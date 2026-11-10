@@ -8,6 +8,7 @@ body {
 .st {
   container: st / inline-size;
   position: relative;
+  overflow-x: clip;
   min-height: 100%;
   background: var(--paper);
   color: var(--ink);
@@ -966,8 +967,7 @@ path.x-sa {
 .ln-spec-pin,
 .ln-made,
 .ln-wired,
-.ln-status,
-.ln-strip {
+.ln-status {
   opacity: 0;
   transition: opacity 240ms steps(2);
 }
@@ -975,24 +975,21 @@ path.x-sa {
 .x-art[data-d1="true"] .ln-spec-pin,
 .x-art[data-d2="true"] .ln-made,
 .x-art[data-d3="true"] .ln-wired,
-.x-art[data-d4="true"] .ln-status,
-.x-art[data-d5="true"] .ln-strip {
+.x-art[data-d4="true"] .ln-status {
   opacity: 1;
 }
 .x-art[data-step="0"] .ln-led-0,
 .x-art[data-step="1"] .ln-led-1,
 .x-art[data-step="2"] .ln-led-2,
 .x-art[data-step="3"] .ln-led-3,
-.x-art[data-step="4"] .ln-led-4,
-.x-art[data-step="5"] .ln-led-5 {
+.x-art[data-step="4"] .ln-led-4 {
   fill: var(--accent);
 }
 .x-art[data-step="0"] .ln-drop-0,
 .x-art[data-step="1"] .ln-drop-1,
 .x-art[data-step="2"] .ln-drop-2,
 .x-art[data-step="3"] .ln-drop-3,
-.x-art[data-step="4"] .ln-drop-4,
-.x-art[data-step="5"] .ln-drop-5 {
+.x-art[data-step="4"] .ln-drop-4 {
   stroke: var(--accent);
   stroke-width: 2;
 }
@@ -1024,22 +1021,6 @@ path.x-sa {
 }
 .x-art[data-run="true"][data-step="4"] .ln-stamp {
   animation: st-stamp 600ms steps(4) 2 both;
-}
-.x-art[data-run="true"][data-step="5"] .ln-scan {
-  animation: st-scan 900ms steps(6) both;
-}
-.x-art[data-run="true"][data-step="5"] .ln-strip {
-  animation: st-print 900ms steps(6) 500ms both;
-}
-@keyframes st-print {
-  from {
-    opacity: 1;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* Narrow */
@@ -3148,13 +3129,6 @@ path.x-sa {
   opacity: 1;
   animation: st-pop-a 240ms steps(2) 300ms both;
 }
-.x-art[data-hot="5-a"] .ln-scan {
-  animation: st-scan-a 450ms steps(6) both;
-}
-.x-art[data-hot="5-a"] .ln-strip {
-  opacity: 1;
-  animation: st-print-a 450ms steps(6) 220ms both;
-}
 .x-art[data-hot="0-b"] .ln-pen {
   animation: st-pen-b 550ms steps(8) both;
 }
@@ -3187,13 +3161,6 @@ path.x-sa {
   opacity: 1;
   animation: st-pop-b 240ms steps(2) 300ms both;
 }
-.x-art[data-hot="5-b"] .ln-scan {
-  animation: st-scan-b 450ms steps(6) both;
-}
-.x-art[data-hot="5-b"] .ln-strip {
-  opacity: 1;
-  animation: st-print-b 450ms steps(6) 220ms both;
-}
 .x-art[data-hot^="0-"] .ln-led-0 {
   fill: var(--accent);
 }
@@ -3207,9 +3174,6 @@ path.x-sa {
   fill: var(--accent);
 }
 .x-art[data-hot^="4-"] .ln-led-4 {
-  fill: var(--accent);
-}
-.x-art[data-hot^="5-"] .ln-led-5 {
   fill: var(--accent);
 }
 .x-art[data-hot="0-a"] .as-drop-0 {
@@ -3343,14 +3307,6 @@ path.x-sa {
     stroke-dashoffset: -16;
   }
 }
-@keyframes st-print-a {
-  from {
-    transform: translateY(30px);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
 @keyframes st-fall-a {
   0% {
     opacity: 1;
@@ -3409,14 +3365,6 @@ path.x-sa {
 @keyframes st-flow-b {
   to {
     stroke-dashoffset: -16;
-  }
-}
-@keyframes st-print-b {
-  from {
-    transform: translateY(30px);
-  }
-  to {
-    transform: translateY(0);
   }
 }
 @keyframes st-fall-b {
@@ -3574,5 +3522,278 @@ path.x-sa {
     transform: none;
     visibility: visible !important;
     animation: none !important;
+  }
+}
+
+/* Keep a demonstration's controls, command and result together in the viewport.
+   Drawing notes expand in the document flow so zoom and long content can still scroll. */
+.st-sec {
+  padding-block: 32px;
+}
+.st-sec-head {
+  gap: 16px 32px;
+  margin-bottom: 24px;
+}
+.st-sec-head > div {
+  gap: 8px;
+}
+.st-sec-head .st-lead {
+  font-size: 16px;
+  line-height: 1.5;
+}
+.st-sec .st-h2 {
+  font-size: clamp(30px, 2.4cqi, 34px);
+}
+.st-notes {
+  margin-top: 20px;
+  border-top: 1px dashed var(--line-2);
+}
+.st-notes > summary {
+  width: fit-content;
+  padding-block: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.st-notes > summary:hover {
+  color: var(--ink);
+}
+.st-notes .st-dwg {
+  margin-top: 4px;
+  padding-top: 0;
+  border-top: 0;
+}
+.fq summary {
+  padding-block: 12px;
+}
+
+@container st (min-width: 1000px) {
+  .st-sec {
+    padding-block: clamp(16px, 2svh, 28px);
+  }
+  .st-sec .st-tab {
+    gap: 1px;
+    padding: 5px 8px;
+    min-height: 44px;
+  }
+  .st-sec .st-tab b {
+    line-height: 20px;
+  }
+  .st-sec .st-tab small {
+    line-height: 14px;
+  }
+  .st-sec .st-notes {
+    grid-area: notes;
+    margin-top: 0;
+  }
+  .st-demo {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    grid-template-areas:
+      "head head"
+      "drawing app"
+      "tabs app"
+      "controls app"
+      "terminal app"
+      "notes notes";
+    gap: 10px 28px;
+    align-items: start;
+  }
+  .st-demo .st-sec-head {
+    grid-area: head;
+    margin-bottom: 4px;
+  }
+  .st-demo > :is(.st-line, .as2, .dk2) {
+    grid-area: drawing;
+    margin-inline: 0;
+  }
+  .st-demo > .st-tabs {
+    grid-area: tabs;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 0;
+  }
+  .st-demo .st-tab:nth-child(4) {
+    border-left: 0;
+  }
+  .st-demo .st-tab:nth-child(n + 4) {
+    border-top: 1px solid var(--line);
+  }
+  #line > .st-tabs {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  #line .st-tab + .st-tab {
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+  .st-demo > .st-bar {
+    grid-area: controls;
+    gap: 8px 12px;
+    margin: 0;
+  }
+  .st-demo > .st-bar p {
+    flex-basis: 100%;
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .st-demo > .st-stage {
+    display: contents;
+  }
+  .st-demo .st-stage > .st-term {
+    grid-area: terminal;
+    min-height: 0;
+    height: clamp(124px, 17svh, 180px);
+    width: 100%;
+  }
+  .st-demo .st-stage > .st-win:not(.st-term) {
+    grid-area: app;
+    align-self: center;
+    width: 100%;
+  }
+  .st-demo .st-stage .st-tbody {
+    height: auto;
+    padding-block: 8px;
+  }
+  .st-win-bar {
+    flex-shrink: 0;
+  }
+  #dock {
+    grid-template-areas:
+      "head head"
+      "drawing app"
+      "tabs app"
+      "terminal app"
+      "notes notes";
+  }
+  #dock .st-stage > .st-term {
+    height: clamp(200px, 28svh, 280px);
+  }
+  #dock .dk2-soon {
+    min-height: 0;
+    aspect-ratio: 1280 / 772;
+    padding: 24px;
+  }
+  #monitor {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas:
+      "head head"
+      "drawing log"
+      "tabs log"
+      "controls log"
+      "notes notes";
+    gap: 10px 32px;
+    align-items: start;
+  }
+  #monitor .st-sec-head {
+    grid-area: head;
+    margin-bottom: 4px;
+  }
+  #monitor .mo2 {
+    display: contents;
+  }
+  #monitor .mo2-stage {
+    grid-area: drawing;
+    justify-self: center;
+    width: min(100%, max(380px, (100svh - 430px) * 900 / 620));
+  }
+  #monitor .mo2-side {
+    grid-area: log;
+    display: flex;
+    padding-top: 0;
+  }
+  #monitor > .st-tabs {
+    grid-area: tabs;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    margin: 0;
+  }
+  #monitor > .mo2-deck {
+    grid-area: controls;
+    margin: 0;
+  }
+  #monitor .mo2-track {
+    flex-basis: 180px;
+  }
+  #dispatch {
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1.6fr) minmax(0, 1fr)
+      clamp(220px, 22cqi, 300px);
+    grid-template-areas:
+      "head head head"
+      "blockers tray app"
+      "blockers terminal app"
+      "notes notes notes";
+    gap: 12px 24px;
+    align-items: start;
+  }
+  #dispatch .st-sec-head {
+    grid-area: head;
+    margin-bottom: 4px;
+  }
+  #dispatch :is(.dp2, .st-stage) {
+    display: contents;
+  }
+  #dispatch .dp2-rows {
+    grid-area: blockers;
+  }
+  #dispatch .dp2-tray {
+    grid-area: tray;
+  }
+  #dispatch .st-term {
+    grid-area: terminal;
+    min-height: 0;
+    height: 160px;
+  }
+  #dispatch .st-stage > .st-win:not(.st-term) {
+    grid-area: app;
+    align-self: start;
+    width: 100%;
+  }
+  #start .sr3 {
+    max-width: min(100%, (100svh - 150px) * 1280 / 600);
+    margin-inline: auto;
+  }
+  #dispatch .dp2-row {
+    grid-template-columns: minmax(0, 1fr) 36px 80px minmax(0, 1fr);
+    gap: 8px;
+  }
+  #dispatch .dp2-chain svg {
+    width: 100%;
+  }
+  #dispatch .dp2-chips {
+    right: 64px;
+    gap: 4px;
+  }
+  #dispatch .dp2-chip {
+    padding-inline: 5px;
+  }
+  #dispatch .dp2-tray .st-btn small {
+    display: none;
+  }
+  #dispatch .dp2-tray .st-bar {
+    gap: 8px;
+  }
+}
+
+@container st (max-width: 999px) {
+  .st-stage > .st-term {
+    min-height: 0;
+    height: 200px;
+  }
+  .st-stage .st-term .st-tbody {
+    height: auto;
+  }
+}
+
+@media (max-height: 760px) {
+  @container st (min-width: 1000px) {
+    .st-sec {
+      padding-block: 12px;
+    }
+    .st-demo,
+    #monitor {
+      row-gap: 8px;
+    }
   }
 }

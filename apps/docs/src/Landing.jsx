@@ -68,7 +68,7 @@ export default class Landing extends Component {
       asm: "none",
       dock: "none",
     };
-    // The cables run from a drawing's edge down the sheet's right margin into the app window it feeds.
+    // Cables follow the gutter between a drawing and the app window it feeds.
     this.setRoot = (el) => {
       if (this.ro) this.ro.disconnect();
       this.root = el;
@@ -109,6 +109,12 @@ export default class Landing extends Component {
       );
       const tx = Math.round((T.right - S.left) / k) + 1;
       const y2 = Math.round((T.top - S.top) / k) + 14;
+      if (T.left > F.right) {
+        const left = Math.round((T.left - S.left) / k) - 1;
+        const middle = Math.round((fx + left) / 2);
+        out[key] = `M${fx} ${y1}H${middle}V${y2}H${left}`;
+        return;
+      }
       out[key] =
         "M" +
         fx +
@@ -155,14 +161,15 @@ export default class Landing extends Component {
     }
     if ((this.props || {}).autoplay !== false) {
       if (this.reduced()) {
+        const lastLineStep = this.data().LINE.length - 1;
         this.setState({
           heroMade: true,
           heroRead: true,
           heroLast: "read",
           heroPhase: "read-done",
-          lineStep: 5,
-          lineDone: 5,
-          linePrinted: this.data().LINE[5].term.length,
+          lineStep: lastLineStep,
+          lineDone: lastLineStep,
+          linePrinted: this.data().LINE[lastLineStep].term.length,
           monK: 3,
           opened: { github: true },
           startPhase: "done",
@@ -401,27 +408,6 @@ export default class Landing extends Component {
           ),
           note("# Your own edits don’t ring your Inbox."),
         ],
-      },
-      {
-        id: "context",
-        num: "06",
-        name: "Context",
-        cmdHint: "context --documents --activities",
-        screen: "update",
-        hl: "activity",
-        app: "T-12",
-        say: "The next session reads the status, the linked notes and the latest update.",
-        cap: "The same update and notes the agent just read.",
-        term: [
-          cmd("ticketd context T-12 --documents --activities \\"),
-          cont(
-            "    | jq -r '.ticket.status, .documents.items[].heading.text, .activities.items[].brief.text'",
-          ),
-          out("In progress"),
-          out("Login abuse notes"),
-          out(U1),
-        ],
-        you: [note("# In the app: open T-12. You see what the agent reads.")],
       },
     ];
 
@@ -812,7 +798,7 @@ export default class Landing extends Component {
     this.heroTimers.push(setTimeout(() => this.runHero("read"), 4200));
   }
 
-  // 01 The line: a station runs one machine; Run the line runs all six.
+  // 01 The line: a station runs one machine; Run the line runs every station.
   pickStep(i, chained) {
     if (!chained) {
       this.lineTimers.forEach((id) => clearTimeout(id));
@@ -864,7 +850,7 @@ export default class Landing extends Component {
     this.lineTimers.forEach((id) => clearTimeout(id));
     this.lineTimers = [];
     if (this.reduced()) {
-      this.pickStep(5);
+      this.pickStep(this.data().LINE.length - 1);
       return;
     }
     this.setState({ lineDone: -1 });
@@ -1414,7 +1400,6 @@ export default class Landing extends Component {
       d2: done(2),
       d3: done(3),
       d4: done(4),
-      d5: done(5),
       rx: String(Math.max(0, idx) * 206),
       stations: D.LINE.map((m, i) => ({
         num: m.num,
@@ -1422,7 +1407,7 @@ export default class Landing extends Component {
         cmd: m.cmdHint,
         on: i === idx,
         done: done(i),
-        left: (((66 + i * 206 + 31) / 1320) * 100).toFixed(2) + "%",
+        left: (((66 + i * 206 + 31) / 1114) * 100).toFixed(2) + "%",
         label: m.num + " " + m.name + ": " + m.cmdHint,
         pick: () => this.pickStep(i),
         hot: () => this.setHot("line", String(i)),
@@ -1437,10 +1422,10 @@ export default class Landing extends Component {
       setAgent: () => this.setState({ lineWho: "agent" }),
       setYou: () => this.setState({ lineWho: "you" }),
       title:
-        idx < 0 ? "Six machines, one ticket." : cur.num + " " + cur.name + ".",
+        idx < 0 ? "Five machines, one ticket." : cur.num + " " + cur.name + ".",
       say:
         idx < 0
-          ? "Watch T-12 go from spec to context."
+          ? "Watch T-12 go from spec to progress update."
           : you
             ? "You can run any machine yourself, in the app."
             : cur.say,
@@ -1837,11 +1822,11 @@ export default class Landing extends Component {
         text:
           s.linePhase === "run"
             ? "running · " + cur.num + " " + cur.name.toLowerCase()
-            : s.lineDone >= 5
+            : s.lineDone >= D.LINE.length - 1
               ? "line done · T-12 in progress"
               : idx >= 0
                 ? "idle · " + cur.num + " " + cur.name.toLowerCase()
-                : "6 machines · idle",
+                : D.LINE.length + " machines · idle",
       },
       mon: {
         on: !!s.monPlaying || !!s.monLive,
@@ -2231,7 +2216,7 @@ export default class Landing extends Component {
               </div>
             </section>
             <section
-              className={"st-sec"}
+              className={"st-sec st-demo"}
               id={"line"}
               data-sheet={"line"}
               aria-labelledby={"st-line-title"}
@@ -2281,7 +2266,7 @@ export default class Landing extends Component {
               >
                 <svg
                   className={"x-art"}
-                  viewBox={"0 0 1320 330"}
+                  viewBox={"0 0 1114 330"}
                   data-hot={v.line.hot}
                   data-step={v.line.step}
                   data-run={v.line.running}
@@ -2290,7 +2275,6 @@ export default class Landing extends Component {
                   data-d2={v.line.d2}
                   data-d3={v.line.d3}
                   data-d4={v.line.d4}
-                  data-d5={v.line.d5}
                   style={{ "--rx": v.line.rx + "px" }}
                   aria-hidden={"true"}
                   dangerouslySetInnerHTML={{ __html: markup[3] }}
@@ -2303,7 +2287,7 @@ export default class Landing extends Component {
                       style={{
                         left: m.left,
                         top: "18%",
-                        width: "13.4%",
+                        width: "15.9%",
                         height: "64%",
                       }}
                       aria-label={m.label}
@@ -2317,59 +2301,6 @@ export default class Landing extends Component {
                     </button>
                   </Fragment>
                 ))}
-              </div>
-              <div className={"st-dwg"}>
-                <ol className={"st-legend"}>
-                  <li>
-                    <b>{"1"}</b>
-                    <span>
-                      <em>{"AI power."}</em>
-                      {" Your agent’s model runs every machine."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"2"}</b>
-                    <span>
-                      <em>{"Lamp."}</em>
-                      {" Lights while that machine’s command runs."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"3"}</b>
-                    <span>
-                      <em>{"Belt."}</em>
-                      {" Carries T-12 from spec to context."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"4"}</b>
-                    <span>
-                      <em>{"Printout."}</em>
-                      {" What the next session reads."}
-                    </span>
-                  </li>
-                </ol>
-                <div className={"st-tb"}>
-                  <p>{"ticketd works"}</p>
-                  <dl>
-                    <div>
-                      <dt>{"dwg"}</dt>
-                      <dd>{"01 · the line"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"sheet"}</dt>
-                      <dd>{"2 of 8"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"scale"}</dt>
-                      <dd>{"nts"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"rev"}</dt>
-                      <dd>{"5c1a242"}</dd>
-                    </div>
-                  </dl>
-                </div>
               </div>
               <div
                 className={"st-tabs"}
@@ -2435,7 +2366,12 @@ export default class Landing extends Component {
                       <i></i>
                     </em>
                   </div>
-                  <div className={"st-tbody"}>
+                  <div
+                    className={"st-tbody"}
+                    tabIndex={0}
+                    role={"region"}
+                    aria-label={"Line command and output"}
+                  >
                     {v.line.lines.map((ln, index) => (
                       <Fragment key={index}>
                         <div className={ln.cls} data-new={ln.isNew}>
@@ -2492,13 +2428,69 @@ export default class Landing extends Component {
                   </figcaption>
                 </figure>
               </div>
-              <p className={"st-fine"} style={{ marginTop: "16px" }}>
-                {
-                  "A recorded run: every command and its output are real, from the ticketd CLI on main, and the screens are the desktop app captured during the same run. "
-                }
-                <code>{"jq"}</code>
-                {" only trims the JSON that ticketd prints."}
-              </p>
+              <details className={"st-notes"}>
+                <summary>{"Drawing notes & recording details"}</summary>
+                <div className={"st-dwg"}>
+                  <ol className={"st-legend"}>
+                    <li>
+                      <b>{"1"}</b>
+                      <span>
+                        <em>{"AI power."}</em>
+                        {" Your agent’s model runs every machine."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"2"}</b>
+                      <span>
+                        <em>{"Lamp."}</em>
+                        {" Lights while that machine’s command runs."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"3"}</b>
+                      <span>
+                        <em>{"Belt."}</em>
+                        {" Carries T-12 from spec to progress update."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"4"}</b>
+                      <span>
+                        <em>{"Status stamp."}</em>
+                        {" Sets the status and records the agent’s update."}
+                      </span>
+                    </li>
+                  </ol>
+                  <div className={"st-tb"}>
+                    <p>{"ticketd works"}</p>
+                    <dl>
+                      <div>
+                        <dt>{"dwg"}</dt>
+                        <dd>{"01 · the line"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"sheet"}</dt>
+                        <dd>{"2 of 8"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"scale"}</dt>
+                        <dd>{"nts"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"rev"}</dt>
+                        <dd>{"5c1a242"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+                <p className={"st-fine"} style={{ marginTop: "16px" }}>
+                  {
+                    "A recorded run: every command and its output are real, from the ticketd CLI on main, and the screens are the desktop app captured during the same run. "
+                  }
+                  <code>{"jq"}</code>
+                  {" only trims the JSON that ticketd prints."}
+                </p>
+              </details>
             </section>
             <section
               className={"st-sec"}
@@ -2630,66 +2622,6 @@ export default class Landing extends Component {
                   </ol>
                 </aside>
               </div>
-              <div className={"st-dwg"}>
-                <ol className={"st-legend"}>
-                  <li>
-                    <b>{"1"}</b>
-                    <span>
-                      <em>{"Screen."}</em>
-                      {" The real desktop app, recorded on one run."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"2"}</b>
-                    <span>
-                      <em>{"Channel."}</em>
-                      {" Tickets, Plan, Graph, Ticket, Inbox."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"3"}</b>
-                    <span>
-                      <em>{"Time."}</em>
-                      {" Four moments of the shift."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"4"}</b>
-                    <span>
-                      <em>{"Live."}</em>
-                      {" Lights when the workspace changes."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"5"}</b>
-                    <span>
-                      <em>{"Camera."}</em>
-                      {" An open app shows CLI changes within seconds."}
-                    </span>
-                  </li>
-                </ol>
-                <div className={"st-tb"}>
-                  <p>{"ticketd works"}</p>
-                  <dl>
-                    <div>
-                      <dt>{"dwg"}</dt>
-                      <dd>{"02 · the monitor"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"sheet"}</dt>
-                      <dd>{"3 of 8"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"scale"}</dt>
-                      <dd>{"nts"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"rev"}</dt>
-                      <dd>{"5c1a242"}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
               <div
                 className={"st-tabs st-tabs-5"}
                 role={"group"}
@@ -2812,15 +2744,78 @@ export default class Landing extends Component {
                   {v.mon.status}
                 </p>
               </div>
-              <p className={"st-fine"} style={{ marginTop: "16px" }}>
-                {
-                  "A recorded run, replayed. Agent names are the labels an agent passes with "
-                }
-                <code>{"--agent"}</code>
-                {
-                  "; ticketd records them but doesn’t verify them. Your own edits never ring your Inbox."
-                }
-              </p>
+              <details className={"st-notes"}>
+                <summary>{"Drawing notes & recording details"}</summary>
+                <div className={"st-dwg"}>
+                  <ol className={"st-legend"}>
+                    <li>
+                      <b>{"1"}</b>
+                      <span>
+                        <em>{"Screen."}</em>
+                        {" The real desktop app, recorded on one run."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"2"}</b>
+                      <span>
+                        <em>{"Channel."}</em>
+                        {" Tickets, Plan, Graph, Ticket, Inbox."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"3"}</b>
+                      <span>
+                        <em>{"Time."}</em>
+                        {" Four moments of the shift."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"4"}</b>
+                      <span>
+                        <em>{"Live."}</em>
+                        {" Lights when the workspace changes."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"5"}</b>
+                      <span>
+                        <em>{"Camera."}</em>
+                        {" An open app shows CLI changes within seconds."}
+                      </span>
+                    </li>
+                  </ol>
+                  <div className={"st-tb"}>
+                    <p>{"ticketd works"}</p>
+                    <dl>
+                      <div>
+                        <dt>{"dwg"}</dt>
+                        <dd>{"02 · the monitor"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"sheet"}</dt>
+                        <dd>{"3 of 8"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"scale"}</dt>
+                        <dd>{"nts"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"rev"}</dt>
+                        <dd>{"5c1a242"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+                <p className={"st-fine"} style={{ marginTop: "16px" }}>
+                  {
+                    "A recorded run, replayed. Agent names are the labels an agent passes with "
+                  }
+                  <code>{"--agent"}</code>
+                  {
+                    "; ticketd records them but doesn’t verify them. Your own edits never ring your Inbox."
+                  }
+                </p>
+              </details>
             </section>
             <section
               className={"st-sec"}
@@ -2974,52 +2969,6 @@ export default class Landing extends Component {
                   </div>
                 </div>
               </div>
-              <div className={"st-dwg"}>
-                <ol className={"st-legend"}>
-                  <li>
-                    <b>{"1"}</b>
-                    <span>
-                      <em>{"Ready tray."}</em>
-                      {" Only Ready tickets ride it."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"2"}</b>
-                    <span>
-                      <em>{"First in line."}</em>
-                      {" What --limit 1 hands out."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"3"}</b>
-                    <span>
-                      <em>{"Your agent."}</em>
-                      {" Asks for work and gets one ticket."}
-                    </span>
-                  </li>
-                </ol>
-                <div className={"st-tb"}>
-                  <p>{"ticketd works"}</p>
-                  <dl>
-                    <div>
-                      <dt>{"dwg"}</dt>
-                      <dd>{"03 · dispatch"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"sheet"}</dt>
-                      <dd>{"4 of 8"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"scale"}</dt>
-                      <dd>{"nts"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"rev"}</dt>
-                      <dd>{"5c1a242"}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
               <svg
                 className={"st-cable"}
                 data-p={v.pulse.disp}
@@ -3040,7 +2989,12 @@ export default class Landing extends Component {
                       <i></i>
                     </em>
                   </div>
-                  <div className={"st-tbody dp2-term"}>
+                  <div
+                    className={"st-tbody dp2-term"}
+                    tabIndex={0}
+                    role={"region"}
+                    aria-label={"Dispatch command and output"}
+                  >
                     {v.disp.lines.map((ln, index) => (
                       <Fragment key={index}>
                         <div className={ln.cls}>
@@ -3088,14 +3042,63 @@ export default class Landing extends Component {
                   </figcaption>
                 </figure>
               </div>
-              <p className={"st-fine"} style={{ marginTop: "16px" }}>
-                {
-                  "Ready is worked out the way ticketd does it: a Todo ticket with no unresolved blocking dependency, and only Done resolves one. Readiness guides what gets picked; it never stops anyone from starting."
-                }
-              </p>
+              <details className={"st-notes"}>
+                <summary>{"Drawing notes & recording details"}</summary>
+                <div className={"st-dwg"}>
+                  <ol className={"st-legend"}>
+                    <li>
+                      <b>{"1"}</b>
+                      <span>
+                        <em>{"Ready tray."}</em>
+                        {" Only Ready tickets ride it."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"2"}</b>
+                      <span>
+                        <em>{"First in line."}</em>
+                        {" What --limit 1 hands out."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"3"}</b>
+                      <span>
+                        <em>{"Your agent."}</em>
+                        {" Asks for work and gets one ticket."}
+                      </span>
+                    </li>
+                  </ol>
+                  <div className={"st-tb"}>
+                    <p>{"ticketd works"}</p>
+                    <dl>
+                      <div>
+                        <dt>{"dwg"}</dt>
+                        <dd>{"03 · dispatch"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"sheet"}</dt>
+                        <dd>{"4 of 8"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"scale"}</dt>
+                        <dd>{"nts"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"rev"}</dt>
+                        <dd>{"5c1a242"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+                <p className={"st-fine"} style={{ marginTop: "16px" }}>
+                  {
+                    "Ready is worked out the way ticketd does it: a Todo ticket with no unresolved blocking dependency, and only Done resolves one. Readiness guides what gets picked; it never stops anyone from starting."
+                  }
+                </p>
+              </details>
             </section>
             <section
-              className={"st-sec"}
+              className={"st-sec st-demo"}
               id={"assembly"}
               data-sheet={"asm"}
               aria-labelledby={"st-asm-title"}
@@ -3179,66 +3182,6 @@ export default class Landing extends Component {
                   </Fragment>
                 ))}
               </div>
-              <div className={"st-dwg"}>
-                <ol className={"st-legend"}>
-                  <li>
-                    <b>{"1"}</b>
-                    <span>
-                      <em>{"Hoppers."}</em>
-                      {" One per ticketd context option."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"2"}</b>
-                    <span>
-                      <em>{"T-12."}</em>
-                      {" The ticket being read."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"3"}</b>
-                    <span>
-                      <em>{"Crate."}</em>
-                      {" Exactly what your agent receives."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"4"}</b>
-                    <span>
-                      <em>{"Gauge."}</em>
-                      {" " + v.asm.bytes + " bytes of JSON right now."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"5"}</b>
-                    <span>
-                      <em>{"Arm."}</em>
-                      {" Ships the crate to the next session."}
-                    </span>
-                  </li>
-                </ol>
-                <div className={"st-tb"}>
-                  <p>{"ticketd works"}</p>
-                  <dl>
-                    <div>
-                      <dt>{"dwg"}</dt>
-                      <dd>{"04 · assembly"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"sheet"}</dt>
-                      <dd>{"5 of 8"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"scale"}</dt>
-                      <dd>{"nts"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"rev"}</dt>
-                      <dd>{"5c1a242"}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
               <div
                 className={"st-tabs st-tabs-5"}
                 role={"group"}
@@ -3284,7 +3227,12 @@ export default class Landing extends Component {
                       <i></i>
                     </em>
                   </div>
-                  <div className={"st-tbody as2-term"}>
+                  <div
+                    className={"st-tbody as2-term"}
+                    tabIndex={0}
+                    role={"region"}
+                    aria-label={"Assembly command and output"}
+                  >
                     {v.asm.lines.map((ln, index) => (
                       <Fragment key={index}>
                         <div className={ln.cls}>
@@ -3331,9 +3279,72 @@ export default class Landing extends Component {
                   </figcaption>
                 </figure>
               </div>
+              <details className={"st-notes"}>
+                <summary>{"Drawing notes"}</summary>
+                <div className={"st-dwg"}>
+                  <ol className={"st-legend"}>
+                    <li>
+                      <b>{"1"}</b>
+                      <span>
+                        <em>{"Hoppers."}</em>
+                        {" One per ticketd context option."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"2"}</b>
+                      <span>
+                        <em>{"T-12."}</em>
+                        {" The ticket being read."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"3"}</b>
+                      <span>
+                        <em>{"Crate."}</em>
+                        {" Exactly what your agent receives."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"4"}</b>
+                      <span>
+                        <em>{"Gauge."}</em>
+                        {" " + v.asm.bytes + " bytes of JSON right now."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"5"}</b>
+                      <span>
+                        <em>{"Arm."}</em>
+                        {" Ships the crate to the next session."}
+                      </span>
+                    </li>
+                  </ol>
+                  <div className={"st-tb"}>
+                    <p>{"ticketd works"}</p>
+                    <dl>
+                      <div>
+                        <dt>{"dwg"}</dt>
+                        <dd>{"04 · assembly"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"sheet"}</dt>
+                        <dd>{"5 of 8"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"scale"}</dt>
+                        <dd>{"nts"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"rev"}</dt>
+                        <dd>{"5c1a242"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </details>
             </section>
             <section
-              className={"st-sec"}
+              className={"st-sec st-demo"}
               id={"dock"}
               data-sheet={"dock"}
               aria-labelledby={"st-dock-title"}
@@ -3418,68 +3429,6 @@ export default class Landing extends Component {
                   </Fragment>
                 ))}
               </div>
-              <div className={"st-dwg"}>
-                <div className={"dk2-slip"} aria-live={"polite"}>
-                  <p>
-                    <b>{"Packing slip"}</b>
-                    <span>{v.dock.slipHead}</span>
-                  </p>
-                  <ol>
-                    {v.dock.slip.map((sl, index) => (
-                      <Fragment key={index}>
-                        <li>
-                          <b>{sl.k}</b>
-                          <span>{sl.v}</span>
-                        </li>
-                      </Fragment>
-                    ))}
-                  </ol>
-                </div>
-                <ol className={"st-legend"}>
-                  <li>
-                    <b>{"1"}</b>
-                    <span>
-                      <em>{"Bays."}</em>
-                      {" One per connection."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"2"}</b>
-                    <span>
-                      <em>{"Shutter."}</em>
-                      {" Rolls up when you open a bay."}
-                    </span>
-                  </li>
-                  <li>
-                    <b>{"3"}</b>
-                    <span>
-                      <em>{"Lamp."}</em>
-                      {" Lit while its bay is open."}
-                    </span>
-                  </li>
-                </ol>
-                <div className={"st-tb"}>
-                  <p>{"ticketd works"}</p>
-                  <dl>
-                    <div>
-                      <dt>{"dwg"}</dt>
-                      <dd>{"05 · the dock"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"sheet"}</dt>
-                      <dd>{"6 of 8"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"scale"}</dt>
-                      <dd>{"nts"}</dd>
-                    </div>
-                    <div>
-                      <dt>{"rev"}</dt>
-                      <dd>{"5c1a242"}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
               <div
                 className={"st-tabs st-tabs-5"}
                 role={"group"}
@@ -3511,7 +3460,12 @@ export default class Landing extends Component {
                       <i></i>
                     </em>
                   </div>
-                  <div className={"st-tbody dk2-term"}>
+                  <div
+                    className={"st-tbody dk2-term"}
+                    tabIndex={0}
+                    role={"region"}
+                    aria-label={"Dock command and output"}
+                  >
                     {v.dock.lines.map((ln, index) => (
                       <Fragment key={index}>
                         <div className={ln.cls} data-new={"true"}>
@@ -3596,11 +3550,76 @@ export default class Landing extends Component {
                   </figcaption>
                 </figure>
               </div>
-              <p className={"st-fine"} style={{ marginTop: "16px" }}>
-                {
-                  "The GitHub screens come from a test account and repository (acme/web-app) served offline; the commands and their output are real."
-                }
-              </p>
+              <details className={"st-notes"}>
+                <summary>{"Drawing notes & recording details"}</summary>
+                <div className={"st-dwg"}>
+                  <div className={"dk2-slip"} aria-live={"polite"}>
+                    <p>
+                      <b>{"Packing slip"}</b>
+                      <span>{v.dock.slipHead}</span>
+                    </p>
+                    <ol>
+                      {v.dock.slip.map((sl, index) => (
+                        <Fragment key={index}>
+                          <li>
+                            <b>{sl.k}</b>
+                            <span>{sl.v}</span>
+                          </li>
+                        </Fragment>
+                      ))}
+                    </ol>
+                  </div>
+                  <ol className={"st-legend"}>
+                    <li>
+                      <b>{"1"}</b>
+                      <span>
+                        <em>{"Bays."}</em>
+                        {" One per connection."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"2"}</b>
+                      <span>
+                        <em>{"Shutter."}</em>
+                        {" Rolls up when you open a bay."}
+                      </span>
+                    </li>
+                    <li>
+                      <b>{"3"}</b>
+                      <span>
+                        <em>{"Lamp."}</em>
+                        {" Lit while its bay is open."}
+                      </span>
+                    </li>
+                  </ol>
+                  <div className={"st-tb"}>
+                    <p>{"ticketd works"}</p>
+                    <dl>
+                      <div>
+                        <dt>{"dwg"}</dt>
+                        <dd>{"05 · the dock"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"sheet"}</dt>
+                        <dd>{"6 of 8"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"scale"}</dt>
+                        <dd>{"nts"}</dd>
+                      </div>
+                      <div>
+                        <dt>{"rev"}</dt>
+                        <dd>{"5c1a242"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+                <p className={"st-fine"} style={{ marginTop: "16px" }}>
+                  {
+                    "The GitHub screens come from a test account and repository (acme/web-app) served offline; the commands and their output are real."
+                  }
+                </p>
+              </details>
             </section>
             <section
               className={"st-sec"}

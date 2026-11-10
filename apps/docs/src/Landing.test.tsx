@@ -38,6 +38,32 @@ test("running a machine updates its command, app caption and status together", (
   ).toBeNull();
 });
 
+test.each(["reduce", "normal"])(
+  "the five-machine line finishes at Update with %s motion",
+  (motion) => {
+    vi.useFakeTimers();
+    render(<Landing autoplay={false} motion={motion} />);
+    const machines = within(
+      screen.getByRole("group", { name: "Machines on the line" }),
+    );
+    expect(machines.getAllByRole("button")).toHaveLength(5);
+    expect(machines.queryByRole("button", { name: /Context/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Run the line" }));
+    act(() => vi.advanceTimersByTime(20000));
+    expect(
+      machines
+        .getByRole("button", { name: /05.*Update/ })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText("line done · T-12 in progress")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "In progress, with the latest update credited to coding-agent.",
+      ),
+    ).toBeTruthy();
+  },
+);
+
 test("system theme is the default and switching themes preserves the selected machine", () => {
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query.includes("dark"),
