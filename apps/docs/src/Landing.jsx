@@ -1,4 +1,5 @@
 import { Component, Fragment } from "react";
+import { links } from "./links";
 import markup from "./Landing.markup.json";
 import AppReady from "./screens/AppReady";
 import AppLine from "./screens/AppLine";
@@ -52,6 +53,7 @@ export default class Landing extends Component {
       footPunch: false,
     };
     this.startTimers = [];
+    this.heroTimers = [];
     this.flips = {};
     this.timers = [];
     this.lineTimers = [];
@@ -168,7 +170,7 @@ export default class Landing extends Component {
           startLines: this.data().HELP.length,
           footPunch: true,
         });
-      } else this.later(800, () => this.heroDemo());
+      } else this.heroAutoTimer = setTimeout(() => this.heroDemo(), 800);
     }
     this.later(60, () => this.measureCables());
     try {
@@ -180,6 +182,8 @@ export default class Landing extends Component {
 
   componentWillUnmount() {
     this.timers.forEach((id) => clearTimeout(id));
+    this.heroTimers.forEach((id) => clearTimeout(id));
+    clearTimeout(this.heroAutoTimer);
     this.lineTimers.forEach((id) => clearTimeout(id));
     clearInterval(this.monTimer);
     clearTimeout(this.liveTimer);
@@ -254,9 +258,9 @@ export default class Landing extends Component {
     const cont = (text) => ({ cls: "st-tl st-tl-cmd", prompt: "  ", text });
     const out = (text) => ({ cls: "st-tl st-tl-out", prompt: "", text });
     const note = (text) => ({ cls: "st-tl st-tl-note", prompt: "", text });
-    const SPEC = "efe906b7-6ffb-44a9-a5f4-c78675f8682a";
-    const PLAN = "ba90d3e7-9c40-4dcc-bc41-ab26d475682c";
-    const NOTES = "9f7fe355-9203-48c5-ae7c-905c8b6bf8ec";
+    const SPEC = "50ea2963-1191-47c0-9f20-32b2cb906fa1";
+    const PLAN = "c57b2a5e-b688-4b21-a9a7-f9f37b5471f6";
+    const NOTES = "d0db3192-e25d-4f3c-8864-c0929e1f95cf";
     const U1 =
       "Added a sliding-window limiter: 5 failures per 15 minutes by account and IP. Next: show the wait time on the login form.";
     const U2 = "Limiter tests pass on CI. Opened #87 for review.";
@@ -715,18 +719,18 @@ export default class Landing extends Component {
     const HELP = [
       "Local ticket workspace",
       "",
-      "Usage: ticketd <COMMAND>",
+      "Usage: ticketd.exe <COMMAND>",
       "",
       "Commands:",
-      "  document          Capture and read Documents",
-      "  create            Create a ticket with a title",
-      "  change            Patch ticket content; use --body-file - to read stdin",
-      "  add-dependency    Add a directed blocking dependency",
-      "  set-parent        Assign or remove a parent (omit --parent to remove)",
-      "  plan              Manage Plans",
-      "  list              List tickets with combined filters",
-      "  context           Retrieve bounded context; select related scopes explicitly",
-      "  source            Connect and configure ticket sources such as GitHub",
+      "  document             Capture and read Documents",
+      "  reminder             Manage a personal ticket reminder (times require an RFC 3339 offset)",
+      "  inbox                List personal inbox entries (newest first)",
+      "  backup               Save a consistent workspace backup to a new file",
+      "  restore-workspace    Restore a workspace backup after closing other ticketd operations",
+      "  export               Export a portable JSON snapshot to stdout or a new file",
+      '  write                Execute a JSON write request (file or - for stdin); prints {"kind","value"}. With --request-id, a retry returns the first result. Other commands print the bare object; `activity add/edit` and `document create/change` also accept --request-id with the same replay behavior',
+      "  batch                Apply a JSON array of operations from a file or - for stdin",
+      "  project              Manage repository projects",
       "  …",
     ];
     this._data = {
@@ -753,6 +757,10 @@ export default class Landing extends Component {
 
   // Hero: the factory makes a ticket, then reads one.
   runHero(kind) {
+    clearTimeout(this.heroAutoTimer);
+    this.heroTimers.forEach((id) => clearTimeout(id));
+    this.heroTimers = [];
+    const later = (ms, fn) => this.heroTimers.push(setTimeout(fn, ms));
     const make = kind === "make";
     if (this.reduced()) {
       this.setState(
@@ -779,9 +787,9 @@ export default class Landing extends Component {
       heroPhase: kind,
       heroK: this.state.heroK === "a" ? "b" : "a",
     });
-    this.later(40, () => this.setState({ heroRun: kind }));
+    later(40, () => this.setState({ heroRun: kind }));
     const end = make ? 3400 : 3900;
-    this.later(end - 500, () =>
+    later(end - 500, () =>
       this.setState(
         make
           ? {
@@ -796,12 +804,12 @@ export default class Landing extends Component {
             },
       ),
     );
-    this.later(end, () => this.setState({ heroRun: "idle" }));
+    later(end, () => this.setState({ heroRun: "idle" }));
   }
 
   heroDemo() {
     this.runHero("make");
-    this.later(4200, () => this.runHero("read"));
+    this.heroTimers.push(setTimeout(() => this.runHero("read"), 4200));
   }
 
   // 01 The line: a station runs one machine; Run the line runs all six.
@@ -952,7 +960,7 @@ export default class Landing extends Component {
     const now = this.model(after.done, after.plug).ready;
     const joined = now.filter((r) => was.indexOf(r) === -1);
     const left = was.filter((r) => now.indexOf(r) === -1);
-    let log = "";
+    let log;
     if (joined.length)
       log =
         joined.join(", ") +
@@ -1205,7 +1213,12 @@ export default class Landing extends Component {
       const id = key + ":" + i;
       return Object.assign({}, ln, {
         copy: true,
-        copyText: this.state.copied === id ? "copied" : "copy",
+        copyText:
+          this.state.copyFailed === id
+            ? "copy failed"
+            : this.state.copied === id
+              ? "copied"
+              : "copy",
         copyIt: () => this.copy(full, id),
       });
     });
@@ -1213,24 +1226,26 @@ export default class Landing extends Component {
 
   copy(text, id) {
     const done = () => {
-      this.setState({ copied: id });
+      this.setState({ copied: id, copyFailed: null });
       clearTimeout(this.copyTimer);
       this.copyTimer = setTimeout(() => this.setState({ copied: "" }), 1400);
     };
+    const failed = () => this.setState({ copied: "", copyFailed: id });
     const fallback = () => {
+      const t = document.createElement("textarea");
       try {
-        const t = document.createElement("textarea");
         t.value = text;
         t.setAttribute("readonly", "");
         t.style.position = "fixed";
         t.style.opacity = "0";
         document.body.appendChild(t);
         t.select();
-        document.execCommand("copy");
-        t.remove();
-        done();
+        if (document.execCommand("copy")) done();
+        else failed();
       } catch {
-        /* nowhere to copy to */
+        failed();
+      } finally {
+        t.remove();
       }
     };
     try {
@@ -1320,7 +1335,7 @@ export default class Landing extends Component {
     const D = this.data();
     const { cmd, out, note } = D;
 
-    let systemDark = false;
+    let systemDark;
     try {
       systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     } catch {
@@ -1599,7 +1614,8 @@ export default class Landing extends Component {
       ask: () => this.askForWork(),
       lines: this.copyable(dispLines, "disp"),
       cap: model.ready.length
-        ? model.ready.join(", ") + ". Only what your agent can start now."
+        ? model.ready.join(", ") +
+          ". Todo tickets with no unresolved blocking dependency."
         : "Nothing is Ready.",
     };
 
@@ -1801,7 +1817,7 @@ export default class Landing extends Component {
           pull: "pulling back",
         }[s.startPhase] || "awaiting input"),
     };
-    let scrolling = false;
+    let scrolling;
     try {
       scrolling =
         document.documentElement.scrollHeight > window.innerHeight + 40;
@@ -1957,8 +1973,26 @@ export default class Landing extends Component {
                   aria-label={"Light theme"}
                   aria-pressed={v.isLight}
                   onClick={v.setLight}
-                  dangerouslySetInnerHTML={{ __html: markup[1] }}
-                />
+                >
+                  <svg
+                    width={"16"}
+                    height={"16"}
+                    viewBox={"0 0 24 24"}
+                    fill={"none"}
+                    stroke={"currentColor"}
+                    strokeWidth={"1.8"}
+                    strokeLinecap={"round"}
+                    strokeLinejoin={"round"}
+                    aria-hidden={"true"}
+                  >
+                    <circle cx={"12"} cy={"12"} r={"4"}></circle>
+                    <path
+                      d={
+                        "M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+                      }
+                    ></path>
+                  </svg>
+                </button>
                 <button
                   type={"button"}
                   className={"st-icon"}
@@ -1982,10 +2016,22 @@ export default class Landing extends Component {
                 </button>
                 <a
                   className={"st-icon"}
-                  href={"https://github.com/vantoan19/ticketd"}
+                  href={links.repository}
                   aria-label={"ticketd on GitHub"}
-                  dangerouslySetInnerHTML={{ __html: markup[2] }}
-                />
+                >
+                  <svg
+                    width={"18"}
+                    height={"18"}
+                    viewBox={"0 0 24 24"}
+                    fill={"none"}
+                    stroke={"currentColor"}
+                    strokeWidth={"1.8"}
+                    strokeLinecap={"round"}
+                    strokeLinejoin={"round"}
+                    aria-hidden={"true"}
+                    dangerouslySetInnerHTML={{ __html: markup[1] }}
+                  />
+                </a>
               </div>
             </div>
           </header>
@@ -1995,88 +2041,124 @@ export default class Landing extends Component {
               aria-labelledby={"st-title"}
               data-sheet={"top"}
             >
-              <div
-                className={"st-hero-copy"}
-                dangerouslySetInnerHTML={{ __html: markup[3] }}
-              />
+              <div className={"st-hero-copy"}>
+                <p className={"st-plate"} data-on={"true"}>
+                  <i aria-hidden={"true"}></i>
+                  <span>{"ticketd · local ticket workspace"}</span>
+                </p>
+                <h1 className={"st-h1"} id={"st-title"}>
+                  {"A ticket factory on your computer, "}
+                  <span className={"st-accent"}>{"powered by your AI"}</span>
+                  {"."}
+                </h1>
+                <p className={"st-lead"}>
+                  {
+                    "ticketd is a ticket workspace on your computer. Your coding agent creates, updates and reads tickets through the CLI. You watch every change in the desktop app and decide what gets built next."
+                  }
+                </p>
+                <div className={"st-hero-ctas"}>
+                  <a className={"st-btn st-btn-primary"} href={links.install}>
+                    {"Get started"}
+                  </a>
+                  <a className={"st-link"} href={links.repository}>
+                    {"View on GitHub ↗"}
+                  </a>
+                </div>
+                <p className={"st-runs"}>
+                  {"Desktop app and CLI for "}
+                  <b>{"macOS 26"}</b>
+                  {" on Apple Silicon, "}
+                  <b>{"Ubuntu 24.04"}</b>
+                  {" and "}
+                  <b>{"Windows 11"}</b>
+                  {"."}
+                </p>
+              </div>
               <div className={"st-hero-art"}>
                 <div className={"st-scene"}>
-                  <svg
-                    className={"x-art pano"}
-                    viewBox={"0 0 1360 520"}
-                    data-run={v.hero.run}
-                    data-made={v.hero.made}
-                    data-read={v.hero.read}
-                    data-hot={v.hero.hot}
-                    aria-hidden={"true"}
-                    dangerouslySetInnerHTML={{ __html: markup[4] }}
-                  />
-                  <p
-                    className={"st-say"}
-                    data-k={v.hero.k}
-                    aria-live={"polite"}
+                  <div
+                    className="st-panorama"
+                    tabIndex={0}
+                    role="region"
+                    aria-label="Factory drawing"
                   >
-                    <span className={"st-say-text"}>{v.hero.say}</span>
-                    <i aria-hidden={"true"}></i>
-                  </p>
-                  <button
-                    type={"button"}
-                    className={"st-hot"}
-                    style={{
-                      left: "2%",
-                      top: "12%",
-                      width: "18%",
-                      height: "58%",
-                    }}
-                    aria-label={"The AI power core. Make a ticket"}
-                    onClick={v.hero.make}
-                    onMouseEnter={v.hero.hotCore}
-                    onFocus={v.hero.hotCore}
-                    onMouseLeave={v.hero.cold}
-                    onBlur={v.hero.cold}
-                  >
-                    <span className={"st-tip"}>
-                      {"AI power · your agent’s model"}
-                    </span>
-                  </button>
-                  <button
-                    type={"button"}
-                    className={"st-hot"}
-                    style={{
-                      left: "22%",
-                      top: "30%",
-                      width: "24%",
-                      height: "40%",
-                    }}
-                    aria-label={"The press. Make a ticket"}
-                    onClick={v.hero.make}
-                    onMouseEnter={v.hero.hotPress}
-                    onFocus={v.hero.hotPress}
-                    onMouseLeave={v.hero.cold}
-                    onBlur={v.hero.cold}
-                  >
-                    <span className={"st-tip"}>
-                      {"ticketd document create-ticket"}
-                    </span>
-                  </button>
-                  <button
-                    type={"button"}
-                    className={"st-hot"}
-                    style={{
-                      left: "40.5%",
-                      top: "74%",
-                      width: "12%",
-                      height: "20%",
-                    }}
-                    aria-label={"The reader. Read a ticket"}
-                    onClick={v.hero.readFn}
-                    onMouseEnter={v.hero.hotReader}
-                    onFocus={v.hero.hotReader}
-                    onMouseLeave={v.hero.cold}
-                    onBlur={v.hero.cold}
-                  >
-                    <span className={"st-tip"}>{"ticketd context T-12"}</span>
-                  </button>
+                    <svg
+                      className={"x-art pano"}
+                      viewBox={"0 0 1360 520"}
+                      data-run={v.hero.run}
+                      data-made={v.hero.made}
+                      data-read={v.hero.read}
+                      data-hot={v.hero.hot}
+                      aria-hidden={"true"}
+                      dangerouslySetInnerHTML={{ __html: markup[2] }}
+                    />
+                    <p
+                      className={"st-say"}
+                      data-k={v.hero.k}
+                      aria-live={"polite"}
+                    >
+                      <span className={"st-say-text"}>{v.hero.say}</span>
+                      <i aria-hidden={"true"}></i>
+                    </p>
+                    <button
+                      type={"button"}
+                      className={"st-hot"}
+                      style={{
+                        left: "2%",
+                        top: "12%",
+                        width: "18%",
+                        height: "58%",
+                      }}
+                      aria-label={"The AI power core. Make a ticket"}
+                      onClick={v.hero.make}
+                      onMouseEnter={v.hero.hotCore}
+                      onFocus={v.hero.hotCore}
+                      onMouseLeave={v.hero.cold}
+                      onBlur={v.hero.cold}
+                    >
+                      <span className={"st-tip"}>
+                        {"AI power · your agent’s model"}
+                      </span>
+                    </button>
+                    <button
+                      type={"button"}
+                      className={"st-hot"}
+                      style={{
+                        left: "22%",
+                        top: "30%",
+                        width: "24%",
+                        height: "40%",
+                      }}
+                      aria-label={"The press. Make a ticket"}
+                      onClick={v.hero.make}
+                      onMouseEnter={v.hero.hotPress}
+                      onFocus={v.hero.hotPress}
+                      onMouseLeave={v.hero.cold}
+                      onBlur={v.hero.cold}
+                    >
+                      <span className={"st-tip"}>
+                        {"ticketd document create-ticket"}
+                      </span>
+                    </button>
+                    <button
+                      type={"button"}
+                      className={"st-hot"}
+                      style={{
+                        left: "40.5%",
+                        top: "74%",
+                        width: "12%",
+                        height: "20%",
+                      }}
+                      aria-label={"The reader. Read a ticket"}
+                      onClick={v.hero.readFn}
+                      onMouseEnter={v.hero.hotReader}
+                      onFocus={v.hero.hotReader}
+                      onMouseLeave={v.hero.cold}
+                      onBlur={v.hero.cold}
+                    >
+                      <span className={"st-tip"}>{"ticketd context T-12"}</span>
+                    </button>
+                  </div>
                   <figure className={"st-win st-appwin"}>
                     <div className={"st-win-bar"} aria-hidden={"true"}>
                       <span>{"your app · Ready"}</span>
@@ -2115,10 +2197,38 @@ export default class Landing extends Component {
                   <p className={"st-fine"}>{v.hero.status}</p>
                 </div>
               </div>
-              <div
-                className={"st-ruler-row"}
-                dangerouslySetInnerHTML={{ __html: markup[5] }}
-              />
+              <div className={"st-ruler-row"}>
+                <div className={"st-ruler"} aria-hidden={"true"}>
+                  <span style={{ left: "0%" }}>{"0"}</span>
+                  <span style={{ left: "16.667%" }}>{"2"}</span>
+                  <span style={{ left: "33.333%" }}>{"4"}</span>
+                  <span style={{ left: "50%" }}>{"6"}</span>
+                  <span style={{ left: "66.667%" }}>{"8"}</span>
+                  <span style={{ left: "83.333%" }}>{"10"}</span>
+                  <span style={{ left: "100%" }}>{"12 m"}</span>
+                </div>
+                <div className={"st-tb"}>
+                  <p>{"ticketd works"}</p>
+                  <dl>
+                    <div>
+                      <dt>{"dwg"}</dt>
+                      <dd>{"00 · the factory"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"sheet"}</dt>
+                      <dd>{"1 of 8"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"scale"}</dt>
+                      <dd>{"nts"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"rev"}</dt>
+                      <dd>{"5c1a242"}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
             </section>
             <section
               className={"st-sec"}
@@ -2183,7 +2293,7 @@ export default class Landing extends Component {
                   data-d5={v.line.d5}
                   style={{ "--rx": v.line.rx + "px" }}
                   aria-hidden={"true"}
-                  dangerouslySetInnerHTML={{ __html: markup[6] }}
+                  dangerouslySetInnerHTML={{ __html: markup[3] }}
                 />
                 {v.line.stations.map((m, index) => (
                   <Fragment key={index}>
@@ -2208,10 +2318,59 @@ export default class Landing extends Component {
                   </Fragment>
                 ))}
               </div>
-              <div
-                className={"st-dwg"}
-                dangerouslySetInnerHTML={{ __html: markup[7] }}
-              />
+              <div className={"st-dwg"}>
+                <ol className={"st-legend"}>
+                  <li>
+                    <b>{"1"}</b>
+                    <span>
+                      <em>{"AI power."}</em>
+                      {" Your agent’s model runs every machine."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"2"}</b>
+                    <span>
+                      <em>{"Lamp."}</em>
+                      {" Lights while that machine’s command runs."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"3"}</b>
+                    <span>
+                      <em>{"Belt."}</em>
+                      {" Carries T-12 from spec to context."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"4"}</b>
+                    <span>
+                      <em>{"Printout."}</em>
+                      {" What the next session reads."}
+                    </span>
+                  </li>
+                </ol>
+                <div className={"st-tb"}>
+                  <p>{"ticketd works"}</p>
+                  <dl>
+                    <div>
+                      <dt>{"dwg"}</dt>
+                      <dd>{"01 · the line"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"sheet"}</dt>
+                      <dd>{"2 of 8"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"scale"}</dt>
+                      <dd>{"nts"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"rev"}</dt>
+                      <dd>{"5c1a242"}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
               <div
                 className={"st-tabs"}
                 role={"group"}
@@ -2381,7 +2540,7 @@ export default class Landing extends Component {
                     data-live={v.mon.live}
                     style={{ "--ch": v.mon.chDeg, "--t": v.mon.tDeg }}
                     aria-hidden={"true"}
-                    dangerouslySetInnerHTML={{ __html: markup[8] }}
+                    dangerouslySetInnerHTML={{ __html: markup[4] }}
                   />
                   <div className={"mo2-screen"} data-flick={v.mon.flick}>
                     <AppMonitor
@@ -2471,10 +2630,66 @@ export default class Landing extends Component {
                   </ol>
                 </aside>
               </div>
-              <div
-                className={"st-dwg"}
-                dangerouslySetInnerHTML={{ __html: markup[9] }}
-              />
+              <div className={"st-dwg"}>
+                <ol className={"st-legend"}>
+                  <li>
+                    <b>{"1"}</b>
+                    <span>
+                      <em>{"Screen."}</em>
+                      {" The real desktop app, recorded on one run."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"2"}</b>
+                    <span>
+                      <em>{"Channel."}</em>
+                      {" Tickets, Plan, Graph, Ticket, Inbox."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"3"}</b>
+                    <span>
+                      <em>{"Time."}</em>
+                      {" Four moments of the shift."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"4"}</b>
+                    <span>
+                      <em>{"Live."}</em>
+                      {" Lights when the workspace changes."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"5"}</b>
+                    <span>
+                      <em>{"Camera."}</em>
+                      {" An open app shows CLI changes within seconds."}
+                    </span>
+                  </li>
+                </ol>
+                <div className={"st-tb"}>
+                  <p>{"ticketd works"}</p>
+                  <dl>
+                    <div>
+                      <dt>{"dwg"}</dt>
+                      <dd>{"02 · the monitor"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"sheet"}</dt>
+                      <dd>{"3 of 8"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"scale"}</dt>
+                      <dd>{"nts"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"rev"}</dt>
+                      <dd>{"5c1a242"}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
               <div
                 className={"st-tabs st-tabs-5"}
                 role={"group"}
@@ -2676,7 +2891,7 @@ export default class Landing extends Component {
                             onPointerMove={r.drag.move}
                             onPointerUp={r.drag.up}
                             onPointerCancel={r.drag.cancel}
-                            dangerouslySetInnerHTML={{ __html: markup[10] }}
+                            dangerouslySetInnerHTML={{ __html: markup[5] }}
                           />
                           <button
                             type={"button"}
@@ -2722,7 +2937,7 @@ export default class Landing extends Component {
                       className={"x-art"}
                       viewBox={"0 -24 700 110"}
                       aria-hidden={"true"}
-                      dangerouslySetInnerHTML={{ __html: markup[11] }}
+                      dangerouslySetInnerHTML={{ __html: markup[6] }}
                     />
                     <div className={"dp2-chips"}>
                       {v.disp.tray.map((t, index) => (
@@ -2737,8 +2952,14 @@ export default class Landing extends Component {
                       className={"dp2-cat"}
                       data-pose={v.disp.pose}
                       aria-hidden={"true"}
-                      dangerouslySetInnerHTML={{ __html: markup[12] }}
-                    />
+                    >
+                      <svg
+                        viewBox={"0 0 28 25"}
+                        shapeRendering={"crispEdges"}
+                        aria-hidden={"true"}
+                        dangerouslySetInnerHTML={{ __html: markup[7] }}
+                      />
+                    </span>
                   </div>
                   <div className={"st-bar"} style={{ marginTop: "12px" }}>
                     <button
@@ -2753,10 +2974,52 @@ export default class Landing extends Component {
                   </div>
                 </div>
               </div>
-              <div
-                className={"st-dwg"}
-                dangerouslySetInnerHTML={{ __html: markup[13] }}
-              />
+              <div className={"st-dwg"}>
+                <ol className={"st-legend"}>
+                  <li>
+                    <b>{"1"}</b>
+                    <span>
+                      <em>{"Ready tray."}</em>
+                      {" Only Ready tickets ride it."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"2"}</b>
+                    <span>
+                      <em>{"First in line."}</em>
+                      {" What --limit 1 hands out."}
+                    </span>
+                  </li>
+                  <li>
+                    <b>{"3"}</b>
+                    <span>
+                      <em>{"Your agent."}</em>
+                      {" Asks for work and gets one ticket."}
+                    </span>
+                  </li>
+                </ol>
+                <div className={"st-tb"}>
+                  <p>{"ticketd works"}</p>
+                  <dl>
+                    <div>
+                      <dt>{"dwg"}</dt>
+                      <dd>{"03 · dispatch"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"sheet"}</dt>
+                      <dd>{"4 of 8"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"scale"}</dt>
+                      <dd>{"nts"}</dd>
+                    </div>
+                    <div>
+                      <dt>{"rev"}</dt>
+                      <dd>{"5c1a242"}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
               <svg
                 className={"st-cable"}
                 data-p={v.pulse.disp}
@@ -2890,7 +3153,7 @@ export default class Landing extends Component {
                   data-p4={v.asm.p4}
                   data-ship={v.asm.ship}
                   aria-hidden={"true"}
-                  dangerouslySetInnerHTML={{ __html: markup[14] }}
+                  dangerouslySetInnerHTML={{ __html: markup[8] }}
                 />
                 {v.asm.flags.map((f, index) => (
                   <Fragment key={index}>
@@ -3130,7 +3393,7 @@ export default class Landing extends Component {
                   data-o3={v.dock.o3}
                   data-o4={v.dock.o4}
                   aria-hidden={"true"}
-                  dangerouslySetInnerHTML={{ __html: markup[15] }}
+                  dangerouslySetInnerHTML={{ __html: markup[9] }}
                 />
                 {v.dock.bays.map((b, index) => (
                   <Fragment key={index}>
@@ -3380,10 +3643,48 @@ export default class Landing extends Component {
                     }
                   </p>
                 </details>
-                <details dangerouslySetInnerHTML={{ __html: markup[16] }} />
-                <details dangerouslySetInnerHTML={{ __html: markup[17] }} />
-                <details dangerouslySetInnerHTML={{ __html: markup[18] }} />
-                <details dangerouslySetInnerHTML={{ __html: markup[19] }} />
+                <details>
+                  <summary>{"Which coding agents can use ticketd?"}</summary>
+                  <p>
+                    {
+                      "Any agent or harness that can run shell commands and read their output. There’s no plugin or MCP server to install: your agent calls the "
+                    }
+                    <code>{"ticketd"}</code>
+                    {
+                      " CLI, which prints JSON. Describe the commands in its instructions, for example in AGENTS.md."
+                    }
+                  </p>
+                </details>
+                <details>
+                  <summary>{"Where are my tickets stored?"}</summary>
+                  <p>
+                    {
+                      "In a local workspace: a SQLite database in your user’s application-data folder, outside your repositories. The desktop app and the CLI open it directly, with no account, server or background service. Uninstalling keeps it, and "
+                    }
+                    <code>{"ticketd backup"}</code>
+                    {" saves a copy."}
+                  </p>
+                </details>
+                <details>
+                  <summary>{"What do I need to install?"}</summary>
+                  <p>
+                    {"The desktop app and the "}
+                    <code>{"ticketd"}</code>
+                    {
+                      " CLI. Each download has both, for macOS 26 on Apple Silicon, Ubuntu 24.04 (x86-64) or Windows 11 (x86-64). Put the CLI on the PATH your agent uses. Downloads are unsigned build artifacts for now, so your system may warn before opening them; the install guide walks through it."
+                    }
+                  </p>
+                </details>
+                <details>
+                  <summary>
+                    {"How is it different from my agent’s own to-do list?"}
+                  </summary>
+                  <p>
+                    {
+                      "An agent’s built-in plan or to-do list usually lives in its session. ticketd keeps tickets, Documents and updates in a local workspace that you can open in the app and any later session can read. It doesn’t run agents, assign work or orchestrate them."
+                    }
+                  </p>
+                </details>
                 <details>
                   <summary>{"Does the desktop app need to be open?"}</summary>
                   <p>
@@ -3409,7 +3710,7 @@ export default class Landing extends Component {
                       className={"x-art"}
                       viewBox={"0 0 900 620"}
                       data-live={"true"}
-                      dangerouslySetInnerHTML={{ __html: markup[20] }}
+                      dangerouslySetInnerHTML={{ __html: markup[10] }}
                     />
                     <div className={"sr3-term"}>
                       <p className={"sr3-cmd"}>
@@ -3443,18 +3744,10 @@ export default class Landing extends Component {
                     }
                   </p>
                   <div className={"st-hero-ctas"}>
-                    <a
-                      className={"st-btn st-btn-primary"}
-                      href={
-                        "https://github.com/vantoan19/ticketd/blob/main/docs/install.md"
-                      }
-                    >
+                    <a className={"st-btn st-btn-primary"} href={links.install}>
                       {"Get started"}
                     </a>
-                    <a
-                      className={"st-link"}
-                      href={"https://github.com/vantoan19/ticketd"}
-                    >
+                    <a className={"st-link"} href={links.repository}>
                       {"View on GitHub ↗"}
                     </a>
                     <button
@@ -3472,6 +3765,17 @@ export default class Landing extends Component {
                     <code>{"ticketd --help"}</code>
                     {" from the shell your agent uses."}
                   </p>
+                  <button
+                    type="button"
+                    className="st-btn st-btn-ghost"
+                    onClick={() => this.copy("ticketd --help", "start")}
+                  >
+                    {this.state.copyFailed === "start"
+                      ? "Copy failed — select ticketd --help"
+                      : this.state.copied === "start"
+                        ? "Copied ticketd --help"
+                        : "Copy ticketd --help"}
+                  </button>
                 </div>
               </div>
             </section>
@@ -3488,23 +3792,9 @@ export default class Landing extends Component {
               </div>
               <nav className={"st-foot-links"} aria-label={"See also"}>
                 <p className={"st-kicker"}>{"See also"}</p>
-                <a
-                  href={
-                    "https://github.com/vantoan19/ticketd/blob/main/docs/install.md"
-                  }
-                >
-                  {"Install guide"}
-                </a>
-                <a href={"https://github.com/vantoan19/ticketd"}>
-                  {"Repository"}
-                </a>
-                <a
-                  href={
-                    "https://github.com/vantoan19/ticketd/blob/main/GLOSSARY.md"
-                  }
-                >
-                  {"Glossary"}
-                </a>
+                <a href={links.install}>{"Install guide"}</a>
+                <a href={links.repository}>{"Repository"}</a>
+                <a href={links.glossary}>{"Glossary"}</a>
               </nav>
               <p className={"st-foot-man"} aria-hidden={"true"}>
                 {"ticketd(1)"}
@@ -3516,7 +3806,7 @@ export default class Landing extends Component {
                   data-punch={v.foot.punch}
                   role={"img"}
                   aria-label={"ticketd, punched through a ticket stub"}
-                  dangerouslySetInnerHTML={{ __html: markup[21] }}
+                  dangerouslySetInnerHTML={{ __html: markup[11] }}
                 />
               </div>
             </footer>

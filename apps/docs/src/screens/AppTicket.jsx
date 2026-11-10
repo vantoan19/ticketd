@@ -1,4 +1,4 @@
-import { Component, Fragment } from "react";
+import { Component } from "react";
 import markup from "./AppTicket.markup.json";
 export default class AppTicket extends Component {
   constructor(...args) {

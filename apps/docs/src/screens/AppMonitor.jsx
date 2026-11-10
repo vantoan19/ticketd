@@ -1,4 +1,4 @@
-import { Component, Fragment } from "react";
+import { Component } from "react";
 import markup from "./AppMonitor.markup.json";
 export default class AppMonitor extends Component {
   constructor(...args) {

@@ -372,6 +372,9 @@ path.x-sa {
 .st-scene {
   position: relative;
 }
+.st-panorama {
+  position: relative;
+}
 .st-appwin {
   position: absolute;
   left: 68.4%;
@@ -1379,8 +1382,29 @@ path.x-sa {
 @container st (max-width: 760px) {
   .st-scene .st-appwin,
   .st-pano .st-appwin {
-    position: static;
+    /* Keep the window's absolute frame scoped to the window, not the drawing. */
+    position: relative;
+    left: auto;
+    top: auto;
     width: 100%;
+  }
+  .st-panorama {
+    overflow-x: auto;
+  }
+  .st-panorama .pano {
+    width: 900px;
+  }
+  .st-panorama .st-hot,
+  .st-line .st-stn,
+  .as2 .st-stn {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  /* A container cannot query itself to set its own custom properties. */
+  .st {
+    --gutter: 16px;
   }
 }
 
@@ -2862,7 +2886,7 @@ path.x-sa {
   opacity: 1;
 }
 .pano[data-hot^="core-"] .h-cable {
-  animation: st-flow 260ms linear infinite;
+  animation: st-flow 260ms linear;
   stroke-width: 2;
 }
 

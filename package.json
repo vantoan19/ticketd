@@ -14,14 +14,14 @@
   "scripts": {
     "dev": "npm run dev --workspace @ticketd/desktop",
     "desktop": "npm run tauri --workspace @ticketd/desktop --",
-    "build": "npm run build --workspace @ticketd/desktop",
+    "build": "npm run build --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces",
     "check": "./scripts/check",
-    "docs": "npm run dev --workspace @ticketd/docs",
+    "docs": "npm run dev --workspace @ticketd/docs --",
     "build:docs": "npm run build --workspace @ticketd/docs"
   },
   "devDependencies": {

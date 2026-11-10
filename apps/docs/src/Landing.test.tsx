@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -11,6 +12,7 @@ import Landing from "./Landing";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 test("running a machine updates its command, app caption and status together", () => {
@@ -175,4 +177,73 @@ test("reduced motion presents the completed figures without waiting for animatio
   ).toBe("3");
   expect(screen.getByText("bay 01 open · github in")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Play it again" })).toBeTruthy();
+});
+
+test("copy preserves command continuations and the two Get started links use the install guide", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  render(<Landing autoplay={false} motion="reduce" />);
+  fireEvent.click(
+    within(
+      screen.getByRole("group", { name: "Machines on the line" }),
+    ).getByRole("button", { name: /01.*Spec/ }),
+  );
+  const line = within(
+    screen.getByRole("region", { name: /Every machine on the line/ }),
+  );
+  await act(async () => {
+    fireEvent.click(line.getByRole("button", { name: "Copy this command" }));
+  });
+  expect(writeText).toHaveBeenCalledWith(
+    'ticketd document create --title "Login hardening spec" \\\n    --body-file spec.md | jq -r .id',
+  );
+  expect(line.getByText("copied")).toBeTruthy();
+  await act(async () => {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy ticketd --help" }),
+    );
+  });
+  expect(writeText).toHaveBeenLastCalledWith("ticketd --help");
+  const starts = screen.getAllByRole("link", { name: "Get started" });
+  expect(starts).toHaveLength(2);
+  for (const link of starts)
+    expect(link.getAttribute("href")).toBe(
+      "https://github.com/vantoan19/ticketd/blob/main/docs/install.md",
+    );
+});
+
+test("replaying the hero cancels the previous action's pending end state", () => {
+  vi.useFakeTimers();
+  render(<Landing autoplay={false} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Make a ticket context/ }),
+  );
+  act(() => vi.advanceTimersByTime(1000));
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Read a ticket ticket/ }),
+  );
+  act(() => vi.advanceTimersByTime(2400));
+  expect(screen.getByText("reading T-12 for the next session…")).toBeTruthy();
+  act(() => vi.advanceTimersByTime(1500));
+  expect(
+    screen.getByText("context out: status, notes, latest update"),
+  ).toBeTruthy();
+});
+
+test("a denied clipboard reports failure instead of claiming the command was copied", async () => {
+  vi.stubGlobal("navigator", {
+    clipboard: {
+      writeText: () => Promise.reject(new Error("Clipboard denied")),
+    },
+  });
+  render(<Landing autoplay={false} motion="reduce" />);
+  await act(async () => {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy ticketd --help" }),
+    );
+  });
+  expect(
+    screen.getByRole("button", { name: "Copy failed — select ticketd --help" }),
+  ).toBeTruthy();
+  expect(screen.queryByText("Copied ticketd --help")).toBeNull();
 });

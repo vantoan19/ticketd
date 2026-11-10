@@ -1,4 +1,4 @@
-import { Component, Fragment } from "react";
+import { Component } from "react";
 import markup from "./AppDock.markup.json";
 export default class AppDock extends Component {
   constructor(...args) {

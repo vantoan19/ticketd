@@ -1,4 +1,4 @@
-import { Component, Fragment } from "react";
+import { Component } from "react";
 import markup from "./AppLine.markup.json";
 export default class AppLine extends Component {
   constructor(...args) {

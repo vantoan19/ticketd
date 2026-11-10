@@ -1,4 +1,4 @@
-import { Component, Fragment } from "react";
+import { Component } from "react";
 import markup from "./AppReady.markup.json";
 export default class AppReady extends Component {
   constructor(...args) {
