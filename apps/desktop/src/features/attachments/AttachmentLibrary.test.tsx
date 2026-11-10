@@ -18,6 +18,40 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+test("discovery identifies uploaded copies without opening each preview", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "search_attachments")
+      return [
+        {
+          attachment: {
+            id: "uploaded",
+            display_name: "Uploaded trace",
+            original_filename: "trace.txt",
+            size_bytes: 9,
+            kind: "external_reference",
+            locator: "drive:account:file",
+            uploaded_copy: true,
+          },
+          related: false,
+          usage: {
+            eligible: false,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        },
+      ];
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<AttachmentLibrary onPreview={() => {}} />);
+  await screen.findByRole("button", { name: "Uploaded trace" });
+  expect(screen.getByRole("cell", { name: "Uploaded copy" })).toBeTruthy();
+  expect(screen.queryByRole("cell", { name: "External reference" })).toBeNull();
+  expect(invoke).not.toHaveBeenCalledWith(
+    "attachment_preview",
+    expect.anything(),
+  );
+});
+
 test("explicit local cleanup reviews protections and restores quarantine", async () => {
   let quarantined = false;
   const file = {

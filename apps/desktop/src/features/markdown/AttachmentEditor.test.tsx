@@ -53,7 +53,31 @@ beforeAll(() =>
     },
   }),
 );
+const rangeGeometry = new Map([
+  [
+    "getClientRects",
+    Object.getOwnPropertyDescriptor(Range.prototype, "getClientRects"),
+  ],
+  [
+    "getBoundingClientRect",
+    Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect"),
+  ],
+]);
+beforeAll(() => {
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [],
+  });
+  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => new DOMRect(),
+  });
+});
 afterAll(() => {
+  for (const [key, descriptor] of rangeGeometry) {
+    if (descriptor) Object.defineProperty(Range.prototype, key, descriptor);
+    else Reflect.deleteProperty(Range.prototype, key);
+  }
   if (editableDescriptor)
     Object.defineProperty(
       HTMLElement.prototype,
@@ -606,6 +630,84 @@ test("inserts a stored file at the rich caret without rewriting on focus or mode
     expect.anything(),
   );
 });
+
+test.each([
+  ["rich", "[Open issue](https://example.test/issues/1)", "issue"],
+  ["source", "[Open issue](https://example.test/issues/1)", "issue"],
+  ["source", "![Open issue](https://example.test/image.png)", "issue"],
+  ["source", "<https://example.test/issues/1>", "example"],
+])(
+  "inserting an attachment from inside %s %s preserves the existing link",
+  async (mode, markup, caretText) => {
+    const original = `Before ${markup} after`;
+    const changed = vi.fn();
+    vi.mocked(open).mockResolvedValue("C:/trace.log");
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "attachment_upload_destination" ||
+      command === "begin_attachment_upload"
+        ? { kind: "local" }
+        : command === "attachment_workspace_id"
+          ? "workspace-test"
+          : command === "attachment_upload_limit"
+            ? 104857600
+            : command === "attachment_uri"
+              ? uri
+              : file,
+    );
+    function Draft() {
+      const [value, setValue] = useState(original);
+      return (
+        <MarkdownEditor
+          persistentToolbar
+          value={value}
+          onChange={(next) => {
+            setValue(next);
+            changed(next);
+          }}
+        />
+      );
+    }
+    render(<Draft />);
+
+    if (mode === "source") {
+      const toggle = screen.queryByRole("button", {
+        name: "Edit Markdown source",
+      });
+      if (toggle) fireEvent.click(toggle);
+      const source = screen.getByRole("textbox", {
+        name: "Markdown document source",
+      });
+      EditorView.findFromDOM(source)?.dispatch({
+        selection: { anchor: original.indexOf(caretText) },
+      });
+    } else {
+      const editable = screen.getByRole("textbox", {
+        name: "Markdown document rich text",
+      });
+      Object.defineProperty(editable, "isContentEditable", { value: true });
+      editable.focus();
+      const text = screen.getByText("Open issue").firstChild!;
+      const range = document.createRange();
+      range.setStart(text, 5);
+      range.collapse(true);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      fireEvent.select(editable);
+      fireEvent(document, new Event("selectionchange"));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Insert attachment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+    await waitFor(() =>
+      expect(changed).toHaveBeenLastCalledWith(
+        `Before ${markup}[trace [final].log](${uri}) after`,
+      ),
+    );
+  },
+);
 
 test("a failed upload cannot insert a valid link and retry keeps the upload identity", async () => {
   const changed = vi.fn();

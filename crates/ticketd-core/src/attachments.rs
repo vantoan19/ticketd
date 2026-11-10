@@ -55,6 +55,9 @@ pub struct Attachment {
     /// Always known for local snapshots; providers may omit a native file's size.
     pub size_bytes: Option<u64>,
     pub kind: AttachmentKind,
+    /// Upload provenance is independent of the provider's current content or availability.
+    #[serde(default)]
+    pub uploaded_copy: bool,
     /// A local relative path or opaque provider locator; never a credential.
     pub locator: String,
     #[serde(default)]
@@ -259,6 +262,7 @@ impl Workspace {
             original_filename,
             size_bytes: Some(size_bytes),
             kind: AttachmentKind::LocalSnapshot,
+            uploaded_copy: false,
             quarantined: false,
             purge_state: AttachmentPurgeState::Retained,
             added_at: Some(self.connection.query_row(
@@ -378,7 +382,7 @@ impl Workspace {
     /// Includes completed uploads whose insertion was abandoned; never deletes bytes.
     pub fn attachments(&self, limit: u32, offset: u32) -> Result<Vec<Attachment>, Error> {
         self.recover_uploads()?;
-        let mut stmt = self.connection.prepare("SELECT id, display_name, original_filename, size_bytes, locator, kind, quarantined, added_at, purge_state FROM attachments ORDER BY rowid DESC LIMIT ?1 OFFSET ?2")?;
+        let mut stmt = self.connection.prepare("SELECT id, display_name, original_filename, size_bytes, locator, kind, quarantined, added_at, purge_state, EXISTS(SELECT 1 FROM drive_upload_operations u WHERE u.attachment_id=attachments.id) FROM attachments ORDER BY rowid DESC LIMIT ?1 OFFSET ?2")?;
         Ok(stmt
             .query_map(params![limit.min(1000), offset], attachment_row)?
             .collect::<Result<Vec<_>, _>>()?)
@@ -388,7 +392,7 @@ impl Workspace {
     pub fn ticket_attachments(&self, reference: &str) -> Result<Vec<Attachment>, Error> {
         self.recover_uploads()?;
         let ticket_id = relationships::id(&self.connection, reference)?;
-        let mut stmt = self.connection.prepare("SELECT a.id, a.display_name, a.original_filename, a.size_bytes, a.locator, a.kind, a.quarantined, a.added_at, a.purge_state FROM attachments a JOIN ticket_attachments t ON t.attachment_id=a.id WHERE t.ticket_id=?1 ORDER BY a.rowid")?;
+        let mut stmt = self.connection.prepare("SELECT a.id, a.display_name, a.original_filename, a.size_bytes, a.locator, a.kind, a.quarantined, a.added_at, a.purge_state, EXISTS(SELECT 1 FROM drive_upload_operations u WHERE u.attachment_id=a.id) FROM attachments a JOIN ticket_attachments t ON t.attachment_id=a.id WHERE t.ticket_id=?1 ORDER BY a.rowid")?;
         Ok(stmt
             .query_map([ticket_id], attachment_row)?
             .collect::<Result<Vec<_>, _>>()?)
@@ -627,7 +631,12 @@ pub(crate) fn read_attachment(connection: &Connection, id: &str) -> Result<Attac
         53 => "quarantined, added_at, 'retained'",
         _ => "0, NULL, 'retained'",
     };
-    if let Some(file) = connection.query_row(&format!("SELECT id, display_name, original_filename, size_bytes, locator, kind, {columns} FROM attachments WHERE id=?1"), [id], attachment_row).optional()? {
+    let uploaded_copy = if version >= 52 {
+        "EXISTS(SELECT 1 FROM drive_upload_operations u WHERE u.attachment_id=attachments.id)"
+    } else {
+        "0"
+    };
+    if let Some(file) = connection.query_row(&format!("SELECT id, display_name, original_filename, size_bytes, locator, kind, {columns}, {uploaded_copy} FROM attachments WHERE id=?1"), [id], attachment_row).optional()? {
         return Ok(file);
     }
     if version >= 52 {
@@ -666,6 +675,7 @@ pub(crate) fn replay_attachment(
         error
     })?;
     file.purge_state = current.purge_state;
+    file.uploaded_copy = current.uploaded_copy;
     Ok(file)
 }
 
@@ -676,6 +686,7 @@ fn attachment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Attachment> {
         original_filename: row.get(2)?,
         size_bytes: row.get(3)?,
         locator: row.get(4)?,
+        uploaded_copy: row.get(9)?,
         quarantined: row.get(6)?,
         added_at: row.get(7)?,
         purge_state: match row.get::<_, String>(8)?.as_str() {

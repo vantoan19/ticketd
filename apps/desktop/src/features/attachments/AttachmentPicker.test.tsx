@@ -205,6 +205,54 @@ test("failed destination bindings keep the batch choice through a later preferen
   ).toHaveLength(4);
 });
 
+test("a failed destination binding keeps the original capture available after remount", async () => {
+  vi.mocked(open).mockResolvedValue(["C:/retry.txt"]);
+  let failBinding = true;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "binding-recovery";
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "begin_attachment_upload") {
+      if (failBinding) {
+        failBinding = false;
+        throw new Error("Workspace is temporarily read-only");
+      }
+      return (args as { explicit?: unknown }).explicit ?? { kind: "local" };
+    }
+    if (command === "import_attachment") return file("retry.txt");
+    return null;
+  });
+  const picked = vi.fn().mockResolvedValue(undefined);
+  const first = render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={picked} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const failed = await screen.findByRole("listitem", { name: "retry.txt" });
+  await within(failed).findByText(/temporarily read-only/);
+  const original = vi
+    .mocked(invoke)
+    .mock.calls.find(
+      ([command]) => command === "begin_attachment_upload",
+    )?.[1] as { requestId: string };
+  first.unmount();
+
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
+  const recovered = await screen.findByRole("listitem", { name: "retry.txt" });
+  fireEvent.click(within(recovered).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(picked).toHaveBeenCalledTimes(1));
+
+  const bindings = vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "begin_attachment_upload")
+    .map(([, args]) => (args as { requestId: string }).requestId);
+  expect(bindings).toEqual([original.requestId, original.requestId]);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.find(([command]) => command === "import_attachment")?.[1],
+  ).toMatchObject({ requestId: original.requestId, source: "C:/retry.txt" });
+});
+
 test("a purged upload replay stays unavailable instead of reporting stored or attaching", async () => {
   vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
   vi.mocked(invoke).mockImplementation(async (command) => {
@@ -508,6 +556,65 @@ test("explicit local fallback uses a new operation and retains the original Driv
       .mocked(invoke)
       .mock.calls.filter(([command]) => command === "upload_drive_file"),
   ).toHaveLength(1);
+});
+
+test("explicit local fallback inserts at its original selection position", async () => {
+  const destination = {
+    connection_id: "connection",
+    folder_id: "uploads",
+    resource_key: null,
+  };
+  vi.mocked(open).mockResolvedValue(["C:/alpha.txt", "C:/bravo.txt"]);
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "fallback-order";
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown }).explicit ?? { kind: "local" };
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready to select a folder" };
+    if (command === "select_drive_upload_folder")
+      return {
+        destination,
+        folder: { id: "uploads", name: "Uploads", can_add_children: true },
+      };
+    if (command === "upload_drive_file") {
+      const source = (args as { source: string }).source;
+      if (source === "C:/alpha.txt") throw new Error("Drive offline for Alpha");
+      return {
+        ...file("bravo.txt"),
+        kind: "external_reference",
+        locator: "drive:connection:bravo",
+      };
+    }
+    if (command === "import_attachment") return file("alpha.txt");
+    return null;
+  });
+  const picked = vi.fn().mockResolvedValue(undefined);
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
+  await screen.findByText("Destination: Google Drive · Uploads");
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+
+  const alpha = await screen.findByRole("listitem", { name: "alpha.txt" });
+  await within(alpha).findByText(/Drive offline for Alpha/);
+  await waitFor(() => expect(picked).toHaveBeenCalledTimes(1));
+  fireEvent.click(
+    within(alpha).getByRole("button", { name: "Upload locally instead" }),
+  );
+  await waitFor(() => expect(picked).toHaveBeenCalledTimes(2));
+
+  expect(picked).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({ id: "bravo.txt" }),
+    expect.any(String),
+    undefined,
+  );
+  expect(picked).toHaveBeenLastCalledWith(
+    expect.objectContaining({ id: "alpha.txt" }),
+    expect.any(String),
+    "bravo.txt",
+  );
 });
 
 test("existing files search keeps related usage distinct and inserts selected identities in selection order", async () => {

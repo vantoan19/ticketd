@@ -11,6 +11,8 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { DocumentNavigation } from "@/features/documents/navigation";
+import { TicketNavigation } from "@/features/tickets/navigation";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -136,6 +138,110 @@ const file = {
   kind: "local_snapshot" as const,
   locator: "file-1/bytes/screen.png",
 };
+
+test("preview exposes Added, same-identity rename and a reusable workspace link", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  let current = { ...file, added_at: "2026-11-04T10:00:00Z" };
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "rename_attachment") {
+      current = { ...current, display_name: "Renamed screenshot" };
+      return current;
+    }
+    if (command === "attachment_preview")
+      return {
+        attachment: current,
+        status: "unsupported",
+        media_type: null,
+        message: "No media preview",
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    throw new Error(`Unexpected ${command}`);
+  });
+  try {
+    render(<AttachmentPreview target={{ id: file.id }} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Screenshot" });
+    expect(
+      screen.getByText("Added").nextElementSibling?.querySelector("time")
+        ?.dateTime,
+    ).toBe("2026-11-04T10:00:00Z");
+    fireEvent.click(screen.getByRole("button", { name: "Reuse attachment" }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        "<ticketd://attachment/workspace/file-1>",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    const name = await screen.findByRole("textbox", { name: "Display name" });
+    fireEvent.change(name, { target: { value: "Renamed screenshot" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    await screen.findByRole("heading", { name: "Renamed screenshot" });
+    expect(invoke).toHaveBeenCalledWith(
+      "rename_attachment",
+      expect.objectContaining({ id: file.id }),
+    );
+    expect(current.original_filename).toBe("screen.png");
+  } finally {
+    if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
+    else Reflect.deleteProperty(navigator, "clipboard");
+  }
+});
+
+test.each(["ticket", "document"])(
+  "saved %s usage navigates and closes the preview",
+  async (kind) => {
+    const close = vi.fn();
+    const openTicket = vi.fn();
+    const openDocument = vi.fn();
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "attachment_workspace_id"
+        ? "workspace"
+        : {
+            attachment: file,
+            status: "unsupported",
+            media_type: null,
+            message: null,
+            can_open: true,
+            usage: {
+              total: 1,
+              legacy_drafts_pending: false,
+              entries: [
+                {
+                  kind: kind === "ticket" ? "ticket_body" : "document_body",
+                  owner: "owner-id",
+                  label: "Saved context",
+                  trashed: false,
+                  target: {
+                    kind,
+                    id: kind === "ticket" ? "T-7" : "document-id",
+                  },
+                },
+              ],
+            },
+          },
+    );
+    render(
+      <TicketNavigation.Provider value={openTicket}>
+        <DocumentNavigation.Provider value={openDocument}>
+          <AttachmentPreview target={{ id: file.id }} onClose={close} />
+        </DocumentNavigation.Provider>
+      </TicketNavigation.Provider>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Saved context" }),
+    );
+    expect(kind === "ticket" ? openTicket : openDocument).toHaveBeenCalledWith(
+      kind === "ticket" ? "T-7" : "document-id",
+    );
+    expect(close).toHaveBeenCalledOnce();
+  },
+);
 
 test("uploaded copies show changed and unavailable observations with last-known details and explicit retry/export", async () => {
   let status = "changed";

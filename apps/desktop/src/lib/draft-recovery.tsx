@@ -5,13 +5,24 @@ import { Button } from "@/components/ui/button";
 import {
   DraftRecoveryContext as Context,
   DraftRecoveryErrorContext as ErrorContext,
+  DraftRecoveryGenerationContext as GenerationContext,
   type DraftRecovery,
 } from "./draft-recovery-context";
+
+type RecoveryStore = DraftRecovery & {
+  has: (owner: string) => boolean;
+  retire: () => void;
+};
 
 function recoveryStore(
   initial: DraftRetention[],
   onError: (error: string) => void,
-) {
+  onReload: (
+    restored: DraftRetention[],
+    cutover: boolean,
+    previous: RecoveryStore,
+  ) => void,
+): RecoveryStore {
   const records = new Map(initial.map((record) => [record.owner, record]));
   const visible = new Map(
     initial.map((record) => [record.owner, record.payload]),
@@ -19,8 +30,11 @@ function recoveryStore(
   const queue: (() => Promise<void>)[] = [];
   let running: Promise<void> | null = null;
   let error: unknown = null;
+  let transitioning = false;
+  let retired = false;
   const pump = (): Promise<void> => {
     if (running) return running;
+    if (transitioning || retired) return Promise.resolve();
     if (error) return Promise.reject(error);
     running = (async () => {
       while (queue.length) {
@@ -30,7 +44,7 @@ function recoveryStore(
     })()
       .catch((reason) => {
         error = reason;
-        onError(String(reason));
+        if (!transitioning && !retired) onError(String(reason));
         throw reason;
       })
       .finally(() => {
@@ -39,16 +53,15 @@ function recoveryStore(
     return running;
   };
   const flush = async () => {
+    if (transitioning || retired)
+      throw new Error("Draft recovery store is no longer writable");
     while (queue.length || running) {
       if (error) throw error;
       await pump();
     }
     if (error) throw error;
   };
-  const store: DraftRecovery & {
-    retry: () => void;
-    has: (owner: string) => boolean;
-  } = {
+  const store: RecoveryStore = {
     active: true,
     has: (owner) => visible.has(owner),
     read(owner, schema) {
@@ -56,6 +69,12 @@ function recoveryStore(
       return payload == null ? null : schema.parse(payload);
     },
     put(owner, payload, markdown, kind = "draft") {
+      // A replaced workspace owns recovery now. Old mounted editors and their
+      // unmount cleanup may finish later; they must not write through the new DB.
+      if (transitioning || retired)
+        return Promise.reject(
+          new Error("Draft recovery store is no longer writable"),
+        );
       visible.set(owner, payload);
       queue.push(async () => {
         const previous = records.get(owner);
@@ -85,7 +104,34 @@ function recoveryStore(
       return pending;
     },
     flush,
+    async reloadAfterRestore() {
+      if (transitioning || retired) return;
+      transitioning = true;
+      // RestoreDialog flushes before replacement. Drop late stale queue entries
+      // while the new workspace's recovery rows are being loaded.
+      queue.length = 0;
+      try {
+        await running?.catch(() => {});
+        const [restored, cutover] = await Promise.all([
+          draftRetention.list(),
+          draftRetention.cutoverPending(),
+        ]);
+        onReload(restored, cutover, store);
+      } catch (reason) {
+        // Restore already committed. Keep stale records blocked if the new
+        // workspace could not be read; the dialog asks the person to restart.
+        retired = true;
+        queue.length = 0;
+        throw reason;
+      }
+    },
+    retire() {
+      transitioning = true;
+      retired = true;
+      queue.length = 0;
+    },
     retry() {
+      if (transitioning || retired) return;
       error = null;
       onError("");
       void flush().catch(() => {});
@@ -96,18 +142,34 @@ function recoveryStore(
 
 /** Load core recovery before mounting editors; all payloads are workspace-local and backed up. */
 export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
-  const [store, setStore] = useState<ReturnType<typeof recoveryStore> | null>(
-    null,
-  );
+  const [recovery, setRecovery] = useState<{
+    store: RecoveryStore | null;
+    generation: number;
+  }>({ store: null, generation: 0 });
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [cutoverPending, setCutoverPending] = useState(false);
   useEffect(() => {
     let active = true;
     void (async () => {
-      const next = recoveryStore(await draftRetention.list(), (message) => {
-        if (active) setError(message);
-      });
+      const makeStore = (initial: DraftRetention[]): RecoveryStore =>
+        recoveryStore(
+          initial,
+          (message) => {
+            if (active) setError(message);
+          },
+          (restored, pending, previous) => {
+            previous.retire();
+            if (!active) return;
+            setError("");
+            setCutoverPending(pending);
+            setRecovery((current) => ({
+              store: makeStore(restored),
+              generation: current.generation + 1,
+            }));
+          },
+        );
+      const next = makeStore(await draftRetention.list());
       const importLegacy = async (
         owner: string,
         payload: unknown,
@@ -222,7 +284,7 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
       const pending = await draftRetention.cutoverPending();
       if (active) {
         setCutoverPending(pending);
-        setStore(next);
+        setRecovery((current) => ({ ...current, store: next }));
         setError("");
       }
     })().catch((reason) => {
@@ -261,17 +323,23 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
           Could not protect recoverable drafts. Keep this window open. {error}{" "}
           <Button
             onClick={() =>
-              store ? store.retry() : setAttempt((value) => value + 1)
+              recovery.store
+                ? recovery.store.retry()
+                : setAttempt((value) => value + 1)
             }
           >
             Retry draft recovery
           </Button>
         </div>
       )}
-      {store ? (
-        <ErrorContext.Provider value={error}>
-          <Context.Provider value={store}>{children}</Context.Provider>
-        </ErrorContext.Provider>
+      {recovery.store ? (
+        <GenerationContext.Provider value={recovery.generation}>
+          <ErrorContext.Provider value={error}>
+            <Context.Provider value={recovery.store}>
+              {children}
+            </Context.Provider>
+          </ErrorContext.Provider>
+        </GenerationContext.Provider>
       ) : (
         <p role="status">Loading recoverable drafts…</p>
       )}

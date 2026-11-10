@@ -86,6 +86,20 @@ const file = {
   locator: "f1/bytes/trace.log",
 };
 
+test("the direct attachment rail distinguishes uploaded copies", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "ticket_attachments")
+      return [{ ...file, kind: "external_reference", uploaded_copy: true }];
+    return [];
+  });
+  render(
+    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+  );
+  await screen.findByRole("button", { name: "Trace" });
+  expect(screen.getByText("Google Drive · Uploaded copy")).toBeTruthy();
+  expect(screen.queryByText("Google Drive · External reference")).toBeNull();
+});
+
 test("a direct preview replaces only its selected ticket association through the atomic operation", async () => {
   const replacement = { ...file, id: "new-file", display_name: "New trace" };
   let replaced = false;

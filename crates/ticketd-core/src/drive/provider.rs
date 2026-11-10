@@ -212,11 +212,13 @@ pub(crate) fn token_request(
     }
     let token: TokenResponse =
         serde_json::from_slice(&response.body).map_err(|_| invalid_response())?;
-    if token.access_token.is_empty()
-        || token
-            .scope
-            .as_deref()
-            .is_some_and(|scope| scope != DRIVE_FILE_SCOPE)
+    if token.access_token.is_empty() {
+        return Err(invalid_response());
+    }
+    if token
+        .scope
+        .as_deref()
+        .is_some_and(|scope| scope != DRIVE_FILE_SCOPE)
     {
         return Err(DriveError::new(
             DriveErrorKind::Reauthorize,
@@ -349,7 +351,34 @@ fn select_file() -> DriveError {
         "this file is not authorized for ticketd; open the Google Drive tab in the attachment picker and select this file; account access alone does not authorize it",
     )
 }
+pub(super) fn api_disabled_error(response: &DriveResponse) -> Option<DriveError> {
+    if response.status != 403 {
+        return None;
+    }
+    let body: serde_json::Value = serde_json::from_slice(&response.body).ok()?;
+    let disabled = body["error"]["errors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|error| error["reason"] == "accessNotConfigured")
+        || body["error"]["details"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|error| {
+                error["reason"] == "SERVICE_DISABLED"
+                    && error["domain"] == "googleapis.com"
+                    && error["metadata"]["service"] == "drive.googleapis.com"
+            });
+    disabled.then(|| DriveError::new(
+        DriveErrorKind::Unconfigured,
+        "Google Drive API is disabled for ticketd's Google app; the app publisher must enable Google Drive API in Google Cloud, then retry",
+    ))
+}
 pub(super) fn metadata_error(response: &DriveResponse) -> DriveError {
+    if let Some(error) = api_disabled_error(response) {
+        return error;
+    }
     let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap_or_default();
     let reasons: Vec<&str> = body["error"]["errors"]
         .as_array()

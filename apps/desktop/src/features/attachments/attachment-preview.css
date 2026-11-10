@@ -41,6 +41,7 @@
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .attachment-preview-layout {
   display: grid;
@@ -93,8 +94,9 @@
   overflow-wrap: anywhere;
 }
 .attachment-preview-info h3 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
 }
 .attachment-preview-info summary {
   cursor: pointer;
@@ -139,15 +141,11 @@
     position: static;
   }
   .attachment-preview-file-actions {
-    position: absolute;
-    bottom: 12px;
-    right: 90px;
-    gap: 4px;
+    width: 100%;
   }
-  .attachment-preview-file-actions .ui-button {
-    height: 36px;
-    padding-inline: 8px;
-    font-size: 12px;
+  .attachment-preview-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .attachment-preview-layout {
     display: block;
@@ -169,7 +167,7 @@
     padding: 12px 16px;
     gap: 8px;
     display: grid;
-    grid-template-rows: auto 36px;
+    grid-template-rows: auto auto;
     grid-template-columns: minmax(0, 1fr);
   }
   .attachment-preview-footer > .attachment-hint {

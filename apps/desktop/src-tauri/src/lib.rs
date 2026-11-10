@@ -507,6 +507,7 @@ fn remove_checkout(id: String, path: String) -> Result<Project, String> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Preserve named IPC fields while adding an optional retry ID.
 fn create_ticket(
     title: String,
     body: String,
@@ -515,39 +516,28 @@ fn create_ticket(
     plan_id: Option<String>,
     tags: Vec<String>,
     follow: bool,
+    request_id: Option<String>,
 ) -> Result<Ticket, String> {
-    open_workspace()
+    match open_workspace()
         .and_then(|mut workspace| {
-            // `follow` is the desktop's "Follow tickets I create" preference; creating and
-            // following commit together.
-            let mut tickets = workspace.apply_batch_following(
-                vec![
-                    BatchOperation::Create {
-                        name: "new".into(),
-                        title,
-                        project_id,
-                    },
-                    BatchOperation::Change {
-                        ticket: "$new".into(),
-                        change: Box::new(TicketChange {
-                            patch: TicketPatch {
-                                body: Some(body),
-                                status: Some(status),
-                                plan_id: plan_id.map(Some),
-                                ..Default::default()
-                            },
-                            add_tags: tags,
-                            ..Default::default()
-                        }),
-                    },
-                ],
-                follow,
-            )?;
-            tickets
-                .pop()
-                .ok_or_else(|| ticketd_core::Error::InvalidBatch("missing result".into()))
+            workspace.write(
+                request_id.as_deref(),
+                WriteRequest::CreateTicketWithContent {
+                    title,
+                    body,
+                    status,
+                    project_id,
+                    plan_id,
+                    tags,
+                    follow,
+                },
+            )
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected ticket creation result".into()),
+    }
 }
 
 #[tauri::command]

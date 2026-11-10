@@ -48,6 +48,14 @@ pub struct PreviewUse {
     pub owner: String,
     pub label: String,
     pub trashed: bool,
+    pub target: Option<PreviewUseTarget>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum PreviewUseTarget {
+    Ticket(String),
+    Document(String),
 }
 
 /// An authorized handle, never a path exposed to the WebView. All reads use this handle.
@@ -125,6 +133,20 @@ impl Workspace {
         let total = usage.protections.len();
         let mut entries = Vec::new();
         for protection in usage.protections.into_iter().take(20) {
+            let target = if protection.kind == "document_body" {
+                Some(PreviewUseTarget::Document(protection.owner.clone()))
+            } else if let Some(ticket_id) = &protection.ticket_id {
+                self.connection
+                    .query_row(
+                        "SELECT 'T-' || number FROM tickets WHERE id=?1",
+                        [ticket_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .map(PreviewUseTarget::Ticket)
+            } else {
+                None
+            };
             let label = if let Some(ticket_id) = &protection.ticket_id {
                 self.connection.query_row("SELECT 'T-' || number || ' · ' || substr(title,1,200) FROM tickets WHERE id=?1", [ticket_id], |row| row.get::<_, String>(0)).optional()?.unwrap_or_else(|| "Ticket context".into())
             } else if protection.kind == "document_body" {
@@ -149,6 +171,7 @@ impl Workspace {
                 owner: protection.owner,
                 label,
                 trashed: protection.trashed,
+                target,
             });
         }
         Ok(PreviewUsage {

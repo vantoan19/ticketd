@@ -306,6 +306,8 @@ test("ticket creation inserts into its draft and submits only through Create", a
       null,
       [],
       false,
+      expect.any(String),
+      expect.any(Boolean),
     ),
   );
   expect(

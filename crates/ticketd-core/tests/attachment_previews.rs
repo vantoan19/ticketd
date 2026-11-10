@@ -41,6 +41,15 @@ fn preview_names_shared_usage_without_flattening_documents_drafts_or_trash() {
         .attachment_preview(&workspace.attachment_workspace_id().unwrap(), &file.id)
         .unwrap();
     assert_eq!(preview.usage.total, 4);
+    let usage = serde_json::to_value(&preview.usage).unwrap();
+    assert!(usage["entries"].as_array().unwrap().iter().any(
+        |entry| entry["target"] == serde_json::json!({"kind":"ticket", "id":ticket.reference})
+    ));
+    assert!(
+        usage["entries"].as_array().unwrap().iter().any(
+            |entry| entry["target"] == serde_json::json!({"kind":"document", "id":document.id})
+        )
+    );
     assert!(
         preview
             .usage

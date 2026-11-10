@@ -105,6 +105,42 @@ fn upload(w: &mut Workspace, p: &Provider) -> ticketd_core::Attachment {
 }
 
 #[test]
+fn metadata_only_version_changes_allow_byte_verified_exports_without_rewriting_provenance() {
+    use ticketd_core::{ExportStatus, MarkdownExportSource};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let p = Provider::default();
+    let file = upload(&mut w, &p);
+    let original = w.drive_uploaded_copy(&file.id).unwrap();
+    p.uploaded.lock().unwrap().as_mut().unwrap().version = Some("5".into());
+
+    let output = dir.path().join("export.log");
+    let result = w.export_drive_uploaded_copy(&file.id, &output, &p).unwrap();
+    assert_eq!(result.status, DriveCopyStatus::Unchanged);
+    assert_eq!(std::fs::read(output).unwrap(), b"original bytes");
+
+    let body = format!("[Upload]({})", w.attachment_uri(&file.id).unwrap());
+    let portable = w
+        .export_markdown_with_files_with_drive(
+            MarkdownExportSource::Markdown { body },
+            dir.path(),
+            &p,
+        )
+        .unwrap();
+    assert_eq!(portable.status, ExportStatus::Complete);
+    assert_eq!(
+        std::fs::read(
+            portable
+                .directory
+                .join(portable.attachments[0].path.as_ref().unwrap())
+        )
+        .unwrap(),
+        b"original bytes"
+    );
+    assert_eq!(w.drive_uploaded_copy(&file.id).unwrap(), original);
+}
+
+#[test]
 fn uploaded_copy_inspection_detects_external_changes_without_overwriting_provenance_or_names() {
     let dir = tempfile::tempdir().unwrap();
     let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
@@ -137,7 +173,15 @@ fn uploaded_copy_inspection_detects_external_changes_without_overwriting_provena
         .inspect_drive_uploaded_copy(&file.id, &p)
         .unwrap()
         .unwrap();
-    assert_eq!(inspection.status, DriveCopyStatus::Changed);
+    assert_eq!(inspection.status, DriveCopyStatus::Unchanged);
+    p.uploaded.lock().unwrap().as_mut().unwrap().sha256_checksum = Some("0".repeat(64));
+    assert_eq!(
+        w.inspect_drive_uploaded_copy(&file.id, &p)
+            .unwrap()
+            .unwrap()
+            .status,
+        DriveCopyStatus::Changed
+    );
     assert_eq!(inspection.last_known.name, "trace.log");
     assert_eq!(w.drive_uploaded_copy(&file.id).unwrap(), original);
     assert_eq!(
@@ -255,7 +299,7 @@ fn mixed_exports_report_typed_omissions_and_remove_unverified_downloads_includin
         ("offline", "unavailable"),
         ("download-offline", "unavailable"),
         ("bytes-changed", "changed"),
-        ("race", "changed"),
+        ("race", "unknown"),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("workspace.sqlite3");

@@ -157,7 +157,9 @@ export function AttachmentLibrary({
                       <td>
                         {file.kind === "local_snapshot"
                           ? "Local snapshot"
-                          : "External reference"}
+                          : file.uploaded_copy
+                            ? "Uploaded copy"
+                            : "External reference"}
                       </td>
                       <td>
                         {file.size_bytes === null

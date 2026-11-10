@@ -399,6 +399,16 @@ A future server may call the same core workflow interface. Cloud synchronization
 
 A caller that needs retries uses the core `write` workflow with a typed write request and optional request ID. The CLI exposes the same workflow as `ticketd write --request-id ID FILE` (use `-` for standard input). For example, `{"operation":"create_ticket","title":"Investigate","project_id":null}` creates a ticket, and `{"operation":"batch","operations":[...]}` applies a batch. Results contain a `kind` and `value` (the delete result has no value). Existing individual commands remain available without retry IDs.
 
+Desktop ticket creation retains its submission ID in the recoverable draft before
+sending the write. `create_ticket_with_content` atomically commits the ticket's
+content, organization and following choice with its replay receipt. A lost response
+or failed draft release reuses that ID after restart rather than creating another
+ticket. Retrying locks the submitted fields; editing them as a new ticket requires
+an explicit decision and durable draft save before a fresh ID can be used. The
+captured following and Create more choices survive restart. After workspace restoration,
+recovery reloads the restored revisions and cutover state, and retained editor
+subtrees remount against that recovery generation.
+
 Request IDs share one workspace-wide namespace. Equality compares the serialized typed request, including its operation, exact strings, attribution, supplied patch fields, and ordered arrays. JSON object key order and whitespace do not matter; omitted optional fields and their default values compare equally, except that omitted patch fields and explicitly cleared fields remain distinct. A different request with the same ID fails even if its effect would happen to be equivalent. Failed requests are not retained and may be retried. Successful outcomes are retained indefinitely and replayed as originally returned.
 
 The JSON export includes `ticket_follows` and `inbox_entries`. Their `person`
@@ -550,6 +560,12 @@ Selection order is retained. Tauri owns browser opening and cancellation, return
 only attachment metadata/errors to React, and never loads Google scripts in the
 WebView. The shared picker handles both direct associations and inline insertion.
 
+The shared core embeds the publisher's installed-app registration from build-time
+`TICKETD_GOOGLE_OAUTH_CLIENT_JSON`, so desktop and CLI need no user configuration
+to begin sign-in. The optional runtime `TICKETD_GOOGLE_OAUTH_CLIENT_FILE` remains
+an explicit developer override; an invalid override never falls back silently.
+Distribution validates each platform's registration before building its artifacts.
+
 Refresh credentials and installed-client material live in the OS user's secure
 store, under `ticketd.google-drive.v1`, keyed by the opaque connection handle.
 Windows uses Credential Manager, macOS Keychain, and Linux encrypted Secret
@@ -632,18 +648,21 @@ operation metadata and remote references only, with no tokens, session URLs,
 source paths or cached remote bytes. Remote content is retained after cancellation,
 local fallback and record cleanup.
 
-`inspect_drive_uploaded_copy` compares immutable upload SHA-256, size and recorded
-version with current metadata without downloading or updating provenance. Its
-`unchanged` status describes metadata only. Missing checksum/version/size or
-capability evidence is `unknown`; unsupported downloads, changed observations and
-typed access failures remain distinct. A changed version may represent metadata
-changes rather than changed bytes, so export conservatively omits it.
+`inspect_drive_uploaded_copy` compares immutable upload SHA-256 and size with
+current metadata without downloading or updating provenance. Its `unchanged`
+status describes a matching checksum/size observation, not verified downloaded
+bytes. Missing checksum/version/size or capability evidence is `unknown`;
+unsupported downloads, changed content and typed access failures remain distinct.
+Drive's [file version](https://developers.google.com/workspace/drive/api/reference/rest/v3/files)
+includes server-side metadata changes, so a later version with matching content
+does not prevent export. The recorded upload version remains immutable.
 
 Both `export_attachment` and the existing portable Markdown exporter use the
 same verified-download workflow. The Google adapter reads authenticated blob
 ranges of at most 256 KiB, checks range/length responses and preserves resource
 keys. Core stages output, bounds and hashes actual bytes, and requires matching
-before/after metadata observations before publishing a file. Failed or unstable
+before/after metadata observations, including version, before publishing a file.
+Version changes during download return `unknown`; failed or unstable
 downloads remove staged bytes and return explicit status; there is no revision
 pinning or automatic cache. Portable format 1 adds nullable `copy_status` to
 uploaded-copy entries, retaining old manifest compatibility. Omissions make the

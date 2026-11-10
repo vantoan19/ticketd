@@ -52,6 +52,25 @@ fn native_metadata_uses_only_token_exchange_and_metadata_get_with_redacted_crede
 }
 
 #[test]
+fn empty_successful_token_response_is_invalid_provider_data() {
+    let transport = Http {
+        requests: Mutex::new(vec![]),
+        responses: Mutex::new(vec![DriveResponse {
+            headers: vec![],
+            status: 200,
+            body: br#"{"access_token":"","scope":"https://www.googleapis.com/auth/drive.file"}"#
+                .to_vec(),
+        }]),
+    };
+    let error = GoogleDrive::new("connection", &Vault, &transport)
+        .metadata("doc-123", None)
+        .unwrap_err();
+    assert_eq!(error.kind, DriveErrorKind::InvalidResponse);
+    assert!(!error.message.contains("secret"));
+    assert_eq!(transport.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn mixed_portable_outputs_and_restore_exclude_credentials_and_need_no_provider_access() {
     struct PrivateVault;
     impl CredentialStore for PrivateVault {

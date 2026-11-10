@@ -13,6 +13,7 @@ import {
 } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView, keymap } from "@codemirror/view";
 import { RangeApi, TextApi, NodeApi, type Value } from "platejs";
@@ -1008,8 +1009,15 @@ export function MarkdownEditor({
         throw new Error("Reopen this editor to insert the stored file.");
       const before = beforeId ? pending.links.get(beforeId) : undefined;
       const caret = pending.source ?? view.state.selection.main;
-      const from = before?.from ?? caret.from;
-      const to = before?.from ?? caret.to;
+      let from = before?.from ?? caret.from;
+      let to = before?.from ?? caret.to;
+      if (!before) {
+        let node = syntaxTree(view.state).resolveInner(caret.from, -1);
+        const linkNodes = ["Link", "Image", "Autolink"];
+        while (node.parent && !linkNodes.includes(node.name))
+          node = node.parent;
+        if (linkNodes.includes(node.name)) from = to = node.to;
+      }
       // Source insertion may be inside a GFM table; a filename pipe must stay in its cell.
       const link = writeMarkdown([
         {
@@ -1048,8 +1056,13 @@ export function MarkdownEditor({
           ? editor.api.before(existing[1])
           : editor.api.after(existing[1]);
         if (point) editor.tf.select(point);
-      } else if (pending.rich) editor.tf.select(pending.rich);
-      else editor.tf.select(editor.api.end([]) ?? [0]);
+      } else {
+        if (pending.rich) editor.tf.select(pending.rich);
+        else editor.tf.select(editor.api.end([]) ?? [0]);
+        const enclosingLink = editor.api.above({ match: { type: "a" } });
+        const point = enclosingLink && editor.api.after(enclosingLink[1]);
+        if (point) editor.tf.select(point);
+      }
       // Insert a link node rather than upserting the surrounding link or replacing its label.
       editor.tf.insertNodes({
         type: "a",

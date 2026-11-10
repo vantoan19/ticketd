@@ -130,7 +130,18 @@ test("unpublished new-ticket content is core-retained and recovers after a faile
     });
   });
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-  await screen.findByText(/Could not create ticket/);
+  await screen.findByText(/Could not confirm whether the ticket was created/);
+  expect(create).toHaveBeenCalledWith(
+    "Recover me",
+    "[Trace](ticketd://attachment/workspace/file)",
+    "Todo",
+    null,
+    null,
+    [],
+    false,
+    expect.any(String),
+    expect.any(Boolean),
+  );
   await waitFor(() =>
     expect(records.get("new-ticket")?.markdown).toEqual([
       "[Trace](ticketd://attachment/workspace/file)",
@@ -146,8 +157,14 @@ test("unpublished new-ticket content is core-retained and recovers after a faile
   expect(
     screen.getByRole("textbox", { name: "Description rich text" }).textContent,
   ).toContain("Trace");
-  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
-  await waitFor(() => expect(records.get("new-ticket")?.payload).toBeNull());
+  expect(screen.getByRole("button", { name: "Discard draft" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(records.get("new-ticket")?.payload).toMatchObject({
+    title: "Recover me",
+    requestId: expect.any(String),
+  });
 });
 
 test("description autosave releases the current draft while source Undo retains and restores its removed file link", async () => {
@@ -615,7 +632,9 @@ test("failed draft protection is visible and blocks publication until explicit r
     "Could not protect recoverable drafts",
   );
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-  await screen.findByText(/Could not create ticket/);
+  await screen.findByText(
+    /Could not save the submission for a safe retry; no ticket was created/,
+  );
   expect(create).not.toHaveBeenCalled();
   fail = false;
   fireEvent.click(screen.getByRole("button", { name: "Retry draft recovery" }));
@@ -624,7 +643,7 @@ test("failed draft protection is visible and blocks publication until explicit r
       screen.queryAllByText(/Could not protect recoverable drafts/),
     ).toHaveLength(0),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry safely" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
 });
 
@@ -687,6 +706,8 @@ test("late retention completion cannot publish or replace newer typing before it
       null,
       [],
       false,
+      expect.any(String),
+      expect.any(Boolean),
     ),
   );
   expect(records.get("new-ticket")?.payload).toMatchObject({ title: "Newer" });

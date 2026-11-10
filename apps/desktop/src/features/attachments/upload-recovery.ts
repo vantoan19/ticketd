@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  attachmentUploadDestinationSchema,
   attachmentSchema,
   attachments,
   driveDestinationSchema,
@@ -11,6 +12,7 @@ const recordSchema = z.object({
   name: z.string(),
   order: z.number(),
   source: z.union([z.string(), z.instanceof(File)]),
+  intent: attachmentUploadDestinationSchema.optional(),
   stored: attachmentSchema.optional(),
   destination: driveDestinationSchema.optional(),
   destinationName: z.string().optional(),

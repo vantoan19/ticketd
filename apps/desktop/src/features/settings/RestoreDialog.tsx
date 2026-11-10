@@ -24,6 +24,7 @@ import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { writeClipboard } from "@/lib/clipboard";
 import { revealFile } from "@/lib/reveal";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "@/features/settings/restore-review.css";
 
 type Phase =
@@ -184,6 +185,7 @@ export function RestoreDialog({
   const [failure, setFailure] = useState("");
   const [copied, setCopied] = useState("");
   const latest = useRef(0);
+  const recovery = useDraftRecovery();
 
   const check = useCallback(async (next: string) => {
     const request = ++latest.current;
@@ -225,6 +227,7 @@ export function RestoreDialog({
     setPhase({ name: "restoring", inspection });
     let safetyPath: string;
     try {
+      await recovery.flush();
       safetyPath = await client.restoreWorkspace(file);
     } catch (reason) {
       setPhase({ name: "review", inspection });
@@ -233,6 +236,7 @@ export function RestoreDialog({
     }
     let reloadFailure = "";
     try {
+      await recovery.reloadAfterRestore();
       await onRestored();
     } catch (reason) {
       reloadFailure = `The restore finished, but open views could not reload: ${String(reason)}. Restart ticketd to see the restored data.`;

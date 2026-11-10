@@ -1,7 +1,7 @@
 use super::{
     CredentialStore, DRIVE_FILE_SCOPE, DriveCredential, DriveError, DriveErrorKind, DriveRequest,
     DriveTransport,
-    provider::{credential_lock, invalid_response, token_request},
+    provider::{api_disabled_error, credential_lock, invalid_response, token_request},
     valid_file_id,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -32,10 +32,32 @@ impl DesktopOAuthClient {
             client_secret,
         })
     }
-    /// The operator-owned installed-app JSON stays outside workspace data/Git.
+    /// Builds bundle the publisher's installed-app registration. A runtime file
+    /// remains an explicit developer override, outside workspace data and Git.
     pub fn from_environment() -> Result<Self, DriveError> {
-        let path = std::env::var_os("TICKETD_GOOGLE_OAUTH_CLIENT_FILE").ok_or_else(unconfigured)?;
-        let bytes = std::fs::read(path).map_err(|_| unconfigured())?;
+        let path =
+            std::env::var_os("TICKETD_GOOGLE_OAUTH_CLIENT_FILE").map(std::path::PathBuf::from);
+        Self::from_configuration(
+            path.as_deref(),
+            option_env!("TICKETD_GOOGLE_OAUTH_CLIENT_JSON"),
+        )
+    }
+
+    fn from_configuration(
+        override_file: Option<&std::path::Path>,
+        bundled_json: Option<&str>,
+    ) -> Result<Self, DriveError> {
+        if let Some(path) = override_file {
+            let bytes = std::fs::read(path).map_err(|_| invalid_override())?;
+            return Self::from_json(&bytes).map_err(|_| invalid_override());
+        }
+        let json = bundled_json
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(unconfigured)?;
+        Self::from_json(json.as_bytes())
+    }
+
+    fn from_json(bytes: &[u8]) -> Result<Self, DriveError> {
         #[derive(Deserialize)]
         struct Config {
             installed: Installed,
@@ -45,14 +67,20 @@ impl DesktopOAuthClient {
             client_id: String,
             client_secret: Option<String>,
         }
-        let config: Config = serde_json::from_slice(&bytes).map_err(|_| unconfigured())?;
+        let config: Config = serde_json::from_slice(bytes).map_err(|_| unconfigured())?;
         Self::new(config.installed.client_id, config.installed.client_secret)
     }
 }
 fn unconfigured() -> DriveError {
     DriveError::new(
         DriveErrorKind::Unconfigured,
-        "Google Drive is not configured: set TICKETD_GOOGLE_OAUTH_CLIENT_FILE to a Desktop OAuth client JSON outside the workspace, enable Drive and Picker APIs, and restart ticketd; local files remain available",
+        "This build does not include a valid Google Drive app configuration. Install a ticketd build with Google Drive enabled, then sign in with Google; local files remain available",
+    )
+}
+fn invalid_override() -> DriveError {
+    DriveError::new(
+        DriveErrorKind::Unconfigured,
+        "The developer override TICKETD_GOOGLE_OAUTH_CLIENT_FILE must point to a valid Desktop OAuth client JSON. Fix it or unset it to use this build's Google Drive configuration, then restart ticketd",
     )
 }
 
@@ -262,7 +290,7 @@ impl PickerSession {
                 body: vec![],
             })?;
             if account.status != 200 {
-                return Err(invalid_response());
+                return Err(api_disabled_error(&account).unwrap_or_else(invalid_response));
             }
             let account: serde_json::Value =
                 serde_json::from_slice(&account.body).map_err(|_| invalid_response())?;
@@ -372,4 +400,86 @@ fn cancelled_error() -> DriveError {
         DriveErrorKind::Cancelled,
         "Drive selection cancelled; no attachment was inserted",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BUNDLED: &str = r#"{"installed":{"client_id":"publisher.apps.googleusercontent.com","client_secret":"desktop-client-secret"}}"#;
+
+    #[test]
+    fn bundled_client_requires_no_runtime_file() {
+        let client = DesktopOAuthClient::from_configuration(None, Some(BUNDLED)).unwrap();
+        assert_eq!(client.client_id, "publisher.apps.googleusercontent.com");
+        assert_eq!(
+            client.client_secret.as_deref(),
+            Some("desktop-client-secret")
+        );
+    }
+
+    #[test]
+    fn explicit_developer_file_overrides_the_bundled_registration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("desktop-client.json");
+        std::fs::write(
+            &path,
+            r#"{"installed":{"client_id":"developer.apps.googleusercontent.com"}}"#,
+        )
+        .unwrap();
+        let client = DesktopOAuthClient::from_configuration(Some(&path), Some(BUNDLED)).unwrap();
+        assert_eq!(client.client_id, "developer.apps.googleusercontent.com");
+        assert!(client.client_secret.is_none());
+    }
+
+    #[test]
+    fn invalid_developer_override_never_silently_uses_the_bundled_registration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("desktop-client.json");
+        for contents in [None, Some("invalid-client-secret"), Some(r#"{"web":{}}"#)] {
+            if let Some(contents) = contents {
+                std::fs::write(&path, contents).unwrap();
+            }
+            let error = DesktopOAuthClient::from_configuration(Some(&path), Some(BUNDLED))
+                .err()
+                .unwrap();
+            assert_eq!(error.kind, DriveErrorKind::Unconfigured);
+            assert!(error.message.contains("TICKETD_GOOGLE_OAUTH_CLIENT_FILE"));
+            assert!(!error.message.contains("invalid-client-secret"));
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_bundled_registration_gives_installation_guidance() {
+        for contents in [
+            None,
+            Some(""),
+            Some("invalid-client-secret"),
+            Some(r#"{"installed":{"client_id":"invalid"}}"#),
+            Some(r#"{"web":{"client_id":"web.apps.googleusercontent.com"}}"#),
+        ] {
+            let error = DesktopOAuthClient::from_configuration(None, contents)
+                .err()
+                .unwrap();
+            assert_eq!(error.kind, DriveErrorKind::Unconfigured);
+            assert!(error.message.contains("Install a ticketd build"));
+            assert!(!error.message.contains("TICKETD_GOOGLE"));
+            assert!(!error.message.contains("invalid-client-secret"));
+        }
+    }
+
+    #[test]
+    fn distribution_client_is_valid() {
+        if let Some(json) =
+            option_env!("TICKETD_GOOGLE_OAUTH_CLIENT_JSON").filter(|value| !value.is_empty())
+        {
+            assert!(
+                DesktopOAuthClient::from_configuration(None, Some(json)).is_ok(),
+                "TICKETD_GOOGLE_OAUTH_CLIENT_JSON must contain a valid Desktop OAuth client JSON"
+            );
+            if std::env::var_os("TICKETD_GOOGLE_OAUTH_CLIENT_FILE").is_none() {
+                assert!(DesktopOAuthClient::from_environment().is_ok());
+            }
+        }
+    }
 }

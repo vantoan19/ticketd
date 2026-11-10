@@ -135,12 +135,11 @@ pub(crate) fn inspect(
         .metadata
         .size_bytes
         .is_some_and(|size| size != operation.request.size_bytes)
-        || checksum.is_some_and(|digest| !digest.eq_ignore_ascii_case(&operation.request.sha256))
-        || version
-            .zip(current.version.as_deref())
-            .is_some_and(|(before, after)| before != after);
+        || checksum.is_some_and(|digest| !digest.eq_ignore_ascii_case(&operation.request.sha256));
+    // Drive versions include metadata-only changes. Export compares observations
+    // around the download and hashes the actual bytes against the original upload.
     (result.status, result.message) = if changed {
-        (DriveCopyStatus::Changed,"This copy has changed in Drive since upload. Changes may include metadata; it cannot be exported as the original upload.".into())
+        (DriveCopyStatus::Changed,"Drive reports different content from the original upload; this copy cannot be exported as the original upload.".into())
     } else if current
         .metadata
         .mime_type
@@ -156,7 +155,7 @@ pub(crate) fn inspect(
     {
         (DriveCopyStatus::Unknown,"Original-upload comparison is unknown: Drive checksum, version, size or download capability is unavailable. Retry or inspect the current file in Drive.".into())
     } else {
-        (DriveCopyStatus::Unchanged,"Current metadata matches the recorded upload. Export downloads and verifies bytes again; this is not an original-byte guarantee.".into())
+        (DriveCopyStatus::Unchanged,"Drive reports the same checksum and size as the recorded upload. Export downloads and verifies the actual bytes again.".into())
     };
     result.current = Some(current);
     result

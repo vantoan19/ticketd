@@ -29,7 +29,6 @@ import { UploadRecovery, type UploadRecord } from "./upload-recovery";
 import { ExistingAttachments } from "./ExistingAttachments";
 
 type UploadAttempt = UploadRecord & {
-  intent?: AttachmentUploadDestination;
   state:
     "queued" | "uploading" | "attaching" | "inserted" | "failed" | "canceled";
   progress: UploadProgress;
@@ -233,10 +232,9 @@ export function AttachmentPicker({
           }
           next.state = "attaching";
           update();
-          const index = attempts.current.indexOf(next);
           const later = attempts.current
-            .slice(index + 1)
-            .find((row) => row.state === "inserted");
+            .filter((row) => row.state === "inserted" && row.order > next.order)
+            .sort((left, right) => left.order - right.order)[0];
           await pick.current(
             next.stored,
             next.linkRequestId,
@@ -298,7 +296,8 @@ export function AttachmentPicker({
       );
       return;
     }
-    const started = (attempts.current.at(-1)?.order ?? 0) + 1;
+    const started =
+      Math.max(0, ...attempts.current.map((attempt) => attempt.order)) + 1;
     let index = 0;
     const batch: UploadAttempt[] = sources.map((source) => ({
       source,
@@ -323,6 +322,8 @@ export function AttachmentPicker({
     // files queued behind a slow upload when the application is interrupted.
     for (const row of batch) {
       try {
+        // A failed destination bind must remain recoverable with this request ID.
+        await journal?.put(row);
         await bindDestination(row);
         if (typeof row.source !== "string") {
           const bound = await attachments.uploadLimit();
@@ -410,7 +411,7 @@ export function AttachmentPicker({
     const local: UploadAttempt = {
       source: row.source,
       name: row.name,
-      order: Date.now(),
+      order: row.order,
       requestId: crypto.randomUUID(),
       linkRequestId: crypto.randomUUID(),
       state: "queued",

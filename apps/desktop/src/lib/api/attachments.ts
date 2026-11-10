@@ -8,6 +8,7 @@ export const attachmentSchema = z.object({
   original_filename: z.string(),
   size_bytes: z.number().nonnegative().nullable(),
   kind: z.enum(["local_snapshot", "external_reference"]),
+  uploaded_copy: z.boolean().optional(),
   locator: z.string(),
   quarantined: z.boolean().optional(),
   purge_state: z.enum(["retained", "pending", "purged"]).optional(),
@@ -83,6 +84,10 @@ const previewSchema = z.object({
         owner: z.string(),
         label: z.string(),
         trashed: z.boolean(),
+        target: z
+          .object({ kind: z.enum(["ticket", "document"]), id: z.string() })
+          .nullable()
+          .optional(),
       }),
     ),
   }),
@@ -184,7 +189,7 @@ export const driveDestinationSchema = z.object({
   resource_key: z.string().nullable(),
 });
 export type DriveUploadDestination = z.infer<typeof driveDestinationSchema>;
-const uploadDestinationSchema = z.discriminatedUnion("kind", [
+export const attachmentUploadDestinationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local") }),
   z.object({
     kind: z.literal("google_drive"),
@@ -193,7 +198,7 @@ const uploadDestinationSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type AttachmentUploadDestination = z.infer<
-  typeof uploadDestinationSchema
+  typeof attachmentUploadDestinationSchema
 >;
 const driveConfigurationSchema = z.object({
   configured: z.boolean(),
@@ -216,12 +221,12 @@ export const attachments = {
     await invoke("open_removed_drive_file", { url });
   },
   async uploadDestination() {
-    return uploadDestinationSchema.parse(
+    return attachmentUploadDestinationSchema.parse(
       await invoke("attachment_upload_destination"),
     );
   },
   async setUploadDestination(destination: DriveUploadDestination | null) {
-    return uploadDestinationSchema.parse(
+    return attachmentUploadDestinationSchema.parse(
       await invoke("set_attachment_upload_destination", { destination }),
     );
   },
@@ -229,7 +234,7 @@ export const attachments = {
     requestId: string,
     explicit: AttachmentUploadDestination | null,
   ) {
-    return uploadDestinationSchema.parse(
+    return attachmentUploadDestinationSchema.parse(
       await invoke("begin_attachment_upload", { requestId, explicit }),
     );
   },

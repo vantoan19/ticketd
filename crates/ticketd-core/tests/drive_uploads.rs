@@ -1360,6 +1360,11 @@ fn uploaded_copy_is_discoverable_and_replays_without_source_after_restart() {
     let file = workspace
         .upload_drive_file("upload", &source, &destination(), &provider, |_, _| true)
         .unwrap();
+    assert_eq!(
+        serde_json::to_value(&file).unwrap()["uploaded_copy"],
+        true,
+        "discovery must distinguish uploaded copies from selected external references"
+    );
     let added = file
         .added_at
         .clone()

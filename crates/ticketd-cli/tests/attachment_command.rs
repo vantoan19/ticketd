@@ -821,7 +821,10 @@ fn independent_cli_reuses_authorized_drive_identity_without_desktop_or_snapshot_
             "TICKETD_TEST_WORKSPACE",
             dir.path().join("workspace.sqlite3"),
         )
-        .env_remove("TICKETD_GOOGLE_OAUTH_CLIENT_FILE")
+        .env(
+            "TICKETD_GOOGLE_OAUTH_CLIENT_FILE",
+            dir.path().join("missing-desktop-client.json"),
+        )
         .args(["attachment", "drive-authorize", &file.id])
         .output()
         .unwrap();

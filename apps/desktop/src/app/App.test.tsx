@@ -767,6 +767,7 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
 });
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
+  await import("@/features/markdown/MarkdownEditor");
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {

@@ -83,7 +83,9 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
                   {file.display_name}
                   <small>
                     {file.kind === "external_reference"
-                      ? "Google Drive · External reference"
+                      ? file.uploaded_copy
+                        ? "Google Drive · Uploaded copy"
+                        : "Google Drive · External reference"
                       : `${formatSize(file.size_bytes)} · Local snapshot`}
                   </small>
                 </span>

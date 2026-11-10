@@ -1,6 +1,7 @@
 use crate::{
     Activity, ActivityPatch, BatchOperation, Document, DocumentPatch, Error, Evidence,
-    EvidenceInput, Plan, Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
+    EvidenceInput, Plan, Project, RelationshipKind, Status, Ticket, TicketChange, TicketPatch,
+    Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -105,6 +106,16 @@ pub enum WriteRequest {
     CreateTicket {
         title: String,
         project_id: Option<String>,
+    },
+    CreateTicketWithContent {
+        title: String,
+        body: String,
+        status: Status,
+        project_id: Option<String>,
+        plan_id: Option<String>,
+        tags: Vec<String>,
+        #[serde(default)]
+        follow: bool,
     },
     ChangeTicket {
         reference: String,
@@ -455,6 +466,44 @@ impl Workspace {
             }
             WriteRequest::CreateTicket { title, project_id } => {
                 WriteResult::Ticket(self.create_ticket_in_project(&title, project_id.as_deref())?)
+            }
+            WriteRequest::CreateTicketWithContent {
+                title,
+                body,
+                status,
+                project_id,
+                plan_id,
+                tags,
+                follow,
+            } => {
+                let mut tickets = self.apply_batch_following(
+                    vec![
+                        BatchOperation::Create {
+                            name: "new".into(),
+                            title,
+                            project_id,
+                        },
+                        BatchOperation::Change {
+                            ticket: "$new".into(),
+                            change: Box::new(TicketChange {
+                                patch: TicketPatch {
+                                    body: Some(body),
+                                    status: Some(status),
+                                    plan_id: plan_id.map(Some),
+                                    ..Default::default()
+                                },
+                                add_tags: tags,
+                                ..Default::default()
+                            }),
+                        },
+                    ],
+                    follow,
+                )?;
+                WriteResult::Ticket(
+                    tickets
+                        .pop()
+                        .ok_or_else(|| Error::InvalidBatch("missing creation result".into()))?,
+                )
             }
             WriteRequest::ChangeTicket { reference, patch } => {
                 WriteResult::Ticket(self.change_ticket(&reference, patch)?)

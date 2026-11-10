@@ -12,6 +12,7 @@ export type DraftRecovery = {
     kind?: "draft" | "undo",
   ) => Promise<void>;
   flush: () => Promise<void>;
+  reloadAfterRestore: () => Promise<void>;
 };
 
 // Standalone views can still render outside the application recovery boundary.
@@ -21,8 +22,12 @@ export const DraftRecoveryContext = createContext<DraftRecovery>({
   read: () => null,
   put: async () => {},
   flush: async () => {},
+  reloadAfterRestore: async () => {},
 });
+export const DraftRecoveryGenerationContext = createContext(0);
 export const DraftRecoveryErrorContext = createContext("");
 export const useDraftRecovery = () => useContext(DraftRecoveryContext);
+export const useDraftRecoveryGeneration = () =>
+  useContext(DraftRecoveryGenerationContext);
 export const useDraftRecoveryError = () =>
   useContext(DraftRecoveryErrorContext);

@@ -968,6 +968,11 @@ the explicitly chosen destination; it does not switch the desktop workspace.
 
 ## 18. Existing Google Drive references
 
+Distributed desktop and CLI builds include ticketd's Google app registration.
+Users sign in and authorize access through Google without creating a Cloud project,
+supplying OAuth files, or setting environment variables. Publisher configuration
+is a build responsibility; user authorization remains in the OS secure store.
+
 The shared attachment picker has a Google Drive tab. Choose files in the system
 browser using your connected account, then add the selected references in their
 returned order. Only explicitly selected files are authorized for ticketd; account
@@ -1094,7 +1099,9 @@ comparison states while retaining last-known details, Open in Drive and Retry.
 `attachment drive-copy-status <id>` returns the same current metadata comparison
 without downloading bytes; ordinary existing-file references return no uploaded
 copy comparison. A matching metadata observation is not a guarantee of preserved
-original bytes. Provider versions can also change for metadata edits.
+original bytes. Provider versions can also change for metadata edits; a version
+change alone does not mark the uploaded content as changed when checksum and
+size still match the original upload.
 
 Explicit file export and Export Markdown with files download an uploaded copy
 only when checksum, version, size and download capability support comparison.
@@ -1106,3 +1113,5 @@ results alongside usable local snapshots and named current-source Drive links.
 Rejected downloads leave no exported file. Existing destinations are never
 overwritten, references and authored labels remain unchanged, and no download
 pins a revision, caches remote bytes automatically or changes the provider file.
+Version and other metadata must remain stable during the download; a version
+change since upload alone does not block verified export of matching bytes.

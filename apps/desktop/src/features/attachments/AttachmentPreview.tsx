@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -24,6 +25,11 @@ import { DriveReferenceDetails } from "./DriveReferenceDetails";
 import { DriveAccessRecovery } from "./DriveAccessRecovery";
 import { ExportMarkdownButton } from "./ExportMarkdown";
 import { formatSize } from "./format-size";
+import { formatDateTime } from "@/lib/format";
+import { CopySourceButton } from "@/features/markdown/CopySourceButton";
+import { DocumentNavigation } from "@/features/documents/navigation";
+import { TicketNavigation } from "@/features/tickets/navigation";
+import { RenameAttachment } from "./RenameAttachment";
 import "./attachment-preview.css";
 
 export type PreviewTarget =
@@ -121,6 +127,9 @@ export function AttachmentPreview({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const openDocument = useContext(DocumentNavigation);
+  const openTicket = useContext(TicketNavigation);
   const generation = useRef(0);
   const replacementRequest = useRef<AbortController | null>(null);
   useEffect(() => () => replacementRequest.current?.abort(), []);
@@ -182,7 +191,10 @@ export function AttachmentPreview({
       .catch(() => {});
   }
   const external = file?.kind === "external_reference";
-  const uploadedCopy = info?.uploaded_copy === true || copy !== null;
+  const uploadedCopy =
+    file?.uploaded_copy === true ||
+    info?.uploaded_copy === true ||
+    copy !== null;
   const available = !external && info?.status === "available" && !failed;
   const purgeUnavailable =
     file?.purge_state === "pending" || file?.purge_state === "purged";
@@ -324,6 +336,18 @@ export function AttachmentPreview({
               {file && (
                 <>
                   <dl className="attachment-metadata">
+                    <dt>Added</dt>
+                    <dd>
+                      {file.added_at ? (
+                        <time dateTime={file.added_at}>
+                          {formatDateTime(file.added_at)}
+                        </time>
+                      ) : (
+                        <span title="No registration date was recorded">
+                          Unknown
+                        </span>
+                      )}
+                    </dd>
                     {external ? (
                       <DriveReferenceDetails
                         id={file.id}
@@ -345,13 +369,52 @@ export function AttachmentPreview({
                       </>
                     )}
                   </dl>
+                  <div className="attachment-actions">
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setRenaming(true)}
+                    >
+                      Rename
+                    </Button>
+                    {workspace && !purgeUnavailable && !file.quarantined && (
+                      <CopySourceButton
+                        label="Reuse attachment"
+                        source={`<ticketd://attachment/${workspace}/${file.id}>`}
+                      />
+                    )}
+                  </div>
+                  {!purgeUnavailable && !file.quarantined && (
+                    <p className="attachment-hint">
+                      Reuse copies a link to paste into another ticket, Document
+                      or update.
+                    </p>
+                  )}
                   {info && (
                     <section className="attachment-preview-usage">
                       <h3>Used in {info.usage.total}</h3>
                       <ul aria-label="Attachment usage">
                         {info.usage.entries.map((entry) => (
                           <li key={`${entry.kind}:${entry.owner}`}>
-                            <strong>{entry.label}</strong>
+                            {(entry.target?.kind === "ticket" && openTicket) ||
+                            (entry.target?.kind === "document" &&
+                              openDocument) ? (
+                              <button
+                                type="button"
+                                className="context-link"
+                                onClick={() => {
+                                  close();
+                                  if (entry.target?.kind === "ticket")
+                                    openTicket?.(entry.target.id);
+                                  else if (entry.target?.kind === "document")
+                                    openDocument?.(entry.target.id);
+                                }}
+                              >
+                                {entry.label}
+                              </button>
+                            ) : (
+                              <strong>{entry.label}</strong>
+                            )}
                             <small>
                               {usageKinds[entry.kind] ?? entry.kind}
                               {entry.trashed ? " · Trash" : ""}
@@ -433,6 +496,18 @@ export function AttachmentPreview({
             </div>
           </footer>
         </div>
+        {renaming && file && (
+          <RenameAttachment
+            file={file}
+            onClose={() => setRenaming(false)}
+            onRenamed={(next) => {
+              setFile(next);
+              setInfo((previous) =>
+                previous ? { ...previous, attachment: next } : previous,
+              );
+            }}
+          />
+        )}
         {picker && onReplace && (
           <AttachmentPicker
             open
