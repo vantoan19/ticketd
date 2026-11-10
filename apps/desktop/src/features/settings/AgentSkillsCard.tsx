@@ -1,43 +1,62 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import { Separator } from "@/components/ui/separator";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { agentSkillsClient, type AgentSkill } from "@/lib/api/agent-skills";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 
-type Action = "Install" | "Update" | "Replace";
+type Status = { label: string; tone: StatusDotTone };
 
-const STATE: Record<
-  NonNullable<AgentSkill["state"]> | "unreadable",
-  { label: string; tone: StatusDotTone; action: Action | null; hint?: string }
-> = {
-  installed: { label: "Installed", tone: "positive", action: null },
-  update_available: {
-    label: "Update available",
-    tone: "attention",
-    action: "Update",
-  },
-  not_installed: { label: "Not installed", tone: "neutral", action: "Install" },
-  edited: {
-    label: "Needs attention",
-    tone: "attention",
-    action: "Replace",
-    hint: "The skill was edited after ticketd installed it.",
-  },
-  other: {
-    label: "Needs attention",
-    tone: "attention",
-    action: "Replace",
-    hint: "Another skill named ticketd is in this folder.",
-  },
-  not_a_file: {
-    label: "Needs attention",
-    tone: "attention",
-    action: null,
-    hint: "SKILL.md in this folder is a link or folder, so ticketd leaves it alone. Remove it, then choose Check again.",
-  },
-  unreadable: { label: "Could not check", tone: "neutral", action: null },
+const INSTALLED: Status = { label: "Installed", tone: "positive" };
+const UPDATE: Status = { label: "Update available", tone: "attention" };
+const NOT_INSTALLED: Status = { label: "Not installed", tone: "neutral" };
+const ATTENTION: Status = { label: "Needs attention", tone: "attention" };
+
+/** Why a copy is left alone, shown under its row. */
+const CONFLICT: Partial<Record<NonNullable<AgentSkill["state"]>, string>> = {
+  edited: "Edited after ticketd installed it.",
+  other: "Another skill named ticketd is in this folder.",
+  not_a_file:
+    "SKILL.md here is a link or folder, so ticketd leaves it alone. Remove it, then choose Check again.",
 };
+
+/** A harness the one action covers: present on this computer, or already holding a copy. */
+function pending(agent: AgentSkill) {
+  return (
+    agent.state === "update_available" ||
+    (agent.state === "not_installed" && agent.detected)
+  );
+}
+
+function rowStatus(agent: AgentSkill): Status | null {
+  switch (agent.state) {
+    case "installed":
+      return INSTALLED;
+    case "update_available":
+      return UPDATE;
+    case "not_installed":
+      return agent.detected ? NOT_INSTALLED : null;
+    case null:
+      return { label: "Could not check", tone: "neutral" };
+    default:
+      return ATTENTION;
+  }
+}
+
+function overall(agents: AgentSkill[]): Status {
+  if (agents.some((agent) => rowStatus(agent) === ATTENTION || !agent.state))
+    return ATTENTION;
+  if (agents.some((agent) => agent.state === "update_available")) return UPDATE;
+  if (agents.some((agent) => agent.state === "installed")) return INSTALLED;
+  return NOT_INSTALLED;
+}
+
+function names(agents: AgentSkill[]) {
+  return agents.length > 2
+    ? `${agents.length} agents`
+    : agents.map((agent) => agent.name).join(" and ");
+}
 
 type Load =
   | { phase: "loading" }
@@ -48,18 +67,16 @@ function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-const stateId = (agent: AgentSkill) => `agent-skill-${agent.id}-state`;
+const STATUS_ID = "agent-skill-status";
 
 export function AgentSkillsCard() {
   const [load, setLoad] = useState<Load>({ phase: "loading" });
-  const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<{ id: string; text: string } | null>(
-    null,
-  );
+  const [busy, setBusy] = useState(false);
+  const [failures, setFailures] = useState<Record<string, string>>({});
+  const [result, setResult] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<AgentSkill | null>(null);
-  const [backup, setBackup] = useState<string | null>(null);
-  // The row whose action just finished; its button may be gone, so focus moves to its state.
-  const focusAfterLoad = useRef<AgentSkill | null>(null);
+  // An action just finished; its button may be gone, so focus moves to the status.
+  const focusAfterLoad = useRef(false);
 
   const refresh = useCallback(
     () =>
@@ -70,51 +87,71 @@ export function AgentSkillsCard() {
       ),
     [],
   );
-  // Read the folders on first show; each install and Check again reads them again.
+  // Read the folders on first show; each action and Check again reads them again.
   useEffect(() => {
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    const agent = focusAfterLoad.current;
-    if (load.phase !== "done" || !agent) return;
-    focusAfterLoad.current = null;
-    document.getElementById(stateId(agent))?.focus();
+    if (load.phase !== "done" || !focusAfterLoad.current) return;
+    focusAfterLoad.current = false;
+    document.getElementById(STATUS_ID)?.focus();
   }, [load]);
 
-  const install = async (agent: AgentSkill, replace: boolean) => {
-    setBusy(agent.id);
-    setFailure(null);
-    setBackup(null);
-    try {
-      const result = await agentSkillsClient.install(agent.id, replace);
-      setBackup(result.backup);
-    } catch (error) {
-      setFailure({ id: agent.id, text: message(error) });
+  /** Installs for each agent in turn; one failure does not stop the others. */
+  const run = async (agents: AgentSkill[], replace: boolean) => {
+    setBusy(true);
+    setFailures({});
+    setResult(null);
+    const failed: Record<string, string> = {};
+    const done: AgentSkill[] = [];
+    let backup: string | null = null;
+    for (const agent of agents) {
+      try {
+        backup = (await agentSkillsClient.install(agent.id, replace)).backup;
+        done.push(agent);
+      } catch (error) {
+        failed[agent.id] = message(error);
+      }
     }
+    setFailures(failed);
+    setResult(
+      backup
+        ? `Replaced for ${names(done)}. The previous SKILL.md was saved as ${backup}.`
+        : done.length > 0
+          ? `Done for ${names(done)}.`
+          : null,
+    );
     setReviewing(null);
-    focusAfterLoad.current = agent;
-    // Keep the row busy until the new state is shown.
+    focusAfterLoad.current = true;
+    // Keep the action busy until the new state is shown.
     await refresh();
-    setBusy(null);
+    setBusy(false);
   };
 
   const checkAgain = () => {
-    setFailure(null);
+    setFailures({});
+    setResult(null);
     setLoad({ phase: "loading" });
     void refresh();
   };
+
+  const agents = load.phase === "done" ? load.agents : [];
+  const todo = agents.filter(pending);
+  const status = overall(agents);
+  const verb = todo.some((agent) => agent.state === "update_available")
+    ? "Update"
+    : "Install";
 
   return (
     <SettingsCard
       id="agent-skills"
       title="Agent skills"
-      description="Teach your coding agents to use the ticketd command line. The skill is installed for your user and works in every project."
       actions={
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={busy !== null || load.phase === "loading"}
+          disabled={busy || load.phase === "loading"}
           onClick={checkAgain}
         >
           Check again
@@ -132,69 +169,96 @@ export function AgentSkillsCard() {
         </p>
       )}
       {load.phase === "done" && (
-        <ul className="agent-skills">
-          {load.agents.map((agent) => {
-            const state = STATE[agent.state ?? "unreadable"];
-            const action = state.action;
-            return (
-              <li key={agent.id} className="settings-row">
-                <div>
-                  <p className="settings-label">
-                    {agent.name}
-                    <span
-                      id={stateId(agent)}
-                      className="agent-skill-state"
-                      tabIndex={-1}
-                    >
-                      <StatusDot tone={state.tone} /> {state.label}
-                    </span>
-                  </p>
-                  <p className="settings-hint">
-                    <code>{agent.path}</code>
-                    {!agent.detected &&
-                      ` · ${agent.name} not found on this computer`}
-                  </p>
-                  {state.hint && <p className="settings-hint">{state.hint}</p>}
-                  {agent.error && (
-                    <p className="settings-failure" role="alert">
-                      {agent.error}
-                    </p>
+        <div className="agent-skill">
+          <div className="agent-skill-header">
+            <p className="settings-label">ticketd skill</p>
+            <span id={STATUS_ID} className="agent-skill-status" tabIndex={-1}>
+              <StatusDot tone={status.tone} /> {status.label}
+            </span>
+          </div>
+          <p className="settings-hint">
+            Teaches your coding agents to use the ticketd command line. It is
+            installed for your user and works in every project.
+          </p>
+          {todo.length > 0 && (
+            <div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => void run(todo, false)}
+              >
+                {busy ? "Installing…" : `${verb} for ${names(todo)}`}
+              </Button>
+            </div>
+          )}
+          {todo.length === 0 &&
+            agents.every(
+              (agent) => !agent.detected && agent.state === "not_installed",
+            ) && (
+              <p className="settings-hint">
+                No supported agent was found on this computer. Install Claude
+                Code or Codex, then choose Check again.
+              </p>
+            )}
+          {result && (
+            <p className="settings-hint" role="status">
+              {result}
+            </p>
+          )}
+          <Separator />
+          <ul className="agent-skill-targets" aria-label="Agents">
+            {agents.map((agent) => {
+              const row = rowStatus(agent);
+              const conflict = agent.state ? CONFLICT[agent.state] : undefined;
+              const replaceable =
+                agent.state === "edited" || agent.state === "other";
+              const failure = failures[agent.id] ?? agent.error;
+              return (
+                <li key={agent.id}>
+                  <span className="agent-skill-target-name">{agent.name}</span>
+                  <span className="agent-skill-target-state">
+                    {row ? (
+                      <>
+                        <StatusDot tone={row.tone} /> {row.label}
+                      </>
+                    ) : (
+                      "Not found on this computer"
+                    )}
+                  </span>
+                  <code className="agent-skill-target-path">{agent.path}</code>
+                  {(conflict ?? failure) && (
+                    <div className="agent-skill-target-note">
+                      {conflict && (
+                        <div className="agent-skill-conflict">
+                          <p className="settings-hint">{conflict}</p>
+                          {replaceable && (
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="xs"
+                              aria-label={`Replace for ${agent.name}`}
+                              disabled={busy}
+                              onClick={() => setReviewing(agent)}
+                            >
+                              Replace…
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {failure && (
+                        <p className="settings-failure" role="alert">
+                          {failure}
+                        </p>
+                      )}
+                    </div>
                   )}
-                  {failure?.id === agent.id && (
-                    <p className="settings-failure" role="alert">
-                      {failure.text}
-                    </p>
-                  )}
-                </div>
-                {action && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`${action} for ${agent.name}`}
-                    disabled={busy !== null}
-                    onClick={() =>
-                      action === "Replace"
-                        ? setReviewing(agent)
-                        : void install(agent, false)
-                    }
-                  >
-                    {busy === agent.id
-                      ? "Installing…"
-                      : action === "Replace"
-                        ? "Replace…"
-                        : action}
-                  </Button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {backup && (
-        <p className="settings-hint" role="status">
-          The previous skill was saved as <code>{backup}</code>.
-        </p>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
       <DialogShell
         open={reviewing !== null}
@@ -203,9 +267,9 @@ export function AgentSkillsCard() {
         description="ticketd will install its own skill in this folder. The current SKILL.md is saved beside it first, so nothing is lost."
         width={573}
         primaryLabel="Replace"
-        blockedReason={busy !== null ? "Replacing…" : null}
-        busy={busy !== null}
-        onSubmit={() => reviewing && void install(reviewing, true)}
+        blockedReason={busy ? "Replacing…" : null}
+        busy={busy}
+        onSubmit={() => reviewing && void run([reviewing], true)}
       >
         <p className="settings-hint">
           Folder: <code>{reviewing?.path}</code>

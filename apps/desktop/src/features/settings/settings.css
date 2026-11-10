@@ -501,19 +501,60 @@
   border-radius: var(--radius);
 }
 
-/* Agent skills card: one row per supported agent. */
-.agent-skills {
+/* Agent skills card: the skill, its one action, then one line per harness. */
+.agent-skill {
   display: grid;
+  gap: 12px;
+}
+.agent-skill-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
+}
+.agent-skill-status,
+.agent-skill-target-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  color: var(--muted-foreground);
+}
+.agent-skill-targets {
+  display: grid;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.agent-skill-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: 12px;
-  font-weight: 400;
+.agent-skill-targets > li {
+  display: grid;
+  grid-template-columns: 8rem 10rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.agent-skill-target-path {
+  overflow-wrap: anywhere;
   color: var(--muted-foreground);
+  font-size: var(--text-code);
+}
+.agent-skill-target-note {
+  grid-column: 2 / -1;
+}
+.agent-skill-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+}
+@media (max-width: 720px) {
+  .agent-skill-targets > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .agent-skill-target-note {
+    grid-column: 1;
+  }
 }
