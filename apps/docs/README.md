@@ -1,7 +1,9 @@
 # ticketd docs
 
-Standalone landing page for ticketd. It runs a deterministic recorded demonstration;
-it never opens a workspace, runs a CLI command, contacts an agent, or connects to Tauri.
+Standalone landing page for ticketd: ticket and context management alongside AI
+agents, with native assistance, automations, integrations and sync. All interactions
+are deterministic local examples. They never open a workspace, run a CLI command,
+contact an agent or connect to Tauri.
 
 From the repository root:
 
@@ -16,34 +18,51 @@ The production output is `apps/docs/dist`. Serve it with a static web server or
 `npm run preview --workspace @ticketd/docs`. Fonts use Google Fonts, with local
 system-font fallbacks. No credentials or environment variables are required.
 
-## Design and recordings
+## Page and examples
 
-The drawings and scoped stylesheet implement the approved November 10, 2026 design
-(canvas version 27) for [issue 238](https://github.com/vantoan19/ticketd/issues/238).
-`Landing.jsx` ports the design's interactions to React. `landing.css` owns the
-page's paper, ink, accent and motion tokens, independently of the desktop app.
+`Landing.tsx` owns the page, system theme and reduced-motion preference. A centered
+headline introduces one main factory illustration. Three product examples then
+explain shared tickets and context, agent visibility, and grounded AI assistance.
+The product is readable before any interaction. Small document connectors,
+stippled edges and the cat supervisor carry the illustration style into these
+examples without adding separate machinery to each section.
 
-`Landing.markup.json` contains static SVG artwork. `LineScene.jsx` displays the
-five-machine horizontal conveyor from `LineScene.markup.json`, including its
-station positions. The ticket carrier follows the selected station; reduced
-motion skips its travel. Narrow screens scroll the drawing to the selected machine.
-The files under `src/screens` contain captured app markup and the app stylesheet,
-from desktop/CLI revision
-`5c1a242`. These are trusted, checked-in fixtures, never user-supplied HTML. The app
-captures are inert; page controls and the monitor/dock's pointer overlays navigate
-the recorded states. Equivalent labeled controls support keyboard navigation.
-Only clock times, ticket ages and home-relative paths were adjusted. GitHub uses
-the offline `acme/web-app` fixture, not a live account.
+`FactoryHero.tsx` owns the factory exchange: organize a brief, pass context to an
+agent, receive a report, and review the result. One “See it work” action runs the
+exchange and stops for human review. Playback can be paused or reset; reduced
+motion goes straight to the report. The HTML product view stays readable inside
+the SVG housing. On narrow screens the drawing can be panned; the surrounding
+page fits the viewport.
 
-To refresh the recordings, build the desktop and CLI from the same revision.
-Replay the spec → Plan → create → wire → update → context story in a disposable
-workspace, then the four monitor moments and the dock views. Capture each app
-view's markup at 1280 × 772 with the matching stylesheet scoped beneath `.app`.
-Replace the corresponding screen fixture, update its highlight rectangles if
-layout changed, and update the commands/outputs in `Landing.jsx` from that run.
-Keep credentials, personal paths and raw session logs out of the fixtures. Update
-every drawing's revision plate together, then compare desktop and phone captures
-in both themes and rerun the interaction tests and repository checks.
+`ProductExamples.tsx` owns the three independent examples:
+
+- Select tickets in the Login hardening Plan to see their linked context.
+- Inspect an agent's evidence and mark the example reviewed.
+- Choose an assistant question, inspect its sources, and confirm or discard a
+  proposed ticket. Adding the ticket requires an explicit action.
+
+`factoryRecords.ts` supplies the shared sources. Examples reset on reload and do
+not share state with each other. These are launch-vision fixtures, not recordings
+of shipped AI or sync functionality. Publication is deferred until the promised
+capabilities are hardened.
+
+`landing.css` owns paper, ink, accent and layout tokens independently of the
+desktop app; `factory-hero.css` owns the main drawing's layout and finite motion.
+The artwork uses oblique projection, stippling and a hard-hat pixel cat, continuing
+the approved design for [issue 238](https://github.com/vantoan19/ticketd/issues/238).
+
+## Artwork and retained studies
+
+Edit `artwork/hero.mjs` and the shared primitives in `artwork/draw.mjs`, then run
+`npm run artwork --workspace @ticketd/docs` to regenerate the static plates in
+`FactoryPlates.markup.json`. No runtime drawing library is required. The page also
+uses the SVG pattern definitions from `Landing.markup.json`.
+
+Earlier design studies remain in `concepts`, `FactoryScenes.tsx`, `FactoryPlates.tsx`
+and `LineScene.jsx`, with their associated artwork and styles. The captured app
+fixtures under `src/screens` come from desktop/CLI revision `5c1a242`. These studies
+and app captures are not rendered by the current landing page. Keep their fixture
+sources separate from the simplified product examples.
 
 `src/links.ts` owns the installation, repository and glossary destinations. The
 repository currently requires access; verify anonymous reachability before a

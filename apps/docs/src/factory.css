@@ -1,0 +1,533 @@
+/* The launch story uses the docs app's existing paper, ink and accent tokens. */
+
+.fw-packet {
+  border-top: 1px dashed var(--line-2);
+  padding-top: 10px;
+  font: 10px/1.8 var(--mono);
+}
+.fw-packet b {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--accent);
+  font-weight: 500;
+}
+.fw-section .st-win-bar {
+  justify-content: space-between;
+}
+.fw-section .st-win-bar > .st-link {
+  font: 11px/1.5 var(--mono);
+  margin-right: 8px;
+}
+
+.fw-footnote {
+  font: 11px/1.7 var(--mono);
+  color: var(--ink-2);
+  margin-top: 16px;
+  text-align: center;
+}
+.fw-section .st-sec-head {
+  margin-bottom: 24px;
+}
+.fw-library-body {
+  display: block;
+}
+.fw-record-list {
+  padding: 12px 0;
+  background: var(--paper-2);
+  border-right: 1px solid var(--line);
+}
+.fw-record-list button {
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  padding: 16px;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+}
+.fw-record-list button > span:first-child {
+  color: var(--accent);
+  font-size: 20px;
+}
+.fw-record-list button b,
+.fw-record-list button small {
+  display: block;
+}
+.fw-record-list button b {
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 550;
+}
+.fw-record-list button small {
+  margin-top: 5px;
+  color: var(--ink-2);
+  font-size: 11px;
+}
+.fw-record-list button[aria-pressed="true"] {
+  background: var(--paper);
+  border-left-color: var(--accent);
+}
+.fw-eyebrow {
+  display: block;
+  color: var(--ink-2);
+  font: 10px/1.6 var(--mono);
+  letter-spacing: 0.04em;
+}
+.fw-document {
+  min-width: 0;
+  padding: 28px;
+}
+.fw-document h3 {
+  font-size: 23px;
+  font-weight: 550;
+  letter-spacing: -0.035em;
+  margin: 10px 0 18px;
+  line-height: 1.2;
+}
+.fw-document > p:not(.fw-eyebrow) {
+  font-size: 15px;
+  line-height: 1.7;
+  margin: 0 0 16px;
+}
+.fw-document .fw-document-note {
+  color: var(--ink-2);
+  font-size: 13px !important;
+  border-left: 2px solid var(--line-2);
+  padding-left: 12px;
+}
+.fw-linked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 20px;
+}
+.fw-linked > span:first-child {
+  flex-basis: 100%;
+  font: 10px/1.5 var(--mono);
+  color: var(--ink-2);
+  text-transform: uppercase;
+}
+.fw-ticket-tag {
+  font-size: 11px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+.fw-packing {
+  padding: 24px;
+  border-left: 1px dashed var(--line-2);
+}
+.fw-packing h3 {
+  margin: 10px 0;
+  font-size: 19px;
+  font-weight: 550;
+}
+.fw-packing > p:not(.fw-eyebrow) {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.fw-checks {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0;
+}
+.fw-checks label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.fw-section input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+}
+.fw-packing .st-btn {
+  width: 100%;
+  font-size: 12px;
+}
+.fw-packing-result {
+  min-height: 42px;
+}
+.fw-assistant-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+}
+.fw-chat {
+  padding: 20px 24px;
+}
+.fw-questions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fw-questions button,
+.fw-citations button {
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+.fw-questions button[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.fw-answer {
+  margin: 20px 0;
+}
+.fw-answer > p:not(.fw-eyebrow) {
+  font-size: 15px;
+  line-height: 1.65;
+  margin: 8px 0 12px;
+}
+.fw-citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fw-citations button {
+  color: var(--accent);
+  font-size: 11px;
+  padding: 4px 8px;
+}
+.fw-citations button[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.fw-source {
+  border-left: 1px solid var(--line);
+  background: var(--paper-2);
+  padding: 20px;
+}
+.fw-source > .fw-eyebrow {
+  margin: 0 0 10px;
+}
+.fw-document-compact {
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.fw-document-compact h3 {
+  font-size: 18px;
+  margin: 8px 0 12px;
+}
+.fw-document-compact > p:not(.fw-eyebrow) {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.fw-document-compact .fw-linked {
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.fw-draft {
+  border-top: 1px dashed var(--line-2);
+  padding-top: 16px;
+  min-height: 74px;
+}
+.fw-draft b {
+  font-size: 14px;
+  display: block;
+  margin: 4px 0;
+}
+.fw-draft p {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+.fw-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.fw-actions .st-btn,
+.fw-draft > .st-btn {
+  font-size: 12px;
+  min-height: 34px;
+}
+.fw-success {
+  color: var(--accent) !important;
+}
+.fw-automation {
+  display: grid;
+  grid-template-columns: 1.1fr auto 1fr;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-2);
+}
+.fw-automation > label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.fw-automation b,
+.fw-automation small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.fw-automation small {
+  color: var(--ink-2);
+  font-size: 11px;
+}
+.fw-automation .st-btn {
+  font-size: 11px;
+  padding-inline: 12px;
+}
+.fw-automation > p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  margin: 0;
+}
+.fw-storage {
+  padding: 22px;
+}
+.fw-storage > .fw-eyebrow {
+  margin-bottom: 14px;
+}
+.fw-storage-files {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.fw-storage-files button {
+  display: grid;
+  gap: 4px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  padding: 10px;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+}
+.fw-storage-files b {
+  font-size: 12px;
+  font-weight: 500;
+}
+.fw-storage-files span {
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.fw-storage-files button[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.fw-sync {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+  padding: 18px 22px;
+  border: 1px solid var(--line);
+  margin-top: 18px;
+  background: var(--paper-2);
+}
+.fw-sync > div {
+  display: grid;
+  gap: 7px;
+}
+.fw-sync b {
+  font-size: 13px;
+  font-weight: 500;
+}
+.fw-sync-state {
+  font: 10px/1.5 var(--mono);
+  color: var(--accent);
+}
+.fw-sync-controls {
+  text-align: center;
+}
+.fw-sync-controls .st-link {
+  font-size: 11px;
+}
+.fw-sync-controls .st-btn {
+  font-size: 12px;
+  min-height: 34px;
+}
+.fw-section button:hover,
+.fw-sync button:hover {
+  color: var(--accent);
+}
+.fw-section button:disabled,
+.fw-sync button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.fw-section button:focus-visible,
+.fw-sync button:focus-visible,
+.fw-signals button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@container st (min-width: 1000px) {
+  .fw-packing-result {
+    min-height: 0;
+  }
+  .fw-section {
+    padding-block: 22px;
+  }
+  .fw-chat {
+    min-height: 315px;
+  }
+}
+@container st (max-width: 999px) {
+  .fw-library-body {
+    grid-template-columns: minmax(170px, 1fr) minmax(0, 2fr);
+  }
+  .fw-packing {
+    grid-column: 1/-1;
+    border-left: 0;
+    border-top: 1px dashed var(--line-2);
+  }
+  .fw-checks {
+    grid-template-columns: 1fr 1fr;
+  }
+  .fw-packing .st-btn {
+    width: auto;
+  }
+  .fw-packing-result {
+    min-height: 0;
+  }
+  .fw-automation {
+    grid-template-columns: 1fr auto;
+  }
+  .fw-automation > p {
+    grid-column: 1/-1;
+  }
+}
+@container st (max-width: 650px) {
+  .fw-library > .st-win-bar > span:last-child {
+    display: none;
+  }
+  .fw-section .st-win-bar > span:first-child {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fw-section .st-win-bar > .st-link {
+    flex-shrink: 0;
+  }
+
+  .fw-library-body,
+  .fw-assistant-body {
+    grid-template-columns: 1fr;
+  }
+  .fw-record-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0;
+  }
+  .fw-record-list button {
+    padding: 12px 8px;
+    gap: 6px;
+  }
+  .fw-record-list button b {
+    font-size: 12px;
+  }
+  .fw-record-list button small {
+    font-size: 10px;
+  }
+  .fw-document {
+    padding: 20px;
+  }
+  .fw-packing {
+    padding: 20px;
+  }
+  .fw-checks {
+    grid-template-columns: 1fr;
+  }
+  .fw-source {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 16px;
+  }
+  .fw-chat {
+    padding: 16px;
+  }
+  .fw-questions button {
+    font-size: 11px;
+  }
+  .fw-automation {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    gap: 14px;
+  }
+  .fw-automation .st-btn {
+    justify-self: start;
+  }
+  .fw-sync {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    padding: 18px;
+  }
+  .fw-sync-controls {
+    justify-items: start;
+    border-block: 1px dashed var(--line-2);
+    padding-block: 14px;
+  }
+  .fw-storage {
+    padding: 16px;
+  }
+  .fw-storage-files {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fw-section .st-details .fw-packing {
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  max-width: 800px;
+  margin-inline: auto;
+}
+.fw-section .st-details .fw-packing .st-btn {
+  width: auto;
+}
+.fw-draft-example {
+  display: grid;
+  grid-template-columns: minmax(200px, 0.7fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+.fw-draft-example .fw-draft-action,
+.fw-draft-example .fw-draft {
+  border: 0;
+  padding: 0;
+}
+.fw-draft-action > p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.fw-reset {
+  margin-top: 20px !important;
+  font-size: 12px !important;
+}
+@container st (max-width: 650px) {
+  .fw-draft-example {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+}
