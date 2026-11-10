@@ -160,6 +160,81 @@ fn authorization_code_verifier_matches_the_browser_s256_challenge() {
 }
 
 #[test]
+fn callback_waits_for_the_rest_of_a_request_sent_after_connection_accept() {
+    let session = PickerSession::begin(
+        DesktopOAuthClient::new("client.apps.googleusercontent.com".into(), None).unwrap(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    let url = url::Url::parse(session.authorization_url()).unwrap();
+    let fields: std::collections::BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+    let redirect = url::Url::parse(&fields["redirect_uri"]).unwrap();
+    let port = redirect.port().unwrap();
+    let authority = redirect.authority().to_owned();
+    let state = fields["state"].clone();
+    let cancelled = std::sync::Arc::new(AtomicBool::new(false));
+    let callback_cancelled = cancelled.clone();
+    let callback = std::thread::spawn(move || {
+        let request = format!(
+            "GET /oauth2callback?state={state}&code=authorization-secret&picked_file_ids=selected HTTP/1.1\r\nHost: {authority}\r\n\r\n"
+        );
+        let mut delayed = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        let split = request.len() - 2;
+        let mut early_response = false;
+        let response = match delayed.write_all(&request.as_bytes()[..split]) {
+            Err(error) => {
+                early_response = true;
+                Err(error)
+            }
+            Ok(()) => {
+                delayed
+                    .set_read_timeout(Some(Duration::from_millis(100)))
+                    .unwrap();
+                let mut byte = [0];
+                match delayed.peek(&mut byte) {
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        delayed
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .unwrap();
+                        delayed
+                            .write_all(&request.as_bytes()[split..])
+                            .and_then(|()| read_http_response(&mut delayed))
+                    }
+                    Ok(_) => {
+                        early_response = true;
+                        read_http_response(&mut delayed)
+                    }
+                    Err(error) => {
+                        early_response = true;
+                        Err(error)
+                    }
+                }
+            }
+        };
+        if early_response {
+            callback_cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        (early_response, response)
+    });
+
+    let selection = session.finish(&Http, &Vault, &cancelled);
+    let (early_response, response) = callback.join().unwrap();
+    assert!(
+        !early_response,
+        "callback answered or closed before receiving the complete request"
+    );
+    let selection = selection.unwrap_or_else(|error| panic!("callback failed: {error}"));
+    assert!(response.unwrap().starts_with("HTTP/1.1 200 OK"));
+    assert_eq!(selection.file_ids, ["selected"]);
+}
+
+#[test]
 fn picker_requires_confirmed_narrow_scope_before_account_lookup_or_vault_access() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 

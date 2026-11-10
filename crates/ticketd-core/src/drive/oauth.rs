@@ -205,6 +205,12 @@ impl PickerSession {
             if !peer.ip().is_loopback() {
                 continue;
             }
+            // Windows accept inherits the listener's nonblocking mode. The
+            // callback request may arrive in fragments, so restore blocking I/O
+            // before reading it and then apply the bounded socket timeouts.
+            socket
+                .set_nonblocking(false)
+                .map_err(|_| loopback_error())?;
             socket
                 .set_read_timeout(Some(Duration::from_millis(500)))
                 .map_err(|_| loopback_error())?;
