@@ -1,7 +1,7 @@
 # ticketd — MVP Specification
 
-**Version:** 0.4 — Domain model reviewed; delivery details remain draft\
-**Date:** November 3, 2026\
+**Version:** 0.5 — Native Chat design approved; delivery validation remains outstanding\
+**Date:** November 10, 2026\
 **Product name:** ticketd\
 **CLI command:** `ticketd`\
 **Initial surface:** Local desktop application and agent-facing CLI.
@@ -12,7 +12,7 @@
 
 The current workflow uses skills and coding agents to create local Markdown tickets. As work grows, reading, editing, navigating hierarchy, and understanding dependencies become difficult. People lack a clear overview, while agents must repeatedly locate and assemble context.
 
-ticketd is the system of record for locally owned tickets. Its future platform integrations also make it a central working surface for externally owned tickets, whose authoritative records remain in their external trackers (section 15.7). People use a desktop UI; agents use a CLI. Thought capture, written context, and Plan visualization live in ticketd. Conversations, AI reasoning, skill execution, agent orchestration, and coding remain in external harnesses such as Claude Code, Codex, and Orca.
+ticketd is the system of record for locally owned tickets. Its future platform integrations also make it a central working surface for externally owned tickets, whose authoritative records remain in their external trackers (section 15.7). People use a desktop UI; agents use a CLI. Thought capture, written context, and Plan visualization live in ticketd. Native Chats host conversations through the user's installed Claude Code and Codex harnesses (section 20). The harnesses retain their reasoning, skills and tool-execution loops; external harness use through the independent CLI remains supported.
 
 External trackers can organize and dispatch high-level work, while ticketd gives the finer-grained tickets discovered through decomposition a home where people and agents can manage and visualize them.
 
@@ -26,7 +26,7 @@ External trackers can organize and dispatch high-level work, while ticketd gives
 
 ### Non-goals
 
-- Running or orchestrating agents inside the application.
+- Autonomous multi-agent scheduling and replacing harness reasoning/tool loops.
 - Replacing coding harnesses, IDEs, or execution environments.
 - Building an enterprise project-management platform in the first release.
 
@@ -64,18 +64,21 @@ First make ticket management, visualization, and context retrieval work well. Ad
 
 | Actor or component          | Responsibility                                                                                      |
 | --------------------------- | --------------------------------------------------------------------------------------------------- |
-| Person using the desktop UI | Understand the work, review and edit tickets, inspect relationships and progress                    |
+| Person using the desktop UI | Understand work, manage records, and direct native Chats                                            |
 | Agent using the CLI         | Create and update tickets, authored activities, tags, hierarchy, and dependencies; retrieve context |
-| External harness            | AI conversations, brainstorming, planning, skills, implementation, and verification                 |
+| Coding harness              | Reasoning, skills and tool execution, hosted through native Chat or used externally                 |
+| Desktop Chat host           | Supervise harness processes, coordinate inputs and approvals, and publish observed activity         |
 | Application core            | Business rules, context queries, and consistent data operations                                     |
 
-The MVP does not include account sign-in, agent-provider integration, or subscription handling.
+Native Chat adds provider integration with harness-managed subscription sign-in
+(section 20). ticketd does not own provider credentials, sell subscriptions, or
+replace the harness login flow.
 
 ## 4. Confirmed product model
 
 ### 4.1. Workspace, projects, and Plans
 
-- One default local workspace contains projects, Plans, and tickets.
+- One default local workspace contains projects, Plans, tickets, Documents, Activities and Chats.
 - Store the default workspace in the operating system's application-data directory, outside repository checkouts. Multiple selectable workspaces are outside the MVP.
 - A project represents one repository, not a grouping of work. Its explicit identity survives repository moves and renames; multiple local checkouts may refer to the same project.
 - A ticket optionally links to one project. Tickets without a project are valid; no Inbox project is required.
@@ -159,7 +162,7 @@ People and agents may transition locally owned tickets between ordinary statuses
 
 ### 5.1. Agent creates a plan; the person reviews it
 
-1. The person brainstorms and plans in an external harness.
+1. The person brainstorms and plans in a native Chat or an external harness.
 2. The agent creates tickets, tags, hierarchy, and dependencies through the CLI.
 3. The person opens the project and reviews its flat list and dependency graph.
 4. The person edits content or relationships in the UI.
@@ -169,7 +172,7 @@ People and agents may transition locally owned tickets between ordinary statuses
 
 1. The agent queries Ready tickets for a project.
 2. It retrieves a ticket and the requested context in one call where appropriate.
-3. It implements and verifies work in the external harness.
+3. It implements and verifies work through the selected coding harness, hosted in Chat or used externally.
 4. It updates status, findings, and outcomes through the CLI.
 5. The UI reflects those changes without requiring an application restart.
 
@@ -198,6 +201,7 @@ People and agents may transition locally owned tickets between ordinary statuses
 | Filters                         | Project (including unlinked), Plan, status, tags, Ready/Blocked, and parent                                                 |
 | CLI                             | Main UI operations, structured output, batch operations, and context queries                                                |
 | Local data                      | Offline persistence, migrations, export, and verifiable backup/restore                                                      |
+| Native Chats                    | Standalone conversations, linked context, streamed harness activity, approvals, queues and recovery; see section 20         |
 
 Trash preserves relationships under section 4.6; permanent ticket deletion is not supported.
 
@@ -227,7 +231,9 @@ Initial layout direction: navigation for projects and Plans, including unlinked 
 
 The graph needs clear edge direction or a legend and ticket selection. Creating edges by dragging is optional if adding dependencies from ticket details is already easy.
 
-An agent/chat panel is outside the MVP.
+Native Chat is a standalone workspace surface with optional record links, not a
+ticket-owned panel. Section 20 defines its behavior; detailed layout follows the
+repository's UI conventions.
 
 ### Ticket status board
 
@@ -335,6 +341,10 @@ flowchart TD
     Person["Person"] --> UI["ticketd desktop UI"]
     Agent["Agent in external harness"] --> CLI["ticketd CLI"]
     UI --> Core["Shared application core"]
+    UI --> Host["Planned Rust Chat host"]
+    Host --> Core
+    Host --> Harness["Installed Claude Code / Codex"]
+    Harness --> CLI
     CLI --> Core
     Core --> Storage["Local storage: SQLite"]
 ```
@@ -368,6 +378,8 @@ Set latency budgets and representative dataset sizes after a benchmark spike. Ba
 
 The first release targets these native desktop and CLI combinations. Release
 validation remains outstanding; a CI build alone is not a support guarantee.
+Native Chat uses this same matrix for both Claude Code and Codex; Ubuntu defines
+the initial Linux target. Section 20 adds harness-specific acceptance requirements.
 
 | Operating system | Architecture          | First-release target | Validation status                                                                                           |
 | ---------------- | --------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -412,8 +424,8 @@ These are draft verification criteria for review, not individually approved requ
 
 ## 13. Explicitly out of scope
 
-- Embedded agent chat or terminal, provider adapters, and subscription handling.
-- Running, orchestrating, or automatically assigning work to agents.
+- Embedded terminal and ticketd-owned provider credentials or subscription billing.
+- Autonomous multi-agent scheduling and automatic assignment of work to agents.
 - Built-in AI decomposition, summarization, prioritization, or scheduling.
 - Highlight/comment feedback delivered directly to an agent session.
 - Branch, worktree, commit, PR, or CI-check synchronization.
@@ -425,6 +437,8 @@ These are draft verification criteria for review, not individually approved requ
 
 These exclusions apply to the initial MVP. Section 15 records agreed product
 extensions and future integration intent; it does not commit delivery dates.
+Section 20 supersedes the earlier exclusion of native chat and provider adapters;
+ordinary agent tool use within a human-directed Chat is in scope.
 
 ## 14. Open decisions
 
@@ -610,8 +624,9 @@ The agreed authority model is:
 - Authored activities and ticketd-specific organization remain locally editable, including for
   externally owned tickets. Incoming synchronization does not overwrite them.
   Posting external comments is outside this one-way integration.
-- Agent sessions, branches, and worktrees remain the responsibility of external
-  coding harnesses. Integrations do not change ticketd's execution boundary.
+- Native agent sessions follow section 20. Branch and worktree management remains
+  outside ticketd's scope; tracker integrations do not grant execution authority
+  or change external ticket-source ownership.
 - Exact extension interface signatures and execution mechanics remain technical
   design work. These decisions do not move platform integrations into the initial
   MVP.
@@ -1121,3 +1136,170 @@ overwritten, references and authored labels remain unchanged, and no download
 pins a revision, caches remote bytes automatically or changes the provider file.
 Version and other metadata must remain stable during the download; a version
 change since upload alone does not block verified export of matching bytes.
+
+## 20. Native agent Chats
+
+This is the approved design for the native Chat extension, not a claim of shipped
+functionality or completed compatibility validation. It replaces the earlier
+external-harness-only product boundary. Implementation and verification are
+tracked in GitHub Issues; the requirements below remain authoritative.
+
+### 20.1. Scope and subscription boundary
+
+The first version is a free local desktop application hosting the user's installed,
+official Claude Code and Codex harnesses with their respective subscription-backed
+sign-in. An API-key-only path does not satisfy this requirement. Users manage
+harness installation, updates and login. ticketd detects installations and guides
+users through the harness's own sign-in, without collecting OAuth tokens, copying
+credentials, proxying model requests or silently changing billing modes.
+
+Both harnesses target the native Windows, macOS and Ubuntu combinations in section
+11 with equal product priority. WSL and remote execution are separate compatibility
+questions, not substitutes for native desktop support. The bridge/runtime needed
+by ticketd is packaged with the application; users need not install Node separately
+for that bridge. Paid distribution, hosted agent execution and an open-source
+license are not established by this decision.
+
+Human-directed sessions are in scope, including ordinary agent tool use and direct
+ticket management. Autonomous multi-agent scheduling, worktree creation/management,
+and changing harness within an existing Chat are outside the first version.
+
+### 20.2. Chat identity, links and execution folders
+
+A Chat is a standalone workspace conversation with one logical harness session in
+the first version. It can start without a project or ticket and can link to multiple
+projects, tickets, Documents and other supported context. Linked records do not own
+the Chat. Chat identity, harness-session identity and editing-agent attribution
+remain distinct. Switching harness creates another Chat, optionally carrying
+selected context; no seamless mid-turn migration is promised.
+
+An execution folder is required but a Project is not. Offer an existing folder;
+otherwise use a persistent managed folder for the Chat. Context links do not move
+execution or create a Project. Multiple Chats may run concurrently, including in
+the same directory; show shared-directory use. No automatic isolation or worktree
+management is implied. Each Chat has at most one active turn.
+
+### 20.3. Conversation and lifetime
+
+The UI displays streamed responses, tool activity, native approval requests and
+human questions. Display observed activity as Idle, Working, Waiting for you,
+Interrupted or Failed, with a specific explanation when needed. Saved history is
+not evidence that execution is still alive or that a requested task succeeded.
+
+Sending while work is active steers it when the effective harness capability
+supports the intended behavior; otherwise the input is visibly queued. Steering
+capabilities must describe effects such as interrupting tools. Provide explicit
+Queue and Stop actions. Queue ownership remains with ticketd. Only input known
+not to have been accepted can automatically fall back from steering to the queue;
+ambiguous delivery is preserved for reconciliation.
+
+Stop pauses further automatic queue dispatch and requests interruption of the
+active turn, retaining unsent input. An interruption acknowledgment does not prove
+every tool stopped or undo completed effects. Distinguish confirmed interruption
+from a timeout or loss of contact.
+
+Execution belongs to the desktop backend, independently of the current view.
+Navigating away or closing the window keeps active work running. Reopening attaches
+to that work without creating a duplicate runtime. Explicit Quit stops app-owned
+execution and preserves history; an independent always-running service is not
+required. Ordinary ticketd CLI operations remain usable without the desktop.
+
+### 20.4. Context, permissions and durable results
+
+Links supply lightweight references; the agent fetches current record contents on
+demand through ticketd capabilities. Explicitly attached excerpts are snapshots
+with provenance and visible clipping. Neither replaces native working-directory
+instructions. Preserve the user's harness settings, repository instructions,
+skills, plugins, hooks and MCP configuration under native trust/permission rules.
+
+Use native permission modes and render native approvals/questions. ticketd adds no
+human-only gate for changing tickets or statuses. Agents can create and update
+Documents, authored Activities, Implementation evidence and ticket statuses through
+ordinary core workflows. External source authority and existing concurrency rules
+continue to apply. Provider events do not directly mutate domain records or bypass
+the CLI/core. Chat messages do not automatically become Activities or Documents;
+offer Save as Document for an assistant response.
+
+### 20.5. Retention and recovery
+
+Save Chat history and queued input automatically in the local workspace. Archive
+hides a Chat while active work can continue. Recoverable trash stops active work
+and preserves history, queued input and files. Restore retains identity and history
+without automatically replaying work. Archiving, trashing or removing a Chat never
+deletes linked records or generated files, including files in its managed folder.
+
+Backups include Chat records, links, history, queued input and observed delivery
+state. Harness-managed credentials are excluded. Native resume files remain
+harness-owned and are not guaranteed by a ticketd backup; restoring displayed
+history does not restore a process or callable approval. This does not claim that
+user-authored conversation text can never contain sensitive information.
+
+Preserve user input separately from submission attempts and observed turn outcomes.
+A lost reply or process crash after possible submission is uncertain, not proof
+that nothing ran. Never automatically resend uncertain work. Reconcile using
+available native evidence, retaining completed output and explaining what remains
+unknown. Streamed text may be checkpointed; a hard crash can lose an uncheckpointed
+suffix, which must not be represented as a complete transcript.
+
+Treat missing/unreadable native history, inaccessible account state, incompatible
+versions and a session already in use as distinct failures. If native resume cannot
+recover, preserve the original Chat and offer an explicit new Chat with selected
+historical context and provenance. Do not present this as restoring native execution
+state or silently create a competing continuation. Old approval cards become
+expired history; only a current live request can receive an answer.
+
+### 20.6. Capability and failure behavior
+
+| Observation                                           | Required behavior                                                                                                                                  |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Missing or incompatible installation                  | Keep drafts/history accessible; identify the executable/version and required capability with actionable install/update guidance.                   |
+| Unknown version or failed capability probe            | Explain uncertainty and allow rechecking; do not claim incompatibility solely from a failed probe.                                                 |
+| Missing or expired login                              | Direct the user through harness-owned login and recheck; distinguish temporary refresh contention when the provider identifies it.                 |
+| Quota exhaustion                                      | Retain output/input; show provider-supplied reset information when available, otherwise unknown. No silent billing fallback.                       |
+| Harness still retrying                                | Keep the existing turn active; do not submit an additional app-level retry.                                                                        |
+| Optional tool/MCP/model capability unavailable        | Explain the affected capability and available recovery choices; do not silently substitute a model/provider. Unaffected work can remain available. |
+| Required permission or sandbox capability unavailable | Block affected execution and show supported repair guidance; never automatically weaken permissions.                                               |
+| Terminal error or process loss                        | Preserve partial output and observed effects; distinguish Failed/Interrupted/uncertain delivery from confirmed completion.                         |
+| Stale approval or delayed command                     | Reject it against the old runtime/request/turn and show the current state; never apply it to a replacement process.                                |
+| Unknown provider event                                | Preserve a readable bounded fallback when possible; unknown interactive requests are not automatically approved.                                   |
+
+Use problem details alongside the common activity states. Preserve meaningful
+provider differences instead of claiming identical capabilities. Record effective
+configuration and tested versions; a successful handshake or sandbox readiness
+response is not proof of successful tool execution.
+
+### 20.7. Acceptance boundary
+
+Planning approval establishes the behavior and ownership above. It does not
+certify provider support, live runtime behavior or completed distribution. The
+selected Claude hosting/subscription boundary still requires attributable support
+clarification, and accepted-command execution in the current Windows Codex sandbox
+remains an explicit validation prerequisite. Track their evidence and resolution
+in GitHub, without treating technical precedent as provider permission.
+
+Before release, verify each of the six harness/platform combinations against the
+section 11 matrix using installed artifacts and real subscription sign-in. Record
+app, bridge/SDK, CLI and OS versions and relevant effective capabilities. Required
+scenarios are:
+
+- Installation/discovery, harness login, packaged bridge launch without separately
+  installed Node, streaming and actual permitted tool execution.
+- Projectless and selected-folder Chats, multi-record links, shared-directory
+  visibility, native configuration inheritance, live context versus excerpts,
+  ticket/status/Document/Activity/evidence writes and Save as Document.
+- Approval allow/deny, human input, steering or visible queue fallback, Stop, and
+  concurrent Chats with one active turn each.
+- Navigation, renderer reconnect, window close/reopen, explicit Quit, startup
+  cancellation and owned-child cleanup on each native OS.
+- Process loss before and after effects, missing native history, expired callbacks,
+  late replies, uncertain delivery and explicit recovery without blind replay.
+- Archive/trash/restore retention and workspace backup/restore without credential
+  transfer or an implied guarantee of restored native state.
+- Bounded streaming under slow views, storage failures, unknown protocol events,
+  supported-version changes and measured per-Chat startup/memory cost.
+
+Use deterministic protocol/core tests for race and error cases alongside live
+checks. Simulations, successful builds, approval delivery and final model text do
+not replace observed tool effects. Internal implementation can proceed in stages
+without reducing either harness or platform scope. Document unsupported optional
+capabilities and keep release blockers explicit.

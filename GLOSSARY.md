@@ -5,7 +5,10 @@ ticketd organizes workable outcomes and their supporting context.
 ## Language
 
 **Workspace**:
-The local boundary containing tickets, Documents, Activities, projects, Plans, and their shared tag vocabulary.
+The local boundary containing tickets, Documents, Activities, projects, Plans, Chats, and their shared tag vocabulary.
+
+**Chat**:
+A standalone conversation in a workspace, linked to a harness session. It can have optional links to multiple projects, tickets, and Documents without belonging to any one of them.
 
 **Ticket**:
 A unit of work describing an intended outcome, optionally linked to one project. A ticket with subtickets still has its own outcome rather than serving only as a container.
