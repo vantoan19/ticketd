@@ -22,13 +22,41 @@ Environment-gated migration and OS-vault tests report as ignored in the ordinary
 suite. Run them explicitly with their documented prerequisites when those
 boundaries change. An ignored test is never evidence that its gate passed.
 
+| Boundary            | Historical CLI environment variable | Rust test target     |
+| ------------------- | ----------------------------------- | -------------------- |
+| Schema 50           | `TICKETD_SCHEMA50_CLI`              | `drive_references`   |
+| Schema 51           | `TICKETD_SCHEMA51_CLI`              | `drive_uploads`      |
+| Schema 52           | `TICKETD_SCHEMA52_CLI`              | `attachment_cleanup` |
+| Schema 53           | `TICKETD_SCHEMA53_CLI`              | `attachment_purge`   |
+| Schema 54           | `TICKETD_SCHEMA54_CLI`              | `drive_uploads`      |
+| OS credential store | Unlocked OS-user secure store       | `drive_vault`        |
+
+Point each variable to an actual historical executable with the command support
+required by the test. A schema's first introducing commit may predate those
+commands; use a complete release of that schema. Build historical code in a
+detached checkout with its own build output and no publisher OAuth environment.
+Before any mutation, run its read-only `workspace` probe with an explicit
+`TICKETD_TEST_WORKSPACE` path and verify that exact path is reported. Stop if the
+old CLI ignores the override. The current tests create their own temporary data.
+
+Run the relevant target with `cargo test -p ticketd-core --test TARGET -- --ignored`.
+The `drive_uploads` target needs both historical CLI variables. Record executable
+hashes and revisions with the results; do not substitute a current executable
+with its schema number edited in SQLite.
+
 ## Live Google and native desktop
 
 The opt-in runner under `tests/live` uses a publisher-configured standalone CLI,
 an explicitly provided authorized connection and writable folder, and an isolated
 Workspace. Follow its help for parameters. It creates uniquely named synthetic
 files and preserves remote files for inspection. Keep its reports under ignored
-`target` output. Do not commit credentials or use a personal Workspace as a fixture.
+`target` output and keep credentials out of Git. The CLI runner never uses the
+person's default Workspace.
+
+Use an isolated development Workspace for native checks where available. When
+verifying the person's running app, limit writes to dedicated synthetic QA
+records and restore temporary aliases, clipboard and display preferences. Keep
+other authored content intact; never restore that Workspace to simulate a fault.
 
 Live assertions include upload/download byte hashes, chunk boundaries, request
 replay across processes, destination preservation and non-overwriting exports.
