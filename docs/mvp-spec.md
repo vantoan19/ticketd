@@ -1166,12 +1166,12 @@ and changing harness within an existing Chat are outside the first version.
 
 ### 20.2. Chat identity, links and execution folders
 
-A Chat is a standalone workspace conversation with one logical harness session in
-the first version. It can start without a project or ticket and can link to multiple
+A Chat is a standalone workspace conversation with one logical harness session at
+a time in the first version. It can start without a project or ticket and can link to multiple
 projects, tickets, Documents and other supported context. Linked records do not own
 the Chat. Chat identity, harness-session identity and editing-agent attribution
-remain distinct. Switching harness creates another Chat, optionally carrying
-selected context; no seamless mid-turn migration is promised.
+remain distinct. A Chat keeps the harness it was created with; using another
+harness means starting a new Chat.
 
 An execution folder is required but a Project is not. Offer an existing folder;
 otherwise use a persistent managed folder for the Chat. Context links do not move
@@ -1206,9 +1206,13 @@ required. Ordinary ticketd CLI operations remain usable without the desktop.
 
 ### 20.4. Context, permissions and durable results
 
+ticketd is the continuously updated record of tickets and their context. Hosted
+agents read linked records to catch up, alongside their own session history, and
+write progress back as they work. The records, not the Chat transcript, are the
+durable shared context.
+
 Links supply lightweight references; the agent fetches current record contents on
-demand through ticketd capabilities. Explicitly attached excerpts are snapshots
-with provenance and visible clipping. Neither replaces native working-directory
+demand through ticketd capabilities. Links do not replace native working-directory
 instructions. Preserve the user's harness settings, repository instructions,
 skills, plugins, hooks and MCP configuration under native trust/permission rules.
 
@@ -1243,9 +1247,10 @@ suffix, which must not be represented as a complete transcript.
 
 Treat missing/unreadable native history, inaccessible account state, incompatible
 versions and a session already in use as distinct failures. If native resume cannot
-recover, preserve the original Chat and offer an explicit new Chat with selected
-historical context and provenance. Do not present this as restoring native execution
-state or silently create a competing continuation. Old approval cards become
+recover, keep the Chat readable and offer to resume it explicitly in a fresh harness
+session started with history the person selects. Do not present this as restoring
+native execution state, start it automatically or replay uncertain submissions. The
+fresh session has its own harness-session identity. Old approval cards become
 expired history; only a current live request can receive an answer.
 
 ### 20.6. Capability and failure behavior
@@ -1285,7 +1290,7 @@ scenarios are:
 - Installation/discovery, harness login, packaged bridge launch without separately
   installed Node, streaming and actual permitted tool execution.
 - Projectless and selected-folder Chats, multi-record links, shared-directory
-  visibility, native configuration inheritance, live context versus excerpts,
+  visibility, native configuration inheritance, current linked context,
   ticket/status/Document/Activity/evidence writes and Save as Document.
 - Approval allow/deny, human input, steering or visible queue fallback, Stop, and
   concurrent Chats with one active turn each.

@@ -154,15 +154,17 @@ transaction can atomically commit an arbitrary harness side effect.
 ### Context and recovery boundaries
 
 The host supplies lightweight linked-record references and locates the independent
-CLI. Current context is read through core-backed operations; excerpts are explicit
-snapshots. Preserve native settings and instruction discovery in the selected
+CLI. Current context is read through core-backed operations. Preserve native
+settings and instruction discovery in the selected
 working directory. Domain writes retain existing source authority and concurrency
 rules. Agent attribution never substitutes for Chat identity or permission.
 
-Keep view reattachment, same-live-process transport recovery and replacement-process
-native resume distinct. Only a live request registry can answer approvals. Native
-resume failure keeps the original Chat readable and offers explicit fresh-Chat
-context carry-over; it never triggers automatic replay of uncertain submissions.
+Keep view reattachment and replacement-process native resume distinct; a broken
+stdio transport means the process is gone, so there is no separate live-process
+recovery. Only a live request registry can answer approvals. Native resume failure
+keeps the Chat readable and offers an explicit resume in a fresh harness session
+started with selected history, recorded under a new native-session identity; it
+never triggers automatic replay of uncertain submissions.
 Backups retain application records and queued input, not harness credentials or a
 promise of native resume state. Restore does not restart work automatically.
 
