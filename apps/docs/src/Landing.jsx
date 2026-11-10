@@ -1,6 +1,7 @@
 import { Component, Fragment } from "react";
 import { links } from "./links";
 import markup from "./Landing.markup.json";
+import lineMachines from "./LineMachines.markup.json";
 import AppReady from "./screens/AppReady";
 import AppLine from "./screens/AppLine";
 import AppMonitor from "./screens/AppMonitor";
@@ -1393,25 +1394,23 @@ export default class Landing extends Component {
           : term.length;
     const done = (i) => i <= s.lineDone || (i === idx && s.linePhase !== "run");
     const line = {
-      step: String(idx),
+      step: String(Math.max(0, idx)),
       running: s.linePhase === "run" && !you,
       d0: done(0),
       d1: done(1),
       d2: done(2),
       d3: done(3),
       d4: done(4),
-      rx: String(Math.max(0, idx) * 206),
       stations: D.LINE.map((m, i) => ({
         num: m.num,
         name: m.name,
         cmd: m.cmdHint,
-        on: i === idx,
+        on: i === Math.max(0, idx),
         done: done(i),
-        left: (((66 + i * 206 + 31) / 1114) * 100).toFixed(2) + "%",
         label: m.num + " " + m.name + ": " + m.cmdHint,
         pick: () => this.pickStep(i),
         hot: () => this.setHot("line", String(i)),
-        tip: "ticketd " + m.cmdHint.replace(/, /g, " · "),
+        art: lineMachines[i],
       })),
       hot: (s.hot || {}).line || "",
       cold: () => this.setHot("line", ""),
@@ -1870,10 +1869,7 @@ export default class Landing extends Component {
     return {
       yes: true,
       setRoot: this.setRoot,
-      cables: Object.assign(
-        { line: "", disp: "", asm: "", dock: "" },
-        s.cables || {},
-      ),
+      cables: Object.assign({ disp: "", asm: "", dock: "" }, s.cables || {}),
       pulse: Object.assign(
         { line: "none", disp: "none", asm: "none", dock: "none" },
         s.pulse || {},
@@ -2247,82 +2243,45 @@ export default class Landing extends Component {
                   }
                 </p>
               </div>
-              <svg
-                className={"st-cable"}
-                data-p={v.pulse.line}
-                aria-hidden={"true"}
-              >
-                <path className={"st-cable-line"} d={v.cables.line}></path>
-                <path
-                  className={"st-cable-run"}
-                  d={v.cables.line}
-                  pathLength={"100"}
-                ></path>
-              </svg>
               <div
                 className={"st-line"}
-                data-cable-from={"line"}
-                data-cable-y={"0.776"}
-              >
-                <svg
-                  className={"x-art"}
-                  viewBox={"0 0 1114 330"}
-                  data-hot={v.line.hot}
-                  data-step={v.line.step}
-                  data-run={v.line.running}
-                  data-d0={v.line.d0}
-                  data-d1={v.line.d1}
-                  data-d2={v.line.d2}
-                  data-d3={v.line.d3}
-                  data-d4={v.line.d4}
-                  style={{ "--rx": v.line.rx + "px" }}
-                  aria-hidden={"true"}
-                  dangerouslySetInnerHTML={{ __html: markup[3] }}
-                />
-                {v.line.stations.map((m, index) => (
-                  <Fragment key={index}>
-                    <button
-                      type={"button"}
-                      className={"st-stn"}
-                      style={{
-                        left: m.left,
-                        top: "18%",
-                        width: "15.9%",
-                        height: "64%",
-                      }}
-                      aria-label={m.label}
-                      onClick={m.pick}
-                      onMouseEnter={m.hot}
-                      onFocus={m.hot}
-                      onMouseLeave={v.line.cold}
-                      onBlur={v.line.cold}
-                    >
-                      <span className={"st-tip"}>{m.tip}</span>
-                    </button>
-                  </Fragment>
-                ))}
-              </div>
-              <div
-                className={"st-tabs"}
                 role={"group"}
                 aria-label={"Machines on the line"}
               >
-                {v.line.stations.map((m, index) => (
-                  <Fragment key={index}>
-                    <button
-                      type={"button"}
-                      className={"st-tab"}
-                      aria-pressed={m.on}
-                      data-done={m.done}
-                      onClick={m.pick}
-                    >
-                      <b>
-                        <span>{m.num}</span>
-                        {m.name}
-                      </b>
+                {v.line.stations.map((m) => (
+                  <button
+                    key={m.num}
+                    type={"button"}
+                    className={"st-line-station"}
+                    aria-label={m.label}
+                    aria-pressed={m.on}
+                    data-done={m.done}
+                    onClick={m.pick}
+                    onMouseEnter={m.hot}
+                    onFocus={m.hot}
+                    onMouseLeave={v.line.cold}
+                    onBlur={v.line.cold}
+                  >
+                    <span className={"st-line-number"}>{m.num}</span>
+                    <span className={"st-line-label"}>
+                      <b>{m.name}</b>
                       <small>{m.cmd}</small>
-                    </button>
-                  </Fragment>
+                    </span>
+                    <svg
+                      className={"x-art"}
+                      viewBox={m.art.viewBox}
+                      data-hot={v.line.hot}
+                      data-step={v.line.step}
+                      data-run={v.line.running}
+                      data-d0={v.line.d0}
+                      data-d1={v.line.d1}
+                      data-d2={v.line.d2}
+                      data-d3={v.line.d3}
+                      data-d4={v.line.d4}
+                      aria-hidden={"true"}
+                      dangerouslySetInnerHTML={{ __html: m.art.markup }}
+                    />
+                  </button>
                 ))}
               </div>
               <div className={"st-bar"}>
@@ -2406,11 +2365,7 @@ export default class Landing extends Component {
                     ) : null}
                   </div>
                 </figure>
-                <figure
-                  className={"st-win"}
-                  data-cable-to={"line"}
-                  data-pulse={v.pulse.line}
-                >
+                <figure className={"st-win"} data-pulse={v.pulse.line}>
                   <div className={"st-win-bar"} aria-hidden={"true"}>
                     <span>{"ticketd desktop app · " + v.line.appTitle}</span>
                     <em>
@@ -2435,22 +2390,24 @@ export default class Landing extends Component {
                     <li>
                       <b>{"1"}</b>
                       <span>
-                        <em>{"AI power."}</em>
-                        {" Your agent’s model runs every machine."}
+                        <em>{"Stations."}</em>
+                        {
+                          " Follow the line from top to bottom, or pick any machine to inspect its command."
+                        }
                       </span>
                     </li>
                     <li>
                       <b>{"2"}</b>
                       <span>
                         <em>{"Lamp."}</em>
-                        {" Lights while that machine’s command runs."}
+                        {" Marks the selected machine."}
                       </span>
                     </li>
                     <li>
                       <b>{"3"}</b>
                       <span>
-                        <em>{"Belt."}</em>
-                        {" Carries T-12 from spec to progress update."}
+                        <em>{"App screen."}</em>
+                        {" Shows the result of the selected command."}
                       </span>
                     </li>
                     <li>
@@ -2532,7 +2489,7 @@ export default class Landing extends Component {
                     data-live={v.mon.live}
                     style={{ "--ch": v.mon.chDeg, "--t": v.mon.tDeg }}
                     aria-hidden={"true"}
-                    dangerouslySetInnerHTML={{ __html: markup[4] }}
+                    dangerouslySetInnerHTML={{ __html: markup[3] }}
                   />
                   <div className={"mo2-screen"} data-flick={v.mon.flick}>
                     <AppMonitor
@@ -2886,7 +2843,7 @@ export default class Landing extends Component {
                             onPointerMove={r.drag.move}
                             onPointerUp={r.drag.up}
                             onPointerCancel={r.drag.cancel}
-                            dangerouslySetInnerHTML={{ __html: markup[5] }}
+                            dangerouslySetInnerHTML={{ __html: markup[4] }}
                           />
                           <button
                             type={"button"}
@@ -2932,7 +2889,7 @@ export default class Landing extends Component {
                       className={"x-art"}
                       viewBox={"0 -24 700 110"}
                       aria-hidden={"true"}
-                      dangerouslySetInnerHTML={{ __html: markup[6] }}
+                      dangerouslySetInnerHTML={{ __html: markup[5] }}
                     />
                     <div className={"dp2-chips"}>
                       {v.disp.tray.map((t, index) => (
@@ -2952,7 +2909,7 @@ export default class Landing extends Component {
                         viewBox={"0 0 28 25"}
                         shapeRendering={"crispEdges"}
                         aria-hidden={"true"}
-                        dangerouslySetInnerHTML={{ __html: markup[7] }}
+                        dangerouslySetInnerHTML={{ __html: markup[6] }}
                       />
                     </span>
                   </div>
@@ -3156,7 +3113,7 @@ export default class Landing extends Component {
                   data-p4={v.asm.p4}
                   data-ship={v.asm.ship}
                   aria-hidden={"true"}
-                  dangerouslySetInnerHTML={{ __html: markup[8] }}
+                  dangerouslySetInnerHTML={{ __html: markup[7] }}
                 />
                 {v.asm.flags.map((f, index) => (
                   <Fragment key={index}>
@@ -3404,7 +3361,7 @@ export default class Landing extends Component {
                   data-o3={v.dock.o3}
                   data-o4={v.dock.o4}
                   aria-hidden={"true"}
-                  dangerouslySetInnerHTML={{ __html: markup[9] }}
+                  dangerouslySetInnerHTML={{ __html: markup[8] }}
                 />
                 {v.dock.bays.map((b, index) => (
                   <Fragment key={index}>
@@ -3729,7 +3686,7 @@ export default class Landing extends Component {
                       className={"x-art"}
                       viewBox={"0 0 900 620"}
                       data-live={"true"}
-                      dangerouslySetInnerHTML={{ __html: markup[10] }}
+                      dangerouslySetInnerHTML={{ __html: markup[9] }}
                     />
                     <div className={"sr3-term"}>
                       <p className={"sr3-cmd"}>
@@ -3825,7 +3782,7 @@ export default class Landing extends Component {
                   data-punch={v.foot.punch}
                   role={"img"}
                   aria-label={"ticketd, punched through a ticket stub"}
-                  dangerouslySetInnerHTML={{ __html: markup[11] }}
+                  dangerouslySetInnerHTML={{ __html: markup[10] }}
                 />
               </div>
             </footer>

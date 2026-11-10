@@ -23,8 +23,9 @@ The drawings and scoped stylesheet implement the approved November 10, 2026 desi
 `Landing.jsx` ports the design's interactions to React. `landing.css` owns the
 page's paper, ink, accent and motion tokens, independently of the desktop app.
 
-`Landing.markup.json` contains static SVG artwork. The files under `src/screens`
-contain captured app markup and the app stylesheet, from desktop/CLI revision
+`Landing.markup.json` contains static SVG artwork; `LineMachines.markup.json`
+contains the five individual machines used by the vertical line. The files under
+`src/screens` contain captured app markup and the app stylesheet, from desktop/CLI revision
 `5c1a242`. These are trusted, checked-in fixtures, never user-supplied HTML. The app
 captures are inert; page controls and the monitor/dock's pointer overlays navigate
 the recorded states. Equivalent labeled controls support keyboard navigation.

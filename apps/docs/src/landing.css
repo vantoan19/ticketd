@@ -651,7 +651,84 @@ path.x-sa {
 }
 .st-line {
   position: relative;
-  margin-inline: -8px;
+  display: grid;
+  gap: 4px;
+}
+.st-line::before {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: 26px;
+  bottom: 26px;
+  border-left: 1px dashed var(--line-2);
+}
+.st-line-station {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px;
+}
+.st-line-number {
+  align-self: start;
+  margin-top: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--paper);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 22px;
+  text-align: center;
+  color: var(--ink-2);
+}
+.st-line-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.st-line-label b {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.st-line-label small {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-line-station .x-art {
+  width: 56px;
+  height: 36px;
+}
+.st-line-station:hover .st-line-label b {
+  color: var(--accent);
+}
+.st-line-station[data-done="true"] .st-line-number {
+  border-color: var(--ink-2);
+  background: var(--paper-2);
+}
+.st-line-station[aria-pressed="true"] {
+  background: var(--accent-soft);
+}
+.st-line-station[aria-pressed="true"] .st-line-number {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+}
+.st-line-station[aria-pressed="true"] .st-line-label {
+  grid-column: 2 / -1;
+}
+.st-line-station[aria-pressed="true"] .x-art {
+  grid-column: 2 / -1;
+  justify-self: center;
+  width: 100%;
+  max-width: 260px;
+  height: 180px;
 }
 .st-stn {
   position: absolute;
@@ -821,8 +898,7 @@ path.x-sa {
   transition: none;
 }
 .x-art[data-run="make"] .h-belt-a,
-.x-art[data-run="read"] .h-belt-b,
-.x-art[data-run="true"] .ln-belt {
+.x-art[data-run="read"] .h-belt-b {
   animation: st-belt 420ms steps(5) infinite;
 }
 @keyframes st-belt {
@@ -959,10 +1035,6 @@ path.x-sa {
   }
 }
 
-.ln-rider {
-  transform: translateX(var(--rx, 0px));
-  transition: transform 900ms steps(9);
-}
 .ln-pen-line,
 .ln-spec-pin,
 .ln-made,
@@ -984,14 +1056,6 @@ path.x-sa {
 .x-art[data-step="3"] .ln-led-3,
 .x-art[data-step="4"] .ln-led-4 {
   fill: var(--accent);
-}
-.x-art[data-step="0"] .ln-drop-0,
-.x-art[data-step="1"] .ln-drop-1,
-.x-art[data-step="2"] .ln-drop-2,
-.x-art[data-step="3"] .ln-drop-3,
-.x-art[data-step="4"] .ln-drop-4 {
-  stroke: var(--accent);
-  stroke-width: 2;
 }
 .x-art[data-run="true"][data-step="0"] .ln-pen {
   animation: st-pen 1100ms steps(8) both;
@@ -1072,13 +1136,6 @@ path.x-sa {
     position: static;
     width: 100%;
     margin-top: 12px;
-  }
-  .st-line {
-    overflow-x: auto;
-    margin-inline: 0;
-  }
-  .st-line .x-art {
-    width: 900px;
   }
   .st-tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1376,7 +1433,6 @@ path.x-sa {
     width: 900px;
   }
   .st-panorama .st-hot,
-  .st-line .st-stn,
   .as2 .st-stn {
     display: none;
   }
@@ -3619,13 +3675,6 @@ path.x-sa {
   .st-demo .st-tab:nth-child(n + 4) {
     border-top: 1px solid var(--line);
   }
-  #line > .st-tabs {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-  #line .st-tab + .st-tab {
-    border-top: 0;
-    border-left: 1px solid var(--line);
-  }
   .st-demo > .st-bar {
     grid-area: controls;
     gap: 8px 12px;
@@ -3656,6 +3705,20 @@ path.x-sa {
   }
   .st-win-bar {
     flex-shrink: 0;
+  }
+  #line {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.2fr);
+    grid-template-rows: auto min-content 1fr auto;
+    grid-template-areas:
+      "head head head"
+      "drawing controls app"
+      "drawing terminal app"
+      "notes notes notes";
+    column-gap: 20px;
+  }
+  #line .st-stage > .st-term {
+    height: auto;
+    align-self: stretch;
   }
   #dock {
     grid-template-areas:
@@ -3794,6 +3857,9 @@ path.x-sa {
     .st-demo,
     #monitor {
       row-gap: 8px;
+    }
+    .st-line-station[aria-pressed="true"] .x-art {
+      height: 164px;
     }
   }
 }
