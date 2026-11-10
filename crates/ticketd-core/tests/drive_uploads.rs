@@ -563,6 +563,7 @@ struct Provider {
     folder_offline: bool,
     unverified: bool,
     database: Option<std::path::PathBuf>,
+    mutate_source_before_read: Option<std::path::PathBuf>,
     allocation_failed: bool,
     reserved: std::sync::atomic::AtomicUsize,
 }
@@ -629,6 +630,9 @@ impl DriveUploadProvider for Provider {
                 DriveErrorKind::Offline,
                 "response lost before completion",
             ));
+        }
+        if let Some(source) = &self.mutate_source_before_read {
+            std::fs::write(source, b"revised bytes").unwrap();
         }
         let mut bytes = Vec::new();
         input.read_to_end(&mut bytes).unwrap();
@@ -1347,6 +1351,41 @@ fn cancellation_after_completion_and_explicit_local_fallback_retain_remote_ident
             .unwrap(),
         workspace.drive_upload("cancel").unwrap()
     );
+}
+
+#[test]
+fn source_mutation_after_provider_starts_keeps_upload_bytes_and_provenance_on_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("trace.log");
+    std::fs::write(&source, b"original bytes").unwrap();
+    let provider = Provider {
+        mutate_source_before_read: Some(source.clone()),
+        ..Default::default()
+    };
+    let mut workspace = Workspace::open(&path).unwrap();
+
+    let file = workspace
+        .upload_drive_file("snapshot", &source, &destination(), &provider, |_, _| true)
+        .unwrap();
+
+    assert_eq!(std::fs::read(&source).unwrap(), b"revised bytes");
+    assert_eq!(file.size_bytes, Some(14));
+    let operation = workspace.drive_upload("snapshot").unwrap();
+    assert_eq!(operation.state, DriveUploadState::Completed);
+    assert_eq!(operation.request.size_bytes, 14);
+    assert_eq!(
+        operation.request.sha256,
+        "52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698"
+    );
+    assert_eq!(
+        operation
+            .provenance
+            .as_ref()
+            .and_then(|file| file.sha256_checksum.as_deref()),
+        Some("52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698")
+    );
+    assert_eq!(provider.ids.lock().unwrap().as_slice(), ["reserved-file"]);
 }
 
 #[test]

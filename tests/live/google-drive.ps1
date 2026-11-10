@@ -3,6 +3,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $CliPath,
 
+    [ValidatePattern('^[A-Fa-f0-9]{64}$')]
+    [string] $ExpectedCliSha256,
+
     [Parameter(Mandatory = $true)]
     [string] $ConnectionId,
 
@@ -698,6 +701,11 @@ function Invoke-Round {
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $targetRoot = Join-Path $repoRoot 'target\live-verification'
 if (-not [System.IO.File]::Exists($script:CliPath)) { throw 'CliPath must identify an existing executable.' }
+$script:InitialCliSha256 = (Get-FileHash -LiteralPath $script:CliPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$script:ExpectedCliSha256 = if ([string]::IsNullOrWhiteSpace($ExpectedCliSha256)) { $null } else { $ExpectedCliSha256.ToLowerInvariant() }
+if ($null -ne $script:ExpectedCliSha256 -and $script:InitialCliSha256 -ne $script:ExpectedCliSha256) {
+    throw 'CliPath SHA-256 did not match ExpectedCliSha256; no live-run artifacts or Workspace mutations were started.'
+}
 if ([string]::IsNullOrWhiteSpace($ConnectionId) -or [string]::IsNullOrWhiteSpace($FolderId)) { throw 'ConnectionId and FolderId are required; the runner never guesses a Drive account or folder.' }
 if ($ConnectionId -notmatch '^[0-9a-fA-F-]{36}$' -or $FolderId -notmatch '^[A-Za-z0-9_-]+$') { throw 'ConnectionId or FolderId has an invalid shape.' }
 if (-not [string]::IsNullOrWhiteSpace($ResourceKey) -and $ResourceKey -notmatch '^[A-Za-z0-9_-]+$') { throw 'ResourceKey has an invalid shape.' }
@@ -741,6 +749,10 @@ finally {
     }
 }
 
+$finalCliSha256 = (Get-FileHash -LiteralPath $script:CliPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$cliHashStable = $finalCliSha256 -eq $script:InitialCliSha256
+Add-Case -CaseId 'runner.cli-hash-stable' -Status $(if ($cliHashStable) { 'passed' } else { 'failed' }) -Assertion 'The CLI executable matched its preflight hash for the full run.' -ErrorCode $(if ($cliHashStable) { $null } else { 'cli_changed_during_run' })
+
 $caseArray = $script:Cases.ToArray()
 $remoteFileArray = $script:RemoteFiles.ToArray()
 $failed = @($caseArray | Where-Object { $_.status -eq 'failed' }).Count
@@ -759,7 +771,6 @@ catch {
     $gitHead = 'unavailable'
     $gitDirty = $null
 }
-$cliHash = (Get-FileHash -LiteralPath $script:CliPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $report = [pscustomobject][ordered]@{
     formatVersion = 1
     suite = 'google-drive-live'
@@ -769,7 +780,10 @@ $report = [pscustomobject][ordered]@{
     startedAtUtc = $startedAt
     finishedAtUtc = [DateTime]::UtcNow.ToString('o')
     cliPath = $script:CliPath
-    cliSha256 = $cliHash
+    cliSha256 = $finalCliSha256
+    initialCliSha256 = $script:InitialCliSha256
+    expectedCliSha256 = $script:ExpectedCliSha256
+    cliHashStableDuringRun = $cliHashStable
     sourceHead = $gitHead
     sourceDirty = $gitDirty
     requireUploadedCopyClassification = [bool]$RequireUploadedCopyClassification
