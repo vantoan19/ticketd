@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 
 describe("canonical Markdown rich-edit boundary", () => {
+  it("keeps attachment links inline in prose, standalone paragraphs, lists and tables with literal labels", () => {
+    const uri = "ticketd://attachment/workspace-id/file-id";
+    const link = `[Trace [final] 日本語](${uri})`;
+    const source = `Before ${link} after.\n\n${link}\n\n- ${link}\n\n| File |\n| --- |\n| ${link} |`;
+    const document = readMarkdown(source);
+    expect(document.reasons).toEqual([]);
+    const saved = writeMarkdown(document.value);
+    expect(readMarkdown(saved).meaning).toEqual(document.meaning);
+    expect(saved.match(/ticketd:\/\/attachment\//g)).toHaveLength(4);
+    expect(saved).toContain("Trace [final] 日本語");
+    expect(
+      readMarkdown(`![literal image label](${uri})`).reasons.length,
+    ).toBeGreaterThan(0);
+  });
   it("retains nested lists, checklist state, links, Unicode, table escapes and code languages", () => {
     const source = `# Plan 日本語\n\nA **bold** and *soft* [link](https://example.com "Title") with ~~old~~ and \`code\`.\n\n3. first\n   - nested\n   - second\n4. next\n\n- [x] done\n- [ ] later\n\n| Name | Value |\n| :--- | ---: |\n| a\\|b | café |\n\n\`\`\`rust\nlet value = 1;\n\`\`\`\n`;
     const document = readMarkdown(source);

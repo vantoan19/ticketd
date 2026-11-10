@@ -1,17 +1,22 @@
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
+  useContext,
+  createContext,
+  useCallback,
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
-import CodeMirror from "@uiw/react-codemirror";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView, keymap } from "@codemirror/view";
-import { TextApi, type Value } from "platejs";
+import { RangeApi, TextApi, NodeApi, type Value } from "platejs";
 import {
   Plate,
   PlateContent,
@@ -65,6 +70,21 @@ import {
 } from "@platejs/table";
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
+import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
+import {
+  AttachmentPreview,
+  type ReferenceReplacement,
+} from "@/features/attachments/AttachmentPreview";
+import {
+  useDraftRecovery,
+  useDraftRecoveryError,
+} from "@/lib/draft-recovery-context";
+import {
+  attachments,
+  type Attachment,
+  type CaptureSource,
+} from "@/lib/api/attachments";
+import { useNativeFileDrop } from "@/features/attachments/use-native-file-drop";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
@@ -72,7 +92,12 @@ import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import {
   Popover,
   PopoverContent,
@@ -96,8 +121,11 @@ import {
   ListChecks,
   MoreHorizontal,
   FileCode2,
+  Paperclip,
+  Eye,
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
+import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import { MermaidDiagram } from "./MermaidDiagram";
 import {
   checklistRule,
@@ -110,6 +138,9 @@ import { insertions, slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
+const AttachmentProtection = createContext<(uri: string) => Promise<void>>(
+  async () => {},
+);
 
 // Source mode keeps what is typed: Enter inserts a plain newline, so list markers are not
 // doubled and a closing fence never inherits indentation.
@@ -145,7 +176,12 @@ function Element(props: PlateElementProps) {
   const { element, children } = props;
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
+  const protectAttachment = useContext(AttachmentProtection);
   const path = editor.api.findPath(element);
+  const [preview, setPreview] = useState<{
+    uri: string;
+    replace: ReferenceReplacement | undefined;
+  } | null>(null);
   const tags = {
     p: "p",
     h1: "h1",
@@ -220,6 +256,47 @@ function Element(props: PlateElementProps) {
         <span contentEditable={false} className="editor-rule" />
       )}
       {children}
+      {element.type === "a" &&
+        String(element.url).startsWith("ticketd://attachment/") && (
+          <span contentEditable={false}>
+            <button
+              type="button"
+              className="attachment-inline-preview"
+              aria-label={`Preview attachment: ${NodeApi.string(element)}`}
+              title="Preview attachment"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                const before = writeMarkdown(editor.children);
+                setPreview({
+                  uri: String(element.url),
+                  replace:
+                    readOnly || !path
+                      ? undefined
+                      : async (file, _requestId, signal) => {
+                          const uri = await attachments.uri(file.id);
+                          signal.throwIfAborted();
+                          await protectAttachment(uri);
+                          signal.throwIfAborted();
+                          if (writeMarkdown(editor.children) !== before)
+                            throw new Error(
+                              "The content changed while choosing a replacement. Close the preview and select the reference again.",
+                            );
+                          editor.tf.setNodes({ url: uri }, { at: path });
+                        },
+                });
+              }}
+            >
+              <Eye aria-hidden="true" />
+            </button>
+            {preview && (
+              <AttachmentPreview
+                target={{ uri: preview.uri }}
+                onClose={() => setPreview(null)}
+                onReplace={preview.replace}
+              />
+            )}
+          </span>
+        )}
     </PlateElement>
   );
 }
@@ -392,9 +469,11 @@ function insert(editor: PlateEditor, type: string) {
 function Toolbar({
   visible,
   floating,
+  onAttach,
 }: {
   visible: boolean;
   floating: boolean;
+  onAttach: () => void;
 }) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
@@ -453,6 +532,17 @@ function Toolbar({
           {icon}
         </Button>
       ))}
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Insert attachment"
+        title="Insert attachment"
+        onMouseDown={keepFocus}
+        onClick={onAttach}
+      >
+        <Paperclip />
+      </Button>
       <Popover
         open={linkOpen}
         onOpenChange={(open) => {
@@ -686,6 +776,10 @@ export interface MarkdownEditorProps {
   paragraphAfterQuote?: boolean;
   /** Keep the formatting toolbar shown while the editor is idle, so a dialog never holds an empty band. */
   persistentToolbar?: boolean;
+  /** Recovery owner to explain independent Undo protection in attachment usage. */
+  recoveryOwner?: string;
+  /** Current ticket context ranks related files; it never changes reference ownership. */
+  attachmentTicketReference?: string | null | undefined;
 }
 
 let pointerDown = false;
@@ -707,7 +801,38 @@ export function MarkdownEditor({
   focusLink,
   paragraphAfterQuote = false,
   persistentToolbar = false,
+  recoveryOwner = label,
+  attachmentTicketReference = null,
 }: MarkdownEditorProps) {
+  const recovery = useDraftRecovery();
+  const recoveryError = useDraftRecoveryError();
+  const [historyOwner] = useState(
+    () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
+  );
+  const [protectedValue, setProtectedValue] = useState<string | null>(null);
+  const protectAttachment = useCallback(
+    (uri: string) =>
+      recovery.put(historyOwner, null, [`[File](${uri})`], "undo"),
+    [recovery, historyOwner],
+  );
+  useEffect(() => {
+    let current = true;
+    void recovery
+      .put(historyOwner, null, value ? [value] : [], "undo")
+      .then(() => {
+        if (current) setProtectedValue(value);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [recovery, historyOwner, value, recoveryError]);
+  useEffect(
+    () => () => {
+      void recovery.put(historyOwner, null, []).catch(() => {});
+    },
+    [recovery, historyOwner],
+  );
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
   // so it stays keyboard reachable) and while one of its menus holds focus.
   const [active, setActive] = useState(false);
@@ -730,6 +855,30 @@ export function MarkdownEditor({
   // In the rich editor the copy and source buttons share the toolbar row instead of adding one.
   const inlineMode = !source && !readOnly;
   const container = useRef<HTMLElement>(null);
+  const sourceEditor = useRef<ReactCodeMirrorRef>(null);
+  const sourceEditorExtensions = useMemo(
+    () => [
+      ...sourceExtensions,
+      EditorView.contentAttributes.of({ "aria-label": `${label} source` }),
+    ],
+    [label],
+  );
+  const [attachmentPicker, setAttachmentPicker] = useState(false);
+  const [capture, setCapture] = useState<{ sources: CaptureSource[] }>();
+  const focusAfterInsertion = useRef(false);
+  const insertion = useRef<{
+    rich: PlateEditor["selection"];
+    source: { from: number; to: number } | undefined;
+    markdown: string;
+    links: Map<string, { uri: string; from: number; to: number }>;
+    tail?: string;
+  } | null>(null);
+  useEffect(
+    () => () => {
+      insertion.current = null;
+    },
+    [],
+  );
   const emitted = useRef(value);
   const synchronizing = useRef(false);
   const [initialMarkdown] = useState(() => writeMarkdown(document.value));
@@ -782,6 +931,152 @@ export function MarkdownEditor({
   }, [autoFocus, readOnly, source, editor]);
   // Slate drops its selection when focus leaves, so remember the last caret for outside changes.
   const lastSelection = useRef<PlateEditor["selection"]>(null);
+  useEffect(() => {
+    if (attachmentPicker || !focusAfterInsertion.current) return;
+    focusAfterInsertion.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      if (source) sourceEditor.current?.view?.focus();
+      else editor.tf.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [attachmentPicker, source, editor]);
+  function beginAttachment() {
+    // Native selection changes can precede Slate's throttled selection update.
+    const selection = window.getSelection();
+    const rich =
+      !source && selection && container.current?.contains(selection.anchorNode)
+        ? editor.api.toSlateRange(selection, {
+            exactMatch: false,
+            suppressThrow: true,
+          })
+        : null;
+    insertion.current = {
+      rich: rich ?? editor.selection ?? lastSelection.current,
+      source: sourceEditor.current?.view?.state.selection.main,
+      markdown: value,
+      links: new Map(),
+    };
+    focusAfterInsertion.current = true;
+    setAttachmentPicker(true);
+  }
+  function captureFiles(
+    sources: CaptureSource[],
+    point?: { x: number; y: number },
+  ) {
+    if (!sources.length || readOnly) return;
+    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      if (source) {
+        const view = sourceEditor.current?.view;
+        const pos = view?.posAtCoords(point);
+        if (view && pos !== null && pos !== undefined)
+          view.dispatch({ selection: { anchor: pos } });
+      } else {
+        const range = globalThis.document.caretRangeFromPoint?.(
+          point.x,
+          point.y,
+        );
+        if (range && container.current?.contains(range.startContainer)) {
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      }
+    }
+    beginAttachment();
+    setCapture({ sources });
+  }
+  const dropFailure = useNativeFileDrop(
+    container,
+    !readOnly && !attachmentPicker,
+    captureFiles,
+  );
+  async function insertAttachment(
+    file: Attachment,
+    _requestId: string,
+    beforeId?: string,
+  ) {
+    const pending = insertion.current;
+    const uri = await attachments.uri(file.id);
+    await recovery.put(historyOwner, null, [`[File](${uri})`], "undo");
+    if (!pending || pending !== insertion.current) return;
+    if (pending.markdown !== emitted.current)
+      throw new Error(
+        "The document changed while choosing a file. Close the picker and choose the insertion point again; the stored file remains available.",
+      );
+    if (source) {
+      const view = sourceEditor.current?.view;
+      if (!view)
+        throw new Error("Reopen this editor to insert the stored file.");
+      const before = beforeId ? pending.links.get(beforeId) : undefined;
+      const caret = pending.source ?? view.state.selection.main;
+      let from = before?.from ?? caret.from;
+      let to = before?.from ?? caret.to;
+      if (!before) {
+        let node = syntaxTree(view.state).resolveInner(caret.from, -1);
+        const linkNodes = ["Link", "Image", "Autolink"];
+        while (node.parent && !linkNodes.includes(node.name))
+          node = node.parent;
+        if (linkNodes.includes(node.name)) from = to = node.to;
+      }
+      // Source insertion may be inside a GFM table; a filename pipe must stay in its cell.
+      const link = writeMarkdown([
+        {
+          type: "p",
+          children: [
+            { type: "a", url: uri, children: [{ text: file.display_name }] },
+          ],
+        },
+      ]).replaceAll("|", "\\|");
+      view.dispatch({
+        changes: { from, to, insert: link },
+        selection: { anchor: from + link.length },
+      });
+      const delta = link.length - (to - from);
+      for (const existing of pending.links.values()) {
+        if (existing.from >= from) {
+          existing.from += delta;
+          existing.to += delta;
+        }
+      }
+      pending.links.set(file.id, { uri, from, to: from + link.length });
+      pending.source = before
+        ? { from: caret.from + delta, to: caret.to + delta }
+        : { from: from + link.length, to: from + link.length };
+      pending.markdown = view.state.doc.toString();
+    } else {
+      const anchor = pending.links.get(beforeId ?? pending.tail ?? "");
+      const existing =
+        anchor &&
+        editor.api.node({
+          at: [],
+          match: (node) => "url" in node && node.url === anchor.uri,
+        });
+      if (existing) {
+        const point = beforeId
+          ? editor.api.before(existing[1])
+          : editor.api.after(existing[1]);
+        if (point) editor.tf.select(point);
+      } else {
+        if (pending.rich) editor.tf.select(pending.rich);
+        else editor.tf.select(editor.api.end([]) ?? [0]);
+        const enclosingLink = editor.api.above({ match: { type: "a" } });
+        const point = enclosingLink && editor.api.after(enclosingLink[1]);
+        if (point) editor.tf.select(point);
+      }
+      // Insert a link node rather than upserting the surrounding link or replacing its label.
+      editor.tf.insertNodes({
+        type: "a",
+        url: uri,
+        children: [{ text: file.display_name }],
+      });
+      editor.tf.move({ distance: 1, unit: "offset" });
+      pending.links.set(file.id, { uri, from: 0, to: 0 });
+      pending.rich = editor.selection;
+      pending.markdown = writeMarkdown(editor.children);
+    }
+    if (!beforeId) pending.tail = file.id;
+    focusAfterInsertion.current = true;
+  }
   useEffect(() => {
     if (!focusRequest || readOnly) return;
     const frame = window.requestAnimationFrame(() => {
@@ -925,6 +1220,34 @@ export function MarkdownEditor({
       ref={container}
       className="markdown-editor"
       aria-label={label}
+      onPasteCapture={(event) => {
+        if (readOnly) return;
+        const screenshots = Array.from(event.clipboardData.items ?? [])
+          .filter(
+            (item) => item.kind === "file" && item.type.startsWith("image/"),
+          )
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file !== null);
+        if (!screenshots.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        captureFiles(screenshots);
+      }}
+      onDragOverCapture={(event) => {
+        if (!readOnly && event.dataTransfer.types.includes("Files")) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onDropCapture={(event) => {
+        if (readOnly || !event.dataTransfer.files?.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        captureFiles(Array.from(event.dataTransfer.files), {
+          x: event.clientX,
+          y: event.clientY,
+        });
+      }}
       onFocus={() => setActive(true)}
       onBlur={(event) => {
         closeSlash();
@@ -951,6 +1274,34 @@ export function MarkdownEditor({
         setActive(false);
       }}
     >
+      {recoveryError && (
+        <Alert tone="error">
+          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
+          <AlertDescription>
+            Keep this window open. {recoveryError}
+          </AlertDescription>
+          <AlertActions>
+            <Button type="button" onClick={recovery.retry}>
+              Retry draft recovery
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+      {recovery.active &&
+        protectedValue === value &&
+        !recoveryError &&
+        value.includes("ticketd://attachment/") && (
+          <p
+            role="status"
+            aria-label="Attachment draft protection"
+            className="text-xs text-muted-foreground"
+          >
+            Draft protected
+            <span className="sr-only">
+              . Workspace attachments stay protected through Undo.
+            </span>
+          </p>
+        )}
       <div
         className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
         data-persistent={persistentToolbar || undefined}
@@ -960,6 +1311,46 @@ export function MarkdownEditor({
           source={value}
           label={`Copy ${label} Markdown`}
         />
+        <ExportMarkdownButton
+          compact
+          source={() => {
+            const selection = sourceEditor.current?.view?.state.selection.main;
+            if (source && selection && !selection.empty)
+              return {
+                kind: "selection",
+                body: value.slice(selection.from, selection.to),
+                context: value,
+              };
+            const nativeSelection = window.getSelection();
+            const rich =
+              !source &&
+              nativeSelection &&
+              container.current?.contains(nativeSelection.anchorNode)
+                ? editor.api.toSlateRange(nativeSelection, {
+                    exactMatch: false,
+                    suppressThrow: true,
+                  })
+                : editor.selection;
+            const selected =
+              !source && rich && !RangeApi.isCollapsed(rich)
+                ? writeMarkdown(editor.api.fragment(rich))
+                : value;
+            return { kind: "markdown", body: selected };
+          }}
+        />
+        {source && !readOnly && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Insert attachment"
+            title="Insert attachment"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={beginAttachment}
+          >
+            <Paperclip />
+          </Button>
+        )}
         <Button
           disabled={document.reasons.length > 0}
           type="button"
@@ -996,12 +1387,13 @@ export function MarkdownEditor({
       )}
       {source ? (
         <CodeMirror
+          ref={sourceEditor}
           value={value}
           autoFocus={autoFocus}
           readOnly={readOnly}
           editable={!readOnly}
           aria-label={`${label} source`}
-          extensions={sourceExtensions}
+          extensions={sourceEditorExtensions}
           onChange={(next) => {
             if (!readOnly && next !== value) {
               emitted.current = next;
@@ -1049,100 +1441,108 @@ export function MarkdownEditor({
             <Toolbar
               visible={active || persistentToolbar}
               floating={!persistentToolbar}
+              onAttach={beginAttachment}
             />
           )}
-          <PlateContent
-            readOnly={readOnly}
-            // Drawn by CSS from this property, never as Slate's placeholder node: that node is text
-            // inside the editable, so native input (autocorrect, dictation) could keep it beside
-            // typed text or fold it into what is saved. Only while the document is empty.
-            {...(placeholder && value.trim() === ""
-              ? {
-                  "data-empty": "",
-                  style: {
-                    "--editor-placeholder": JSON.stringify(placeholder),
-                  } as CSSProperties,
-                }
-              : {})}
-            aria-label={`${label} rich text`}
-            role={slash ? "combobox" : "textbox"}
-            aria-autocomplete={slash ? "list" : undefined}
-            aria-haspopup={slash ? "listbox" : undefined}
-            aria-expanded={slash ? true : undefined}
-            aria-controls={slash ? slashMenuId : undefined}
-            aria-activedescendant={
-              slash && choices[slashIndex]
-                ? `${slashMenuId}-${choices[slashIndex][0]}`
-                : undefined
-            }
-            onCompositionStart={closeSlash}
-            onMouseDown={closeSlash}
-            className="rich-document"
-            onKeyDown={keyDown}
-            onPaste={(event) => {
-              if (readOnly) return;
-              const pasted = event.clipboardData.getData("text/plain");
-              if (!pasted) return;
-              event.preventDefault();
-              event.stopPropagation();
-              const incoming = readMarkdown(pasted);
-              if (incoming.reasons.length) editor.tf.insertText(pasted);
-              else {
-                const first = incoming.value[0];
-                // Slate merges a fragment's first block into the current block.
-                // An empty leading paragraph protects a pasted heading/list/table.
-                editor.tf.insertFragment(
-                  first?.type === "p"
-                    ? incoming.value
-                    : [
-                        { type: "p", children: [{ text: "" }] },
-                        ...incoming.value,
-                      ],
-                );
+          <AttachmentProtection.Provider value={protectAttachment}>
+            <PlateContent
+              readOnly={readOnly}
+              // Drawn by CSS from this property, never as Slate's placeholder node: that node is text
+              // inside the editable, so native input (autocorrect, dictation) could keep it beside
+              // typed text or fold it into what is saved. Only while the document is empty.
+              {...(placeholder && value.trim() === ""
+                ? {
+                    "data-empty": "",
+                    style: {
+                      "--editor-placeholder": JSON.stringify(placeholder),
+                    } as CSSProperties,
+                  }
+                : {})}
+              aria-label={`${label} rich text`}
+              role={slash ? "combobox" : "textbox"}
+              aria-autocomplete={slash ? "list" : undefined}
+              aria-haspopup={slash ? "listbox" : undefined}
+              aria-expanded={slash ? true : undefined}
+              aria-controls={slash ? slashMenuId : undefined}
+              aria-activedescendant={
+                slash && choices[slashIndex]
+                  ? `${slashMenuId}-${choices[slashIndex][0]}`
+                  : undefined
               }
-            }}
-            onDragOver={(event) => {
-              if (
-                event.dataTransfer.types.includes("application/x-ticketd-block")
-              )
+              onCompositionStart={closeSlash}
+              onMouseDown={closeSlash}
+              className="rich-document"
+              onKeyDown={keyDown}
+              onPaste={(event) => {
+                if (readOnly) return;
+                const pasted = event.clipboardData.getData("text/plain");
+                if (!pasted) return;
                 event.preventDefault();
-              event.stopPropagation();
-            }}
-            onDrop={(event) => {
-              const data = event.dataTransfer.getData(
-                "application/x-ticketd-block",
-              );
-              if (!data || readOnly) return;
-              event.preventDefault();
-              event.stopPropagation();
-              let payload: unknown;
-              try {
-                payload = JSON.parse(data);
-              } catch {
-                return;
-              }
-              if (
-                typeof payload !== "object" ||
-                payload === null ||
-                !("editorId" in payload) ||
-                payload.editorId !== editorId ||
-                !("index" in payload) ||
-                typeof payload.index !== "number" ||
-                !Number.isInteger(payload.index) ||
-                payload.index < 0 ||
-                payload.index >= editor.children.length
-              )
-                return;
-              const range = editor.api.findEventRange(event);
-              const destination = range?.anchor.path[0];
-              if (
-                destination !== undefined &&
-                destination >= 0 &&
-                destination < editor.children.length
-              )
-                editor.tf.moveNodes({ at: [payload.index], to: [destination] });
-            }}
-          />
+                event.stopPropagation();
+                const incoming = readMarkdown(pasted);
+                if (incoming.reasons.length) editor.tf.insertText(pasted);
+                else {
+                  const first = incoming.value[0];
+                  // Slate merges a fragment's first block into the current block.
+                  // An empty leading paragraph protects a pasted heading/list/table.
+                  editor.tf.insertFragment(
+                    first?.type === "p"
+                      ? incoming.value
+                      : [
+                          { type: "p", children: [{ text: "" }] },
+                          ...incoming.value,
+                        ],
+                  );
+                }
+              }}
+              onDragOver={(event) => {
+                if (
+                  event.dataTransfer.types.includes(
+                    "application/x-ticketd-block",
+                  )
+                )
+                  event.preventDefault();
+                event.stopPropagation();
+              }}
+              onDrop={(event) => {
+                const data = event.dataTransfer.getData(
+                  "application/x-ticketd-block",
+                );
+                if (!data || readOnly) return;
+                event.preventDefault();
+                event.stopPropagation();
+                let payload: unknown;
+                try {
+                  payload = JSON.parse(data);
+                } catch {
+                  return;
+                }
+                if (
+                  typeof payload !== "object" ||
+                  payload === null ||
+                  !("editorId" in payload) ||
+                  payload.editorId !== editorId ||
+                  !("index" in payload) ||
+                  typeof payload.index !== "number" ||
+                  !Number.isInteger(payload.index) ||
+                  payload.index < 0 ||
+                  payload.index >= editor.children.length
+                )
+                  return;
+                const range = editor.api.findEventRange(event);
+                const destination = range?.anchor.path[0];
+                if (
+                  destination !== undefined &&
+                  destination >= 0 &&
+                  destination < editor.children.length
+                )
+                  editor.tf.moveNodes({
+                    at: [payload.index],
+                    to: [destination],
+                  });
+              }}
+            />
+          </AttachmentProtection.Provider>
           {slash && !readOnly && (
             <div
               id={slashMenuId}
@@ -1173,6 +1573,19 @@ export function MarkdownEditor({
           )}
         </Plate>
       )}
+      {!readOnly && (
+        <AttachmentPicker
+          ticketReference={attachmentTicketReference}
+          open={attachmentPicker}
+          capture={capture}
+          onOpenChange={(open) => {
+            setAttachmentPicker(open);
+            if (!open) insertion.current = null;
+          }}
+          onPick={insertAttachment}
+        />
+      )}
+      {dropFailure && <p role="alert">{dropFailure}</p>}
     </section>
   );
 }

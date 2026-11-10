@@ -1,4 +1,5 @@
 import type { SettingsCardKey } from "./settings-sections";
+import { AttachmentSettings } from "./AttachmentSettings";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   Copy,
@@ -350,7 +351,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
     <SettingsCard
       id="backups"
       title="Backups"
-      description="A complete copy of the workspace, checked for integrity after it is saved. It never replaces an existing file."
+      description="A complete copy of the workspace and every retained local attachment file, checked for integrity after it is saved. Remote files remain references and metadata. It never replaces an existing file."
       actions={
         <Button
           type="button"
@@ -718,6 +719,7 @@ export function SettingsView({
           <AppearanceCard />
           <AttentionCard onOpenInbox={onOpenInbox} />
           <LocationCard refreshKey={restores} />
+          <AttachmentSettings key={restores} />
           <BackupsCard
             onRestore={async () => {
               setRestores((count) => count + 1);

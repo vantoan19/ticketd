@@ -4,10 +4,13 @@ pub use search::TicketWithUpdate;
 mod backlinks;
 pub use backlinks::Backlink;
 mod backup;
+mod backup_archive;
+mod restore;
 pub use backup::BackupRecord;
 mod backup_review;
 pub use backup_review::{
-    BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind, WorkspaceSummary,
+    AttachmentBackupContent, BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind,
+    WorkspaceSummary,
 };
 mod context;
 mod context_graph;
@@ -26,6 +29,10 @@ pub use duplicates::{
 };
 mod evidence;
 mod export;
+mod portable_export;
+pub use portable_export::{
+    ExportAttachment, ExportAttachmentKind, ExportStatus, MarkdownExport, MarkdownExportSource,
+};
 mod location;
 pub use context::{ContextOptions, TicketContext};
 pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
@@ -63,6 +70,26 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
+mod attachment_cleanup;
+mod attachment_library;
+pub use attachment_cleanup::AttachmentCleanupReview;
+pub use attachment_cleanup::RemoteAttachmentRemoval;
+mod attachment_previews;
+mod attachment_retention;
+pub use attachment_library::{AttachmentQuery, AttachmentSearchResult, AttachmentState};
+mod attachments;
+mod upload_destination;
+pub use attachment_previews::{
+    AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
+};
+pub use upload_destination::AttachmentUploadDestination;
+pub mod drive;
+mod embedded_attachments;
+pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
+pub use attachments::{
+    Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
+    DEFAULT_ATTACHMENT_LIMIT,
+};
 mod change_token;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
@@ -72,10 +99,14 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 46;
+pub const FORMAT_VERSION: i64 = 55;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Drive: {0}")]
+    Drive(#[from] drive::DriveError),
+    #[error("attachment: {0}")]
+    Attachment(String),
     #[error("ticket '{0}' was changed elsewhere since it was loaded")]
     TicketChanged(String),
     #[error("document '{0}' was changed elsewhere since it was loaded")]
@@ -84,6 +115,13 @@ pub enum Error {
     DocumentNotFound(String),
     #[error("backup or restore failed: {0}")]
     Backup(String),
+    #[error(
+        "cannot save a complete safety copy of the current workspace: {source}. The current workspace is unchanged. Repair missing current files, or restore the complete backup separately with `ticketd restore-workspace <backup> --target <new-database-path>`; this does not switch the desktop workspace"
+    )]
+    SafetyCopy {
+        #[source]
+        source: Box<Error>,
+    },
     #[error(
         "backup or restore failed: workspace is in use; close other ticketd operations and retry: {source}"
     )]
@@ -347,6 +385,12 @@ impl Workspace {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         use fs2::FileExt;
         let path = path.as_ref();
+        let resolved = if path.exists() {
+            Some(path.canonicalize()?)
+        } else {
+            None
+        };
+        let path = resolved.as_deref().unwrap_or(path);
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let lock = backup::lock_file(path)?;
@@ -357,7 +401,25 @@ impl Workspace {
                 wait_for_migration_lock(deadline)?;
                 continue;
             }
+            if restore::pending(path) {
+                drop(lock);
+                let recovery_lock = backup::lock_file(path)?;
+                if let Err(error) = FileExt::try_lock_exclusive(&recovery_lock) {
+                    if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
+                        return Err(error.into());
+                    }
+                    wait_for_migration_lock(deadline)?;
+                    continue;
+                }
+                restore::recover(path)?;
+                continue;
+            }
             let connection = Connection::open(path)?;
+            if backup::table_exists(&connection, "ticketd_backup_container")?
+                || backup::table_exists(&connection, "ticketd_backup_files")?
+            {
+                return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings > Restore from backup".into()));
+            }
             document_links::register_heading_function(&connection)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
@@ -429,7 +491,9 @@ impl Workspace {
     }
 
     fn migrate(connection: &mut Connection, version: i64) -> Result<(), Error> {
-        connection.pragma_update(None, "foreign_keys", "ON")?;
+        // Schema51 rebuilds the parent attachment table without cascading into
+        // reference/retention rows. Validate all foreign keys before committing.
+        connection.pragma_update(None, "foreign_keys", "OFF")?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if version == 0 {
@@ -692,7 +756,45 @@ impl Workspace {
         if version < 46 {
             ticket_documents::migrate(&transaction)?;
         }
+        if version < 47 {
+            attachments::migrate(&transaction)?;
+        }
+        if version < 48 {
+            embedded_attachments::migrate(&transaction)?;
+        }
+        if version < 49 {
+            attachments::migrate_upload_settings(&transaction)?;
+        }
+        if version < 50 {
+            attachment_retention::migrate(&transaction, version > 0)?;
+        }
+        if version < 51 {
+            drive::migrate(&transaction)?;
+        }
+        if version < 52 {
+            drive::migrate_uploads(&transaction)?;
+        }
+        if version < 53 {
+            attachment_cleanup::migrate(&transaction)?;
+        }
+        if version < 54 {
+            attachment_cleanup::migrate_purge(&transaction)?;
+        }
+        if version < 55 {
+            upload_destination::migrate(&transaction)?;
+        }
+        let violations: i64 =
+            transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })?;
+        if violations != 0 {
+            return Err(Error::Attachment(
+                "migration would invalidate existing references; preserved pre-migration backup"
+                    .into(),
+            ));
+        }
         transaction.commit()?;
+        connection.pragma_update(None, "foreign_keys", "ON")?;
         Ok(())
     }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,6 +34,8 @@ import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { useSourceActivity } from "./source-activity";
 import { formatDateTime } from "@/lib/format";
 import { providerName } from "./ticket-source";
+import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import "./publication.css";
 
 /** The Source rail's content for a ticket that has never had an external identity. */
@@ -69,7 +71,10 @@ export function LocalPublication({
   // The origin and what to do about it read as one sentence with an inline action.
   const lead = "Created in ticketd.";
   if (!preview) return <small className="rail-note">{lead}</small>;
-  if (preview.eligibility.kind === "eligible")
+  if (
+    preview.eligibility.kind === "eligible" ||
+    preview.eligibility.reason === "internal_attachments"
+  )
     return (
       <>
         <small className="rail-note">
@@ -187,6 +192,7 @@ type Phase =
   | { kind: "loading"; preview?: PublicationPreview }
   | { kind: "ready"; preview: PublicationPreview }
   | { kind: "publishing"; preview: PublicationPreview }
+  | { kind: "blocked"; preview: PublicationPreview; message: string }
   | { kind: "unresolved"; message: string }
   | { kind: "unavailable"; message: string };
 
@@ -209,6 +215,7 @@ export function PublishDialog({
   const [destination, setDestination] = useState<string | undefined>();
   const [error, setError] = useState("");
   const [reloads, setReloads] = useState(0);
+  const reviewDescription = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -217,7 +224,16 @@ export function PublishDialog({
       .then(
         (preview) => {
           if (!active) return;
-          if (preview.eligibility.kind !== "eligible")
+          if (
+            preview.eligibility.kind !== "eligible" &&
+            preview.eligibility.reason === "internal_attachments"
+          )
+            setPhase({
+              kind: "blocked",
+              preview,
+              message: preview.eligibility.message,
+            });
+          else if (preview.eligibility.kind !== "eligible")
             setPhase({
               kind: "unavailable",
               message: preview.eligibility.message,
@@ -269,7 +285,10 @@ export function PublishDialog({
           ? `${failure.message.replace(/[.!?]$/, "")}. Nothing was created.`
           : failure.message,
       );
-      if (failure.code === "publication_changed") {
+      if (
+        failure.code === "publication_changed" ||
+        failure.code === "publication_ineligible"
+      ) {
         setPhase({ kind: "loading" });
         setReloads((count) => count + 1);
       } else setPhase({ kind: "ready", preview });
@@ -287,12 +306,31 @@ export function PublishDialog({
       <DialogContent
         className="publication-dialog publish-dialog"
         showCloseButton={false}
+        onCloseAutoFocus={(event) => {
+          if (!reviewDescription.current) return;
+          const description = document
+            .getElementById(`body-${ticket.id}`)
+            ?.closest<HTMLElement>('[role="group"]');
+          if (description) {
+            event.preventDefault();
+            description.focus();
+            description.scrollIntoView({ block: "center" });
+          }
+        }}
       >
         <DialogHeader showCloseButton>
           <DialogTitle>
-            Publish{" "}
-            <span className="publication-reference">{ticket.reference}</span> to{" "}
-            {name}
+            {phase.kind === "blocked" ? (
+              "Resolve attachment links before publishing"
+            ) : (
+              <>
+                Publish{" "}
+                <span className="publication-reference">
+                  {ticket.reference}
+                </span>{" "}
+                to {name}
+              </>
+            )}
           </DialogTitle>
           <DialogDescription>
             Creates an ordinary open issue. Afterwards {name} owns the title and
@@ -300,6 +338,32 @@ export function PublishDialog({
           </DialogDescription>
         </DialogHeader>
         {phase.kind === "loading" && <p role="status">Preparing preview…</p>}
+        {phase.kind === "blocked" && (
+          <div className="publication-preview">
+            <p className="publication-error" role="alert">
+              {phase.message}
+            </p>
+            <ul
+              className="publication-attachment-links"
+              aria-label="Workspace-only attachment links"
+            >
+              {phase.preview.internal_attachments.map((link) => (
+                <li key={link.uri}>
+                  <AttachmentLink uri={link.uri}>
+                    {link.display_name ?? link.uri}
+                  </AttachmentLink>
+                  <small className="publication-detail">
+                    Internal link in ticket description · Select to inspect
+                  </small>
+                </li>
+              ))}
+            </ul>
+            <p className="publication-detail">
+              Direct local attachment associations stay with this ticket in
+              ticketd. They are not automatically sent to {name}.
+            </p>
+          </div>
+        )}
         {phase.kind === "unavailable" && (
           <p className="publication-error" role="alert">
             {phase.message}
@@ -316,7 +380,7 @@ export function PublishDialog({
             </p>
           </div>
         )}
-        {preview && (
+        {preview && phase.kind !== "blocked" && (
           <div className="publication-preview">
             <div className="publication-field">
               <span className="publication-label" id="publication-destination">
@@ -377,6 +441,10 @@ export function PublishDialog({
               <h3>Stays in ticketd</h3>
               <ul className="publication-local-list">
                 <li>
+                  {preview.local?.attachments ?? 0} directly attached files stay
+                  with this ticket and are not automatically published.
+                </li>
+                <li>
                   Reference{" "}
                   <span className="source-number">{ticket.reference}</span> and
                   status {ticket.status}
@@ -428,7 +496,24 @@ export function PublishDialog({
           >
             {phase.kind === "unresolved" ? "Close" : "Cancel"}
           </Button>
-          {phase.kind !== "unresolved" && (
+          {phase.kind === "blocked" && (
+            <ExportMarkdownButton
+              source={{ kind: "ticket", reference: ticket.reference }}
+              label="Export with files"
+            />
+          )}
+          {phase.kind === "blocked" && (
+            <Button
+              size="sm"
+              onClick={() => {
+                reviewDescription.current = true;
+                onOpenChange(false);
+              }}
+            >
+              Review description
+            </Button>
+          )}
+          {phase.kind !== "unresolved" && phase.kind !== "blocked" && (
             <Button
               size="sm"
               disabled={

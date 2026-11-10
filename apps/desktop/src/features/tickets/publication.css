@@ -30,6 +30,24 @@
   flex-direction: column;
   gap: 20px;
 }
+.publication-attachment-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+.publication-attachment-links li {
+  display: grid;
+  gap: 4px;
+}
+.publication-attachment-links .context-link {
+  justify-self: start;
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 .publication-field {
   display: flex;
   flex-direction: column;
@@ -66,6 +84,7 @@
   line-height: 16px;
 }
 .publication-error {
+  overflow-wrap: anywhere;
   margin: 0;
   padding: 8px 12px;
   border-radius: var(--radius-md);

@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used)]
 
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::TcpListener,
     process::{Command, Output},
 };
@@ -21,9 +21,28 @@ fn serve() -> String {
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
-            let mut buffer = [0u8; 8192];
-            let read = stream.read(&mut buffer).unwrap_or(0);
-            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let mut input = BufReader::new(&mut stream);
+            let mut request = String::new();
+            loop {
+                let mut line = String::new();
+                if input.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                request.push_str(&line);
+            }
+            let length = request
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            // Closing a Windows socket with unread POST bytes can reset the
+            // connection before the client receives even a successful response.
+            let mut body = vec![0; length];
+            input.read_exact(&mut body).unwrap();
             let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
             let authorized = request
                 .to_lowercase()
@@ -361,6 +380,25 @@ fn local_ticket(cli: &Cli) -> String {
     let reference = created["reference"].as_str().unwrap().to_owned();
     cli.run(&["change", &reference, "--body", "Why it matters"]);
     reference
+}
+
+#[test]
+fn publish_reports_the_core_attachment_preflight_without_creating_an_issue() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let reference = local_ticket(&cli);
+    let uri = "ticketd://attachment/foreign-workspace/trace-file";
+    cli.run(&["change", &reference, "--body", &format!("[trace]({uri})")]);
+    let preview = cli.run(&["source", "publish", &reference, "--preview"]);
+    assert_eq!(preview["eligibility"]["reason"], "internal_attachments");
+    assert_eq!(preview["internal_attachments"][0]["uri"], uri);
+    assert_eq!(preview["local"]["attachments"], 0);
+    let message = preview["eligibility"]["message"].as_str().unwrap();
+    assert!(message.contains("Remove these links"), "{message}");
+    let error = cli.fail(&["source", "publish", &reference], Some(TOKEN));
+    assert!(error.contains(message), "{error}");
+    assert!(cli.run(&["show", &reference])["publication"].is_null());
+    assert!(cli.run(&["show", &reference])["source"].is_null());
 }
 
 #[test]

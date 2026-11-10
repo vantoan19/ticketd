@@ -84,5 +84,7 @@ export function publicationReason(preview: PublicationPreview): string {
       return "Settle the previous publication outcome before publishing again.";
     case "unsupported":
       return "This source does not support publication.";
+    case "internal_attachments":
+      return preview.eligibility.message;
   }
 }

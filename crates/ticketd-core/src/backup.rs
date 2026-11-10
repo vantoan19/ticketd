@@ -5,12 +5,10 @@ use std::{
 };
 
 use crate::{
-    Error, FORMAT_VERSION, Workspace,
+    Error, Workspace,
     backup_review::{BackupCheck, check_backup},
-    default_path,
 };
-use fs2::FileExt;
-use rusqlite::{Connection, OpenFlags, backup::Backup};
+use rusqlite::{Connection, backup::Backup};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -54,7 +52,19 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 42] = [
+const TABLES: [(&str, i64); 54] = [
+    ("attachment_upload_destinations", 55),
+    ("attachment_upload_destination", 55),
+    ("drive_upload_operations", 52),
+    ("drive_references", 51),
+    ("attachment_draft_cutover", 50),
+    ("attachment_drafts", 50),
+    ("attachment_draft_references", 50),
+    ("attachment_workspace", 48),
+    ("embedded_attachments", 48),
+    ("attachment_upload_settings", 49),
+    ("attachments", 47),
+    ("ticket_attachments", 47),
     ("entities", 31),
     ("documents", 31),
     ("document_opens", 31),
@@ -121,6 +131,27 @@ pub(crate) fn missing_tables(
             missing.push(table);
         }
     }
+    if version >= 53 && table_exists(connection, "attachments")? {
+        for (column, object) in [
+            ("quarantined", "attachments.quarantined"),
+            ("added_at", "attachments.added_at"),
+        ] {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('attachments') WHERE name=?1)",
+                [column],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                missing.push(object);
+            }
+        }
+    }
+    if version >= 54 && table_exists(connection, "attachments")? {
+        let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('attachments') WHERE name='purge_state')", [], |row| row.get(0))?;
+        if !exists {
+            missing.push("attachments.purge_state");
+        }
+    }
     // Context identities and derived indexes need their maintenance triggers;
     // missing triggers silently corrupt subsequent writes after a restore.
     for (trigger, introduced) in [
@@ -142,6 +173,9 @@ pub(crate) fn missing_tables(
         ("plan_graph_fts_insert", 43),
         ("plan_graph_fts_delete", 43),
         ("plan_graph_fts_update", 43),
+        ("embedded_activity_delete", 48),
+        ("drive_upload_request_namespace", 52),
+        ("write_drive_request_namespace", 52),
     ] {
         let exists: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
@@ -186,34 +220,14 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
     }
 }
 
-/// Opens a new file, refusing to replace one that already exists.
-fn create_new(path: &Path) -> Result<File, Error> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| match error.kind() {
-            std::io::ErrorKind::AlreadyExists => Error::FileExists(path.to_path_buf()),
-            _ => error.into(),
-        })
-}
-
 impl Workspace {
     /// Create a consistent backup without overwriting an existing file.
     /// Returns whether the backup was also recorded as the last backup; the
     /// backup itself is saved either way.
     pub fn backup(&self, path: impl AsRef<Path>) -> Result<bool, Error> {
+        let _uploads = self.attachment_backup_lock()?;
         let path = path.as_ref();
-        drop(create_new(path)?);
-        let result = (|| {
-            let mut dest = Connection::open(path)?;
-            copy(&self.connection, &mut dest)?;
-            validate(&dest)
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(path);
-            return result.map(|()| false);
-        }
+        save_snapshot(&self.connection, &self.attachment_directory()?, path, true)?;
         // The backup is already saved and checked, so a failure to note it
         // must not discard it; the previous record simply stays.
         let recorded = path
@@ -235,7 +249,7 @@ impl Workspace {
         Self::read_last_backup(&self.connection)
     }
 
-    fn read_last_backup(connection: &Connection) -> Result<Option<BackupRecord>, Error> {
+    pub(crate) fn read_last_backup(connection: &Connection) -> Result<Option<BackupRecord>, Error> {
         match connection.query_row(
             "SELECT path, completed_at FROM last_backup WHERE id = 1",
             [],
@@ -256,84 +270,63 @@ impl Workspace {
         connection: &Connection,
         workspace: &Path,
     ) -> Result<PathBuf, Error> {
+        let root = crate::backup_archive::attachment_root(workspace);
+        std::fs::create_dir_all(&root)?;
+        let _uploads = crate::attachments::lock_uploads(&root)?;
         let mut name = workspace.as_os_str().to_os_string();
         name.push(format!("{PRE_MIGRATION_MARKER}{}.sqlite3", Uuid::new_v4()));
         let path = PathBuf::from(name);
-        drop(create_new(&path)?);
-        let result = (|| {
-            let mut destination = Connection::open(&path)?;
-            copy(connection, &mut destination)?;
-            Ok::<_, Error>(())
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&path);
-        }
-        result?;
+        save_snapshot(connection, &root, &path, false)?;
         Ok(path)
     }
+}
 
-    pub fn restore_default(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
-        Self::restore(default_path()?, path)
+/// Publish only a fully written single-file snapshot; never clobber another file.
+pub(crate) fn save_snapshot(
+    source: &Connection,
+    root: &Path,
+    path: &Path,
+    check_schema: bool,
+) -> Result<(), Error> {
+    if path.exists() {
+        return Err(Error::FileExists(path.to_path_buf()));
     }
-
-    /// Restore only when no workspace connection is open. Returns the safety backup path.
-    pub fn restore(
-        workspace: impl AsRef<Path>,
-        backup: impl AsRef<Path>,
-    ) -> Result<PathBuf, Error> {
-        let workspace = workspace.as_ref();
-        let backup = backup.as_ref();
-        if !backup.is_file() {
-            return Err(Error::Backup(format!(
-                "backup file not found: {}",
-                backup.display()
-            )));
-        }
-        let lock = lock_file(workspace)?;
-        FileExt::try_lock_exclusive(&lock).map_err(|source| {
-            if source.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
-                Error::RestoreLock { source }
-            } else {
-                Error::Directory(source)
-            }
-        })?;
-        let source = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        source.execute_batch("BEGIN")?;
-        validate(&source)?;
-        // A first restore on a new computer has no workspace file yet; it is created below.
-        if workspace.exists() && workspace.canonicalize()? == backup.canonicalize()? {
-            return Err(Error::Backup("backup is the current workspace".into()));
-        }
-        let mut current = Connection::open(workspace)?;
-        current.busy_timeout(Duration::from_secs(10))?;
-        let current_version: i64 =
-            current.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current_version > FORMAT_VERSION {
-            return Err(Error::NewerSchema(current_version));
-        }
-        let mut name = workspace.as_os_str().to_os_string();
-        name.push(format!("{SAFETY_MARKER}{}.sqlite3", Uuid::new_v4()));
-        let safety = PathBuf::from(name);
-        drop(create_new(&safety)?);
-        let mut safety_db = Connection::open(&safety)?;
-        copy(&current, &mut safety_db)?;
-        drop(safety_db);
-        // The restored file brings its own, older record. The last backup is a
-        // fact about this computer, so keep the one from before the restore.
-        let last_backup = Self::read_last_backup(&current).ok().flatten();
-        copy(&source, &mut current).map_err(|source| Error::Restore {
-            safety: safety.clone(),
-            source: Box::new(source),
-        })?;
-        if let Some(record) = last_backup {
-            // Only a restored workspace of the current format has the table; an
-            // older one gets an empty record when it is migrated.
-            let _ = current.execute(
-                "INSERT INTO last_backup (id, path, completed_at) VALUES (1, ?1, ?2) \
-                 ON CONFLICT(id) DO UPDATE SET path = excluded.path, completed_at = excluded.completed_at",
-                [record.path, record.completed_at],
-            );
-        }
-        Ok(safety)
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    if root.exists() && parent.canonicalize()?.starts_with(root.canonicalize()?) {
+        return Err(Error::Backup(
+            "save the backup outside managed attachment storage".into(),
+        ));
     }
+    let staged = tempfile::NamedTempFile::new_in(parent)?;
+    let mut destination = Connection::open(staged.path())?;
+    // Byte-restoring reference writes take only the SQLite writer lock. Freeze them
+    // for the snapshot/path inventory, never for hashing/copying large file bodies.
+    let barrier = if let Some(path) = source.path().filter(|path| !path.is_empty()) {
+        let barrier = Connection::open(path)?;
+        barrier.busy_timeout(Duration::from_secs(10))?;
+        barrier.execute_batch("BEGIN IMMEDIATE")?;
+        Some(barrier)
+    } else {
+        None
+    };
+    copy(source, &mut destination)?;
+    let files = crate::backup_archive::retained_file_inventory(root)?;
+    drop(barrier);
+    crate::backup_archive::pack(&destination, files)?;
+    if check_schema {
+        validate(&destination)?;
+    }
+    drop(destination);
+    staged.as_file().sync_all()?;
+    staged.persist_noclobber(path).map_err(|error| {
+        if error.error.kind() == std::io::ErrorKind::AlreadyExists {
+            Error::FileExists(path.to_path_buf())
+        } else {
+            Error::Directory(error.error)
+        }
+    })?;
+    crate::backup_archive::sync_directory(parent)
 }

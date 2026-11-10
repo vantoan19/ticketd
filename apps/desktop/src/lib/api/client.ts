@@ -776,6 +776,7 @@ export const client = {
     planId: string | null,
     tags: string[],
     follow: boolean,
+    requestId?: string,
   ) {
     return ticketSchema.parse(
       await invoke("create_ticket", {
@@ -786,6 +787,7 @@ export const client = {
         planId,
         tags,
         follow,
+        ...(requestId && { requestId }),
       }),
     );
   },

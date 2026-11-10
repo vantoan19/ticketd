@@ -1,6 +1,9 @@
 //! Desktop adapter for the shared ticketd core.
 mod agent_skills;
+mod attachment_commands;
+mod attachment_media;
 mod cli_status;
+mod drive_commands;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
@@ -505,6 +508,7 @@ fn remove_checkout(id: String, path: String) -> Result<Project, String> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Preserve named IPC fields while adding an optional retry ID.
 fn create_ticket(
     title: String,
     body: String,
@@ -513,39 +517,28 @@ fn create_ticket(
     plan_id: Option<String>,
     tags: Vec<String>,
     follow: bool,
+    request_id: Option<String>,
 ) -> Result<Ticket, String> {
-    open_workspace()
+    match open_workspace()
         .and_then(|mut workspace| {
-            // `follow` is the desktop's "Follow tickets I create" preference; creating and
-            // following commit together.
-            let mut tickets = workspace.apply_batch_following(
-                vec![
-                    BatchOperation::Create {
-                        name: "new".into(),
-                        title,
-                        project_id,
-                    },
-                    BatchOperation::Change {
-                        ticket: "$new".into(),
-                        change: Box::new(TicketChange {
-                            patch: TicketPatch {
-                                body: Some(body),
-                                status: Some(status),
-                                plan_id: plan_id.map(Some),
-                                ..Default::default()
-                            },
-                            add_tags: tags,
-                            ..Default::default()
-                        }),
-                    },
-                ],
-                follow,
-            )?;
-            tickets
-                .pop()
-                .ok_or_else(|| ticketd_core::Error::InvalidBatch("missing result".into()))
+            workspace.write(
+                request_id.as_deref(),
+                WriteRequest::CreateTicketWithContent {
+                    title,
+                    body,
+                    status,
+                    project_id,
+                    plan_id,
+                    tags,
+                    follow,
+                },
+            )
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected ticket creation result".into()),
+    }
 }
 
 #[tauri::command]
@@ -1398,15 +1391,80 @@ pub fn run() -> Result<(), tauri::Error> {
         ticketd_core::source::RefreshPolicy::default(),
     ));
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol(
+            "attachment-media",
+            |context, request, responder| {
+                if context.webview_label() != "main" {
+                    responder.respond(attachment_media::denied(tauri::http::StatusCode::FORBIDDEN));
+                    return;
+                }
+                attachment_media::handle(request, responder);
+            },
+        )
+        .manage(drive_commands::DrivePickerOperations::default())
         .manage(Refresher(std::sync::Arc::clone(&coordinator)))
         .setup(move |_| {
             start_periodic_refresh(coordinator);
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        // Tauri classifies registered schemes as local IPC origins. Media is never a document.
+        .plugin(
+            tauri::plugin::Builder::<_, ()>::new("attachment-media-navigation")
+                .on_navigation(|_, url| {
+                    url.scheme() != "attachment-media"
+                        && url.host_str() != Some("attachment-media.localhost")
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            drive_commands::drive_configuration,
+            drive_commands::drive_reference,
+            drive_commands::drive_uploaded_copy_status,
+            drive_commands::check_drive_reference,
+            drive_commands::recover_drive_reference,
+            drive_commands::select_drive_files,
+            drive_commands::select_drive_upload_folder,
+            drive_commands::attachment_upload_destination,
+            drive_commands::set_attachment_upload_destination,
+            drive_commands::begin_attachment_upload,
+            drive_commands::check_drive_upload,
+            drive_commands::open_drive_upload,
+            attachment_commands::upload_drive_file,
+            drive_commands::cancel_drive_selection,
+            attachment_commands::import_attachment,
+            attachment_commands::capture_attachment,
+            attachment_commands::cancel_attachment_upload,
+            attachment_commands::attachment_upload_limit,
+            attachment_commands::attachment_workspace_id,
+            attachment_commands::set_attachment_upload_limit,
+            attachment_commands::list_attachments,
+            attachment_commands::search_attachments,
+            attachment_commands::attachment_cleanup_reviews,
+            attachment_commands::attachment_cleanup_review,
+            attachment_commands::purge_attachment,
+            attachment_commands::remove_remote_attachment,
+            attachment_commands::open_removed_drive_file,
+            attachment_commands::quarantine_attachment,
+            attachment_commands::restore_attachment,
+            attachment_commands::rename_attachment,
+            attachment_commands::inspect_attachment,
+            attachment_commands::ticket_attachments,
+            attachment_commands::set_ticket_attachment,
+            attachment_commands::replace_ticket_attachment,
+            attachment_commands::export_attachment,
+            attachment_commands::export_markdown_with_files,
+            attachment_commands::open_attachment,
+            attachment_commands::attachment_uri,
+            attachment_commands::resolve_attachment_uri,
+            attachment_commands::attachment_preview,
+            attachment_commands::draft_retentions,
+            attachment_commands::complete_draft_cutover,
+            attachment_commands::draft_cutover_pending,
+            attachment_commands::retain_draft,
+            attachment_commands::attachment_usage,
             context_link_markdown,
             document_context_links,
             ticket_from_document,

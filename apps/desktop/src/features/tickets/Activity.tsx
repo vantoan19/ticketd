@@ -53,6 +53,8 @@ import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
 import { relativeDateTime, formatDateTime } from "@/lib/format";
 import { revealInDetail } from "./detail-scroll";
+import { z } from "zod";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "./activity.css";
 
 /**
@@ -66,6 +68,17 @@ type Draft = {
   /** The id of an existing Document attached to the update, or "". */
   support: string;
 };
+const recoveryDraftSchema = z.object({
+  brief: z.string(),
+  details: z.string().nullable(),
+  support: z.string(),
+});
+const editDraftSchema = z.object({
+  id: z.string(),
+  original: z.string(),
+  content: z.string(),
+});
+const requestSchema = z.object({ payload: z.string(), id: z.string() });
 const drafts = new Map<string, Draft>();
 const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
 // Earlier versions kept details and the attachment under their own keys.
@@ -172,6 +185,8 @@ export function Activity({
   target?: { id: string; key: number } | null;
   plans?: Plan[];
 }) {
+  const recovery = useDraftRecovery();
+  const recoveryOwner = `activity:${ticketId}`;
   const now = useNow();
   const [feedback, setFeedback] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -248,7 +263,13 @@ export function Activity({
     }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState<Draft>(() => loadDraft(ticketId));
+  const [saved, setSaved] = useState<Draft>(
+    () =>
+      recovery.read(recoveryOwner, recoveryDraftSchema) ??
+      (recovery.active
+        ? { brief: "", details: null, support: "" }
+        : loadDraft(ticketId)),
+  );
   const savedRef = useRef(saved);
   const [composing, setComposing] = useState(() => hasDraft(saved));
   const requestKey = `ticketd:activity-request:${ticketId}`;
@@ -257,6 +278,16 @@ export function Activity({
     const next = { ...savedRef.current, ...patch };
     savedRef.current = next;
     setSaved(next);
+    if (recovery.active) {
+      void recovery
+        .put(
+          recoveryOwner,
+          hasDraft(next) ? next : null,
+          [next.brief, next.details ?? ""].filter(Boolean),
+        )
+        .catch(() => {});
+      return;
+    }
     try {
       if (hasDraft(next)) {
         drafts.set(ticketId, next);
@@ -275,6 +306,7 @@ export function Activity({
   // Write the draft once more as the page goes away, so a quick quit keeps it.
   useEffect(() => {
     const flush = () => {
+      if (recovery.active) return;
       try {
         if (hasDraft(savedRef.current))
           localStorage.setItem(
@@ -291,9 +323,13 @@ export function Activity({
       window.removeEventListener("pagehide", flush);
       document.removeEventListener("visibilitychange", flush);
     };
-  }, [ticketId]);
+  }, [ticketId, recovery]);
   function clearDraft() {
     updateDraft({ brief: "", details: null, support: "" });
+    if (recovery.active) {
+      void recovery.put(requestKey, null, []).catch(() => {});
+      return;
+    }
     try {
       localStorage.removeItem(requestKey);
     } catch {
@@ -343,7 +379,12 @@ export function Activity({
     id: string;
     original: string;
     content: string;
-  } | null>(null);
+  } | null>(() => recovery.read(`activity-edit:${ticketId}`, editDraftSchema));
+  useEffect(() => {
+    void recovery
+      .put(`activity-edit:${ticketId}`, edit, edit ? [edit.content] : [])
+      .catch(() => {});
+  }, [edit, recovery, ticketId]);
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const pages = useRef(1);
@@ -404,6 +445,7 @@ export function Activity({
     setPending(true);
     setError("");
     try {
+      await recovery.flush();
       if (edit) {
         const savedNote = await client.editActivity(
           reference,
@@ -422,7 +464,9 @@ export function Activity({
           showDetails ? details : null,
           support || null,
         ]);
-        const previous = localValue(requestKey);
+        const previous = recovery.active
+          ? JSON.stringify(recovery.read(requestKey, requestSchema))
+          : localValue(requestKey);
         let requestId: string = crypto.randomUUID();
         if (previous) {
           try {
@@ -440,14 +484,17 @@ export function Activity({
             /* Replace malformed local state. */
           }
         }
-        try {
-          localStorage.setItem(
-            requestKey,
-            JSON.stringify({ payload, id: requestId }),
-          );
-        } catch {
-          /* The retry id is best effort; a full store must not block posting. */
-        }
+        if (recovery.active)
+          await recovery.put(requestKey, { payload, id: requestId }, []);
+        else
+          try {
+            localStorage.setItem(
+              requestKey,
+              JSON.stringify({ payload, id: requestId }),
+            );
+          } catch {
+            /* The retry id is best effort; a full store must not block posting. */
+          }
         await client.addActivityWithDetails(
           reference,
           draft,
@@ -456,9 +503,12 @@ export function Activity({
           requestId,
         );
       }
-      if (edit) setEdit(null);
-      else {
+      if (edit) {
+        await recovery.put(`activity-edit:${ticketId}`, null, []);
+        setEdit(null);
+      } else {
         clearDraft();
+        if (recovery.active) await recovery.put(requestKey, null, []);
         setComposing(false);
       }
       await loadNotes();
@@ -677,7 +727,11 @@ export function Activity({
                 <span>{edit ? "Edit update" : "New update"}</span>
               </FieldLabel>
               <LazyMarkdownEditor
+                attachmentTicketReference={reference}
                 key={edit?.id ?? "new"}
+                recoveryOwner={
+                  edit ? `activity-edit:${ticketId}` : recoveryOwner
+                }
                 label={edit ? "Edit update" : "New update"}
                 placeholder="Write an update…"
                 value={draftText}
@@ -696,7 +750,9 @@ export function Activity({
                 <span>Details</span>
               </FieldLabel>
               <LazyMarkdownEditor
+                attachmentTicketReference={reference}
                 label="Details"
+                recoveryOwner={`${recoveryOwner}:details`}
                 placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."
                 value={details}
                 onChange={setDetails}

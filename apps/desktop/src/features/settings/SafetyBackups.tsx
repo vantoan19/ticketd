@@ -38,8 +38,8 @@ export function SafetyBackups() {
     <div className="safety-backups" role="region" aria-label="Safety backups">
       <p className="settings-hint">
         ticketd keeps a copy next to the workspace before it restores a backup
-        or upgrades the workspace format. Restore one the same way as any other
-        backup.
+        or upgrades the workspace format, including every retained local
+        attachment file. Restore one the same way as any other backup.
       </p>
       {backups && backups.length === 0 && (
         <EmptyState size="inline" description="No safety backups yet." />

@@ -38,6 +38,181 @@ enum ReminderCommand {
 }
 
 #[derive(Subcommand)]
+enum AttachmentCommand {
+    /// Remove an unused remote record from ticketd; the file remains in Drive
+    RemoveFromTicketd {
+        id: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Permanently delete quarantined local bytes; identity remains unavailable. Never deletes remote files.
+    Purge {
+        id: String,
+        /// Required acknowledgement: this cannot be undone except by restoring an older complete backup
+        #[arg(long, required = true)]
+        confirm: bool,
+    },
+    /// Review unused local storage and protected references; never moves or deletes files
+    CleanupReview {
+        id: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Reclaim local storage by reversible quarantine after rechecking all protections
+    Quarantine {
+        id: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Restore quarantined local bytes under their original attachment identity
+    Restore {
+        id: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Search filenames and available metadata with usage context, recent first
+    Search {
+        #[arg(default_value = "")]
+        search: String,
+        #[arg(long, value_enum, default_value_t = AttachmentStateArg::All)]
+        state: AttachmentStateArg,
+        /// Prioritize related files without flattening Document ownership
+        #[arg(long)]
+        related_ticket: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Change the display name only; authored labels and original bytes stay unchanged
+    Rename {
+        id: String,
+        display_name: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Read or change the workspace's per-file upload limit (default 100 MiB); existing snapshots stay unchanged
+    Limit {
+        /// Positive byte bound, enforced while copying actual bytes
+        #[arg(long)]
+        bytes: Option<u64>,
+    },
+    /// Read or change the default for new uploads; never moves existing files
+    Destination {
+        #[arg(long, conflicts_with = "drive")]
+        local: bool,
+        #[arg(long, requires_all = ["connection", "folder"])]
+        drive: bool,
+        #[arg(long, requires = "drive")]
+        connection: Option<String>,
+        #[arg(long, requires = "drive")]
+        folder: Option<String>,
+        #[arg(long, requires = "drive")]
+        resource_key: Option<String>,
+    },
+    /// Upload using the workspace default; retry keeps its original destination
+    Add {
+        path: String,
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        request_id: Option<String>,
+        /// Explicit local upload without changing the workspace preference
+        #[arg(long)]
+        local: bool,
+    },
+    /// List direct ticket attachments, or all workspace uploads including unused files
+    List {
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Inspect a workspace attachment by stable ID
+    Inspect { id: String },
+    /// Last-known Drive metadata and opaque connection handle; no network needed
+    DriveInfo { id: String },
+    /// Compare current metadata with uploaded-copy provenance; never downloads bytes
+    DriveCopyStatus { id: String },
+    /// Upload a new blob copy to an explicitly authorized writable Drive folder
+    DriveUpload {
+        path: String,
+        #[arg(long)]
+        connection: String,
+        #[arg(long)]
+        folder: String,
+        #[arg(long)]
+        resource_key: Option<String>,
+        #[arg(long)]
+        request_id: String,
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// List pending, uncertain and completed uploads without network access
+    DriveUploads,
+    /// Inspect an operation; --check reconciles the same remote ID without uploading
+    DriveUploadStatus {
+        request_id: String,
+        #[arg(long)]
+        check: bool,
+    },
+    /// Reference an already-authorized Drive file using the shared OS credential store
+    DriveAdd {
+        connection: String,
+        file_id: String,
+        #[arg(long)]
+        resource_key: Option<String>,
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// Resolve current Drive metadata without downloading or converting content
+    DriveResolve { id: String },
+    /// Check current access, returning typed recovery status and last-known metadata
+    DriveStatus { id: String },
+    /// Reconnect and authorize the original file in system-browser Picker (open the printed URL)
+    DriveAuthorize { id: String },
+    /// Explain saved, Trash, draft and Undo protections (eligibility is advisory)
+    Usage { id: String },
+    /// Finish legacy draft migration only after importing/reviewing every desktop profile
+    CompleteDraftMigration {
+        #[arg(long, required = true)]
+        all_profiles_reviewed: bool,
+    },
+    /// Inspect private recovery payloads, including preserved drafts from other profiles
+    RecoveryDrafts,
+    /// Discard one reviewed recovery payload/protection, retaining attachment bytes
+    ReleaseRecovery {
+        owner: String,
+        #[arg(long)]
+        revision: i64,
+        #[arg(long, required = true)]
+        discard_recovery: bool,
+    },
+    /// Print the workspace-scoped URI to use in canonical Markdown links
+    Uri { id: String },
+    /// Reuse an existing attachment on another ticket
+    Link { id: String, ticket: String },
+    /// Remove only this ticket's association, retaining the snapshot and all other uses
+    Detach { id: String, ticket: String },
+    /// Copy stored bytes to a new file without overwriting an existing destination
+    Export { id: String, path: String },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum AttachmentStateArg {
+    All,
+    InUse,
+    Unused,
+    Quarantined,
+}
+
+#[derive(Subcommand)]
 enum DocumentCommand {
     /// List what an item (Document, ticket or Plan ID) links to: its outgoing references
     References {
@@ -183,6 +358,11 @@ enum DocumentCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage workspace file snapshots without the desktop running
+    Attachment {
+        #[command(subcommand)]
+        command: AttachmentCommand,
+    },
     /// Capture and read Documents
     Document {
         #[command(subcommand)]
@@ -202,12 +382,33 @@ enum Command {
     },
     /// Save a consistent workspace backup to a new file
     Backup { path: String },
+    /// Review backup integrity and retained local bytes as JSON without restoring
+    InspectBackup { path: String },
     /// Restore a workspace backup after closing other ticketd operations
-    RestoreWorkspace { path: String },
+    RestoreWorkspace {
+        path: String,
+        /// Recover into this database path instead of replacing the current workspace; does not switch the desktop workspace
+        #[arg(long)]
+        target: Option<String>,
+    },
     /// Export a portable JSON snapshot to stdout or a new file
     Export {
         #[arg(long)]
         file: Option<String>,
+    },
+    /// Export portable Markdown, referenced files and manifest into a fresh folder; inspect JSON status for omissions
+    #[command(group(clap::ArgGroup::new("content").required(true).multiple(false).args(["ticket", "document", "markdown_file"])))]
+    ExportMarkdown {
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long)]
+        document: Option<String>,
+        /// Export selected/current Markdown from a file (- reads stdin)
+        #[arg(long)]
+        markdown_file: Option<String>,
+        /// Existing parent folder; a new ticketd-export-* directory is created
+        #[arg(long)]
+        output: String,
     },
     /// Execute a JSON write request (file or - for stdin); prints {"kind","value"}. With --request-id, a retry returns the first result. Other commands print the bare object; `activity add/edit` and `document create/change` also accept --request-id with the same replay behavior
     Write {
@@ -837,6 +1038,7 @@ fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
     let group = parents.get(1).map(String::as_str).unwrap_or("");
     Some(match id {
         "id" => match group {
+            "attachment" => "The Attachment ID (see `attachment list`)",
             "document" => "The Document ID (see `document recent` or `document search`)",
             "plan" => "The Plan ID (see `plan list`)",
             "project" => "The project ID (see `project list`)",
@@ -925,8 +1127,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Skills { command } => return skills::run(command, output),
         CliCommand::Workspace(command) => command,
     };
-    if let Command::RestoreWorkspace { path } = &command {
-        let safety = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+    if let Command::RestoreWorkspace { path, target } = &command {
+        let destination = target
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("TICKETD_TEST_WORKSPACE").map(std::path::PathBuf::from));
+        let safety = match destination {
             Some(workspace) => Workspace::restore(workspace, path)?,
             None => Workspace::restore_default(path)?,
         };
@@ -962,6 +1168,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         None => Workspace::open_default()?,
     };
     let text = match command {
+        Command::Attachment { command } => attachment_command(&mut workspace, command)?,
         Command::Document { command } => match command {
             DocumentCommand::References { id, offset } => {
                 serde_json::to_string(&workspace.context_links(&id, 100, offset)?)?
@@ -1134,7 +1341,37 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             workspace.backup(&path)?;
             format!("Backup saved: {path}")
         }
+        Command::InspectBackup { path } => serde_json::to_string(&workspace.inspect_backup(path)?)?,
         Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
+        Command::ExportMarkdown {
+            ticket,
+            document,
+            markdown_file,
+            output,
+        } => {
+            let source = match (ticket, document, markdown_file) {
+                (Some(reference), None, None) => {
+                    ticketd_core::MarkdownExportSource::Ticket { reference }
+                }
+                (None, Some(id), None) => ticketd_core::MarkdownExportSource::Document { id },
+                (None, None, Some(path)) => {
+                    let body = if path == "-" {
+                        let mut body = String::new();
+                        std::io::stdin().read_to_string(&mut body)?;
+                        body
+                    } else {
+                        std::fs::read_to_string(path)?
+                    };
+                    ticketd_core::MarkdownExportSource::Markdown { body }
+                }
+                _ => {
+                    return Err(
+                        "select exactly one of --ticket, --document or --markdown-file".into(),
+                    );
+                }
+            };
+            serde_json::to_string_pretty(&workspace.export_markdown_with_files(source, output)?)?
+        }
         Command::Export { file } => {
             if let Some(path) = file {
                 workspace.export_file(path)?;
@@ -1820,6 +2057,337 @@ fn main() {
         eprintln!("error: {error}{hint}");
         std::process::exit(1);
     }
+}
+
+fn attachment_command(
+    workspace: &mut Workspace,
+    command: AttachmentCommand,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let status_only = matches!(&command, AttachmentCommand::DriveStatus { .. });
+    Ok(match command {
+        AttachmentCommand::Purge { id, confirm: _ } => {
+            serde_json::to_string(&workspace.purge_attachment(&id)?)?
+        }
+        AttachmentCommand::RemoveFromTicketd { id, request_id } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::RemoveRemoteAttachment { id },
+        )? {
+            WriteResult::RemoteAttachmentRemoved(result) => serde_json::to_string(&result)?,
+            _ => return Err("Unexpected remote removal result".into()),
+        },
+        AttachmentCommand::CleanupReview { id, limit, offset } => match id {
+            Some(id) => serde_json::to_string(&workspace.attachment_cleanup_review(&id)?)?,
+            None => serde_json::to_string(&workspace.attachment_cleanup_reviews(limit, offset)?)?,
+        },
+        AttachmentCommand::Quarantine { id, request_id } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::QuarantineAttachment { id },
+        )? {
+            WriteResult::Attachment(file) => serde_json::to_string(&file)?,
+            _ => return Err("unexpected quarantine result".into()),
+        },
+        AttachmentCommand::Restore { id, request_id } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::RestoreAttachment { id },
+        )? {
+            WriteResult::Attachment(file) => serde_json::to_string(&file)?,
+            _ => return Err("unexpected restore result".into()),
+        },
+        AttachmentCommand::Search {
+            search,
+            state,
+            related_ticket,
+            limit,
+            offset,
+        } => serde_json::to_string(&workspace.search_attachments(
+            &ticketd_core::AttachmentQuery {
+                search,
+                state: match state {
+                    AttachmentStateArg::All => ticketd_core::AttachmentState::All,
+                    AttachmentStateArg::InUse => ticketd_core::AttachmentState::InUse,
+                    AttachmentStateArg::Unused => ticketd_core::AttachmentState::Unused,
+                    AttachmentStateArg::Quarantined => ticketd_core::AttachmentState::Quarantined,
+                },
+                ticket: related_ticket,
+                limit,
+                offset,
+            },
+        )?)?,
+        AttachmentCommand::Rename {
+            id,
+            display_name,
+            request_id,
+        } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::RenameAttachment { id, display_name },
+        )? {
+            WriteResult::Attachment(file) => serde_json::to_string(&file)?,
+            _ => return Err("unexpected attachment rename result".into()),
+        },
+        AttachmentCommand::Limit { bytes } => {
+            if let Some(bytes) = bytes {
+                workspace.set_attachment_upload_limit(bytes)?;
+            }
+            serde_json::to_string(
+                &serde_json::json!({ "limit_bytes": workspace.attachment_upload_limit()?, "default_bytes": ticketd_core::DEFAULT_ATTACHMENT_LIMIT }),
+            )?
+        }
+        AttachmentCommand::Destination {
+            local,
+            drive,
+            connection,
+            folder,
+            resource_key,
+        } => {
+            let saved = if local {
+                workspace.set_local_upload_destination()?
+            } else if drive {
+                let connection = connection.ok_or("--drive requires --connection")?;
+                let destination = ticketd_core::drive::DriveUploadDestination {
+                    connection_id: connection.clone(),
+                    folder_id: folder.ok_or("--drive requires --folder")?,
+                    resource_key,
+                };
+                let transport = ticketd_core::drive::GoogleTransport::default();
+                let provider = ticketd_core::drive::GoogleDrive::new(
+                    &connection,
+                    &ticketd_core::drive::PlatformCredentialStore,
+                    &transport,
+                );
+                workspace.set_drive_upload_destination(&destination, &provider)?
+            } else {
+                workspace.attachment_upload_destination()?
+            };
+            serde_json::to_string(&saved)?
+        }
+        AttachmentCommand::Add {
+            path,
+            ticket,
+            name,
+            request_id,
+            local,
+        } => {
+            let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let destination = workspace.begin_attachment_upload(
+                &request_id,
+                local.then_some(ticketd_core::AttachmentUploadDestination::Local),
+            )?;
+            let file = match destination {
+                ticketd_core::AttachmentUploadDestination::Local => {
+                    let result = workspace.write(
+                        Some(&request_id),
+                        WriteRequest::ImportAttachment {
+                            source: path,
+                            display_name: name.clone(),
+                        },
+                    )?;
+                    let WriteResult::Attachment(file) = result else {
+                        return Err("unexpected attachment result".into());
+                    };
+                    file
+                }
+                ticketd_core::AttachmentUploadDestination::GoogleDrive { destination, .. } => {
+                    let transport = ticketd_core::drive::GoogleTransport::default();
+                    let provider = ticketd_core::drive::GoogleDrive::new(
+                        &destination.connection_id,
+                        &ticketd_core::drive::PlatformCredentialStore,
+                        &transport,
+                    );
+                    let file = workspace.upload_drive_file(
+                        &request_id,
+                        &path,
+                        &destination,
+                        &provider,
+                        |_, _| true,
+                    ).map_err(|error| format!("Upload request {request_id} did not finish: {error}. Retry the same file with `attachment add --request-id {request_id}`; its original destination is retained. Use a new request ID for an explicit alternative."))?;
+                    if let Some(display_name) = name {
+                        match workspace.write(
+                            Some(&format!("upload-name:{request_id}")),
+                            WriteRequest::RenameAttachment {
+                                id: file.id.clone(),
+                                display_name,
+                            },
+                        )? {
+                            WriteResult::Attachment(file) => file,
+                            _ => return Err("unexpected attachment rename result".into()),
+                        }
+                    } else {
+                        file
+                    }
+                }
+            };
+            if let Some(ticket) = ticket {
+                workspace.set_ticket_attachment(&ticket, &file.id, true).map_err(|error| {
+                    format!("attachment stored as {}; ticket association failed: {error}. Reuse it with `ticketd attachment link {} {ticket}`", file.id, file.id)
+                })?;
+            }
+            serde_json::to_string(&file)?
+        }
+        AttachmentCommand::List {
+            ticket,
+            limit,
+            offset,
+        } => serde_json::to_string(&match ticket {
+            Some(ticket) => workspace
+                .ticket_attachments(&ticket)?
+                .into_iter()
+                .skip(offset as usize)
+                .take(limit.min(1000) as usize)
+                .collect(),
+            None => workspace.attachments(limit, offset)?,
+        })?,
+        AttachmentCommand::Inspect { id } => serde_json::to_string(&workspace.attachment(&id)?)?,
+        AttachmentCommand::DriveInfo { id } => {
+            serde_json::to_string(&workspace.drive_reference(&id)?)?
+        }
+        AttachmentCommand::DriveUploads => serde_json::to_string(&workspace.drive_uploads()?)?,
+        AttachmentCommand::DriveUploadStatus { request_id, check } => {
+            let operation = workspace.drive_upload(&request_id)?;
+            if check {
+                let transport = ticketd_core::drive::GoogleTransport::default();
+                let provider = ticketd_core::drive::GoogleDrive::new(
+                    &operation.request.destination.connection_id,
+                    &ticketd_core::drive::PlatformCredentialStore,
+                    &transport,
+                );
+                serde_json::to_string(&workspace.check_drive_upload(&request_id, &provider)?)?
+            } else {
+                serde_json::to_string(&operation)?
+            }
+        }
+        AttachmentCommand::DriveUpload {
+            path,
+            connection,
+            folder,
+            resource_key,
+            request_id,
+            ticket,
+        } => {
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &connection,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            let destination = ticketd_core::drive::DriveUploadDestination {
+                connection_id: connection.clone(),
+                folder_id: folder,
+                resource_key,
+            };
+            let file = workspace.upload_drive_file(
+                &request_id,
+                &path,
+                &destination,
+                &provider,
+                |_, _| true,
+            )?;
+            if let Some(ticket) = ticket {
+                workspace.set_ticket_attachment(&ticket,&file.id,true).map_err(|error|format!("Uploaded copy saved as {}; association failed: {error}; the remote file remains in Drive. Reuse with ticketd attachment link {} {ticket}",file.id,file.id))?;
+            }
+            serde_json::to_string(&file)?
+        }
+        AttachmentCommand::DriveAdd {
+            connection,
+            file_id,
+            resource_key,
+            ticket,
+        } => {
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &connection,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            let file = workspace.reference_drive_file(
+                &connection,
+                &file_id,
+                resource_key.as_deref(),
+                &provider,
+            )?;
+            if let Some(ticket) = ticket {
+                workspace.set_ticket_attachment(&ticket, &file.id, true).map_err(|error| format!("Drive reference saved as {}; association failed: {error}; reuse with `ticketd attachment link {} {ticket}`", file.id, file.id))?;
+            }
+            serde_json::to_string(&file)?
+        }
+        AttachmentCommand::DriveAuthorize { id } => {
+            let session = workspace.begin_drive_reference_recovery(
+                &id,
+                ticketd_core::drive::DesktopOAuthClient::from_environment()?,
+                std::time::Duration::from_secs(180),
+            )?;
+            let reference = workspace.drive_reference(&id)?;
+            eprintln!(
+                "Open this URL in your system browser, reconnect with the original Google account, and select only {} (file ID {}). No sharing changes will be made:\n{}",
+                reference.metadata.name,
+                reference.metadata.id,
+                session.authorization_url()
+            );
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let selection = session.finish(
+                &transport,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &std::sync::atomic::AtomicBool::new(false),
+            )?;
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &selection.connection_id,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            serde_json::to_string(&workspace.recover_drive_reference(&id, &selection, &provider)?)?
+        }
+        AttachmentCommand::DriveResolve { id } | AttachmentCommand::DriveStatus { id } => {
+            let reference = workspace.drive_reference(&id)?;
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &reference.connection_id,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            let access = workspace.check_drive_reference(&id, &provider)?;
+            if status_only {
+                serde_json::to_string(&access)?
+            } else {
+                if let Some(error) = access.failure {
+                    return Err(format!("{}; retry: ticketd attachment drive-resolve {id}; reconnect/authorize this file: ticketd attachment drive-authorize {id}; open {} in Drive to review availability or request access from its owner; no sharing changes are made", serde_json::to_string(&error)?, access.reference.metadata.web_url).into());
+                }
+                serde_json::to_string(&access.reference)?
+            }
+        }
+        AttachmentCommand::DriveCopyStatus { id } => {
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDriveCopies::new(
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            serde_json::to_string(&workspace.inspect_drive_uploaded_copy(&id, &provider)?)?
+        }
+        AttachmentCommand::Usage { id } => {
+            serde_json::to_string(&workspace.attachment_usage(&id)?)?
+        }
+        AttachmentCommand::CompleteDraftMigration {
+            all_profiles_reviewed: _,
+        } => {
+            workspace.complete_draft_cutover()?;
+            serde_json::json!({"legacy_drafts_pending":false}).to_string()
+        }
+        AttachmentCommand::RecoveryDrafts => serde_json::to_string(&workspace.draft_retentions()?)?,
+        AttachmentCommand::ReleaseRecovery {
+            owner,
+            revision,
+            discard_recovery: _,
+        } => serde_json::to_string(&workspace.release_draft(&owner, revision)?)?,
+        AttachmentCommand::Uri { id } => serde_json::to_string(&workspace.attachment_uri(&id)?)?,
+        AttachmentCommand::Link { id, ticket } => {
+            serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, true)?)?
+        }
+        AttachmentCommand::Detach { id, ticket } => {
+            serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, false)?)?
+        }
+        AttachmentCommand::Export { id, path } => {
+            workspace.export_attachment(&id, &path)?;
+            serde_json::to_string(&serde_json::json!({ "id": id, "path": path }))?
+        }
+    })
 }
 
 fn parse_relationship_kind(

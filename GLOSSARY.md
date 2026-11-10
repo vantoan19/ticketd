@@ -88,6 +88,32 @@ Reusable context: a thought, draft, spec, knowledge, or supporting detail. A Doc
 **Activity details**:
 A Document created as the supporting detail of an authored Activity. Its originating Activity initially excludes it from ordinary browsing. Keep in Documents or designation as a Plan spec makes it visible without changing identity or provenance; an AI tag does not control visibility. Linking an existing standalone Document does not change its visibility. Deleting the originating Activity leaves the Document intact and discoverable in ordinary browsing.
 
+**Attachment**:
+A workspace-scoped file identity with a display name, original filename, available metadata, and storage locator. It is distinct from a Document and Implementation evidence. A local Attachment is an immutable workspace-managed snapshot; uploading a revision creates a new identity. Reusing or detaching an Attachment changes references without replacing or deleting its bytes. Files inside linked Documents stay associated with those Documents.
+
+**External attachment reference**:
+An Attachment resolving current provider content rather than a local snapshot. Google Drive references use the connected person's per-file application authorization and existing sharing permissions. Google Docs, Sheets, and Slides open in Drive without conversion. Last-known metadata survives access failures; removing a reference never deletes the remote file.
+
+**Quarantined Attachment**:
+A local Attachment whose unused bytes were explicitly moved out of active storage for reversible cleanup. Its identity and metadata remain discoverable, complete backups retain its bytes, and restoration makes the same identity reusable. Saved references, recoverable drafts, Undo and Trash protect files from quarantine. Quarantine still occupies disk space until explicit purge.
+
+**Uploaded copy**:
+An Attachment uploaded by ticketd to an explicitly selected remote folder. Its
+operation, remote identity, input digest and observed checksum/version are retained
+for recovery. The provider can change the content independently; an uploaded copy
+does not promise preserved original bytes. A revision uses a new upload operation
+and attachment identity. Cancellation and removal never delete the remote file.
+
+**Purged Attachment**:
+A local Attachment whose quarantined bytes were permanently removed by explicit
+confirmation. Its identity, names and references remain with unavailable status.
+Undo cannot recover purged bytes; deliberately restoring an older complete backup
+can recover the earlier workspace. A pending purge records committed intent but
+unconfirmed completion and requires explicit retry, never automatic deletion.
+
+**Recoverable draft**:
+Unpublished editor content retained independently of a ticket, Document, or Activity save. Its attachment references protect files while the editor is closed. Independently recoverable Undo states have separate protection; saving or discarding the current draft does not imply permission to delete their files.
+
 **Context graph**:
 A bounded view of explicit relationships among tickets, Documents, and Plans. Activities explain ticket-to-supporting-Document connections but are not separate graph nodes. Tags classify or color items without implying pairwise links or blocking dependencies.
 

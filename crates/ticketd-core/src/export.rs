@@ -12,6 +12,22 @@ impl Workspace {
         let mut result = Map::new();
         result.insert("format_version".into(), Value::from(2));
         for (table, columns) in [
+            ("attachment_upload_destination", "id, destination"),
+            ("attachment_upload_destinations", "request_id, destination"),
+            (
+                "drive_upload_operations",
+                "request_id, attachment_id, operation",
+            ),
+            ("attachment_upload_settings", "id, limit_bytes"),
+            (
+                "attachments",
+                "id, display_name, original_filename, size_bytes, kind, locator, quarantined, added_at, purge_state",
+            ),
+            ("ticket_attachments", "ticket_id, attachment_id"),
+            (
+                "drive_references",
+                "attachment_id, connection_id, file_id, metadata",
+            ),
             ("entities", "id, kind"),
             (
                 "documents",

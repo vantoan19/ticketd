@@ -99,7 +99,7 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 - Support editable, deletable, timestamped authored activities with required human-readable briefs and optional supporting Documents for progress and findings (section 16). Record the editing agent when supplied; do not store human names in the MVP. Attribution is descriptive, not verified identity or authorization.
 - Keep automatic ticket history separate from authored activities: record status, relationship, project/Plan membership, and trash/restore changes. Full body revision history is outside the MVP.
 - Tags use a shared workspace vocabulary; a ticket may have multiple tags independently of other relationships.
-- Priority, deadlines, attachments, and custom fields are not required for the MVP.
+- Priority, deadlines, and custom fields are not required for the MVP. File attachments extend the original MVP as described in section 17.
 
 ### 4.3. Hierarchical relationships, flat presentation
 
@@ -763,3 +763,361 @@ relationship additions/removals, atomic writes, and retry deduplication. Concurr
 writes to the same body may overwrite one another; conflict resolution and full
 body revision history remain outside this version. Technical storage and graph
 query decisions are recorded in ADR 0007.
+
+## 17. Local file attachments
+
+An Attachment is a reusable file identity within one workspace. Upload any regular
+file within the workspace upload limit (100 MiB per file by default) into managed local storage, independently of its ticket
+association. Preserve the original bytes, filename, size, and a separate display
+name. New uploads create new identities; moving or deleting the source file does
+not affect a completed snapshot. Local use works offline.
+
+The ticket property rail lists direct attachments separately from Documents.
+Attach file opens a native file picker; Existing files reuses recent uploads or
+an explicit Attachment ID. Metadata offers explicit Open file and Export file
+actions. Native open permits supported passive file formats; other types remain
+exportable. Opening never happens automatically. Detach from ticket removes only
+that direct association, preserving bytes and other uses, including recoverable
+trash. Files in linked Documents do not become direct ticket attachments.
+
+Attachments under the sidebar's Context group opens the workspace library.
+Search matches display names, original filenames, stable IDs, storage kinds and
+known byte sizes, plus cached external filenames, file IDs and MIME types, with
+All files, In use and Unused filters. Search never downloads remote content. In-use includes
+saved references, recoverable drafts, Undo and Trash. Unused is a reference state,
+not permission to delete: legacy-draft review can still withhold cleanup.
+Results are paged (50 in desktop, at most 1,000 per core query). Existing files
+offers the same search inside the shared picker, prioritizing the current
+ticket's related files, then recent uploads. Selection order controls insertion;
+reusing a file never copies its bytes or changes its identity.
+Local image thumbnails load lazily for supported files up to 5 MiB. Larger files
+keep a file icon and the explicit shared preview, so a library does not
+automatically buffer many large media responses.
+
+Rename changes only the display name. The original filename and every literal
+Markdown label, including an initially generated filename label, stay unchanged.
+Completed uploads remain searchable when insertion was abandoned.
+
+Inline links and direct attachment rows share a media preview dialog. Supported
+images, video and audio are attempted locally with explicit playback controls;
+unsupported files/codecs and failed rendering keep metadata and open/export
+actions. PDF, office and attached HTML content are not embedded viewers. Missing
+bytes retain identity, name and last-known metadata; Retry reinspects storage.
+Choose a replacement uploads/selects another identity and changes only the
+chosen reference, preserving all other uses. A changed draft requires reselection.
+Previewing, focusing or closing never changes canonical Markdown or its labels.
+The dialog fits compact screens and inherits the current light/dark theme.
+
+Completed uploads remain inspectable and reusable even if association fails or
+is abandoned. Retry uses the original upload request ID, including after a lost
+response or source deletion. A failed file copy never creates a valid Attachment.
+A failed database commit preserves completed bytes and a durable recovery record.
+An export refuses to replace an existing file and never leaves partial output.
+
+**Export Markdown with files** creates a new folder with portable Markdown,
+referenced local snapshots and a manifest. Ticket export includes direct
+attachments separately, without flattening files inside linked Documents.
+Repeated identities share one copy and colliding names remain distinct. Missing
+or foreign-workspace references retain readable links and explicit omissions;
+the result is `partial`. External references export current-provider links,
+without download or native conversion. A `complete` result includes files or
+links for every requested identity, not a promise of offline provider access.
+Canonical Markdown and ordinary copy-as-Markdown remain unchanged. Shared editor
+export uses its current selection, or all current content when nothing is
+selected, independently of saving. `ticketd export-markdown --ticket T-1`,
+`--document ID`, or `--markdown-file PATH` (`-` for stdin) plus `--output FOLDER`
+exposes the same workflow without a running desktop. See [export](export.md).
+
+The shared editor inserts stored files at the caret as ordinary inline Markdown
+links, including inside lists and tables. Upload and Existing files share the
+same picker in descriptions, ticket creation, Documents, and authored update
+briefs and details. Insertion changes the draft; each host retains its existing
+autosave or explicit-submit behavior. Failed saves retain the draft and completed
+files. Closing the picker before upload completion leaves the file available
+without inserting it.
+
+Capture multiple files through native selection, file drop or screenshot paste
+in the shared editor, including source mode. Each file has independent progress,
+Cancel and Retry. Successful links appear at the caret in original selection
+order, including when an earlier failed file is retried. Pending and failed rows
+are never canonical attachment links. Closing abandons insertion while selected
+uploads continue; completed bytes remain reusable. The desktop keeps pending
+upload identities and screenshot bytes in workspace-scoped local recovery storage
+across reloads. Recovered rows require explicit Retry at a newly chosen caret;
+Dismiss removes only capture recovery, never a completed snapshot or reference.
+This storage is separate from saved content and recoverable content drafts.
+
+Settings > Attachments changes the per-file upload limit immediately for future
+uploads. The core checks actual copied bytes, including a source that grows while
+copying. Previously completed uploads remain replayable after the limit changes.
+
+Canonical links use `ticketd://attachment/<workspace-id>/<attachment-id>`.
+Resolution is restricted to the owning workspace. Authored labels are literal
+content, independent of the file's display name. Reading, focusing, and changing
+editor modes do not rewrite source. Existing Markdown images and unsupported
+content retain source editing as their lossless fallback. Inline link removal
+changes only the reference. Saved body and brief references are derived in the
+same transaction as their content, separately from direct ticket associations.
+
+The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
+[--request-id ID]`, `attachment list [--ticket T-1]`, `attachment inspect <id>`,
+`attachment link <id> <ticket>`, `attachment detach <id> <ticket>`, and
+`attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
+`attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
+`attachment search [text] [--state all|in-use|unused] [--related-ticket T-1]
+[--limit N] [--offset N]` returns metadata with usage and related-file context.
+`attachment list` also accepts `--limit` and `--offset`, including with `--ticket`.
+`attachment rename <id> <display-name> [--request-id ID]` changes metadata only;
+retrying the same rename request cannot overwrite a later change.
+Failed association reports the completed Attachment ID for explicit reuse.
+`attachment limit [--bytes <positive-byte-count>]` reads or changes the same
+workspace upload limit; rejection explains the current bound and recovery command.
+
+Recoverable ticket/new-ticket, Document/capture, and authored-update brief/details
+drafts retain their files across navigation, restart, failed saves/submissions,
+editor mode changes and external-refresh conflict choices. Draft recovery does
+not publish an Activity or Document. Successful save, explicit discard or
+replacement updates only that recovery owner; independent rich/source Undo and
+Document conflict Reload Undo keep separate protection. Removing a reference or
+releasing recovery never deletes bytes. No inactivity expiry or automatic
+unreferenced-file deletion applies.
+
+`attachment usage <id>` explains direct, inline, draft, Undo and Trash protections
+and reports advisory cleanup eligibility. Trashed tickets/Documents and hidden
+Activity details remain uses; deleting an Activity removes its brief use while
+preserving its supporting Document and its files. Cleanup must check eligibility
+again when it executes.
+
+**Clean up** opens an explicit local-storage review in the attachment library,
+including eligibility reasons and protected references. Chosen unused local files
+move to reversible quarantine; no automatic deletion occurs. The Quarantine filter
+keeps their metadata discoverable and Restore makes the same identity reusable.
+Quarantine still occupies disk space and stays in complete backups until explicit
+purge. New references and Undo restore available quarantined bytes before saving;
+missing content produces an actionable failure instead of a false intact reference.
+Remote files have no reclaimable local bytes and are never deleted.
+
+`attachment cleanup-review [id] [--limit N] [--offset N]` reports the same core
+review. `attachment quarantine <id> [--request-id ID]` rechecks protections and
+quarantines local bytes; `attachment restore <id> [--request-id ID]` restores them.
+Request replay returns its original result without repeating later effects.
+`attachment search --state quarantined` finds retained quarantine.
+
+The library offers Permanently purge separately from Restore, with irreversible
+confirmation. `attachment purge <id> --confirm` provides the same explicit local
+action without a desktop. Purge rechecks saved references, drafts, Undo, Trash and
+legacy-draft review at execution time. It never deletes remote files or unrelated
+managed files. Its identity and names remain discoverable as permanently purged;
+references and recovered Undo show unavailable bytes, without silently replacing
+content. Upload replay preserves the identity and reports current purge status.
+
+An interrupted purge is pending until explicitly retried, with no automatic
+deletion on opening or backup. Pending purges block complete backup publication.
+Quarantine remains in backups until purge; backups after completed purge retain
+unavailable metadata. Existing older complete backups remain unchanged and can be
+deliberately restored to recover the earlier workspace and its bytes.
+
+The library's Added column shows truthful first-registration time for new local
+and external records. Old records without evidence show Unknown. Rename, retries,
+metadata refresh and backup/restore preserve this value.
+
+For an upgraded workspace with existing attachments, review recoverable drafts
+from every desktop profile before allowing cleanup. Startup imports the current
+profile's drafts without claiming other profiles are empty. Confirm **All desktop
+profiles reviewed** or run `attachment complete-draft-migration
+--all-profiles-reviewed` after importing/reviewing them. Until then usage reports
+`legacy_drafts_pending: true`; inspection, export and authoring remain available.
+Fresh workspaces and attachment-free upgrades need no desktop review.
+Distinct old profile drafts are preserved separately when their recovery keys
+collide; `attachment recovery-drafts` inspects their private recovery payloads
+without publishing them.
+After reviewing or recovering a payload, `attachment release-recovery <owner>
+--revision <revision> --discard-recovery` explicitly discards only that owner and
+protection. This also resolves conservative Undo protection left by an interrupted
+editor shutdown; attachment bytes and other owners remain intact.
+
+Publication checks the exact outgoing description in the core before creating a
+remote issue, including retries after a failed or resolved attempt. Workspace-only
+attachment links block publication, with affected URIs, known display names, and
+guidance to remove or replace the links with accessible URLs or share a separate
+export with files. Desktop publication and `source publish T-1 --preview` show the
+same preflight. No file upload or private-path rewrite is implied.
+
+Direct local attachment associations are not automatically published. They stay
+with the ticket through publication and source refresh, as do independently linked
+local Documents and their files. Source-authoritative description changes replace
+only derived references; unresolved incoming file links remain visible without
+blocking refresh or resolving against another workspace's attachments.
+
+Workspace backups include the database and every retained local file, including
+unused uploads, files referenced from Trash, recovery records and quarantined
+bytes until explicit purge. Concurrent uploads cannot produce a successful
+backup containing a local identity without its bytes. Backups never contain
+account credentials or implicitly download remote content; remote records retain
+references and metadata only.
+
+Desktop restore review and `ticketd inspect-backup <path>` check database
+integrity, retained file inventory and byte checksums, and report local file
+totals and remote-reference limits. Missing or damaged bytes block restoration
+before the current workspace changes. Restoring saves a complete safety copy
+first; failed replacement preserves the original database and files. Interrupted
+replacement is resolved before the workspace reopens. Existing supported
+attachment-free database-only backups remain usable. Attachment-bearing backups
+are versioned containers and must be restored through ticketd rather than opened
+as live workspace databases.
+
+If missing current bytes prevent a complete safety copy, restore identifies the
+missing files and leaves the current workspace unchanged. Recover the complete
+backup separately with `ticketd restore-workspace backup.sqlite3 --target
+recovered.sqlite3`. This uses the same validation and safety-copy workflow for
+the explicitly chosen destination; it does not switch the desktop workspace.
+
+## 18. Existing Google Drive references
+
+Distributed desktop and CLI builds include ticketd's Google app registration.
+Users sign in and authorize access through Google without creating a Cloud project,
+supplying OAuth files, or setting environment variables. Publisher configuration
+is a build responsibility; user authorization remains in the OS secure store.
+
+The shared attachment picker has a Google Drive tab. Choose files in the system
+browser using your connected account, then add the selected references in their
+returned order. Only explicitly selected files are authorized for ticketd; account
+access does not grant application access to every file. Selection does not change
+sharing. Failed selection never creates an apparently valid reference. Selected
+references remain discoverable in Existing files if insertion fails or is abandoned.
+
+Drive references show current source content, not a local snapshot. Google Docs,
+Sheets and Slides open in Drive, without conversion or embedded editing. Last-known
+metadata and authored links survive offline/provider failures. Removing a ticket
+association or an inline link does not delete the Drive file. Local uploads keep
+their configured destination; selecting Drive content never changes it.
+
+Portable Markdown exports retain named provider links and explicit manifest
+entries for Drive references without downloading or converting native files.
+Complete means every requested reference has a local file or provider link;
+recipient permissions and offline remote bytes are not guaranteed. Backups
+preserve remote identity, references and last-known metadata without credentials.
+Inspection explicitly reports that remote bytes are excluded and current access
+is unverified. After restoration, unavailable files need the appropriate account
+and explicit file selection again. Required local bytes remain fully verified;
+remote references never weaken that guarantee.
+
+The independent CLI can inspect/reuse a stored reference with ordinary attachment
+commands. `attachment drive-info <id>` returns last-known metadata and its opaque
+connection handle. `attachment drive-resolve <id>` refreshes current metadata.
+`attachment drive-add <connection> <file-id> [--ticket T-n] [--resource-key KEY]`
+uses the OS user's existing authorization. An unselected file gets selection
+instructions, never broader scopes. Byte export refuses external references and
+instructs the caller to open current content in Drive; portable-link export is a
+separate workflow.
+
+Opening a Drive reference checks metadata access without downloading content.
+Authorize file opens the system-browser Picker for the original file; Reconnect
+requires the original account and OAuth client. Picking a different account or
+file leaves the reference unchanged. Retry checks current access, preserving
+last-known details, authored labels, original names and all other uses.
+
+File selection for ticketd, expired account authorization, proven permission
+denial, Drive trash and provider/rate-limit failures have separate recovery
+messages. A generic 403 or 404 remains inaccessible-or-missing: ticketd does not
+infer deletion from an ambiguous response. Open in Drive lets the person review
+availability or request access from the owner; ticketd never changes sharing.
+
+`attachment drive-status <id>` returns last-known metadata and a typed `failure`
+(null after a successful metadata refresh). `drive-resolve` returns a nonzero
+exit with a stable error kind and retry/authorization/Open in Drive instructions
+on failure. `attachment drive-authorize <id>` prints a one-shot system-browser
+Picker URL and waits up to three minutes for explicit original-file selection.
+The CLI uses the same OS credential store without a desktop process. No command
+silently broadens `drive.file`, substitutes another file or caches remote bytes.
+
+### Removing from ticketd
+
+Unused Drive records offer **Remove from ticketd** in the attachment library.
+The confirmation explains that the original file remains in Drive, including
+copies uploaded by ticketd; this does not reclaim provider storage. Saved uses,
+recoverable drafts, Undo, Trash and unreviewed legacy drafts protect records.
+Core rechecks those protections when removing the record. Detaching a selected
+association or Markdown link remains independent and preserves other uses.
+
+The standalone CLI provides `attachment remove-from-ticketd <id>
+[--request-id ID]`; `attachment cleanup-review <id>` reports `remove_eligible`
+separately from local quarantine and purge eligibility. Removal returns the
+remaining provider link and re-add guidance. Choose the file again through the
+Google Drive picker to register it deliberately. Upload operations and immutable
+provenance survive record removal for recovery; old upload or metadata-write
+receipts do not recreate a removed record or report it as registered. A metadata
+refresh already in flight cannot recreate it either. Existing backups remain
+unchanged; deliberately restoring an older backup restores its earlier records.
+No removal, cleanup, cancellation or fallback action deletes a remote file or
+changes sharing permissions.
+
+## 19. Google Drive uploads
+
+Settings > Attachments configures one workspace upload destination: Local workspace
+or an explicitly selected writable Google Drive folder. Changes apply immediately
+to newly created operations, without moving existing bytes. Failed folder validation,
+offline access or a read-only folder leaves the saved preference unchanged. The
+folder is checked again before upload; provider failure never switches to local.
+
+The shared insertion flow displays the destination, captures the current workspace
+choice once per file selection, and binds each new operation before uploading.
+Each queued, interrupted or completed operation keeps that choice
+through preference changes, retry and restart, including older local capture queues.
+An explicit per-operation choice does not change the workspace preference.
+
+`attachment destination` reads the same preference without network access;
+`attachment destination --local` selects local storage. `attachment destination
+--drive --connection <handle> --folder <id> [--resource-key KEY]` validates and saves
+a writable authorized folder. `attachment add` uses the default for a new request,
+and its original destination for a retry. `attachment add --local` explicitly chooses
+local storage for a new operation without changing the default. A conflicting choice
+on an existing request ID is rejected; use a new ID for a deliberate alternative.
+
+In the shared Upload flow, Choose Drive folder opens the system-browser Picker
+for one folder. The core verifies that it is writable before selection is accepted
+and again before each upload. File selection, drop and screenshot capture use the
+same independent per-file states and workspace upload bound as local uploads.
+Each queued file retains its chosen account/folder even if the destination for
+new files changes. Failures never switch storage automatically.
+
+An upload has a durable operation and a pre-generated remote blob ID before
+sending bytes. Retry checks that same ID and verifies provenance, size and digest
+before registering a completed uploaded copy. Check status performs reconciliation
+without sending bytes. Unsupported verification stays uncertain, with Open in
+Drive available. Retry must use the original input bytes; uploading a revision
+requires a new operation and attachment identity. Completed copies remain in
+Existing files if insertion or reference saving fails. Canceling an upload or
+abandoning insertion never deletes a completed remote file. Upload locally instead
+is explicit and creates a separate local upload, preserving the Drive operation.
+
+`attachment drive-upload <path> --connection <handle> --folder <id> --request-id
+<id> [--resource-key KEY] [--ticket T-n]` uses the same workflows without a desktop
+process. `attachment drive-uploads` lists operation metadata; `attachment
+drive-upload-status <id> [--check]` inspects or reconciles a saved operation.
+Uploaded copies retain input SHA-256 and observed provider checksum/version;
+remote editing can change them independently. They are not immutable snapshots,
+and byte export requires an explicit verified-download workflow. Backups retain
+only remote metadata and operations, never remote bytes, tokens or resumable URLs.
+
+Uploaded-copy previews distinguish changed, unavailable, unsupported and unknown
+comparison states while retaining last-known details, Open in Drive and Retry.
+`attachment drive-copy-status <id>` returns the same current metadata comparison
+without downloading bytes; ordinary existing-file references return no uploaded
+copy comparison. A matching metadata observation is not a guarantee of preserved
+original bytes. Provider versions can also change for metadata edits; a version
+change alone does not mark the uploaded content as changed when checksum and
+size still match the original upload.
+
+Explicit file export and Export Markdown with files download an uploaded copy
+only when checksum, version, size and download capability support comparison.
+They check current metadata before and after the bounded download and compare
+actual bytes with the recorded upload SHA-256. Changed, unknown, unsupported or
+unavailable copies are omitted with reasons; portable manifests retain
+`uploaded_copy` classification and `copy_status`, and the UI/CLI return partial
+results alongside usable local snapshots and named current-source Drive links.
+Rejected downloads leave no exported file. Existing destinations are never
+overwritten, references and authored labels remain unchanged, and no download
+pins a revision, caches remote bytes automatically or changes the provider file.
+Version and other metadata must remain stable during the download; a version
+change since upload alone does not block verified export of matching bytes.

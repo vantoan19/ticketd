@@ -14,6 +14,12 @@ export function bridgeDefault(
   args?: { id?: string; reference?: string },
 ): unknown {
   switch (command) {
+    case "attachment_upload_destination":
+      return { kind: "local" };
+    case "attachment_upload_limit":
+      return 104857600;
+    case "attachment_workspace_id":
+      return "workspace-test";
     case "latest_update":
       return null;
     case "document_context_links":
@@ -24,6 +30,9 @@ export function bridgeDefault(
     case "activity_feed":
     case "ticket_history":
     case "list_evidence":
+    case "ticket_attachments":
+    case "list_attachments":
+    case "search_attachments":
     case "ticket_backlinks":
     case "inbox":
     case "safety_backups":

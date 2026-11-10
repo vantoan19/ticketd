@@ -24,6 +24,7 @@ import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { writeClipboard } from "@/lib/clipboard";
 import { revealFile } from "@/lib/reveal";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "@/features/settings/restore-review.css";
 
 type Phase =
@@ -184,6 +185,7 @@ export function RestoreDialog({
   const [failure, setFailure] = useState("");
   const [copied, setCopied] = useState("");
   const latest = useRef(0);
+  const recovery = useDraftRecovery();
 
   const check = useCallback(async (next: string) => {
     const request = ++latest.current;
@@ -225,6 +227,7 @@ export function RestoreDialog({
     setPhase({ name: "restoring", inspection });
     let safetyPath: string;
     try {
+      await recovery.flush();
       safetyPath = await client.restoreWorkspace(file);
     } catch (reason) {
       setPhase({ name: "review", inspection });
@@ -233,6 +236,7 @@ export function RestoreDialog({
     }
     let reloadFailure = "";
     try {
+      await recovery.reloadAfterRestore();
       await onRestored();
     } catch (reason) {
       reloadFailure = `The restore finished, but open views could not reload: ${String(reason)}. Restart ticketd to see the restored data.`;
@@ -354,6 +358,46 @@ export function RestoreDialog({
                 </span>
               </p>
               <Comparison current={inspection.current} backup={valid.summary} />
+              {inspection.attachment_content && (
+                <div
+                  className="restore-notes"
+                  aria-label="Attachment completeness"
+                >
+                  <p>
+                    <strong>Local attachment bytes are complete.</strong>
+                  </p>
+                  <p className="restore-muted">
+                    {inspection.attachment_content.local_snapshots} local{" "}
+                    {inspection.attachment_content.local_snapshots === 1
+                      ? "snapshot"
+                      : "snapshots"}
+                    ; {inspection.attachment_content.retained_files} retained{" "}
+                    {inspection.attachment_content.retained_files === 1
+                      ? "file"
+                      : "files"}
+                    ,{" "}
+                    {inspection.attachment_content.retained_bytes.toLocaleString()}{" "}
+                    bytes. Includes unused files, files in Trash, and retained
+                    quarantine.
+                  </p>
+                  <p className="restore-muted">
+                    {inspection.attachment_content.remote_references} remote{" "}
+                    {inspection.attachment_content.remote_references === 1
+                      ? "reference"
+                      : "references"}
+                    : links and metadata only. Remote file bytes and account
+                    credentials are not backed up.
+                  </p>
+                  {inspection.attachment_content.remote_references > 0 && (
+                    <p className="restore-muted">
+                      Restoring does not verify Drive access. If unavailable,
+                      connect the appropriate account and select the file again
+                      in the attachment picker's Google Drive tab. Last-known
+                      names and references are preserved.
+                    </p>
+                  )}
+                </div>
+              )}
               <p className="restore-muted">
                 Restoring replaces everything in this workspace, including
                 follows, reminders, and inbox state.{" "}

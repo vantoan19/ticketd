@@ -11,9 +11,10 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { PublicationAttempt, Ticket } from "@/lib/api/client";
 import { SourceActivityContext } from "./source-activity";
-import { PublicationNotice } from "./PublishToSource";
+import { PublicationNotice, PublishDialog } from "./PublishToSource";
 import { TicketHeader } from "./TicketHeader";
 import { TicketProperties } from "./TicketProperties";
+import { open } from "@tauri-apps/plugin-dialog";
 
 window.ResizeObserver = class {
   observe() {}
@@ -23,6 +24,7 @@ window.ResizeObserver = class {
 Element.prototype.scrollIntoView = () => {};
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(async () => {}),
   revealItemInDir: vi.fn(),
@@ -164,6 +166,180 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("workspace links open the core preflight with affected files and no publication action", async () => {
+  const message =
+    "Workspace-only attachment links cannot be published. Remove or replace links in the description, or export Markdown with files.";
+  bridgeAnswers({
+    ...eligible,
+    internal_attachments: [
+      {
+        uri: "ticketd://attachment/workspace/file",
+        display_name: "Checkout error.png",
+      },
+    ],
+    eligibility: {
+      kind: "ineligible",
+      reason: "internal_attachments",
+      message,
+    },
+  });
+  rail(ticket());
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Publish to GitHub/ }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Resolve attachment links before publishing",
+  });
+  expect(within(dialog).getByRole("alert").textContent).toContain(message);
+  expect(within(dialog).getByText("Checkout error.png")).toBeTruthy();
+  expect(
+    within(dialog).getByText(/Direct local attachment associations stay/),
+  ).toBeTruthy();
+  expect(
+    within(dialog).queryByRole("button", { name: "Publish issue" }),
+  ).toBeNull();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Review description" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
+  ).toBe(false);
+});
+
+test("publication preview explains that direct local files are not sent", async () => {
+  bridgeAnswers({
+    ...eligible,
+    local: {
+      activities: 0,
+      plan: null,
+      tags: [],
+      subtickets: [],
+      attachments: 2,
+    },
+  });
+  render(
+    <PublishDialog
+      ticket={ticket()}
+      provider="github"
+      onOpenChange={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  expect(
+    await screen.findByText(/2 directly attached files stay/),
+  ).toBeTruthy();
+});
+
+test("blocked publication exports with files without initiating publication", async () => {
+  vi.mocked(open).mockResolvedValue("C:/sharing");
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "preview_publication")
+      return {
+        ...eligible,
+        internal_attachments: [
+          {
+            uri: "ticketd://attachment/workspace/file",
+            display_name: "trace.log",
+          },
+        ],
+        eligibility: {
+          kind: "ineligible",
+          reason: "internal_attachments",
+          message: "Export with files before sharing.",
+        },
+      };
+    if (command === "export_markdown_with_files")
+      return {
+        format_version: 1,
+        status: "complete",
+        directory: "C:/sharing/export",
+        markdown_path: "content.md",
+        manifest_path: "manifest.json",
+        attachments: [],
+      };
+    return [];
+  });
+  render(
+    <PublishDialog
+      ticket={ticket()}
+      provider="github"
+      onOpenChange={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Export with files" }),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "Export complete" }),
+  ).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("export_markdown_with_files", {
+    source: { kind: "ticket", reference: "T-1" },
+    output: "C:/sharing",
+  });
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(
+    screen.getByRole("dialog", {
+      name: "Resolve attachment links before publishing",
+    }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Publish issue" })).toBeNull();
+});
+
+test("an attachment added after preview refreshes the dialog to the blocked preflight", async () => {
+  let submitted = false;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "preview_publication")
+      return submitted
+        ? {
+            ...eligible,
+            internal_attachments: [
+              {
+                uri: "ticketd://attachment/workspace/new-file",
+                display_name: "New trace",
+              },
+            ],
+            eligibility: {
+              kind: "ineligible",
+              reason: "internal_attachments",
+              message: "Remove the new internal link before publishing.",
+            },
+          }
+        : eligible;
+    if (command === "publish_ticket") {
+      submitted = true;
+      throw {
+        code: "publication_ineligible",
+        message: "Remove the new internal link before publishing.",
+      };
+    }
+    return [];
+  });
+  render(
+    <PublishDialog
+      ticket={ticket()}
+      provider="github"
+      onOpenChange={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  const publish = await screen.findByRole("button", { name: "Publish issue" });
+  await waitFor(() =>
+    expect((publish as HTMLButtonElement).disabled).toBe(false),
+  );
+  fireEvent.click(publish);
+  expect(
+    await screen.findByRole("dialog", {
+      name: "Resolve attachment links before publishing",
+    }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Publish issue" })).toBeNull();
 });
 
 test("the scrollable publication header keeps its own Close action and closes without sending", async () => {

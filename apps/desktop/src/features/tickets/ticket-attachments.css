@@ -1,0 +1,178 @@
+.ticket-attachments {
+  align-self: stretch;
+  min-width: 0;
+  width: 100%;
+}
+.ticket-attachments ul,
+.attachment-existing ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.attachment-uploads {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+}
+.attachment-uploads li {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-ui);
+}
+.attachment-uploads li > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.attachment-uploads progress {
+  width: 100%;
+  accent-color: var(--primary);
+}
+.attachment-uploads strong,
+.attachment-uploads small {
+  display: block;
+}
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: var(--radius);
+  width: 100%;
+  text-align: left;
+  font-size: var(--text-ui);
+}
+.attachment-row:hover {
+  background: var(--accent);
+}
+.attachment-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.attachment-row > svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.attachment-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.attachment-row small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.attachment-hint {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.attachment-upload {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.attachment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.attachment-actions input {
+  min-width: 120px;
+  flex: 1;
+}
+.attachment-metadata {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  font-size: var(--text-ui);
+}
+.attachment-metadata dt {
+  color: var(--muted-foreground);
+}
+.attachment-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.attachment-existing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.attachment-existing ul {
+  max-height: 260px;
+  overflow: auto;
+}
+.attachment-existing-results {
+  max-height: min(380px, 40vh);
+  overflow: auto;
+}
+.attachment-existing-results ul {
+  max-height: none;
+  overflow: visible;
+}
+.attachment-existing-results .attachment-row {
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.attachment-existing-results .attachment-row > span:not(.attachment-thumbnail) {
+  flex: 1;
+}
+.attachment-existing-results input {
+  accent-color: var(--primary);
+  flex: none;
+}
+.attachment-existing-results label:focus-within {
+  box-shadow: var(--focus-ring);
+}
+.attachment-thumbnail {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--recessed);
+  overflow: hidden;
+}
+.attachment-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.attachment-thumbnail svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted-foreground);
+}
+
+.attachment-drive-connection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.attachment-drive-notice {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+  font-size: var(--text-caption);
+}
+.attachment-existing p {
+  overflow-wrap: anywhere;
+}

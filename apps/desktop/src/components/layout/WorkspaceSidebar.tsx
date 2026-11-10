@@ -11,6 +11,7 @@ import {
   Layers,
   Archive,
   FileText,
+  Paperclip,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
@@ -148,7 +149,8 @@ type View =
   | "archived-plans"
   | "settings"
   | "inbox"
-  | "documents";
+  | "documents"
+  | "attachments";
 export function WorkspaceSidebar({
   view: viewName,
   workspaceGraphOpen = false,
@@ -430,6 +432,14 @@ export function WorkspaceSidebar({
                     onClick={() => setView("documents")}
                   >
                     <FileText size={16} /> Documents
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={view === "attachments"}
+                    onClick={() => setView("attachments")}
+                  >
+                    <Paperclip size={16} /> Attachments
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

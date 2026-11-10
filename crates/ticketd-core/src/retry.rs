@@ -1,6 +1,7 @@
 use crate::{
     Activity, ActivityPatch, BatchOperation, Document, DocumentPatch, Error, Evidence,
-    EvidenceInput, Plan, Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
+    EvidenceInput, Plan, Project, RelationshipKind, Status, Ticket, TicketChange, TicketPatch,
+    Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,33 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    RemoveRemoteAttachment {
+        id: String,
+    },
+    QuarantineAttachment {
+        id: String,
+    },
+    RestoreAttachment {
+        id: String,
+    },
+    RenameAttachment {
+        id: String,
+        display_name: String,
+    },
+    ImportAttachment {
+        source: String,
+        display_name: Option<String>,
+    },
+    SetTicketAttachment {
+        reference: String,
+        attachment_id: String,
+        present: bool,
+    },
+    ReplaceTicketAttachment {
+        reference: String,
+        previous_id: String,
+        replacement_id: String,
+    },
     CreateTicketFromDocument {
         id: String,
         title: String,
@@ -78,6 +106,16 @@ pub enum WriteRequest {
     CreateTicket {
         title: String,
         project_id: Option<String>,
+    },
+    CreateTicketWithContent {
+        title: String,
+        body: String,
+        status: Status,
+        project_id: Option<String>,
+        plan_id: Option<String>,
+        tags: Vec<String>,
+        #[serde(default)]
+        follow: bool,
     },
     ChangeTicket {
         reference: String,
@@ -232,6 +270,8 @@ pub enum WriteRequest {
 // Results are owned at the public boundary; boxing tickets would complicate every caller.
 #[allow(clippy::large_enum_variant)]
 pub enum WriteResult {
+    RemoteAttachmentRemoved(crate::RemoteAttachmentRemoval),
+    Attachment(crate::Attachment),
     Document(Document),
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
@@ -250,6 +290,30 @@ impl Workspace {
         request_id: Option<&str>,
         request: WriteRequest,
     ) -> Result<WriteResult, Error> {
+        if let WriteRequest::ImportAttachment {
+            source,
+            display_name,
+        } = &request
+        {
+            let generated = uuid::Uuid::new_v4().to_string();
+            return self
+                .import_attachment(
+                    request_id.unwrap_or(&generated),
+                    source,
+                    display_name.as_deref(),
+                )
+                .map(WriteResult::Attachment);
+        }
+        self.recover_uploads()?;
+        // File coordination must precede BEGIN; nested workflows reuse this scope.
+        let _file_moves = if matches!(
+            request,
+            WriteRequest::QuarantineAttachment { .. } | WriteRequest::RestoreAttachment { .. }
+        ) {
+            Some(self.attachment_backup_lock()?)
+        } else {
+            None
+        };
         let canonical = serde_json::to_string(&request)?;
         self.connection.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
@@ -266,7 +330,20 @@ impl Workspace {
                     if previous != canonical {
                         return Err(Error::RequestConflict(id.to_owned()));
                     }
-                    return Ok(serde_json::from_str(&outcome)?);
+                    let result = serde_json::from_str(&outcome)?;
+                    return match result {
+                        WriteResult::Attachment(file) => {
+                            crate::attachments::replay_attachment(&self.connection, file)
+                                .map(WriteResult::Attachment)
+                        }
+                        other => Ok(other),
+                    };
+                }
+            }
+            if let Some(id) = request_id {
+                let reserved: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM attachment_upload_destinations WHERE request_id=?1)", [id], |r| r.get(0))?;
+                if reserved {
+                    return Err(Error::RequestConflict(id.into()));
                 }
             }
             let outcome = self.execute_write(request)?;
@@ -294,6 +371,41 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::RemoveRemoteAttachment { id } => {
+                WriteResult::RemoteAttachmentRemoved(self.remove_remote_attachment(&id)?)
+            }
+            WriteRequest::QuarantineAttachment { id } => {
+                WriteResult::Attachment(self.quarantine_attachment_locked(&id)?)
+            }
+            WriteRequest::RestoreAttachment { id } => {
+                WriteResult::Attachment(self.restore_attachment_locked(&id)?)
+            }
+            WriteRequest::RenameAttachment { id, display_name } => {
+                WriteResult::Attachment(self.rename_attachment(&id, &display_name)?)
+            }
+            WriteRequest::ImportAttachment { .. } => {
+                return Err(Error::Attachment(
+                    "uploads must run outside a database transaction".into(),
+                ));
+            }
+            WriteRequest::SetTicketAttachment {
+                reference,
+                attachment_id,
+                present,
+            } => WriteResult::Ticket(self.set_ticket_attachment(
+                &reference,
+                &attachment_id,
+                present,
+            )?),
+            WriteRequest::ReplaceTicketAttachment {
+                reference,
+                previous_id,
+                replacement_id,
+            } => WriteResult::Ticket(self.replace_ticket_attachment(
+                &reference,
+                &previous_id,
+                &replacement_id,
+            )?),
             WriteRequest::CreateTicketFromDocument { id, title, follow } => WriteResult::Ticket(
                 self.create_ticket_from_document_following(&id, &title, follow)?,
             ),
@@ -354,6 +466,44 @@ impl Workspace {
             }
             WriteRequest::CreateTicket { title, project_id } => {
                 WriteResult::Ticket(self.create_ticket_in_project(&title, project_id.as_deref())?)
+            }
+            WriteRequest::CreateTicketWithContent {
+                title,
+                body,
+                status,
+                project_id,
+                plan_id,
+                tags,
+                follow,
+            } => {
+                let mut tickets = self.apply_batch_following(
+                    vec![
+                        BatchOperation::Create {
+                            name: "new".into(),
+                            title,
+                            project_id,
+                        },
+                        BatchOperation::Change {
+                            ticket: "$new".into(),
+                            change: Box::new(TicketChange {
+                                patch: TicketPatch {
+                                    body: Some(body),
+                                    status: Some(status),
+                                    plan_id: plan_id.map(Some),
+                                    ..Default::default()
+                                },
+                                add_tags: tags,
+                                ..Default::default()
+                            }),
+                        },
+                    ],
+                    follow,
+                )?;
+                WriteResult::Ticket(
+                    tickets
+                        .pop()
+                        .ok_or_else(|| Error::InvalidBatch("missing creation result".into()))?,
+                )
             }
             WriteRequest::ChangeTicket { reference, patch } => {
                 WriteResult::Ticket(self.change_ticket(&reference, patch)?)

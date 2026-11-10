@@ -15,6 +15,8 @@ import { Kbd } from "@/components/ui/kbd";
 import { client, type Ticket } from "@/lib/api/client";
 import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
 import { revealInDetail } from "./detail-scroll";
+import { z } from "zod";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 
 /**
  * A backlink's passage, and the span of its mention as the core reports it: chars
@@ -34,6 +36,12 @@ type Content = Pick<Ticket, "title" | "body">;
  * against, so a reload can tell whether the stored ticket changed meanwhile.
  */
 type StoredDraft = Content & { baseTitle: string; baseBody: string };
+const storedDraftSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+  baseTitle: z.string(),
+  baseBody: z.string(),
+});
 const draftKey = (id: string) => `ticketd:ticket-draft:${id}`;
 
 function storeDraft(id: string, draft: Content, saved: Content) {
@@ -55,11 +63,15 @@ function storeDraft(id: string, draft: Content, saved: Content) {
 }
 
 /** The editor's starting text: the ticket, plus any draft left behind on this device. */
-function restore(ticket: Ticket): { draft: Content; saved: Content } {
+function restore(
+  ticket: Ticket,
+  retained?: StoredDraft | null,
+  coreActive = false,
+): { draft: Content; saved: Content } {
   const current = { title: ticket.title, body: ticket.body };
   try {
-    const raw = localStorage.getItem(draftKey(ticket.id));
-    const value: unknown = raw ? JSON.parse(raw) : null;
+    const raw = coreActive ? null : localStorage.getItem(draftKey(ticket.id));
+    const value: unknown = retained ?? (raw ? JSON.parse(raw) : null);
     if (typeof value === "object" && value !== null) {
       const stored = value as Partial<StoredDraft>;
       const titleDirty =
@@ -105,7 +117,15 @@ export function TicketEditor({
   /** A description passage the person navigated here to read; null once they move on. */
   mention?: Mention | null;
 }) {
-  const [restored] = useState(() => restore(ticket));
+  const recovery = useDraftRecovery();
+  const recoveryOwner = `ticket:${ticket.id}`;
+  const [restored] = useState(() =>
+    restore(
+      ticket,
+      recovery.read(recoveryOwner, storedDraftSchema),
+      recovery.active,
+    ),
+  );
   const [draft, setDraft] = useState<Content>(restored.draft);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -140,11 +160,23 @@ export function TicketEditor({
   const latest = useRef({ draft, saved });
   useEffect(() => {
     latest.current = { draft, saved };
-    storeDraft(ticketId, draft, saved);
-  }, [draft, saved, ticketId]);
+    if (recovery.active) {
+      const dirty = draft.title !== saved.title || draft.body !== saved.body;
+      void recovery
+        .put(
+          recoveryOwner,
+          dirty
+            ? { ...draft, baseTitle: saved.title, baseBody: saved.body }
+            : null,
+          dirty ? [draft.body] : [],
+        )
+        .catch(() => {});
+    } else storeDraft(ticketId, draft, saved);
+  }, [draft, saved, ticketId, recovery, recoveryOwner]);
   useEffect(() => {
     const flush = () => {
-      storeDraft(ticketId, latest.current.draft, latest.current.saved);
+      if (!recovery.active)
+        storeDraft(ticketId, latest.current.draft, latest.current.saved);
     };
     window.addEventListener("pagehide", flush);
     document.addEventListener("visibilitychange", flush);
@@ -152,7 +184,7 @@ export function TicketEditor({
       window.removeEventListener("pagehide", flush);
       document.removeEventListener("visibilitychange", flush);
     };
-  }, [ticketId]);
+  }, [ticketId, recovery]);
   // "idle" until something is saved, so an untouched ticket doesn't say "Saved".
   const [state, setState] = useState<"idle" | "saved" | "pending" | "failed">(
     "idle",
@@ -321,8 +353,9 @@ export function TicketEditor({
         ...(patch.title !== undefined && { expected_title: saved.title }),
         ...(patch.body !== undefined && { expected_body: saved.body }),
       };
-      void client
-        .changeTicket(ticket.reference, guarded)
+      void recovery
+        .flush()
+        .then(() => client.changeTicket(ticket.reference, guarded))
         .then((result) => {
           setSaved({ title: result.title, body: result.body });
           setDraft((current) => ({
@@ -372,6 +405,7 @@ export function TicketEditor({
     state,
     retry,
     saving,
+    recovery,
   ]);
 
   function adoptSaved() {
@@ -546,6 +580,8 @@ export function TicketEditor({
           <div hidden={!editingBody}>
             <LazyMarkdownEditor
               value={draft.body}
+              recoveryOwner={recoveryOwner}
+              attachmentTicketReference={ticket.reference}
               onChange={(body) => edit({ ...draft, body })}
               label="Description"
               autoFocus={editingBody}
@@ -577,6 +613,14 @@ export function TicketEditor({
               >
                 <MarkdownDocument
                   source={rendered}
+                  onChange={(body) =>
+                    edit({
+                      ...draft,
+                      body: draft.body.startsWith("\uFEFF")
+                        ? `\uFEFF${body}`
+                        : body,
+                    })
+                  }
                   select={select}
                   revision={revision}
                   mention={mark}

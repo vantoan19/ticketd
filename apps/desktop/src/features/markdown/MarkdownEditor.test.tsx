@@ -340,6 +340,7 @@ describe("Toolbar layout and links", () => {
     expect(names).toEqual([
       "Bold",
       "Italic",
+      "Insert attachment",
       "Link",
       "Bullet list",
       "Checklist",

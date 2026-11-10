@@ -8,9 +8,11 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeAll, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
+import { DraftRecoveryProvider } from "@/lib/draft-recovery";
+import type { DraftRetention } from "@/lib/api/attachments";
 import { CreateTicketDialog } from "./CreateTicketDialog";
 
 // The description editor loads lazily. Load it once up front so no test waits on
@@ -20,10 +22,15 @@ beforeAll(async () => {
 });
 
 // What the tag search answers; empty unless a test sets it.
-const answers = vi.hoisted(() => ({ tags: [] as string[] }));
+const answers = vi.hoisted(() => ({
+  tags: [] as string[],
+  invoke:
+    vi.fn<
+      (command: string, args?: Record<string, unknown>) => Promise<unknown>
+    >(),
+}));
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (command: string) =>
-    Promise.resolve(command === "search_tags" ? answers.tags : []),
+  invoke: answers.invoke,
 }));
 vi.mock("@uiw/react-codemirror", () => ({
   default: ({
@@ -58,7 +65,43 @@ window.ResizeObserver = class {
 afterEach(() => {
   cleanup();
   answers.tags = [];
+  answers.invoke.mockReset();
+  localStorage.removeItem("ticketd.preferences");
 });
+beforeEach(() => {
+  answers.invoke.mockImplementation(async (command) => {
+    if (command === "search_tags") return answers.tags;
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    return null;
+  });
+});
+
+function recoveryBridge({ failFirstRelease = true } = {}) {
+  const records = new Map<string, DraftRetention>();
+  let releaseAttempts = 0;
+  let failNextRelease = failFirstRelease;
+  answers.invoke.mockImplementation(async (command, args) => {
+    if (command === "search_tags") return answers.tags;
+    if (command === "draft_retentions") return [...records.values()];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft") {
+      const draft = args?.draft as DraftRetention;
+      if (draft.owner === "new-ticket" && draft.payload === null) {
+        releaseAttempts += 1;
+        if (failNextRelease) {
+          failNextRelease = false;
+          throw new Error("Recovery storage is temporarily unavailable");
+        }
+      }
+      const saved = { ...draft, revision: draft.revision + 1 };
+      records.set(saved.owner, saved);
+      return saved;
+    }
+    return null;
+  });
+  return { records, getReleaseAttempts: () => releaseAttempts };
+}
 
 function Harness({
   create,
@@ -74,6 +117,8 @@ function Harness({
     plan: string | null,
     tags: string[],
     keepOpen: boolean,
+    requestId?: string,
+    followCreated?: boolean,
   ) => Promise<string>;
   navigation?: { project: string; plan: string };
   projects?: Project[];
@@ -133,6 +178,8 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
     null,
     [],
     false,
+    expect.any(String),
+    true,
   );
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
@@ -284,6 +331,261 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
     ["First", "e1", true],
     ["Second", "e1", true],
   ]);
+  const requestIds = create.mock.calls.map((call) => call[7]);
+  expect(requestIds[0]).toEqual(expect.any(String));
+  expect(requestIds[1]).toEqual(expect.any(String));
+  expect(requestIds[0]).not.toBe(requestIds[1]);
+});
+
+test("retrying recovery cleanup after creation does not create a duplicate ticket", async () => {
+  const recovery = recoveryBridge();
+  const create = vi.fn().mockResolvedValue("T-3");
+  render(
+    <DraftRecoveryProvider>
+      <Harness create={create} />
+    </DraftRecoveryProvider>,
+  );
+  fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+    target: { value: "Created before cleanup failed" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText(/T-3 was created/)).toBeTruthy();
+  expect(create).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Finish cleanup" }));
+  await waitFor(() => expect(recovery.getReleaseAttempts()).toBe(2));
+  expect(create).toHaveBeenCalledTimes(1);
+});
+
+test("a lost-response submission reuses its request ID and follow choice after remount", async () => {
+  const recovery = recoveryBridge({ failFirstRelease: false });
+  const accepted = new Map<
+    string,
+    { fingerprint: string; reference: string }
+  >();
+  let loseFirstResponse = true;
+  const create = vi.fn(
+    async (
+      title: string,
+      body: string,
+      status: string,
+      project: string | null,
+      plan: string | null,
+      tags: string[],
+      _keepOpen: boolean,
+      requestId?: string,
+      followCreated?: boolean,
+    ) => {
+      const fingerprint = JSON.stringify([
+        title,
+        body,
+        status,
+        project,
+        plan,
+        tags,
+        followCreated,
+      ]);
+      if (requestId) {
+        const previous = accepted.get(requestId);
+        if (previous) {
+          if (previous.fingerprint !== fingerprint)
+            throw new Error(
+              "Submission ID conflicts with its original payload",
+            );
+          return previous.reference;
+        }
+      }
+      const reference = `T-${accepted.size + 1}`;
+      if (requestId) accepted.set(requestId, { fingerprint, reference });
+      if (requestId && loseFirstResponse) {
+        loseFirstResponse = false;
+        throw new Error("Ticket was committed but its response was lost");
+      }
+      return reference;
+    },
+  );
+  const first = render(
+    <DraftRecoveryProvider>
+      <Harness create={create} />
+    </DraftRecoveryProvider>,
+  );
+  fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+    target: { value: "Created before restart" },
+  });
+  fireEvent.click(screen.getByRole("switch", { name: "Create more" }));
+  await waitFor(() => expect(recovery.records.has("new-ticket")).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  expect(
+    await screen.findByText(/Could not confirm whether the ticket was created/),
+  ).toBeTruthy();
+  expect(recovery.records.get("new-ticket")?.payload).toMatchObject({
+    title: "Created before restart",
+    requestId: expect.any(String),
+    followCreated: true,
+  });
+  first.unmount();
+
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({
+      theme: "system",
+      openTickets: "split",
+      ticketLayout: "list",
+      sidebarCollapsed: false,
+      ticketRows: "detailed",
+      followCreated: false,
+      notifyReminders: false,
+    }),
+  );
+  render(
+    <DraftRecoveryProvider>
+      <Harness create={create} />
+    </DraftRecoveryProvider>,
+  );
+  expect(await screen.findByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Created before restart",
+  );
+  expect(
+    screen
+      .getByRole("switch", { name: "Create more" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Retry safely" }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(recovery.records.get("new-ticket")?.payload).toBeNull(),
+  );
+  expect(create.mock.calls[0]?.[7]).toEqual(create.mock.calls[1]?.[7]);
+  expect(create.mock.calls[0]?.[7]).toEqual(expect.any(String));
+  expect(create.mock.calls.map((call) => call[8])).toEqual([true, true]);
+  expect(create.mock.calls.map((call) => call[6])).toEqual([true, true]);
+  expect(accepted.size).toBe(1);
+});
+
+test.each([false, true])(
+  "editing an uncertain submission waits for durable saving (save fails: %s)",
+  async (saveFails) => {
+    const recovery = recoveryBridge({ failFirstRelease: false });
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("The response was lost"))
+      .mockResolvedValueOnce("T-2");
+    render(
+      <DraftRecoveryProvider>
+        <Harness create={create} />
+      </DraftRecoveryProvider>,
+    );
+    const title = await screen.findByRole("textbox", { name: "Title" });
+    fireEvent.change(title, { target: { value: "Preserve my draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+    expect(await screen.findByText(/Could not confirm whether/)).toBeTruthy();
+    expect(title).toHaveProperty("disabled", true);
+    const originalId = create.mock.calls[0]?.[7];
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit draft" }));
+    expect(screen.getByText(/earlier ticket may already exist/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep retrying" }));
+    expect(title).toHaveProperty("disabled", true);
+    expect(recovery.records.get("new-ticket")?.payload).toMatchObject({
+      requestId: originalId,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit draft" }));
+    const invokeNormally = answers.invoke.getMockImplementation()!;
+    let saveStarted = false;
+    let finishSave: () => void = () => {};
+    const saving = new Promise<void>((resolve, reject) => {
+      finishSave = saveFails
+        ? () => reject(new Error("Draft save failed"))
+        : resolve;
+    });
+    answers.invoke.mockImplementation(async (command, args) => {
+      if (command === "retain_draft") {
+        saveStarted = true;
+        await saving;
+      }
+      return invokeNormally(command, args);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Edit as new ticket" }));
+    await waitFor(() => expect(saveStarted).toBe(true));
+    expect(title).toHaveProperty("disabled", true);
+    expect(create).toHaveBeenCalledTimes(1);
+    finishSave();
+    if (saveFails) {
+      expect(
+        await screen.findByText(
+          /original submission is still available to retry/,
+        ),
+      ).toBeTruthy();
+      expect(title).toHaveProperty("disabled", true);
+      expect(recovery.records.get("new-ticket")?.payload).toMatchObject({
+        requestId: originalId,
+      });
+      expect(
+        screen.queryByRole("button", { name: "Create ticket" }),
+      ).toBeNull();
+      expect(create).toHaveBeenCalledTimes(1);
+      return;
+    }
+    await waitFor(() => expect(title).toHaveProperty("disabled", false));
+    expect(title).toHaveProperty("value", "Preserve my draft");
+    expect(recovery.records.get("new-ticket")?.payload).not.toHaveProperty(
+      "requestId",
+    );
+    expect(recovery.records.get("new-ticket")?.payload).not.toHaveProperty(
+      "followCreated",
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+    fireEvent.change(title, { target: { value: "Corrected draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls[1]?.[7]).not.toBe(originalId);
+  },
+);
+
+test("closing an empty recovered submission preserves its request identity", async () => {
+  const recovery = recoveryBridge({ failFirstRelease: false });
+  const requestId = crypto.randomUUID();
+  recovery.records.set("new-ticket", {
+    owner: "new-ticket",
+    kind: "draft",
+    revision: 1,
+    markdown: [],
+    payload: {
+      title: "",
+      body: "",
+      status: "Todo",
+      project: "",
+      plan: "",
+      tags: [],
+      restored: true,
+      requestId,
+      followCreated: true,
+    },
+  });
+  const first = render(
+    <DraftRecoveryProvider>
+      <Harness create={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  await screen.findByRole("textbox", { name: "Title" });
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await waitFor(() =>
+    expect(recovery.records.get("new-ticket")?.payload).toMatchObject({
+      requestId,
+    }),
+  );
+  first.unmount();
+  render(
+    <DraftRecoveryProvider>
+      <Harness create={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Retry safely" }),
+  ).toBeTruthy();
 });
 
 test("tags are chips that can be added and removed", () => {

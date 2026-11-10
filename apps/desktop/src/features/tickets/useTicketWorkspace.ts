@@ -357,6 +357,8 @@ export function useTicketWorkspace(
     planId: string | null,
     tags: string[],
     keepOpen = false,
+    requestId?: string,
+    followCreated?: boolean,
   ) {
     const ticket = await client.createTicket(
       title,
@@ -365,7 +367,8 @@ export function useTicketWorkspace(
       project,
       planId,
       tags,
-      loadPreferences().followCreated,
+      followCreated ?? loadPreferences().followCreated,
+      requestId,
     );
     setDetails((previous) => ({ ...previous, [ticket.reference]: ticket }));
     if (!keepOpen) {

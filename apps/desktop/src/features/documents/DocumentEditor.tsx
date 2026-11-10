@@ -30,6 +30,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
+import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import {
   Popover,
   PopoverContent,
@@ -43,6 +44,8 @@ import {
   useWorkspaceChange,
 } from "@/lib/workspace-change";
 import { DocumentNavigation, PlanNavigation } from "./navigation";
+import { z } from "zod";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 
 function DocumentSurface({
   capture,
@@ -120,6 +123,30 @@ type Pending = {
   /** The stored revision this save was based on; the core rejects it if that moved on. */
   revision: string | null;
 };
+const snapshotSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+  suggestion: z.string().nullable(),
+});
+const pendingSchema = z.object({
+  id: z.string().nullable(),
+  title: z.string().nullable(),
+  body: z.string().nullable(),
+  titleChanged: z.boolean(),
+  requestId: z.string(),
+  snapshot: snapshotSchema,
+  revision: z.string().nullable(),
+});
+const recoverySchema = z.object({
+  draft: snapshotSchema,
+  saved: snapshotSchema,
+  id: z.string().nullable(),
+  revision: z.string().nullable(),
+  pending: pendingSchema.nullable(),
+  discarded: snapshotSchema.nullable(),
+  external: snapshotSchema.nullable(),
+  externalRevision: z.string().nullable(),
+});
 export function DocumentEditor({
   initial,
   onClose,
@@ -153,14 +180,26 @@ export function DocumentEditor({
   backLabel?: string;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
+  const recovery = useDraftRecovery();
+  const recoveryOwner = `document:${initial?.id ?? "capture"}`;
+  const [recovered] = useState(() =>
+    recovery.read(recoveryOwner, recoverySchema),
+  );
   // Referenced tickets shown inside the Document (their Trash state) follow workspace changes.
   const workspaceRevision = useWorkspaceChange();
   const [focusRequest, setFocusRequest] = useState(0);
   const refocusEditor = () => setFocusRequest((value) => value + 1);
-  const [writing, setWriting] = useState(initial === null);
+  const [writing, setWriting] = useState(
+    initial === null || recovered !== null,
+  );
   // The heading line the title already shows, kept out of the editor while editing
   // and put back in front of what is typed, so the saved text never changes.
-  const [hiddenHead, setHiddenHead] = useState("");
+  const [hiddenHead, setHiddenHead] = useState(() => {
+    if (!recovered || !initial) return "";
+    const { body, title } = recovered.draft;
+    const stripped = withoutDerivedHeading(body, title, initial.heading);
+    return body.slice(0, body.length - stripped.length);
+  });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
   const [creatingFromDocument, setCreatingFromDocument] = useState(false);
@@ -168,7 +207,9 @@ export function DocumentEditor({
     Awaited<ReturnType<typeof documents.links>>
   >([[], []]);
   const [linkError, setLinkError] = useState("");
-  const [suggestion, setSuggestion] = useState(currentTicket ?? null);
+  const [suggestion, setSuggestion] = useState(
+    recovered ? recovered.draft.suggestion : (currentTicket ?? null),
+  );
   const linksKey = useRef("");
   const refreshLinks = () => {
     if (initial)
@@ -189,8 +230,12 @@ export function DocumentEditor({
   useEffect(() => {
     refreshLinksRef.current();
   }, [initial]);
-  const [title, setTitle] = useState(initial?.title ?? "");
-  const [body, setBody] = useState(initial?.body ?? "");
+  const [title, setTitle] = useState(
+    recovered?.draft.title ?? initial?.title ?? "",
+  );
+  const [body, setBody] = useState(
+    recovered?.draft.body ?? initial?.body ?? "",
+  );
   const [status, setStatus] = useState(
     initial ? "Saved on this computer" : "Start writing. We’ll save as you go.",
   );
@@ -216,23 +261,66 @@ export function DocumentEditor({
     trashedRef.current = value;
     setTrashed(value);
   };
-  const [external, setExternal] = useState<Snapshot | null>(null);
+  const [external, setExternal] = useState<Snapshot | null>(
+    recovered?.external ?? null,
+  );
   // The draft "Reload saved content" threw away, offered back for a few seconds.
-  const [discarded, setDiscarded] = useState<Snapshot | null>(null);
+  const [discarded, setDiscarded] = useState<Snapshot | null>(
+    recovered?.discarded ?? null,
+  );
   useEffect(() => {
     if (!discarded) return;
     const timer = window.setTimeout(() => setDiscarded(null), 10000);
     return () => window.clearTimeout(timer);
   }, [discarded]);
-  const externalRef = useRef<Snapshot | null>(null);
+  const externalRef = useRef<Snapshot | null>(recovered?.external ?? null);
   const draft = useRef<Snapshot>({ title, body, suggestion });
-  const saved = useRef<Snapshot>({ title, body, suggestion: null });
-  const id = useRef(initial?.id ?? null);
-  const pending = useRef<Pending | null>(null);
+  const saved = useRef<Snapshot>(
+    recovered?.saved ?? { title, body, suggestion: null },
+  );
+  const id = useRef(recovered?.id ?? initial?.id ?? null);
+  const pending = useRef<Pending | null>(recovered?.pending ?? null);
   const saving = useRef(false);
   // `updated_at` of the stored Document as last loaded or saved here.
-  const revision = useRef<string | null>(initial?.updated_at ?? null);
-  const externalRevision = useRef<string | null>(null);
+  const revision = useRef<string | null>(
+    recovered?.revision ?? initial?.updated_at ?? null,
+  );
+  const externalRevision = useRef<string | null>(
+    recovered?.externalRevision ?? null,
+  );
+  const persistRecovery = () => {
+    const dirty =
+      storedTitle(draft.current.title) !== saved.current.title ||
+      draft.current.body !== saved.current.body ||
+      draft.current.suggestion !== saved.current.suggestion;
+    const payload =
+      dirty || pending.current || discarded || externalRef.current
+        ? {
+            draft: draft.current,
+            saved: saved.current,
+            id: id.current,
+            revision: revision.current,
+            pending: pending.current,
+            discarded,
+            external: externalRef.current,
+            externalRevision: externalRevision.current,
+          }
+        : null;
+    return recovery.put(
+      recoveryOwner,
+      payload,
+      payload
+        ? [
+            draft.current.body,
+            pending.current?.snapshot.body ?? "",
+            discarded?.body ?? "",
+          ].filter(Boolean)
+        : [],
+    );
+  };
+  useEffect(() => {
+    void persistRecovery().catch(() => {});
+  });
   const lastVersion = useRef<string | null>(
     initial ? `${initial.updated_at}|${initial.trashed}` : null,
   );
@@ -324,6 +412,8 @@ export function DocumentEditor({
     setFailed(false);
     const slow = window.setTimeout(() => setStatus("Still saving…"), 2000);
     try {
+      await persistRecovery();
+      await recovery.flush();
       const result = await documents.save(
         request.id,
         request.title,
@@ -342,6 +432,7 @@ export function DocumentEditor({
         title: storedTitle(request.snapshot.title),
       };
       pending.current = null;
+      await persistRecovery();
       saving.current = false;
       setStatus("Saved on this computer");
       refreshLinks();
@@ -698,6 +789,12 @@ export function DocumentEditor({
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
             {statusLine}
+            {!writing && (
+              <ExportMarkdownButton
+                compact
+                source={{ kind: "markdown", body }}
+              />
+            )}
             <SegmentedControl
               aria-label="Document mode"
               value={writing ? "edit" : "read"}
@@ -888,6 +985,8 @@ export function DocumentEditor({
         <div className="document-body">
           {!initial || writing ? (
             <LazyMarkdownEditor
+              recoveryOwner={recoveryOwner}
+              attachmentTicketReference={currentTicket}
               value={head ? body.slice(head.length) : body}
               onChange={(value) => {
                 const next = head + value;
@@ -916,6 +1015,21 @@ export function DocumentEditor({
               >
                 <MarkdownDocument
                   revision={workspaceRevision}
+                  onChange={
+                    locked
+                      ? undefined
+                      : (value) => {
+                          const shown = withoutDerivedHeading(
+                            body,
+                            title,
+                            savedDocument?.heading,
+                          );
+                          const next =
+                            body.slice(0, body.length - shown.length) + value;
+                          draft.current = { ...draft.current, body: next };
+                          setBody(next);
+                        }
+                  }
                   source={withoutDerivedHeading(
                     body,
                     title,

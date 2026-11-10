@@ -8,6 +8,7 @@ import { RailSection } from "@/features/tickets/RailSection";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { TicketDocuments } from "@/features/tickets/TicketDocuments";
+import { TicketAttachments } from "@/features/tickets/TicketAttachments";
 import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
@@ -164,6 +165,14 @@ export function TicketPage({
       />
     </>
   );
+  const attachments = active && (
+    <TicketAttachments
+      key={ticket.reference}
+      ticket={ticket}
+      revision={revision}
+      refresh={refresh}
+    />
+  );
   const documents = active && !ticket.trashed && (
     <TicketDocuments
       ticket={ticket}
@@ -270,6 +279,7 @@ export function TicketPage({
         )}
         {narrow && (
           <div className="detail-connected">
+            {attachments}
             {documents}
             {relationships}
           </div>
@@ -322,6 +332,7 @@ export function TicketPage({
           onOpenTicket={select}
           onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
         >
+          {attachments}
           {documents}
           {relationships}
           {attention && (

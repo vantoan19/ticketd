@@ -1,3 +1,111 @@
+#[test]
+fn cli_restores_to_an_explicit_recovery_target_without_replacing_the_current_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let current = dir.path().join("current.sqlite3");
+    let source = dir.path().join("source.sqlite3");
+    let target = dir.path().join("recovered.sqlite3");
+    let backup = dir.path().join("complete.sqlite3");
+    ticketd_core::Workspace::open(&current)
+        .unwrap()
+        .create_ticket("Keep original")
+        .unwrap();
+    let mut source_workspace = ticketd_core::Workspace::open(&source).unwrap();
+    source_workspace
+        .create_ticket("Recover separately")
+        .unwrap();
+    source_workspace.backup(&backup).unwrap();
+    drop(source_workspace);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args([
+            "restore-workspace",
+            backup.to_str().unwrap(),
+            "--target",
+            target.to_str().unwrap(),
+        ])
+        .env("TICKETD_TEST_WORKSPACE", &current)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .starts_with("Restored workspace. Safety backup:")
+    );
+    assert_eq!(
+        ticketd_core::Workspace::open(current)
+            .unwrap()
+            .show_ticket("T-1")
+            .unwrap()
+            .title,
+        "Keep original"
+    );
+    assert_eq!(
+        ticketd_core::Workspace::open(target)
+            .unwrap()
+            .show_ticket("T-1")
+            .unwrap()
+            .title,
+        "Recover separately"
+    );
+}
+
+#[test]
+fn cli_inspects_attachment_completeness_before_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("fixture.txt");
+    std::fs::write(&source, b"retained").unwrap();
+    let run = |args: &[&str]| {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("GITHUB_TOKEN", "ticketd-backup-credential-canary")
+            .env("TICKETD_TEST_WORKSPACE", &workspace)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let file: serde_json::Value = serde_json::from_str(&run(&[
+        "attachment",
+        "add",
+        source.to_str().unwrap(),
+        "--request-id",
+        "backup",
+    ]))
+    .unwrap();
+    let backup = dir.path().join("complete.sqlite3");
+    run(&["backup", backup.to_str().unwrap()]);
+    assert!(
+        !std::fs::read(&backup)
+            .unwrap()
+            .windows(b"ticketd-backup-credential-canary".len())
+            .any(|bytes| bytes == b"ticketd-backup-credential-canary")
+    );
+    let review: serde_json::Value =
+        serde_json::from_str(&run(&["inspect-backup", backup.to_str().unwrap()])).unwrap();
+    assert_eq!(review["check"]["status"], "valid");
+    assert_eq!(review["attachment_content"]["local_snapshots"], 1);
+    assert_eq!(review["attachment_content"]["retained_bytes"], 8);
+    assert_eq!(review["attachment_content"]["remote_references"], 0);
+    run(&["restore-workspace", backup.to_str().unwrap()]);
+    let exported = dir.path().join("restored.txt");
+    run(&[
+        "attachment",
+        "export",
+        file["id"].as_str().unwrap(),
+        exported.to_str().unwrap(),
+    ]);
+    assert_eq!(std::fs::read(exported).unwrap(), b"retained");
+}
+
 #[cfg(unix)]
 #[test]
 fn closed_stdout_reports_an_error_without_panicking() {

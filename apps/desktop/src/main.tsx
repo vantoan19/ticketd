@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "@/app/App";
 import { applyStoredTheme } from "@/lib/preferences";
+import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import { keepWebviewInStep } from "@/lib/webview-scale";
 
 const root = document.getElementById("root");
@@ -24,7 +25,9 @@ if (import.meta.env.DEV && window.location.hash === "#plate-prototype") {
 } else {
   applicationRoot.render(
     <StrictMode>
-      <App />
+      <DraftRecoveryProvider>
+        <App />
+      </DraftRecoveryProvider>
     </StrictMode>,
   );
 }

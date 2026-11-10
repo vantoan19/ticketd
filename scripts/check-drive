@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Keep native database and browser-component tests from starving one another.
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-2}"
+export VITEST_MAX_WORKERS="${VITEST_MAX_WORKERS:-2}"
+
+cargo test --locked -p ticketd-core --lib drive::
+cargo test --locked -p ticketd-core \
+  --test drive_picker --test drive_provider --test drive_references \
+  --test drive_upload_provider --test drive_uploads \
+  --test drive_copy_provider --test drive_copy_verification \
+  --test drive_portability --test drive_vault --test remote_removal \
+  --test attachment_library --test attachment_previews \
+  --test attachment_retention --test attachment_backups --test ticket_creation
+cargo test --locked -p ticketd-cli --test attachment_command
+
+npm run test --workspace @ticketd/desktop -- \
+  src/app/App.test.tsx \
+  src/features/attachments \
+  src/features/markdown/AttachmentEditor.test.tsx \
+  src/features/markdown/AttachmentHosts.test.tsx \
+  src/features/markdown/DraftRecovery.test.tsx \
+  src/features/settings/AttachmentSettings.test.tsx \
+  src/features/settings/RestoreDialog.test.tsx \
+  src/features/settings/RestoreRecovery.test.tsx \
+  src/features/tickets/TicketAttachments.test.tsx \
+  src/features/tickets/CreateTicketDialog.test.tsx \
+  src/features/tickets/TicketEditor.test.tsx \
+  src/features/tickets/PublishToSource.test.tsx

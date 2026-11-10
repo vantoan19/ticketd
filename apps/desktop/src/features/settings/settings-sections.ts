@@ -8,6 +8,7 @@ export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Appearance", group: "Preferences" },
   { id: "attention", label: "Attention", group: "Preferences" },
   { id: "location", label: "Location", group: "Workspace" },
+  { id: "attachments", label: "Attachments", group: "Workspace" },
   { id: "backups", label: "Backups", group: "Workspace" },
   { id: "export", label: "Export", group: "Workspace" },
   { id: "command-line", label: "Command line", group: "Workspace" },

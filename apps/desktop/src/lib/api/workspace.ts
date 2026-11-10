@@ -33,6 +33,17 @@ export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
 const backupInspectionSchema = z.object({
   path: z.string(),
   current: workspaceSummarySchema,
+  attachment_content: z
+    .object({
+      container_version: z.number().nullable(),
+      local_snapshots: z.number(),
+      retained_files: z.number(),
+      retained_bytes: z.number(),
+      remote_references: z.number(),
+      remote_bytes_included: z.boolean().optional(),
+      remote_access_verified: z.boolean().optional(),
+    })
+    .optional(),
   check: z.discriminatedUnion("status", [
     z.object({
       status: z.literal("valid"),
