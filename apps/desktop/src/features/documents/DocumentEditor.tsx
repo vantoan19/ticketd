@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  CloudCheck,
   ArrowLeft,
   Check,
   FileText,
@@ -50,6 +51,7 @@ import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
 import { RecordHistory } from "@/features/sync-review/RecordHistory";
 import { useConflicts } from "@/features/sync-review/use-conflicts";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import { useRecordSyncState } from "@/features/sync/record-sync";
 
 function DocumentSurface({
   capture,
@@ -684,13 +686,19 @@ export function DocumentEditor({
     </FieldGroup>
   );
   const isSaved = status === "Saved on this computer";
+  const sync = useRecordSyncState(savedDocument?.id ?? null, isSaved);
   const statusLine = (
     <span role="status" className="document-status">
-      {isSaved && needsReview ? (
+      {isSaved && (needsReview || sync === "needs_review") ? (
         // Saved, but changed on two desktops: that is the state worth saying.
         <>
           <StatusDot tone="attention" size={10} />
           Needs review
+        </>
+      ) : sync === "synced" ? (
+        <>
+          <CloudCheck aria-hidden="true" />
+          Synced to Drive
         </>
       ) : (
         <>
