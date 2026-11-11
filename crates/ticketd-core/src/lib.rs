@@ -42,6 +42,7 @@ pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspa
 mod plans;
 mod retry;
 pub mod source;
+pub mod sync;
 pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
@@ -100,7 +101,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 56;
+pub const FORMAT_VERSION: i64 = 58;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -782,6 +783,10 @@ impl Workspace {
         }
         if version < 56 {
             device::migrate(&transaction)?;
+        }
+        if version < 58 {
+            sync::migrate(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 58;")?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
