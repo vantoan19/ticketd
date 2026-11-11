@@ -33,7 +33,7 @@ The identity of a ticket's corresponding record in an external tracker, retained
 A short, workspace-unique label for a ticket: `T-`, the device code of the Workspace installation that created it, then that device's counter, with no dash between them (`T-KQ43`). It is stored with the ticket and never changes, including when project or Plan links change or the device later takes another code. The ticket's internal identifier, not the reference, is its identity.
 
 **Device code**:
-Two uppercase letters identifying one Workspace installation in the Ticket references it issues, so desktops sharing a Workspace never issue the same reference. It is random by default; a restored Workspace, or a copy whose code another device holds, takes a fresh one.
+Two uppercase letters identifying one Workspace installation in the Ticket references it issues, so desktops sharing a Workspace never issue the same reference. It is random by default. A restored Workspace takes a fresh one, as does a desktop joining a sync folder where its code is held or was given up, and a file copy of a Workspace once sync detects that the original also syncs.
 
 **Version**:
 An earlier state of a ticket or Document (title, body, status, trash), saved locally on the device whenever a local edit or an incoming sync replaces it. Versions are kept 30 days; the record itself is the current version and is always kept. Restoring a version is an ordinary edit.

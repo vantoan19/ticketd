@@ -1426,3 +1426,33 @@ fn a_slow_download_shows_it_is_moving_well_before_a_megabyte_arrived() {
     let progress = seen.lock().unwrap().unwrap();
     assert!((1..=50).contains(&progress), "{progress}");
 }
+
+#[test]
+fn tickets_made_on_both_copies_before_the_copy_is_detected_are_reported_not_merged() {
+    let desks = desks();
+    let mut a = desks.desk("Desk A");
+    a.create_ticket("Login").unwrap();
+    a.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    drop(a);
+    let path = |name: &str| desks.directory.path().join(name);
+    std::fs::copy(path("Desk A"), path("Desk C")).unwrap();
+    let mut a = Workspace::open(path("Desk A")).unwrap();
+    let mut copy = Workspace::open(path("Desk C")).unwrap();
+    let from_a = a.create_ticket("From A").unwrap().reference;
+    let from_copy = copy.create_ticket("From the copy").unwrap().reference;
+    assert_eq!(from_a, from_copy);
+
+    a.sync_now(&desks.remote).unwrap();
+    copy.sync_now(&desks.remote).unwrap();
+    a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(a.show_ticket(&from_a).unwrap().title, "From A");
+    assert_eq!(copy.show_ticket(&from_a).unwrap().title, "From the copy");
+    for desk in [&a, &copy] {
+        assert_eq!(titles(desk).len(), 2);
+        assert_eq!(unreadable(desk).len(), 1);
+    }
+    assert_ne!(a.device_code().unwrap(), copy.device_code().unwrap());
+}

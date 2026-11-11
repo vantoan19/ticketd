@@ -31,7 +31,11 @@ Every synchronized record is identified by its GUID, carried in the file header.
 
 The Ticket reference is a readable label, not the identity: `T-`, the two-letter device code of the device that created the ticket, then that device's own counter, with no dash (`T-KQ43`). Devices therefore issue references offline without clashing. A device code is random; a device joining sync checks the device list kept in Drive and takes another code if its own is in use there or was given up by a device of that folder (the list keeps retired codes, because tickets still carry them). A Workspace restored from a backup takes a fresh code. An issued reference never changes.
 
-A Workspace file copied by hand to another machine is out of scope: the copy keeps the device identity and code of the original, nothing detects it, and two such copies syncing to one folder can issue the same reference. Moving a Workspace between machines goes through backup and restore, or through downloading it from Drive. There are no numeric aliases such as `T-42`.
+A Workspace file copied by hand to another machine starts with the device identity and code of the original, so it is detected when the two sync to one folder. On every run a desktop writes a fresh random run token into its own entry of the device list and keeps the same token locally. A desktop that finds a token in its entry that it did not write knows another copy synced under its identity: it takes a new device identity and a code no desktop of the folder holds or gave up, registers as a new desktop and carries on. Which of the two changes is whichever runs after the other has synced; the code they shared stays with the other one. A desktop that synced before run tokens existed has none on either side and is not taken for a copy.
+
+The limit: detection needs one run of each copy after the copy was made. Until then both still issue from the same code and counter, so a ticket created on each can carry the same reference. The two are different tickets (different GUIDs) and each gets its own file, but a desktop that holds one cannot take in the other under a reference already held: it reports that file under Needs attention and does not merge it. Moving a Workspace between machines through backup and restore, or by downloading it from Drive, has no such window.
+
+There are no numeric aliases such as `T-42`.
 
 Each relationship is written in exactly one file (a dependency in the blocked ticket, a parent in the child, tags in the tagged record), so no relationship can disagree with itself across two files.
 
@@ -54,7 +58,7 @@ Trash is the `trashed` field. Sync never deletes a record, locally or in Drive. 
 
 ## Restoring a backup
 
-Restoring a backup on a connected device disconnects it: the sync folder is forgotten together with the last-synced copies, and the sign-in is kept. Left connected, the next run would merge the folder back in and silently undo the restore, since every file there is newer than the restored content. The person instead chooses again between uploading the restored Workspace (it merges with the folder like a first upload, with differing values going to review) and downloading the one in Drive. Downloading a Workspace is the one restore that keeps its folder, because that restore is how the downloaded Workspace is put in place.
+Restoring a backup disconnects the Workspace from its sync folder: the folder is forgotten together with the last-synced copies. The restored Workspace has whatever Drive sign-in the backup held, which may be none or another account than the replaced Workspace used. Left connected, the next run would merge the folder back in and silently undo the restore, since every file there is newer than the restored content. The person instead chooses again between uploading the restored Workspace (it merges with the folder like a first upload, with differing values going to review) and downloading the one in Drive. Downloading a Workspace is the one restore that keeps its folder, because that restore is how the downloaded Workspace is put in place.
 
 ## History
 
@@ -73,6 +77,8 @@ This ADR governs only what happens between devices. The last-synced copy is a sy
 - Synced content is stored unencrypted in the person's Drive, protected by their Google account alone. The app says so at setup, and [PRIVACY.md](../../PRIVACY.md) records it.
 - Sync runs only while the desktop app is open. The CLI neither uploads nor downloads.
 - Because Drive has no conditional update, a file's version is checked immediately before upload. A write by another device inside that short window is replaced as the current file and remains in Drive's revisions. Two devices creating the same file at once can leave two Drive files; every device resolves to the oldest and ignores the other.
+- A synced file that is missing from Drive is uploaded again by the next run of any desktop that synced it; absence is never read as a deletion. A desktop that had not yet received the file's latest version puts it back with its own, older content. The other desktops then merge that file as a change made elsewhere: fields they did not change since take the older value, and fields they changed stay or go to review. The earlier value is in each desktop's History.
+- Every run writes the desktop's run token to the device list, so a connected desktop makes one small Drive write per poll even when nothing changed.
 - Change discovery lists the whole folder and compares file versions. This is adequate for one person's Workspace and is the first thing to revisit if a Workspace outgrows it.
 - Personal state stays on each device: Attention inbox read state, checkout paths, credentials, window layout, unfinished drafts and upload queues.
 - The remote side sits behind a narrow file-storage interface with a Google Drive adapter. Other storage providers are not planned.

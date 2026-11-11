@@ -81,8 +81,11 @@ the corresponding Google Drive file.
 
 Workspace sync never deletes a record: an item you trash keeps its file in Drive,
 marked as in Trash. Turning sync off on a desktop removes nothing from that desktop or
-from Drive. To remove synced content from Google, delete the folder in Drive
-yourself; Drive's own trash and revision retention then apply.
+from Drive. Deleting a single synced file in Drive does not remove it: the next
+sync run of a connected desktop uploads it again. Sync stops only when the whole
+folder is removed or the desktop is disconnected. To remove synced content from
+Google, disconnect your desktops and delete the folder in Drive yourself; Drive's
+own trash and revision retention then apply.
 
 Uninstalling the desktop leaves workspace data behind. Backups and exports also
 remain wherever you saved them. A backup retains local workspace data and local

@@ -201,7 +201,7 @@ A project that arrives from another device has no checkout folder until one is r
 
 Beside the record folders, a Workspace folder holds:
 
-- `devices.json`: the device registry. Each desktop that joined the folder is listed under its device id with its name, its two-letter device code and the time it last uploaded a change. `retired` lists the codes a desktop of the folder held and gave up. A desktop joining with a code that is listed either way takes a new one.
+- `devices.json`: the device registry. Each desktop that joined the folder is listed under its device id with its name, its two-letter device code, the time it last uploaded a change and `run`, a random token it replaces on every run (a desktop that finds a token there it did not write is a copy of that Workspace file and joins as a new desktop). `retired` lists the codes a desktop of the folder held and gave up. A desktop joining with a code that is listed either way takes a new one.
 - `attachments.json`: one entry per managed Attachment with its display name, file name, size, SHA-256 and the storage version of its bytes. A desktop lists an Attachment from this entry before it has the bytes, and checks the bytes against it after downloading them.
 - `attachments/`: the bytes of each managed Attachment as one file, written once and never changed. They are uploaded before any record that names the Attachment.
 

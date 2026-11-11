@@ -1165,6 +1165,10 @@ and upload queues. Workspace sync never publishes to an external tracker.
 - A desktop joining sync takes another device code if another desktop already
   holds its own or once held it, so Ticket references issued on different
   desktops never clash. References already issued never change.
+- A Workspace file copied to another machine is detected once both copies have
+  synced: one of them joins as a new desktop with a fresh device code. Tickets
+  created on both copies before that can share a reference; a desktop that
+  holds one reports the other under Needs attention and does not merge it.
 - Restoring a backup disconnects the Workspace from its Drive folder. The
   restored content is not overwritten by what Drive holds: the person chooses
   upload or download again.
