@@ -1127,12 +1127,6 @@ fn workspace_info() -> Result<WorkspaceInfo, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command(async)]
-fn restore_workspace(path: String) -> Result<String, String> {
-    Workspace::restore_default(path)
-        .map(|safety| safety.display().to_string())
-        .map_err(|e| e.to_string())
-}
-#[tauri::command(async)]
 fn inspect_backup(path: String) -> Result<BackupInspection, String> {
     open_workspace()
         .and_then(|w| w.inspect_backup(path))
@@ -1508,7 +1502,7 @@ pub fn run() -> Result<(), tauri::Error> {
             save_source,
             last_backup,
             workspace_info,
-            restore_workspace,
+            chat_commands::restore_workspace,
             inspect_backup,
             safety_backups,
             export_workspace,

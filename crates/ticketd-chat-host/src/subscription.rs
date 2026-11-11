@@ -26,8 +26,6 @@ pub enum ChatUpdate {
     },
     /// State that exists only while the host runs.
     Live(ChatLive),
-    /// Something worth telling the person that has no stored record.
-    Notice(String),
     /// The view fell behind. This is the last update; attach again for a new snapshot.
     Resync,
 }
@@ -38,7 +36,6 @@ impl ChatUpdate {
             // ponytail: serializes once more than the bridge will; estimate if it shows up in profiles.
             Self::Changes(changes) => serde_json::to_vec(changes).map_or(0, |json| json.len()),
             Self::Text { delta, .. } => delta.len(),
-            Self::Notice(text) => text.len(),
             Self::Live(_) | Self::Resync => 256,
         }
     }
@@ -103,6 +100,15 @@ pub(crate) fn channel() -> (Publisher, Subscription) {
     )
 }
 
+impl Drop for Publisher {
+    /// A supervisor that ends, however it ends, ends its views' feeds: what is already
+    /// queued is still delivered, then `next` returns `None`.
+    fn drop(&mut self) {
+        self.shared.backlog().closed = true;
+        self.shared.wake.notify_one();
+    }
+}
+
 impl Publisher {
     /// False once the view is gone or was told to resync.
     pub(crate) fn open(&self) -> bool {
@@ -164,5 +170,21 @@ mod tests {
         assert!(!publisher.open());
         assert_eq!(subscription.next().await, Some(ChatUpdate::Resync));
         assert_eq!(subscription.next().await, None);
+    }
+
+    #[tokio::test]
+    async fn a_feed_ends_when_its_publisher_is_dropped() {
+        let (publisher, mut subscription) = channel();
+        publisher.push(text(1));
+        let waiting = tokio::spawn(async move {
+            let first = subscription.next().await;
+            (first, subscription.next().await)
+        });
+
+        drop(publisher);
+
+        let (first, second) = waiting.await.expect("the reader finishes");
+        assert_eq!(first, Some(text(1)));
+        assert_eq!(second, None);
     }
 }

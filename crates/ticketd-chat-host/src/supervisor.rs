@@ -11,8 +11,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ticketd_core::{
-    Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
-    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, Workspace,
+    CHAT_NOTICE_LIMIT, Chat, ChatInteractionKind, ChatInteractionState, ChatMessage,
+    ChatObservation, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error,
+    Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
@@ -20,9 +21,9 @@ use uuid::Uuid;
 
 use crate::host::{
     Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, ChatView,
-    ContextSource, HostError, INTERRUPT_TIMEOUT, LiveInteraction, ResumeMode, SNAPSHOT_ITEMS,
-    STOPPED_BY_TICKETD, SendMode, StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL,
-    WorkspaceOpener, is_refusal,
+    ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError, INTERRUPT_TIMEOUT, LiveInteraction,
+    ResumeMode, SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode, StopState, TEXT_CHECKPOINT_INTERVAL,
+    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal, problem_key,
 };
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::{
@@ -55,6 +56,11 @@ pub(crate) enum Command {
         mode: ResumeMode,
         reply: Reply<()>,
     },
+    /// The person asked for input whose delivery is uncertain to be sent again.
+    Resend {
+        message_id: String,
+        reply: Reply<()>,
+    },
     Trash(Reply<Option<String>>),
     Changed,
     /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
@@ -66,6 +72,8 @@ enum Done {
     Opened {
         generation: RuntimeGeneration,
         result: Result<OpenedRuntime, Problem>,
+        /// The ticketd context read for the new session, or why it could not be.
+        context: Result<Option<String>, String>,
     },
     Dispatched {
         outcome: DispatchOutcome,
@@ -99,7 +107,6 @@ struct Opening {
     generation: RuntimeGeneration,
     origin: ChatSessionOrigin,
     preamble: Option<String>,
-    context: Option<String>,
     reply: Option<Reply<()>>,
 }
 
@@ -149,9 +156,13 @@ pub(crate) struct Supervisor {
     dispatching: Option<Dispatch>,
     /// A new turn that was written with no acknowledgment or turn seen yet.
     unconfirmed_start: Option<String>,
+    /// When an unconfirmed start stops counting as work in progress.
+    unconfirmed_deadline: Option<Instant>,
     active: Option<ActiveTurn>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
     direct: VecDeque<String>,
+    /// Input the person asked to send again although its delivery is uncertain.
+    resend: Option<String>,
     /// Selected history for a fresh session, sent with the next new turn.
     preamble: Option<String>,
     /// The ticketd context of a new session, sent with its first new turn.
@@ -212,8 +223,10 @@ impl Supervisor {
             opening: None,
             dispatching: None,
             unconfirmed_start: None,
+            unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
+            resend: None,
             preamble: None,
             session_context: None,
             context_sent: None,
@@ -238,10 +251,15 @@ impl Supervisor {
 
     async fn run(mut self) {
         loop {
-            let timer = [self.show_text_at, self.checkpoint_at, self.stop_deadline]
-                .into_iter()
-                .flatten()
-                .min();
+            let timer = [
+                self.show_text_at,
+                self.checkpoint_at,
+                self.stop_deadline,
+                self.unconfirmed_deadline,
+            ]
+            .into_iter()
+            .flatten()
+            .min();
             tokio::select! {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(reply)) => {
@@ -341,6 +359,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
         self.direct.clear();
+        self.resend = None;
         self.problem = Some(problem);
     }
 
@@ -380,6 +399,9 @@ impl Supervisor {
                 reply,
             } => self.respond(interaction_id, answer, reply),
             Command::Resume { mode, reply } => self.resume(mode, reply).await,
+            Command::Resend { message_id, reply } => {
+                let _ = reply.send(self.request_resend(message_id));
+            }
             Command::Trash(reply) => {
                 let chat = self.chat_id.clone();
                 let result = match self.write(|core| core.set_chat_trashed(&chat, true)) {
@@ -447,8 +469,50 @@ impl Supervisor {
             // The input may already be with the harness: interrupt its turn once known.
             self.stop_when_turn_known = true;
             self.stop = Some(StopState::Requested);
+            self.stop_deadline = Some(Instant::now() + INTERRUPT_TIMEOUT);
         }
         Ok(())
+    }
+
+    /// The person decided to send input again although its first delivery is uncertain.
+    /// Only that input is dispatched, as a new submission: the queue is paused first, so
+    /// nothing else follows it until the person resumes the queue.
+    fn request_resend(&mut self, message_id: String) -> Result<(), HostError> {
+        if let Some(detail) = &self.storage_failed {
+            return Err(HostError::StorageFailed(detail.clone()));
+        }
+        if self.active.is_some()
+            || self.dispatching.is_some()
+            || self.opening.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.resend.is_some()
+        {
+            return Err(HostError::Working);
+        }
+        let chat = self.chat_id.clone();
+        if self.core(|core| core.chat(&chat))?.trashed {
+            return Err(Error::ChatTrashed(chat).into());
+        }
+        self.write(|core| core.set_chat_queue_paused(&chat, true))?;
+        self.direct.clear();
+        self.problem = None;
+        self.resend = Some(message_id);
+        Ok(())
+    }
+
+    /// A new turn was written and nothing confirmed it within the bound. Whether the
+    /// harness has it stays unknown, so it is recorded as uncertain for the person to
+    /// decide about; later evidence from this runtime can still settle it.
+    fn delivery_unconfirmed(&mut self, attempt_id: String) {
+        self.record(vec![ChatObservation::SubmissionUncertain {
+            attempt_id,
+            detail: Some("the harness did not confirm receiving it in time".to_owned()),
+        }]);
+        let chat = self.chat_id.clone();
+        let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
+        self.direct.clear();
+        self.stop = None;
+        self.stop_deadline = None;
     }
 
     fn interrupt(&mut self) {
@@ -522,17 +586,22 @@ impl Supervisor {
             let _ = reply.send(Err(HostError::Busy));
             return;
         }
-        if self.runtime.is_some() {
-            self.stop_runtime("replaced by an explicit resume").await;
-        }
         let chat_id = self.chat_id.clone();
         let chat = match self.core(|core| core.chat(&chat_id)) {
+            // A trashed Chat runs nothing until it is restored.
+            Ok(chat) if chat.trashed => {
+                let _ = reply.send(Err(Error::ChatTrashed(chat_id).into()));
+                return;
+            }
             Ok(chat) => chat,
             Err(error) => {
                 let _ = reply.send(Err(error.into()));
                 return;
             }
         };
+        if self.runtime.is_some() {
+            self.stop_runtime("replaced by an explicit resume").await;
+        }
         let (session, origin, preamble) = match mode {
             ResumeMode::FreshSession { history } => (
                 SessionStart::New,
@@ -571,9 +640,10 @@ impl Supervisor {
             return;
         };
         // A resumed native session already has it; a new one starts without it.
-        let context = (origin != ChatSessionOrigin::NativeResume)
-            .then(|| self.context.as_ref().and_then(|source| source(&chat.id)))
-            .flatten();
+        let source = self
+            .context
+            .clone()
+            .filter(|_| origin != ChatSessionOrigin::NativeResume);
         self.generations += 1;
         let generation = RuntimeGeneration(self.generations);
         let request = OpenRequest {
@@ -585,13 +655,23 @@ impl Supervisor {
             generation,
             origin,
             preamble,
-            context,
             reply,
         });
-        let done = self.done.clone();
+        let (done, chat_id) = (self.done.clone(), chat.id.clone());
         tokio::spawn(async move {
+            // Reading the context runs the CLI and can take seconds: off the async threads.
+            let context = match source {
+                Some(source) => tokio::task::spawn_blocking(move || source(&chat_id))
+                    .await
+                    .unwrap_or_else(|error| Err(error.to_string())),
+                None => Ok(None),
+            };
             let result = adapter.open(request).await;
-            let _ = done.send(Done::Opened { generation, result });
+            let _ = done.send(Done::Opened {
+                generation,
+                result,
+                context,
+            });
         });
     }
 
@@ -679,10 +759,12 @@ impl Supervisor {
         let _ = self.write(|core| core.mark_chat_contact_lost(Some(&chat), detail));
         self.active = None;
         self.unconfirmed_start = None;
+        self.unconfirmed_deadline = None;
         self.interactions.clear();
         self.text.clear();
         self.pending_tools.clear();
         self.direct.clear();
+        self.resend = None;
         self.stop = None;
         self.stop_deadline = None;
         self.stop_when_turn_known = false;
@@ -723,10 +805,16 @@ impl Supervisor {
         };
         if chat.trashed {
             self.direct.clear();
+            self.resend = None;
             return;
         }
         let idle = self.active.is_none();
+        // What the person asked to send again goes alone, as a new turn.
+        let resend = self.resend.clone().filter(|_| idle);
         let message_id = loop {
+            if let Some(id) = &resend {
+                break id.clone();
+            }
             match self.direct.front() {
                 Some(id) if idle || self.steering().is_some() => break id.clone(),
                 // Steering is not available: it stays in the visible queue.
@@ -750,16 +838,21 @@ impl Supervisor {
             self.open(&chat, session, origin, preamble, None);
             return;
         }
-        if self.direct.front() == Some(&message_id) {
+        if resend.is_some() {
+            self.resend = None;
+        } else if self.direct.front() == Some(&message_id) {
             self.direct.pop_front();
         }
-        self.dispatch(&message_id);
+        self.dispatch(&message_id, resend.is_some());
     }
 
     /// Records the possible submission, then hands the input to the adapter. Nothing
     /// awaits between the checks, the record and the hand-off; the adapter rechecks
     /// generation and expected turn at its write.
-    fn dispatch(&mut self, message_id: &str) {
+    ///
+    /// `resend` is set only for input the person asked to send again; it alone may
+    /// follow an uncertain attempt.
+    fn dispatch(&mut self, message_id: &str, resend: bool) {
         let Some(runtime) = &self.runtime else {
             return;
         };
@@ -776,11 +869,29 @@ impl Supervisor {
         let starts_turn = kind == SubmissionKind::StartTurn;
         let attempt = Uuid::new_v4().to_string();
         let chat = self.chat_id.clone();
-        let Ok(message) =
-            self.write(|core| core.record_chat_submission(&chat, message_id, &attempt, intent))
-        else {
-            return;
+        let recorded = self.write(|core| {
+            if resend {
+                core.record_chat_resubmission(&chat, message_id, &attempt)
+            } else {
+                core.record_chat_submission(&chat, message_id, &attempt, intent)
+            }
+        });
+        let message = match recorded {
+            Ok(message) => message,
+            Err(error) => {
+                // Storage failure is reported by `write`; a refusal is said here.
+                // The queue is paused so the same refusal is not met again unasked.
+                if is_refusal(&error) {
+                    self.notice(format!("A message was not sent: {error}"));
+                    let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
+                }
+                return;
+            }
         };
+        if starts_turn {
+            // An earlier Stop was about an earlier submission.
+            self.stop_when_turn_known = false;
+        }
         let preamble = if starts_turn {
             self.preamble.take()
         } else {
@@ -831,7 +942,11 @@ impl Supervisor {
 
     fn on_done(&mut self, done: Done) {
         match done {
-            Done::Opened { generation, result } => self.on_opened(generation, result),
+            Done::Opened {
+                generation,
+                result,
+                context,
+            } => self.on_opened(generation, result, context),
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
             Done::Interrupted {
                 generation,
@@ -878,7 +993,12 @@ impl Supervisor {
         }
     }
 
-    fn on_opened(&mut self, generation: RuntimeGeneration, result: Result<OpenedRuntime, Problem>) {
+    fn on_opened(
+        &mut self,
+        generation: RuntimeGeneration,
+        result: Result<OpenedRuntime, Problem>,
+        context: Result<Option<String>, String>,
+    ) {
         let Some(opening) = self
             .opening
             .take_if(|opening| opening.generation == generation)
@@ -900,8 +1020,12 @@ impl Supervisor {
                 if opening.preamble.is_some() {
                     self.preamble = opening.preamble;
                 }
-                if opening.context.is_some() {
-                    self.session_context = opening.context;
+                match context {
+                    Ok(Some(context)) => self.session_context = Some(context),
+                    Ok(None) => {}
+                    Err(error) => self.notice(format!(
+                        "ticketd could not prepare this Chat's context, so the session started without it: {error}"
+                    )),
                 }
                 self.problem = None;
                 Ok(())
@@ -950,6 +1074,8 @@ impl Supervisor {
             DispatchOutcome::Written => {
                 if current && dispatch.starts_turn && self.active.is_none() {
                     self.unconfirmed_start = Some(attempt_id);
+                    self.unconfirmed_deadline =
+                        Some(Instant::now() + DELIVERY_CONFIRMATION_TIMEOUT);
                 }
             }
             DispatchOutcome::Acknowledged { turn } => {
@@ -1215,15 +1341,20 @@ impl Supervisor {
                         turn_id: turn_id.clone(),
                     });
                 }
-                let (state, detail) = match outcome {
-                    TurnOutcome::Completed => (ChatTurnState::Completed, None),
-                    TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None),
-                    TurnOutcome::Failed(problem) => (ChatTurnState::Failed, Some(problem.message)),
+                let (state, detail, problem) = match outcome {
+                    TurnOutcome::Completed => (ChatTurnState::Completed, None, None),
+                    TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None),
+                    TurnOutcome::Failed(problem) => (
+                        ChatTurnState::Failed,
+                        Some(problem.message.chars().take(CHAT_NOTICE_LIMIT).collect()),
+                        Some(problem_key(problem.kind).to_owned()),
+                    ),
                 };
                 observations.push(ChatObservation::TurnEnded {
                     turn_id: turn_id.clone(),
                     state,
                     detail,
+                    problem,
                 });
                 self.record(observations);
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
@@ -1249,10 +1380,18 @@ impl Supervisor {
                 self.on_loss(format!("the harness process ended{exit}: {diagnostics}"));
             }
             // The harness keeps the turn; nothing is retried or ended here.
-            EventKind::Notice { kind, message, .. } => match kind {
+            EventKind::Notice {
+                kind,
+                message,
+                detail,
+                ..
+            } => match kind {
                 NoticeKind::Retrying | NoticeKind::Warning => self.notice(message),
-                // ponytail: effective settings are not stored or shown yet.
-                NoticeKind::EffectiveSettings => {}
+                NoticeKind::EffectiveSettings => {
+                    let settings = detail.map_or(message, |detail| detail.payload().to_owned());
+                    let chat = self.chat_id.clone();
+                    let _ = self.write(|core| core.set_chat_effective_settings(&chat, &settings));
+                }
             },
             EventKind::Unknown { summary, .. } => self.notice(summary),
         }
@@ -1329,8 +1468,14 @@ impl Supervisor {
         }
         if self.stop_deadline.is_some_and(|at| at <= now) {
             self.stop_deadline = None;
-            if self.active.is_some() && self.stop.is_some() {
+            if self.stop.is_some() {
                 self.stop = Some(StopState::Unconfirmed);
+            }
+        }
+        if self.unconfirmed_deadline.is_some_and(|at| at <= now) {
+            self.unconfirmed_deadline = None;
+            if let Some(attempt_id) = self.unconfirmed_start.take() {
+                self.delivery_unconfirmed(attempt_id);
             }
         }
     }
@@ -1353,10 +1498,17 @@ impl Supervisor {
         }
     }
 
+    /// Keeps something worth telling the person that belongs to no other record. It is
+    /// stored, so it is there for a view that attaches later.
+    // ponytail: one record per notice; coalesce repeats if a harness proves noisy.
     fn notice(&mut self, text: String) {
-        for subscriber in &self.subscribers {
-            subscriber.push(ChatUpdate::Notice(text.clone()));
-        }
+        let chat = self.chat_id.clone();
+        let notice = ChatObservation::Notice {
+            notice_id: Uuid::new_v4().to_string(),
+            text,
+        };
+        // A storage failure is reported by `write` itself.
+        let _ = self.write(|core| core.record_chat_observations(&chat, vec![notice]));
     }
 
     fn live(&self) -> ChatLive {

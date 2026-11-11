@@ -9,8 +9,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+};
 use tokio::process::{Child, Command};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::timeout;
 
 pub(crate) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
@@ -171,5 +174,53 @@ impl ChildProcess for Process {
     async fn kill(&mut self) {
         // A process that already exited needs no kill.
         let _ = self.0.kill().await;
+    }
+}
+
+/// Writes one frame within `bound`. A harness that does not take its input in that time
+/// is not coming back: the pipe is dropped, because a partial frame may be in it, and
+/// the process is killed so that its loss is reported like any other.
+pub(crate) async fn write_bounded(
+    stdin: &mut Option<Writer>,
+    child: &AsyncMutex<Box<dyn ChildProcess>>,
+    bytes: &[u8],
+    bound: Duration,
+) -> io::Result<()> {
+    let Some(writer) = stdin.as_mut() else {
+        return Err(io::ErrorKind::BrokenPipe.into());
+    };
+    let written = timeout(bound, async {
+        writer.write_all(bytes).await?;
+        writer.flush().await
+    });
+    match written.await {
+        Ok(result) => result,
+        Err(_) => {
+            *stdin = None;
+            child.lock().await.kill().await;
+            Err(io::ErrorKind::TimedOut.into())
+        }
+    }
+}
+
+/// Closes the process's input, which asks it to exit, and waits up to `bound` for the
+/// exit. Returns the exit code, or `None` after killing a process that did not exit.
+/// The bound covers waiting for a write in progress, so a harness that stopped reading
+/// cannot hold this up.
+pub(crate) async fn close_process(
+    stdin: &AsyncMutex<Option<Writer>>,
+    child: &AsyncMutex<Box<dyn ChildProcess>>,
+    bound: Duration,
+) -> Option<Option<i32>> {
+    let exited = timeout(bound, async {
+        *stdin.lock().await = None;
+        child.lock().await.wait().await
+    });
+    match exited.await {
+        Ok(exit_code) => Some(exit_code),
+        Err(_) => {
+            child.lock().await.kill().await;
+            None
+        }
     }
 }

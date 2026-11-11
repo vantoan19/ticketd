@@ -7,9 +7,11 @@ use std::time::Duration;
 use serde_json::json;
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, EventKind, InteractionRequest, NativeItemId, NativeRequestId,
-    NativeSessionId, NativeTurnId,
+    ApprovalDecision, DeliveryEvidence, EventKind, InteractionRequest, NativeItemId,
+    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind,
+    ProviderDetail, TurnOutcome,
 };
+use ticketd_core::{ChatDelivery, ChatSubmissionIntent};
 
 use super::*;
 
@@ -48,6 +50,7 @@ impl Fixture {
 
     fn input(&self, message: &str) -> NewChatInput {
         NewChatInput {
+            command_id: uuid::Uuid::new_v4().to_string(),
             harness_id: "codex".to_owned(),
             folder: Some(self.dir.path().to_string_lossy().into_owned()),
             links: Vec::new(),
@@ -57,9 +60,10 @@ impl Fixture {
 
     /// A Chat whose first message was acknowledged and started `turn-1`.
     async fn chat(&self) -> String {
-        let id = self.chats.create(self.input("first")).await.unwrap();
+        let created = self.chats.create(self.input("first")).await.unwrap();
         settle().await;
-        id
+        assert_eq!(created.send_error, None);
+        created.chat_id
     }
 
     async fn open(&self, chat_id: &str) -> (Opened, Arc<Mutex<Vec<Value>>>) {
@@ -155,7 +159,7 @@ async fn a_chat_without_a_chosen_folder_gets_its_own_folder_beside_the_workspace
     let mut input = f.input("Plan the release\nwith details");
     input.folder = None;
 
-    let id = f.chats.create(input).await.unwrap();
+    let id = f.chats.create(input).await.unwrap().chat_id;
 
     let chat = f.core().chat(&id).unwrap();
     let managed = format!("{}.chats", f.core().workspace_info().unwrap().path);
@@ -188,9 +192,9 @@ async fn requests_are_checked_before_anything_is_stored() {
             .is_empty()
     );
 
-    let unknown_field = json!({ "harness_id": "codex", "folder": null, "links": [], "message": "m", "shell": "rm" });
+    let unknown_field = json!({ "command_id": "c", "harness_id": "codex", "folder": null, "links": [], "message": "m", "shell": "rm" });
     assert!(serde_json::from_value::<NewChatInput>(unknown_field).is_err());
-    assert!(serde_json::from_value::<LinkRef>(json!({ "kind": "project", "id": "p" })).is_err());
+    assert!(serde_json::from_value::<LinkRef>(json!({ "kind": "plan", "id": "p" })).is_err());
     assert!(serde_json::from_value::<Answer>(json!({ "option_id": 1 })).is_err());
     assert!(serde_json::from_value::<HistorySelection>(json!({ "kind": "everything" })).is_err());
 
@@ -331,7 +335,7 @@ async fn queued_input_is_shown_as_the_queue_and_can_be_withdrawn() {
 async fn an_uncertain_submission_waits_for_the_person_and_is_resent_only_when_they_say_so() {
     let f = Fixture::new().await;
     f.fake.script_submit(SubmitReply::LoseProcess);
-    let id = f.chats.create(f.input("first")).await.unwrap();
+    let id = f.chats.create(f.input("first")).await.unwrap().chat_id;
     settle().await;
     let (opened, _) = f.open(&id).await;
     let problem = opened.snapshot.chat.problem.unwrap();
@@ -449,4 +453,429 @@ async fn a_response_is_saved_as_a_document_and_retention_changes_reach_the_list(
         .unwrap();
     settle().await;
     assert_eq!(f.submitted(), ["first"], "restore replays nothing");
+}
+
+fn user_deliveries(opened: &Opened) -> Vec<&'static str> {
+    let items = opened.snapshot.items.iter();
+    items
+        .filter_map(|item| match item {
+            Item::User { delivery, .. } => Some(*delivery),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn input_a_turn_processed_reads_as_delivered_and_never_as_awaiting_a_decision() {
+    let f = Fixture::new().await;
+    // As Claude Code does: no acknowledgment, only a turn correlated with the input.
+    f.fake.script_submit(SubmitReply::Timeout);
+    let id = f.chats.create(f.input("first")).await.unwrap().chat_id;
+    settle().await;
+    let attempt = match f.fake.written().remove(0) {
+        Written::Submit(submission) => submission.submission,
+        other => panic!("expected the submission, got {other:?}"),
+    };
+    f.emit(EventKind::SubmissionEvidence {
+        submission: attempt.clone(),
+        evidence: DeliveryEvidence::Processing { turn: turn() },
+    })
+    .await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: vec![attempt],
+    })
+    .await;
+
+    // Contact ends after the turn completed, as on any quit or restart.
+    f.fake.lose_process().await;
+    settle().await;
+
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(user_deliveries(&opened), ["delivered"]);
+    let problem = opened.snapshot.chat.problem.map(|problem| problem.kind);
+    assert_ne!(problem, Some("uncertain_delivery"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn discarding_an_uncertain_message_keeps_it_and_its_uncertainty_and_sends_nothing() {
+    let f = Fixture::new().await;
+    f.fake.script_submit(SubmitReply::LoseProcess);
+    let id = f.chats.create(f.input("first")).await.unwrap().chat_id;
+    settle().await;
+    f.chats.send(&id, "later", SendMode::Queue).await.unwrap();
+    let (opened, _) = f.open(&id).await;
+    let message_id = opened.snapshot.chat.problem.unwrap().message_id.unwrap();
+
+    let discard = UncertainDecision::Discard;
+    f.chats
+        .resolve_uncertain(&id, &message_id, discard)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(user_deliveries(&opened), ["set_aside"]);
+    assert_eq!(opened.snapshot.chat.problem.map(|p| p.kind), Some("failed"));
+    let stored = messages(&f.core(), &id).unwrap().remove(0);
+    assert_eq!(stored.attempts.len(), 1);
+    assert_eq!(stored.attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(f.submitted(), ["first"]);
+    assert_eq!(f.core().chat_queue(&id).unwrap().len(), 1);
+    let again = f.chats.resolve_uncertain(&id, &message_id, discard).await;
+    assert_eq!(again.unwrap_err().code, "stale");
+}
+
+#[tokio::test(start_paused = true)]
+async fn resending_an_uncertain_message_sends_that_message_alone_as_a_new_submission() {
+    let f = Fixture::new().await;
+    f.fake.script_submit(SubmitReply::LoseProcess);
+    let id = f.chats.create(f.input("first")).await.unwrap().chat_id;
+    settle().await;
+    f.chats.send(&id, "later", SendMode::Queue).await.unwrap();
+    f.chats.resume_queue(&id).await.unwrap();
+    let (opened, _) = f.open(&id).await;
+    let message_id = opened.snapshot.chat.problem.unwrap().message_id.unwrap();
+
+    let resend = UncertainDecision::Resend;
+    f.chats
+        .resolve_uncertain(&id, &message_id, resend)
+        .await
+        .unwrap();
+    settle().await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+
+    assert_eq!(f.submitted(), ["first", "first"], "the queue was not sent");
+    let stored = messages(&f.core(), &id).unwrap().remove(0);
+    let deliveries: Vec<_> = stored.attempts.iter().map(|a| a.delivery).collect();
+    assert_eq!(
+        deliveries,
+        [ChatDelivery::Uncertain, ChatDelivery::Acknowledged]
+    );
+    assert_ne!(stored.attempts[0].id, stored.attempts[1].id);
+    assert!(f.core().chat(&id).unwrap().queue_paused);
+}
+
+#[tokio::test(start_paused = true)]
+async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    assert_eq!(f.chats.working(), 1);
+
+    let unconfirmed = f.chats.begin_restore().await;
+    assert!(unconfirmed.is_empty());
+    assert_eq!(f.chats.working(), 0, "no harness runs across a restore");
+    assert!(matches!(f.fake.written().last(), Some(Written::Close(_))));
+    assert!(f.chats.send(&id, "during", SendMode::Auto).await.is_err());
+    // What a backup can hold: a turn in progress, a submission in flight, queued input.
+    let mut core = f.core();
+    core.set_chat_queue_paused(&id, false).unwrap();
+    let flying = core.save_chat_input(None, &id, "in flight").unwrap();
+    core.record_chat_submission(&id, &flying.id, "a-restored", ChatSubmissionIntent::NewTurn)
+        .unwrap();
+    core.save_chat_input(None, &id, "queued in the backup")
+        .unwrap();
+    drop(core);
+
+    f.chats.finish_restore().unwrap();
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+
+    assert_eq!(f.submitted(), ["first"], "nothing restored was dispatched");
+    assert_eq!(f.fake.opens().len(), 1, "no harness was started");
+    let chat = f.core().chat(&id).unwrap();
+    assert!(chat.queue_paused && chat.active_turn.is_none());
+    assert_eq!(seen.lock().unwrap().last().unwrap()["kind"], "resync");
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(
+        opened.snapshot.chat.problem.unwrap().kind,
+        "uncertain_delivery"
+    );
+    assert_eq!(opened.snapshot.chat.queue.len(), 1);
+    assert_eq!(f.fake.opens().len(), 1, "opening the view started nothing");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_typed_failure_notices_and_reported_settings_reach_a_view_opened_afterwards() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let problem = |kind| Problem {
+        kind,
+        message: "said by the harness".to_owned(),
+        detail: None,
+    };
+    f.emit(EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: "settings".to_owned(),
+        detail: Some(ProviderDetail::new(
+            "settings",
+            r#"{"model":"m-1","permission_mode":"default"}"#,
+        )),
+    })
+    .await;
+    f.emit(EventKind::Notice {
+        turn: Some(turn()),
+        kind: NoticeKind::Retrying,
+        message: "Reconnecting (2/5)".to_owned(),
+        detail: None,
+    })
+    .await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Failed(problem(ProblemKind::QuotaExhausted)),
+        submissions: Vec::new(),
+    })
+    .await;
+
+    let (opened, _) = f.open(&id).await;
+    let shown = opened.snapshot.chat.problem.unwrap();
+    assert_eq!(shown.kind, "usage_limit");
+    assert_eq!(shown.message.as_deref(), Some("said by the harness"));
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Marker { reason: "note", message: Some(text), .. } if text == "Reconnecting (2/5)"
+    )));
+    let permissions = opened.snapshot.chat.harness.permissions.unwrap();
+    assert!(permissions.contains("model m-1") && permissions.contains("permission mode default"));
+    assert_eq!(f.chats.overview().unwrap().needs_you, 1);
+
+    // A sign-in failure in the middle of a turn is a setup step: shown, not counted.
+    f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(EventKind::TurnEnded {
+        turn: NativeTurnId::new("turn-2"),
+        outcome: TurnOutcome::Failed(problem(ProblemKind::LoginRequired)),
+        submissions: Vec::new(),
+    })
+    .await;
+    let (opened, _) = f.open(&id).await;
+    let shown = opened.snapshot.chat.problem.unwrap();
+    assert_eq!(shown.kind, "not_signed_in");
+    assert_eq!(shown.command.as_deref(), Some("codex login"));
+    assert_eq!(f.chats.overview().unwrap().needs_you, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn api_key_and_unknown_sign_in_are_their_own_statuses_with_an_explanation() {
+    let f = Fixture::new().await;
+    let status = |login| {
+        let inspection = Inspection::Installed {
+            executable: PathBuf::from("harness"),
+            version: Some("1.0".to_owned()),
+            login,
+            capabilities: ticketd_chat_host::Capabilities {
+                steering: ticketd_chat_host::Capability::Unknown {
+                    reason: String::new(),
+                },
+                native_resume: ticketd_chat_host::Capability::Unknown {
+                    reason: String::new(),
+                },
+            },
+        };
+        harness_status("claude-code", "Claude Code", inspection)
+    };
+
+    assert_eq!(status(LoginState::SignedIn).status, "ready");
+    let api_key = status(LoginState::NonSubscription);
+    assert_eq!(api_key.status, "not_subscription");
+    assert!(api_key.message.unwrap().contains("not a subscription"));
+    let unknown = status(LoginState::Unknown);
+    assert_eq!(unknown.status, "sign_in_unknown");
+    assert!(unknown.message.unwrap().contains("cannot check"));
+    let signed_out = status(LoginState::SignedOut);
+    assert_eq!(signed_out.status, "not_signed_in");
+    assert_eq!(signed_out.command.as_deref(), Some("claude /login"));
+
+    // Neither blocks a Chat; both are told before the first message.
+    f.fake.set_inspection(Inspection::NotInstalled);
+    let listed = f.chats.harnesses().await.unwrap();
+    let codex = listed.iter().find(|status| status.id == "codex").unwrap();
+    assert_eq!(codex.status, "not_installed");
+    assert!(codex.help_url.is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fresh_session_leaves_out_uncertain_input_unless_picked_and_marks_partial_text() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(EventKind::TextDelta {
+        turn: turn(),
+        item: NativeItemId::new("m1"),
+        text: "Half an ans".to_owned(),
+    })
+    .await;
+    f.fake.lose_process().await;
+    settle().await;
+    f.fake.script_submit(SubmitReply::LoseProcess);
+    f.chats
+        .send(&id, "maybe sent", SendMode::Auto)
+        .await
+        .unwrap();
+    settle().await;
+    let uncertain = messages(&f.core(), &id)
+        .unwrap()
+        .into_iter()
+        .find(|message| message.text == "maybe sent")
+        .unwrap();
+    assert!(uncertain.awaits_decision());
+
+    f.chats.resume(&id, HistorySelection::All).await.unwrap();
+    f.chats.send(&id, "continue", SendMode::Auto).await.unwrap();
+    settle().await;
+    let sent = f.submitted().pop().unwrap();
+    assert!(!sent.contains("maybe sent"));
+    assert!(sent.contains("Assistant (incomplete"));
+    assert!(sent.contains("Half an ans"));
+
+    f.fake.lose_process().await;
+    settle().await;
+    let picked = HistorySelection::Picked {
+        ids: vec![uncertain.id],
+    };
+    f.chats.resume(&id, picked).await.unwrap();
+    f.chats.send(&id, "go on", SendMode::Auto).await.unwrap();
+    settle().await;
+    let sent = f.submitted().pop().unwrap();
+    assert!(sent.contains("User (it is not known whether"));
+    assert!(sent.contains("maybe sent"));
+
+    f.chats.set_retention(&id, Retention::Trash).await.unwrap();
+    let opens = f.fake.opens().len();
+    assert!(f.chats.resume(&id, HistorySelection::All).await.is_err());
+    assert_eq!(f.fake.opens().len(), opens, "a trashed Chat starts nothing");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_first_send_returns_the_chat_and_a_retry_makes_no_second_one() {
+    let f = Fixture::new().await;
+    let mut linked = f.input("first");
+    linked.folder = None;
+    linked.links = vec![LinkRef {
+        kind: LinkKind::Ticket,
+        id: "no-such-ticket".to_owned(),
+    }];
+    assert!(f.chats.create(linked).await.is_err());
+    let managed = format!("{}.chats", f.core().workspace_info().unwrap().path);
+    assert!(
+        !Path::new(&managed).exists(),
+        "a refused Chat leaves no folder"
+    );
+
+    // The Chat is stored, then its first message cannot be saved.
+    let input = f.input("first");
+    f.chats.quit().await;
+    let first = f.chats.create(input.clone()).await.unwrap();
+    assert!(first.send_error.is_some());
+
+    let again = f.chats.create(input).await.unwrap();
+    assert_eq!(again.chat_id, first.chat_id);
+    assert_eq!(
+        f.core().list_chats(ChatListFilter::Active).unwrap().len(),
+        1
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn repeating_a_new_chat_request_sends_its_first_message_once() {
+    let f = Fixture::new().await;
+    let input = f.input("first");
+
+    let first = f.chats.create(input.clone()).await.unwrap();
+    settle().await;
+    let again = f.chats.create(input).await.unwrap();
+    settle().await;
+
+    assert_eq!(
+        (again.chat_id.as_str(), again.send_error),
+        (first.chat_id.as_str(), None)
+    );
+    assert_eq!(f.submitted(), ["first"]);
+    assert_eq!(messages(&f.core(), &first.chat_id).unwrap().len(), 1);
+    let not_a_uuid = NewChatInput {
+        command_id: "../elsewhere".to_owned(),
+        ..f.input("first")
+    };
+    assert!(f.chats.create(not_a_uuid).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_list_is_not_read_again_for_checkpointed_text_and_shared_folders_are_named() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(EventKind::TextDelta {
+        turn: turn(),
+        item: NativeItemId::new("m1"),
+        text: "x".repeat(200),
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (_, before) = f.chats.overview_digest().unwrap();
+    let written = f.chats.digest();
+
+    f.emit(EventKind::TextDelta {
+        turn: turn(),
+        item: NativeItemId::new("m1"),
+        text: " and more".to_owned(),
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert_ne!(f.chats.digest(), written, "the checkpoint was written");
+    assert_eq!(f.chats.overview_digest().unwrap().1, before);
+
+    let other = f.chats.create(f.input("second")).await.unwrap().chat_id;
+    settle().await;
+    let (opened, _) = f.open(&other).await;
+    assert_eq!(opened.snapshot.chat.folder.shared_with, ["first"]);
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(opened.snapshot.chat.folder.shared_with, ["second"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the_chat() {
+    let f = Fixture::new().await;
+    let project = f
+        .core()
+        .create_project("Storefront", "/work/store")
+        .unwrap();
+    let link = || LinkRef {
+        kind: LinkKind::Project,
+        id: project.id.clone(),
+    };
+    assert_eq!(
+        serde_json::from_value::<LinkRef>(json!({ "kind": "project", "id": project.id })).unwrap(),
+        link()
+    );
+    let found = f.chats.search_records("store").unwrap();
+    assert_eq!(
+        found,
+        [LinkedRecord::Project {
+            id: project.id.clone(),
+            title: "Storefront".to_owned()
+        }]
+    );
+
+    let id = f.chat().await;
+    let folder = f.core().chat(&id).unwrap().execution_folder;
+    f.chats.set_link(&id, link(), true).await.unwrap();
+
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(opened.snapshot.chat.links, found);
+    assert_eq!(f.core().chat(&id).unwrap().execution_folder, folder);
+    assert_eq!(opened.snapshot.chat.folder.path, folder);
+    // The reference block the agent is given names it (worded in the host's tests).
+    let linked = f.core().chat_linked_records(&id).unwrap();
+    assert_eq!(linked[0].kind, ChatLinkKind::Project);
+
+    f.chats.set_link(&id, link(), false).await.unwrap();
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.chat.links.is_empty());
 }

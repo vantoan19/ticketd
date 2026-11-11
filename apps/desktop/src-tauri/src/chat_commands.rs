@@ -18,7 +18,7 @@ use ticketd_core::ChatListFilter;
 
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
-    Answer, ChatFailure, Chats, CloseAction, HarnessStatus, HistorySelection, LinkRef,
+    Answer, ChatFailure, Chats, CloseAction, Created, HarnessStatus, HistorySelection, LinkRef,
     NewChatInput, Opened, Overview, QuitAction, Retention, UncertainDecision, close_action,
     quit_action,
 };
@@ -62,11 +62,15 @@ fn claude_bridge() -> Result<PathBuf, String> {
 /// built when the session starts, so it names the CLI and the records as they are then.
 fn context_source(app_version: String) -> ContextSource {
     Arc::new(move |chat_id| {
-        let workspace = crate::open_workspace().ok()?;
-        let path = workspace.workspace_info().ok().map(|info| info.path);
-        // Blocking: runs the CLI with a deadline. It happens once per new session.
-        let status = cli::locate(&app_version, path.as_deref().map(PathBuf::from).as_deref());
-        context::for_chat(&workspace, chat_id, &status).ok()
+        let context = || {
+            let workspace = crate::open_workspace()?;
+            let path = PathBuf::from(workspace.workspace_info()?.path);
+            // Blocking: runs the CLI with a deadline, once per new session. The host
+            // calls this off the async threads.
+            let status = cli::locate(&app_version, Some(&path));
+            context::for_chat(&workspace, chat_id, &status)
+        };
+        context().map(Some).map_err(|error| error.to_string())
     })
 }
 
@@ -105,16 +109,23 @@ fn watch_overview(app: &AppHandle) {
     }
     let (app, chats) = (app.clone(), bridge.chats.clone());
     tauri::async_runtime::spawn(async move {
-        let mut shown = None;
+        let (mut seen, mut shown) = (None, None);
         while changed.changed().await.is_ok() {
             tokio::time::sleep(OVERVIEW_INTERVAL).await;
             changed.borrow_and_update();
-            let digest = chats.digest();
-            if digest.is_some() && digest != shown {
-                shown = digest;
-                if let Ok(overview) = chats.overview() {
-                    let _ = app.emit(OVERVIEW_EVENT, overview);
-                }
+            // Nothing was written and no live state moved: nothing to read.
+            let written = chats.digest();
+            if written.is_none() || written == seen {
+                continue;
+            }
+            seen = written;
+            // Lists are fetched again on this event, so it fires only when a row or the
+            // counts would read differently; a text checkpoint alone changes neither.
+            if let Ok((overview, digest)) = chats.overview_digest()
+                && shown.as_ref() != Some(&digest)
+            {
+                shown = Some(digest);
+                let _ = app.emit(OVERVIEW_EVENT, overview);
             }
         }
     });
@@ -180,7 +191,7 @@ pub async fn chat_folder_use(bridge: State<'_, ChatBridge>, path: String) -> Out
 }
 
 #[tauri::command]
-pub async fn chat_create(bridge: State<'_, ChatBridge>, input: NewChatInput) -> Outcome<String> {
+pub async fn chat_create(bridge: State<'_, ChatBridge>, input: NewChatInput) -> Outcome<Created> {
     bridge.chats.create(input).await
 }
 
@@ -318,6 +329,43 @@ pub async fn chat_save_as_document(
     bridge
         .chats
         .save_as_document(&chat_id, &response_id, &title)
+}
+
+/// Replaces the workspace with a backup. Running Chats are stopped first and nothing
+/// restored is run: what the backup held as in progress is recorded as lost contact and
+/// its queues stay paused until the person acts.
+#[tauri::command]
+pub async fn restore_workspace(
+    app: AppHandle,
+    bridge: State<'_, ChatBridge>,
+    path: String,
+) -> Result<String, String> {
+    let chats = bridge.chats.clone();
+    let unconfirmed = chats.begin_restore().await;
+    let restored = tauri::async_runtime::spawn_blocking(move || {
+        ticketd_core::Workspace::restore_default(path)
+    })
+    .await;
+    let reconciled = chats.finish_restore();
+    if let Ok(overview) = chats.overview() {
+        let _ = app.emit(OVERVIEW_EVENT, overview);
+    }
+    let safety = restored
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    reconciled.map_err(|failure| {
+        format!(
+            "The workspace was restored, but its Chats could not be checked: {}",
+            failure.message
+        )
+    })?;
+    if !unconfirmed.is_empty() {
+        return Err(format!(
+            "The workspace was restored, but stopping {} Chat(s) could not be confirmed; a harness process may still be running.",
+            unconfirmed.len()
+        ));
+    }
+    Ok(safety.display().to_string())
 }
 
 /// The person's answer to the Quit confirmation.

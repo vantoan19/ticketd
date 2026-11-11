@@ -17,8 +17,8 @@ use ticketd_chat_host::{
     ResumeMode, SendMode, Subscription, UnconfirmedCleanup, WorkspaceOpener, harness_key,
 };
 use ticketd_core::{
-    Chat, ChatDelivery, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
-    ChatObservation, ChatRecord, ChatRole, NewChat, Workspace,
+    Chat, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
+    NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -34,6 +34,8 @@ const SUMMARY_ITEMS: usize = 50;
 const HISTORY_ITEMS: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_LAST_MESSAGES: usize = 200;
+/// The detail recorded on work that was in progress in a backup when it was restored.
+const RESTORED_FROM_BACKUP: &str = "the workspace was restored from a backup";
 
 /// A refused request. `stale` means the request, turn or runtime it named is no longer
 /// current; the message is shown to the person as it is.
@@ -79,6 +81,7 @@ type Outcome<T> = Result<T, ChatFailure>;
 pub enum LinkKind {
     Ticket,
     Document,
+    Project,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -94,6 +97,7 @@ impl From<LinkRef> for ChatLink {
             kind: match link.kind {
                 LinkKind::Ticket => ChatLinkKind::Ticket,
                 LinkKind::Document => ChatLinkKind::Document,
+                LinkKind::Project => ChatLinkKind::Project,
             },
             id: link.id,
         }
@@ -103,6 +107,9 @@ impl From<LinkRef> for ChatLink {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewChatInput {
+    /// A UUID the interface makes once per New Chat attempt and repeats on a retry, so
+    /// a retry finds the Chat and the message the first try saved.
+    pub command_id: String,
     pub harness_id: String,
     /// `None` asks for a managed folder.
     pub folder: Option<String>,
@@ -140,6 +147,14 @@ pub enum Retention {
     Unarchive,
     Trash,
     Restore,
+}
+
+/// A Chat that was created. `send_error` says why its first message was not saved; the
+/// Chat exists either way, so the interface opens it instead of creating another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Created {
+    pub chat_id: String,
+    pub send_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -206,6 +221,7 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             executable.display()
         )
     };
+    let sign_in = chat_view::login_command(id).map(str::to_owned);
     let (status, message, command) = match &inspection {
         Inspection::Installed {
             executable,
@@ -214,27 +230,25 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             ..
         } => match login {
             LoginState::SignedIn => ("ready", found(executable, version), None),
+            // Usable, but never shown as plain ready: the person sees how it bills
+            // before the first message goes out.
             LoginState::NonSubscription => (
-                "ready",
+                "not_subscription",
                 format!(
                     "{}. It is signed in with an API key or cloud provider, not a subscription; {name} bills usage there.",
                     found(executable, version)
                 ),
-                None,
+                sign_in,
             ),
-            LoginState::SignedOut => (
-                "not_signed_in",
-                found(executable, version),
-                Some(format!("{id} login")),
-            ),
+            LoginState::SignedOut => ("not_signed_in", found(executable, version), sign_in),
             // Not every harness can be asked; it says so itself when a Chat starts.
             LoginState::Unknown => (
-                "ready",
+                "sign_in_unknown",
                 format!(
                     "{}. ticketd cannot check whether it is signed in; {name} reports that when a Chat starts.",
                     found(executable, version)
                 ),
-                None,
+                sign_in,
             ),
         },
         Inspection::Incompatible {
@@ -255,55 +269,69 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
         status,
         message: Some(message),
         command,
-        help_url: None,
+        // Shown where the person has something to install or update.
+        help_url: matches!(status, "not_installed" | "incompatible")
+            .then(|| chat_view::help_url(id).map(str::to_owned))
+            .flatten(),
     }
 }
 
-fn ticket_status(workspace: &Workspace, reference: &str) -> String {
-    workspace
-        .show_ticket(reference)
-        .ok()
-        .and_then(|ticket| {
-            Some(
-                serde_json::to_value(ticket.status)
-                    .ok()?
-                    .as_str()?
-                    .to_owned(),
-            )
-        })
-        .unwrap_or_default()
+/// Whether Chats can be started on a harness with this status. A sign-in ticketd could
+/// not confirm as a subscription does not block; it is shown.
+fn usable(status: &str) -> bool {
+    matches!(status, "ready" | "not_subscription" | "sign_in_unknown")
+}
+
+/// A ticket status as the interface names it.
+fn status_name(status: impl Serialize) -> Result<String, ticketd_core::Error> {
+    Ok(match serde_json::to_value(status)? {
+        Value::String(name) => name,
+        other => other.to_string(),
+    })
 }
 
 fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, ticketd_core::Error> {
-    let records = workspace.chat_linked_records(chat_id)?;
-    Ok(records
-        .into_iter()
-        .filter_map(|record| match (record.kind, record.reference) {
-            (ChatLinkKind::Ticket, Some(reference)) => Some(LinkedRecord::Ticket {
-                status: ticket_status(workspace, &reference),
+    let mut links = Vec::new();
+    for record in workspace.chat_linked_records(chat_id)? {
+        links.push(match (record.kind, record.reference) {
+            (ChatLinkKind::Ticket, Some(reference)) => LinkedRecord::Ticket {
+                status: status_name(workspace.show_ticket(&reference)?.status)?,
                 id: record.id,
                 reference,
                 title: record.title,
-            }),
-            (ChatLinkKind::Document, _) => Some(LinkedRecord::Document {
+            },
+            // A ticket always has a reference; without one there is nothing to open.
+            (ChatLinkKind::Ticket, None) => continue,
+            (ChatLinkKind::Document, _) => LinkedRecord::Document {
                 id: record.id,
                 title: record.title,
-            }),
-            // The Chat screens link tickets and Documents only.
-            (ChatLinkKind::Ticket | ChatLinkKind::Project, _) => None,
-        })
-        .collect())
+            },
+            (ChatLinkKind::Project, _) => LinkedRecord::Project {
+                id: record.id,
+                title: record.title,
+            },
+        });
+    }
+    Ok(links)
 }
 
-fn surroundings(workspace: &Workspace, chat: &Chat) -> Result<Surroundings, ticketd_core::Error> {
-    let mut shared_with = Vec::new();
-    for filter in [ChatListFilter::Active, ChatListFilter::Archived] {
-        for other in workspace.list_chats(filter)? {
-            if other.id != chat.id && other.execution_folder == chat.execution_folder {
-                shared_with.push(other.title.unwrap_or("Untitled Chat".to_owned()));
-            }
-        }
-    }
+/// Every Chat outside the trash, read once per request for what Chats share.
+fn folder_users(workspace: &Workspace) -> Result<Vec<Chat>, ticketd_core::Error> {
+    let mut chats = workspace.list_chats(ChatListFilter::Active)?;
+    chats.extend(workspace.list_chats(ChatListFilter::Archived)?);
+    Ok(chats)
+}
+
+fn surroundings(
+    workspace: &Workspace,
+    chat: &Chat,
+    folder_users: &[Chat],
+) -> Result<Surroundings, ticketd_core::Error> {
+    let shared_with = folder_users
+        .iter()
+        .filter(|other| other.id != chat.id && other.execution_folder == chat.execution_folder)
+        .map(|other| other.title.clone().unwrap_or("Untitled Chat".to_owned()))
+        .collect();
     Ok(Surroundings {
         folder_missing: !Path::new(&chat.execution_folder).is_dir(),
         shared_with,
@@ -345,7 +373,6 @@ struct View {
     tracker: Tracker,
     state: ChatState,
     sequence: u64,
-    notices: u64,
 }
 
 pub struct Chats {
@@ -357,6 +384,8 @@ pub struct Chats {
     /// The Experimental switch. The interface keeps the person's choice and tells the
     /// backend at startup; until then Chat is off and nothing can run.
     enabled: AtomicBool,
+    /// Set while the workspace is being replaced by a backup: nothing may start.
+    restoring: AtomicBool,
     host: Mutex<Option<ChatHost>>,
     feeds: Mutex<HashMap<u64, Feed>>,
     next_feed: AtomicU64,
@@ -380,6 +409,7 @@ impl Chats {
             unavailable,
             context,
             enabled: AtomicBool::new(false),
+            restoring: AtomicBool::new(false),
             host: Mutex::new(None),
             feeds: Mutex::new(HashMap::new()),
             next_feed: AtomicU64::new(1),
@@ -412,6 +442,11 @@ impl Chats {
         if !self.enabled() {
             return Err(failed("Chat is turned off in Settings > Experimental."));
         }
+        if self.restoring.load(Ordering::SeqCst) {
+            return Err(failed(
+                "The workspace is being restored from a backup. Try again when it has finished.",
+            ));
+        }
         let mut host = lock(&self.host);
         if let Some(host) = host.as_ref() {
             return Ok(host.clone());
@@ -430,7 +465,7 @@ impl Chats {
         self.host().map(|_| ())
     }
 
-    /// Differs whenever a list row or the counts could differ.
+    /// Moves whenever any Chat record was written or live state changed; cheap to read.
     pub fn digest(&self) -> Option<String> {
         let host = self.started_host()?;
         let sequence = self.workspace().ok()?.chat_change_sequence().ok()?;
@@ -472,6 +507,44 @@ impl Chats {
             .count()
     }
 
+    /// Before the workspace is replaced by a backup: stops every running Chat, so no
+    /// harness keeps working against records that are about to change, and refuses new
+    /// work until `finish_restore`. Returns the Chats whose harness could not be
+    /// confirmed stopped.
+    pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
+        self.restoring.store(true, Ordering::SeqCst);
+        match self.started_host() {
+            Some(host) => host.stop_all().await,
+            None => Vec::new(),
+        }
+    }
+
+    /// After the restore, whether or not it replaced anything. The records now in the
+    /// workspace have no runtime behind them: they are reconciled as lost contact, and
+    /// every queue with input in it is paused, so restored input waits for the person.
+    pub fn finish_restore(&self) -> Outcome<()> {
+        let reconciled = self.workspace().and_then(|mut workspace| {
+            workspace.mark_chat_contact_lost(None, RESTORED_FROM_BACKUP)?;
+            let filters = [
+                ChatListFilter::Active,
+                ChatListFilter::Archived,
+                ChatListFilter::Trashed,
+            ];
+            for filter in filters {
+                for chat in workspace.list_chats(filter)? {
+                    if !chat.queue_paused && !workspace.chat_queue(&chat.id)?.is_empty() {
+                        workspace.set_chat_queue_paused(&chat.id, true)?;
+                    }
+                }
+            }
+            Ok(())
+        });
+        // Views read a new snapshot: their cursors belong to the replaced records.
+        lock(&self.feeds).clear();
+        self.restoring.store(false, Ordering::SeqCst);
+        reconciled
+    }
+
     /// Stops app-owned execution with bounded cleanup. The host accepts nothing afterwards.
     pub async fn quit(&self) -> Vec<UnconfirmedCleanup> {
         match self.started_host() {
@@ -490,6 +563,7 @@ impl Chats {
         let live = self.started_host().map(|host| host.live());
         // ponytail: one bounded history read per Chat; add a core summary query when a
         // workspace holds enough Chats for the list to feel slow.
+        let folder_users = folder_users(&workspace)?;
         let mut summaries = Vec::new();
         for chat in workspace.list_chats(filter)? {
             let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
@@ -501,10 +575,31 @@ impl Chats {
                 &chat,
                 &live,
                 &Tracker::from_items(&items),
-                &surroundings(&workspace, &chat)?,
+                &surroundings(&workspace, &chat, &folder_users)?,
             ));
         }
         Ok(summaries)
+    }
+
+    /// The counts, and a text that differs exactly when a list row or the counts would
+    /// read differently. Streamed text being checkpointed changes neither, so lists are
+    /// not fetched again for it.
+    pub fn overview_digest(&self) -> Outcome<(Overview, String)> {
+        let mut overview = Overview {
+            needs_you: 0,
+            working: 0,
+        };
+        let mut rows = Vec::new();
+        for filter in [ChatListFilter::Active, ChatListFilter::Archived] {
+            for summary in self.summaries(filter)? {
+                overview.needs_you += usize::from(summary.needs_you);
+                overview.working += usize::from(matches!(summary.activity, "working" | "waiting"));
+                rows.push(summary);
+            }
+        }
+        rows.extend(self.summaries(ChatListFilter::Trashed)?);
+        let digest = format!("{rows:?}");
+        Ok((overview, digest))
     }
 
     pub fn list(&self, scope: ChatListFilter) -> Outcome<Vec<Summary>> {
@@ -513,20 +608,13 @@ impl Chats {
     }
 
     pub fn overview(&self) -> Outcome<Overview> {
-        let mut overview = Overview {
-            needs_you: 0,
-            working: 0,
-        };
         if !self.enabled() {
-            return Ok(overview);
+            return Ok(Overview {
+                needs_you: 0,
+                working: 0,
+            });
         }
-        for filter in [ChatListFilter::Active, ChatListFilter::Archived] {
-            for summary in self.summaries(filter)? {
-                overview.needs_you += usize::from(summary.needs_you);
-                overview.working += usize::from(matches!(summary.activity, "working" | "waiting"));
-            }
-        }
-        Ok(overview)
+        Ok(self.overview_digest()?.0)
     }
 
     /// Probes installation and sign-in again on every call.
@@ -563,32 +651,31 @@ impl Chats {
         Ok(count)
     }
 
-    pub async fn create(&self, input: NewChatInput) -> Outcome<String> {
+    /// Creates a Chat and sends its first message. Repeating `command_id` finds the Chat
+    /// and the message an earlier try saved instead of making them again.
+    pub async fn create(&self, input: NewChatInput) -> Outcome<Created> {
         let host = self.host()?;
         text_argument(&input.message, "The message")?;
+        let command_id = uuid::Uuid::parse_str(&input.command_id)
+            .map_err(|_| failed("the request id must be a UUID"))?
+            .to_string();
         let served = |adapter: &Arc<dyn HarnessAdapter>| harness_key(adapter.harness());
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
             return Err(failed(self.unavailable(&input.harness_id)));
         }
         let mut workspace = self.workspace()?;
+        // Beside the workspace file, one per Chat, named by the request so that a
+        // retry asks for the same Chat.
+        let managed =
+            PathBuf::from(format!("{}.chats", workspace.workspace_info()?.path)).join(&command_id);
         let (execution_folder, folder_managed) = match &input.folder {
             Some(path) => (folder_argument(path)?, false),
-            None => {
-                // Beside the workspace file, one per Chat, and never removed by ticketd.
-                let folder = PathBuf::from(format!("{}.chats", workspace.workspace_info()?.path))
-                    .join(uuid::Uuid::new_v4().to_string());
-                std::fs::create_dir_all(&folder).map_err(|error| {
-                    failed(format!(
-                        "could not create the Chat's folder {}: {error}",
-                        folder.display()
-                    ))
-                })?;
-                (folder.to_string_lossy().into_owned(), true)
-            }
+            None => (managed.to_string_lossy().into_owned(), true),
         };
         let first_line = input.message.trim().lines().next().unwrap_or_default();
+        // The Chat is stored first: a request the core refuses leaves no folder behind.
         let chat = workspace.create_chat(
-            None,
+            Some(&format!("{command_id}:chat")),
             NewChat {
                 title: Some(first_line.chars().take(80).collect()),
                 harness: input.harness_id,
@@ -598,9 +685,26 @@ impl Chats {
             },
         )?;
         drop(workspace);
-        host.send(&chat.id, None, &input.message, SendMode::Auto)
-            .await?;
-        Ok(chat.id)
+        let created = |send_error| Created {
+            chat_id: chat.id.clone(),
+            send_error,
+        };
+        if chat.folder_managed
+            && let Err(error) = std::fs::create_dir_all(&chat.execution_folder)
+        {
+            // The Chat stays readable and offers "pick another folder".
+            return Ok(created(Some(format!(
+                "could not create the Chat's folder {}: {error}",
+                chat.execution_folder
+            ))));
+        }
+        let first = format!("{command_id}:first");
+        let sent = host.send(&chat.id, Some(&first), &input.message, SendMode::Auto);
+        Ok(created(
+            sent.await
+                .err()
+                .map(|error| ChatFailure::from(error).message),
+        ))
     }
 
     fn fresh(&self, chat_id: &str) -> Option<FreshHistory> {
@@ -608,7 +712,8 @@ impl Chats {
     }
 
     fn state(&self, view: &View) -> Outcome<ChatState> {
-        let around = surroundings(&self.workspace()?, &view.chat)?;
+        let workspace = self.workspace()?;
+        let around = surroundings(&workspace, &view.chat, &folder_users(&workspace)?)?;
         Ok(chat_view::chat_state(
             &view.chat,
             &view.live,
@@ -628,7 +733,7 @@ impl Chats {
             &chat,
             &attached.live,
             &tracker,
-            &surroundings(&workspace, &chat)?,
+            &surroundings(&workspace, &chat, &folder_users(&workspace)?)?,
         );
         let fresh = self.fresh(chat_id);
         let items = attached
@@ -643,7 +748,6 @@ impl Chats {
             tracker,
             state: state.clone(),
             sequence: 0,
-            notices: 0,
         };
         let id = self.next_feed.fetch_add(1, Ordering::SeqCst);
         let (resync, resynced) = oneshot::channel();
@@ -743,19 +847,6 @@ impl Chats {
                     view.live = live;
                     // Whether a stored request can still be answered is live state.
                     view.tracker.dependents()
-                }
-                Some(ChatUpdate::Notice(text)) => {
-                    view.notices += 1;
-                    let item = Item::Marker {
-                        id: format!("notice:{}", view.notices),
-                        at: String::new(),
-                        reason: "note",
-                        message: Some(text),
-                    };
-                    if !send(&mut view, json!({ "kind": "item", "item": item })) {
-                        return;
-                    }
-                    continue;
                 }
                 Some(ChatUpdate::Resync) | None => break,
             };
@@ -864,44 +955,20 @@ impl Chats {
     ) -> Outcome<()> {
         let host = self.host()?;
         let mut workspace = self.workspace()?;
-        let attempt = messages(&workspace, chat_id)?
+        messages(&workspace, chat_id)?
             .into_iter()
-            .find(|message| message.id == message_id)
-            .and_then(|message| message.attempts.into_iter().next_back())
-            .filter(|attempt| attempt.delivery == ChatDelivery::Uncertain)
+            .find(|message| message.id == message_id && message.awaits_decision())
             .ok_or_else(|| stale("this message is no longer waiting for your decision"))?;
-        // The core keeps one open attempt per input, so the uncertain one is closed as
-        // the person decided; its detail keeps that the first delivery is unknown.
-        let detail = match decision {
-            UncertainDecision::Resend => {
-                "you chose to send it again; whether the first attempt arrived is unknown"
-            }
-            UncertainDecision::Discard => {
-                "you discarded it; whether the first attempt arrived is unknown"
-            }
-        };
-        workspace.record_chat_observations(
-            chat_id,
-            vec![ChatObservation::SubmissionNotDelivered {
-                attempt_id: attempt.id,
-                detail: Some(detail.to_owned()),
-            }],
-        )?;
+        // Either way the message and its uncertain attempt stay as they were observed;
+        // the decision is recorded beside them.
         match decision {
             UncertainDecision::Discard => {
-                workspace.withdraw_chat_input(chat_id, message_id)?;
-                host.notify_changed(chat_id).await?;
-                self.resync(chat_id);
+                workspace.discard_uncertain_chat_submission(chat_id, message_id)?;
+                Ok(host.notify_changed(chat_id).await?)
             }
-            UncertainDecision::Resend => {
-                host.notify_changed(chat_id).await?;
-                host.resume_queue(chat_id).await?;
-                if !self.live(chat_id).running {
-                    host.resume(chat_id, ResumeMode::Native).await?;
-                }
-            }
+            // A new submission of this message alone; the rest of the queue waits.
+            UncertainDecision::Resend => Ok(host.resend(chat_id, message_id).await?),
         }
-        Ok(())
     }
 
     /// Probes the Chat's harness again and, when it is usable and the Chat was stopped
@@ -914,7 +981,7 @@ impl Chats {
             .find(|(id, _)| *id == chat.harness)
             .ok_or_else(|| failed(format!("unknown harness '{}'", chat.harness)))?;
         let status = harness_status(id, name, host.inspect(id).await?);
-        if status.status != "ready" {
+        if !usable(status.status) {
             return Err(failed(status.message.unwrap_or_default()));
         }
         if matches!(
@@ -965,22 +1032,36 @@ impl Chats {
         let workspace = self.workspace()?;
         let tickets = workspace.search_tickets(query, None, false, 8, 0)?;
         let documents = workspace.search_documents(query, None, 8, 0)?;
-        let tickets = tickets.into_iter().map(|ticket| LinkedRecord::Ticket {
-            status: serde_json::to_value(ticket.status)
-                .ok()
-                .and_then(|status| Some(status.as_str()?.to_owned()))
-                .unwrap_or_default(),
-            id: ticket.id,
-            reference: ticket.reference,
-            title: ticket.title,
-        });
-        let documents = documents
-            .into_iter()
-            .map(|document| LinkedRecord::Document {
-                id: document.id,
-                title: document.heading,
+        let mut found = Vec::new();
+        for ticket in tickets {
+            found.push(LinkedRecord::Ticket {
+                status: status_name(ticket.status)?,
+                id: ticket.id,
+                reference: ticket.reference,
+                title: ticket.title,
             });
-        Ok(tickets.chain(documents).collect())
+        }
+        found.extend(
+            documents
+                .into_iter()
+                .map(|document| LinkedRecord::Document {
+                    id: document.id,
+                    title: document.heading,
+                }),
+        );
+        // Projects are few and have no search index: match their names here.
+        let needle = query.to_lowercase();
+        let projects = workspace.list_projects()?.into_iter();
+        found.extend(
+            projects
+                .filter(|project| project.name.to_lowercase().contains(&needle))
+                .take(8)
+                .map(|project| LinkedRecord::Project {
+                    id: project.id,
+                    title: project.name,
+                }),
+        );
+        Ok(found)
     }
 
     pub async fn set_link(&self, chat_id: &str, link: LinkRef, present: bool) -> Outcome<()> {
@@ -995,9 +1076,23 @@ impl Chats {
     pub async fn resume(&self, chat_id: &str, selection: HistorySelection) -> Outcome<()> {
         let host = self.host()?;
         let workspace = self.workspace()?;
+        if workspace.chat(chat_id)?.trashed {
+            return Err(failed(
+                "Restore this Chat from the trash before resuming it.",
+            ));
+        }
+        // Input that may never have arrived is history only when the person picks it.
+        let unreceived = |message: &ChatMessage| {
+            message.role == ChatRole::User
+                && message
+                    .attempts
+                    .last()
+                    .is_some_and(|attempt| !attempt.received())
+        };
+        let picking = matches!(selection, HistorySelection::Picked { .. });
         let sent: Vec<_> = messages(&workspace, chat_id)?
             .into_iter()
-            .filter(|message| !message.queued)
+            .filter(|message| !message.queued && (picking || !unreceived(message)))
             .collect();
         let (history, chosen): (&'static str, Vec<&ChatMessage>) = match &selection {
             HistorySelection::LastResponse => (
@@ -1034,7 +1129,13 @@ impl Chats {
             );
             for message in &chosen {
                 let speaker = match message.role {
+                    ChatRole::User if unreceived(message) => {
+                        "User (it is not known whether the earlier session received this)"
+                    }
                     ChatRole::User => "User",
+                    ChatRole::Assistant if !message.complete => {
+                        "Assistant (incomplete: the rest of this response was not saved)"
+                    }
                     ChatRole::Assistant => "Assistant",
                 };
                 text.push_str(&format!("\n{speaker}:\n{}\n", message.text));

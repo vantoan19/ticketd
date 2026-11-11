@@ -6,11 +6,12 @@ use std::collections::HashMap;
 use serde::Serialize;
 use ticketd_chat_host::{
     Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, InteractionKind,
-    ProblemKind, STOPPED_BY_TICKETD, StopState,
+    ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
 };
 use ticketd_core::{
-    Chat, ChatDelivery, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatItem,
-    ChatMessage, ChatRole, ChatSessionOrigin, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
+    Chat, ChatDelivery, ChatDeliveryDecision, ChatInteraction, ChatInteractionKind,
+    ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatTool,
+    ChatToolState, ChatTurn, ChatTurnState,
 };
 
 pub const HARNESSES: [(&str, &str); 2] = [("claude-code", "Claude Code"), ("codex", "Codex")];
@@ -20,6 +21,26 @@ pub fn harness_name(id: &str) -> &str {
         .iter()
         .find(|(key, _)| *key == id)
         .map_or(id, |(_, name)| name)
+}
+
+/// The harness's own sign-in, as a command the person runs in a terminal.
+pub fn login_command(harness: &str) -> Option<&'static str> {
+    match harness {
+        // ponytail: `claude /login` starts Claude Code at its sign-in; confirm against
+        // a live installation in #264.
+        "claude-code" => Some("claude /login"),
+        "codex" => Some("codex login"),
+        _ => None,
+    }
+}
+
+/// Where the harness's publisher explains installing and updating it.
+pub fn help_url(harness: &str) -> Option<&'static str> {
+    match harness {
+        "claude-code" => Some("https://code.claude.com/docs/en/setup"),
+        "codex" => Some("https://developers.openai.com/codex/cli"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -42,6 +63,10 @@ pub enum LinkedRecord {
         status: String,
     },
     Document {
+        id: String,
+        title: String,
+    },
+    Project {
         id: String,
         title: String,
     },
@@ -208,8 +233,24 @@ pub struct Tracker {
     updated_at: Option<String>,
 }
 
-fn delivery(message: &ChatMessage) -> Option<ChatDelivery> {
-    message.attempts.last().map(|attempt| attempt.delivery)
+/// How the latest submission of user input reads. A turn the harness correlated with it
+/// is evidence it arrived, with or without an acknowledgment; nothing else is.
+fn delivery(message: &ChatMessage) -> Option<&'static str> {
+    let attempt = message.attempts.last()?;
+    if attempt.received() {
+        return Some("delivered");
+    }
+    Some(match attempt.delivery {
+        ChatDelivery::Possible => "sending",
+        ChatDelivery::Acknowledged => "delivered",
+        // The person set it aside; whether it arrived is still unknown.
+        ChatDelivery::Uncertain if attempt.decision == Some(ChatDeliveryDecision::Discarded) => {
+            "set_aside"
+        }
+        ChatDelivery::Uncertain => "uncertain",
+        // Back in the queue; the row stays so the attempt is not hidden.
+        ChatDelivery::NotDelivered | ChatDelivery::Rejected => "not_sent",
+    })
 }
 
 impl Tracker {
@@ -234,7 +275,7 @@ impl Tracker {
                 self.updated_at = Some(turn.ended_at.clone().unwrap_or(turn.started_at.clone()));
             }
             ChatItem::Message(message) if message.role == ChatRole::User => {
-                if delivery(message) == Some(ChatDelivery::Uncertain) {
+                if message.awaits_decision() {
                     self.uncertain = Some(message.id.clone());
                 } else if self.uncertain.as_ref() == Some(&message.id) {
                     self.uncertain = None;
@@ -257,7 +298,7 @@ impl Tracker {
                     self.pending.remove(&interaction.id);
                 }
             }
-            ChatItem::Session(_) | ChatItem::Tool(_) => {}
+            ChatItem::Session(_) | ChatItem::Tool(_) | ChatItem::Notice(_) => {}
         }
     }
 
@@ -448,13 +489,7 @@ pub fn item(
             id: message.id.clone(),
             at: message.created_at.clone(),
             text: message.text.clone(),
-            delivery: match delivery(message)? {
-                ChatDelivery::Possible => "sending",
-                ChatDelivery::Acknowledged => "delivered",
-                ChatDelivery::Uncertain => "uncertain",
-                // Back in the queue; the row stays so the attempt is not hidden.
-                ChatDelivery::NotDelivered | ChatDelivery::Rejected => "not_sent",
-            },
+            delivery: delivery(message)?,
         },
         ChatItem::Message(message) => {
             let active = chat.active_turn.as_ref().map(|turn| &turn.id);
@@ -503,6 +538,12 @@ pub fn item(
             steps: vec![step(tool, harness)],
         },
         ChatItem::Interaction(interaction) => request(interaction, live, harness),
+        ChatItem::Notice(notice) => Item::Marker {
+            id: notice.id.clone(),
+            at: notice.created_at.clone(),
+            reason: "note",
+            message: Some(notice.text.clone()),
+        },
     })
 }
 
@@ -530,8 +571,17 @@ fn activity(live: &ChatLive, tracker: &Tracker) -> &'static str {
     }
 }
 
-fn harness_problem(problem: &ticketd_chat_host::Problem) -> Problem {
-    let kind = match problem.kind {
+/// A harness failure in the Chat screens' terms, with what the person needs to recover.
+fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) -> Problem {
+    let setup = matches!(
+        kind,
+        ProblemKind::NotInstalled
+            | ProblemKind::IncompatibleVersion
+            | ProblemKind::PermissionUnavailable
+    );
+    let command = login_command(harness).filter(|_| kind == ProblemKind::LoginRequired);
+    let help = help_url(harness).filter(|_| setup);
+    let kind = match kind {
         ProblemKind::NotInstalled => "not_installed",
         ProblemKind::IncompatibleVersion => "incompatible",
         ProblemKind::LoginRequired => "not_signed_in",
@@ -543,7 +593,9 @@ fn harness_problem(problem: &ticketd_chat_host::Problem) -> Problem {
     };
     Problem {
         kind,
-        message: Some(problem.message.clone()),
+        message,
+        command: command.map(str::to_owned),
+        help_url: help.map(str::to_owned),
         ..Problem::default()
     }
 }
@@ -579,7 +631,11 @@ fn problem(
         ..Problem::default()
     };
     match &live.problem {
-        Some(ChatProblem::OpenFailed { problem, .. }) => Some(harness_problem(problem)),
+        Some(ChatProblem::OpenFailed { problem, .. }) => Some(harness_problem(
+            &chat.harness,
+            problem.kind,
+            Some(problem.message.clone()),
+        )),
         Some(ChatProblem::RuntimeLost { detail }) => Some(failed(format!(
             "Contact with the harness was lost: {detail}"
         ))),
@@ -591,8 +647,41 @@ fn problem(
         ))),
         Some(ChatProblem::CleanupUnconfirmed { reason }) => Some(unconfirmed(Some(reason.clone()))),
         None if live.stop == Some(StopState::Unconfirmed) => Some(unconfirmed(None)),
-        None => None,
+        // Nothing is live: the last turn's recorded failure is what there is to say.
+        None => {
+            let turn = tracker.last_turn.as_ref().filter(|turn| {
+                live.activity == Activity::Idle && turn.state == ChatTurnState::Failed
+            })?;
+            let kind = problem_kind(turn.problem.as_deref()?);
+            (kind != ProblemKind::Other)
+                .then(|| harness_problem(&chat.harness, kind, turn.detail.clone()))
+        }
     }
+}
+
+/// What is known about the settings in effect: ticketd sets none, and shows what the
+/// harness itself reported for this Chat's latest session.
+fn permissions(name: &str, reported: Option<&str>) -> String {
+    let own =
+        format!("Uses your own {name} settings and permissions. ticketd changes none of them.");
+    let Some(reported) = reported else {
+        return format!("{own} {name} has not reported the settings in effect.");
+    };
+    let fields: Vec<String> = match serde_json::from_str(reported) {
+        Ok(serde_json::Value::Object(fields)) => fields
+            .iter()
+            .filter_map(|(key, value)| {
+                let value = match value {
+                    serde_json::Value::String(text) => text.clone(),
+                    serde_json::Value::Number(_) | serde_json::Value::Bool(_) => value.to_string(),
+                    _ => return None,
+                };
+                Some(format!("{} {value}", key.replace('_', " ")))
+            })
+            .collect(),
+        _ => vec![reported.chars().take(300).collect()],
+    };
+    format!("{own} {name} reported: {}.", fields.join(", "))
 }
 
 fn last_component(path: &str) -> String {
@@ -621,9 +710,7 @@ pub fn chat_state(
         harness: HarnessRef {
             id: chat.harness.clone(),
             name: name.to_owned(),
-            permissions: Some(format!(
-                "Uses your own {name} settings and permissions. ticketd changes none of them."
-            )),
+            permissions: Some(permissions(name, chat.effective_settings.as_deref())),
         },
         folder: Folder {
             path: chat.execution_folder.clone(),
@@ -688,7 +775,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         folder_name: (!around.folder_missing).then(|| last_component(&chat.execution_folder)),
         first_ticket: around.links.iter().find_map(|link| match link {
             LinkedRecord::Ticket { reference, .. } => Some(reference.clone()),
-            LinkedRecord::Document { .. } => None,
+            LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,
         }),
         retention: retention(chat),
         activity,

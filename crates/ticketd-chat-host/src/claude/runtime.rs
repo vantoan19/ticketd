@@ -11,11 +11,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::BufReader;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use tokio::time::timeout;
 
-use crate::stdio::{ChildProcess, Io, Line, Reader, StderrTail, Writer, read_line};
+use crate::stdio::{
+    ChildProcess, Io, Line, Reader, StderrTail, Writer, close_process, read_line, write_bounded,
+};
+use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 use crate::{
     Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EVENT_BUFFER, EventKind,
     EventStream, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
@@ -47,7 +50,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             reply_timeout: Duration::from_secs(30),
-            close_timeout: Duration::from_secs(5),
+            close_timeout: ADAPTER_CLOSE_TIMEOUT,
         }
     }
 }
@@ -90,6 +93,30 @@ struct State {
 }
 
 impl State {
+    /// Drops commands nobody waits for once the bridge shows they went through, so the
+    /// map holds only what can still be settled or refused.
+    fn forget_settled(&mut self, name: &str, event: &Value) {
+        match name {
+            "request_resolved" | "request_cancelled" => {
+                let request = event["request_id"].as_str().unwrap_or_default();
+                self.commands.retain(
+                    |_, command| !matches!(&command.kind, Kind::Respond(id) if id.0 == request),
+                );
+            }
+            // A submission the turn took can no longer be refused.
+            "input_processing" | "turn_result" => {
+                let taken = event["submission_ids"].as_array();
+                let taken =
+                    |id: &SubmissionId| taken.into_iter().flatten().any(|taken| *taken == id.0);
+                self.commands.retain(|_, command| {
+                    command.waiter.is_some()
+                        || !matches!(&command.kind, Kind::Submit(id) if taken(id))
+                });
+            }
+            _ => {}
+        }
+    }
+
     /// Hands `reply` to the caller of the first command matching `wanted`.
     fn settle(&mut self, wanted: impl Fn(&str, &Kind) -> bool, reply: Reply) -> bool {
         let found = self
@@ -193,17 +220,13 @@ impl Connection {
             } else {
                 (None, None)
             };
-            state.commands.insert(id.clone(), Command { kind, waiter });
+            // A refusal ticketd sends on its own has nothing to settle and nobody waiting.
+            if waits || !matches!(kind, Kind::Plain) {
+                state.commands.insert(id.clone(), Command { kind, waiter });
+            }
             (format!("{command}\n"), id, receiver)
         };
-        let Some(stdin) = stdin.as_mut() else {
-            return Err(WriteFailure::Lost);
-        };
-        let written = async {
-            stdin.write_all(line.as_bytes()).await?;
-            stdin.flush().await
-        };
-        match written.await {
+        match write_bounded(&mut stdin, &self.child, line.as_bytes(), WRITE_TIMEOUT).await {
             Ok(()) => Ok((id, receiver)),
             Err(_) => Err(WriteFailure::Lost),
         }
@@ -333,12 +356,9 @@ impl Connection {
         }
         // Closing its input makes the bridge end the session, which terminates
         // Claude Code, and exit.
-        *self.stdin.lock().await = None;
-        let mut child = self.child.lock().await;
-        match timeout(self.options.close_timeout, child.wait()).await {
-            Ok(exit_code) => CloseOutcome::Confirmed { exit_code },
-            Err(_) => {
-                child.kill().await;
+        match close_process(&self.stdin, &self.child, self.options.close_timeout).await {
+            Some(exit_code) => CloseOutcome::Confirmed { exit_code },
+            None => {
                 // ponytail: only the bridge process is killed. Owning its whole
                 // process tree (Windows job object, POSIX process group) is #257/#267.
                 CloseOutcome::Unconfirmed {
@@ -492,6 +512,7 @@ impl Connection {
             "command_rejected" => return events(rejected(&mut state, id, &event)),
             "session_ended" => return self.session_ended(&mut state, &event),
             name => {
+                state.forget_settled(name, &event);
                 return match state.session.event(name, &event) {
                     Some((events, decline)) => Applied {
                         events,
@@ -581,21 +602,21 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
             &payload,
         )]
     };
+    // What the refusal was about is already gone: a request resolved or cancelled
+    // while its answer was on the way is forgotten before the answer is refused.
+    let gone = matches!(code, "stale_request" | "stale_generation" | "no_session");
     let Some(command) = state.commands.remove(id) else {
-        return unexpected();
+        return if gone { Vec::new() } else { unexpected() };
     };
     let waiter_gone = |waiter: Option<oneshot::Sender<Reply>>, reason: String| {
         waiter.is_none_or(|waiter| waiter.send(Reply::Rejected(reason)).is_err())
     };
     match command.kind {
-        Kind::Respond(request) => {
-            let gone = matches!(code, "stale_request" | "stale_generation" | "no_session");
-            match state.session.answer_refused(&request, gone) {
-                Some(withdrawn) => vec![withdrawn],
-                None if gone => Vec::new(),
-                None => unexpected(),
-            }
-        }
+        Kind::Respond(request) => match state.session.answer_refused(&request, gone) {
+            Some(withdrawn) => vec![withdrawn],
+            None if gone => Vec::new(),
+            None => unexpected(),
+        },
         Kind::Submit(submission) => {
             if waiter_gone(command.waiter, reason.clone()) {
                 return vec![EventKind::SubmissionEvidence {
@@ -796,5 +817,48 @@ impl HarnessRuntime for ClaudeRuntime {
 
     async fn close(&self) -> CloseOutcome {
         self.connection.close().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scripted::pipes;
+
+    #[tokio::test(start_paused = true)]
+    async fn commands_nobody_waits_for_are_forgotten_once_the_bridge_shows_they_went_through() {
+        let (_peer, io) = pipes();
+        let (connection, _events) = Connection::start(io, RuntimeGeneration(7), Options::default());
+        let event = |event: Value| Line::Complete(event.to_string().into_bytes());
+
+        for round in 0..3 {
+            let request = NativeRequestId::new(format!("request-{round}"));
+            let answer = json!({"cmd": "respond", "request_id": request.0});
+            let written = connection.write(false, |_| Ok((answer, Kind::Respond(request.clone()))));
+            assert!(written.await.is_ok());
+            let decline = json!({"cmd": "respond", "request_id": "undisplayable"});
+            assert!(
+                connection
+                    .write(false, |_| Ok((decline, Kind::Plain)))
+                    .await
+                    .is_ok()
+            );
+            let submission = SubmissionId::new(format!("submission-{round}"));
+            let submit = json!({"cmd": "submit", "submission_id": submission.0});
+            let written =
+                connection.write(false, |_| Ok((submit, Kind::Submit(submission.clone()))));
+            assert!(written.await.is_ok());
+            assert_eq!(connection.state().commands.len(), 2);
+
+            connection.apply(event(json!({
+                "v": PROTOCOL, "event": "request_resolved", "generation": 7, "request_id": request.0,
+            })));
+            connection.apply(event(json!({
+                "v": PROTOCOL, "event": "input_processing", "generation": 7,
+                "submission_ids": [submission.0],
+            })));
+
+            assert!(connection.state().commands.is_empty());
+        }
     }
 }

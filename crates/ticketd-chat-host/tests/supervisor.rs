@@ -11,16 +11,18 @@ use std::time::Duration;
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
     Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities, Capability, ChatHost,
-    ChatProblem, ChatUpdate, CloseOutcome, DeliveryEvidence, EventKind, Harness, HarnessAdapter,
-    HostError, INTERRUPT_TIMEOUT, InteractionAnswer, InteractionKind, InteractionRequest,
-    NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, Problem, ProblemKind, ResumeMode,
-    RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission,
-    SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL,
-    ToolStatus, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener,
+    ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT, DeliveryEvidence,
+    EventKind, Harness, HarnessAdapter, HostError, INTERRUPT_TIMEOUT, InteractionAnswer,
+    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
+    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode, RuntimeGeneration,
+    SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission, SubmissionId,
+    SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus,
+    TurnOutcome, UnconfirmedCleanup, WorkspaceOpener, problem_kind,
 };
 use ticketd_core::{
-    Chat, ChatDelivery, ChatInteractionState, ChatItem, ChatMessage, ChatRecord, ChatRole,
-    ChatSessionOrigin, ChatSubmissionIntent, ChatTurn, ChatTurnState, Error, NewChat, Workspace,
+    Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
+    ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatTurn, ChatTurnState, Error,
+    NewChat, Workspace,
 };
 
 struct Fixture {
@@ -861,7 +863,9 @@ async fn a_new_session_gets_the_ticketd_context_once_and_it_is_kept_apart_from_t
     f.host = ChatHost::with_context(
         Arc::new(move || Workspace::open(&path)),
         vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
-        Some(Arc::new(|chat_id| Some(format!("context for {chat_id}")))),
+        Some(Arc::new(|chat_id| {
+            Ok(Some(format!("context for {chat_id}")))
+        })),
     )
     .unwrap();
 
@@ -901,4 +905,192 @@ async fn live_state_is_readable_without_a_view_and_cleared_when_the_chat_stops()
     assert_eq!(f.host.live()[&f.chat.id].activity, Activity::Working);
     f.host.stop_all().await;
     assert!(f.host.live().is_empty());
+}
+
+fn notices(f: &Fixture) -> Vec<String> {
+    f.items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Notice(notice) => Some(notice.text),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn input_a_turn_only_processed_is_not_uncertain_after_a_restart() {
+    let f = Fixture::new(FakeAdapter::codex());
+    // As Claude Code does: the write is never acknowledged, only correlated with a turn.
+    f.fake.script_submit(SubmitReply::Timeout);
+    let input = f.send("first").await;
+    let attempt = f.message(&input.id).attempts[0].id.clone();
+    f.emit(EventKind::SubmissionEvidence {
+        submission: SubmissionId(attempt.clone()),
+        evidence: DeliveryEvidence::Processing { turn: turn_1() },
+    })
+    .await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn_1(),
+        outcome: TurnOutcome::Completed,
+        submissions: vec![SubmissionId(attempt)],
+    })
+    .await;
+    f.host.quit().await;
+
+    start_host(&f.path, &f.storage_up, &f.fake);
+
+    let attempts = f.message(&input.id).attempts;
+    assert_eq!(attempts[0].delivery, ChatDelivery::Possible);
+    assert!(attempts[0].received());
+    assert!(!f.message(&input.id).awaits_decision());
+    assert_eq!(f.turns()[0].state, ChatTurnState::Completed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_before_the_turn_is_known_becomes_unconfirmed_and_the_wait_for_it_is_bounded() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.fake.script_submit(SubmitReply::Timeout);
+    let input = f.send("first").await;
+    f.queue("later").await;
+
+    f.host.stop(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.live().await.stop, Some(StopState::Requested));
+
+    tokio::time::sleep(INTERRUPT_TIMEOUT).await;
+    let live = f.live().await;
+    assert_eq!(live.stop, Some(StopState::Unconfirmed));
+    assert_eq!(live.activity, Activity::Working);
+
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT).await;
+    let live = f.live().await;
+    assert_eq!(live.activity, Activity::Idle);
+    assert!(!live.delivery_unconfirmed);
+    assert_eq!(live.stop, None);
+    assert!(f.message(&input.id).awaits_decision());
+    assert_eq!(f.submits().len(), 1, "nothing was sent again");
+    assert_eq!(f.queued(), ["later"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_turn_keeps_its_problem_kind_and_notices_and_settings_reach_later_views() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: "settings".to_owned(),
+        detail: Some(ProviderDetail::new("settings", r#"{"model":"m"}"#)),
+    })
+    .await;
+    f.emit(EventKind::Notice {
+        turn: Some(turn_1()),
+        kind: NoticeKind::Retrying,
+        message: "Reconnecting (2/5)".to_owned(),
+        detail: None,
+    })
+    .await;
+    f.emit(turn_ended(
+        turn_1(),
+        TurnOutcome::Failed(Problem {
+            kind: ProblemKind::QuotaExhausted,
+            message: "You have hit your usage limit".to_owned(),
+            detail: None,
+        }),
+    ))
+    .await;
+
+    // Nothing was attached while this happened; it is all in the records.
+    let turn = f.turns().remove(0);
+    assert_eq!(turn.state, ChatTurnState::Failed);
+    assert_eq!(turn.problem.as_deref(), Some("quota_exhausted"));
+    assert_eq!(problem_kind("quota_exhausted"), ProblemKind::QuotaExhausted);
+    assert_eq!(notices(&f), ["Reconnecting (2/5)"]);
+    let chat = f.core().chat(&f.chat.id).unwrap();
+    assert_eq!(chat.effective_settings.as_deref(), Some(r#"{"model":"m"}"#));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_trashed_chat_cannot_be_resumed() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.host.trash(&f.chat.id).await.unwrap();
+
+    for mode in [
+        ResumeMode::Native,
+        ResumeMode::FreshSession {
+            history: "earlier".to_owned(),
+        },
+    ] {
+        let refused = f.host.resume(&f.chat.id, mode).await;
+        assert!(matches!(
+            refused,
+            Err(HostError::Core(Error::ChatTrashed(_)))
+        ));
+    }
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1, "no runtime was started");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_feed_of_a_view_ends_when_the_supervisor_of_its_chat_stops() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let (_view, mut subscription) = f.host.attach(&f.chat.id).await.unwrap();
+
+    f.host.stop_all().await;
+
+    let ended = tokio::time::timeout(Duration::from_secs(60), async {
+        while subscription.next().await.is_some() {}
+    });
+    assert!(ended.await.is_ok(), "the feed must end, not wait forever");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_resend_is_a_new_submission_of_that_input_alone_and_only_when_asked() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.fake.script_submit(SubmitReply::LoseProcess);
+    let input = f.send("first").await;
+    f.queue("later").await;
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+    assert_eq!(f.submits().len(), 1, "nothing is resent by itself");
+
+    f.host.resend(&f.chat.id, &input.id).await.unwrap();
+    settle().await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+
+    let sent: Vec<_> = f.submits().into_iter().map(|sent| sent.text).collect();
+    assert_eq!(sent, ["first", "first"]);
+    let attempts = f.message(&input.id).attempts;
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(attempts[0].decision, Some(ChatDeliveryDecision::Resent));
+    assert_ne!(f.submits()[0].submission, f.submits()[1].submission);
+    assert_eq!(f.queued(), ["later"], "the queue waits for the person");
+    // It was decided once; there is nothing left to resend.
+    f.host.resend(&f.chat.id, &input.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.submits().len(), 2);
+    assert_eq!(notices(&f).len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_context_that_cannot_be_read_is_said_and_the_session_starts_without_it() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    f.host = ChatHost::with_context(
+        Arc::new(move || Workspace::open(&path)),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(|_| {
+            Err("the workspace could not be opened".to_owned())
+        })),
+    )
+    .unwrap();
+
+    f.send("first").await;
+
+    assert_eq!(f.submits()[0].text, "first");
+    assert!(notices(&f)[0].contains("the workspace could not be opened"));
 }

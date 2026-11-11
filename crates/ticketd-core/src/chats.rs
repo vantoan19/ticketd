@@ -23,22 +23,26 @@ pub const CHAT_TOOL_OUTPUT_LIMIT: usize = 1024 * 1024;
 /// Provisional: to be measured against real sessions.
 pub const CHAT_CHANGE_TAIL: usize = 2_000;
 
+/// Characters kept of one stored notice.
+pub const CHAT_NOTICE_LIMIT: usize = 2_000;
+
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 /// Chat tables are deliberately left without workspace change-token triggers: they
 /// change many times a second while a turn streams, and views follow `chat_changes`.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(&format!(
-        "CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, title TEXT, harness TEXT NOT NULL, execution_folder TEXT NOT NULL, folder_managed INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, trashed INTEGER NOT NULL DEFAULT 0, queue_paused INTEGER NOT NULL DEFAULT 0, changes_trimmed_through INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT ({NOW}));
+        "CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, title TEXT, harness TEXT NOT NULL, execution_folder TEXT NOT NULL, folder_managed INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, trashed INTEGER NOT NULL DEFAULT 0, queue_paused INTEGER NOT NULL DEFAULT 0, effective_settings TEXT, changes_trimmed_through INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT ({NOW}));
          CREATE TABLE IF NOT EXISTS chat_links (chat_id TEXT NOT NULL REFERENCES chats(id), kind TEXT NOT NULL, target_id TEXT NOT NULL, PRIMARY KEY(chat_id, kind, target_id));
          CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, native_session_id TEXT NOT NULL, origin TEXT NOT NULL, started_at TEXT NOT NULL DEFAULT ({NOW}));
-         CREATE TABLE IF NOT EXISTS chat_turns (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, native_turn_id TEXT, state TEXT NOT NULL, detail TEXT, started_at TEXT NOT NULL DEFAULT ({NOW}), ended_at TEXT);
+         CREATE TABLE IF NOT EXISTS chat_turns (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, native_turn_id TEXT, state TEXT NOT NULL, detail TEXT, problem TEXT, started_at TEXT NOT NULL DEFAULT ({NOW}), ended_at TEXT);
          CREATE UNIQUE INDEX IF NOT EXISTS chat_turns_active ON chat_turns(chat_id) WHERE state = 'active';
          CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, role TEXT NOT NULL, text TEXT NOT NULL, complete INTEGER NOT NULL, turn_id TEXT REFERENCES chat_turns(id), created_at TEXT NOT NULL DEFAULT ({NOW}));
-         CREATE TABLE IF NOT EXISTS chat_submission_attempts (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), message_id TEXT NOT NULL REFERENCES chat_messages(id), intent TEXT NOT NULL, delivery TEXT NOT NULL, turn_id TEXT REFERENCES chat_turns(id), detail TEXT, recorded_at TEXT NOT NULL DEFAULT ({NOW}));
+         CREATE TABLE IF NOT EXISTS chat_submission_attempts (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), message_id TEXT NOT NULL REFERENCES chat_messages(id), intent TEXT NOT NULL, delivery TEXT NOT NULL, turn_id TEXT REFERENCES chat_turns(id), detail TEXT, decision TEXT, recorded_at TEXT NOT NULL DEFAULT ({NOW}));
          CREATE INDEX IF NOT EXISTS chat_submission_attempts_message ON chat_submission_attempts(message_id);
          CREATE TABLE IF NOT EXISTS chat_tools (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT NOT NULL REFERENCES chat_turns(id), name TEXT NOT NULL, input TEXT NOT NULL, state TEXT NOT NULL, output TEXT, output_truncated INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS chat_interactions (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT NOT NULL REFERENCES chat_turns(id), kind TEXT NOT NULL, native_request_id TEXT, prompt TEXT NOT NULL, state TEXT NOT NULL, response TEXT);
+         CREATE TABLE IF NOT EXISTS chat_notices (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT ({NOW}));
          CREATE TABLE IF NOT EXISTS chat_changes (sequence INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL REFERENCES chats(id), kind TEXT NOT NULL, subject_id TEXT NOT NULL);
          CREATE INDEX IF NOT EXISTS chat_changes_chat ON chat_changes(chat_id, sequence);
          CREATE INDEX IF NOT EXISTS chat_sessions_chat ON chat_sessions(chat_id, position);
@@ -46,6 +50,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(chat_id, position);
          CREATE INDEX IF NOT EXISTS chat_tools_chat ON chat_tools(chat_id, position);
          CREATE INDEX IF NOT EXISTS chat_interactions_chat ON chat_interactions(chat_id, position);
+         CREATE INDEX IF NOT EXISTS chat_notices_chat ON chat_notices(chat_id, position);
          PRAGMA user_version = 56;"
     ))?;
     Ok(())
@@ -102,6 +107,8 @@ pub struct Chat {
     pub trashed: bool,
     /// Set by Stop: the host must not dispatch queued input until it is cleared.
     pub queue_paused: bool,
+    /// The settings the harness last reported as in effect, as the host recorded them.
+    pub effective_settings: Option<String>,
     /// The latest recorded harness-session identity. Its presence does not mean the
     /// harness can still resume it.
     pub native_session_id: Option<String>,
@@ -166,6 +173,17 @@ pub enum ChatDelivery {
     Uncertain,
 }
 
+/// What the person decided about a submission whose delivery stayed uncertain. The
+/// attempt keeps `Uncertain`: a decision is not an observation of what the harness got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatDeliveryDecision {
+    /// Sent again as a new submission, recorded as a later attempt.
+    Resent,
+    /// Set aside; it is never sent again.
+    Discarded,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatSubmissionAttempt {
     pub id: String,
@@ -174,7 +192,15 @@ pub struct ChatSubmissionAttempt {
     /// The turn observed processing this submission, when the harness correlated one.
     pub turn_id: Option<String>,
     pub detail: Option<String>,
+    pub decision: Option<ChatDeliveryDecision>,
     pub recorded_at: String,
+}
+
+impl ChatSubmissionAttempt {
+    /// The harness acknowledged the submission or correlated a turn with it.
+    pub fn received(&self) -> bool {
+        self.delivery == ChatDelivery::Acknowledged || self.turn_id.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,6 +216,18 @@ pub struct ChatMessage {
     pub queued: bool,
     pub attempts: Vec<ChatSubmissionAttempt>,
     pub created_at: String,
+}
+
+impl ChatMessage {
+    /// The latest submission may or may not have arrived and the person has not
+    /// decided what to do about it.
+    pub fn awaits_decision(&self) -> bool {
+        self.attempts.last().is_some_and(|attempt| {
+            attempt.delivery == ChatDelivery::Uncertain
+                && !attempt.received()
+                && attempt.decision.is_none()
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -210,6 +248,8 @@ pub struct ChatTurn {
     pub native_turn_id: Option<String>,
     pub state: ChatTurnState,
     pub detail: Option<String>,
+    /// The kind of failure, as the host names it, when the turn ended with one.
+    pub problem: Option<String>,
     pub started_at: String,
     pub ended_at: Option<String>,
 }
@@ -264,6 +304,16 @@ pub struct ChatInteraction {
     pub response: Option<String>,
 }
 
+/// Something the host observed that belongs to no other record: a harness warning, a
+/// retry, traffic it could not interpret. Text is cut to `CHAT_NOTICE_LIMIT` characters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatNotice {
+    pub id: String,
+    pub position: i64,
+    pub text: String,
+    pub created_at: String,
+}
+
 /// One entry of a Chat's history, ordered by `position`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -273,6 +323,7 @@ pub enum ChatItem {
     Turn(ChatTurn),
     Tool(ChatTool),
     Interaction(ChatInteraction),
+    Notice(ChatNotice),
 }
 
 /// Something the host observed from the harness. Record only what was actually seen:
@@ -311,6 +362,8 @@ pub enum ChatObservation {
         turn_id: String,
         state: ChatTurnState,
         detail: Option<String>,
+        /// The kind of failure, as the host names it.
+        problem: Option<String>,
     },
     /// A checkpoint of an assistant message: `text` replaces what was stored.
     AssistantText {
@@ -339,6 +392,10 @@ pub enum ChatObservation {
         interaction_id: String,
         state: ChatInteractionState,
         response: Option<String>,
+    },
+    Notice {
+        notice_id: String,
+        text: String,
     },
 }
 
@@ -452,16 +509,16 @@ fn turn_from_row(row: &Row<'_>) -> rusqlite::Result<ChatTurn> {
         detail: row.get(4)?,
         started_at: row.get(5)?,
         ended_at: row.get(6)?,
+        problem: row.get(7)?,
     })
 }
 
-const TURN: &str =
-    "SELECT id, position, native_turn_id, state, detail, started_at, ended_at FROM chat_turns";
+const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem FROM chat_turns";
 
 fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
         .query_row(
-            "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at,
+            "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
                     (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1)
              FROM chats WHERE id = ?1",
             [id],
@@ -476,7 +533,8 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
                     trashed: row.get(6)?,
                     queue_paused: row.get(7)?,
                     created_at: row.get(8)?,
-                    native_session_id: row.get(9)?,
+                    effective_settings: row.get(9)?,
+                    native_session_id: row.get(10)?,
                     links: Vec::new(),
                     active_turn: None,
                 })
@@ -528,7 +586,7 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
         return Ok(None);
     };
     let mut statement = connection.prepare(
-        "SELECT id, intent, delivery, turn_id, detail, recorded_at FROM chat_submission_attempts WHERE message_id = ?1 ORDER BY rowid",
+        "SELECT id, intent, delivery, turn_id, detail, recorded_at, decision FROM chat_submission_attempts WHERE message_id = ?1 ORDER BY rowid",
     )?;
     message.attempts = statement
         .query_map([id], |row| {
@@ -539,6 +597,10 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                 turn_id: row.get(3)?,
                 detail: row.get(4)?,
                 recorded_at: row.get(5)?,
+                decision: row
+                    .get::<_, Option<String>>(6)?
+                    .map(|_| named(row, 6))
+                    .transpose()?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -618,6 +680,21 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             )
             .optional()?
             .map(ChatItem::Interaction),
+        "notice" => connection
+            .query_row(
+                "SELECT id, position, text, created_at FROM chat_notices WHERE id = ?1",
+                [id],
+                |row| {
+                    Ok(ChatNotice {
+                        id: row.get(0)?,
+                        position: row.get(1)?,
+                        text: row.get(2)?,
+                        created_at: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?
+            .map(ChatItem::Notice),
         _ => None,
     })
 }
@@ -634,7 +711,8 @@ fn read_history(
              UNION ALL SELECT position, 'message', id, chat_id FROM chat_messages
              UNION ALL SELECT position, 'turn', id, chat_id FROM chat_turns
              UNION ALL SELECT position, 'tool', id, chat_id FROM chat_tools
-             UNION ALL SELECT position, 'interaction', id, chat_id FROM chat_interactions)
+             UNION ALL SELECT position, 'interaction', id, chat_id FROM chat_interactions
+             UNION ALL SELECT position, 'notice', id, chat_id FROM chat_notices)
          WHERE chat_id = ?1 AND position < ?2 ORDER BY position DESC LIMIT ?3",
     )?;
     let mut subjects = statement
@@ -892,6 +970,7 @@ fn observe(
             turn_id,
             state,
             detail,
+            problem,
         } => {
             require_turn(connection, chat_id, &turn_id)?;
             if state == ChatTurnState::Active {
@@ -913,8 +992,8 @@ fn observe(
                 )));
             }
             connection.execute(
-                &format!("UPDATE chat_turns SET state = ?2, detail = ?3, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
-                params![turn_id, name(state)?, detail],
+                &format!("UPDATE chat_turns SET state = ?2, detail = ?3, problem = ?4, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
+                params![turn_id, name(state)?, detail, problem],
             )?;
             log(connection, chat_id, "turn", &turn_id)?;
             expire_interactions(connection, chat_id, Some(&turn_id))
@@ -1028,7 +1107,54 @@ fn observe(
             log(connection, chat_id, "interaction", &interaction_id)?;
             Ok(())
         }
+        ChatObservation::Notice { notice_id, text } => {
+            if owned(connection, "chat_notices", chat_id, &notice_id)? {
+                return Ok(());
+            }
+            let text: String = text.chars().take(CHAT_NOTICE_LIMIT).collect();
+            let position = log(connection, chat_id, "notice", &notice_id)?;
+            connection.execute(
+                "INSERT INTO chat_notices (id, chat_id, position, text) VALUES (?1, ?2, ?3, ?4)",
+                params![notice_id, chat_id, position, text],
+            )?;
+            Ok(())
+        }
     }
+}
+
+/// The saved input `message_id` of this Chat.
+fn require_input(
+    connection: &Connection,
+    chat_id: &str,
+    message_id: &str,
+) -> Result<ChatMessage, Error> {
+    let not_input = || invalid(format!("'{message_id}' is not saved input of this Chat"));
+    if !owned(connection, "chat_messages", chat_id, message_id)? {
+        return Err(not_input());
+    }
+    read_message(connection, message_id)?
+        .filter(|message| message.role == ChatRole::User)
+        .ok_or_else(not_input)
+}
+
+/// Records the person's decision on the uncertain submission of `message`.
+fn decide(
+    connection: &Connection,
+    chat_id: &str,
+    message: &ChatMessage,
+    decision: ChatDeliveryDecision,
+) -> Result<(), Error> {
+    let attempt = message
+        .attempts
+        .last()
+        .filter(|_| message.awaits_decision())
+        .ok_or_else(|| Error::ChatSubmissionUnresolved(message.id.clone()))?;
+    connection.execute(
+        "UPDATE chat_submission_attempts SET decision = ?2 WHERE id = ?1",
+        params![attempt.id, name(decision)?],
+    )?;
+    log(connection, chat_id, "message", &message.id)?;
+    Ok(())
 }
 
 /// Records that nothing more will be observed from this Chat's runtime: the active turn's
@@ -1057,10 +1183,10 @@ fn lose_contact(connection: &Connection, chat_id: &str, detail: &str) -> Result<
     }
     expire_interactions(connection, chat_id, None)?;
     for id in ids(
-        "SELECT DISTINCT message_id FROM chat_submission_attempts WHERE chat_id = ?1 AND delivery = 'possible'",
+        "SELECT DISTINCT message_id FROM chat_submission_attempts WHERE chat_id = ?1 AND delivery = 'possible' AND turn_id IS NULL",
     )? {
         connection.execute(
-            "UPDATE chat_submission_attempts SET delivery = 'uncertain', detail = ?2 WHERE message_id = ?1 AND delivery = 'possible'",
+            "UPDATE chat_submission_attempts SET delivery = 'uncertain', detail = ?2 WHERE message_id = ?1 AND delivery = 'possible' AND turn_id IS NULL",
             params![id, detail],
         )?;
         log(connection, chat_id, "message", &id)?;
@@ -1370,14 +1496,7 @@ impl Workspace {
             if read_chat(connection, chat_id)?.trashed {
                 return Err(Error::ChatTrashed(chat_id.to_owned()));
             }
-            let message = read_message(connection, message_id)?
-                .filter(|message| message.role == ChatRole::User)
-                .filter(|_| {
-                    owned(connection, "chat_messages", chat_id, message_id).unwrap_or(false)
-                })
-                .ok_or_else(|| {
-                    invalid(format!("'{message_id}' is not saved input of this Chat"))
-                })?;
+            let message = require_input(connection, chat_id, message_id)?;
             let recorded: Option<String> = connection
                 .query_row(
                     "SELECT message_id FROM chat_submission_attempts WHERE id = ?1",
@@ -1400,6 +1519,67 @@ impl Workspace {
             log(connection, chat_id, "message", message_id)?;
             trim(connection, chat_id)?;
             read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
+        })
+    }
+
+    /// Record that the person asked for input whose delivery is uncertain to be sent
+    /// again. The uncertain attempt keeps what was observed and gains the decision; the
+    /// new submission is its own attempt, recorded as possible before the hand-off.
+    /// Refused unless the latest attempt is uncertain and undecided, so this can never
+    /// follow from anything but the person's request. Repeating `attempt_id` records
+    /// nothing new.
+    pub fn record_chat_resubmission(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+        attempt_id: &str,
+    ) -> Result<ChatMessage, Error> {
+        self.chat_write(|connection| {
+            if read_chat(connection, chat_id)?.trashed {
+                return Err(Error::ChatTrashed(chat_id.to_owned()));
+            }
+            let message = require_input(connection, chat_id, message_id)?;
+            if message.attempts.iter().any(|a| a.id == attempt_id) {
+                return Ok(message);
+            }
+            decide(connection, chat_id, &message, ChatDeliveryDecision::Resent)?;
+            connection.execute(
+                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery) VALUES (?1, ?2, ?3, ?4, 'possible')",
+                params![attempt_id, chat_id, message_id, name(ChatSubmissionIntent::NewTurn)?],
+            )?;
+            trim(connection, chat_id)?;
+            read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
+        })
+    }
+
+    /// Record that the person set aside input whose delivery is uncertain. The message
+    /// and its attempt stay in history as uncertain; it is never sent again.
+    pub fn discard_uncertain_chat_submission(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<ChatMessage, Error> {
+        self.chat_write(|connection| {
+            let message = require_input(connection, chat_id, message_id)?;
+            decide(
+                connection,
+                chat_id,
+                &message,
+                ChatDeliveryDecision::Discarded,
+            )?;
+            trim(connection, chat_id)?;
+            read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
+        })
+    }
+
+    /// Keep the settings the harness reported as in effect, replacing an earlier report.
+    pub fn set_chat_effective_settings(&mut self, id: &str, settings: &str) -> Result<Chat, Error> {
+        self.update_chat(id, |connection| {
+            connection.execute(
+                "UPDATE chats SET effective_settings = ?2 WHERE id = ?1",
+                params![id, settings],
+            )?;
+            Ok(())
         })
     }
 
@@ -1443,7 +1623,7 @@ impl Workspace {
                      EXISTS (SELECT 1 FROM chat_turns WHERE chat_id = chats.id AND state = 'active')
                   OR EXISTS (SELECT 1 FROM chat_tools WHERE chat_id = chats.id AND state = 'running')
                   OR EXISTS (SELECT 1 FROM chat_interactions WHERE chat_id = chats.id AND state = 'pending')
-                  OR EXISTS (SELECT 1 FROM chat_submission_attempts WHERE chat_id = chats.id AND delivery = 'possible'))
+                  OR EXISTS (SELECT 1 FROM chat_submission_attempts WHERE chat_id = chats.id AND delivery = 'possible' AND turn_id IS NULL))
                  ORDER BY rowid",
             )?;
             let affected = statement

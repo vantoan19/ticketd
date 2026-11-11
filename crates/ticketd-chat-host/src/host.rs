@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
-    Harness, HarnessAdapter, Inspection, InteractionAnswer, InteractionKind, Problem,
+    Harness, HarnessAdapter, Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind,
     SteeringBehavior, Subscription,
 };
 
@@ -22,6 +22,15 @@ pub const TEXT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 pub const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Bound for each cleanup step (interrupt, final event, exit) when a runtime is stopped.
 pub const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long an adapter waits for its process to exit before killing it. It stays below
+/// `CLOSE_TIMEOUT`, so the kill has happened by the time the supervisor stops waiting.
+pub const ADAPTER_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+const _: () = assert!(ADAPTER_CLOSE_TIMEOUT.as_millis() < CLOSE_TIMEOUT.as_millis());
+/// How long one write to a harness may take before the harness counts as not reading.
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a written new turn may go without any confirmation before its delivery is
+/// recorded as uncertain and the Chat stops showing as working. Provisional (#267).
+pub const DELIVERY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(120);
 /// History items in the snapshot a view receives on attach.
 pub const SNAPSHOT_ITEMS: usize = 200;
 
@@ -30,8 +39,9 @@ pub const SNAPSHOT_ITEMS: usize = 200;
 pub type WorkspaceOpener = Arc<dyn Fn() -> Result<Workspace, Error> + Send + Sync>;
 
 /// The ticketd context for a Chat (see `context::for_chat`), read when a harness
-/// session starts. `None` sends nothing.
-pub type ContextSource = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+/// session starts. `Ok(None)` sends nothing; an error is told to the person and the
+/// session starts without context. It may block, so it runs off the async threads.
+pub type ContextSource = Arc<dyn Fn(&str) -> Result<Option<String>, String> + Send + Sync>;
 
 /// The name of the tool record that keeps the context text a session was started with,
 /// so the transcript shows what the agent was given apart from the person's words.
@@ -67,6 +77,8 @@ pub enum HostError {
     HarnessUnavailable(String),
     #[error("the Chat is already starting its harness")]
     Busy,
+    #[error("the Chat is working; try again when it has finished")]
+    Working,
     #[error("ticketd is quitting")]
     Quitting,
 }
@@ -325,6 +337,15 @@ impl ChatHost {
         .await
     }
 
+    /// Sends input again although its first delivery is uncertain, because the person
+    /// asked for exactly that. Only that input is dispatched, as a new submission, and
+    /// the queue is left paused. Refused while the Chat is working.
+    pub async fn resend(&self, chat_id: &str, message_id: &str) -> Result<(), HostError> {
+        let message_id = message_id.to_owned();
+        self.ask(chat_id, |reply| Command::Resend { message_id, reply })
+            .await
+    }
+
     /// Starts a replacement process. Never called automatically after a failure.
     pub async fn resume(&self, chat_id: &str, mode: ResumeMode) -> Result<(), HostError> {
         self.ask(chat_id, |reply| Command::Resume { mode, reply })
@@ -429,4 +450,34 @@ impl ChatHost {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// The name a failed turn's problem kind is stored under.
+pub fn problem_key(kind: ProblemKind) -> &'static str {
+    match kind {
+        ProblemKind::NotInstalled => "not_installed",
+        ProblemKind::IncompatibleVersion => "incompatible_version",
+        ProblemKind::LoginRequired => "login_required",
+        ProblemKind::QuotaExhausted => "quota_exhausted",
+        ProblemKind::NativeHistoryUnavailable => "native_history_unavailable",
+        ProblemKind::SessionInUse => "session_in_use",
+        ProblemKind::PermissionUnavailable => "permission_unavailable",
+        ProblemKind::Other => "other",
+    }
+}
+
+/// The problem kind stored under `key`; an unknown name reads as `Other`.
+pub fn problem_kind(key: &str) -> ProblemKind {
+    [
+        ProblemKind::NotInstalled,
+        ProblemKind::IncompatibleVersion,
+        ProblemKind::LoginRequired,
+        ProblemKind::QuotaExhausted,
+        ProblemKind::NativeHistoryUnavailable,
+        ProblemKind::SessionInUse,
+        ProblemKind::PermissionUnavailable,
+    ]
+    .into_iter()
+    .find(|kind| problem_key(*kind) == key)
+    .unwrap_or(ProblemKind::Other)
 }

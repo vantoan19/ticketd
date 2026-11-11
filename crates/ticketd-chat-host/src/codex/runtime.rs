@@ -4,13 +4,12 @@
 //! their callers, notifications and harness requests become events. Commands only
 //! write; they never read the protocol stream themselves.
 
-use std::io;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::BufReader;
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use tokio::time::timeout;
 
@@ -22,6 +21,8 @@ use crate::{
 };
 
 pub(super) use crate::stdio::{ChildProcess, Io, Reader, Writer};
+use crate::stdio::{close_process, write_bounded};
+use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 
 use super::discovery;
 use super::mapping::{Call, Session, rejection_reason, unknown};
@@ -44,7 +45,7 @@ impl Default for Options {
         Self {
             client_version: env!("CARGO_PKG_VERSION").to_owned(),
             rpc_timeout: Duration::from_secs(30),
-            close_timeout: Duration::from_secs(5),
+            close_timeout: ADAPTER_CLOSE_TIMEOUT,
         }
     }
 }
@@ -126,10 +127,8 @@ impl Connection {
             }
             prepare(&mut state).map_err(WriteFailure::Refused)?
         };
-        let Some(stdin) = stdin.as_mut() else {
-            return Err(WriteFailure::Lost);
-        };
-        match write(stdin, &frame).await {
+        let bytes = rpc::encode(&frame);
+        match write_bounded(&mut stdin, &self.child, &bytes, WRITE_TIMEOUT).await {
             Ok(()) => Ok(prepared),
             Err(_) => Err(WriteFailure::Lost),
         }
@@ -256,12 +255,9 @@ impl Connection {
             state.session.clear_live();
         }
         // Closing its input asks app-server to shut down and stop what it started.
-        *self.stdin.lock().await = None;
-        let mut child = self.child.lock().await;
-        match timeout(self.options.close_timeout, child.wait()).await {
-            Ok(exit_code) => CloseOutcome::Confirmed { exit_code },
-            Err(_) => {
-                child.kill().await;
+        match close_process(&self.stdin, &self.child, self.options.close_timeout).await {
+            Some(exit_code) => CloseOutcome::Confirmed { exit_code },
+            None => {
                 // ponytail: only the app-server process is killed. Owning its whole
                 // process tree (Windows job object, POSIX process group) is #257/#267.
                 CloseOutcome::Unconfirmed {
@@ -371,11 +367,6 @@ fn reply_outcome(reply: Option<Reply>) -> CallOutcome {
         Some(Err(error)) => CallOutcome::Error(error),
         None => CallOutcome::Lost,
     }
-}
-
-async fn write(stdin: &mut Writer, frame: &Value) -> io::Result<()> {
-    stdin.write_all(&rpc::encode(frame)).await?;
-    stdin.flush().await
 }
 
 fn resume_problem(error: &RpcError) -> Problem {

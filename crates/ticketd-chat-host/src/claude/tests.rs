@@ -712,3 +712,27 @@ fn a_shortened_tool_result_says_its_start_is_missing() {
         "[earlier output truncated]\nthe end"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn closing_kills_a_process_that_stopped_reading_its_input_within_the_bound() {
+    let (peer, runtime, _events) = open().await;
+    // More than the pipe holds, and nothing reads it: the write cannot finish.
+    let stuck = start_turn("sub-1", &"x".repeat(256 * 1024));
+    let writing = tokio::spawn({
+        let runtime = Arc::clone(&runtime);
+        async move { runtime.submit(stuck).await }
+    });
+    sleep(Duration::from_millis(1)).await;
+
+    let started = tokio::time::Instant::now();
+    let closed = runtime.close().await;
+
+    assert!(matches!(closed, CloseOutcome::Unconfirmed { .. }));
+    assert_eq!(started.elapsed(), crate::ADAPTER_CLOSE_TIMEOUT);
+    assert!(crate::ADAPTER_CLOSE_TIMEOUT < crate::CLOSE_TIMEOUT);
+    assert_eq!(*peer.exit.borrow(), Some(None), "the process was killed");
+    // The write is bounded too, so the submission is settled instead of hanging.
+    let outcome = timeout(crate::WRITE_TIMEOUT, writing).await;
+    let outcome = outcome.expect("the write gives up").expect("the task ends");
+    assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
+}

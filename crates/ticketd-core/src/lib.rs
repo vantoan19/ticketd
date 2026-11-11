@@ -96,11 +96,12 @@ pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
 };
 pub use chats::{
-    CHAT_CHANGE_TAIL, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatChange, ChatDelivery,
-    ChatHistoryPage, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatItem,
-    ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter, ChatMessage, ChatObservation,
-    ChatRecord, ChatRole, ChatSession, ChatSessionOrigin, ChatSnapshot, ChatSubmissionAttempt,
-    ChatSubmissionIntent, ChatTool, ChatToolState, ChatTurn, ChatTurnState, NewChat,
+    CHAT_CHANGE_TAIL, CHAT_NOTICE_LIMIT, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatChange,
+    ChatDelivery, ChatDeliveryDecision, ChatHistoryPage, ChatInteraction, ChatInteractionKind,
+    ChatInteractionState, ChatItem, ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter,
+    ChatMessage, ChatNotice, ChatObservation, ChatRecord, ChatRole, ChatSession, ChatSessionOrigin,
+    ChatSnapshot, ChatSubmissionAttempt, ChatSubmissionIntent, ChatTool, ChatToolState, ChatTurn,
+    ChatTurnState, NewChat,
 };
 pub use history::{HistoryEntry, Readiness, Status};
 pub use projects::Project;
