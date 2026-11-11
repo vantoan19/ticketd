@@ -33,9 +33,13 @@ npm ci
 npm run build
 ```
 
-Build the frontend before workspace-wide Cargo builds or checks: Tauri embeds
-`apps/desktop/dist` at compile time. `npm run desktop -- dev` manages its own
-frontend development server.
+Run `npm run build` before workspace-wide Cargo builds or checks. It builds, in
+order, the Claude Chat bridge executable and the frontend: Tauri embeds
+`apps/desktop/dist` at compile time and copies the bridge beside the desktop
+executable as a sidecar, so a Cargo build of the desktop fails while either is
+missing. `npm run desktop -- dev` manages its own frontend development server
+and uses the bridge that `npm run build` produced; `npm run desktop -- build`
+rebuilds both first.
 
 ## Use a disposable workspace
 
@@ -135,7 +139,7 @@ self-contained executable, so users need neither Node nor Bun. Bun is a pinned
 development dependency; `npm ci` installs it.
 
 ```sh
-npm run build:executable --workspace @ticketd/chat-bridge-claude
+npm run build:bridge
 npm run build:executable --workspace @ticketd/chat-bridge-claude -- bun-darwin-arm64
 ```
 
@@ -145,6 +149,12 @@ cross-compiles each from any host by downloading that target's runtime. Output
 goes to `apps/chat-bridge-claude/dist/` under the Tauri sidecar naming
 convention, `ticketd-chat-bridge-claude-<Rust target triple>`. Signing, where a
 platform needs it, happens on that platform.
+
+The desktop lists the bridge under `bundle.externalBin` in
+`apps/desktop/src-tauri/tauri.conf.json`. Tauri picks the file for the Rust
+target being built and installs it beside the desktop executable as
+`ticketd-chat-bridge-claude`. A desktop build for a target other than the host
+needs that target's bridge built first with the matching Bun target.
 
 The executable contains the Agent SDK but no Claude Code: the SDK's optional
 per-platform Claude Code packages are not bundled, the bridge always starts the
