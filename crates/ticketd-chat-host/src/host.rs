@@ -37,6 +37,9 @@ pub type ContextSource = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// so the transcript shows what the agent was given apart from the person's words.
 pub const CONTEXT_RECORD_NAME: &str = "ticketd context";
 
+/// The detail recorded on a turn ticketd itself stopped, on Quit or when Chat is turned off.
+pub const STOPPED_BY_TICKETD: &str = "ticketd stopped this Chat";
+
 /// The `Chat.harness` value an adapter serves.
 pub fn harness_key(harness: Harness) -> &'static str {
     match harness {

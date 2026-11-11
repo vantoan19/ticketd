@@ -21,8 +21,8 @@ use uuid::Uuid;
 use crate::host::{
     Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, ChatView,
     ContextSource, HostError, INTERRUPT_TIMEOUT, LiveInteraction, ResumeMode, SNAPSHOT_ITEMS,
-    SendMode, StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener,
-    is_refusal,
+    STOPPED_BY_TICKETD, SendMode, StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL,
+    WorkspaceOpener, is_refusal,
 };
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::{
@@ -246,7 +246,7 @@ impl Supervisor {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(reply)) => {
                         self.shutting_down = true;
-                        let unconfirmed = self.stop_runtime("ticketd stopped this Chat").await;
+                        let unconfirmed = self.stop_runtime(STOPPED_BY_TICKETD).await;
                         self.publish();
                         self.board.report(&self.chat_id, None);
                         let _ = reply.send(unconfirmed);
@@ -255,7 +255,7 @@ impl Supervisor {
                     Some(command) => self.on_command(command).await,
                     None => {
                         self.shutting_down = true;
-                        self.stop_runtime("ticketd stopped this Chat").await;
+                        self.stop_runtime(STOPPED_BY_TICKETD).await;
                         self.board.report(&self.chat_id, None);
                         return;
                     }
