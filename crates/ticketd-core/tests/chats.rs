@@ -266,7 +266,7 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                     name: "Bash".into(),
                     input: "cargo test".into(),
                     state: ChatToolState::Completed,
-                    output: Some("é".repeat(CHAT_TOOL_OUTPUT_LIMIT)),
+                    output: Some(format!("START{}END", "é".repeat(CHAT_TOOL_OUTPUT_LIMIT))),
                 },
                 ChatObservation::InteractionRequested {
                     interaction_id: "ask-1".into(),
@@ -317,7 +317,10 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
         panic!("expected the tool");
     };
     assert!(tool.output_truncated);
-    assert!(tool.output.as_ref().unwrap().len() <= CHAT_TOOL_OUTPUT_LIMIT);
+    // The end of the output is what is kept: it is where a command says how it went.
+    let kept = tool.output.as_ref().unwrap();
+    assert!(kept.len() <= CHAT_TOOL_OUTPUT_LIMIT && kept.len() > CHAT_TOOL_OUTPUT_LIMIT - 4);
+    assert!(kept.ends_with("éEND") && !kept.starts_with("START"));
     let ChatItem::Interaction(interaction) = &snapshot.items[4] else {
         panic!("expected the interaction");
     };

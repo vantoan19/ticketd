@@ -23,7 +23,7 @@ import {
   type RejectionCode,
 } from "./protocol";
 
-/** Characters kept from one tool result; the host stores at most 1 MiB per output. */
+/** Characters kept from the end of one tool result; the host stores the last 1 MiB per output. */
 export const MAX_TOOL_RESULT_CHARS = 1_048_576;
 /** Characters kept from an SDK frame the bridge has no event for. */
 export const MAX_UNMAPPED_JSON_CHARS = 4096;
@@ -609,7 +609,7 @@ export function createBridge(deps: BridgeDeps) {
             tool_use_id: text(block.tool_use_id),
             parent_tool_use_id: parent,
             is_error: block.is_error === true,
-            text: full.slice(0, MAX_TOOL_RESULT_CHARS),
+            text: full.slice(-MAX_TOOL_RESULT_CHARS),
             truncated: full.length > MAX_TOOL_RESULT_CHARS,
           });
         }

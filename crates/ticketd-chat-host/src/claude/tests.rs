@@ -702,3 +702,13 @@ async fn the_built_bridge_answers_hello() {
     drop(io.stdin);
     assert_eq!(io.child.wait().await, Some(0));
 }
+
+#[test]
+fn a_shortened_tool_result_says_its_start_is_missing() {
+    use super::session::tool_output;
+    assert_eq!(tool_output("all of it", false), "all of it");
+    assert_eq!(
+        tool_output("the end", true),
+        "[earlier output truncated]\nthe end"
+    );
+}

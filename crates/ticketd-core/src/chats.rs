@@ -13,7 +13,9 @@ use uuid::Uuid;
 
 use crate::{Error, Workspace};
 
-/// Stored tool output is cut to this many bytes; `ChatTool::output_truncated` marks the cut.
+/// Stored tool output keeps its last this-many bytes; `ChatTool::output_truncated` marks
+/// that the start was dropped. The end is kept because it is where a command reports its
+/// outcome.
 /// Provisional: to be measured against real sessions.
 pub const CHAT_TOOL_OUTPUT_LIMIT: usize = 1024 * 1024;
 
@@ -709,15 +711,16 @@ fn once(
     Ok(id)
 }
 
+/// The last `CHAT_TOOL_OUTPUT_LIMIT` bytes of `output`, and whether its start was dropped.
 fn bounded(mut output: String) -> (String, bool) {
     if output.len() <= CHAT_TOOL_OUTPUT_LIMIT {
         return (output, false);
     }
-    let mut end = CHAT_TOOL_OUTPUT_LIMIT;
-    while !output.is_char_boundary(end) {
-        end -= 1;
+    let mut start = output.len() - CHAT_TOOL_OUTPUT_LIMIT;
+    while !output.is_char_boundary(start) {
+        start += 1;
     }
-    output.truncate(end);
+    output.drain(..start);
     (output, true)
 }
 

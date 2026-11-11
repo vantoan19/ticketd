@@ -831,7 +831,9 @@ describe("process loss and unknown frames", () => {
             type: "tool_result",
             tool_use_id: "toolu_9",
             is_error: true,
-            content: [{ type: "text", text: "y".repeat(1_048_577) }],
+            content: [
+              { type: "text", text: `head${"y".repeat(1_048_576)}tail` },
+            ],
           },
         ],
       },
@@ -843,7 +845,10 @@ describe("process loss and unknown frames", () => {
       is_error: true,
       truncated: true,
     });
+    // The end is kept, as the host and the transcript say.
     expect(toolResult?.text.length).toBe(1_048_576);
+    expect(toolResult?.text.startsWith("yyyy")).toBe(true);
+    expect(toolResult?.text.endsWith("ytail")).toBe(true);
   });
 
   it("rejects lines that are not commands without stopping", async () => {

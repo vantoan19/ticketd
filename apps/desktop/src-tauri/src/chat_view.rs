@@ -404,7 +404,7 @@ fn step(tool: &ChatTool, harness: &str) -> Step {
     };
     let cut = tool
         .output_truncated
-        .then_some("output cut short");
+        .then_some("earlier output cut, ticketd keeps the last 1 MiB");
     let result: Vec<_> = outcome.into_iter().chain(cut).collect();
     Step {
         verb,

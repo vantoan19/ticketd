@@ -62,6 +62,16 @@ pub(super) fn unknown(summary: &str, kind: &str, payload: &Value) -> EventKind {
     }
 }
 
+/// A tool result as shown: the bridge keeps the end of a long one, so the note that
+/// something is missing goes where it is missing.
+pub(super) fn tool_output(text: &str, truncated: bool) -> String {
+    if truncated {
+        format!("[earlier output truncated]\n{text}")
+    } else {
+        text.to_owned()
+    }
+}
+
 impl Session {
     pub fn active_turn(&self) -> Option<&NativeTurnId> {
         self.turn.as_ref().map(|turn| &turn.id)
@@ -267,10 +277,10 @@ impl Session {
             ));
             return;
         };
-        let mut output = text(event, "text").unwrap_or_default().to_owned();
-        if event["truncated"] == true {
-            output.push_str("\n[output truncated]");
-        }
+        let output = tool_output(
+            text(event, "text").unwrap_or_default(),
+            event["truncated"] == true,
+        );
         events.push(EventKind::ToolUpdated {
             turn: turn.clone(),
             item: NativeItemId::new(id),
