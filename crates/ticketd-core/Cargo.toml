@@ -30,10 +30,12 @@ saphyr = { version = "0.3", default-features = false }
 [features]
 # Gives every new Workspace the device code KQ. For tests only: see src/device.rs.
 test-device-code = []
+# Builds the in-memory storage that sync tests run against. For tests only.
+fake-remote = []
 
 [dev-dependencies]
-# Turns the fixed device code on for this crate's own tests.
-ticketd-core = { path = ".", features = ["test-device-code"] }
+# Turns the fixed device code and the fake storage on for this crate's own tests.
+ticketd-core = { path = ".", features = ["test-device-code", "fake-remote"] }
 serde_json = "1"
 tempfile = "3"
 

@@ -245,13 +245,16 @@ impl<'a> DriveRemote<'a> {
         }
     }
 
-    /// Replace the wait between retries, so tests control time.
     /// Where a person sees the Workspace folder in Drive's own interface.
+    /// `folder` is the Workspace folder identifier, checked like in every
+    /// other call; a folder that is not in Drive is `FolderMissing`.
     pub fn folder_url(&self, folder: &str) -> Result<String, RemoteError> {
+        check(folder, None)?;
         let root = self.resolve(folder, true)?.root;
         Ok(format!("https://drive.google.com/drive/folders/{root}"))
     }
 
+    /// Replace the wait between retries, so tests control time.
     pub fn with_pause(mut self, pause: impl Fn(Duration) + Send + Sync + 'a) -> Self {
         self.pause = Box::new(pause);
         self

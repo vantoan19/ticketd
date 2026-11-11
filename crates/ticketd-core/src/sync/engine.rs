@@ -249,11 +249,14 @@ pub(super) fn notify(
     let notice =
         serde_json::to_string(notice).map_err(|error| Error::SyncFile(error.to_string()))?;
     // One notice per cause, however many runs meet it again.
-    connection.execute(
+    let recorded = connection.execute(
         "INSERT OR IGNORE INTO sync_notices (id, notice, cause) VALUES (?1, ?2, ?3)",
         params![format!("notice-{}", Uuid::new_v4()), notice, cause],
     )?;
-    touch(connection)
+    if recorded > 0 {
+        touch(connection)?;
+    }
+    Ok(())
 }
 
 /// Merge two versions of a record against their last-synced copy. Sections are

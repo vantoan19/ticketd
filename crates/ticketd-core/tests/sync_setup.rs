@@ -97,6 +97,30 @@ impl Desks {
     }
 }
 
+fn retitle(workspace: &mut Workspace, reference: &str, title: &str) {
+    workspace
+        .change_ticket(
+            reference,
+            TicketPatch {
+                title: Some(title.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+}
+
+fn unreadable(workspace: &Workspace) -> Vec<String> {
+    workspace
+        .sync_notices()
+        .unwrap()
+        .into_iter()
+        .map(|notice| match notice.notice {
+            SyncNoticeKind::UnreadableFile { path, .. } => path,
+            other => format!("{other:?}"),
+        })
+        .collect()
+}
+
 fn titles(workspace: &Workspace) -> Vec<String> {
     workspace
         .list_tickets()
@@ -571,16 +595,14 @@ fn a_conflict_needs_attention_and_names_the_record_to_review() {
     );
 }
 
-/// The fake storage, looking at a Workspace from a second connection each
-/// time Attachment bytes are being fetched.
-struct Watching {
+/// The fake storage, doing something of the test's each time Attachment
+/// bytes are being fetched.
+struct Hooked<'a> {
     remote: FakeRemote,
-    workspace: std::path::PathBuf,
-    attachment: String,
-    seen: std::sync::Mutex<Vec<AttachmentAvailabilityState>>,
+    during_download: Box<dyn Fn() + Send + Sync + 'a>,
 }
 
-impl RemoteStorage for Watching {
+impl RemoteStorage for Hooked<'_> {
     fn folders(&self) -> Result<Vec<ticketd_core::sync::remote::RemoteFolder>, RemoteError> {
         self.remote.folders()
     }
@@ -604,11 +626,7 @@ impl RemoteStorage for Watching {
         output: &mut dyn std::io::Write,
     ) -> Result<(), RemoteError> {
         if key.kind == RemoteKind::Attachment {
-            let other = Workspace::open(&self.workspace).unwrap();
-            let found = other
-                .attachment_availability(std::slice::from_ref(&self.attachment))
-                .unwrap();
-            self.seen.lock().unwrap().push(found[0].state);
+            (self.during_download)();
         }
         self.remote.download(folder, key, version, output)
     }
@@ -639,11 +657,17 @@ fn an_attachment_shows_as_downloading_while_its_bytes_arrive_and_not_downloaded_
     let (_a, _, attachment) = desks.uploaded("Desk A");
     let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
     b.sync_now(&desks.remote).unwrap();
-    let watching = Watching {
+    // A second connection looks at the Workspace while the bytes arrive.
+    let seen = std::sync::Mutex::new(Vec::new());
+    let watching = Hooked {
         remote: desks.remote.clone(),
-        workspace: desks.directory.path().join("Desk B"),
-        attachment: attachment.clone(),
-        seen: Default::default(),
+        during_download: Box::new(|| {
+            let other = Workspace::open(desks.directory.path().join("Desk B")).unwrap();
+            let found = other
+                .attachment_availability(std::slice::from_ref(&attachment))
+                .unwrap();
+            seen.lock().unwrap().push(found[0].state);
+        }),
     };
     let state = |workspace: &Workspace| {
         workspace
@@ -665,7 +689,7 @@ fn an_attachment_shows_as_downloading_while_its_bytes_arrive_and_not_downloaded_
     b.download_attachment(&watching, &attachment).unwrap();
 
     assert_eq!(
-        *watching.seen.lock().unwrap(),
+        *seen.lock().unwrap(),
         [AttachmentAvailabilityState::Downloading; 2]
     );
     assert_eq!(state(&b), AttachmentAvailabilityState::Downloaded);
@@ -761,4 +785,346 @@ fn a_failure_with_no_state_of_its_own_needs_attention_until_a_run_succeeds() {
     let status = a.sync_recover(&desks.remote).unwrap();
     assert_eq!(recovered(&status), (None, SyncState::Uploaded));
     assert_eq!(status.recovery_message, None);
+}
+
+#[test]
+fn an_attachment_whose_bytes_are_gone_here_is_reported_and_holds_nothing_up() {
+    let desks = desks();
+    let (mut a, reference, _) = desks.uploaded("Desk A");
+    let lost = a
+        .import_attachment_bytes("request-2", "lost.txt", b"lost", |_, _| true)
+        .unwrap()
+        .id;
+    let root = desks.directory.path().join("Desk A.attachments");
+    std::fs::remove_dir_all(root.join(&lost)).unwrap();
+    retitle(&mut a, &reference, "Sign in");
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    // The run went through: the ticket is uploaded, the file is named once.
+    assert_eq!(recovered(&status), (None, SyncState::NeedsAttention));
+    assert_eq!((status.pending_uploads, status.pending_total), (vec![], 0));
+    assert!(status.last_synced_at.is_some());
+    assert_eq!(unreadable(&a), ["attachments/lost.txt"]);
+    let listed = desks.remote.list(&desks.folder()).unwrap();
+    assert!(
+        listed
+            .iter()
+            .any(|file| file.name == format!("{reference} Sign in.md"))
+    );
+    a.sync_now(&desks.remote).unwrap();
+    assert_eq!(unreadable(&a).len(), 1);
+}
+
+#[test]
+fn an_attachment_that_cannot_be_saved_here_is_reported_and_records_still_sync() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    // Something is in the way of where this Attachment's bytes go.
+    let root = desks.directory.path().join("Desk B.attachments");
+    std::fs::create_dir_all(root.join(&attachment).join("in the way")).unwrap();
+    let state = |workspace: &Workspace| {
+        workspace
+            .attachment_availability(std::slice::from_ref(&attachment))
+            .unwrap()[0]
+            .state
+    };
+
+    let status = b.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(recovered(&status), (None, SyncState::NeedsAttention));
+    assert!(status.last_synced_at.is_some());
+    assert_eq!(titles(&b), ["Login"]);
+    assert_eq!(unreadable(&b), ["attachments/notes.txt"]);
+    assert_eq!(state(&b), AttachmentAvailabilityState::NotDownloaded);
+
+    // With the way clear, the next run fetches it and says nothing more.
+    std::fs::remove_dir_all(root.join(&attachment)).unwrap();
+    b.sync_now(&desks.remote).unwrap();
+    assert_eq!(state(&b), AttachmentAvailabilityState::Downloaded);
+    assert_eq!(unreadable(&b).len(), 1);
+}
+
+#[test]
+fn one_attachment_is_fetched_once_when_a_run_and_an_open_ask_for_it_together() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+    b.set_sync_settings("Desk B", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    let path = desks.directory.path().join("Desk B");
+    let downloads = |remote: &FakeRemote| {
+        remote
+            .calls()
+            .into_iter()
+            .filter(|op| *op == RemoteOp::Download)
+            .count()
+    };
+    let before = downloads(&desks.remote);
+
+    // While the person's open is fetching the bytes, a scheduled run starts on
+    // another connection, and a second open waits on a third.
+    let waiting = std::sync::Mutex::new(None);
+    let racing = Hooked {
+        remote: desks.remote.clone(),
+        during_download: Box::new(|| {
+            let scheduled = Workspace::open(&path)
+                .unwrap()
+                .sync_now(&desks.remote)
+                .unwrap();
+            assert_eq!(scheduled.recovery, None);
+            let (path, remote, id) = (path.clone(), desks.remote.clone(), attachment.clone());
+            *waiting.lock().unwrap() = Some(std::thread::spawn(move || {
+                Workspace::open(path)
+                    .unwrap()
+                    .download_attachment(&remote, &id)
+            }));
+            // Lets the second open find the download under way; it must pass either way.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }),
+    };
+    b.download_attachment(&racing, &attachment).unwrap();
+    let second = waiting.lock().unwrap().take().unwrap().join().unwrap();
+
+    second.unwrap();
+    assert_eq!(downloads(&desks.remote) - before, 1);
+    assert_eq!(
+        std::fs::read(b.attachment_open_path(&attachment).unwrap()).unwrap(),
+        BYTES
+    );
+    assert_eq!(b.sync_notices().unwrap(), []);
+}
+
+#[test]
+fn a_download_cut_off_by_the_app_closing_is_taken_up_after_the_launch_reset() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+    b.set_sync_settings("Desk B", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    // What a download leaves when the app stops in the middle of it.
+    rusqlite::Connection::open(desks.directory.path().join("Desk B"))
+        .unwrap()
+        .execute("UPDATE sync_attachments SET state = 'downloading'", [])
+        .unwrap();
+    let state = |workspace: &Workspace| {
+        workspace
+            .attachment_availability(std::slice::from_ref(&attachment))
+            .unwrap()[0]
+            .state
+    };
+
+    // A run leaves a download alone that another connection may own.
+    b.sync_now(&desks.remote).unwrap();
+    assert_eq!(state(&b), AttachmentAvailabilityState::Downloading);
+
+    b.reset_interrupted_downloads().unwrap();
+    b.sync_now(&desks.remote).unwrap();
+    assert_eq!(state(&b), AttachmentAvailabilityState::Downloaded);
+}
+
+#[test]
+fn renaming_an_attachment_that_is_not_downloaded_here_reaches_the_other_desks() {
+    let desks = desks();
+    let (mut a, reference, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+
+    b.rename_attachment(&attachment, "meeting notes.txt")
+        .unwrap();
+    b.sync_now(&desks.remote).unwrap();
+    a.sync_now(&desks.remote).unwrap();
+
+    for desk in [&a, &b] {
+        assert_eq!(
+            desk.ticket_attachments(&reference).unwrap()[0].display_name,
+            "meeting notes.txt"
+        );
+    }
+    assert_eq!(b.dirty_records().unwrap(), []);
+}
+
+#[test]
+fn restoring_a_backup_disconnects_sync_until_upload_or_download_is_chosen_again() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let path = desks.directory.path().join("Desk A");
+    let backup = desks.directory.path().join("backup.sqlite3");
+    a.backup(&backup).unwrap();
+    a.create_ticket("After the backup").unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    drop(a);
+
+    Workspace::restore(&path, &backup).unwrap();
+    let mut a = Workspace::open(&path).unwrap();
+
+    // Signed in still, but no folder: a run cannot quietly bring back what
+    // the restore went back on.
+    let status = a.sync_status().unwrap();
+    assert_eq!(
+        (status.connection, status.folder),
+        (SyncConnection::Choosing, None)
+    );
+    assert_eq!(a.sync_binding().unwrap(), None);
+    assert!(matches!(a.sync_now(&desks.remote), Err(Error::Sync(_))));
+    assert_eq!(titles(&a), ["Login"]);
+
+    // Choosing to upload merges with the folder as a first sync does.
+    a.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+    let mut restored = titles(&a);
+    restored.sort();
+    assert_eq!(restored, ["After the backup", "Login"]);
+}
+
+#[test]
+fn a_run_that_changes_nothing_leaves_the_change_token_and_a_long_queue_is_paged() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    a.sync_now(&desks.remote).unwrap();
+    let token = a.change_token().unwrap();
+
+    a.sync_now(&desks.remote).unwrap();
+    assert_eq!(a.change_token().unwrap(), token);
+
+    for number in 0..60 {
+        a.create_ticket(&format!("Ticket {number}")).unwrap();
+    }
+    let status = a.sync_status().unwrap();
+    assert_eq!(status.state, SyncState::UploadPending);
+    assert_eq!(
+        (status.pending_uploads.len(), status.pending_total),
+        (50, 60)
+    );
+    assert_eq!(status.pending_uploads[0].title, "Ticket 0");
+}
+
+#[test]
+fn a_device_code_given_up_stays_in_the_registry_and_is_not_taken_by_a_desk_joining() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let registry = RemoteKey::new(RemoteKind::Devices, "devices");
+    let first = a.device_code().unwrap();
+    a.renew_device_code().unwrap();
+    a.sync_now(&desks.remote).unwrap();
+
+    let (version, stored) = desks.file(&registry);
+    let stored: serde_json::Value = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(stored["retired"], serde_json::json!([first]));
+
+    // A desk joining with a code that was given up takes another.
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    let joining = b.device_code().unwrap();
+    let mut edited = stored.clone();
+    edited["retired"] = serde_json::json!([first, joining]);
+    desks
+        .remote
+        .write(
+            &desks.folder(),
+            &registry,
+            "devices.json",
+            Some(&version),
+            &mut Cursor::new(serde_json::to_vec(&edited).unwrap()),
+        )
+        .unwrap();
+    b.sync_now(&desks.remote).unwrap();
+
+    assert_ne!(b.device_code().unwrap(), joining);
+    assert_ne!(b.device_code().unwrap(), first);
+}
+
+#[test]
+fn a_shared_file_from_a_newer_ticketd_stops_the_run_and_is_not_rewritten() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let registry = RemoteKey::new(RemoteKind::Devices, "devices");
+    let (version, stored) = desks.file(&registry);
+    let mut newer: serde_json::Value = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(newer["format"], 1);
+    // An entry this version does not know survives a rewrite by this version.
+    newer["settings"] = serde_json::json!({ "shared": true });
+    let write = |value: &serde_json::Value, expected: &str| {
+        desks
+            .remote
+            .write(
+                &desks.folder(),
+                &registry,
+                "devices.json",
+                Some(expected),
+                &mut Cursor::new(serde_json::to_vec(value).unwrap()),
+            )
+            .unwrap()
+            .version
+    };
+    let version = write(&newer, &version);
+    a.set_sync_settings("Studio", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    let (rewritten, stored) = desks.file(&registry);
+    assert_ne!(rewritten, version);
+    let stored: serde_json::Value = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(stored["settings"]["shared"], true);
+
+    // A higher format is not this version's to rewrite at all.
+    let mut newer = stored;
+    newer["format"] = 2.into();
+    let version = write(&newer, &rewritten);
+    a.set_sync_settings("Den", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(
+        recovered(&status),
+        (Some(SyncRecovery::Error), SyncState::NeedsAttention)
+    );
+    assert!(status.recovery_message.unwrap().contains("newer ticketd"));
+    assert_eq!(desks.file(&registry).0, version);
+}
+
+#[test]
+fn an_attachment_upload_whose_answer_is_lost_repeats_without_a_second_copy() {
+    let desks = desks();
+    let (mut a, reference, _) = desks.uploaded("Desk A");
+    let extra = a
+        .import_attachment_bytes("request-2", "more.txt", b"more", |_, _| true)
+        .unwrap()
+        .id;
+    a.set_ticket_attachment(&reference, &extra, true).unwrap();
+    let key = RemoteKey::new(RemoteKind::Attachment, extra.clone());
+
+    // The bytes reach the storage, the answer does not; the next run stops
+    // before it starts.
+    desks.remote.drop_write(1, RemoteError::Offline);
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(
+        recovered(&status),
+        (Some(SyncRecovery::Offline), SyncState::SavedLocally)
+    );
+    assert!(status.pending_uploads.iter().any(|item| item.id == extra));
+    desks.remote.fail(
+        RemoteOp::List,
+        1,
+        RemoteError::RateLimited { retry_after: None },
+    );
+    a.sync_now(&desks.remote).unwrap();
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+    assert_eq!(
+        desks.remote.revisions(&desks.folder(), &key).unwrap().len(),
+        1
+    );
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    b.sync_now(&desks.remote).unwrap();
+    assert_eq!(b.ticket_attachments(&reference).unwrap().len(), 2);
+    assert_eq!(
+        std::fs::read(b.attachment_open_path(&extra).unwrap()).unwrap(),
+        b"more"
+    );
 }
