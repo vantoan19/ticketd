@@ -18,7 +18,7 @@ let store: Entry[] = [];
 const calls: { command: string; args: Record<string, unknown> }[] = [];
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async (command: string, args: Record<string, unknown>) => {
+  invoke: vi.fn(async (command: string, args: Record<string, unknown> = {}) => {
     calls.push({ command, args });
     if (command === "set_inbox_read") {
       const ids = args.ids as number[];

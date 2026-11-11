@@ -1,3 +1,0 @@
-# Tests assert literal Ticket references, so they fix the otherwise random device code.
-[env]
-TICKETD_TEST_DEVICE_CODE = "KQ"

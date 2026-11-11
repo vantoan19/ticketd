@@ -9,7 +9,7 @@ fn workspace(directory: &tempfile::TempDir, name: &str) -> Workspace {
 fn tickets_take_the_device_code_and_the_next_device_counter() {
     let directory = tempfile::tempdir().unwrap();
     let mut workspace = workspace(&directory, "a.sqlite3");
-    // Test runs fix the otherwise random code (see .cargo/config.toml).
+    // Test runs fix the otherwise random code (the `test-device-code` feature).
     assert_eq!(workspace.device_code().unwrap(), "KQ");
 
     let first = workspace.create_ticket("First").unwrap();

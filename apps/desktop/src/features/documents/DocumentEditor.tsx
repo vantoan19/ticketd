@@ -45,6 +45,10 @@ import {
 } from "@/lib/workspace-change";
 import { DocumentNavigation, PlanNavigation } from "./navigation";
 import { z } from "zod";
+import { StatusDot } from "@/components/ui/status-dot";
+import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
+import { RecordHistory } from "@/features/sync-review/RecordHistory";
+import { useConflicts } from "@/features/sync-review/use-conflicts";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 
 function DocumentSurface({
@@ -180,6 +184,11 @@ export function DocumentEditor({
   backLabel?: string;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
+  const { conflicts } = useConflicts();
+  const needsReview = conflicts.some(
+    (item) => item.kind === "document" && item.id === initial?.id,
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
   const recovery = useDraftRecovery();
   const recoveryOwner = `document:${initial?.id ?? "capture"}`;
   const [recovered] = useState(() =>
@@ -677,8 +686,18 @@ export function DocumentEditor({
   const isSaved = status === "Saved on this computer";
   const statusLine = (
     <span role="status" className="document-status">
-      {isSaved && <Check aria-hidden="true" />}
-      {capture && isSaved ? "Saved to Documents as you type" : status}
+      {isSaved && needsReview ? (
+        // Saved, but changed on two desktops: that is the state worth saying.
+        <>
+          <StatusDot tone="attention" size={10} />
+          Needs review
+        </>
+      ) : (
+        <>
+          {isSaved && <Check aria-hidden="true" />}
+          {capture && isSaved ? "Saved to Documents as you type" : status}
+        </>
+      )}
     </span>
   );
   const saveError = failed && (
@@ -834,6 +853,9 @@ export function DocumentEditor({
                   </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" sideOffset={4}>
+                  <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                    History…
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={toggleTrash}>
                     Move to Trash
                   </DropdownMenuItem>
@@ -843,7 +865,16 @@ export function DocumentEditor({
           </div>
         </header>
       )}
+      {initial && historyOpen && (
+        <RecordHistory
+          kind="document"
+          id={initial.id}
+          subtitle={heading}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
       <div className="document-main">
+        {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
         {!initial && (
           <header>
             <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">

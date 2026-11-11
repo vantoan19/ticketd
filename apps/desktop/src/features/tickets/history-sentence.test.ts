@@ -12,6 +12,15 @@ const sentence = (kind: string, from_value: string, to_value: string) =>
     lookups,
   );
 
+test("a dependency sync dropped to avoid a loop says which one and why", () => {
+  expect(sentence("sync_dependency_removed", "T-MW9", "blocks")).toBe(
+    "Sync removed “blocks T-MW9”; it would have made a loop",
+  );
+  expect(sentence("sync_dependency_removed", "T-MW9", "blocked_by")).toBe(
+    "Sync removed “blocked by T-MW9”; it would have made a loop",
+  );
+});
+
 test("describes recorded changes as sentences without event keys", () => {
   expect(sentence("status", "Todo", "In progress")).toBe(
     "Status Todo → In progress",

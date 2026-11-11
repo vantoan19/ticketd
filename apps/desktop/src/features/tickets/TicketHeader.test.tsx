@@ -198,3 +198,15 @@ test("expanded view offers Show beside the list instead of Expand", () => {
   fireEvent.click(screen.getByRole("button", { name: "Show beside the list" }));
   expect(props.onReturn).toHaveBeenCalled();
 });
+
+test("History… in the ticket actions opens the ticket's History", async () => {
+  header();
+  await chooseAction("History…");
+  expect(await screen.findByRole("dialog", { name: "History" })).toBeTruthy();
+  expect(screen.getByText("T-KQ1 · Ticket")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("record_versions", {
+    kind: "ticket",
+    id: "1",
+    source: "local",
+  });
+});

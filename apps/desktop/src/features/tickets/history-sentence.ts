@@ -108,6 +108,9 @@ export function describeChange(
       return from === "attached"
         ? `Linked to ${to} after an uncertain publication`
         : `Published to ${to}`;
+    case "sync_dependency_removed":
+      // `from` is the other ticket; `to` says which way the dropped edge ran.
+      return `Sync removed ${quote(`${to === "blocks" ? "blocks" : "blocked by"} ${from}`)}; it would have made a loop`;
     case "trash":
       return to === "trashed" ? "Moved to trash" : "Restored from trash";
     default:

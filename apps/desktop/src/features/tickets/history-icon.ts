@@ -20,7 +20,12 @@ export function historyIcon(kind: string, to = ""): LucideIcon {
   if (kind === "project") return Package;
   if (kind === "plan") return Layers;
   if (kind === "parent" || kind === "relationship:child") return GitBranch;
-  if (kind === "dependency" || kind.startsWith("relationship:")) return Link2;
+  if (
+    kind === "dependency" ||
+    kind === "sync_dependency_removed" ||
+    kind.startsWith("relationship:")
+  )
+    return Link2;
   if (kind === "trash") return Trash2;
   if (
     kind.startsWith("source") ||
