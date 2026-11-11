@@ -600,6 +600,9 @@ fn a_conflict_needs_attention_and_names_the_record_to_review() {
 struct Hooked<'a> {
     remote: FakeRemote,
     during_download: Box<dyn Fn() + Send + Sync + 'a>,
+    /// Called while the folder is being listed, which is after a run read
+    /// what this Workspace stores about itself.
+    during_listing: Option<Box<dyn Fn() + Send + Sync + 'a>>,
     /// Called when half the bytes have been handed over; says whether the
     /// rest follows.
     halfway: Option<Box<dyn Fn() -> bool + Send + Sync + 'a>>,
@@ -618,6 +621,9 @@ impl RemoteStorage for Hooked<'_> {
         &self,
         folder: &str,
     ) -> Result<Vec<ticketd_core::sync::remote::RemoteFile>, RemoteError> {
+        if let Some(during_listing) = &self.during_listing {
+            during_listing();
+        }
         self.remote.list(folder)
     }
 
@@ -683,6 +689,7 @@ fn an_attachment_shows_as_downloading_while_its_bytes_arrive_and_not_downloaded_
             seen.lock().unwrap().push(found[0].state);
         }),
         halfway: None,
+        during_listing: None,
     };
     let state = |workspace: &Workspace| {
         workspace
@@ -900,6 +907,7 @@ fn one_attachment_is_fetched_once_when_a_run_and_an_open_ask_for_it_together() {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }),
         halfway: None,
+        during_listing: None,
     };
     b.download_attachment(&racing, &attachment).unwrap();
     let second = waiting.lock().unwrap().take().unwrap().join().unwrap();
@@ -1214,7 +1222,14 @@ fn a_desktop_that_synced_before_run_tokens_existed_keeps_its_identity() {
     a.sync_now(&desks.remote).unwrap();
     let code = a.device_code().unwrap();
 
-    // The registry as an earlier ticketd left it: no run token in any entry.
+    // What an earlier ticketd left: no run token here or in the registry.
+    rusqlite::Connection::open(desks.directory.path().join("Desk A"))
+        .unwrap()
+        .execute(
+            "UPDATE sync_state SET run_token = NULL, run_previous = NULL, run_due = 1",
+            [],
+        )
+        .unwrap();
     let key = RemoteKey::new(RemoteKind::Devices, "devices");
     let (version, _) = desks.file(&key);
     let mut earlier = registered(&desks);
@@ -1313,6 +1328,7 @@ fn a_passing_storage_failure_during_an_attachment_download_fails_the_run_and_lea
         remote: desks.remote.clone(),
         during_download: Box::new(|| {}),
         halfway: Some(Box::new(|| false)),
+        during_listing: None,
     };
     let status = b.sync_now(&cut).unwrap();
     assert_eq!(
@@ -1413,6 +1429,7 @@ fn a_slow_download_shows_it_is_moving_well_before_a_megabyte_arrived() {
     let slow = Hooked {
         remote: desks.remote.clone(),
         during_download: Box::new(|| {}),
+        during_listing: None,
         halfway: Some(Box::new(|| {
             let other = Workspace::open(desks.directory.path().join("Desk B")).unwrap();
             let found = other
@@ -1486,4 +1503,114 @@ fn runs_with_nothing_to_send_write_nothing_after_the_first_of_an_app_session() {
     }
     assert_eq!(writes(&desks), before + 1);
     assert_ne!(registered(&desks)["devices"], token);
+}
+
+fn identity(desks: &Desks, desk: &Workspace) -> (Vec<String>, String) {
+    let devices = registered(desks)["devices"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    (devices, desk.device_code().unwrap())
+}
+
+#[test]
+fn a_run_token_write_that_fails_or_whose_answer_is_lost_does_not_make_a_desktop_a_copy() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let before = identity(&desks, &a);
+    assert_eq!(before.0.len(), 1);
+
+    // The write arrives, its answer does not.
+    a.start_sync_session().unwrap();
+    desks.remote.drop_write(1, RemoteError::Offline);
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.recovery, Some(SyncRecovery::Offline));
+    assert_eq!(a.sync_now(&desks.remote).unwrap().recovery, None);
+    assert_eq!(identity(&desks, &a), before);
+
+    // The write does not arrive.
+    a.start_sync_session().unwrap();
+    desks.remote.fail(RemoteOp::Write, 1, RemoteError::Offline);
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.recovery, Some(SyncRecovery::Offline));
+    assert_eq!(a.sync_now(&desks.remote).unwrap().recovery, None);
+    assert_eq!(a.sync_now(&desks.remote).unwrap().recovery, None);
+    assert_eq!(identity(&desks, &a), before);
+}
+
+#[test]
+fn two_processes_on_one_workspace_file_starting_together_stay_one_desktop() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let before = identity(&desks, &a);
+    a.start_sync_session().unwrap();
+    // A second process runs its first sync between this run reading what the
+    // Workspace stores and reading the registry.
+    let once = std::sync::atomic::AtomicBool::new(false);
+    let overlapping = Hooked {
+        remote: desks.remote.clone(),
+        during_download: Box::new(|| {}),
+        halfway: None,
+        during_listing: Some(Box::new(|| {
+            if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                let mut other = Workspace::open(desks.directory.path().join("Desk A")).unwrap();
+                assert_eq!(other.sync_now(&desks.remote).unwrap().recovery, None);
+            }
+        })),
+    };
+
+    assert_eq!(a.sync_now(&overlapping).unwrap().recovery, None);
+    assert_eq!(a.sync_now(&desks.remote).unwrap().recovery, None);
+
+    assert_eq!(identity(&desks, &a), before);
+}
+
+#[test]
+fn an_attachment_download_that_keeps_failing_becomes_a_notice_and_runs_succeed_again() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+    b.set_sync_settings("Desk B", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    let refuse = || {
+        desks.remote.fail(
+            RemoteOp::Download,
+            1,
+            RemoteError::Other("the storage refuses this file".into()),
+        );
+    };
+
+    // The first failures may pass, so they fail the run, naming the Attachment.
+    for _ in 0..2 {
+        refuse();
+        let status = b.sync_now(&desks.remote).unwrap();
+        assert_eq!(status.recovery, Some(SyncRecovery::Error));
+        let message = status.recovery_message.unwrap();
+        assert!(message.contains("notes.txt"), "{message}");
+        assert_eq!(b.sync_notices().unwrap(), []);
+    }
+
+    // The third is this one file's trouble: told once, and the run succeeds.
+    refuse();
+    let status = b.sync_now(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::NeedsAttention));
+    assert!(status.last_synced_at.is_some());
+    assert_eq!(unreadable(&b), ["attachments/notes.txt"]);
+
+    // Runs leave it alone from here on.
+    let before = desks.remote.calls().len();
+    let status = b.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.recovery, None);
+    assert!(!desks.remote.calls()[before..].contains(&RemoteOp::Download));
+
+    // Asking for it still tries, and a success is a success.
+    b.download_attachment(&desks.remote, &attachment).unwrap();
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::Downloaded
+    );
+    assert_eq!(unreadable(&b).len(), 1);
 }

@@ -62,7 +62,8 @@ pub(crate) fn migrate_recovery(connection: &Connection) -> Result<(), Error> {
 }
 
 /// Format version 61: the run token this desktop last wrote into its entry of
-/// the device registry, and the one before it.
+/// the device registry and the one before it, and how often in a row the
+/// download of an Attachment failed.
 pub(crate) fn migrate_run_token(connection: &Connection) -> Result<(), Error> {
     add_columns(
         connection,
@@ -71,6 +72,8 @@ pub(crate) fn migrate_run_token(connection: &Connection) -> Result<(), Error> {
             ("sync_state", "run_previous", "TEXT"),
             // Whether the next run writes a fresh token: once per app session.
             ("sync_state", "run_due", "INTEGER NOT NULL DEFAULT 1"),
+            // Downloads of the current version that the storage failed in a row.
+            ("sync_attachments", "attempts", "INTEGER NOT NULL DEFAULT 0"),
         ],
     )
 }
@@ -996,13 +999,37 @@ impl Workspace {
             }
             _ => (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()),
         };
-        if state.run_token.as_ref() != Some(&token) {
+        let (id, token) = if state.run_token.as_ref() == Some(&token) {
+            (id, token)
+        } else {
             let previous = state.run_token.as_ref().filter(|_| !copied);
-            self.connection.execute(
-                "UPDATE sync_state SET device_id = ?1, run_token = ?2, run_previous = ?3",
-                params![id, token, previous],
+            // Only if the Workspace still stores what this run read: another
+            // process on the same Workspace file may have run meanwhile, and
+            // the file and the registry must not end up with tokens from
+            // different processes.
+            let stored = self.connection.execute(
+                "UPDATE sync_state SET device_id = ?1, run_token = ?2, run_previous = ?3 WHERE device_id IS ?4 AND run_token IS ?5",
+                params![id, token, previous, state.device_id, state.run_token],
             )?;
-        }
+            if stored == 1 {
+                (id, token)
+            } else {
+                // What that process stored is this desktop's identity too.
+                let now: (Option<String>, Option<String>) = self.connection.query_row(
+                    "SELECT device_id, run_token FROM sync_state",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                match now {
+                    (Some(id), Some(token)) => (id, token),
+                    _ => {
+                        return Err(Error::Sync(
+                            "another ticketd process changed this desktop's sync identity; sync will try again".into(),
+                        ));
+                    }
+                }
+            }
+        };
         let holder = |code: &str| {
             registry
                 .devices

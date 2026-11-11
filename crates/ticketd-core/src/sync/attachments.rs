@@ -38,6 +38,9 @@ const UNREADABLE_HERE: &str = "local";
 /// How long a download on another connection may show no progress before an
 /// open that waits for it gives up.
 const STALLED: Duration = Duration::from_secs(60);
+/// How many downloads of one Attachment the storage may fail in a row before
+/// runs stop trying it.
+const DOWNLOAD_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
@@ -147,10 +150,26 @@ struct Receiving<'a> {
     saved: u64,
     connection: &'a Connection,
     id: &'a str,
+    /// Why a write failed here. The storage reports any failed write of its
+    /// output as a failure of its own, so this is how a fault of this device
+    /// (a full disk) is told from one of the storage.
+    fault: Option<std::io::Error>,
 }
 
 impl Write for Receiving<'_> {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.receive(bytes).inspect_err(|error| {
+            self.fault = Some(std::io::Error::new(error.kind(), error.to_string()));
+        })
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl Receiving<'_> {
+    fn receive(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         let written = self.file.write(bytes)?;
         self.hash.update(&bytes[..written]);
         self.received += written as u64;
@@ -164,10 +183,6 @@ impl Write for Receiving<'_> {
                 .map_err(std::io::Error::other)?;
         }
         Ok(written)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.file.flush()
     }
 }
 
@@ -356,7 +371,7 @@ impl Workspace {
                             )?;
                         }
                         connection.execute(
-                            "UPDATE sync_attachments SET version = ?2, sha256 = ?3 WHERE id = ?1 AND state != 'downloaded' AND version IS NOT ?2",
+                            "UPDATE sync_attachments SET version = ?2, sha256 = ?3, attempts = 0 WHERE id = ?1 AND state != 'downloaded' AND version IS NOT ?2",
                             params![id, entry.version, entry.sha256],
                         )?;
                     }
@@ -521,7 +536,9 @@ impl Workspace {
     ///
     /// A fault of this device (no room, no permission, something in the way)
     /// needs the person, so it is told once per Attachment wherever in the
-    /// fetch it happens. A failure of the storage is the caller's to report.
+    /// fetch it happens. A failure of the storage for this one file fails the
+    /// caller's run the first few times and then becomes a notice too; being
+    /// offline or signed out is the caller's to report.
     fn fetch_attachment(
         &mut self,
         remote: &dyn RemoteStorage,
@@ -631,9 +648,15 @@ impl Workspace {
                 saved: 0,
                 connection: &self.connection,
                 id,
+                fault: None,
             };
             let key = RemoteKey::new(RemoteKind::Attachment, id);
-            remote.download(folder, &key, &version, &mut output)?;
+            if let Err(error) = remote.download(folder, &key, &version, &mut output) {
+                return Err(match output.fault.take() {
+                    Some(fault) => Error::Directory(fault),
+                    None => error.into(),
+                });
+            }
             let Receiving {
                 file,
                 hash,
@@ -644,11 +667,10 @@ impl Workspace {
             // Windows does not move a directory with an open file in it.
             drop(file);
             if received < size {
-                // Cut short on the way, which says nothing about the file.
-                return Err(RemoteError::Other(format!(
-                    "the download of '{}' stopped before all of it arrived",
-                    attachment.display_name
-                ))
+                // Cut short on the way, which need not say anything about the file.
+                return Err(RemoteError::Other(
+                    "the download stopped before all of it arrived".into(),
+                )
                 .into());
             }
             if (hex(hash), received) != (sha256.clone(), size) {
@@ -667,7 +689,13 @@ impl Workspace {
             Ok(true)
         })();
         match received {
-            Ok(true) => set("downloaded"),
+            Ok(true) => {
+                self.connection.execute(
+                    "UPDATE sync_attachments SET attempts = 0, failed = NULL WHERE id = ?1",
+                    [id],
+                )?;
+                set("downloaded")
+            }
             Ok(false) => {
                 self.connection.execute(
                     "UPDATE sync_attachments SET failed = ?2 WHERE id = ?1",
@@ -688,10 +716,73 @@ impl Workspace {
                     attachment.display_name
                 )))
             }
+            // A failure of the storage for this one file. It may pass, so the
+            // first few fail the run, which tries again and leaves nothing to
+            // read once it worked. One that keeps coming back is this file's
+            // trouble: it is told once and left to an explicit download, so
+            // that it does not fail every run from then on.
+            Err(Error::Remote(RemoteError::Other(reason))) => {
+                set("not_downloaded")?;
+                let attempts: u32 = self.connection.query_row(
+                    "UPDATE sync_attachments SET attempts = attempts + 1 WHERE id = ?1 RETURNING attempts",
+                    [id],
+                    |row| row.get(0),
+                )?;
+                let message = format!(
+                    "'{}' could not be downloaded: {reason}",
+                    attachment.display_name
+                );
+                if attempts < DOWNLOAD_ATTEMPTS {
+                    return Err(RemoteError::Other(message).into());
+                }
+                self.connection.execute(
+                    "UPDATE sync_attachments SET failed = ?2 WHERE id = ?1",
+                    [id, version.as_str()],
+                )?;
+                notify(
+                    &self.connection,
+                    &format!("attachment-fetch:{id}:{version}"),
+                    &SyncNoticeKind::UnreadableFile {
+                        path: format!("attachments/{filename}"),
+                        reason,
+                    },
+                )?;
+                Err(Error::Attachment(message))
+            }
             Err(error) => {
                 set("not_downloaded")?;
                 Err(error)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)] // Setup that fails must fail the test.
+
+    use super::*;
+
+    #[test]
+    fn a_write_that_fails_on_this_device_is_kept_apart_from_a_failure_of_the_storage() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bytes");
+        fs::write(&path, "").unwrap();
+        let connection = Connection::open_in_memory().unwrap();
+        let mut receiving = Receiving {
+            // Opened for reading only, so no byte can be written to it.
+            file: File::open(&path).unwrap(),
+            hash: Sha256::new(),
+            received: 0,
+            saved: 0,
+            connection: &connection,
+            id: "attachment",
+            fault: None,
+        };
+
+        assert!(receiving.write_all(b"downloaded bytes").is_err());
+
+        assert!(receiving.fault.is_some());
+        assert_eq!(receiving.received, 0);
     }
 }
