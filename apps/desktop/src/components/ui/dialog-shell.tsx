@@ -31,6 +31,7 @@ export function DialogShell({
   footerLeading,
   footerNote,
   primaryHint,
+  showClose = true,
   children,
   busy = false,
 }: {
@@ -55,6 +56,8 @@ export function DialogShell({
   footerNote?: string;
   /** A shortcut shown inside the primary button. */
   primaryHint?: string;
+  /** The corner Close button; off where the footer holds the only two ways out. */
+  showClose?: boolean;
   children: ReactNode;
   /** A submitted write is still in flight, so dismissing must wait for its result. */
   busy?: boolean;
@@ -128,20 +131,22 @@ export function DialogShell({
             </Button>
           </div>
           {/* Last in the tab order, drawn in the header's corner. */}
-          <div className="absolute top-5 right-4">
-            <DialogClose asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                {...(onCancel && { onClick: onCancel })}
-                disabled={busy}
-              >
-                <XIcon />
-                <span className="sr-only">Close</span>
-              </Button>
-            </DialogClose>
-          </div>
+          {showClose && (
+            <div className="absolute top-5 right-4">
+              <DialogClose asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  {...(onCancel && { onClick: onCancel })}
+                  disabled={busy}
+                >
+                  <XIcon />
+                  <span className="sr-only">Close</span>
+                </Button>
+              </DialogClose>
+            </div>
+          )}
         </form>
       </DialogContent>
     </Dialog>

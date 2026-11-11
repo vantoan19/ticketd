@@ -53,6 +53,20 @@ export function bridgeDefault(
         canceled: 0,
         duplicate: 0,
       };
+    case "sync_status":
+      // This Workspace does not sync unless a test says so.
+      return {
+        connection: "not_connected",
+        account: null,
+        folder: null,
+        state: "saved_locally",
+        last_synced_at: null,
+        pending_uploads: [],
+        attachment_downloads: { count: 0, bytes_left: 0 },
+        needs_review: [],
+        recovery: null,
+        first_sync: null,
+      };
     case "source_health":
       return { refreshing: false, sources: [] };
     case "preview_publication":

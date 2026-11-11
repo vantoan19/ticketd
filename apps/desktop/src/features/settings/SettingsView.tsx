@@ -42,6 +42,7 @@ import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
+import { SyncSettings } from "@/features/sync/SyncSettings";
 import { useSources } from "@/features/settings/sources/use-sources";
 import type { SourceEntry } from "@/lib/api/sources";
 import "@/features/settings/sources/sources.css";
@@ -700,6 +701,8 @@ export function SettingsView({
   const source = sources.find(
     (entry) => selected === `source-${entry.connector.provider}`,
   );
+  // Sync is a page of its own, as a source is.
+  const sync = selected === "sync";
   // Opening Settings replaces the sidebar, which held focus; land on the title.
   useEffect(
     () => heading.current?.focus({ preventScroll: true }),
@@ -708,9 +711,10 @@ export function SettingsView({
   return (
     <div
       className="management settings-page"
-      data-source-active={source ? "true" : undefined}
+      data-source-active={source || sync ? "true" : undefined}
     >
-      {!source && (
+      {sync && <SyncSettings heading={heading} />}
+      {!source && !sync && (
         <div className="settings-column">
           <h1 id="settings-heading" ref={heading} tabIndex={-1}>
             Settings
@@ -743,7 +747,7 @@ export function SettingsView({
           />
         );
       })}
-      {!source && (
+      {!source && !sync && (
         <div className="settings-column">
           <KeyboardShortcutsCard />
           <AboutCard />

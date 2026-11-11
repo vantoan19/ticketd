@@ -8,6 +8,7 @@ export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Appearance", group: "Preferences" },
   { id: "attention", label: "Attention", group: "Preferences" },
   { id: "location", label: "Location", group: "Workspace" },
+  { id: "sync", label: "Sync", group: "Workspace" },
   { id: "attachments", label: "Attachments", group: "Workspace" },
   { id: "backups", label: "Backups", group: "Workspace" },
   { id: "export", label: "Export", group: "Workspace" },
@@ -30,9 +31,12 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Help",
 ];
 
-/** A card id: a Settings section, another page borrowing the card (Projects), or a source. */
+/** A card id: a Settings section, another page borrowing the card (Projects), a source, or a further Sync card. */
 export type SettingsCardKey =
-  SettingsSectionId | `project-${string}` | `source-${string}`;
+  | SettingsSectionId
+  | `project-${string}`
+  | `source-${string}`
+  | `sync-${string}`;
 
 /** The section for an available source, listed under Sources beside its card. */
 export function sourceSection(provider: string, name: string) {

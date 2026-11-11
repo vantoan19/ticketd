@@ -60,7 +60,10 @@ export function SettingsNav({
                         onSelect?.(section.id);
                         const keyboard = event.detail === 0;
                         requestAnimationFrame(() => {
-                          if (section.id.startsWith("source-")) {
+                          if (
+                            section.id.startsWith("source-") ||
+                            section.id === "sync"
+                          ) {
                             const heading =
                               document.getElementById("settings-heading");
                             const page = heading?.closest(".settings-page");
