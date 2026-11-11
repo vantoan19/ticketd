@@ -1,6 +1,11 @@
 {
   "name": "@ticketd/desktop",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vantoan19/ticketd.git",
+    "directory": "apps/desktop"
+  },
   "version": "0.1.0",
   "type": "module",
   "scripts": {

@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem with ticketd
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Use synthetic data and redact credentials,
+        private ticket content, and sensitive paths. Report vulnerabilities using
+        SECURITY.md rather than this public form.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Run ticketd --version, or include your source commit. Mention both versions if desktop and CLI differ.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and installation method
+      placeholder: Windows 11 x86-64, source build
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected area
+      options: [Desktop, CLI, Both, Installation or build, Unsure]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include minimal commands or UI steps, preferably in a disposable workspace.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Additional evidence
+      description: Sanitized error messages, screenshots, or a small example. Do not upload your workspace database or backups.

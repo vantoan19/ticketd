@@ -4,3 +4,13 @@ node_modules/
 **/dist/
 **/src-tauri/gen/
 *.tsbuildinfo
+
+# Local configuration and synthetic/manual test data.
+/.local/
+.env
+.env.*
+!.env.example
+!.env.*.example
+/workspace.sqlite3
+/workspace.sqlite3-wal
+/workspace.sqlite3-shm

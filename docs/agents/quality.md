@@ -36,9 +36,9 @@
 
 ## Checks and review
 
-`./scripts/check` checks Markdown, whitespace, Rust formatting/Clippy/tests, and frontend formatting/lint/types/tests. Install dependencies with `npm ci` and use the pinned Rust toolchain before running it.
+`./scripts/check` checks Markdown, whitespace, Rust formatting/Clippy/tests, and frontend formatting/lint/types/tests. Install dependencies with `npm ci`, build the frontend with `npm run build`, and use the pinned Rust toolchain before running it. See [development setup](../development.md) for platform prerequisites and a disposable workspace.
 
-CI runs the same check command and builds the frontend, desktop, and CLI on the self-hosted Linux runner for every pull request. macOS and Windows run `cargo test` and build the desktop and CLI on pushes to `main`, nightly, and on pull requests labeled `platform-check`, because hosted macOS and Windows minutes are billed per minute. All jobs use pinned toolchains and committed lockfiles. The initial scaffold has no behavior tests; Vitest permits an empty suite until behavior is implemented.
+CI runs the same check command and builds the frontend, desktop, and CLI on the self-hosted Linux runner for every pull request. macOS and Windows run `cargo test` and build the desktop and CLI on pushes to `main`, nightly, and on pull requests labeled `platform-check`. All jobs use pinned toolchains and committed lockfiles. Public-PR runner safety must be reviewed before changing repository visibility.
 
 Review should assess interface simplicity, domain correctness, error paths, and whether tests protect observable behavior. CI checks mechanics; it does not replace design review. Use dependency updates scoped to the intended change and pin CI actions to commit SHAs.
 

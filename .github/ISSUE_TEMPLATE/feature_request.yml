@@ -1,0 +1,30 @@
+name: Feature request
+description: Describe a problem ticketd could help solve
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: Search existing requests first. Discuss substantial changes before implementing them.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the workflow and who would benefit.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested behavior
+      description: Explain what the user would experience. A design or implementation is optional.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include relevant platform, CLI, accessibility, or data compatibility needs.
