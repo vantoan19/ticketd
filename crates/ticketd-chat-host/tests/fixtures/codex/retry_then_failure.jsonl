@@ -1,0 +1,9 @@
+{"note":"Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema) and the app-server documentation. Not captured from a live session; every value is synthetic."}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Go","text_elements":[]}]}}}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1730948100}}}}}
+{"server":{"method":"error","params":{"threadId":"thr_1","turnId":"turn_1","willRetry":true,"error":{"message":"Reconnecting... 1/5","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":null}}}}}}
+{"mark":"the harness is retrying"}
+{"server":{"method":"error","params":{"threadId":"thr_1","turnId":"turn_1","willRetry":false,"error":{"message":"You've hit your usage limit.","codexErrorInfo":"usageLimitExceeded"}}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"failed","items":[],"error":{"message":"You've hit your usage limit.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null}}}}}

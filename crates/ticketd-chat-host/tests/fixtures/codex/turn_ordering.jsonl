@@ -1,0 +1,17 @@
+{"note":"Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema) and the app-server documentation. Not captured from a live session; every value is synthetic."}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"List the files","text_elements":[]}]}}}
+{"server":{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"method":"item/started","params":{"threadId":"thr_1","turnId":"turn_1","startedAtMs":1,"item":{"type":"userMessage","id":"item_0","clientId":"sub-1","content":[{"type":"text","text":"List the files","text_elements":[]}]}}}}
+{"server":{"method":"item/started","params":{"threadId":"thr_1","turnId":"turn_1","startedAtMs":1,"item":{"type":"agentMessage","id":"item_1","text":""}}}}
+{"server":{"method":"item/agentMessage/delta","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_1","delta":"Looking"}}}
+{"server":{"method":"item/reasoning/textDelta","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_r","delta":"thinking","contentIndex":0}}}
+{"server":{"method":"item/started","params":{"threadId":"thr_1","turnId":"turn_1","startedAtMs":2,"item":{"type":"commandExecution","id":"item_2","command":"ls","commandActions":[],"cwd":"/work/chat-1","status":"inProgress"}}}}
+{"server":{"id":0,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_2","startedAtMs":2,"command":"ls","cwd":"/work/chat-1","reason":"Needs approval"}}}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"mark":"the approval arrived before the turn/start reply"}
+{"client":{"id":0,"result":{"decision":"accept"}}}
+{"server":{"method":"serverRequest/resolved","params":{"threadId":"thr_1","requestId":0}}}
+{"server":{"method":"item/commandExecution/outputDelta","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_2","delta":"README.md\n"}}}
+{"server":{"method":"item/completed","params":{"threadId":"thr_1","turnId":"turn_1","completedAtMs":3,"item":{"type":"commandExecution","id":"item_2","command":"ls","commandActions":[],"cwd":"/work/chat-1","status":"completed","exitCode":0,"aggregatedOutput":"README.md\n"}}}}
+{"server":{"method":"item/completed","params":{"threadId":"thr_1","turnId":"turn_1","completedAtMs":4,"item":{"type":"agentMessage","id":"item_1","text":"Looking. One file: README.md"}}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"completed","items":[],"error":null}}}}

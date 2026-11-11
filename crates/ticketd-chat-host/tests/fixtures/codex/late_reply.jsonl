@@ -1,0 +1,14 @@
+{"note":"Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema) and the app-server documentation. Not captured from a live session; every value is synthetic."}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Hello","text_elements":[]}]}}}
+{"mark":"the reply is withheld until the adapter stops waiting"}
+{"server":{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"id":99,"result":{}}}
+{"mark":"the late reply was delivered"}
+{"client":{"id":4,"method":"turn/interrupt","params":{"threadId":"thr_1","turnId":"turn_1"}}}
+{"server":{"id":4,"result":{}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"interrupted","items":[],"error":null}}}}
+{"mark":"a second submission"}
+{"client":{"id":5,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-2","input":[{"type":"text","text":"Again","text_elements":[]}]}}}
+{"mark":"withheld again"}
+{"server":{"id":5,"error":{"code":-32600,"message":"server is shutting down","data":{"reason":"serverShuttingDown"}}}}
