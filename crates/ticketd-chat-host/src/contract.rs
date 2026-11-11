@@ -90,6 +90,10 @@ pub enum Inspection {
 pub enum LoginState {
     SignedIn,
     SignedOut,
+    /// Signed in through an API key or cloud provider rather than the harness
+    /// subscription. The harness chose this from the user's own configuration; ticketd
+    /// never selects it.
+    NonSubscription,
     Unknown,
 }
 
@@ -318,11 +322,29 @@ pub enum EventKind {
         /// Bounded tail of stderr.
         diagnostics: String,
     },
+    /// A non-terminal observation about the session or a turn. It never starts, ends
+    /// or fails a turn; a turn named here stays active.
+    Notice {
+        turn: Option<NativeTurnId>,
+        kind: NoticeKind,
+        message: String,
+        detail: Option<ProviderDetail>,
+    },
     /// Provider traffic the adapter does not model. Never completion or approval.
     Unknown {
         summary: String,
         detail: ProviderDetail,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeKind {
+    /// The harness is retrying on its own. Do not submit an application-level retry.
+    Retrying,
+    /// A harness warning, such as a rerouted model or a configuration problem.
+    Warning,
+    /// The settings the harness reports as in effect for this session, in `detail`.
+    EffectiveSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -9,6 +9,7 @@ if (!version) throw new Error("Missing Cargo workspace version");
 for (const file of [
   "package.json",
   "apps/desktop/package.json",
+  "apps/chat-bridge-claude/package.json",
   "apps/desktop/src-tauri/tauri.conf.json",
 ]) {
   if (json(file).version !== version) {

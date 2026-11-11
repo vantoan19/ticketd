@@ -28,9 +28,9 @@ use crate::{
     ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
     HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind, InteractionRequest,
     InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
-    NativeRequestId, NativeSessionId, NativeTurnId, OpenRequest, OpenedRuntime, Problem,
-    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission, SubmissionId,
-    SubmissionKind, Subscription, ToolStatus, TurnOutcome,
+    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
+    Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
+    SubmissionId, SubmissionKind, Subscription, ToolStatus, TurnOutcome,
 };
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
@@ -1193,6 +1193,12 @@ impl Supervisor {
                     exit_code.map_or_else(String::new, |code| format!(" (exit code {code})"));
                 self.on_loss(format!("the harness process ended{exit}: {diagnostics}"));
             }
+            // The harness keeps the turn; nothing is retried or ended here.
+            EventKind::Notice { kind, message, .. } => match kind {
+                NoticeKind::Retrying | NoticeKind::Warning => self.notice(message),
+                // ponytail: effective settings are not stored or shown yet.
+                NoticeKind::EffectiveSettings => {}
+            },
             EventKind::Unknown { summary, .. } => self.notice(summary),
         }
     }
