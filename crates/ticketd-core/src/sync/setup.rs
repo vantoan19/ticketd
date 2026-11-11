@@ -39,6 +39,28 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format version 60: the message of a failure that has no recovery state of
+/// its own, and the mark of a file written in a newer format than this
+/// desktop reads.
+pub(crate) fn migrate_recovery(connection: &Connection) -> Result<(), Error> {
+    for (table, column, definition) in [
+        ("sync_state", "recovery_message", "TEXT"),
+        ("sync_files", "newer", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        let present: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            [table, column],
+            |row| row.get(0),
+        )?;
+        if !present {
+            connection.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+            ))?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncConnection {
@@ -69,6 +91,8 @@ pub enum SyncRecovery {
     StorageFull,
     Offline,
     RateLimited,
+    /// Any other failure of a run; the status carries its message.
+    Error,
 }
 
 /// The one thing that gets sync out of a recovery state.
@@ -87,7 +111,9 @@ impl SyncRecovery {
         match self {
             Self::FolderMissing => SyncRecoveryAction::Reupload,
             Self::AuthorizationExpired => SyncRecoveryAction::Reconnect,
-            Self::StorageFull | Self::Offline | Self::RateLimited => SyncRecoveryAction::Retry,
+            Self::StorageFull | Self::Offline | Self::RateLimited | Self::Error => {
+                SyncRecoveryAction::Retry
+            }
         }
     }
 
@@ -168,7 +194,19 @@ pub struct SyncStatus {
     pub attachment_downloads: AttachmentDownloads,
     pub needs_review: Vec<SyncItem>,
     pub recovery: Option<SyncRecovery>,
+    /// What went wrong, while `recovery` is [`SyncRecovery::Error`].
+    pub recovery_message: Option<String>,
     pub first_sync: Option<FirstSync>,
+}
+
+/// Where this Workspace syncs to and as whom: what a host needs to start a run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncBinding {
+    pub folder_id: String,
+    /// The storage sign-in the desktop stored; `None` if it never signed in.
+    pub connection_id: Option<String>,
+    pub device_name: String,
+    pub poll_secs: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -222,6 +260,7 @@ struct State {
     attachment_download: AttachmentDownload,
     last_synced_at: Option<String>,
     recovery: Option<SyncRecovery>,
+    recovery_message: Option<String>,
     first_sync: Option<SyncDirection>,
     first_total: u64,
 }
@@ -240,7 +279,7 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
 
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total FROM sync_state",
+        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message FROM sync_state",
         [],
         |row| {
             Ok(State {
@@ -257,6 +296,7 @@ fn state(connection: &Connection) -> Result<State, Error> {
                 recovery: from_label(row.get(9)?),
                 first_sync: from_label(row.get(10)?),
                 first_total: row.get(11)?,
+                recovery_message: row.get(12)?,
             })
         },
     )?)
@@ -298,7 +338,7 @@ fn bind(
     direction: SyncDirection,
 ) -> Result<(), Error> {
     connection.execute(
-        "UPDATE sync_state SET folder = ?1, folder_name = ?2, first_sync = ?3, first_total = 0, recovery = NULL, last_synced_at = NULL",
+        "UPDATE sync_state SET folder = ?1, folder_name = ?2, first_sync = ?3, first_total = 0, recovery = NULL, recovery_message = NULL, last_synced_at = NULL",
         params![folder, name, label(direction)?],
     )?;
     touch(connection)
@@ -357,11 +397,38 @@ impl Workspace {
     /// Stop syncing here. Local content and the folder in the storage stay as they are.
     pub fn sync_disconnect(&mut self) -> Result<SyncStatus, Error> {
         self.connection.execute(
-            "UPDATE sync_state SET connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, first_sync = NULL",
+            "UPDATE sync_state SET connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
             [],
         )?;
         touch(&self.connection)?;
         self.sync_status()
+    }
+
+    /// The sync destination, or `None` when no folder is chosen. One small
+    /// read, for a host that asks often.
+    pub fn sync_binding(&self) -> Result<Option<SyncBinding>, Error> {
+        type Row = (Option<String>, Option<String>, Option<String>, u64);
+        let (folder, connection_id, name, poll_secs): Row = self.connection.query_row(
+            "SELECT folder, connection, device_name, poll_interval_secs FROM sync_state",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        Ok(folder.map(|folder_id| SyncBinding {
+            folder_id,
+            connection_id,
+            device_name: name.unwrap_or_else(computer_name),
+            poll_secs,
+        }))
+    }
+
+    /// How many records in review and notices are unread.
+    pub fn sync_unread_count(&self) -> Result<usize, Error> {
+        Ok(self.connection.query_row(
+            "SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM sync_conflicts GROUP BY kind, id HAVING MIN(read) = 0))
+                  + (SELECT COUNT(*) FROM sync_notices WHERE read = 0)",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     /// What to show about sync. Reads this Workspace only, never the storage.
@@ -435,6 +502,7 @@ impl Workspace {
                 SyncRecovery::FolderMissing
                     | SyncRecovery::AuthorizationExpired
                     | SyncRecovery::StorageFull
+                    | SyncRecovery::Error
             )
         );
         let sync_state = if blocked || !needs_review.is_empty() || unreadable > 0 {
@@ -488,6 +556,9 @@ impl Workspace {
             pending_uploads,
             attachment_downloads,
             needs_review,
+            recovery_message: state
+                .recovery_message
+                .filter(|_| state.recovery == Some(SyncRecovery::Error)),
             recovery: state.recovery,
             first_sync,
         })
@@ -632,8 +703,10 @@ impl Workspace {
     /// One full sync run: join the device registry, send Attachment bytes, sync
     /// the records, fetch Attachment bytes.
     ///
-    /// A storage failure the person can act on is not an error here: it becomes
-    /// the status's `recovery`, with every local change kept for the next run.
+    /// A failed run is not an error here: it becomes the status's `recovery`
+    /// (with `recovery_message` for a failure that has no state of its own),
+    /// and every local change is kept for the next run. `Err` means the
+    /// Workspace is not connected or the outcome could not be saved.
     pub fn sync_now(&mut self, remote: &dyn RemoteStorage) -> Result<SyncStatus, Error> {
         let outcome = self.run(remote);
         self.conclude(outcome)
@@ -659,19 +732,27 @@ impl Workspace {
     }
 
     fn conclude(&mut self, outcome: Result<(), Error>) -> Result<SyncStatus, Error> {
-        match outcome {
-            Ok(()) => self.connection.execute(
-                &format!("UPDATE sync_state SET recovery = NULL, first_sync = NULL, last_synced_at = {NOW}"),
-                [],
-            )?,
-            Err(Error::Remote(error)) => match SyncRecovery::of(&error) {
-                Some(recovery) => self
-                    .connection
-                    .execute("UPDATE sync_state SET recovery = ?1", [label(recovery)?])?,
-                None => return Err(Error::Remote(error)),
+        let (recovery, message) = match outcome {
+            Ok(()) => (None, None),
+            // Nothing ran, so there is nothing to recover from.
+            Err(error) if state(&self.connection)?.folder.is_none() => return Err(error),
+            Err(error) => match &error {
+                Error::Remote(remote) if SyncRecovery::of(remote).is_some() => {
+                    (SyncRecovery::of(remote), None)
+                }
+                _ => (Some(SyncRecovery::Error), Some(error.to_string())),
             },
-            Err(error) => return Err(error),
         };
+        self.connection.execute(
+            "UPDATE sync_state SET recovery = ?1, recovery_message = ?2",
+            params![recovery.map(label).transpose()?, message],
+        )?;
+        if recovery.is_none() {
+            self.connection.execute(
+                &format!("UPDATE sync_state SET first_sync = NULL, last_synced_at = {NOW}"),
+                [],
+            )?;
+        }
         touch(&self.connection)?;
         self.sync_status()
     }

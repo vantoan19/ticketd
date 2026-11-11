@@ -670,3 +670,95 @@ fn an_attachment_shows_as_downloading_while_its_bytes_arrive_and_not_downloaded_
     );
     assert_eq!(state(&b), AttachmentAvailabilityState::Downloaded);
 }
+
+#[test]
+fn the_host_reads_its_sync_destination_and_unread_count_without_a_status() {
+    let desks = desks();
+    let a = desks.desk("Desk A");
+    assert_eq!(a.sync_binding().unwrap(), None);
+    drop(a);
+
+    let (mut a, reference, _) = desks.uploaded("Desk A");
+    let binding = a.sync_binding().unwrap().unwrap();
+    assert_eq!(
+        (
+            binding.folder_id,
+            binding.connection_id.as_deref(),
+            binding.device_name.as_str(),
+            binding.poll_secs
+        ),
+        (desks.folder(), Some("connection-1"), "Desk A", 60)
+    );
+
+    // One record in conflict (however many fields) and one notice.
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    b.sync_now(&desks.remote).unwrap();
+    for (desk, title) in [(&mut a, "Sign in"), (&mut b, "Log on")] {
+        desk.change_ticket(
+            &reference,
+            TicketPatch {
+                title: Some(title.into()),
+                body: Some(title.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    a.sync_now(&desks.remote).unwrap();
+    assert_eq!(b.sync_unread_count().unwrap(), 0);
+    let stray = RemoteKey::new(RemoteKind::Ticket, "0c8f3a51-6f0e-4a0b-9d55-2f1f6f3f8a10");
+    desks
+        .remote
+        .write(
+            &desks.folder(),
+            &stray,
+            "stray.md",
+            None,
+            &mut Cursor::new(b"not a ticket"),
+        )
+        .unwrap();
+    b.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(b.sync_unread_count().unwrap(), 2);
+    let conflict = b.sync_conflicts().unwrap().remove(0).id;
+    b.set_sync_read(&[conflict], true).unwrap();
+    assert_eq!(b.sync_unread_count().unwrap(), 1);
+}
+
+#[test]
+fn a_failure_with_no_state_of_its_own_needs_attention_until_a_run_succeeds() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    a.create_ticket("Saved meanwhile").unwrap();
+    desks.remote.fail(
+        RemoteOp::List,
+        1,
+        RemoteError::Other("the storage answered nonsense".into()),
+    );
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(
+        recovered(&status),
+        (Some(SyncRecovery::Error), SyncState::NeedsAttention)
+    );
+    assert!(
+        status
+            .recovery_message
+            .as_deref()
+            .unwrap()
+            .contains("the storage answered nonsense")
+    );
+    assert_eq!(SyncRecovery::Error.action(), SyncRecoveryAction::Retry);
+    assert_eq!(status.pending_uploads.len(), 1);
+    // What the desktop receives.
+    let json = serde_json::to_value(&status).unwrap();
+    assert_eq!(json["recovery"], "error");
+    assert!(json["recovery_message"].is_string());
+    // A later launch finds it too.
+    assert_eq!(a.sync_status().unwrap(), status);
+
+    let status = a.sync_recover(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+    assert_eq!(status.recovery_message, None);
+}
