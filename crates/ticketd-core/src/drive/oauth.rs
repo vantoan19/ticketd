@@ -94,10 +94,15 @@ pub struct PickerSession {
     verifier: String,
     timeout: Duration,
     recovery: Option<super::DriveReference>,
+    /// A sign-in picks no files and learns which account signed in.
+    sign_in: bool,
 }
 pub struct DriveSelection {
     pub connection_id: String,
     pub file_ids: Vec<String>,
+    /// The account's email address, after [`PickerSession::begin_sign_in`] when
+    /// Google names it.
+    pub account: Option<String>,
 }
 impl PickerSession {
     pub(super) fn begin_recovery(
@@ -119,6 +124,25 @@ impl PickerSession {
             .append_pair("allow_multiple", "false");
         session.authorization_url = url.into();
         session.recovery = Some(reference);
+        Ok(session)
+    }
+    /// Sign in without choosing files: the app only reaches files it creates.
+    pub fn begin_sign_in(
+        client: DesktopOAuthClient,
+        timeout: Duration,
+    ) -> Result<Self, DriveError> {
+        let mut session = Self::begin(client, timeout)?;
+        let mut url =
+            url::Url::parse(&session.authorization_url).map_err(|_| invalid_response())?;
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .into_owned()
+            .filter(|(k, _)| k != "allow_multiple" && k != "trigger_onepick")
+            .collect();
+        url.set_query(None);
+        url.query_pairs_mut().extend_pairs(pairs);
+        session.authorization_url = url.into();
+        session.sign_in = true;
         Ok(session)
     }
     pub fn begin_folder(client: DesktopOAuthClient, timeout: Duration) -> Result<Self, DriveError> {
@@ -175,6 +199,7 @@ impl PickerSession {
             verifier,
             timeout: timeout.min(Duration::from_secs(180)),
             recovery: None,
+            sign_in: false,
         })
     }
     pub fn authorization_url(&self) -> &str {
@@ -234,7 +259,9 @@ impl PickerSession {
             }
             let callback = self.parse_callback(&request);
             let valid = callback.is_some();
-            let page = if valid {
+            let page = if valid && self.sign_in {
+                "Signed in. Return to ticketd. You can close this tab."
+            } else if valid {
                 "Selection received. Return to ticketd. You can close this tab."
             } else {
                 "Invalid callback. Return to ticketd and retry selection."
@@ -261,7 +288,7 @@ impl PickerSession {
                 .filter(|v| !v.is_empty())
                 .map(str::to_owned)
                 .collect();
-            if file_ids.is_empty() {
+            if file_ids.is_empty() && !self.sign_in {
                 return Err(cancelled_error());
             }
             if file_ids.len() > 100 || file_ids.iter().any(|id| !valid_file_id(id)) {
@@ -288,7 +315,12 @@ impl PickerSession {
             }
             let account = transport.send(DriveRequest {
                 method: "GET",
-                url: "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)".into(),
+                url: if self.sign_in {
+                    "https://www.googleapis.com/drive/v3/about?fields=user(permissionId,emailAddress)"
+                } else {
+                    "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)"
+                }
+                .into(),
                 headers: vec![(
                     "Authorization".into(),
                     format!("Bearer {}", token.access_token),
@@ -300,6 +332,7 @@ impl PickerSession {
             }
             let account: serde_json::Value =
                 serde_json::from_slice(&account.body).map_err(|_| invalid_response())?;
+            let email = account["user"]["emailAddress"].as_str().map(str::to_owned);
             let permission_id = account["user"]["permissionId"]
                 .as_str()
                 .filter(|id| valid_file_id(id))
@@ -321,6 +354,7 @@ impl PickerSession {
                     &DriveSelection {
                         connection_id: connection_id.clone(),
                         file_ids: file_ids.clone(),
+                        account: None,
                     },
                 )?;
             }
@@ -343,6 +377,7 @@ impl PickerSession {
             return Ok(DriveSelection {
                 connection_id,
                 file_ids,
+                account: email,
             });
         }
         Err(DriveError::new(

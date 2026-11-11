@@ -185,3 +185,21 @@ test("the popover is reachable by keyboard and leads to Sync settings", async ()
   expect(openSettings).toHaveBeenCalled();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
+
+test("saved locally: a busy Drive is named, not called offline", async () => {
+  await footer(
+    syncStatus({
+      state: "saved_locally",
+      recovery: "rate_limited",
+      pending_uploads: [change("A")],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "Saved on this computerDrive is busy · 1 change waiting",
+  );
+  // Sync retries by itself, so the footer carries no action of its own.
+  expect(screen.getAllByRole("button")).toHaveLength(1);
+  expect(
+    within(await popover()).getByRole("button", { name: "Try now" }),
+  ).toBeTruthy();
+});

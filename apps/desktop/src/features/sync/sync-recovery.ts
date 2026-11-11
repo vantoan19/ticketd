@@ -49,5 +49,13 @@ export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
           "Changes are saved on this computer and upload when you are back online.",
         action: "Retry",
       };
+    case "rate_limited":
+      return {
+        label: "Saved on this computer",
+        title: "Google Drive is busy",
+        description:
+          "Google Drive asked ticketd to slow down. Changes are saved on this computer and upload a little later.",
+        action: "Retry",
+      };
   }
 }

@@ -305,6 +305,7 @@ fn workspace_transport_recovery_refreshes_only_metadata_and_keeps_secrets_out_of
         assert_eq!(status.reference, previous);
     }
     let selection = ticketd_core::drive::DriveSelection {
+        account: None,
         connection_id: connection.clone(),
         file_ids: vec!["file".into()],
     };

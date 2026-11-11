@@ -1465,7 +1465,7 @@ pub fn run() -> Result<(), tauri::Error> {
         })
         .setup(move |app| {
             start_periodic_refresh(coordinator);
-            sync.start(started);
+            sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
                 guard_menu_quit(app.handle())?;
             }
@@ -1647,7 +1647,20 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::record_versions,
             sync_commands::record_version,
             sync_commands::restore_record_version,
-            sync_commands::sync_flush_on_exit
+            sync_commands::sync_flush_on_exit,
+            sync_commands::sync_status,
+            sync_commands::sync_connect,
+            sync_commands::sync_setup_options,
+            sync_commands::sync_upload_workspace,
+            sync_commands::sync_download_workspace,
+            sync_commands::sync_now,
+            sync_commands::sync_recover,
+            sync_commands::sync_disconnect,
+            sync_commands::sync_open_folder,
+            sync_commands::sync_settings,
+            sync_commands::set_sync_settings,
+            sync_commands::attachment_availability,
+            sync_commands::download_attachment
         ])
         .build(tauri::generate_context!())?
         .run(|app, event| {

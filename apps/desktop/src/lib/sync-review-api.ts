@@ -35,7 +35,18 @@ const conflictSchema = conflictSummarySchema.extend({
   local_device: z.string(),
   fields: z.array(
     z.object({
+      /** The key a choice is sent back under. */
       field: z.string(),
+      /** The Activity or Implementation evidence the field is inside, if any. */
+      section: z
+        .object({
+          kind: z.enum(["activity", "evidence"]),
+          /** When the Activity was reported. */
+          reported_at: z.string().nullable(),
+          /** What the Implementation evidence is named. */
+          name: z.string().nullable(),
+        })
+        .nullable(),
       local: z.string(),
       /** When this desktop last changed the field; null when nothing recorded it. */
       local_changed_at: z.string().nullable(),
@@ -48,6 +59,7 @@ const conflictSchema = conflictSummarySchema.extend({
   ),
 });
 export type Conflict = z.infer<typeof conflictSchema>;
+export type ConflictField = Conflict["fields"][number];
 
 /** `edited` carries the person's own text in `value`; only `body` accepts it. */
 export type Resolution =

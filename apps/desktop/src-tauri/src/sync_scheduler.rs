@@ -10,23 +10,15 @@ use std::{
 
 use ticketd_core::{
     Error, Workspace,
-    sync::{DirtyRecord, SyncReport, remote::RemoteStorage},
+    sync::{MIN_POLL_INTERVAL_SECS, SyncItem, SyncStatus, remote::RemoteStorage},
 };
 
-/// How often Drive is checked for changes unless the person chose otherwise.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the binding uses it once a Workspace can connect")
-)]
-pub const DEFAULT_POLL: Duration = Duration::from_secs(60);
-/// The shortest poll a setting may ask for.
-pub const MIN_POLL: Duration = Duration::from_secs(30);
 /// How long after the last local change its upload starts.
 const UPLOAD_DELAY: Duration = Duration::from_secs(3);
 /// How long quitting waits for the last upload.
 pub const EXIT_LIMIT: Duration = Duration::from_secs(10);
 
-/// What this Workspace syncs with. Everything that syncs reads it from one place.
+/// What this Workspace syncs with, read from the Workspace before every use.
 #[derive(Clone)]
 pub struct Binding {
     /// The Workspace folder identifier in the storage.
@@ -38,8 +30,10 @@ pub struct Binding {
 }
 
 type Open = dyn Fn() -> Result<Workspace, Error> + Send + Sync;
-/// `None` while the Workspace is not connected.
+/// `None` while the Workspace is not connected to a folder.
 type Bound = dyn Fn() -> Result<Option<Binding>, Error> + Send + Sync;
+/// A sync workflow of the core: an ordinary run, or the recovery action.
+type Run = fn(&mut Workspace, &dyn RemoteStorage) -> Result<SyncStatus, Error>;
 
 #[derive(Default)]
 struct Watch {
@@ -77,11 +71,17 @@ impl Scheduler {
         (self.binding)()
     }
 
+    /// Keeps sync from running while the caller replaces the Workspace file;
+    /// waits for a run in progress.
+    pub fn hold(&self) -> MutexGuard<'_, ()> {
+        lock(&self.running)
+    }
+
     /// Runs sync if one is due at `now` (time since the app started). `None`
     /// when nothing was due, the Workspace is not connected, or a run is
-    /// already in progress. A failed run is not repeated before the next poll
-    /// or local change.
-    pub fn tick(&self, now: Duration) -> Result<Option<SyncReport>, Error> {
+    /// already in progress. A run the storage refused is not repeated before
+    /// the next poll or local change.
+    pub fn tick(&self, now: Duration) -> Result<Option<SyncStatus>, Error> {
         let Some(binding) = self.binding()? else {
             // The next connection starts with a run.
             *lock(&self.watch) = Watch::default();
@@ -108,46 +108,44 @@ impl Scheduler {
         let Ok(_running) = self.running.try_lock() else {
             return Ok(None);
         };
-        self.run(&binding, now).map(Some)
+        self.run(&binding, now, Workspace::sync_now).map(Some)
     }
 
     /// Sync now: waits for a run in progress, then runs. `None` when not connected.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "its command answers with the sync status, which is not built yet"
-        )
-    )]
-    pub fn sync_now(&self, now: Duration) -> Result<Option<SyncReport>, Error> {
+    pub fn sync_now(&self, now: Duration) -> Result<Option<SyncStatus>, Error> {
+        self.exclusive(now, Workspace::sync_now)
+    }
+
+    /// The corrective action of the current recovery state, then a run.
+    pub fn recover(&self, now: Duration) -> Result<Option<SyncStatus>, Error> {
+        self.exclusive(now, Workspace::sync_recover)
+    }
+
+    fn exclusive(&self, now: Duration, run: Run) -> Result<Option<SyncStatus>, Error> {
         let Some(binding) = self.binding()? else {
             return Ok(None);
         };
         let _running = lock(&self.running);
-        self.run(&binding, now).map(Some)
+        self.run(&binding, now, run).map(Some)
     }
 
-    fn run(&self, binding: &Binding, now: Duration) -> Result<SyncReport, Error> {
+    fn run(&self, binding: &Binding, now: Duration, run: Run) -> Result<SyncStatus, Error> {
         // The Workspace is opened for this run alone; its writes are short
         // transactions, so other commands are not held up by the network.
-        let result = (self.open)().and_then(|mut workspace| {
-            workspace.sync(binding.remote.as_ref(), &binding.folder, &binding.device)
-        });
+        let result =
+            (self.open)().and_then(|mut workspace| run(&mut workspace, binding.remote.as_ref()));
         let mut watch = lock(&self.watch);
         watch.connected = true;
         watch.upload_at = None;
-        watch.poll_at = now + binding.poll.max(MIN_POLL);
+        let least = Duration::from_secs(MIN_POLL_INTERVAL_SECS);
+        watch.poll_at = now + binding.poll.max(least);
         result
     }
 
     /// One last run before quitting, given `limit` to finish. Returns what is
     /// still waiting to upload: empty when everything reached the storage or
     /// the Workspace does not sync. A failed upload is reported the same way.
-    pub fn flush(
-        self: &Arc<Self>,
-        now: Duration,
-        limit: Duration,
-    ) -> Result<Vec<DirtyRecord>, Error> {
+    pub fn flush(self: &Arc<Self>, now: Duration, limit: Duration) -> Result<Vec<SyncItem>, Error> {
         let Some(binding) = self.binding()? else {
             return Ok(Vec::new());
         };
@@ -157,26 +155,22 @@ impl Scheduler {
             .name("workspace-sync-exit".into())
             .spawn(move || {
                 let _running = lock(&scheduler.running);
-                let _ = scheduler.run(&binding, now);
+                let _ = scheduler.run(&binding, now, Workspace::sync_now);
                 let _ = done.send(());
             });
         if spawned.is_ok() {
             let _ = finished.recv_timeout(limit);
         }
-        (self.open)()?.dirty_records()
+        Ok((self.open)()?.sync_status()?.pending_uploads)
     }
 
-    /// Starts sync for as long as the app runs: expires old History once, then
-    /// asks every second whether a run is due.
-    pub fn start(self: Arc<Self>, started: Instant) {
+    /// Starts sync for as long as the app runs: `at_launch` once, then asks
+    /// every second whether a run is due.
+    pub fn start(self: Arc<Self>, started: Instant, at_launch: impl FnOnce() + Send + 'static) {
         let spawned = std::thread::Builder::new()
             .name("workspace-sync".into())
             .spawn(move || {
-                if let Err(error) =
-                    (self.open)().and_then(|mut workspace| workspace.expire_versions(None))
-                {
-                    eprintln!("could not expire old versions: {error}");
-                }
+                at_launch();
                 // Said once on stderr, and again only if it changes or comes back.
                 let mut reported: Option<String> = None;
                 loop {
@@ -201,19 +195,22 @@ impl Scheduler {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)] // Setup that fails must fail the test.
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use std::io::Write;
     use ticketd_core::{
         TicketPatch,
-        sync::remote::{
-            FakeRemote, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteOp,
-            RemoteRevision,
+        sync::{
+            SyncRecovery,
+            remote::{
+                FakeRemote, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
+                RemoteOp, RemoteRevision,
+            },
         },
     };
 
-    pub(crate) const FOLDER: &str = "workspace";
     const SECOND: Duration = Duration::from_secs(1);
+    const MINUTE: Duration = Duration::from_secs(60);
 
     /// A fake storage whose listing waits until the test lets it through.
     struct Gated {
@@ -263,16 +260,17 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) struct Desk {
+    struct Desk {
         _directory: tempfile::TempDir,
-        pub remote: FakeRemote,
-        pub scheduler: Arc<Scheduler>,
+        remote: FakeRemote,
+        scheduler: Arc<Scheduler>,
         bound: Arc<Mutex<Option<Binding>>>,
         path: std::path::PathBuf,
+        folder: String,
     }
 
     impl Desk {
-        pub fn workspace(&self) -> Workspace {
+        fn workspace(&self) -> Workspace {
             Workspace::open(&self.path).unwrap()
         }
         fn bind(&self, binding: Option<Binding>) {
@@ -280,33 +278,32 @@ pub(crate) mod tests {
         }
         fn binding(&self, poll: Duration) -> Binding {
             Binding {
-                folder: FOLDER.into(),
+                folder: self.folder.clone(),
                 device: "Desk A".into(),
                 poll,
                 remote: Arc::new(self.remote.clone()),
             }
         }
-        fn uploads(&self) -> usize {
-            let writes = |calls: Vec<RemoteOp>| {
-                calls
-                    .into_iter()
-                    .filter(|op| *op == RemoteOp::Write)
-                    .count()
-            };
-            writes(self.remote.calls())
+        fn pending(&self) -> usize {
+            self.workspace()
+                .sync_status()
+                .unwrap()
+                .pending_uploads
+                .len()
         }
     }
 
-    /// A connected desktop with one ticket not yet uploaded.
-    pub(crate) fn desk() -> Desk {
+    /// A desktop connected to a folder, with one ticket not yet uploaded.
+    fn desk() -> Desk {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workspace.sqlite3");
-        Workspace::open(&path)
-            .unwrap()
-            .create_ticket("First")
-            .unwrap();
         let remote = FakeRemote::new();
-        remote.ensure_folder(FOLDER, "Test").unwrap();
+        let mut workspace = Workspace::open(&path).unwrap();
+        workspace.create_ticket("First").unwrap();
+        workspace
+            .sync_connect("connection", "mina@example.com")
+            .unwrap();
+        let status = workspace.sync_upload_workspace(&remote, "Test").unwrap();
         let bound = Arc::new(Mutex::new(None));
         let (open_path, source) = (path.clone(), Arc::clone(&bound));
         let scheduler = Arc::new(Scheduler::new(
@@ -319,31 +316,35 @@ pub(crate) mod tests {
             scheduler,
             bound,
             path,
+            folder: status.folder.unwrap().id,
         };
-        desk.bind(Some(desk.binding(DEFAULT_POLL)));
+        desk.bind(Some(desk.binding(MINUTE)));
         desk
     }
 
     #[test]
     fn runs_at_launch_and_again_when_the_connection_returns() {
         let desk = desk();
-        let report = desk.scheduler.tick(Duration::ZERO).unwrap().unwrap();
-        assert_eq!(report.uploaded, 1);
+        assert_eq!(desk.pending(), 1);
+        let status = desk.scheduler.tick(Duration::ZERO).unwrap().unwrap();
+        assert_eq!(status.pending_uploads, []);
+        assert!(status.last_synced_at.is_some());
         assert_eq!(desk.scheduler.tick(SECOND).unwrap(), None);
 
         desk.bind(None);
         assert_eq!(desk.scheduler.tick(2 * SECOND).unwrap(), None);
-        desk.bind(Some(desk.binding(DEFAULT_POLL)));
+        desk.bind(Some(desk.binding(MINUTE)));
         assert!(desk.scheduler.tick(3 * SECOND).unwrap().is_some());
     }
 
     #[test]
-    fn polls_every_minute_by_default_and_never_faster_than_thirty_seconds() {
+    fn polls_at_the_set_interval_and_never_faster_than_thirty_seconds() {
         let desk = desk();
         assert!(desk.scheduler.tick(Duration::ZERO).unwrap().is_some());
         assert_eq!(desk.scheduler.tick(59 * SECOND).unwrap(), None);
         assert!(desk.scheduler.tick(60 * SECOND).unwrap().is_some());
 
+        // The interval is read again for every run.
         desk.bind(Some(desk.binding(5 * SECOND)));
         assert!(desk.scheduler.sync_now(100 * SECOND).unwrap().is_some());
         assert_eq!(desk.scheduler.tick(129 * SECOND).unwrap(), None);
@@ -354,7 +355,6 @@ pub(crate) mod tests {
     fn uploads_once_a_few_seconds_after_the_last_local_change() {
         let desk = desk();
         desk.scheduler.tick(Duration::ZERO).unwrap();
-        let uploaded = desk.uploads();
 
         let ticket = desk.workspace().create_ticket("Second").unwrap();
         assert_eq!(desk.scheduler.tick(SECOND).unwrap(), None);
@@ -368,23 +368,21 @@ pub(crate) mod tests {
         // The second change restarts the wait that began at one second.
         assert_eq!(desk.scheduler.tick(3 * SECOND).unwrap(), None);
         assert_eq!(desk.scheduler.tick(5 * SECOND).unwrap(), None);
-        let report = desk.scheduler.tick(6 * SECOND).unwrap().unwrap();
-        assert_eq!((report.uploaded, report.pending), (1, 0));
-        assert_eq!(desk.uploads(), uploaded + 1);
+        assert_eq!(desk.pending(), 1);
+        let status = desk.scheduler.tick(6 * SECOND).unwrap().unwrap();
+        assert_eq!(status.pending_uploads, []);
         assert_eq!(desk.scheduler.tick(7 * SECOND).unwrap(), None);
     }
 
     #[test]
-    fn a_failed_run_waits_for_the_next_poll() {
+    fn a_refused_run_is_recorded_and_waits_for_the_next_poll() {
         let desk = desk();
         desk.remote.fail(RemoteOp::List, 1, RemoteError::Offline);
-        assert!(matches!(
-            desk.scheduler.tick(Duration::ZERO),
-            Err(Error::Remote(RemoteError::Offline))
-        ));
+        let status = desk.scheduler.tick(Duration::ZERO).unwrap().unwrap();
+        assert_eq!(status.recovery, Some(SyncRecovery::Offline));
         assert_eq!(desk.scheduler.tick(10 * SECOND).unwrap(), None);
-        let report = desk.scheduler.tick(60 * SECOND).unwrap().unwrap();
-        assert_eq!(report.uploaded, 1);
+        let status = desk.scheduler.tick(60 * SECOND).unwrap().unwrap();
+        assert_eq!((status.recovery, status.pending_uploads.len()), (None, 0));
     }
 
     #[test]
@@ -392,15 +390,28 @@ pub(crate) mod tests {
         let desk = desk();
         desk.scheduler.tick(Duration::ZERO).unwrap();
         desk.workspace().create_ticket("Second").unwrap();
-        let report = desk.scheduler.sync_now(SECOND).unwrap().unwrap();
-        assert_eq!(report.uploaded, 1);
+        let status = desk.scheduler.sync_now(SECOND).unwrap().unwrap();
+        assert_eq!(status.pending_uploads, []);
 
         desk.bind(None);
         assert_eq!(desk.scheduler.sync_now(2 * SECOND).unwrap(), None);
     }
 
+    #[test]
+    fn recovering_from_a_missing_folder_uploads_the_workspace_again() {
+        let desk = desk();
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+        desk.remote.remove_folder(&desk.folder);
+        let status = desk.scheduler.sync_now(SECOND).unwrap().unwrap();
+        assert_eq!(status.recovery, Some(SyncRecovery::FolderMissing));
+
+        let status = desk.scheduler.recover(2 * SECOND).unwrap().unwrap();
+        assert_eq!((status.recovery, status.pending_uploads.len()), (None, 0));
+        assert!(!desk.remote.list(&desk.folder).unwrap().is_empty());
+    }
+
     /// Binds the desk to a storage that holds every listing until the returned
-    /// sender is used or dropped; the receiver tells when a run reached it.
+    /// sender is dropped; the receiver tells when a run reached it.
     fn gate(desk: &Desk) -> (mpsc::Sender<()>, mpsc::Receiver<()>) {
         let (open, gate) = mpsc::channel();
         let (entered, reached) = mpsc::channel();
@@ -410,7 +421,7 @@ pub(crate) mod tests {
                 gate: Mutex::new(gate),
                 entered: Mutex::new(entered),
             }),
-            ..desk.binding(DEFAULT_POLL)
+            ..desk.binding(MINUTE)
         }));
         (open, reached)
     }
@@ -423,12 +434,11 @@ pub(crate) mod tests {
         let first = std::thread::spawn(move || scheduler.sync_now(Duration::ZERO));
         reached.recv().unwrap();
 
-        // Due (never ran from a tick), but the first run still holds the storage.
-        assert_eq!(desk.scheduler.tick(SECOND).unwrap(), None);
+        // Due, but the first run still holds the storage.
+        assert_eq!(desk.scheduler.tick(61 * SECOND).unwrap(), None);
         drop(open);
-        assert_eq!(first.join().unwrap().unwrap().unwrap().uploaded, 1);
-        let lists = |calls: Vec<RemoteOp>| calls.into_iter().filter(|op| *op == RemoteOp::List);
-        assert_eq!(lists(desk.remote.calls()).count(), 1);
+        let status = first.join().unwrap().unwrap().unwrap();
+        assert_eq!(status.pending_uploads, []);
     }
 
     #[test]
@@ -436,7 +446,7 @@ pub(crate) mod tests {
         let desk = desk();
         let pending = desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap();
         assert_eq!(pending, []);
-        assert_eq!(desk.uploads(), 1);
+        assert!(!desk.remote.list(&desk.folder).unwrap().is_empty());
     }
 
     #[test]
@@ -447,13 +457,13 @@ pub(crate) mod tests {
             .scheduler
             .flush(Duration::ZERO, Duration::ZERO)
             .unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].kind, ticketd_core::sync::RecordKind::Ticket);
+        let titles: Vec<_> = pending.iter().map(|item| item.title.as_str()).collect();
+        assert_eq!(titles, ["First"]);
 
         // Let the abandoned run end before the Workspace file goes away.
         reached.recv().unwrap();
         drop(open);
-        drop(lock(&desk.scheduler.running));
+        drop(desk.scheduler.hold());
     }
 
     #[test]

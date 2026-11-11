@@ -1,16 +1,25 @@
-//! Commands for reviewing what sync did: records that need review, notices,
-//! History and the exit flush. The core holds the rules; this file validates
-//! what the interface sends and words the core's values for display.
+//! Commands for Workspace sync: connecting to Google Drive, status and
+//! settings, and reviewing what sync did (records that need review, notices,
+//! History). The core holds the rules; this file validates what the interface
+//! sends, supplies the Drive connection and words the core's values for display.
 
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{Arc, Mutex, OnceLock, PoisonError, atomic::AtomicBool},
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
+use tauri_plugin_opener::OpenerExt;
 use ticketd_core::{
-    DocumentPatch, Error, RecordKind, Status, SyncKind, SyncRecord, SyncValue, TicketPatch,
-    Workspace, WriteRequest,
+    DocumentPatch, Error, RecordKind, Status, SyncKind, SyncPartKind, SyncRecord, SyncValue,
+    TicketPatch, Workspace, WriteRequest,
+    drive::{
+        DesktopOAuthClient, DriveRemote, GoogleTransport, PickerSession, PlatformCredentialStore,
+    },
     sync::{
-        DirtyRecord, SyncChoice, SyncConflict, SyncNotice, SyncResolution,
-        remote::{RemoteError, RemoteKey, RemoteKind},
+        AttachmentAvailability, AttachmentDownload, SetupOptions, SyncChoice, SyncConflict,
+        SyncItem, SyncNotice, SyncRecovery, SyncResolution, SyncSettings, SyncStatus,
+        remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
     },
 };
 
@@ -23,11 +32,95 @@ pub struct SyncHost {
     pub started: Instant,
 }
 
-/// What this Workspace syncs with: the scheduler and every command here ask
-/// this one function. Nothing connects a Workspace to a Drive folder yet, so
-/// it has no connection to report.
+fn transport() -> &'static GoogleTransport {
+    static TRANSPORT: OnceLock<GoogleTransport> = OnceLock::new();
+    TRANSPORT.get_or_init(GoogleTransport::default)
+}
+
+static DRIVE: Mutex<Option<(String, Arc<DriveRemote<'static>>)>> = Mutex::new(None);
+
+/// The Drive storage of a signed-in connection. One value is kept per
+/// connection, so its access token and folder lookups last between runs.
+fn drive(connection_id: &str) -> Arc<DriveRemote<'static>> {
+    let mut kept = DRIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((id, remote)) = kept.as_ref()
+        && id == connection_id
+    {
+        return Arc::clone(remote);
+    }
+    // ponytail: the adapter borrows its connection id, so the id is kept for the
+    // life of the app: one short string per account signed in to.
+    let id: &'static str = Box::leak(connection_id.to_owned().into_boxed_str());
+    let remote = Arc::new(DriveRemote::new(id, &PlatformCredentialStore, transport()));
+    *kept = Some((connection_id.to_owned(), Arc::clone(&remote)));
+    remote
+}
+
+/// What this Workspace syncs with, as the core stores it. The scheduler and
+/// every command ask through here, so a changed folder, desktop name or poll
+/// interval applies to the next thing that runs.
+fn binding_of(
+    workspace: &Workspace,
+    remote: impl FnOnce(&str) -> Arc<dyn RemoteStorage>,
+) -> Result<Option<Binding>, Error> {
+    let status = workspace.sync_status()?;
+    let (Some(folder), Some(connection)) = (status.folder, status.connection_id) else {
+        return Ok(None);
+    };
+    let settings = workspace.sync_settings()?;
+    Ok(Some(Binding {
+        folder: folder.id,
+        device: settings.desktop_name,
+        poll: Duration::from_secs(settings.poll_interval_secs),
+        remote: remote(&connection),
+    }))
+}
+
 pub fn binding() -> Result<Option<Binding>, Error> {
-    Ok(None)
+    binding_of(&open_workspace()?, |connection| drive(connection))
+}
+
+/// The name macOS shows for this computer. Its apps get no host name in their
+/// environment, which is where the core looks.
+fn mac_computer_name() -> Option<String> {
+    let output = std::process::Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()?;
+    String::from_utf8(output.stdout).ok()
+}
+
+/// Names this desktop after the computer where the core could not find a name.
+fn name_this_desktop(
+    workspace: &mut Workspace,
+    computer: impl FnOnce() -> Option<String>,
+) -> Result<(), Error> {
+    let settings = workspace.sync_settings()?;
+    if settings.desktop_name != "This desktop" {
+        return Ok(());
+    }
+    if let Some(name) = computer().filter(|name| !name.trim().is_empty()) {
+        workspace.set_sync_settings(
+            name.trim(),
+            settings.poll_interval_secs,
+            settings.attachment_download,
+        )?;
+    }
+    Ok(())
+}
+
+/// What the desktop does once when it starts, before the first sync run.
+pub fn at_launch() {
+    let prepared = open_workspace().and_then(|mut workspace| {
+        workspace.expire_versions(None)?;
+        if cfg!(target_os = "macos") {
+            name_this_desktop(&mut workspace, mac_computer_name)?;
+        }
+        Ok(())
+    });
+    if let Err(error) = prepared {
+        eprintln!("could not prepare Workspace sync: {error}");
+    }
 }
 
 type Outcome<T> = Result<T, BridgeFailure>;
@@ -99,9 +192,22 @@ pub struct ConflictSummary {
     read: bool,
 }
 
+/// The Activity or Implementation evidence a conflicting field belongs to.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct Section {
+    kind: SyncPartKind,
+    /// When an Activity was reported.
+    reported_at: Option<String>,
+    /// What Implementation evidence is named.
+    name: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ConflictField {
+    /// The key the choice is sent back under.
     field: String,
+    /// Set when the field is inside a section, whose key alone names nothing.
+    section: Option<Section>,
     local: String,
     local_changed_at: Option<String>,
     remote: String,
@@ -121,20 +227,50 @@ pub struct Conflict {
     fields: Vec<ConflictField>,
 }
 
+/// The section a field key of the form `<section GUID>:<field>` points into.
+fn section(record: &SyncRecord, field: &str) -> Option<Section> {
+    let (id, _) = field.split_once(':')?;
+    let part = record.parts.iter().find(|part| part.id == id)?;
+    let value = |name: &str| match part.fields.get(name) {
+        Some(SyncValue::Text(text)) => Some(text.clone()),
+        _ => None,
+    };
+    Some(Section {
+        kind: part.kind,
+        reported_at: value("reported_at"),
+        name: value("name"),
+    })
+}
+
 fn conflicts(workspace: &Workspace) -> Result<Vec<ConflictSummary>, Error> {
-    Ok(workspace
+    workspace
         .sync_conflicts()?
         .into_iter()
-        .map(|conflict| ConflictSummary {
-            kind: conflict.kind,
-            id: conflict.id,
-            reference: conflict.reference,
-            title: conflict.title,
-            fields: conflict.fields.into_iter().map(|f| f.field).collect(),
-            detected_at: conflict.detected_at,
-            read: conflict.read,
+        .map(|conflict| {
+            let record = workspace.export_sync_record(conflict.kind, &conflict.id)?;
+            // The list names what changed: a section is named by its kind, once.
+            let mut fields: Vec<String> = Vec::new();
+            for field in conflict.fields {
+                let name = match section(&record, &field.field).map(|section| section.kind) {
+                    Some(SyncPartKind::Activity) => "activity".to_owned(),
+                    Some(SyncPartKind::Evidence) => "implementation_evidence".to_owned(),
+                    None => field.field,
+                };
+                if !fields.contains(&name) {
+                    fields.push(name);
+                }
+            }
+            Ok(ConflictSummary {
+                kind: conflict.kind,
+                id: conflict.id,
+                reference: conflict.reference,
+                title: conflict.title,
+                fields,
+                detected_at: conflict.detected_at,
+                read: conflict.read,
+            })
         })
-        .collect())
+        .collect()
 }
 
 fn conflict(
@@ -152,6 +288,7 @@ fn conflict(
         read,
         fields,
     } = workspace.sync_conflict(kind, id)?;
+    let record = workspace.export_sync_record(kind, &id)?;
     Ok(Conflict {
         kind,
         id,
@@ -163,6 +300,7 @@ fn conflict(
         fields: fields
             .into_iter()
             .map(|field| ConflictField {
+                section: section(&record, &field.field),
                 local: display(workspace, field.local.as_ref()),
                 remote: display(workspace, field.remote.as_ref()),
                 local_changed_at: field.local_changed_at,
@@ -457,8 +595,10 @@ fn version_detail(
     })
 }
 
-/// Writes an earlier version's title, text and status as an ordinary edit, so
-/// what it replaces becomes a version too. Trash is left as it is.
+/// Makes an earlier version's title, text and status current again as an
+/// ordinary edit, so what it replaces becomes a version too. Trash is left as
+/// it is. A version kept here is restored by the core; one read from Drive is
+/// written as the edit it amounts to.
 fn restore(
     workspace: &mut Workspace,
     bound: Option<&Binding>,
@@ -471,8 +611,12 @@ fn restore(
     check_request_id(request_id)?;
     let record = workspace.export_sync_record(sync_kind(kind), id)?;
     let earlier = version_content(workspace, bound, kind, id, source, version)?;
-    let request = match kind {
-        RecordKind::Ticket => WriteRequest::ChangeTicket {
+    let request = match (source, kind) {
+        (Source::Local, _) => match version.parse() {
+            Ok(id) => WriteRequest::RestoreVersion { id },
+            Err(_) => return rejected("This version is no longer available"),
+        },
+        (Source::Drive, RecordKind::Ticket) => WriteRequest::ChangeTicket {
             reference: text(&record, "ref"),
             patch: TicketPatch {
                 title: Some(earlier.title),
@@ -485,7 +629,7 @@ fn restore(
                 ..Default::default()
             },
         },
-        RecordKind::Document => WriteRequest::ChangeDocument {
+        (Source::Drive, RecordKind::Document) => WriteRequest::ChangeDocument {
             id: id.to_owned(),
             patch: DocumentPatch {
                 title: Some(Some(earlier.title).filter(|title| !title.is_empty())),
@@ -498,55 +642,9 @@ fn restore(
     Ok(())
 }
 
-/// One record or file that has not reached Drive.
-#[derive(Debug, PartialEq, Eq, Serialize)]
-pub struct PendingItem {
-    kind: ticketd_core::sync::RecordKind,
-    id: String,
-    reference: Option<String>,
-    title: String,
-}
-
-/// Names the records waiting to upload. One that no longer exists is left out.
-pub fn pending_items(workspace: &Workspace, pending: Vec<DirtyRecord>) -> Vec<PendingItem> {
-    use ticketd_core::sync::RecordKind as Dirty;
-    pending
-        .into_iter()
-        .filter_map(|dirty| {
-            let kind = match dirty.kind {
-                Dirty::Ticket => SyncKind::Ticket,
-                Dirty::Document => SyncKind::Document,
-                Dirty::Plan => SyncKind::Plan,
-                Dirty::Project => SyncKind::Project,
-                Dirty::Attachment => {
-                    let file = workspace.attachment(&dirty.id).ok()?;
-                    return Some(PendingItem {
-                        kind: dirty.kind,
-                        id: dirty.id,
-                        reference: None,
-                        title: file.display_name,
-                    });
-                }
-            };
-            let record = workspace.export_sync_record(kind, &dirty.id).ok()?;
-            let reference = Some(text(&record, "ref")).filter(|reference| !reference.is_empty());
-            let title = [text(&record, "title"), text(&record, "name")]
-                .into_iter()
-                .find(|title| !title.is_empty())
-                .unwrap_or_else(|| "Untitled".into());
-            Some(PendingItem {
-                kind: dirty.kind,
-                id: dirty.id,
-                reference,
-                title,
-            })
-        })
-        .collect()
-}
-
 #[derive(Debug, Serialize)]
 pub struct ExitReport {
-    pending: Vec<PendingItem>,
+    pending: Vec<SyncItem>,
 }
 
 #[tauri::command]
@@ -643,20 +741,206 @@ pub fn restore_record_version(
 /// A failed upload is an answer, not a failure of the command.
 #[tauri::command(async)]
 pub fn sync_flush_on_exit(host: tauri::State<'_, SyncHost>) -> Outcome<ExitReport> {
-    let left = host.scheduler.flush(host.started.elapsed(), EXIT_LIMIT)?;
     Ok(ExitReport {
-        pending: pending_items(&open_workspace()?, left),
+        pending: host.scheduler.flush(host.started.elapsed(), EXIT_LIMIT)?,
     })
+}
+
+fn failed(error: impl std::fmt::Display) -> BridgeFailure {
+    BridgeFailure::plain(&error.to_string())
+}
+
+/// Google sign-in in the system browser. Returns the connection the credential
+/// is kept under and the account's email address when Google names it.
+fn sign_in(app: &tauri::AppHandle) -> Outcome<(String, String)> {
+    let client = DesktopOAuthClient::from_environment().map_err(failed)?;
+    let session = PickerSession::begin_sign_in(client, Duration::from_secs(180)).map_err(failed)?;
+    // The core generated this pinned Google URL. It never crosses the WebView.
+    app.opener()
+        .open_url(session.authorization_url(), None::<&str>)
+        .map_err(|_| failed("could not open the system browser to sign in to Google Drive"))?;
+    let signed_in = session
+        .finish(
+            transport(),
+            &PlatformCredentialStore,
+            &AtomicBool::new(false),
+        )
+        .map_err(failed)?;
+    // A kept adapter holds the previous sign-in's access token.
+    *DRIVE.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    Ok((
+        signed_in.connection_id,
+        signed_in.account.unwrap_or_default(),
+    ))
+}
+
+/// The storage of the signed-in account, before or after a folder is chosen.
+fn signed_in_drive(workspace: &Workspace) -> Outcome<Arc<DriveRemote<'static>>> {
+    match workspace.sync_status()?.connection_id {
+        Some(connection) => Ok(drive(&connection)),
+        None => rejected("Sign in to Google Drive first"),
+    }
+}
+
+/// A folder identifier as the storage interface allows it.
+fn check_folder_id(folder_id: &str) -> Outcome<()> {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    if folder_id.is_empty() || folder_id.len() > 64 || !folder_id.chars().all(allowed) {
+        return rejected("invalid Workspace folder");
+    }
+    Ok(())
+}
+
+fn check_attachment_ids(ids: &[String]) -> Outcome<()> {
+    if ids.len() > 1000 || ids.iter().any(|id| id.is_empty() || id.len() > 128) {
+        return rejected("invalid Attachments");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn sync_status() -> Outcome<SyncStatus> {
+    Ok(open_workspace()?.sync_status()?)
+}
+
+// Everything below that reaches Google runs off the UI thread.
+#[tauri::command(async)]
+pub fn sync_connect(app: tauri::AppHandle) -> Outcome<SyncStatus> {
+    let (connection, account) = sign_in(&app)?;
+    Ok(open_workspace()?.sync_connect(&connection, &account)?)
+}
+
+#[tauri::command(async)]
+pub fn sync_setup_options() -> Outcome<SetupOptions> {
+    let workspace = open_workspace()?;
+    let remote = signed_in_drive(&workspace)?;
+    Ok(workspace.sync_setup_options(remote.as_ref())?)
+}
+
+/// The first upload itself starts with the scheduler's next look, within a second.
+#[tauri::command(async)]
+pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
+    let mut workspace = open_workspace()?;
+    let remote = signed_in_drive(&workspace)?;
+    Ok(workspace.sync_upload_workspace(remote.as_ref(), "ticketd Workspace")?)
+}
+
+/// Replaces the Workspace file, like restoring a backup: sync is held off
+/// meanwhile, and the handle used here is the one the core consumes.
+#[tauri::command(async)]
+pub fn sync_download_workspace(
+    host: tauri::State<'_, SyncHost>,
+    folder_id: String,
+) -> Outcome<SyncStatus> {
+    check_folder_id(&folder_id)?;
+    let _no_run = host.scheduler.hold();
+    let workspace = open_workspace()?;
+    let remote = signed_in_drive(&workspace)?;
+    let (replaced, _safety_backup) =
+        workspace.sync_download_workspace(remote.as_ref(), &folder_id)?;
+    Ok(replaced.sync_status()?)
+}
+
+#[tauri::command(async)]
+pub fn sync_now(host: tauri::State<'_, SyncHost>) -> Outcome<SyncStatus> {
+    match host.scheduler.sync_now(host.started.elapsed())? {
+        Some(status) => Ok(status),
+        None => Ok(open_workspace()?.sync_status()?),
+    }
+}
+
+#[tauri::command(async)]
+pub fn sync_recover(
+    app: tauri::AppHandle,
+    host: tauri::State<'_, SyncHost>,
+) -> Outcome<SyncStatus> {
+    if open_workspace()?.sync_status()?.recovery == Some(SyncRecovery::AuthorizationExpired) {
+        let (connection, account) = sign_in(&app)?;
+        open_workspace()?.sync_connect(&connection, &account)?;
+    }
+    match host.scheduler.recover(host.started.elapsed())? {
+        Some(status) => Ok(status),
+        None => Ok(open_workspace()?.sync_status()?),
+    }
+}
+
+#[tauri::command]
+pub fn sync_disconnect() -> Outcome<SyncStatus> {
+    Ok(open_workspace()?.sync_disconnect()?)
+}
+
+#[tauri::command(async)]
+pub fn sync_open_folder(app: tauri::AppHandle) -> Outcome<()> {
+    let workspace = open_workspace()?;
+    let Some(folder) = workspace.sync_status()?.folder else {
+        return rejected("Sync is not connected");
+    };
+    let url = signed_in_drive(&workspace)?
+        .folder_url(&folder.id)
+        .map_err(|error| {
+            failed(format!(
+                "Could not find the folder in Google Drive: {error}"
+            ))
+        })?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| failed("Could not open the folder in Google Drive"))
+}
+
+#[tauri::command]
+pub fn sync_settings() -> Outcome<SyncSettings> {
+    Ok(open_workspace()?.sync_settings()?)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SettingsChange {
+    desktop_name: String,
+    poll_interval_secs: u64,
+    attachment_download: AttachmentDownload,
+}
+
+fn change_settings(workspace: &mut Workspace, settings: &SettingsChange) -> Outcome<SyncSettings> {
+    if settings.desktop_name.chars().count() > 100 {
+        return rejected("use a shorter name for this desktop");
+    }
+    // The core refuses an empty name and a poll under its minimum.
+    Ok(workspace.set_sync_settings(
+        &settings.desktop_name,
+        settings.poll_interval_secs,
+        settings.attachment_download,
+    )?)
+}
+
+#[tauri::command]
+pub fn set_sync_settings(settings: SettingsChange) -> Outcome<SyncSettings> {
+    change_settings(&mut open_workspace()?, &settings)
+}
+
+#[tauri::command]
+pub fn attachment_availability(ids: Vec<String>) -> Outcome<Vec<AttachmentAvailability>> {
+    check_attachment_ids(&ids)?;
+    Ok(open_workspace()?.attachment_availability(&ids)?)
+}
+
+/// Fetches the file and answers when it is here; progress shows meanwhile
+/// through `attachment_availability`.
+#[tauri::command(async)]
+pub fn download_attachment(host: tauri::State<'_, SyncHost>, id: String) -> Outcome<()> {
+    check_attachment_ids(std::slice::from_ref(&id))?;
+    let Some(bound) = host.scheduler.binding()? else {
+        return rejected("Sync is not connected");
+    };
+    Ok(open_workspace()?.download_attachment(bound.remote.as_ref(), &id)?)
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)] // Setup that fails must fail the test.
 mod tests {
     use super::*;
-    use std::{io::Cursor, time::Duration};
+    use std::io::Cursor;
     use ticketd_core::sync::{
         SyncNoticeKind,
-        remote::{FakeRemote, RemoteOp, RemoteStorage},
+        remote::{FakeRemote, RemoteOp},
     };
 
     const FOLDER: &str = "workspace";
@@ -1055,21 +1339,113 @@ mod tests {
     }
 
     #[test]
-    fn pending_uploads_are_named_for_the_exit_report() {
+    fn a_conflict_inside_an_activity_names_the_activity() {
         let mut desks = desks();
-        let ticket = desks.here.create_ticket("Fix login").unwrap();
-        desks.here.create_document(None, "Notes").unwrap();
-        let pending = desks.here.dirty_records().unwrap();
-        let named: Vec<_> = pending_items(&desks.here, pending)
-            .into_iter()
-            .map(|item| (item.reference, item.title))
-            .collect();
+        let ticket = desks.there.create_ticket("Fix login").unwrap();
+        let activity = desks
+            .there
+            .add_activity(&ticket.reference, "Started", None)
+            .unwrap();
+        desks.sync_there();
+        desks.sync_here();
+        let brief = |brief: &str| ticketd_core::ActivityPatch {
+            brief: Some(brief.into()),
+            ..Default::default()
+        };
+        desks
+            .there
+            .edit_activity(&ticket.reference, &activity.id, brief("Started there"))
+            .unwrap();
+        desks
+            .here
+            .edit_activity(&ticket.reference, &activity.id, brief("Started here"))
+            .unwrap();
+        desks.sync_there();
+        desks.sync_here();
+
+        assert_eq!(conflicts(&desks.here).unwrap()[0].fields, ["activity"]);
+        let shown = conflict(&desks.here, SyncKind::Ticket, &ticket.id, None).unwrap();
+        let field = &shown.fields[0];
+        // The key still resolves the conflict; the section says what it is.
+        assert_eq!(field.field, format!("{}:body", activity.id));
+        let section = field.section.as_ref().unwrap();
+        assert_eq!(section.kind, SyncPartKind::Activity);
+        assert!(section.reported_at.is_some());
         assert_eq!(
-            named,
-            [
-                (Some(ticket.reference), "Fix login".to_owned()),
-                (None, "Untitled".to_owned())
-            ]
+            (field.local.as_str(), field.remote.as_str()),
+            ("Started here", "Started there")
         );
+    }
+
+    #[test]
+    fn the_binding_follows_what_the_workspace_stores() {
+        let mut desks = desks();
+        let fake = desks.remote.clone();
+        let bound = |workspace: &Workspace| {
+            let fake = fake.clone();
+            binding_of(workspace, move |_| Arc::new(fake)).unwrap()
+        };
+        assert!(bound(&desks.here).is_none());
+        desks
+            .here
+            .sync_connect("connection", "mina@example.com")
+            .unwrap();
+        // Signed in, but no folder chosen: nothing to sync with yet.
+        assert!(bound(&desks.here).is_none());
+
+        let status = desks
+            .here
+            .sync_upload_workspace(&desks.remote, "Test")
+            .unwrap();
+        desks
+            .here
+            .set_sync_settings("Laptop", 90, AttachmentDownload::OnOpen)
+            .unwrap();
+        let binding = bound(&desks.here).unwrap();
+        assert_eq!(binding.folder, status.folder.unwrap().id);
+        assert_eq!(binding.device, "Laptop");
+        assert_eq!(binding.poll, Duration::from_secs(90));
+
+        desks.here.sync_disconnect().unwrap();
+        assert!(bound(&desks.here).is_none());
+    }
+
+    #[test]
+    fn settings_and_identifiers_are_checked_before_the_core_sees_them() {
+        let mut desks = desks();
+        let change = |name: &str, poll| SettingsChange {
+            desktop_name: name.into(),
+            poll_interval_secs: poll,
+            attachment_download: AttachmentDownload::Automatic,
+        };
+        let saved = change_settings(&mut desks.here, &change("Laptop", 30)).unwrap();
+        assert_eq!(
+            (saved.desktop_name.as_str(), saved.poll_interval_secs),
+            ("Laptop", 30)
+        );
+        assert!(change_settings(&mut desks.here, &change("Laptop", 29)).is_err());
+        assert!(change_settings(&mut desks.here, &change(" ", 60)).is_err());
+        assert!(change_settings(&mut desks.here, &change(&"n".repeat(101), 60)).is_err());
+
+        assert!(check_folder_id("0c8f3a51-6f0e-4a0b-9d55-2f1f6f3f8a10").is_ok());
+        assert!(check_folder_id("").is_err());
+        assert!(check_folder_id("' or name contains '").is_err());
+        assert!(check_attachment_ids(&[String::new()]).is_err());
+    }
+
+    #[test]
+    fn a_desktop_the_core_could_not_name_takes_the_computers_name() {
+        let mut desks = desks();
+        let named = |workspace: &Workspace| workspace.sync_settings().unwrap().desktop_name;
+        desks
+            .here
+            .set_sync_settings("This desktop", 60, AttachmentDownload::Automatic)
+            .unwrap();
+        name_this_desktop(&mut desks.here, || Some("Mina's MacBook\n".into())).unwrap();
+        assert_eq!(named(&desks.here), "Mina's MacBook");
+
+        // A name that is already set is left alone.
+        name_this_desktop(&mut desks.here, || Some("Other".into())).unwrap();
+        assert_eq!(named(&desks.here), "Mina's MacBook");
     }
 }

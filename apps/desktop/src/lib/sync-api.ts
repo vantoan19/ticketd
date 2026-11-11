@@ -44,6 +44,8 @@ export const syncRecoveries = [
   "authorization_expired",
   "storage_full",
   "offline",
+  /** Google Drive asked for fewer requests; sync tries again by itself. */
+  "rate_limited",
 ] as const;
 export type SyncRecovery = (typeof syncRecoveries)[number];
 

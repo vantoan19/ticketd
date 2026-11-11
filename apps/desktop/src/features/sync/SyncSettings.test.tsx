@@ -304,6 +304,12 @@ test.each([
     "Changes are saved on this computer and upload when you are back online.",
     "Retry",
   ],
+  [
+    "rate_limited",
+    "Google Drive is busy",
+    "Google Drive asked ticketd to slow down. Changes are saved on this computer and upload a little later.",
+    "Retry",
+  ],
 ] as const)(
   "recovery from %s is one notice with one action",
   async (recovery, title, description, action) => {

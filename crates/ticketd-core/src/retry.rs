@@ -264,6 +264,10 @@ pub enum WriteRequest {
         plan: Option<String>,
         agent: Option<String>,
     },
+    /// Make an earlier version of a ticket or Document current again.
+    RestoreVersion {
+        id: i64,
+    },
     /// Settle fields of a record that needs review after sync.
     ResolveSyncConflict {
         kind: crate::SyncKind,
@@ -670,6 +674,10 @@ impl Workspace {
                 plan_id,
                 document_id,
             } => WriteResult::Plan(self.set_plan_spec(&plan_id, document_id.as_deref())?),
+            WriteRequest::RestoreVersion { id } => {
+                self.restore_version(id)?;
+                WriteResult::Deleted
+            }
             WriteRequest::ResolveSyncConflict {
                 kind,
                 id,

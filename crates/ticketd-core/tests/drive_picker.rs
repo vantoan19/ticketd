@@ -603,3 +603,58 @@ fn cancelled_picker_closes_without_credentials_or_network() {
         .unwrap();
     assert_eq!(error.kind, ticketd_core::drive::DriveErrorKind::Cancelled);
 }
+
+#[test]
+fn sign_in_needs_no_picked_file_and_names_the_account() {
+    struct SignIn;
+    impl DriveTransport for SignIn {
+        fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+            let body: &[u8] = if request.method == "POST" {
+                br#"{"access_token":"access-secret","refresh_token":"refresh-secret","scope":"https://www.googleapis.com/auth/drive.file"}"#
+            } else {
+                assert_eq!(
+                    request.url,
+                    "https://www.googleapis.com/drive/v3/about?fields=user(permissionId,emailAddress)"
+                );
+                br#"{"user":{"permissionId":"account-123","emailAddress":"mina@example.com"}}"#
+            };
+            Ok(DriveResponse {
+                headers: vec![],
+                status: 200,
+                body: body.to_vec(),
+            })
+        }
+    }
+
+    let session = PickerSession::begin_sign_in(
+        DesktopOAuthClient::new("client.apps.googleusercontent.com".into(), None).unwrap(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    let url = url::Url::parse(session.authorization_url()).unwrap();
+    let fields: std::collections::BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+    // No file picker is opened: the app only reaches the files it creates.
+    assert!(!fields.contains_key("trigger_onepick"));
+    assert_eq!(
+        fields["scope"],
+        "https://www.googleapis.com/auth/drive.file"
+    );
+    let redirect = url::Url::parse(&fields["redirect_uri"]).unwrap();
+    let (state, port) = (fields["state"].clone(), redirect.port().unwrap());
+    let authority = redirect.authority().to_owned();
+    let callback = std::thread::spawn(move || {
+        let mut socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let request = format!(
+            "GET /oauth2callback?state={state}&code=authorization-secret HTTP/1.1\r\nHost: {authority}\r\n\r\n"
+        );
+        socket.write_all(request.as_bytes()).unwrap();
+        read_http_response(&mut socket).unwrap()
+    });
+
+    let signed_in = session
+        .finish(&SignIn, &Vault, &AtomicBool::new(false))
+        .unwrap();
+    assert!(callback.join().unwrap().contains("Signed in."));
+    assert_eq!(signed_in.account.as_deref(), Some("mina@example.com"));
+    assert!(signed_in.file_ids.is_empty());
+}

@@ -33,6 +33,7 @@ const conflict: Conflict = {
   fields: [
     {
       field: "status",
+      section: null,
       local: "In review",
       local_changed_at: "2026-11-11T18:31:00Z",
       remote: "Done",
@@ -41,6 +42,7 @@ const conflict: Conflict = {
     },
     {
       field: "body",
+      section: null,
       local: "Allow 5 failed attempts",
       local_changed_at: "2026-11-11T18:31:00Z",
       remote: "Allow 10 failed attempts",
@@ -175,4 +177,21 @@ test("a side with no recorded change time shows when the conflict was found", as
       ),
     ),
   ).toBeTruthy();
+});
+
+test("a field inside an Activity is named by the Activity, and its text can be edited", async () => {
+  const reported = new Date().toISOString();
+  vi.mocked(syncReview.conflict).mockResolvedValue({
+    ...conflict,
+    fields: [
+      {
+        ...conflict.fields[1]!,
+        field: "0c8f3a51-6f0e-4a0b-9d55-2f1f6f3f8a10:body",
+        section: { kind: "activity", reported_at: reported, name: null },
+      },
+    ],
+  });
+  open();
+  expect(await screen.findByText("Activity from Today: text")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Edit instead" })).toBeTruthy();
 });

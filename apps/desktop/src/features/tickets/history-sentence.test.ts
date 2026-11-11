@@ -21,6 +21,15 @@ test("a dependency sync dropped to avoid a loop says which one and why", () => {
   );
 });
 
+test("a parent link sync dropped to avoid a loop says which one and why", () => {
+  expect(sentence("sync_parent_removed", "T-MW9", "parent")).toBe(
+    "Sync removed “parent T-MW9”; it would have made a loop",
+  );
+  expect(sentence("sync_parent_removed", "T-MW10", "child")).toBe(
+    "Sync removed “subticket T-MW10”; it would have made a loop",
+  );
+});
+
 test("describes recorded changes as sentences without event keys", () => {
   expect(sentence("status", "Todo", "In progress")).toBe(
     "Status Todo → In progress",

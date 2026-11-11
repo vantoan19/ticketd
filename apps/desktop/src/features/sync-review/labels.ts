@@ -1,5 +1,5 @@
 import { formatTime, startOfLocalDay } from "@/lib/format";
-import type { RecordKind } from "@/lib/sync-review-api";
+import type { ConflictField, RecordKind } from "@/lib/sync-review-api";
 
 /** The body of a ticket is its Description; a Document's is its Text. */
 export function fieldLabel(kind: RecordKind, field: string): string {
@@ -32,4 +32,21 @@ export function dayTime(timestamp: string, now: Date): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return timestamp;
   return `${dayLabel(timestamp, now)} at ${formatTime(date)}`;
+}
+
+/**
+ * The label of a field in review. One inside an Activity or Implementation
+ * evidence names that section, because its key is only the section's id.
+ */
+export function conflictLabel(
+  kind: RecordKind,
+  { field, section }: Pick<ConflictField, "field" | "section">,
+  now: Date,
+): string {
+  if (!section) return fieldLabel(kind, field);
+  const inner = field.slice(field.indexOf(":") + 1);
+  const what = inner === "body" ? "text" : inner.replaceAll("_", " ");
+  if (section.kind === "evidence")
+    return `Implementation evidence${section.name ? ` “${section.name}”` : ""}: ${what}`;
+  return `Activity${section.reported_at ? ` from ${dayLabel(section.reported_at, now)}` : ""}: ${what}`;
 }

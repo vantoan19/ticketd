@@ -246,6 +246,12 @@ impl<'a> DriveRemote<'a> {
     }
 
     /// Replace the wait between retries, so tests control time.
+    /// Where a person sees the Workspace folder in Drive's own interface.
+    pub fn folder_url(&self, folder: &str) -> Result<String, RemoteError> {
+        let root = self.resolve(folder, true)?.root;
+        Ok(format!("https://drive.google.com/drive/folders/{root}"))
+    }
+
     pub fn with_pause(mut self, pause: impl Fn(Duration) + Send + Sync + 'a) -> Self {
         self.pause = Box::new(pause);
         self

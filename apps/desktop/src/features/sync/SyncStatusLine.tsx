@@ -62,7 +62,13 @@ function describe(status: SyncStatus, now: number): Line {
   const lastSynced = synced ? `Last synced ${synced}` : "Not synced yet";
   const waiting = status.pending_uploads.length;
   const safe = "Everything is saved on this computer";
-  const offline = status.recovery === "offline";
+  // Neither needs a decision: sync tries again by itself.
+  const paused =
+    status.recovery === "offline"
+      ? "Offline"
+      : status.recovery === "rate_limited"
+        ? "Drive is busy"
+        : null;
   const recovery = recoveryCopy(status);
   switch (status.state) {
     case "uploaded":
@@ -90,10 +96,10 @@ function describe(status: SyncStatus, now: number): Line {
         tone: "neutral",
         label: "Saved on this computer",
         detail:
-          [offline && "Offline", waiting && `${changes(waiting)} waiting`]
+          [paused, waiting && `${changes(waiting)} waiting`]
             .filter(Boolean)
             .join(" · ") || "Not uploaded yet",
-        title: offline ? "Offline" : "Saved on this computer",
+        title: paused ?? "Saved on this computer",
         description: safe,
         items: waiting
           ? [
@@ -236,7 +242,10 @@ export function SyncStatusLine() {
                   onClick={() => void run(syncApi.syncNow, "Sync did not run")}
                 >
                   <RefreshCw aria-hidden="true" />
-                  {status.recovery === "offline" ? "Try now" : "Sync now"}
+                  {status.recovery === "offline" ||
+                  status.recovery === "rate_limited"
+                    ? "Try now"
+                    : "Sync now"}
                 </Button>
               )}
               <Button

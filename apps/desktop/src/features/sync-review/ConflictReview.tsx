@@ -11,7 +11,7 @@ import {
   type Resolution,
 } from "@/lib/sync-review-api";
 import { FieldValue } from "./FieldValue";
-import { dayTime, fieldLabel } from "./labels";
+import { conflictLabel, dayTime } from "./labels";
 import "@/features/settings/settings.css";
 import "./sync-review.css";
 
@@ -128,9 +128,9 @@ export function ConflictReview({
               )}
             </span>
           </div>
-          {fields.map(({ field, local, remote, remote_device }) => {
-            const label = fieldLabel(kind, field);
-            const body = field === "body";
+          {fields.map(({ field, section, local, remote, remote_device }) => {
+            const label = conflictLabel(kind, { field, section }, now);
+            const body = field === "body" || field.endsWith(":body");
             const choice = choiceOf(field);
             return (
               <Fragment key={field}>

@@ -331,7 +331,12 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
         <AlertActions>
           <Button
             size="sm"
-            variant={status.recovery === "offline" ? "outline" : "default"}
+            variant={
+              status.recovery === "offline" ||
+              status.recovery === "rate_limited"
+                ? "outline"
+                : "default"
+            }
             disabled={busy}
             onClick={() =>
               void run(syncApi.recover, `${copy.action} did not work`)
