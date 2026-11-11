@@ -832,8 +832,7 @@ impl Supervisor {
                     self.record(vec![ChatObservation::InteractionResolved {
                         interaction_id,
                         state,
-                        response: Some(response)
-                            .filter(|_| state == ChatInteractionState::Answered),
+                        response: (state == ChatInteractionState::Answered).then_some(response),
                     }]);
                 }
                 let _ = reply.send(result);
