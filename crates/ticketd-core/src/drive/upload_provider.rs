@@ -12,9 +12,14 @@ pub(super) fn safe_session_url(value: &str) -> bool {
     let Ok(url) = url::Url::parse(value) else {
         return false;
     };
+    // Creation uploads to the collection; a content update names its file.
+    let path = url.path();
     url.scheme() == "https"
         && url.host_str() == Some("www.googleapis.com")
-        && url.path() == "/upload/drive/v3/files"
+        && (path == "/upload/drive/v3/files"
+            || path
+                .strip_prefix("/upload/drive/v3/files/")
+                .is_some_and(valid_file_id))
         && url.username().is_empty()
         && url.password().is_none()
         && url.port().is_none()
@@ -195,56 +200,85 @@ impl DriveUploadProvider for GoogleDrive<'_> {
             .map(|(_, v)| v)
             .filter(|v| safe_session_url(v))
             .ok_or_else(invalid_response)?;
-        let mut sent = 0;
-        loop {
-            if !progress(sent, total) {
-                return Err(cancelled());
-            }
-            let count = (total - sent).min(256 * 1024) as usize;
-            let mut bytes = vec![0; count];
-            input
-                .read_exact(&mut bytes)
-                .map_err(|_| invalid_response())?;
-            let range = if total == 0 {
-                "bytes */0".into()
-            } else {
-                format!("bytes {}-{}/{total}", sent, sent + count as u64 - 1)
-            };
-            let mut headers = vec![
-                ("Content-Type".into(), "application/octet-stream".into()),
-                ("Content-Range".into(), range),
-            ];
-            headers.extend(authorization.clone());
-            let response = self.transport.send(DriveRequest {
-                method: "PUT",
-                url: session.clone(),
-                headers,
-                body: bytes,
-            })?;
-            sent += count as u64;
-            if matches!(response.status, 200 | 201) {
-                if sent != total {
-                    return Err(invalid_response());
+        let response = send_chunks(
+            total,
+            input,
+            &mut |range, bytes| {
+                let mut headers = vec![
+                    ("Content-Type".into(), "application/octet-stream".into()),
+                    ("Content-Range".into(), range),
+                ];
+                headers.extend(authorization.clone());
+                self.transport.send(DriveRequest {
+                    method: "PUT",
+                    url: session.clone(),
+                    headers,
+                    body: bytes,
+                })
+            },
+            &mut |sent| {
+                if progress(sent, total) {
+                    Ok(())
+                } else {
+                    Err(cancelled())
                 }
-                progress(sent, total);
-                return Ok(());
+            },
+        )?;
+        if !matches!(response.status, 200 | 201) {
+            return Err(metadata_error(&response));
+        }
+        progress(total, total);
+        Ok(())
+    }
+}
+
+/// Sends `total` bytes of `input` to a resumable upload session in 256 KiB
+/// chunks. `put` sends one chunk with its `Content-Range`; `proceed` may stop
+/// the upload before each chunk. Returns the completing response, or the first
+/// response that neither completes nor continues the upload.
+pub(super) fn send_chunks<E: From<DriveError>>(
+    total: u64,
+    input: &mut dyn Read,
+    put: &mut dyn FnMut(String, Vec<u8>) -> Result<DriveResponse, E>,
+    proceed: &mut dyn FnMut(u64) -> Result<(), E>,
+) -> Result<DriveResponse, E> {
+    let mut sent = 0;
+    loop {
+        proceed(sent)?;
+        let count = (total - sent).min(256 * 1024) as usize;
+        let mut bytes = vec![0; count];
+        input
+            .read_exact(&mut bytes)
+            .map_err(|_| invalid_response())?;
+        let range = if total == 0 {
+            "bytes */0".into()
+        } else {
+            format!("bytes {}-{}/{total}", sent, sent + count as u64 - 1)
+        };
+        let response = put(range, bytes)?;
+        sent += count as u64;
+        if matches!(response.status, 200 | 201) {
+            if sent != total {
+                return Err(invalid_response().into());
             }
-            if response.status != 308 {
-                return Err(metadata_error(&response));
-            }
-            let expected = format!("bytes=0-{}", sent.saturating_sub(1));
-            if sent == 0
-                || sent >= total
-                || !response
-                    .headers
-                    .iter()
-                    .any(|(k, v)| k.eq_ignore_ascii_case("range") && v == &expected)
-            {
-                return Err(DriveError::new(
-                    DriveErrorKind::Uncertain,
-                    "Drive upload progress is uncertain; check status before retrying",
-                ));
-            }
+            return Ok(response);
+        }
+        if response.status != 308 {
+            return Ok(response);
+        }
+        let expected = format!("bytes=0-{}", sent.saturating_sub(1));
+        if sent == 0
+            || sent >= total
+            || !response
+                .headers
+                .iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case("range") && v == &expected)
+        {
+            return Err(DriveError::new(
+                DriveErrorKind::Uncertain,
+                "Drive upload progress is uncertain; check status before retrying",
+            )
+            .into());
         }
     }
 }

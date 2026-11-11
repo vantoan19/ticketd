@@ -12,6 +12,7 @@ cargo test --locked -p ticketd-core \
   --test drive_upload_provider --test drive_uploads \
   --test drive_copy_provider --test drive_copy_verification \
   --test drive_portability --test drive_vault --test remote_removal \
+  --test remote_contract --test drive_remote \
   --test attachment_library --test attachment_previews \
   --test attachment_retention --test attachment_backups --test ticket_creation
 cargo test --locked -p ticketd-cli --test attachment_command

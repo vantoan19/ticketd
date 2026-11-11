@@ -92,13 +92,20 @@ impl DriveTransport for GoogleTransport {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
         // Defense in depth: never forward bearer/refresh credentials to redirects or caller URLs.
         let upload_url = super::upload_provider::safe_session_url(&request.url);
+        let files = "https://www.googleapis.com/drive/v3/files";
         let allowed = request.method == "POST"
             && request.url == "https://oauth2.googleapis.com/token"
-            || matches!(request.method, "POST" | "PUT") && upload_url
+            || matches!(request.method, "POST" | "PUT" | "PATCH") && upload_url
+            // Metadata-only creation of the Workspace sync folders.
+            || request.method == "POST" && request.url.starts_with(&format!("{files}?"))
             || request.method == "GET"
                 && (request
                     .url
-                    .starts_with("https://www.googleapis.com/drive/v3/files/")
+                    .strip_prefix(files)
+                    .is_some_and(|rest| rest.starts_with(['/', '?']))
+                    || request
+                        .url
+                        .starts_with("https://www.googleapis.com/drive/v3/changes")
                     || request.url
                         == "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)");
         if !allowed {
@@ -113,6 +120,12 @@ impl DriveTransport for GoogleTransport {
                 builder = builder.header(name, value);
             }
             builder.call()
+        } else if request.method == "PATCH" {
+            let mut builder = self.agent.patch(&request.url);
+            for (name, value) in &request.headers {
+                builder = builder.header(name, value);
+            }
+            builder.send(&request.body)
         } else if request.method == "PUT" {
             let mut builder = self.agent.put(&request.url);
             for (name, value) in &request.headers {
