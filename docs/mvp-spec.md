@@ -327,7 +327,7 @@ See [High-level architecture](architecture.md) for runtime structure, module res
 - Use short transactions, appropriate indexes, lock handling, and atomic updates.
 - Use globally unique identities and schema migrations to preserve future options.
 - Preserve workspace boundaries and necessary change metadata without building a universal database abstraction.
-- Future sync may retain SQLite locally and add a cloud database. Sync requires change propagation, conflict handling, deletion semantics, and authorization; it is not simply a database swap.
+- Personal desktop-to-desktop sync keeps SQLite locally and stores one Markdown file per record in the person's Google Drive (section 20). A later cloud service may add a cloud database; that requires change propagation, conflict handling, deletion semantics, and authorization, and is not simply a database swap.
 - Placing a live database in a file-sync folder is not the product synchronization strategy.
 
 ```mermaid
@@ -425,6 +425,8 @@ These are draft verification criteria for review, not individually approved requ
 
 These exclusions apply to the initial MVP. Section 15 records agreed product
 extensions and future integration intent; it does not commit delivery dates.
+Section 20 later adds personal sync between one person's desktops and a 30-day
+version history of tickets and Documents.
 
 ## 14. Open decisions
 
@@ -1121,3 +1123,109 @@ overwritten, references and authored labels remain unchanged, and no download
 pins a revision, caches remote bytes automatically or changes the provider file.
 Version and other metadata must remain stable during the download; a version
 change since upload alone does not block verified export of matching bytes.
+
+## 20. Workspace sync
+
+A person using ticketd on several desktops gets the same Workspace content and
+managed Attachments on each, through their own Google Drive. Every desktop keeps
+its own local Workspace and remains fully usable offline. There is no ticketd
+account, server or subscription. The decision and its trade-offs are recorded in
+ADR 0011; the file convention is in `docs/sync-file-format.md`.
+
+### 20.1. What is stored in Drive
+
+- ticketd creates one visible folder in the person's Drive under the existing
+  `drive.file` scope. No broader scope is requested.
+- Every ticket, Document, Plan and project is one Markdown file: a header of
+  fields, then the Markdown text. A ticket's authored Activities and
+  Implementation evidence are sections of the ticket's own file.
+- Managed Attachments are ordinary files in an `attachments` folder. They download
+  automatically by default; an optional setting downloads each file when it is
+  first opened. Each Attachment shows whether it is downloaded.
+- Files are not encrypted, and there is no sync password. Setup states plainly
+  that synced content is stored unencrypted in the person's Drive.
+- The live SQLite database is never synchronized.
+
+Synced: tickets, Documents, authored Activities, Plans, projects, tags,
+relationships, Implementation evidence, follows, Ticket reminders and managed
+Attachments. An externally sourced ticket syncs with its provenance.
+
+Local to each desktop: Attention inbox read state, project checkout paths,
+credentials, source connection settings, window layout, unfinished editor drafts
+and upload queues. Workspace sync never publishes to an external tracker.
+
+### 20.2. Setup
+
+- Connect Google Drive, then choose one of two actions: upload this Workspace, or
+  download an existing one from Drive.
+- Downloading replaces the local Workspace after saving a safety backup. Two
+  Workspaces created independently are never merged automatically.
+- A Workspace has one storage destination.
+- A desktop joining sync takes another device code if another desktop already
+  holds its own, so Ticket references issued on different desktops never clash.
+  References already issued never change.
+
+### 20.3. When sync runs
+
+- Sync runs while the desktop app is open: at launch and on reconnect, by polling
+  Drive every minute by default (30 seconds at the least), by uploading a few
+  seconds after a save, and on a Sync now action.
+- On normal exit the app makes a bounded attempt to upload pending changes and
+  reports what is still pending.
+- The CLI stays independent of the desktop and does not contact Drive. Its
+  changes are recorded with the write and upload when the desktop next runs.
+  A change received from Drive is not uploaded again.
+- Local saving continues during outages, exhausted storage or quota and expired
+  authorization. Each has a clear corrective action.
+- The status display distinguishes saved locally, upload pending, uploaded to
+  Drive, Attachment download pending and Needs attention.
+
+### 20.4. Changes made on two desktops
+
+Each desktop keeps a copy of every record as last synced and compares both sides
+with it.
+
+- Different fields changed: both changes are kept without asking.
+- The same field changed: the local value is kept and the record is marked Needs
+  review. A side-by-side comparison of the conflicting fields lets the person
+  choose a value or edit it. The Markdown text is one field; text is not merged
+  automatically.
+- Tags and other sets combine additions and removals. An addition wins over a
+  removal made at the same time. No review is needed.
+- When changes from two desktops together would form a dependency loop, every
+  desktop drops the same dependency, the later one, and shows a notice naming it.
+- No duplicate ticket and no conflict copy of a file is created.
+- Needs review appears as a badge on the record and as an entry in the Attention
+  inbox that opens the comparison.
+
+### 20.5. Trash, missing files and hand edits
+
+- Sync never deletes a record. Trash is a synced field: when one desktop trashes
+  a record that another edited, the record stays in Trash with the edit kept, and
+  restoring is explicit.
+- A file missing from Drive, an empty folder listing or failed authorization is a
+  recovery event. The app uploads again or asks to reconnect; it never deletes
+  local content.
+- A file edited directly in Drive is treated as an edit from another desktop once
+  it validates. An unreadable file is skipped with a Needs attention notice and
+  changes nothing locally. A file created by hand in the folder does not become a
+  record, because ticketd sees only files it created.
+
+### 20.6. Version history
+
+- Each desktop saves the previous version of a ticket or Document whenever a
+  local edit or an incoming sync changes it. Versions are kept for 30 days; the
+  current version is always kept.
+- A History view lists versions and compares one with the current record.
+  Restoring a version is an ordinary edit, which then syncs.
+- Versions stay on the desktop that saved them. On a newly added desktop, History
+  reads that record's earlier versions from Drive's own file revisions on request.
+
+### 20.7. Outside this version
+
+Encryption of synced content, sync passwords and key recovery; collaboration,
+team permissions, and mobile or web clients; ticketd-hosted accounts, servers or
+billing; other storage providers; a background service or CLI-run sync; automatic
+merging of Markdown text or of unrelated Workspaces; permanent deletion and
+automatic expiry of Trash; syncing Attention inbox read state. A later paid
+ticketd cloud may use a stronger protocol.

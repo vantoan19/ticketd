@@ -55,6 +55,14 @@ files and preserves remote files for inspection. Keep its reports under ignored
 `target` output and keep credentials out of Git. The CLI runner never uses the
 person's default Workspace. `google-drive-sync.ps1` in the same directory checks
 the Workspace sync adapter with a saved connection alone; see `tests/live/README.md`.
+It covers storage only: folder discovery, listing, download, update at a current
+and a stale version, Drive revisions and chunked transfer. It does not exercise
+merging, conflict review or the desktop, and it leaves its folder in Drive.
+
+Sync behaviour that does not need Drive is tested in the core against temporary
+Workspaces: the file converter (`sync_files`), change capture (`sync_capture`),
+merge rules (`sync_merge`), version history (`versions`) and device codes
+(`device_references`). These run in `./scripts/check`, not in `check-drive`.
 
 Use an isolated development Workspace for native checks where available. When
 verifying the person's running app, limit writes to dedicated synthetic QA
