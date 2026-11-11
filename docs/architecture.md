@@ -119,6 +119,12 @@ records are authoritative for ticketd's history; reconstructing a Chat from all
 raw provider events is not required. Exact table names and schema are internal
 implementation details.
 
+The storage half of this design exists: the core's Chat workflows
+(`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
+tables do not move the workspace change token, so streaming a turn does not make
+other views refetch; Chat views follow the Chat change log instead. The supervisor,
+adapters and interface are not yet built.
+
 User input and submission attempts are separate. The core saves input before
 dispatch and records possible submission before the adapter hands it to the
 harness. Provider acknowledgment, correlated processing and terminal outcome
