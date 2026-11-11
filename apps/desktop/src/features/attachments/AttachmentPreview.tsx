@@ -35,6 +35,7 @@ import {
   storageWord,
   useAvailability,
 } from "@/features/sync-review/availability";
+import { syncApi } from "@/lib/sync-api";
 
 export type PreviewTarget =
   { uri: string } | { id: string; initial?: Attachment };
@@ -150,6 +151,23 @@ export function AttachmentPreview({
   // The bytes are still in Drive, or on their way: there is nothing to preview
   // yet. Once they arrive the preview is read again.
   const awaited = stored !== undefined && stored.state !== "downloaded";
+  const absent = stored?.state === "not_downloaded" ? stored.id : "";
+  const { download } = availability;
+  // Where Attachments download when opened, opening one is what fetches it:
+  // once per file, so a download that failed waits for the Download button.
+  const fetched = useRef("");
+  useEffect(() => {
+    if (!absent || fetched.current === absent) return;
+    fetched.current = absent;
+    void syncApi
+      .settings()
+      .then((settings) =>
+        settings.attachment_download === "on_open"
+          ? download(absent)
+          : undefined,
+      )
+      .catch((reason: unknown) => setError(String(reason)));
+  }, [absent, download]);
   useEffect(() => {
     const current = ++generation.current;
     void (async () => {

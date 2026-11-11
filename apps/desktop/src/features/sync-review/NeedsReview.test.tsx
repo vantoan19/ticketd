@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { syncReview, type ConflictSummary } from "@/lib/sync-review-api";
 import { TicketList } from "@/features/tickets/TicketList";
 import type { Ticket } from "@/lib/api/client";
+import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 import { NeedsReviewNotice } from "./NeedsReviewNotice";
 
 vi.mock("@/lib/sync-review-api", () => ({
@@ -88,4 +95,20 @@ test("a ticket row says Needs review in place of its readiness", async () => {
   expect(row?.textContent).not.toContain("Ready");
   expect(screen.getAllByText("Needs review")).toHaveLength(1);
   expect(screen.getByText("Ready")).toBeTruthy();
+});
+
+test("conflicts that cannot be read again keep the notice that was showing", async () => {
+  vi.mocked(syncReview.conflicts).mockResolvedValue([conflict]);
+  const view = (change: number) => (
+    <WorkspaceChangeProvider value={change}>
+      <NeedsReviewNotice kind="ticket" id="guid-12" />
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(view(0));
+  await screen.findByRole("region", { name: "Needs review" });
+  vi.mocked(syncReview.conflicts).mockRejectedValue(new Error("busy"));
+  rerender(view(1));
+  await vi.waitFor(() => expect(syncReview.conflicts).toHaveBeenCalledTimes(2));
+  await act(() => new Promise<void>((done) => setTimeout(done)));
+  expect(screen.getByRole("region", { name: "Needs review" })).toBeTruthy();
 });

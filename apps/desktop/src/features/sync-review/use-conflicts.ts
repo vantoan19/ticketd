@@ -4,7 +4,8 @@ import { useWorkspaceChange } from "@/lib/workspace-change";
 
 /**
  * The records that Need review, refreshed whenever the Workspace changes. A
- * Workspace without sync has none, so a failed read is an empty list.
+ * Workspace without sync answers with none. A read that fails says nothing
+ * about the records, so the last answer stays until the next read.
  */
 export function useConflicts(): {
   conflicts: ConflictSummary[];
@@ -19,9 +20,7 @@ export function useConflicts(): {
       (found) => {
         if (active) setConflicts(found);
       },
-      () => {
-        if (active) setConflicts([]);
-      },
+      () => {},
     );
     return () => {
       active = false;

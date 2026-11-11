@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -14,6 +15,7 @@ import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
 import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import { TicketAttachments } from "@/features/tickets/TicketAttachments";
 import type { Ticket } from "@/lib/api/client";
+import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -36,8 +38,10 @@ const files = [
   file("c", "report.md"),
 ];
 let states: Availability[];
+let mode: "automatic" | "on_open";
 
 beforeEach(() => {
+  mode = "automatic";
   states = [
     { id: "a", state: "not_downloaded", progress: null },
     { id: "b", state: "downloading", progress: 40 },
@@ -64,6 +68,13 @@ beforeEach(() => {
       }));
     if (command === "ticket_attachments") return files;
     if (command === "attachment_workspace_id") return "workspace";
+    if (command === "sync_settings")
+      return {
+        desktop_name: "Laptop",
+        device_code: "KQ",
+        poll_interval_secs: 60,
+        attachment_download: mode,
+      };
     if (command === "attachment_preview")
       return {
         attachment: files[0],
@@ -135,4 +146,55 @@ test("the preview of a file that is not downloaded offers Download in place of t
     await screen.findByRole("heading", { name: "Downloading…" }),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+});
+
+test("with Attachments downloaded when opened, opening one that is not here downloads it and shows progress", async () => {
+  mode = "on_open";
+  // The download answers only when the file is here; progress shows meanwhile.
+  vi.mocked(syncReview.download).mockReturnValue(new Promise(() => {}));
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
+  expect(
+    await screen.findByRole("heading", { name: "Downloading…" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+  expect(syncReview.download).toHaveBeenCalledTimes(1);
+});
+
+test("with automatic downloads, a file that did not arrive waits for Download", async () => {
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  await screen.findByRole("button", { name: "Download" });
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("sync_settings"));
+  expect(syncReview.download).not.toHaveBeenCalled();
+});
+
+test("a download on open that fails says why and leaves Download", async () => {
+  mode = "on_open";
+  vi.mocked(syncReview.download).mockRejectedValue(new Error("offline"));
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  expect((await screen.findAllByRole("alert"))[0]?.textContent).toContain(
+    "offline",
+  );
+  expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+  expect(syncReview.download).toHaveBeenCalledTimes(1);
+});
+
+test("availability that cannot be read again keeps what was last known", async () => {
+  const ticket = { id: "t", reference: "T-KQ12", trashed: false } as Ticket;
+  const view = (change: number) => (
+    <WorkspaceChangeProvider value={change}>
+      <TicketAttachments
+        ticket={ticket}
+        revision={0}
+        refresh={async () => {}}
+      />
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(view(0));
+  await screen.findByText("193 B · Not downloaded");
+  vi.mocked(syncReview.availability).mockRejectedValue(new Error("busy"));
+  rerender(view(1));
+  await waitFor(() => expect(syncReview.availability).toHaveBeenCalledTimes(2));
+  await act(() => new Promise<void>((done) => setTimeout(done)));
+  expect(screen.getByText("193 B · Not downloaded")).toBeTruthy();
 });
