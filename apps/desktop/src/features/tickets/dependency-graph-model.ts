@@ -262,11 +262,9 @@ export function openViewport(
   };
 }
 
-const referenceNumber = (reference: string) =>
-  Number(reference.replace(/\D+/g, "")) || 0;
-/** Tickets in T-number order, so a list reads the same every time. */
+/** Tickets by device code, then counter (T-KQ9 before T-KQ10), so a list reads the same every time. */
 export function byReference<T extends { reference: string }>(items: T[]) {
-  return [...items].sort(
-    (a, b) => referenceNumber(a.reference) - referenceNumber(b.reference),
+  return [...items].sort((a, b) =>
+    a.reference.localeCompare(b.reference, undefined, { numeric: true }),
   );
 }

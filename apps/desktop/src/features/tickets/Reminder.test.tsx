@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/api/core", () => {
 });
 
 test("schedules and dismisses a ticket reminder", async () => {
-  const view = render(<Reminder reference="T-1" revision={0} />);
+  const view = render(<Reminder reference="T-KQ1" revision={0} />);
   fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
   fireEvent.change(screen.getByLabelText("Local reminder date and time"), {
     target: { value: "2030-01-01T12:00" },
@@ -30,7 +30,7 @@ test("requires a choice for repeated local times and rejects skipped times", () 
   const original = process.env.TZ;
   process.env.TZ = "America/New_York";
   try {
-    const view = render(<Reminder reference="T-1" revision={0} />);
+    const view = render(<Reminder reference="T-KQ1" revision={0} />);
     fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
     const input = screen.getByLabelText("Local reminder date and time");
     fireEvent.change(input, { target: { value: "2030-03-10T02:30" } });
@@ -83,7 +83,7 @@ test("retries a lost snooze response with the original request and instant", asy
       }
     }
   });
-  const view = render(<Reminder reference="T-2" revision={0} />);
+  const view = render(<Reminder reference="T-KQ2" revision={0} />);
   fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
   await screen.findByText(/Due since/);
   fireEvent.click(screen.getByRole("button", { name: "Snooze 1 hour" }));
@@ -117,7 +117,7 @@ test("prevents a second reminder change while a write is pending", async () => {
         complete = resolve;
       });
   });
-  const view = render(<Reminder reference="T-3" revision={0} />);
+  const view = render(<Reminder reference="T-KQ3" revision={0} />);
   fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
   await screen.findByText(/Scheduled:/);
   const snooze = screen.getByRole("button", { name: "Snooze 1 hour" });

@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory() as home:
     assert json.loads(results[0].stdout) == json.loads(results[1].stdout)
     assert len(run('search', 'Duplicate request marker')[1]) == 1
     failed = command(['batch', '-'], [dict(operation='create', name='rollback', title='Rollback marker', project_id=None),
-                                       dict(operation='change', ticket='T-999999', change=dict(title='invalid'))])
+                                       dict(operation='change', ticket='T-KQ999999', change=dict(title='invalid'))])
     assert failed.returncode != 0 and not run('search', 'Rollback marker')[1]
     with tempfile.TemporaryDirectory() as fresh:
         fresh_env = dict(os.environ, HOME=fresh, XDG_DATA_HOME=fresh)

@@ -104,7 +104,7 @@ pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200),
 /// Columns read by every Document list query; see `summary_from_row`.
 fn summary_columns() -> String {
     format!(
-        "d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name))"
+        "d.id, {HEADING}, (SELECT t.reference FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name))"
     )
 }
 
@@ -244,7 +244,7 @@ impl Workspace {
     pub fn show_document(&self, id: &str) -> Result<Document, Error> {
         self.connection
             .query_row(
-                &format!("SELECT d.id, d.title, d.body, d.created_at, d.updated_at, d.trashed, (SELECT brief FROM activities WHERE id = d.originating_activity_id), d.kept, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = d.originating_activity_id), {HEADING} FROM documents d WHERE d.id = ?1"),
+                &format!("SELECT d.id, d.title, d.body, d.created_at, d.updated_at, d.trashed, (SELECT brief FROM activities WHERE id = d.originating_activity_id), d.kept, (SELECT t.reference FROM activities a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = d.originating_activity_id), {HEADING} FROM documents d WHERE d.id = ?1"),
                 [id],
                 |row| {
                     Ok(Document {

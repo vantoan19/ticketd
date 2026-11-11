@@ -37,7 +37,7 @@ afterEach(() => {
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "1",
   trashed: false,
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Escalate the cache bug",
   status: "In progress",
   body: "Cache entries never expire.",
@@ -57,7 +57,7 @@ const attempt = (
   overrides: Partial<PublicationAttempt> = {},
 ): PublicationAttempt => ({
   id: "a1",
-  reference: "T-1",
+  reference: "T-KQ1",
   provider: "github",
   destination: "acme/api",
   title: "Escalate the cache bug",
@@ -71,7 +71,7 @@ const attempt = (
 });
 
 const eligible = {
-  reference: "T-1",
+  reference: "T-KQ1",
   provider: "github",
   provider_name: "GitHub",
   destination: "acme/api",
@@ -136,7 +136,7 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
     await screen.findByRole("button", { name: /Publish to GitHub/ }),
   );
   const dialog = await screen.findByRole("dialog", {
-    name: /Publish T-1 to GitHub/,
+    name: /Publish T-KQ1 to GitHub/,
   });
   await within(dialog).findByText("Escalate the cache bug");
   expect(
@@ -158,7 +158,7 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
 
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("publish_ticket", {
-      reference: "T-1",
+      reference: "T-KQ1",
       provider: "github",
       destination: "acme/api",
       expectedFingerprint: "00000000000000a1",
@@ -277,7 +277,7 @@ test("blocked publication exports with files without initiating publication", as
     await screen.findByRole("dialog", { name: "Export complete" }),
   ).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("export_markdown_with_files", {
-    source: { kind: "ticket", reference: "T-1" },
+    source: { kind: "ticket", reference: "T-KQ1" },
     output: "C:/sharing",
   });
   expect(
@@ -349,7 +349,7 @@ test("the scrollable publication header keeps its own Close action and closes wi
     await screen.findByRole("button", { name: /Publish to GitHub/ }),
   );
   const dialog = await screen.findByRole("dialog", {
-    name: /Publish T-1 to GitHub/,
+    name: /Publish T-KQ1 to GitHub/,
   });
   const close = within(dialog).getByRole("button", { name: "Close" });
   expect(close.closest('[data-slot="dialog-header"]')).toBeTruthy();
@@ -394,7 +394,7 @@ test("changing repositories waits for that destination's preview before publishi
     await screen.findByRole("button", { name: /Publish to GitHub/ }),
   );
   const dialog = await screen.findByRole("dialog", {
-    name: /Publish T-1 to GitHub/,
+    name: /Publish T-KQ1 to GitHub/,
   });
   const repository = await within(dialog).findByRole("combobox", {
     name: "Repository",
@@ -421,7 +421,7 @@ test("changing repositories waits for that destination's preview before publishi
 
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("publish_ticket", {
-      reference: "T-1",
+      reference: "T-KQ1",
       provider: "github",
       destination: "acme/web",
       expectedFingerprint: "fingerprint-web",
@@ -435,7 +435,7 @@ test("an ineligible ticket says why and offers no Publish action", async () => {
     eligibility: {
       kind: "ineligible",
       reason: "status",
-      message: "T-1 is Done; only Todo, In progress and In review",
+      message: "T-KQ1 is Done; only Todo, In progress and In review",
     },
   });
   rail(ticket({ status: "Done" }));
@@ -452,7 +452,7 @@ test("a trashed ticket's rail says why it cannot be published", async () => {
     eligibility: {
       kind: "ineligible",
       reason: "trashed",
-      message: "T-1 is in the trash; restore it to publish it",
+      message: "T-KQ1 is in the trash; restore it to publish it",
     },
   });
   rail(ticket({ trashed: true }));
@@ -464,7 +464,7 @@ test("a ticket that changed since the preview sends nothing and is previewed aga
   bridgeAnswers(eligible, {
     reject: {
       code: "publication_changed",
-      message: "T-1 changed since it was previewed, so nothing was sent",
+      message: "T-KQ1 changed since it was previewed, so nothing was sent",
     },
   });
   rail(ticket());
@@ -492,7 +492,7 @@ test("a refusal says nothing was created and allows another try", async () => {
     reject: {
       code: "publication_failed",
       message:
-        "T-1 was not published and remains a local ticket: no permission",
+        "T-KQ1 was not published and remains a local ticket: no permission",
     },
   });
   rail(ticket());
@@ -519,7 +519,7 @@ test("an unknown outcome blocks retrying and says the issue may exist", async ()
   bridgeAnswers(eligible, {
     reject: {
       code: "publication_unresolved",
-      message: "T-1: GitHub did not answer. The issue may already exist",
+      message: "T-KQ1: GitHub did not answer. The issue may already exist",
     },
   });
   const refresh = rail(ticket());
@@ -546,7 +546,7 @@ const review = (overrides: Record<string, unknown> = {}) => ({
   known: [
     "ticketd asked GitHub to create “Escalate the cache bug” in acme/api.",
     "The request was sent, but no usable answer came back.",
-    "T-1 is still a local ticket with all its progress and organization.",
+    "T-KQ1 is still a local ticket with all its progress and organization.",
   ],
   unknown: "whether GitHub created an issue for this attempt.",
   note: "Publishing again is blocked: if the issue exists, creating another would duplicate it.",
@@ -633,7 +633,7 @@ test("naming the created issue attaches it and refreshes the ticket", async () =
 
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("resolve_publication", {
-      reference: "T-1",
+      reference: "T-KQ1",
       resolution: { kind: "attach", issue: "12" },
       acceptDifferentContent: false,
     }),
@@ -647,7 +647,7 @@ test("evidence the source cannot give keeps the review open and unresolved", asy
     reject: {
       code: "publication_unverified",
       message:
-        "T-1: this could not be verified (provider unreachable). The attempt stays unresolved; nothing was changed",
+        "T-KQ1: this could not be verified (provider unreachable). The attempt stays unresolved; nothing was changed",
     },
   });
   const refresh = rail(ticket({ publication: attempt() }));
@@ -705,7 +705,7 @@ test("possible matches can be confirmed, and not-created is withheld while they 
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("resolve_publication", {
-      reference: "T-1",
+      reference: "T-KQ1",
       resolution: { kind: "attach", issue: "acme/api#7" },
       acceptDifferentContent: false,
     }),
@@ -734,7 +734,7 @@ test("an issue whose text differs is attached only after the person confirms it"
           throw {
             code: "publication_different_content",
             message:
-              "T-1: acme/api#22 does not hold what ticketd sent: its title is “Unrelated probe” where ticketd sent “Escalate the cache bug”.",
+              "T-KQ1: acme/api#22 does not hold what ticketd sent: its title is “Unrelated probe” where ticketd sent “Escalate the cache bug”.",
             fields: [],
           };
         confirmed = true;
@@ -877,7 +877,7 @@ test("the Actions menu offers publish with the core's disabled reason", async ()
   });
   render(
     <TicketHeader
-      selected="T-1"
+      selected="T-KQ1"
       ticket={ticket({ status: "Done" })}
       expanded={false}
       onExpand={vi.fn()}
@@ -906,7 +906,7 @@ test("publishing from Actions opens the same exact preview before sending", asyn
   bridgeAnswers(eligible);
   render(
     <TicketHeader
-      selected="T-1"
+      selected="T-KQ1"
       ticket={ticket()}
       expanded={false}
       onExpand={vi.fn()}
@@ -926,7 +926,7 @@ test("publishing from Actions opens the same exact preview before sending", asyn
   await waitFor(() => expect(item.getAttribute("data-disabled")).toBeNull());
   fireEvent.click(item);
   expect(
-    await screen.findByRole("dialog", { name: "Publish T-1 to GitHub" }),
+    await screen.findByRole("dialog", { name: "Publish T-KQ1 to GitHub" }),
   ).toBeTruthy();
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),

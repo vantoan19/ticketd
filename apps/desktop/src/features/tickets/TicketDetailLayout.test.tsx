@@ -59,7 +59,7 @@ afterEach(() => {
 
 const ticket: Ticket = {
   id: "1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Ship the rail",
   body: "A description to read.",
   status: "Todo",
@@ -130,7 +130,7 @@ test("the property rail holds Status, Source, Project, Plan, Tags, Relationships
 test("the reading column runs title, state, description, then subtickets, and keeps the rail apart", async () => {
   children = [
     {
-      reference: "T-5",
+      reference: "T-KQ5",
       title: { text: "Part one" },
       status: "Done",
       trashed: false,
@@ -286,14 +286,14 @@ test("Subtickets and Evidence own their add actions even when empty", async () =
 });
 
 test("showing another ticket starts its rail and document at the top", async () => {
-  const other: Ticket = { ...ticket, id: "2", reference: "T-2" };
+  const other: Ticket = { ...ticket, id: "2", reference: "T-KQ2" };
   const props = {
     mention: null,
     expanded: false,
     onExpand: vi.fn(),
     onReturn: vi.fn(),
     setSelected: vi.fn(),
-    details: { "T-1": ticket, "T-2": other },
+    details: { "T-KQ1": ticket, "T-KQ2": other },
     projects: [],
     plans: [],
     revision: 0,
@@ -315,7 +315,7 @@ test("showing another ticket starts its rail and document at the top", async () 
   ) {
     offsets.set(this, value);
   });
-  const view = render(<TicketDetails {...props} selected="T-2" />);
+  const view = render(<TicketDetails {...props} selected="T-KQ2" />);
   await screen.findAllByRole("complementary", { hidden: true });
   const scrollers = () => {
     const [shown] = document.querySelectorAll<HTMLElement>(".detail-content");
@@ -326,7 +326,7 @@ test("showing another ticket starts its rail and document at the top", async () 
     ];
   };
   for (const node of scrollers()) node.scrollTop = 120;
-  view.rerender(<TicketDetails {...props} selected="T-1" />);
+  view.rerender(<TicketDetails {...props} selected="T-KQ1" />);
   for (const node of scrollers()) expect(node.scrollTop).toBe(0);
   vi.restoreAllMocks();
 });

@@ -15,21 +15,21 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 }
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    let mut statement = connection.prepare("SELECT tickets.number, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.parent_id WHERE ticket_parents.child_id = ?1")?;
+    let mut statement = connection.prepare("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.parent_id WHERE ticket_parents.child_id = ?1")?;
     ticket.parent = statement
         .query_row([&ticket.id], |row| {
             Ok(RelatedTicket {
-                reference: format!("T-{}", row.get::<_, i64>(0)?),
+                reference: row.get::<_, String>(0)?,
                 title: row.get(1)?,
                 trashed: row.get(2)?,
             })
         })
         .optional()?;
-    let mut statement = connection.prepare("SELECT tickets.number, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.child_id WHERE ticket_parents.parent_id = ?1 ORDER BY tickets.number")?;
+    let mut statement = connection.prepare("SELECT tickets.reference, tickets.title, tickets.trashed FROM tickets JOIN ticket_parents ON tickets.id = ticket_parents.child_id WHERE ticket_parents.parent_id = ?1 ORDER BY tickets.number")?;
     ticket.children = statement
         .query_map([&ticket.id], |row| {
             Ok(RelatedTicket {
-                reference: format!("T-{}", row.get::<_, i64>(0)?),
+                reference: row.get::<_, String>(0)?,
                 title: row.get(1)?,
                 trashed: row.get(2)?,
             })
@@ -70,7 +70,7 @@ impl Workspace {
         let tx = self.connection.savepoint()?;
         crate::transaction_write_lock(&tx)?;
         let child_id = relationships::id(&tx, child)?;
-        let old: Option<String> = tx.query_row("SELECT 'T-' || tickets.number FROM ticket_parents JOIN tickets ON tickets.id = ticket_parents.parent_id WHERE child_id = ?1", [&child_id], |row| row.get(0)).optional()?;
+        let old: Option<String> = tx.query_row("SELECT tickets.reference FROM ticket_parents JOIN tickets ON tickets.id = ticket_parents.parent_id WHERE child_id = ?1", [&child_id], |row| row.get(0)).optional()?;
         // Removing a link is allowed if either endpoint remains visible.
         if parent.is_none() {
             if let Err(error) = crate::ensure_editable(&tx, &child_id) {

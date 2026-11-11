@@ -62,7 +62,7 @@ test("a change that came from a source reads as the source, not as an agent", as
       ];
     throw new Error(`Unexpected ${command}`);
   });
-  render(<Activity {...props} reference="T-20" />);
+  render(<Activity {...props} reference="T-KQ20" />);
   await screen.findByText("Changed on GitHub");
   expect(screen.queryByText(/Agent:/)).toBeNull();
 });
@@ -98,7 +98,7 @@ test("shows an editing agent only when one was recorded and words history as sen
       ];
     throw new Error(`Unexpected ${command}`);
   });
-  render(<Activity {...props} reference="T-20" />);
+  render(<Activity {...props} reference="T-KQ20" />);
   await screen.findByText("Status Todo → In progress");
   expect(screen.queryByText(/Only in ticketd/)).toBeNull();
   // The agent names its update; an agentless one is the person's own.
@@ -112,7 +112,7 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
     if (command === "activity_feed" || command === "ticket_history") return [];
     throw new Error(`Unexpected ${command}`);
   });
-  const first = render(<Activity {...props} reference="T-21" />);
+  const first = render(<Activity {...props} reference="T-KQ21" />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
@@ -121,10 +121,10 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
     target: { value: "Half-written finding" },
   });
   first.unmount();
-  render(<Activity {...props} reference="T-22" />);
+  render(<Activity {...props} reference="T-KQ22" />);
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
   cleanup();
-  render(<Activity {...props} reference="T-21" />);
+  render(<Activity {...props} reference="T-KQ21" />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
@@ -140,7 +140,7 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
   );
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
   cleanup();
-  render(<Activity {...props} reference="T-21" />);
+  render(<Activity {...props} reference="T-KQ21" />);
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
 });
 
@@ -154,7 +154,7 @@ test("Activity puts the composer before labelled notes and quiet relative histor
   render(
     <Activity
       {...props}
-      reference="T-50"
+      reference="T-KQ50"
       sourceName="GitHub"
       latestNoteId="n"
     />,
@@ -178,7 +178,7 @@ test("an empty composer offers Cancel and says why Post is disabled", async () =
     if (command === "activity_feed" || command === "ticket_history") return [];
     throw new Error(`Unexpected ${command}`);
   });
-  render(<Activity {...props} reference="T-23" />);
+  render(<Activity {...props} reference="T-KQ23" />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   expect(screen.queryByRole("button", { name: "Discard draft" })).toBeNull();
   expect(screen.getByText("Write an update to post.")).toBeTruthy();
@@ -207,7 +207,7 @@ test("Reply starts a new update with a quote of the one it answers", async () =>
     if (command === "ticket_history") return [];
     throw new Error(`Unexpected ${command}`);
   });
-  render(<Activity {...props} reference="T-24" />);
+  render(<Activity {...props} reference="T-KQ24" />);
   await screen.findByText("Found the cause. More detail follows.");
   fireEvent.pointerDown(
     screen.getByRole("button", { name: /Actions for update from/ }),
@@ -243,7 +243,7 @@ test("changes made together share one row, and Updates hides the rows", async ()
         ]
       : [],
   );
-  render(<Activity {...props} reference="T-21" />);
+  render(<Activity {...props} reference="T-KQ21" />);
   await screen.findByText("Added evidence “PR #482” and “fix branch”");
   fireEvent.click(screen.getByRole("radio", { name: "Updates" }));
   expect(screen.queryByText(/Added evidence/)).toBeNull();

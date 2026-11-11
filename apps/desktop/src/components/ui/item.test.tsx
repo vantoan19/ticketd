@@ -9,12 +9,12 @@ test("an Item row keeps its children and accessible names", () => {
     <ul>
       <Item asChild>
         <li>
-          <button type="button">Open T-1</button>
+          <button type="button">Open T-KQ1</button>
         </li>
       </Item>
     </ul>,
   );
   const row = screen.getByRole("listitem");
   expect(row.getAttribute("data-slot")).toBe("item");
-  expect(screen.getByRole("button", { name: "Open T-1" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open T-KQ1" })).toBeTruthy();
 });

@@ -14,6 +14,7 @@ pub use backup_review::{
 };
 mod context;
 mod context_graph;
+mod device;
 pub use context_graph::{
     ContextGraph, ContextGraphContinuation, ContextGraphEdge, ContextGraphNode, ContextGraphPage,
     WorkspaceGraph, WorkspaceGraphRequest,
@@ -99,7 +100,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 55;
+pub const FORMAT_VERSION: i64 = 56;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -612,7 +613,7 @@ impl Workspace {
             transaction.execute_batch("PRAGMA user_version = 34;")?;
         }
         if version < 41 {
-            transaction.execute_batch("CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, number, passage)); CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(number, activity, source_id, passage);")?;
+            transaction.execute_batch(document_links::MENTION_INDEX_SCHEMA)?;
         }
         if version < 35 {
             document_links::migrate(&transaction)?;
@@ -712,15 +713,11 @@ impl Workspace {
         if version < 42 {
             // Rebuildable, ordered projections let graph reads stop after a bounded
             // number of Activity mentions without walking unrelated Activities.
-            transaction.execute_batch("                CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, number, passage));
-                CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
-                INSERT OR IGNORE INTO activity_graph_numbers SELECT a.ticket_id, m.source_id, m.number, m.passage FROM numeric_mentions m JOIN activities a ON a.id=m.source_id WHERE m.activity=1;
+            transaction.execute_batch("                CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
+                INSERT OR IGNORE INTO activity_graph_numbers SELECT a.ticket_id, m.source_id, m.reference, m.passage FROM numeric_mentions m JOIN activities a ON a.id=m.source_id WHERE m.activity=1;
                 INSERT OR IGNORE INTO activity_graph_targets SELECT a.ticket_id, m.activity_id, m.target_id, m.passage FROM activity_mentions m JOIN activities a ON a.id=m.activity_id;
-                CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_insert AFTER INSERT ON numeric_mentions WHEN NEW.activity=1 BEGIN INSERT OR IGNORE INTO activity_graph_numbers SELECT ticket_id, NEW.source_id, NEW.number, NEW.passage FROM activities WHERE id=NEW.source_id; END;
-                CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_delete AFTER DELETE ON numeric_mentions WHEN OLD.activity=1 BEGIN DELETE FROM activity_graph_numbers WHERE activity_id=OLD.source_id AND number=OLD.number AND passage=OLD.passage; END;
                 CREATE TRIGGER IF NOT EXISTS activity_graph_targets_insert AFTER INSERT ON activity_mentions BEGIN INSERT OR IGNORE INTO activity_graph_targets SELECT ticket_id, NEW.activity_id, NEW.target_id, NEW.passage FROM activities WHERE id=NEW.activity_id; END;
                 CREATE TRIGGER IF NOT EXISTS activity_graph_targets_delete AFTER DELETE ON activity_mentions BEGIN DELETE FROM activity_graph_targets WHERE activity_id=OLD.activity_id AND target_id=OLD.target_id AND passage=OLD.passage; END;
-                CREATE INDEX IF NOT EXISTS activity_graph_numbers_source ON activity_graph_numbers(activity_id, number, passage);
                 CREATE INDEX IF NOT EXISTS activity_graph_targets_source ON activity_graph_targets(activity_id, target_id, passage);
                 CREATE INDEX IF NOT EXISTS context_mentions_reverse_full ON context_mentions(target_id, source_id, passage);
                 CREATE INDEX IF NOT EXISTS activity_mentions_reverse_full ON activity_mentions(target_id, activity_id, passage);
@@ -783,6 +780,9 @@ impl Workspace {
         if version < 55 {
             upload_destination::migrate(&transaction)?;
         }
+        if version < 56 {
+            device::migrate(&transaction)?;
+        }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
                 r.get(0)
@@ -829,11 +829,11 @@ impl Workspace {
             plans::ensure_active(&transaction, id)?;
         }
         let id = Uuid::new_v4().to_string();
+        let reference = device::issue_reference(&transaction)?;
         transaction.execute(
-            "INSERT INTO tickets (id, title, status, project_id, plan_id) VALUES (?1, ?2, 'Todo', ?3, ?4)",
-            params![id, title, project_id, plan_id],
+            "INSERT INTO tickets (id, reference, title, status, project_id, plan_id) VALUES (?1, ?2, ?3, 'Todo', ?4, ?5)",
+            params![id, reference, title, project_id, plan_id],
         )?;
-        let number = transaction.last_insert_rowid();
         if let Some(project_id) = project_id {
             history::record(&transaction, &id, "project", "", project_id, None)?;
         }
@@ -841,7 +841,7 @@ impl Workspace {
             history::record(&transaction, &id, "plan", "", plan_id, None)?;
         }
         transaction.commit()?;
-        self.show_ticket(&format!("T-{number}"))
+        self.show_ticket(&reference)
     }
 
     pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
@@ -849,15 +849,12 @@ impl Workspace {
         if title == Some("") {
             return Err(Error::EmptyTitle);
         }
-        let number = reference
-            .strip_prefix("T-")
-            .and_then(|value| value.parse::<i64>().ok());
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
         let ticket = transaction
             .query_row(
-                "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
-                [number],
+                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+                [reference],
                 ticket_from_row,
             )
             .optional()?
@@ -892,8 +889,8 @@ impl Workspace {
             }
             if *plan_id != ticket.plan_id {
                 transaction.execute(
-                    "UPDATE tickets SET plan_id = ?1 WHERE number = ?2",
-                    params![plan_id, number],
+                    "UPDATE tickets SET plan_id = ?1 WHERE id = ?2",
+                    params![plan_id, ticket.id],
                 )?;
                 history::record(
                     &transaction,
@@ -911,8 +908,8 @@ impl Workspace {
             }
             if *project_id != ticket.project_id {
                 transaction.execute(
-                    "UPDATE tickets SET project_id = ?1 WHERE number = ?2",
-                    params![project_id, number],
+                    "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
+                    params![project_id, ticket.id],
                 )?;
                 history::record(
                     &transaction,
@@ -933,7 +930,7 @@ impl Workspace {
                 duplicates::clear(&transaction, &ticket.id, patch.editing_agent.as_deref())?;
             }
         }
-        transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
+        transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE id = ?4", params![title, patch.body, status.to_string(), ticket.id])?;
         if let Some(body) = patch.body.as_deref() {
             document_links::index_body(&transaction, &ticket.id, body)?;
         }
@@ -948,8 +945,8 @@ impl Workspace {
             )?;
         }
         let mut updated = transaction.query_row(
-            "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
-            [number],
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1",
+            [&ticket.id],
             ticket_from_row,
         )?;
         updated.tags = tags::for_ticket(&transaction, &updated.id)?;
@@ -1132,7 +1129,7 @@ impl Workspace {
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
         )?;
         let mut tickets = statement
             .query_map([trashed], ticket_from_row)?
@@ -1149,14 +1146,11 @@ impl Workspace {
     }
 
     pub fn show_ticket(&self, reference: &str) -> Result<Ticket, Error> {
-        let number = reference
-            .strip_prefix("T-")
-            .and_then(|value| value.parse::<i64>().ok());
         let ticket = self
             .connection
             .query_row(
-                "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
-                [number],
+                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+                [reference],
                 ticket_from_row,
             )
             .optional()?;
@@ -1175,7 +1169,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
     Ok(Ticket {
         id: row.get(0)?,
         trashed: row.get(7)?,
-        reference: format!("T-{}", row.get::<_, i64>(1)?),
+        reference: row.get::<_, String>(1)?,
         title: row.get(2)?,
         status: row.get::<_, String>(3)?.parse().map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
@@ -1204,13 +1198,13 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
 
 // All ticket mutations must check this inside the same write transaction.
 pub(crate) fn ensure_editable(connection: &Connection, id: &str) -> Result<(), Error> {
-    let (trashed, number): (bool, i64) = connection.query_row(
-        "SELECT trashed, number FROM tickets WHERE id = ?1",
+    let (trashed, reference): (bool, String) = connection.query_row(
+        "SELECT trashed, reference FROM tickets WHERE id = ?1",
         [id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     if trashed {
-        return Err(Error::Trashed(format!("T-{number}")));
+        return Err(Error::Trashed(reference));
     }
     Ok(())
 }

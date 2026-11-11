@@ -33,7 +33,7 @@ Element.prototype.scrollIntoView = () => {};
 function ticket(id: number, status = "Todo", plan = "launch"): Ticket {
   return {
     id: String(id),
-    reference: `T-${id}`,
+    reference: `T-KQ${id}`,
     title: `Ticket ${id}`,
     body: "",
     status,
@@ -180,7 +180,7 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
   await openPlan();
   chooseView("Board");
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: /^T-1\D/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^T-KQ1\D/ }));
   // The next workspace poll arrives while this newly typed draft is still unsaved.
   await settle(1900);
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
@@ -195,7 +195,7 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
       availability: "Blocked",
       prerequisites: [
         {
-          reference: "T-2",
+          reference: "T-KQ2",
           title: "Ticket 2",
           status: "In review",
           trashed: false,
@@ -209,16 +209,16 @@ test("workspace changes refresh Plan membership, status, counts, and readiness w
   const board = within(
     screen.getByRole("region", { name: "Ticket status board" }),
   );
-  expect(board.queryByRole("button", { name: /^T-1\D/ })).toBeNull();
+  expect(board.queryByRole("button", { name: /^T-KQ1\D/ })).toBeNull();
   expect(
     within(screen.getByRole("region", { name: "In review column" })).getByRole(
       "button",
-      { name: /^T-2\D/ },
+      { name: /^T-KQ2\D/ },
     ),
   ).toBeTruthy();
   expect(
-    within(screen.getByRole("button", { name: /^T-4\D/ })).getByText(
-      "Blocked by T-2",
+    within(screen.getByRole("button", { name: /^T-KQ4\D/ })).getByText(
+      "Blocked by T-KQ2",
     ),
   ).toBeTruthy();
   expect(screen.getByLabelText("Tickets by status").textContent).toContain(
@@ -260,8 +260,8 @@ test("a delayed previous Plan response cannot replace the current Plan's Board o
   const board = within(
     screen.getByRole("region", { name: "Ticket status board" }),
   );
-  expect(board.getByRole("button", { name: /^T-3\D/ })).toBeTruthy();
-  expect(board.queryByRole("button", { name: /^T-1\D/ })).toBeNull();
+  expect(board.getByRole("button", { name: /^T-KQ3\D/ })).toBeTruthy();
+  expect(board.queryByRole("button", { name: /^T-KQ1\D/ })).toBeNull();
   expect(screen.getByLabelText("Tickets by status").textContent).toContain(
     "In review1",
   );
@@ -292,7 +292,7 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   expect(
     screen.queryByRole("button", { name: /^Remove T-.* from Launch/ }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /^T-1\D/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^T-KQ1\D/ }));
   await settle();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "disabled",
@@ -326,7 +326,7 @@ test("Plan ticket details retain their draft and return to the same Board positi
   await settle();
   const board = screen.getByRole("region", { name: "Ticket status board" });
   board.scrollLeft = 420;
-  const card = within(board).getByRole("button", { name: /^T-1\D/ });
+  const card = within(board).getByRole("button", { name: /^T-KQ1\D/ });
   card.focus();
   fireEvent.click(card);
   await settle();
@@ -417,7 +417,7 @@ test("Plans remember List and Board independently of Dependencies while preservi
   expect(
     screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
   ).toBe("true");
-  expect(screen.getByRole("button", { name: /T-3.*Ticket 3/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /T-KQ3.*Ticket 3/ })).toBeTruthy();
 });
 
 test("a Plan's chosen ticket layout survives restarting the desktop", async () => {
@@ -455,7 +455,7 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   ];
   saved[1] = {
     ...ticket(2),
-    parent: { reference: "T-1", title: "Ticket 1", trashed: false },
+    parent: { reference: "T-KQ1", title: "Ticket 1", trashed: false },
   };
   render(<App />);
   await settle();
@@ -477,18 +477,22 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
     "Duplicate",
   ]);
   expect(todo.getByText("50 of 55 loaded")).toBeTruthy();
-  const parent = todo.getByRole("button", { name: /^T-1\D/ });
-  const child = todo.getByRole("button", { name: /^T-2\D/ });
+  const parent = todo.getByRole("button", { name: /^T-KQ1\D/ });
+  const child = todo.getByRole("button", { name: /^T-KQ2\D/ });
   expect(within(parent).getByText("Alpha")).toBeTruthy();
   expect(within(child).getByText("Beta")).toBeTruthy();
-  expect(within(child).getByText("Subticket of T-1")).toBeTruthy();
+  expect(within(child).getByText("Subticket of T-KQ1")).toBeTruthy();
   expect(within(parent).queryByText("Launch")).toBeNull();
-  expect(within(board).queryByRole("button", { name: /^T-201\D/ })).toBeNull();
-  expect(within(board).queryByRole("button", { name: /^T-202\D/ })).toBeNull();
+  expect(
+    within(board).queryByRole("button", { name: /^T-KQ201\D/ }),
+  ).toBeNull();
+  expect(
+    within(board).queryByRole("button", { name: /^T-KQ202\D/ }),
+  ).toBeNull();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
-      { name: /^T-200\D/ },
+      { name: /^T-KQ200\D/ },
     ),
   ).toBeTruthy();
   fireEvent.click(todo.getByRole("button", { name: "Load more Todo" }));

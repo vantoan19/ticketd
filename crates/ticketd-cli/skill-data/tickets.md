@@ -6,8 +6,8 @@
 ticketd project list
 ticketd list --project PROJECT_ID --limit 20
 ticketd search "search text" --project PROJECT_ID --limit 20
-ticketd show T-1
-ticketd context T-1 --relationships --latest-update
+ticketd show T-KQ1
+ticketd context T-KQ1 --relationships --latest-update
 ```
 
 `list` and `search` combine filters; inspect their help for status, tags, Plan,
@@ -27,10 +27,10 @@ which system can edit authoritative fields; see `skills get sources`.
 
 ```sh
 ticketd create "Example ticket" --project PROJECT_ID
-ticketd change T-1 --body-file description.md
-ticketd change T-1 --status "In progress" --agent agent-name
-ticketd add-tag T-1 research
-ticketd remove-tag T-1 research
+ticketd change T-KQ1 --body-file description.md
+ticketd change T-KQ1 --status "In progress" --agent agent-name
+ticketd add-tag T-KQ1 research
+ticketd remove-tag T-KQ1 research
 ```
 
 Creation requires only a title. Direct `create` can also take `--plan`; without an
@@ -57,19 +57,19 @@ or trashing an unfinished blocker does not satisfy its dependents.
 ## Relationships and evidence
 
 ```sh
-ticketd set-parent T-2 --parent T-1
-ticketd add-dependency T-1 T-2
-ticketd add-relationship T-1 T-2 related
-ticketd add-relationship T-1 T-2 discovered
-ticketd evidence add T-1 --kind branch --name branch --value feature/example
-ticketd evidence list T-1
+ticketd set-parent T-KQ2 --parent T-KQ1
+ticketd add-dependency T-KQ1 T-KQ2
+ticketd add-relationship T-KQ1 T-KQ2 related
+ticketd add-relationship T-KQ1 T-KQ2 discovered
+ticketd evidence add T-KQ1 --kind branch --name branch --value feature/example
+ticketd evidence list T-KQ1
 ```
 
 The first dependency argument blocks the second. For `discovered`, the first
 ticket is the work during which the second was discovered. `related` is symmetric;
 neither contextual relationship affects readiness. Parent/subticket hierarchy
 is separate from dependencies and supports one level. Project and Plan membership
-are independent between parent and child. Detach with `set-parent T-2` (no
+are independent between parent and child. Detach with `set-parent T-KQ2` (no
 `--parent`), `remove-dependency`, or `remove-relationship` as appropriate.
 
 Evidence kinds include `branch`, `worktree`, `pull-request`, `commit`, and
@@ -83,7 +83,7 @@ Use evidence IDs returned by `evidence list` for edit/delete operations.
 project; `unregister` removes a registration. Discover existing projects before
 creating one. Paths are native to the OS; WSL interoperability is not validated.
 
-`trash T-1` hides a ticket while preserving its data and relationships.
-`trash-list` finds hidden tickets; `restore T-1` returns one to ordinary visibility.
+`trash T-KQ1` hides a ticket while preserving its data and relationships.
+`trash-list` finds hidden tickets; `restore T-KQ1` returns one to ordinary visibility.
 A trashed ticket must be restored before editing. Ticket trash is distinct from
 permanent deletion, Plan archiving, and workspace restore.

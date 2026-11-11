@@ -518,7 +518,7 @@ test("discovery uses the core's imported references and Discard restores saved r
     ...preview,
     new: 0,
     already_here: 1,
-    issues: [{ ...preview.issues[0]!, ticket: "T-142" }],
+    issues: [{ ...preview.issues[0]!, ticket: "T-KQ142" }],
   });
   render(
     <SourceCard
@@ -546,7 +546,7 @@ test("discovery uses the core's imported references and Discard restores saved r
       .map((cell) => cell.textContent),
   ).toEqual(["Issue", "Title", "In ticketd"]);
   expect(screen.getByText("0 new · 1 already here")).toBeTruthy();
-  expect(table.textContent).toContain("Already T-142");
+  expect(table.textContent).toContain("Already T-KQ142");
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
   expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "");
   expect(screen.getByText("Saved configuration")).toBeTruthy();

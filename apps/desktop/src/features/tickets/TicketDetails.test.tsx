@@ -22,11 +22,11 @@ test("relationship navigation replaces the reference and focuses it outside the 
     updateTicket: vi.fn(),
     details: {},
   };
-  const { rerender } = render(<TicketDetails {...props} selected="T-39" />);
-  const previous = screen.getByRole("heading", { name: "T-39" });
+  const { rerender } = render(<TicketDetails {...props} selected="T-KQ39" />);
+  const previous = screen.getByRole("heading", { name: "T-KQ39" });
   previous.focus();
-  rerender(<TicketDetails {...props} selected="T-21" />);
-  const heading = screen.getByRole("heading", { name: "T-21" });
+  rerender(<TicketDetails {...props} selected="T-KQ21" />);
+  const heading = screen.getByRole("heading", { name: "T-KQ21" });
   expect(document.activeElement).toBe(heading);
   expect(heading.closest(".detail-scroll")).toBeNull();
   expect(document.querySelector(".detail-scroll")).toBeTruthy();
@@ -50,7 +50,7 @@ test("side by side, the document and the rail are separate bounded scrollers", (
 test("trashed ticket descriptions remain readable without editing controls", () => {
   const ticket: Ticket = {
     id: "trash",
-    reference: "T-2",
+    reference: "T-KQ2",
     title: "Trashed",
     status: "Todo",
     trashed: true,
@@ -65,13 +65,13 @@ test("trashed ticket descriptions remain readable without editing controls", () 
   };
   render(
     <TicketDetails
-      selected="T-2"
+      selected="T-KQ2"
       mention={null}
       expanded={false}
       onExpand={vi.fn()}
       onReturn={vi.fn()}
       setSelected={vi.fn()}
-      details={{ "T-2": ticket }}
+      details={{ "T-KQ2": ticket }}
       projects={[]}
       plans={[]}
       revision={0}
@@ -93,7 +93,7 @@ test("trashed ticket descriptions remain readable without editing controls", () 
 test("the full-width view marks the reading column and drops the repeated heading", () => {
   const ticket: Ticket = {
     id: "wide",
-    reference: "T-3",
+    reference: "T-KQ3",
     title: "Wide",
     status: "Todo",
     trashed: false,
@@ -108,13 +108,13 @@ test("the full-width view marks the reading column and drops the repeated headin
   };
   const { container } = render(
     <TicketDetails
-      selected="T-3"
+      selected="T-KQ3"
       mention={null}
       expanded
       onExpand={vi.fn()}
       onReturn={vi.fn()}
       setSelected={vi.fn()}
-      details={{ "T-3": ticket }}
+      details={{ "T-KQ3": ticket }}
       projects={[]}
       plans={[]}
       revision={0}

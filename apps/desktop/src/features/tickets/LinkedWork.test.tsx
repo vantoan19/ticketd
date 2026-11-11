@@ -24,7 +24,7 @@ afterEach(() => {
 
 const base: Ticket = {
   id: "1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Work",
   body: "",
   status: "Todo",
@@ -106,7 +106,7 @@ function bridge(
       };
     }
     if (command === "search_tickets")
-      return [other("T-5", "Target"), other("T-1", "Itself")];
+      return [other("T-KQ5", "Target"), other("T-KQ1", "Itself")];
     return base;
   });
 }
@@ -163,13 +163,13 @@ test("a ticket with no links still offers its Context graph", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Open context graph" }),
   );
-  expect(open).toHaveBeenCalledWith("T-1");
+  expect(open).toHaveBeenCalledWith("T-KQ1");
 });
 
 test("a trashed ticket still shows its relationships, without actions to change them", async () => {
   bridge({
     prerequisites: [
-      { reference: "T-2", title: "Blocker", status: "In progress" },
+      { reference: "T-KQ2", title: "Blocker", status: "In progress" },
     ],
   });
   renderSection({ ...base, trashed: true });
@@ -200,21 +200,25 @@ test("loading and a failed read are distinct from having no links", async () => 
 
 test("builds every row from the one relationships read, including all dependents", async () => {
   bridge({
-    related: [{ reference: "T-4", title: "Sibling" }],
+    related: [{ reference: "T-KQ4", title: "Sibling" }],
     blocking: [
-      { reference: "T-6", title: "Waiting" },
-      { reference: "T-7", title: "Also waiting" },
+      { reference: "T-KQ6", title: "Waiting" },
+      { reference: "T-KQ7", title: "Also waiting" },
     ],
     prerequisites: [
       {
-        reference: "T-2",
+        reference: "T-KQ2",
         title: "Blocker",
         status: "In progress",
         trashed: true,
       },
     ],
-    parent: { reference: "T-3", title: "Epic" },
-    duplicate_of: { reference: "T-9", title: "Original", status: "Duplicate" },
+    parent: { reference: "T-KQ3", title: "Epic" },
+    duplicate_of: {
+      reference: "T-KQ9",
+      title: "Original",
+      status: "Duplicate",
+    },
   });
   renderSection(base);
   await screen.findByText("Sibling");
@@ -246,14 +250,14 @@ test("builds every row from the one relationships read, including all dependents
 });
 
 test("shows n+ and loads the next page when more links exist", async () => {
-  bridge({ related: [{ reference: "T-4", title: "Sibling" }], more: 20 });
+  bridge({ related: [{ reference: "T-KQ4", title: "Sibling" }], more: 20 });
   renderSection(base);
   await screen.findByText("Sibling");
   expect(screen.getByRole("button", { name: "Show more links" })).toBeTruthy();
 });
 
 test("the Dependencies action opens the dependency graph", async () => {
-  bridge({ prerequisites: [{ reference: "T-2", title: "Blocker" }] });
+  bridge({ prerequisites: [{ reference: "T-KQ2", title: "Blocker" }] });
   const onOpenGraph = vi.fn();
   renderSection(base, undefined, onOpenGraph);
   fireEvent.click(await screen.findByRole("button", { name: "Dependencies" }));
@@ -261,17 +265,17 @@ test("the Dependencies action opens the dependency graph", async () => {
 });
 
 test("Remove relationship takes the link off the ticket", async () => {
-  bridge({ prerequisites: [{ reference: "T-2", title: "Blocker" }] });
+  bridge({ prerequisites: [{ reference: "T-KQ2", title: "Blocker" }] });
   const refresh = renderSection(base);
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Remove relationship: Blocked by T-2",
+      name: "Remove relationship: Blocked by T-KQ2",
     }),
   );
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("remove_dependency", {
-      blocker: "T-2",
-      dependent: "T-1",
+      blocker: "T-KQ2",
+      dependent: "T-KQ1",
     }),
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -279,18 +283,20 @@ test("Remove relationship takes the link off the ticket", async () => {
 
 test("removing a duplicate link explains the result before anything changes", async () => {
   bridge({
-    duplicate_of: { reference: "T-9", title: "Original", status: "Todo" },
+    duplicate_of: { reference: "T-KQ9", title: "Original", status: "Todo" },
   });
-  const refresh = renderSection({ ...base, duplicate_of: "T-9" });
+  const refresh = renderSection({ ...base, duplicate_of: "T-KQ9" });
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Remove relationship: Duplicate of T-9",
+      name: "Remove relationship: Duplicate of T-KQ9",
     }),
   );
   const confirm = await screen.findByRole("dialog", {
     name: "Remove duplicate link",
   });
-  expect(confirm.textContent).toContain("T-1 stops being a duplicate of T-9");
+  expect(confirm.textContent).toContain(
+    "T-KQ1 stops being a duplicate of T-KQ9",
+  );
   expect(confirm.textContent).toContain("review them separately");
   expect(invoke).not.toHaveBeenCalledWith(
     "remove_duplicate",
@@ -302,7 +308,7 @@ test("removing a duplicate link explains the result before anything changes", as
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith(
       "remove_duplicate",
-      expect.objectContaining({ source: "T-1" }),
+      expect.objectContaining({ source: "T-KQ1" }),
     ),
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -315,7 +321,7 @@ async function chooseTarget() {
   });
   const matches = await screen.findByRole("list", { name: "Matches" });
   expect(within(matches).queryByText("Itself")).toBeNull();
-  fireEvent.click(within(matches).getByRole("button", { name: /T-5/ }));
+  fireEvent.click(within(matches).getByRole("button", { name: /T-KQ5/ }));
 }
 
 async function chooseRelationship(kind: string) {
@@ -340,8 +346,8 @@ test("Link ticket adds a relationship in the chosen direction", async () => {
   );
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("add_dependency", {
-      blocker: "T-1",
-      dependent: "T-5",
+      blocker: "T-KQ1",
+      dependent: "T-KQ5",
     }),
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -366,22 +372,22 @@ test("choosing a new parent says it replaces the current one", async () => {
   bridge();
   renderSection({
     ...base,
-    parent: { reference: "T-3", title: "Epic", trashed: false },
+    parent: { reference: "T-KQ3", title: "Epic", trashed: false },
   });
   fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).queryByRole("status")).toBeNull();
   await chooseRelationship("parent");
   expect(within(dialog).getByRole("status").textContent).toBe(
-    "This replaces the current parent T-3.",
+    "This replaces the current parent T-KQ3.",
   );
 });
 
 test("subtickets read under the description with local progress, not in the rail", async () => {
   bridge({
     children: [
-      { reference: "T-8", title: "Finished part", status: "Done" },
-      { reference: "T-9", title: "Open part", status: "In progress" },
+      { reference: "T-KQ8", title: "Finished part", status: "Done" },
+      { reference: "T-KQ9", title: "Open part", status: "In progress" },
     ],
   });
   renderSection(base);
@@ -394,13 +400,13 @@ test("subtickets read under the description with local progress, not in the rail
   // The rail's Relationships holds no subtickets, so it collapses to its action.
   expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
   expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual(
-    [expect.stringContaining("T-8"), expect.stringContaining("T-9")],
+    [expect.stringContaining("T-KQ8"), expect.stringContaining("T-KQ9")],
   );
 });
 
 test("Add subticket opens the link dialog already saying this ticket is the parent", async () => {
   bridge({
-    children: [{ reference: "T-8", title: "Part", status: "Todo" }],
+    children: [{ reference: "T-KQ8", title: "Part", status: "Todo" }],
   });
   renderSection(base);
   fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
@@ -464,14 +470,14 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
   expect(within(row).queryByRole("button")).toBeNull();
   view.rerender(
     <Section
-      ticket={duplicate(target({ ticket: "T-7" }))}
+      ticket={duplicate(target({ ticket: "T-KQ7" }))}
       refresh={async () => {}}
       onOpenGraph={() => {}}
     />,
   );
-  const resolved = (await screen.findByRole("button", { name: "T-7" })).closest(
-    "li",
-  )!;
+  const resolved = (
+    await screen.findByRole("button", { name: "T-KQ7" })
+  ).closest("li")!;
   expect(within(resolved).getByText("acme/api#9")).toBeTruthy();
   view.rerender(
     <Section

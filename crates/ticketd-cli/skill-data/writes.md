@@ -25,7 +25,7 @@ request does not infer a project from the working directory.
 
 ## Guarded edits
 
-Read `show T-1` first. To replace its body only if it still equals what was read:
+Read `show T-KQ1` first. To replace its body only if it still equals what was read:
 
 ```json
 {

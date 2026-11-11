@@ -593,7 +593,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-const ATTEMPT_COLUMNS: &str = "a.id, t.number, a.provider, a.destination, a.title, a.body, a.status, \
+const ATTEMPT_COLUMNS: &str = "a.id, t.reference, a.provider, a.destination, a.title, a.body, a.status, \
      a.started_at, a.updated_at, a.failure_code, a.failure_message, a.external_id, a.locator, \
      a.display, a.url, a.lease_expires_at";
 
@@ -647,7 +647,7 @@ fn attempt_from_row(row: &rusqlite::Row<'_>, now: &str) -> rusqlite::Result<Publ
     };
     Ok(PublicationAttempt {
         id: row.get(0)?,
-        reference: format!("T-{}", row.get::<_, i64>(1)?),
+        reference: row.get::<_, String>(1)?,
         issue: external_id
             .zip(locator)
             .map(|(id, locator)| PublishedIssue {
@@ -722,18 +722,15 @@ struct Subject {
 }
 
 fn subject(connection: &Connection, reference: &str) -> Result<Subject, Error> {
-    let number = reference
-        .strip_prefix("T-")
-        .and_then(|value| value.parse::<i64>().ok());
     connection
         .query_row(
-            "SELECT id, number, title, body, status, trashed FROM tickets WHERE number = ?1",
-            [number],
+            "SELECT id, reference, title, body, status, trashed FROM tickets WHERE reference = ?1",
+            [reference],
             |row| {
                 let status: String = row.get(4)?;
                 Ok(Subject {
                     id: row.get(0)?,
-                    reference: format!("T-{}", row.get::<_, i64>(1)?),
+                    reference: row.get::<_, String>(1)?,
                     title: row.get(2)?,
                     body: row.get(3)?,
                     status: status.parse().map_err(|e| {
@@ -971,7 +968,7 @@ impl Workspace {
                 plan: self.connection.query_row("SELECT e.name FROM tickets t JOIN plans e ON e.id = t.plan_id WHERE t.id = ?1", [&ticket.id], |row| row.get(0)).optional()?,
                 tags: crate::tags::for_ticket(&self.connection, &ticket.id)?,
                 subtickets: {
-                    let mut statement = self.connection.prepare("SELECT 'T-' || t.number FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1 ORDER BY t.number")?;
+                    let mut statement = self.connection.prepare("SELECT t.reference FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1 ORDER BY t.number")?;
                     statement.query_map([&ticket.id], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?
                 },
                 attachments: self.connection.query_row("SELECT COUNT(*) FROM ticket_attachments WHERE ticket_id = ?1", [&ticket.id], |row| row.get(0))?,

@@ -61,7 +61,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "1",
   trashed: false,
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Imported issue",
   status: "Todo",
   body: "Described on GitHub",
@@ -255,7 +255,7 @@ test("a resolved canonical issue opens its local ticket, and a loop is not follo
         status: "Duplicate",
         source: source({
           ...closed,
-          duplicate_target: { ...external, ticket: "T-9" },
+          duplicate_target: { ...external, ticket: "T-KQ9" },
         }),
       })}
       projects={[]}
@@ -265,9 +265,9 @@ test("a resolved canonical issue opens its local ticket, and a loop is not follo
       onOpenTicket={onOpen}
     />,
   );
-  expect(screen.getByText("Duplicate of T-9 (acme/api#7)")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Open T-9" }));
-  expect(onOpen).toHaveBeenCalledWith("T-9");
+  expect(screen.getByText("Duplicate of T-KQ9 (acme/api#7)")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open T-KQ9" }));
+  expect(onOpen).toHaveBeenCalledWith("T-KQ9");
   const rows = (target: object) =>
     rowContextItem(
       ticket({
@@ -276,7 +276,7 @@ test("a resolved canonical issue opens its local ticket, and a loop is not follo
       }),
       { showPlan: false, showProject: false, plans: [], projects: [] },
     )?.label ?? null;
-  expect(rows({ ...external, ticket: "T-9" })).toBe("Duplicate of T-9");
+  expect(rows({ ...external, ticket: "T-KQ9" })).toBe("Duplicate of T-KQ9");
   expect(rows({ ...external, problem: "cycle" })).toBe(
     "Duplicate of acme/api#7",
   );
@@ -290,7 +290,7 @@ test("the Source section shows the owner, the state, freshness and refreshes one
       : command === "refresh_sources"
         ? {
             imported: [],
-            updated: ["T-1"],
+            updated: ["T-KQ1"],
             unchanged: 0,
             failures: [],
             refreshed_at: "2026-02-02T00:00:00Z",
@@ -314,7 +314,7 @@ test("the Source section shows the owner, the state, freshness and refreshes one
   fireEvent.click(within(section).getByRole("button", { name: "Refresh" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
-    ticket: "T-1",
+    ticket: "T-KQ1",
   });
   fireEvent.click(within(section).getByRole("link", { name: "acme/api#98" }));
   await waitFor(() =>
@@ -336,7 +336,7 @@ test("a failed refresh keeps the content and says the last attempt failed", asyn
             failures: [
               {
                 provider: "github",
-                reference: "T-1",
+                reference: "T-KQ1",
                 code: "unavailable",
                 message: "GitHub is down.",
               },
@@ -462,7 +462,7 @@ test("a row shows the owner's pill and a local row shows none", () => {
     <TicketList
       tickets={[
         ticket(),
-        ticket({ id: "2", reference: "T-2", title: "Mine", source: null }),
+        ticket({ id: "2", reference: "T-KQ2", title: "Mine", source: null }),
       ]}
       selected={null}
       onOpen={vi.fn()}
@@ -535,12 +535,12 @@ test("source wording: location, state and freshness", () => {
 
 test("a local child explains its independent ownership when its parent belongs to GitHub", async () => {
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "show_ticket" ? ticket({ reference: "T-2" }) : [],
+    command === "show_ticket" ? ticket({ reference: "T-KQ2" }) : [],
   );
   properties(
     ticket({
       source: null,
-      parent: { reference: "T-2", title: "Parent", trashed: false },
+      parent: { reference: "T-KQ2", title: "Parent", trashed: false },
     }),
   );
   expect(screen.getByText(/^Created in ticketd\./)).toBeTruthy();

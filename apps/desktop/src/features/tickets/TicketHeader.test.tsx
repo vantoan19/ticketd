@@ -24,7 +24,7 @@ Element.prototype.releasePointerCapture = () => {};
 
 const ticket: Ticket = {
   id: "1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Ticket",
   body: "",
   status: "Todo",
@@ -64,7 +64,7 @@ afterEach(() => {
 });
 function header(overrides: Partial<Parameters<typeof TicketHeader>[0]> = {}) {
   const props = {
-    selected: "T-1",
+    selected: "T-KQ1",
     ticket,
     expanded: false,
     onExpand: vi.fn(),
@@ -92,18 +92,18 @@ async function chooseAction(name: string) {
 
 test("leads with the reference and no repeated Ticket details heading", () => {
   header();
-  expect(screen.getByRole("heading", { name: "T-1" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "T-KQ1" })).toBeTruthy();
   expect(screen.queryByText("Ticket details")).toBeNull();
 });
 
 test("copies the reference from the header and the context command from the menu", async () => {
   header();
   fireEvent.click(screen.getByRole("button", { name: "Copy reference" }));
-  await waitFor(() => expect(writeText).toHaveBeenCalledWith("T-1"));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("T-KQ1"));
   await chooseAction("Copy context command");
   await waitFor(() =>
     expect(writeText).toHaveBeenLastCalledWith(
-      "ticketd context T-1 --relationships --activities --evidence",
+      "ticketd context T-KQ1 --relationships --activities --evidence",
     ),
   );
 });
@@ -140,7 +140,7 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
   expect(props.onOpenGraph).toHaveBeenCalled();
   await chooseAction("Mark as duplicate…");
   expect(
-    await screen.findByRole("dialog", { name: "Mark T-1 as a duplicate" }),
+    await screen.findByRole("dialog", { name: "Mark T-KQ1 as a duplicate" }),
   ).toBeTruthy();
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -150,7 +150,7 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
   await chooseAction("Trash ticket");
   await waitFor(() => expect(props.updateTicket).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("set_trashed", {
-    reference: "T-1",
+    reference: "T-KQ1",
     trashed: true,
   });
 });

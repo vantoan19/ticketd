@@ -255,7 +255,9 @@ impl Fixture {
     }
 
     fn ticket(&self, number: u32) -> Ticket {
-        self.workspace.show_ticket(&format!("T-{number}")).unwrap()
+        self.workspace
+            .show_ticket(&format!("T-KQ{number}"))
+            .unwrap()
     }
 
     fn set_state(&self, id: u64, state: ExternalState) {
@@ -325,7 +327,7 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
     let plan = f.workspace.create_plan("Launch").unwrap();
     f.workspace
         .change_ticket(
-            "T-1",
+            "T-KQ1",
             TicketPatch {
                 plan_id: Some(Some(plan.id.clone())),
                 status: Some(Status::InProgress),
@@ -333,22 +335,22 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
             },
         )
         .unwrap();
-    f.workspace.add_tag("T-1", "backend").unwrap();
+    f.workspace.add_tag("T-KQ1", "backend").unwrap();
     f.workspace
-        .add_activity("T-1", "local observation", None)
+        .add_activity("T-KQ1", "local observation", None)
         .unwrap();
     let blocker = f.workspace.create_ticket("Prerequisite").unwrap();
     f.workspace
-        .add_dependency(&blocker.reference, "T-1", None)
+        .add_dependency(&blocker.reference, "T-KQ1", None)
         .unwrap();
     let child = f.workspace.create_ticket("Detail").unwrap();
     f.workspace
-        .set_parent(&child.reference, Some("T-1"), None)
+        .set_parent(&child.reference, Some("T-KQ1"), None)
         .unwrap();
 
     f.publish(issue(1, "Retitled"), true);
     let report = f.refresh();
-    assert_eq!(report.updated, vec!["T-1".to_owned()]);
+    assert_eq!(report.updated, vec!["T-KQ1".to_owned()]);
     f.refresh();
 
     let ticket = f.ticket(1);
@@ -359,7 +361,7 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
     assert_eq!(ticket.tags, vec!["backend".to_owned()]);
     assert_eq!(ticket.prerequisites.len(), 1);
     assert_eq!(ticket.children.len(), 1);
-    assert_eq!(f.workspace.activities("T-1", 10, 0).unwrap().len(), 1);
+    assert_eq!(f.workspace.activities("T-KQ1", 10, 0).unwrap().len(), 1);
     // Local progress is never sent anywhere: the fake has no write path, and the
     // remote issue is still open.
     assert_eq!(
@@ -376,7 +378,7 @@ fn closure_reasons_map_to_statuses_and_unknown_ones_are_flagged_not_guessed() {
     }
     f.refresh();
     f.workspace
-        .change_ticket("T-4", progress(Status::InReview))
+        .change_ticket("T-KQ4", progress(Status::InReview))
         .unwrap();
     f.set_state(1, closed(ClosureReason::Completed));
     f.set_state(2, closed(ClosureReason::NotPlanned));
@@ -398,7 +400,7 @@ fn closure_reasons_map_to_statuses_and_unknown_ones_are_flagged_not_guessed() {
         .collect();
     assert_eq!(satisfying, vec![true, false, false, false]);
     // History and counts reflect the mapping.
-    let history = f.workspace.ticket_history("T-1").unwrap();
+    let history = f.workspace.ticket_history("T-KQ1").unwrap();
     assert!(
         history
             .iter()
@@ -477,12 +479,12 @@ fn reopening_returns_to_todo_clears_duplicate_and_later_open_refreshes_keep_prog
     assert!(reopened.source.unwrap().duplicate_target.is_none());
 
     f.workspace
-        .change_ticket("T-1", progress(Status::InReview))
+        .change_ticket("T-KQ1", progress(Status::InReview))
         .unwrap();
     f.refresh();
     f.refresh();
     assert_eq!(f.ticket(1).status, Status::InReview);
-    let history = f.workspace.ticket_history("T-1").unwrap();
+    let history = f.workspace.ticket_history("T-KQ1").unwrap();
     let statuses: Vec<_> = history
         .iter()
         .filter(|h| h.kind == "status")
@@ -501,7 +503,7 @@ fn the_core_refuses_external_content_edits_and_closed_status_changes_but_allows_
     f.refresh();
 
     assert!(matches!(
-        f.workspace.change_ticket("T-1", retitle("Mine")),
+        f.workspace.change_ticket("T-KQ1", retitle("Mine")),
         Err(Error::ExternalContent { .. })
     ));
     let body = TicketPatch {
@@ -509,22 +511,22 @@ fn the_core_refuses_external_content_edits_and_closed_status_changes_but_allows_
         ..TicketPatch::default()
     };
     assert!(matches!(
-        f.workspace.change_ticket("T-1", body),
+        f.workspace.change_ticket("T-KQ1", body),
         Err(Error::ExternalContent { .. })
     ));
     for status in [Status::Done, Status::Canceled] {
         assert!(matches!(
-            f.workspace.change_ticket("T-1", progress(status)),
+            f.workspace.change_ticket("T-KQ1", progress(status)),
             Err(Error::ExternalStatus { open: true, .. })
         ));
     }
     assert!(matches!(
-        f.workspace.change_ticket("T-2", progress(Status::Todo)),
+        f.workspace.change_ticket("T-KQ2", progress(Status::Todo)),
         Err(Error::ExternalStatus { open: false, .. })
     ));
     let local = f.workspace.create_ticket("Canonical").unwrap();
     assert!(matches!(
-        f.workspace.mark_duplicate("T-1", &local.reference, None),
+        f.workspace.mark_duplicate("T-KQ1", &local.reference, None),
         Err(Error::ExternalStatus { .. })
     ));
     // Rejected through the cohesive-change path as well.
@@ -532,7 +534,7 @@ fn the_core_refuses_external_content_edits_and_closed_status_changes_but_allows_
         patch: retitle("Mine"),
         ..Default::default()
     };
-    assert!(f.workspace.apply_ticket_change("T-1", change).is_err());
+    assert!(f.workspace.apply_ticket_change("T-KQ1", change).is_err());
     // Re-submitting unchanged text is not an edit, so a client sending the whole form works.
     let same = TicketPatch {
         title: Some("Owned".into()),
@@ -541,18 +543,20 @@ fn the_core_refuses_external_content_edits_and_closed_status_changes_but_allows_
         ..TicketPatch::default()
     };
     assert_eq!(
-        f.workspace.change_ticket("T-1", same).unwrap().status,
+        f.workspace.change_ticket("T-KQ1", same).unwrap().status,
         Status::InProgress
     );
     f.workspace
-        .change_ticket("T-1", progress(Status::InReview))
+        .change_ticket("T-KQ1", progress(Status::InReview))
         .unwrap();
     f.workspace
-        .change_ticket("T-1", progress(Status::Todo))
+        .change_ticket("T-KQ1", progress(Status::Todo))
         .unwrap();
     // Local organization stays editable on closed tickets too.
-    f.workspace.add_tag("T-2", "later").unwrap();
-    f.workspace.add_activity("T-2", "still mine", None).unwrap();
+    f.workspace.add_tag("T-KQ2", "later").unwrap();
+    f.workspace
+        .add_activity("T-KQ2", "still mine", None)
+        .unwrap();
     // A local ticket is unaffected.
     f.workspace
         .change_ticket(&local.reference, progress(Status::Done))
@@ -566,7 +570,7 @@ fn replayable_status_changes_validate_current_source_authority() {
     f.publish(issue(1, "Owned"), true);
     f.refresh();
     let request = |status| WriteRequest::ChangeTicket {
-        reference: "T-1".into(),
+        reference: "T-KQ1".into(),
         patch: progress(status),
     };
     let original = f
@@ -579,7 +583,7 @@ fn replayable_status_changes_validate_current_source_authority() {
     f.set_state(1, closed(ClosureReason::Completed));
     f.refresh();
     let current = f.ticket(1);
-    let history = f.workspace.ticket_history("T-1").unwrap();
+    let history = f.workspace.ticket_history("T-KQ1").unwrap();
     assert!(matches!(
         f.workspace
             .write(Some("board-new-change"), request(Status::Todo)),
@@ -592,7 +596,7 @@ fn replayable_status_changes_validate_current_source_authority() {
         original
     );
     assert_eq!(f.ticket(1), current);
-    assert_eq!(f.workspace.ticket_history("T-1").unwrap(), history);
+    assert_eq!(f.workspace.ticket_history("T-KQ1").unwrap(), history);
 }
 
 #[test]
@@ -637,7 +641,7 @@ fn a_failed_refresh_keeps_saved_content_and_records_freshness_truthfully() {
         report
             .failures
             .iter()
-            .any(|x| x.reference.as_deref() == Some("T-1"))
+            .any(|x| x.reference.as_deref() == Some("T-KQ1"))
     );
     let source = f.ticket(1).source.unwrap();
     assert_eq!(f.ticket(1).title, "Stable");
@@ -676,12 +680,12 @@ fn one_ticket_can_be_refreshed_alone_and_local_tickets_cannot() {
         .refresh_sources(
             &f.engine,
             &RefreshOptions {
-                ticket: Some("T-1".into()),
+                ticket: Some("T-KQ1".into()),
                 now: None,
             },
         )
         .unwrap();
-    assert_eq!(report.updated, vec!["T-1".to_owned()]);
+    assert_eq!(report.updated, vec!["T-KQ1".to_owned()]);
     assert_eq!(f.ticket(1).title, "One edited");
     assert_eq!(f.ticket(2).title, "Two");
     let calls = f.fake.0.lock().unwrap().discover_calls;
@@ -701,7 +705,7 @@ fn one_ticket_can_be_refreshed_alone_and_local_tickets_cannot() {
     let missing = f.workspace.refresh_sources(
         &f.engine,
         &RefreshOptions {
-            ticket: Some("T-99".into()),
+            ticket: Some("T-KQ99".into()),
             now: None,
         },
     );
@@ -716,7 +720,7 @@ fn source_filters_and_counts_agree_with_the_listing() {
     f.refresh();
     f.workspace.create_ticket("Local one").unwrap();
     f.workspace
-        .change_ticket("T-1", progress(Status::InProgress))
+        .change_ticket("T-KQ1", progress(Status::InProgress))
         .unwrap();
 
     let all = f
@@ -768,7 +772,7 @@ fn imported_tickets_survive_reopening_export_backup_and_restore() {
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
     let mut workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.show_ticket("T-1").unwrap(), before);
+    assert_eq!(workspace.show_ticket("T-KQ1").unwrap(), before);
     // Rediscovery after restore reuses the ticket.
     let report = workspace
         .refresh_sources(&engine, &RefreshOptions::default())
@@ -850,7 +854,7 @@ fn an_external_target_resolves_to_the_ticket_discovery_later_imports_without_a_s
     f.publish(issue(1, "Dup"), true);
     f.publish(issue(2, "Blocked by dup"), true);
     f.refresh();
-    f.workspace.add_dependency("T-1", "T-2", None).unwrap();
+    f.workspace.add_dependency("T-KQ1", "T-KQ2", None).unwrap();
     f.publish(duplicate_of(1, "Dup", Some(99)), true);
     f.refresh();
 
@@ -870,7 +874,7 @@ fn an_external_target_resolves_to_the_ticket_discovery_later_imports_without_a_s
     f.publish(issue(99, "Canonical"), true);
     f.refresh();
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 3);
-    assert_eq!(resolved(&f.ticket(1)).as_deref(), Some("T-3"));
+    assert_eq!(resolved(&f.ticket(1)).as_deref(), Some("T-KQ3"));
     // Information only: no local designation, and no dependency moved or satisfied.
     let dup = f.ticket(1);
     assert!(dup.duplicate_of.is_none());
@@ -878,12 +882,12 @@ fn an_external_target_resolves_to_the_ticket_discovery_later_imports_without_a_s
     assert!(!dup.status.satisfies_dependency());
     assert!(f.ticket(3).duplicates.is_empty());
     assert_eq!(f.ticket(2).prerequisites.len(), 1);
-    assert_eq!(f.ticket(2).prerequisites[0].reference, "T-1");
+    assert_eq!(f.ticket(2).prerequisites[0].reference, "T-KQ1");
     // The CLI/agent context carries the same target, not a local relationship.
     let context = f
         .workspace
         .ticket_context(
-            "T-1",
+            "T-KQ1",
             ticketd_core::ContextOptions {
                 relationships: true,
                 ..Default::default()
@@ -943,7 +947,7 @@ fn a_target_that_is_itself_a_duplicate_resolves_directly_to_the_final_canonical_
     import_then_close_as_duplicates(&mut f, &[(1, Some(2)), (2, Some(3)), (3, None)]);
     f.publish(issue(3, "Final"), true);
     f.refresh();
-    assert_eq!(resolved(&f.ticket(1)).as_deref(), Some("T-3"));
+    assert_eq!(resolved(&f.ticket(1)).as_deref(), Some("T-KQ3"));
 }
 
 #[test]
@@ -953,7 +957,7 @@ fn target_identity_survives_export_backup_and_restore() {
     f.publish(issue(99, "Canonical"), true);
     f.refresh();
     let before = f.ticket(1);
-    assert_eq!(resolved(&before).as_deref(), Some("T-2"));
+    assert_eq!(resolved(&before).as_deref(), Some("T-KQ2"));
     let exported = f.workspace.export().unwrap();
     assert_eq!(
         exported["external_duplicate_targets"][0]["external_id"],
@@ -966,7 +970,7 @@ fn target_identity_survives_export_backup_and_restore() {
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
     let workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.show_ticket("T-1").unwrap(), before);
+    assert_eq!(workspace.show_ticket("T-KQ1").unwrap(), before);
     drop(dir);
 }
 
@@ -1006,7 +1010,7 @@ impl Fixture {
 
     fn conversation(&self, number: u32) -> Vec<ConversationEntry> {
         self.workspace
-            .source_conversation(&format!("T-{number}"))
+            .source_conversation(&format!("T-KQ{number}"))
             .unwrap()
     }
 }
@@ -1051,7 +1055,7 @@ fn comments_and_events_are_persisted_chronologically_and_repeated_refresh_adds_n
         },
     );
     let report = f.refresh();
-    assert_eq!(report.imported, vec!["T-1".to_owned()]);
+    assert_eq!(report.imported, vec!["T-KQ1".to_owned()]);
     let entries = f.conversation(1);
     assert_eq!(
         labels(&entries),
@@ -1106,7 +1110,7 @@ fn an_edited_comment_updates_a_deleted_one_disappears_and_unchanged_issues_are_n
         },
     );
     let report = f.refresh();
-    assert_eq!(report.updated, vec!["T-1".to_owned()]);
+    assert_eq!(report.updated, vec!["T-KQ1".to_owned()]);
     let entries = f.conversation(1);
     assert_eq!(labels(&entries), vec!["comment c1"]);
     let ConversationEntry::Comment { body, .. } = &entries[0] else {
@@ -1128,9 +1132,9 @@ fn local_notes_stay_separate_and_the_conversation_survives_failure_and_takeover(
     );
     f.refresh();
     f.workspace
-        .add_activity("T-1", "my own thought", Some("agent-x"))
+        .add_activity("T-KQ1", "my own thought", Some("agent-x"))
         .unwrap();
-    assert_eq!(f.workspace.activities("T-1", 10, 0).unwrap().len(), 1);
+    assert_eq!(f.workspace.activities("T-KQ1", 10, 0).unwrap().len(), 1);
     assert_eq!(f.conversation(1).len(), 1);
 
     // The source stops answering about comments: what was retrieved stays.
@@ -1151,9 +1155,9 @@ fn local_notes_stay_separate_and_the_conversation_survives_failure_and_takeover(
     // The source goes down, the person takes ownership, and the conversation stays.
     f.remote(|r| r.outage = Some("down".into()));
     f.refresh();
-    f.workspace.take_ownership("T-1", None).unwrap();
+    f.workspace.take_ownership("T-KQ1", None).unwrap();
     assert_eq!(labels(&f.conversation(1)), vec!["comment c1"]);
-    assert_eq!(f.workspace.activities("T-1", 10, 0).unwrap().len(), 1);
+    assert_eq!(f.workspace.activities("T-KQ1", 10, 0).unwrap().len(), 1);
 }
 
 #[test]
@@ -1162,7 +1166,7 @@ fn local_tickets_have_no_conversation_and_unknown_tickets_are_rejected() {
     f.workspace.create_ticket("Plain").unwrap();
     assert!(f.conversation(1).is_empty());
     assert!(matches!(
-        f.workspace.source_conversation("T-99"),
+        f.workspace.source_conversation("T-KQ99"),
         Err(Error::NotFound(_))
     ));
 }
@@ -1195,7 +1199,7 @@ fn the_conversation_is_exported_and_survives_backup_and_restore() {
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
     let workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.source_conversation("T-1").unwrap(), before);
+    assert_eq!(workspace.source_conversation("T-KQ1").unwrap(), before);
     drop(dir);
 }
 
@@ -1217,12 +1221,12 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
     );
     f.refresh();
     f.workspace
-        .add_activity("T-1", "note", Some("agent-x"))
+        .add_activity("T-KQ1", "note", Some("agent-x"))
         .unwrap();
     let context = f
         .workspace
         .ticket_context(
-            "T-1",
+            "T-KQ1",
             ContextOptions {
                 activities: true,
                 conversation: true,
@@ -1241,7 +1245,7 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
     );
     let without = f
         .workspace
-        .ticket_context("T-1", ContextOptions::default())
+        .ticket_context("T-KQ1", ContextOptions::default())
         .unwrap();
     assert!(
         serde_json::to_value(&without)
@@ -1281,10 +1285,10 @@ fn a_failed_comment_read_is_recorded_apart_and_never_makes_a_confirmed_ticket_un
             .contains("comments timed out")
     );
     // Taking ownership is for an unreadable source, not an unreadable thread.
-    assert!(f.workspace.take_ownership("T-1", None).is_err());
+    assert!(f.workspace.take_ownership("T-KQ1", None).is_err());
 
     // The new issue was imported; its failed thread is reported, not a source failure.
-    assert_eq!(report.imported, vec!["T-2".to_owned()]);
+    assert_eq!(report.imported, vec!["T-KQ2".to_owned()]);
     assert!(
         report
             .failures
@@ -1305,7 +1309,7 @@ fn a_failed_comment_read_is_recorded_apart_and_never_makes_a_confirmed_ticket_un
 #[test]
 fn a_local_duplicate_never_points_at_a_ticket_the_source_closed_as_a_duplicate() {
     let mut f = Fixture::new();
-    // T-1 is the true original, T-2 and T-3 were imported open.
+    // T-KQ1 is the true original, T-KQ2 and T-KQ3 were imported open.
     f.publish(issue(1, "Original"), true);
     f.publish(
         issue(2, "Closed later as a duplicate of the original"),
@@ -1315,29 +1319,29 @@ fn a_local_duplicate_never_points_at_a_ticket_the_source_closed_as_a_duplicate()
         issue(3, "Closed later as a duplicate of something unknown"),
         true,
     );
-    f.publish(issue(4, "Local-looking duplicate of T-2"), true);
+    f.publish(issue(4, "Local-looking duplicate of T-KQ2"), true);
     f.refresh();
-    // A local ticket the person already marked as a duplicate of T-2 (still open).
+    // A local ticket the person already marked as a duplicate of T-KQ2 (still open).
     let local = f.workspace.create_ticket("Local duplicate").unwrap();
     f.workspace
-        .mark_duplicate(&local.reference, "T-2", None)
+        .mark_duplicate(&local.reference, "T-KQ2", None)
         .unwrap();
-    // The source now closes T-2 as a duplicate of T-1, and T-3 of an issue nobody imported.
+    // The source now closes T-KQ2 as a duplicate of T-KQ1, and T-KQ3 of an issue nobody imported.
     f.publish(duplicate_of(2, "Dup 2", Some(1)), true);
     f.publish(duplicate_of(3, "Dup 3", Some(99)), true);
     f.refresh();
 
-    // (a) A new marking against T-2 follows it to the real original, T-1.
+    // (a) A new marking against T-KQ2 follows it to the real original, T-KQ1.
     let fresh = f.workspace.create_ticket("Another duplicate").unwrap();
     let marked = f
         .workspace
-        .mark_duplicate(&fresh.reference, "T-2", None)
+        .mark_duplicate(&fresh.reference, "T-KQ2", None)
         .unwrap();
-    assert_eq!(marked.duplicate_of.as_deref(), Some("T-1"));
+    assert_eq!(marked.duplicate_of.as_deref(), Some("T-KQ1"));
     // An original that is itself a duplicate of nothing known is refused.
     let refused = f
         .workspace
-        .mark_duplicate(&fresh.reference, "T-3", None)
+        .mark_duplicate(&fresh.reference, "T-KQ3", None)
         .unwrap_err();
     assert!(
         matches!(refused, Error::DuplicateCanonicalUnresolved(_)),
@@ -1347,13 +1351,13 @@ fn a_local_duplicate_never_points_at_a_ticket_the_source_closed_as_a_duplicate()
     // (b) The earlier local designation is flagged, never rewritten behind the
     // person's back, and moving it is one explicit marking.
     let flagged = f.workspace.show_ticket(&local.reference).unwrap();
-    assert_eq!(flagged.duplicate_of.as_deref(), Some("T-2"));
-    assert_eq!(flagged.duplicate_redirect.as_deref(), Some("T-1"));
+    assert_eq!(flagged.duplicate_of.as_deref(), Some("T-KQ2"));
+    assert_eq!(flagged.duplicate_redirect.as_deref(), Some("T-KQ1"));
     let moved = f
         .workspace
-        .mark_duplicate(&local.reference, "T-2", None)
+        .mark_duplicate(&local.reference, "T-KQ2", None)
         .unwrap();
-    assert_eq!(moved.duplicate_of.as_deref(), Some("T-1"));
+    assert_eq!(moved.duplicate_of.as_deref(), Some("T-KQ1"));
     assert_eq!(moved.duplicate_redirect, None);
 }
 
@@ -1388,12 +1392,12 @@ fn a_closed_issue_with_an_unrecognized_reason_is_never_ready_and_allows_a_local_
     // The person can decide locally; the message for anything else says so.
     let error = f
         .workspace
-        .change_ticket("T-1", progress(Status::InProgress))
+        .change_ticket("T-KQ1", progress(Status::InProgress))
         .unwrap_err();
     assert!(error.to_string().contains("Done or Canceled"), "{error}");
     let decided = f
         .workspace
-        .change_ticket("T-1", progress(Status::Canceled))
+        .change_ticket("T-KQ1", progress(Status::Canceled))
         .unwrap();
     assert_eq!(decided.status, Status::Canceled);
     // A later refresh of the unchanged closure keeps the decision and the flag.
@@ -1432,7 +1436,7 @@ fn an_external_canonical_is_linked_recorded_in_history_and_never_erased_without_
         other => panic!("expected an external target, got {other:?}"),
     }
     assert_eq!(
-        history_of(&f, "T-1", "external_duplicate"),
+        history_of(&f, "T-KQ1", "external_duplicate"),
         vec![("".to_owned(), "o/r#2".to_owned())]
     );
 
@@ -1441,7 +1445,7 @@ fn an_external_canonical_is_linked_recorded_in_history_and_never_erased_without_
     f.refresh();
     assert!(f.ticket(1).source.unwrap().duplicate_target.is_none());
     assert_eq!(
-        history_of(&f, "T-1", "external_duplicate"),
+        history_of(&f, "T-KQ1", "external_duplicate"),
         vec![
             ("".to_owned(), "o/r#2".to_owned()),
             ("o/r#2".to_owned(), "".to_owned())
@@ -1479,7 +1483,7 @@ fn a_withdrawn_target_clears_to_unknown_but_a_missing_answer_keeps_the_last_know
     f.refresh();
     assert_eq!(target(&f.ticket(1)), DuplicateTarget::Unknown);
     assert_eq!(
-        history_of(&f, "T-1", "external_duplicate").last(),
+        history_of(&f, "T-KQ1", "external_duplicate").last(),
         Some(&("o/r#2".to_owned(), "".to_owned()))
     );
 }
@@ -1570,7 +1574,7 @@ fn an_in_flight_refresh_does_not_apply_discovery_from_a_replaced_configuration()
     f.workspace
         .save_source(&f.engine, "fake", config_a.as_object().unwrap())
         .unwrap();
-    assert_eq!(f.refresh().imported, ["T-1"]);
+    assert_eq!(f.refresh().imported, ["T-KQ1"]);
     f.remote(|remote| {
         remote
             .matching_by_repository
@@ -1636,7 +1640,7 @@ fn an_in_flight_refresh_does_not_apply_discovery_from_a_replaced_configuration()
 
     f.publish(issue(1, "Still syncing outside B"), false);
     let b_report = f.refresh_at("2026-02-03T00:00:00Z");
-    assert_eq!(b_report.imported, ["T-2"]);
+    assert_eq!(b_report.imported, ["T-KQ2"]);
     assert_eq!(f.ticket(2).title, "Only in B");
     assert_eq!(f.ticket(1).title, "Still syncing outside B");
     assert_eq!(
@@ -1696,7 +1700,7 @@ fn only_the_latest_closure_borrows_the_current_issues_reason() {
         issue.updated_at = "2026-02-02T00:00:00Z".into();
     });
     f.refresh_at("2026-02-03T00:00:00Z");
-    let events = f.workspace.source_conversation("T-1").unwrap();
+    let events = f.workspace.source_conversation("T-KQ1").unwrap();
     assert!(matches!(&events[0], ConversationEntry::Event {event, ..} if event == "closed"));
     assert!(
         matches!(&events[2], ConversationEntry::Event {event, ..} if event == "closed_completed")

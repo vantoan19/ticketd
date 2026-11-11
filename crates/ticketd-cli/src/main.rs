@@ -682,13 +682,13 @@ enum SourceCommand {
     Status,
     /// Import matching issues and refresh every externally owned ticket now, or one ticket
     Refresh {
-        /// Refresh only this externally owned ticket, for example T-12
+        /// Refresh only this externally owned ticket, for example T-KQ12
         #[arg(long)]
         ticket: Option<String>,
     },
     /// Make an unavailable externally owned ticket local: keeps its content and work, stops synchronizing it
     TakeOwnership {
-        /// The ticket, for example T-12
+        /// The ticket, for example T-KQ12
         reference: String,
         #[arg(long)]
         agent: Option<String>,
@@ -696,7 +696,7 @@ enum SourceCommand {
     /// Publish a local Todo, In progress or In review ticket as one ordinary issue.
     /// Use --preview first: it prints exactly what would be sent and sends nothing
     Publish {
-        /// The local ticket to publish, for example T-12
+        /// The local ticket to publish, for example T-KQ12
         ticket: String,
         #[arg(long, default_value = "github")]
         provider: String,
@@ -718,7 +718,7 @@ enum SourceCommand {
     /// With no flag it prints what is known and unknown and searches the destination
     /// for the issue that may have been created; it changes nothing
     Resolve {
-        /// The ticket with the unresolved publication, for example T-12
+        /// The ticket with the unresolved publication, for example T-KQ12
         ticket: String,
         /// The issue that was created: a number, owner/name#number or a link in the
         /// destination. GitHub verifies it before it is attached
@@ -1046,8 +1046,8 @@ fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
             "evidence" => "The evidence ID (see `evidence list`)",
             _ => "The ID",
         },
-        "reference" => "The ticket reference, for example T-12",
-        "ticket" => "The ticket reference, for example T-12",
+        "reference" => "The ticket reference, for example T-KQ12",
+        "ticket" => "The ticket reference, for example T-KQ12",
         "agent" => "Name of the agent making this change, recorded in history and the feed",
         "offset" => "Skip this many results (for paging)",
         "limit" => "Return at most this many results",
@@ -1078,7 +1078,7 @@ fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
         "body_file" => "Read the description from a file (- reads stdin)",
         "clear_project" => "Unlink the ticket from its project",
         "value" => "The URL, reference, path or verification result",
-        "source" => "The ticket that is the source of the change, for example T-12",
+        "source" => "The ticket that is the source of the change, for example T-KQ12",
         "bodies" => "Include the Documents' text, not only their titles",
         "all" => "Include archived Plans",
         "unlinked" => "Only tickets without a project",

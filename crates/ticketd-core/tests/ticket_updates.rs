@@ -213,7 +213,7 @@ fn a_cut_short_brief_in_context_says_how_to_read_all_of_it() {
     assert_eq!(items[0].fetch_brief, None);
     assert_eq!(
         items[1].fetch_brief.as_deref(),
-        Some(format!("ticketd activity show T-1 {}", long.id).as_str())
+        Some(format!("ticketd activity show T-KQ1 {}", long.id).as_str())
     );
 }
 

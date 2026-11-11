@@ -61,7 +61,7 @@ afterEach(() => {
 
 const ticket: Ticket = {
   id: "1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Ship the rail",
   body: "A description to read.",
   status: "In progress",
@@ -142,7 +142,7 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   );
   fireEvent.click(await screen.findByRole("option", { name: "Web portal" }));
   await waitFor(() =>
-    expect(changes).toEqual([expect.objectContaining({ reference: "T-1" })]),
+    expect(changes).toEqual([expect.objectContaining({ reference: "T-KQ1" })]),
   );
 });
 

@@ -19,7 +19,7 @@ afterEach(() => {
 
 const ticket = {
   id: "t1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Work",
   body: "Description",
 } as Ticket;
@@ -29,7 +29,7 @@ const link = (id: string, label: string, explicit: boolean) => ({
   source_kind: "ticket",
   target_kind: "document",
   passage: "",
-  source_label: "T-1",
+  source_label: "T-KQ1",
   target_label: label,
   source_trashed: false,
   target_trashed: false,
@@ -51,7 +51,7 @@ test("unlinking removes only an explicit reference and a mention offers Edit des
   fireEvent.click(await screen.findByRole("button", { name: "Unlink Linked" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("set_ticket_document", {
-      reference: "T-1",
+      reference: "T-KQ1",
       documentId: "d1",
       present: false,
       requestId: expect.any(String),
@@ -73,7 +73,7 @@ test("attaching Activity details from the picker links them without a separate k
     if (command === "document_context_links") return Promise.resolve([[], []]);
     if (command === "recent_documents")
       return Promise.resolve([
-        { id: "d9", heading: "Trace", origin_ticket: "T-11" },
+        { id: "d9", heading: "Trace", origin_ticket: "T-KQ11" },
       ]);
     return Promise.resolve(null);
   });
@@ -85,14 +85,14 @@ test("attaching Activity details from the picker links them without a separate k
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Add Document" }));
-  fireEvent.click(await screen.findByText("T-11 · Update details"));
+  fireEvent.click(await screen.findByText("T-KQ11 · Update details"));
   expect(invoke).toHaveBeenCalledWith("recent_documents", {
     offset: 0,
     includeSupport: true,
   });
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("set_ticket_document", {
-      reference: "T-1",
+      reference: "T-KQ1",
       documentId: "d9",
       present: true,
       requestId: expect.any(String),

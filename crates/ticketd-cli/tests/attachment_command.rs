@@ -401,7 +401,7 @@ fn portable_markdown_exports_ticket_document_and_selected_input_without_desktop(
         &[
             "export-markdown",
             "--ticket",
-            "T-1",
+            "T-KQ1",
             "--output",
             dir.path().to_str().unwrap(),
         ],
@@ -919,7 +919,7 @@ fn cli_reports_protected_unpublished_drafts_without_a_desktop_process() {
     let body = format!("[Draft]({})", workspace.attachment_uri(id).unwrap());
     workspace
         .retain_draft(&ticketd_core::DraftRetention {
-            owner: "activity:T-1".into(),
+            owner: "activity:T-KQ1".into(),
             kind: "draft".into(),
             revision: 0,
             payload: Some(serde_json::json!({"brief": body})),
@@ -929,10 +929,10 @@ fn cli_reports_protected_unpublished_drafts_without_a_desktop_process() {
     drop(workspace);
     let usage = run(dir.path(), &["attachment", "usage", id]);
     assert_eq!(usage["eligible"], false);
-    assert_eq!(usage["protections"][0]["owner"], "activity:T-1");
+    assert_eq!(usage["protections"][0]["owner"], "activity:T-KQ1");
     assert_eq!(usage["protections"][0]["kind"], "draft");
     let recovery = run(dir.path(), &["attachment", "recovery-drafts"]);
-    assert_eq!(recovery[0]["owner"], "activity:T-1");
+    assert_eq!(recovery[0]["owner"], "activity:T-KQ1");
     assert!(
         recovery[0]["payload"]["brief"]
             .as_str()
@@ -958,7 +958,7 @@ fn cli_reports_protected_unpublished_drafts_without_a_desktop_process() {
         &[
             "attachment",
             "release-recovery",
-            "activity:T-1",
+            "activity:T-KQ1",
             "--revision",
             "1",
             "--discard-recovery",

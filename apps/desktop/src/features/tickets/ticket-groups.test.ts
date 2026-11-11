@@ -3,7 +3,7 @@ import type { Ticket } from "@/lib/api/client";
 import { groupTickets } from "./ticket-groups";
 
 const ticket = (id: number, status: string) =>
-  ({ id: String(id), reference: `T-${id}`, status }) as Ticket;
+  ({ id: String(id), reference: `T-KQ${id}`, status }) as Ticket;
 const counts = {
   total: 0,
   todo: 0,
@@ -24,8 +24,8 @@ test("groups the shown page in workflow order with the whole result's counts", (
     ["Done", 1],
   ]);
   expect(groups[0]?.tickets.map((item) => item.reference)).toEqual([
-    "T-5",
-    "T-4",
+    "T-KQ5",
+    "T-KQ4",
   ]);
 });
 

@@ -47,14 +47,14 @@ test("a span that straddles blocks, or code, never matches", () => {
 });
 
 test("the passage must still sit around the span in the current source", () => {
-  const source = "Intro.\n\nBlocked on T-1 today.";
-  const passage = "Blocked on T-1 today.";
+  const source = "Intro.\n\nBlocked on T-KQ1 today.";
+  const passage = "Blocked on T-KQ1 today.";
   expect(mentionStillAt(source, passage, { start: 19, end: 22 })).toBe(true);
   expect(
     mentionStillAt("Added.\n\n" + source, passage, { start: 19, end: 22 }),
   ).toBe(true);
   expect(
-    mentionStillAt("Intro: T-1 is the parent.", passage, {
+    mentionStillAt("Intro: T-KQ1 is the parent.", passage, {
       start: 19,
       end: 22,
     }),
@@ -63,11 +63,11 @@ test("the passage must still sit around the span in the current source", () => {
 });
 
 test("the core's char span becomes UTF-16 offsets, astral characters counting twice", () => {
-  const text = "😀 é 𝒳 T-1 ok";
+  const text = "😀 é 𝒳 T-KQ1 ok";
   const start = [...text].indexOf("T");
-  const span = charSpanToUtf16(text, { start, end: start + 3 });
+  const span = charSpanToUtf16(text, { start, end: start + 5 });
   expect(span).not.toBeNull();
-  expect(text.slice(span?.start, span?.end)).toBe("T-1");
+  expect(text.slice(span?.start, span?.end)).toBe("T-KQ1");
   // A span that ends the text, and one past it.
   expect(charSpanToUtf16("a😀", { start: 1, end: 2 })).toEqual({
     start: 1,
@@ -77,6 +77,6 @@ test("the core's char span becomes UTF-16 offsets, astral characters counting tw
 });
 
 test("a leading byte order mark is dropped before offsets apply", () => {
-  expect(withoutBom("\uFEFFSee T-1")).toBe("See T-1");
+  expect(withoutBom("\uFEFFSee T-KQ1")).toBe("See T-KQ1");
   expect(withoutBom("See \uFEFFT-1")).toBe("See \uFEFFT-1");
 });

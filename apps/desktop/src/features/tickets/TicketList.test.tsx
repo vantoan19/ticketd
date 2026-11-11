@@ -10,7 +10,7 @@ afterEach(cleanup);
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "1",
   trashed: false,
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "First ticket",
   status: "Todo",
   body: "",
@@ -59,17 +59,17 @@ test("names an unfinished prerequisite on a blocked Todo ticket", () => {
     ticket({
       availability: "Blocked",
       prerequisites: [
-        prerequisite("T-2", "In progress"),
-        prerequisite("T-3", "Todo"),
-        prerequisite("T-4", "Done"),
+        prerequisite("T-KQ2", "In progress"),
+        prerequisite("T-KQ3", "Todo"),
+        prerequisite("T-KQ4", "Done"),
       ],
     }),
   ]);
-  expect(screen.getByText("Blocked by T-2 and 1 more")).toBeTruthy();
+  expect(screen.getByText("Blocked by T-KQ2 and 1 more")).toBeTruthy();
 });
 
 test("shows Ready once prerequisites are done", () => {
-  renderList([ticket({ prerequisites: [prerequisite("T-2", "Done")] })]);
+  renderList([ticket({ prerequisites: [prerequisite("T-KQ2", "Done")] })]);
   expect(screen.getByText("Ready")).toBeTruthy();
   expect(screen.queryByText(/Blocked/)).toBeNull();
 });
@@ -80,7 +80,7 @@ test("shows only the status word outside Todo", () => {
       (status, index) => ({
         ...ticket({ status, availability: null }),
         id: String(index),
-        reference: `T-${index + 1}`,
+        reference: `T-KQ${index + 1}`,
       }),
     ),
   );
@@ -90,20 +90,20 @@ test("shows only the status word outside Todo", () => {
 });
 
 test("names the canonical ticket of a duplicate", () => {
-  renderList([ticket({ status: "Duplicate", duplicate_of: "T-9" })]);
-  expect(screen.getByText("Duplicate of T-9")).toBeTruthy();
+  renderList([ticket({ status: "Duplicate", duplicate_of: "T-KQ9" })]);
+  expect(screen.getByText("Duplicate of T-KQ9")).toBeTruthy();
 });
 
 test("shows one context item and tags as pills", () => {
   renderList([
     ticket({
-      parent: { reference: "T-7", title: "Parent", trashed: false },
+      parent: { reference: "T-KQ7", title: "Parent", trashed: false },
       plan_id: "e1",
       tags: ["ui", "bug"],
     }),
-    ticket({ id: "2", reference: "T-2", plan_id: "e1", project_id: "p1" }),
+    ticket({ id: "2", reference: "T-KQ2", plan_id: "e1", project_id: "p1" }),
   ]);
-  expect(screen.getByText("Subticket of T-7")).toBeTruthy();
+  expect(screen.getByText("Subticket of T-KQ7")).toBeTruthy();
   expect(screen.getAllByText("Launch")).toHaveLength(1);
   expect(screen.queryByText("Website")).toBeNull();
   expect(screen.getByText("ui")).toBeTruthy();
@@ -122,13 +122,13 @@ test("names the status icon and toggles selection", () => {
   const onToggle = vi.fn();
   renderList([ticket({ status: "In review", availability: null })], {
     onToggle,
-    bulkSelection: ["T-1"],
+    bulkSelection: ["T-KQ1"],
   });
   expect(screen.getByRole("img", { name: "In review" })).toBeTruthy();
-  const box = screen.getByRole("checkbox", { name: "Select T-1" });
+  const box = screen.getByRole("checkbox", { name: "Select T-KQ1" });
   expect((box as HTMLInputElement).checked).toBe(true);
   fireEvent.click(box);
-  expect(onToggle).toHaveBeenCalledWith("T-1");
+  expect(onToggle).toHaveBeenCalledWith("T-KQ1");
 });
 
 const counts = {
@@ -143,7 +143,7 @@ const counts = {
 const inStatus = (id: number, status: string) =>
   ticket({
     id: String(id),
-    reference: `T-${id}`,
+    reference: `T-KQ${id}`,
     title: `Ticket ${id}`,
     status,
     availability: null,
@@ -211,10 +211,10 @@ test("a flat list has no group headers and names each status", () => {
 test("rows end with the core update time, never a progress excerpt or a lone no-update note", () => {
   const when = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
   renderList([
-    ticket({ id: "updated", reference: "T-1", updated_at: when }),
+    ticket({ id: "updated", reference: "T-KQ1", updated_at: when }),
     ticket({
       id: "reported",
-      reference: "T-2",
+      reference: "T-KQ2",
       status: "In progress",
       updated_at: when,
       progress_summary: {
@@ -228,7 +228,7 @@ test("rows end with the core update time, never a progress excerpt or a lone no-
     }),
     ticket({
       id: "unreported",
-      reference: "T-3",
+      reference: "T-KQ3",
       status: "In review",
       updated_at: when,
       progress_summary: null,
@@ -242,8 +242,8 @@ test("rows end with the core update time, never a progress excerpt or a lone no-
 
 test("a Plan and a project carry different icons", () => {
   const { container } = renderList([
-    ticket({ id: "1", reference: "T-1", plan_id: "e1" }),
-    ticket({ id: "2", reference: "T-2", project_id: "p1" }),
+    ticket({ id: "1", reference: "T-KQ1", plan_id: "e1" }),
+    ticket({ id: "2", reference: "T-KQ2", project_id: "p1" }),
   ]);
   const icon = (name: string) =>
     screen
@@ -277,12 +277,12 @@ test("a single-status view still shows that a ticket is blocked", () => {
     [
       ticket({
         availability: "Blocked",
-        prerequisites: [prerequisite("T-9", "Todo")],
+        prerequisites: [prerequisite("T-KQ9", "Todo")],
       }),
     ],
     { singleStatus: true },
   );
-  expect(screen.getByText("Blocked by T-9")).toBeTruthy();
+  expect(screen.getByText("Blocked by T-KQ9")).toBeTruthy();
 });
 
 test("simple rows keep the reference, title, readiness and time, and hide tags and context", () => {
@@ -296,7 +296,7 @@ test("simple rows keep the reference, title, readiness and time, and hide tags a
     ],
     { simple: true },
   );
-  expect(screen.getByText("T-1")).toBeTruthy();
+  expect(screen.getByText("T-KQ1")).toBeTruthy();
   expect(screen.getByText("First ticket")).toBeTruthy();
   expect(screen.getByText("Ready")).toBeTruthy();
   expect(screen.getByText(/Updated/)).toBeTruthy();
@@ -326,10 +326,10 @@ test("a simple row's name carries its Ready and Blocked words", () => {
       ticket({}),
       ticket({
         id: "t2",
-        reference: "T-2",
+        reference: "T-KQ2",
         title: "Second ticket",
         availability: "Blocked",
-        prerequisites: [prerequisite("T-9", "Todo")],
+        prerequisites: [prerequisite("T-KQ9", "Todo")],
       }),
     ],
     { simple: true },

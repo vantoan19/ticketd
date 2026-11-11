@@ -23,7 +23,7 @@ test("shows the reported brief and opens its exact Activity", async () => {
     supporting_document_id: null,
   });
   const open = vi.fn();
-  render(<LatestUpdate reference="T-1" active revision={0} onOpen={open} />);
+  render(<LatestUpdate reference="T-KQ1" active revision={0} onOpen={open} />);
   await screen.findByText("Review complete: details");
   expect(screen.getByText(/Agent/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Go to update" }));
@@ -34,7 +34,7 @@ test("distinguishes an absent update from a failed read and allows retry", async
   bridge.invoke
     .mockRejectedValueOnce(new Error("Database unavailable"))
     .mockResolvedValueOnce(null);
-  render(<LatestUpdate reference="T-1" active revision={0} />);
+  render(<LatestUpdate reference="T-KQ1" active revision={0} />);
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Database unavailable",
   );
@@ -55,8 +55,8 @@ test("refreshes the preview when the workspace revision changes", async () => {
     ...report,
     brief: { text: "Corrected report", truncated: true },
   });
-  const view = render(<LatestUpdate reference="T-1" active revision={0} />);
+  const view = render(<LatestUpdate reference="T-KQ1" active revision={0} />);
   await screen.findByText("First report");
-  view.rerender(<LatestUpdate reference="T-1" active revision={1} />);
+  view.rerender(<LatestUpdate reference="T-KQ1" active revision={1} />);
   await screen.findByText("Corrected report…");
 });

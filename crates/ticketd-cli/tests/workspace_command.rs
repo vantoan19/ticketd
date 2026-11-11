@@ -102,7 +102,7 @@ fn settings_quick_reference_commands_run() {
         dir.path(),
         &[
             "context",
-            "T-1",
+            "T-KQ1",
             "--relationships",
             "--activities",
             "--evidence",
@@ -113,7 +113,7 @@ fn settings_quick_reference_commands_run() {
         &[
             "activity",
             "add",
-            "T-1",
+            "T-KQ1",
             "--file",
             note.to_str().unwrap(),
             "--agent",
@@ -261,7 +261,7 @@ fn activity_details_can_be_found_and_kept_through_cli() {
         &[
             "activity",
             "add",
-            "T-1",
+            "T-KQ1",
             "--brief",
             "Update",
             "--details-file",
@@ -278,7 +278,7 @@ fn activity_details_can_be_found_and_kept_through_cli() {
         &["document", "search", "distinct", "--include-support"],
     ))
     .unwrap();
-    assert_eq!(included[0]["origin_ticket"], "T-1");
+    assert_eq!(included[0]["origin_ticket"], "T-KQ1");
     run(dir.path(), &["document", "keep", id]);
     let found: serde_json::Value =
         serde_json::from_str(&run(dir.path(), &["document", "search", "distinct"])).unwrap();
@@ -299,11 +299,17 @@ fn plan_progress_recent_context_and_spec_recency_work_through_cli() {
     );
     invoke(&["create", "Work", "--plan", id]);
     for n in 1..=22 {
-        invoke(&["activity", "add", "T-1", "--brief", &format!("Report {n}")]);
+        invoke(&[
+            "activity",
+            "add",
+            "T-KQ1",
+            "--brief",
+            &format!("Report {n}"),
+        ]);
     }
     let list = invoke(&["list", "--plan", id, "--latest-update"]);
     assert_eq!(list[0]["latest_update"]["brief"]["text"], "Report 22");
-    let context = invoke(&["context", "T-1", "--activities"]);
+    let context = invoke(&["context", "T-KQ1", "--activities"]);
     assert_eq!(
         context["activities"]["items"][0]["brief"]["text"],
         "Report 22"
@@ -361,13 +367,13 @@ fn context_documents_include_mentioned_documents_with_their_source() {
         &[
             "activity",
             "add",
-            "T-1",
+            "T-KQ1",
             "--brief",
             &format!("See [it](ticketd://document/{id})"),
         ],
     );
     let context: serde_json::Value =
-        serde_json::from_str(&run(dir.path(), &["context", "T-1", "--documents"])).unwrap();
+        serde_json::from_str(&run(dir.path(), &["context", "T-KQ1", "--documents"])).unwrap();
     let item = &context["documents"]["items"][0];
     assert_eq!(item["id"], id);
     assert_eq!(item["source"], "update");
@@ -385,7 +391,7 @@ fn linking_activity_details_to_a_ticket_keeps_them_through_cli() {
         &[
             "activity",
             "add",
-            "T-1",
+            "T-KQ1",
             "--brief",
             "Update",
             "--details-file",
@@ -394,7 +400,7 @@ fn linking_activity_details_to_a_ticket_keeps_them_through_cli() {
     ))
     .unwrap();
     let id = activity["supporting_document_id"].as_str().unwrap();
-    run(dir.path(), &["document", "link-ticket", id, "T-1"]);
+    run(dir.path(), &["document", "link-ticket", id, "T-KQ1"]);
     let found: serde_json::Value =
         serde_json::from_str(&run(dir.path(), &["document", "search", "linked"])).unwrap();
     assert_eq!(found[0]["id"], id);

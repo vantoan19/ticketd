@@ -287,7 +287,7 @@ fn link_insertion_validates_target_identity() {
         workspace.context_link_markdown(&document.id).unwrap(),
         format!("[Context](ticketd://document/{})", document.id)
     );
-    assert!(workspace.context_link_markdown("T-999999").is_err());
+    assert!(workspace.context_link_markdown("T-KQ999999").is_err());
 }
 
 #[test]
@@ -945,7 +945,7 @@ fn context_links_use_document_headings_and_accept_ticket_references() {
     assert_eq!(outgoing.len(), 1);
     assert_eq!(outgoing[0].target_label, "Plain heading");
     let incoming = workspace.context_backlinks(&untitled.id, 10, 0).unwrap();
-    assert_eq!(incoming[0].source_label, "T-1");
+    assert_eq!(incoming[0].source_label, "T-KQ1");
     assert_eq!(incoming[0].target_label, "Plain heading");
 }
 
@@ -956,7 +956,7 @@ fn document_mentions_cover_link_text_and_tickets_created_later() {
     let document = workspace
         .create_document(
             Some("Notes"),
-            "See [T-1](https://example.com) and T-2 which does not exist yet",
+            "See [T-KQ1](https://example.com) and T-KQ2 which does not exist yet",
         )
         .unwrap();
     let before: Vec<_> = workspace
@@ -965,7 +965,7 @@ fn document_mentions_cover_link_text_and_tickets_created_later() {
         .into_iter()
         .map(|link| link.target_label)
         .collect();
-    assert_eq!(before, ["T-1"]);
+    assert_eq!(before, ["T-KQ1"]);
     let second = workspace.create_ticket("Second").unwrap();
     let mut after: Vec<_> = workspace
         .context_links(&document.id, 10, 0)
@@ -974,7 +974,7 @@ fn document_mentions_cover_link_text_and_tickets_created_later() {
         .map(|link| link.target_label)
         .collect();
     after.sort();
-    assert_eq!(after, ["T-1", "T-2"]);
+    assert_eq!(after, ["T-KQ1", "T-KQ2"]);
     let back = workspace.document_backlinks(&document.id, 10, 0).unwrap();
     assert!(back.is_empty(), "documents are not ticket sources");
     let incoming = workspace.context_backlinks(&second.id, 10, 0).unwrap();

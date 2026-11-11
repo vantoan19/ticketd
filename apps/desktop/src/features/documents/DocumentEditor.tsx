@@ -713,7 +713,7 @@ export function DocumentEditor({
   // every other connection is a mention, listed once.
   const isAttachment = (item: (typeof connected)[number]) =>
     item.kind === "plan" && item.passages.length === 0;
-  // Reference order (T-1 before T-3), not the order the links were recorded in.
+  // Reference order (T-KQ1 before T-KQ3), not the order the links were recorded in.
   const mentions = connected
     .filter((item) => !isAttachment(item))
     .sort((a, b) =>

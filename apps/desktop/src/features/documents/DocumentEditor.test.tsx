@@ -199,10 +199,10 @@ it("suggests only the current ticket and lets it be removed before capture", asy
     trashed: false,
   });
   renderEditor(
-    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
+    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-KQ12" />,
   );
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove connection to T-12" }),
+    screen.getByRole("button", { name: "Remove connection to T-KQ12" }),
   );
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
@@ -254,7 +254,7 @@ it("opens a connected ticket after saving a document draft", async () => {
         target_id: "d1",
         source_kind: "ticket",
         target_kind: "document",
-        source_label: "T-4",
+        source_label: "T-KQ4",
         target_label: "Document",
         source_trashed: false,
         target_trashed: false,
@@ -272,8 +272,8 @@ it("opens a connected ticket after saving a document draft", async () => {
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "T-4" }));
-  await waitFor(() => expect(open).toHaveBeenCalledWith("T-4"));
+  fireEvent.click(screen.getByRole("button", { name: "T-KQ4" }));
+  await waitFor(() => expect(open).toHaveBeenCalledWith("T-KQ4"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Updated");
 });
 
@@ -316,13 +316,13 @@ it("keeps capture typing unchanged while saving the suggested connection", async
   vi.mocked(documents.save).mockResolvedValue({
     id: "d1",
     title: null,
-    body: "Thought\n\n[T-12](ticketd://ticket/T-12)",
+    body: "Thought\n\n[T-KQ12](ticketd://ticket/T-KQ12)",
     created_at: "now",
     updated_at: "now",
     trashed: false,
   });
   renderEditor(
-    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
+    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-KQ12" />,
   );
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
@@ -330,7 +330,7 @@ it("keeps capture typing unchanged while saving the suggested connection", async
   fireEvent.click(screen.getByText("Done"));
   await waitFor(() => expect(documents.save).toHaveBeenCalled());
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe(
-    "Thought\n\n[T-12](ticketd://ticket/T-12)",
+    "Thought\n\n[T-KQ12](ticketd://ticket/T-KQ12)",
   );
   expect(
     (screen.getByLabelText("Your thought") as HTMLTextAreaElement).value,
@@ -346,14 +346,14 @@ it("removes a suggested connection after the first save", async () => {
     trashed: false,
   });
   renderEditor(
-    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
+    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-KQ12" />,
   );
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
   });
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(1));
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove connection to T-12" }),
+    screen.getByRole("button", { name: "Remove connection to T-KQ12" }),
   );
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
   expect(vi.mocked(documents.save).mock.calls[1]?.[2]).toBe("Thought");
@@ -390,7 +390,7 @@ it("opens the originating ticket from document details", () => {
     title: null,
     body: "Evidence",
     origin_brief: "Update",
-    origin_ticket: "T-3",
+    origin_ticket: "T-KQ3",
     created_at: "now",
     updated_at: "now",
     trashed: false,
@@ -399,8 +399,10 @@ it("opens the originating ticket from document details", () => {
   renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenTicket={open} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "T-3 · Update details" }));
-  expect(open).toHaveBeenCalledWith("T-3");
+  fireEvent.click(
+    screen.getByRole("button", { name: "T-KQ3 · Update details" }),
+  );
+  expect(open).toHaveBeenCalledWith("T-KQ3");
 });
 
 it("reads an untitled Document with its core heading and current save details", async () => {
@@ -576,8 +578,8 @@ it("lists each connected item once and names Plans that use the Document as spec
     target_id: target,
     source_kind: source === "d1" ? "document" : "ticket",
     target_kind: target === "d1" ? "document" : "ticket",
-    source_label: source === "d1" ? "Spec" : "T-4",
-    target_label: target === "d1" ? "Spec" : "T-4",
+    source_label: source === "d1" ? "Spec" : "T-KQ4",
+    target_label: target === "d1" ? "Spec" : "T-KQ4",
     source_trashed: false,
     target_trashed: false,
     passage: "mention",
@@ -595,8 +597,8 @@ it("lists each connected item once and names Plans that use the Document as spec
     ],
   ]);
   renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
-  await screen.findByRole("button", { name: /T-4/ });
-  expect(screen.getAllByRole("button", { name: /T-4/ })).toHaveLength(1);
+  await screen.findByRole("button", { name: /T-KQ4/ });
+  expect(screen.getAllByRole("button", { name: /T-KQ4/ })).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Roadmap" })).toBeTruthy();
   expect(
     screen.getByText(/^Updated .* · spec of the Plan Roadmap$/),
@@ -939,7 +941,7 @@ it("asks the editor to take focus back after each conflict action (D2)", async (
 const doc = {
   id: "d1",
   title: "Checkout spec",
-  body: "See T-1 and T-3.",
+  body: "See T-KQ1 and T-KQ3.",
   created_at: "2026-11-04T00:00:00Z",
   updated_at: "2026-11-04T00:00:00Z",
   trashed: false,
@@ -988,14 +990,14 @@ it("quotes a passage shared by several connections once", async () => {
     target_label: target,
     source_trashed: false,
     target_trashed: false,
-    passage: "See T-1 and T-3.",
+    passage: "See T-KQ1 and T-KQ3.",
   });
   vi.mocked(documents.links).mockResolvedValue([
-    [link("T-1"), link("T-3")],
+    [link("T-KQ1"), link("T-KQ3")],
     [],
   ]);
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
-  await screen.findByRole("button", { name: "T-1" });
-  expect(screen.getAllByText(/See\s+T-1/)).toHaveLength(2);
+  await screen.findByRole("button", { name: "T-KQ1" });
+  expect(screen.getAllByText(/See\s+T-KQ1/)).toHaveLength(2);
   expect(screen.getAllByText(/^Both from\s*“/)).toHaveLength(1);
 });

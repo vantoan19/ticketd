@@ -30,7 +30,10 @@ A connector to an external ticket source, run by ticketd through a shared extens
 The identity of a ticket's corresponding record in an external tracker, retained as provenance even when ticketd takes ownership. Its presence alone does not imply external ownership or active synchronization.
 
 **Ticket reference**:
-A short, workspace-unique reference to a ticket that stays unchanged when its project or Plan links change.
+A short, workspace-unique label for a ticket: `T-`, the device code of the Workspace installation that created it, then that device's counter, with no dash between them (`T-KQ43`). It is stored with the ticket and never changes, including when project or Plan links change or the device later takes another code. The ticket's internal identifier, not the reference, is its identity.
+
+**Device code**:
+Two uppercase letters identifying one Workspace installation in the Ticket references it issues, so desktops sharing a Workspace never issue the same reference. It is random by default; a restored Workspace, or a copy whose code another device holds, takes a fresh one.
 
 **Parent ticket**:
 A ticket whose outcome is broken into subtickets. It may be Done while subtickets remain open, and completing all subtickets does not necessarily fulfill its own outcome.

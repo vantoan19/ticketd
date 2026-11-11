@@ -21,35 +21,37 @@ test("describes recorded changes as sentences without event keys", () => {
     "Project changed from Platform to gone",
   );
   expect(sentence("plan", "e1", "")).toBe("Plan cleared");
-  expect(sentence("dependency", "", "T-3")).toBe("Blocked by T-3");
-  expect(sentence("relationship:blocks", "T-4", "")).toBe(
-    "No longer blocks T-4",
+  expect(sentence("dependency", "", "T-KQ3")).toBe("Blocked by T-KQ3");
+  expect(sentence("relationship:blocks", "T-KQ4", "")).toBe(
+    "No longer blocks T-KQ4",
   );
-  expect(sentence("relationship:duplicate", "", "T-2")).toBe(
-    "Marked as duplicate of T-2",
+  expect(sentence("relationship:duplicate", "", "T-KQ2")).toBe(
+    "Marked as duplicate of T-KQ2",
   );
   expect(sentence("evidence", "", "Review")).toBe("Added evidence “Review”");
   expect(sentence("trash", "active", "trashed")).toBe("Moved to trash");
 });
 
 test("words subticket changes, and the Inbox shares the same sentences", () => {
-  expect(sentence("relationship:child", "", "T-7")).toBe("Added subticket T-7");
-  expect(sentence("relationship:child", "T-7", "")).toBe(
-    "Removed subticket T-7",
+  expect(sentence("relationship:child", "", "T-KQ7")).toBe(
+    "Added subticket T-KQ7",
+  );
+  expect(sentence("relationship:child", "T-KQ7", "")).toBe(
+    "Removed subticket T-KQ7",
   );
   expect(
     summarize({
       id: 1,
-      reference: "T-1",
+      reference: "T-KQ1",
       title: "Parent",
       kind: "relationship:child",
       from_value: "",
-      to_value: "T-7",
+      to_value: "T-KQ7",
       timestamp: "",
       read: false,
       editing_agent: "codex",
     }),
-  ).toBe("Added subticket T-7 · codex");
+  ).toBe("Added subticket T-KQ7 · codex");
 });
 
 test("an attached issue reads apart from a publication", () => {

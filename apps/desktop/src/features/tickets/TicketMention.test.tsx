@@ -52,7 +52,7 @@ afterEach(() => {
 const ticket = (reference: string, body: string, trashed = false): Ticket => ({
   id: reference,
   reference,
-  title: reference === "T-1" ? "Target" : "Source",
+  title: reference === "T-KQ1" ? "Target" : "Source",
   status: "Todo",
   trashed,
   body,
@@ -67,11 +67,11 @@ const ticket = (reference: string, body: string, trashed = false): Ticket => ({
 
 // What the workspace stored before a CLI edit, and what the database holds now. The
 // backlink's span was computed on the stored text.
-const OLD = "Intro.\n\nBlocked on T-1 today.";
-const STORED = "Added first.\n\nIntro.\n\nBlocked on T-1 today.";
+const OLD = "Intro.\n\nBlocked on T-KQ1 today.";
+const STORED = "Added first.\n\nIntro.\n\nBlocked on T-KQ1 today.";
 const span = {
-  mention_start: STORED.indexOf("T-1"),
-  mention_end: STORED.indexOf("T-1") + 3,
+  mention_start: STORED.indexOf("T-KQ1"),
+  mention_end: STORED.indexOf("T-KQ1") + 3,
 };
 
 type Api = { select: (reference: string) => void };
@@ -111,13 +111,13 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
         case "show_ticket":
           return show(args?.reference ?? "");
         case "ticket_backlinks":
-          return args?.reference === "T-1"
+          return args?.reference === "T-KQ1"
             ? [
                 {
-                  source_reference: "T-2",
+                  source_reference: "T-KQ2",
                   source_title: "Source",
                   activity_id: null,
-                  passage: "Blocked on T-1 today.",
+                  passage: "Blocked on T-KQ1 today.",
                   ...span,
                 },
               ]
@@ -127,7 +127,7 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
           return listStamp > 0
             ? [
                 {
-                  ticket: ticket("T-9", String(listStamp)),
+                  ticket: ticket("T-KQ9", String(listStamp)),
                   latest_update: null,
                 },
               ]
@@ -155,10 +155,10 @@ async function followBacklink() {
       <Harness />
     </TickingChanges>,
   );
-  // Cache T-2 with its old body, then look at T-1, whose backlinks list T-2.
-  act(() => api.select("T-2"));
-  await screen.findByText(/Blocked on T-1 today\./, { selector: "p" });
-  act(() => api.select("T-1"));
+  // Cache T-KQ2 with its old body, then look at T-KQ1, whose backlinks list T-KQ2.
+  act(() => api.select("T-KQ2"));
+  await screen.findByText(/Blocked on T-KQ1 today\./, { selector: "p" });
+  act(() => api.select("T-KQ1"));
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
 }
 
@@ -167,19 +167,19 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
   let release = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));
   setUp(async (reference) => {
-    if (reference === "T-1") return ticket("T-1", "Plain.");
-    if (!fresh) return ticket("T-2", OLD);
+    if (reference === "T-KQ1") return ticket("T-KQ1", "Plain.");
+    if (!fresh) return ticket("T-KQ2", OLD);
     await gate;
-    return ticket("T-2", STORED);
+    return ticket("T-KQ2", STORED);
   });
   render(
     <TickingChanges>
       <Harness />
     </TickingChanges>,
   );
-  act(() => api.select("T-2"));
-  await screen.findByText(/Blocked on T-1 today\./, { selector: "p" });
-  act(() => api.select("T-1"));
+  act(() => api.select("T-KQ2"));
+  await screen.findByText(/Blocked on T-KQ1 today\./, { selector: "p" });
+  act(() => api.select("T-KQ1"));
   fresh = true;
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
   // The cached body is on screen, but nothing is revealed or reported yet.
@@ -187,27 +187,27 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
   expect(document.querySelector("[id^=mention-note]")?.textContent).toBe("");
   await act(async () => release());
   await waitFor(() =>
-    expect(marked()?.textContent).toBe("Blocked on T-1 today."),
+    expect(marked()?.textContent).toBe("Blocked on T-KQ1 today."),
   );
   expect(document.activeElement).toBe(marked());
-  expect(document.getElementById("mention-note-T-2")?.textContent).toBe(
-    "Mentions T-1",
+  expect(document.getElementById("mention-note-T-KQ2")?.textContent).toBe(
+    "Mentions T-KQ1",
   );
 });
 
 test("trashing and restoring the revealed ticket does not reveal it again", async () => {
-  let current = ticket("T-2", STORED);
+  let current = ticket("T-KQ2", STORED);
   setUp(async (reference) =>
-    reference === "T-1" ? ticket("T-1", "Plain.") : current,
+    reference === "T-KQ1" ? ticket("T-KQ1", "Plain.") : current,
   );
   await followBacklink();
   await waitFor(() => expect(marked()).not.toBeNull());
   const scroller = document.querySelector<HTMLElement>(".detail-scroll")!;
   scroller.scrollTop = 33;
-  current = ticket("T-2", STORED, true);
+  current = ticket("T-KQ2", STORED, true);
   listStamp = 1;
   await waitFor(() => expect(marked()).toBeNull(), { timeout: 4000 });
-  current = ticket("T-2", STORED, false);
+  current = ticket("T-KQ2", STORED, false);
   listStamp = 2;
   await waitFor(
     () =>
@@ -222,7 +222,7 @@ test("trashing and restoring the revealed ticket does not reveal it again", asyn
 
 test("switching to another view and back drops the highlight", async () => {
   setUp(async (reference) =>
-    reference === "T-1" ? ticket("T-1", "Plain.") : ticket("T-2", STORED),
+    reference === "T-KQ1" ? ticket("T-KQ1", "Plain.") : ticket("T-KQ2", STORED),
   );
   await followBacklink();
   await waitFor(() => expect(marked()).not.toBeNull());
@@ -233,10 +233,10 @@ test("switching to another view and back drops the highlight", async () => {
 
 test("selecting the ticket that is already open drops the highlight", async () => {
   setUp(async (reference) =>
-    reference === "T-1" ? ticket("T-1", "Plain.") : ticket("T-2", STORED),
+    reference === "T-KQ1" ? ticket("T-KQ1", "Plain.") : ticket("T-KQ2", STORED),
   );
   await followBacklink();
   await waitFor(() => expect(marked()).not.toBeNull());
-  act(() => api.select("T-2"));
+  act(() => api.select("T-KQ2"));
   await waitFor(() => expect(marked()).toBeNull());
 });

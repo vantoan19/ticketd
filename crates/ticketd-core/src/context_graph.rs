@@ -24,19 +24,19 @@ const GROUPS: [(&str, &str); 24] = [
         "document",
     ),
     (
-        "SELECT m.source_id, COALESCE(t.id, ''), MIN(m.passage) FROM numeric_mentions m LEFT JOIN tickets t ON t.number = m.number WHERE m.source_id = ?1 AND m.activity = 0 GROUP BY m.number ORDER BY m.number LIMIT ?2",
+        "SELECT m.source_id, COALESCE(t.id, ''), MIN(m.passage) FROM numeric_mentions m LEFT JOIN tickets t ON t.reference = m.reference WHERE m.source_id = ?1 AND m.activity = 0 GROUP BY m.reference ORDER BY m.reference LIMIT ?2",
         "mention",
     ),
     (
-        "SELECT m.source_id, t.id, MIN(m.passage) FROM tickets t JOIN numeric_mentions m ON m.number = t.number AND m.activity = 0 WHERE t.id = ?1 GROUP BY m.source_id ORDER BY m.source_id LIMIT ?2",
+        "SELECT m.source_id, t.id, MIN(m.passage) FROM tickets t JOIN numeric_mentions m ON m.reference = t.reference AND m.activity = 0 WHERE t.id = ?1 GROUP BY m.source_id ORDER BY m.source_id LIMIT ?2",
         "mention",
     ),
     (
-        "SELECT m.ticket_id, COALESCE(t.id, ''), MIN(m.passage) FROM activity_graph_numbers m LEFT JOIN tickets t ON t.number = m.number WHERE m.ticket_id = ?1 GROUP BY m.number ORDER BY m.number LIMIT ?2",
+        "SELECT m.ticket_id, COALESCE(t.id, ''), MIN(m.passage) FROM activity_graph_numbers m LEFT JOIN tickets t ON t.reference = m.reference WHERE m.ticket_id = ?1 GROUP BY m.reference ORDER BY m.reference LIMIT ?2",
         "activity",
     ),
     (
-        "SELECT a.ticket_id, t.id, MIN(m.passage) FROM tickets t JOIN numeric_mentions m ON m.number = t.number AND m.activity = 1 JOIN activities a ON a.id = m.source_id WHERE t.id = ?1 GROUP BY a.ticket_id ORDER BY a.ticket_id LIMIT ?2",
+        "SELECT a.ticket_id, t.id, MIN(m.passage) FROM tickets t JOIN numeric_mentions m ON m.reference = t.reference AND m.activity = 1 JOIN activities a ON a.id = m.source_id WHERE t.id = ?1 GROUP BY a.ticket_id ORDER BY a.ticket_id LIMIT ?2",
         "activity",
     ),
     (
@@ -186,15 +186,8 @@ impl Workspace {
             )));
         }
         let tx = self.connection.unchecked_transaction()?;
-        let center: String = if let Some(number) = reference
-            .strip_prefix("T-")
-            .and_then(|v| v.parse::<i64>().ok())
-        {
-            tx.query_row("SELECT id FROM tickets WHERE number = ?1", [number], |r| {
-                r.get(0)
-            })
-            .optional()?
-            .ok_or_else(|| Error::NotFound(reference.to_owned()))?
+        let center: String = if reference.starts_with("T-") {
+            crate::relationships::id(&tx, reference)?
         } else {
             tx.query_row("SELECT id FROM entities WHERE id = ?1", [reference], |r| {
                 r.get(0)
@@ -483,7 +476,7 @@ fn graph_nodes(
     for chunk in ids.chunks(100) {
         let placeholders = vec!["?"; chunk.len()].join(",");
         let sql = format!(
-            "SELECT id, 'ticket', 'T-' || number || ' · ' || substr(title, 1, 200), status, trashed, 0, 'T-' || number FROM tickets WHERE id IN ({placeholders}) UNION ALL SELECT d.id, 'document', {}, NULL, d.trashed, d.originating_activity_id IS NOT NULL AND NOT d.kept, NULL FROM documents d WHERE d.id IN ({placeholders}) UNION ALL SELECT id, 'plan', substr(name, 1, 200), CASE WHEN archived THEN 'Archived' ELSE 'Active' END, 0, 0, NULL FROM plans WHERE id IN ({placeholders})",
+            "SELECT id, 'ticket', reference || ' · ' || substr(title, 1, 200), status, trashed, 0, reference FROM tickets WHERE id IN ({placeholders}) UNION ALL SELECT d.id, 'document', {}, NULL, d.trashed, d.originating_activity_id IS NOT NULL AND NOT d.kept, NULL FROM documents d WHERE d.id IN ({placeholders}) UNION ALL SELECT id, 'plan', substr(name, 1, 200), CASE WHEN archived THEN 'Archived' ELSE 'Active' END, 0, 0, NULL FROM plans WHERE id IN ({placeholders})",
             crate::documents::HEADING
         );
         let mut statement = tx.prepare(&sql)?;

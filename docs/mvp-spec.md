@@ -93,7 +93,7 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 - Use **tags** for categories such as bug, research, or feature. No mandatory issue-type system.
 - Only the title is mandatory user-entered content. Project and Plan links are optional.
 - A ticket describes an intended outcome, including when it has subtickets.
-- Short ticket references are unique across the workspace and remain unchanged when project or Plan links change.
+- Short ticket references are unique across the workspace and remain unchanged when project or Plan links change. A reference is `T-`, the creating installation's two-letter device code and that device's counter (`T-KQ43`); a plain number such as `T-42` is not a reference.
 - Support Markdown content and checklists. Checklist items have no independent statuses or dependencies; unchecked items do not prevent Done.
 - Acceptance criteria can be written in the body; no separate mandatory field is required.
 - Support editable, deletable, timestamped authored activities with required human-readable briefs and optional supporting Documents for progress and findings (section 16). Record the editing agent when supplied; do not store human names in the MVP. Attribution is descriptive, not verified identity or authorization.
@@ -284,10 +284,10 @@ Do not return the entire workspace by default. Indicate truncation and how to fe
 ```bash
 ticketd create "Fix upload timeout" --project demo
 ticketd list --project demo --ready --json
-ticketd show T-42 --context dependencies,parent,activities --json
-ticketd update T-42 --status in-progress
-ticketd activity add T-42 --brief "Investigation complete" --details-file findings.md
-ticketd dependency add T-43 --blocked-by T-42
+ticketd show T-KQ42 --context dependencies,parent,activities --json
+ticketd update T-KQ42 --status in-progress
+ticketd activity add T-KQ42 --brief "Investigation complete" --details-file findings.md
+ticketd dependency add T-KQ43 --blocked-by T-KQ42
 ```
 
 Agents use the CLI/application core. They do not write SQL directly or treat Markdown exports as the system of record.
@@ -478,13 +478,13 @@ workflow. The following extensions describe agreed product direction. Section 16
   canonical ticket. Marking a locally owned ticket Duplicate requires selecting
   its canonical ticket; status and relationship change together.
 - Marking a duplicate sets the dedicated Duplicate status and presents its
-  canonical relationship explicitly, for example, Duplicate of T-10. This
+  canonical relationship explicitly, for example, Duplicate of T-KQ10. This
   replaces the earlier representation as Canceled plus a duplicate relationship.
 - Review affected blocking dependencies when marking a duplicate. Show proposed
   replacements and apply the agreed changes atomically with cycle validation.
-- Cancellation alone never satisfies a prerequisite. For example, if T-30 is
-  blocked by T-20 and T-20 duplicates T-10, replacing T-20 with T-10 as the blocker
-  makes T-30's readiness depend on T-10's completion.
+- Cancellation alone never satisfies a prerequisite. For example, if T-KQ30 is
+  blocked by T-KQ20 and T-KQ20 duplicates T-KQ10, replacing T-KQ20 with T-KQ10 as the blocker
+  makes T-KQ30's readiness depend on T-KQ10's completion.
 - Preserve canonical identity alongside Duplicate status so integrations can
   retain the relationship across platforms with different closure conventions.
 - Removing the duplicate designation restores the status held before duplicate
@@ -824,7 +824,7 @@ without download or native conversion. A `complete` result includes files or
 links for every requested identity, not a promise of offline provider access.
 Canonical Markdown and ordinary copy-as-Markdown remain unchanged. Shared editor
 export uses its current selection, or all current content when nothing is
-selected, independently of saving. `ticketd export-markdown --ticket T-1`,
+selected, independently of saving. `ticketd export-markdown --ticket T-KQ1`,
 `--document ID`, or `--markdown-file PATH` (`-` for stdin) plus `--output FOLDER`
 exposes the same workflow without a running desktop. See [export](export.md).
 
@@ -859,12 +859,12 @@ content retain source editing as their lossless fallback. Inline link removal
 changes only the reference. Saved body and brief references are derived in the
 same transaction as their content, separately from direct ticket associations.
 
-The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
-[--request-id ID]`, `attachment list [--ticket T-1]`, `attachment inspect <id>`,
+The standalone CLI exposes `attachment add <path> [--ticket T-KQ1] [--name NAME]
+[--request-id ID]`, `attachment list [--ticket T-KQ1]`, `attachment inspect <id>`,
 `attachment link <id> <ticket>`, `attachment detach <id> <ticket>`, and
 `attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
 `attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
-`attachment search [text] [--state all|in-use|unused] [--related-ticket T-1]
+`attachment search [text] [--state all|in-use|unused] [--related-ticket T-KQ1]
 [--limit N] [--offset N]` returns metadata with usage and related-file context.
 `attachment list` also accepts `--limit` and `--offset`, including with `--ticket`.
 `attachment rename <id> <display-name> [--request-id ID]` changes metadata only;
@@ -940,7 +940,7 @@ Publication checks the exact outgoing description in the core before creating a
 remote issue, including retries after a failed or resolved attempt. Workspace-only
 attachment links block publication, with affected URIs, known display names, and
 guidance to remove or replace the links with accessible URLs or share a separate
-export with files. Desktop publication and `source publish T-1 --preview` show the
+export with files. Desktop publication and `source publish T-KQ1 --preview` show the
 same preflight. No file upload or private-path rewrite is implied.
 
 Direct local attachment associations are not automatically published. They stay
@@ -1005,7 +1005,7 @@ remote references never weaken that guarantee.
 The independent CLI can inspect/reuse a stored reference with ordinary attachment
 commands. `attachment drive-info <id>` returns last-known metadata and its opaque
 connection handle. `attachment drive-resolve <id>` refreshes current metadata.
-`attachment drive-add <connection> <file-id> [--ticket T-n] [--resource-key KEY]`
+`attachment drive-add <connection> <file-id> [--ticket T-KQ1] [--resource-key KEY]`
 uses the OS user's existing authorization. An unselected file gets selection
 instructions, never broader scopes. Byte export refuses external references and
 instructs the caller to open current content in Drive; portable-link export is a
@@ -1092,7 +1092,7 @@ abandoning insertion never deletes a completed remote file. Upload locally inste
 is explicit and creates a separate local upload, preserving the Drive operation.
 
 `attachment drive-upload <path> --connection <handle> --folder <id> --request-id
-<id> [--resource-key KEY] [--ticket T-n]` uses the same workflows without a desktop
+<id> [--resource-key KEY] [--ticket T-KQ1]` uses the same workflows without a desktop
 process. `attachment drive-uploads` lists operation metadata; `attachment
 drive-upload-status <id> [--check]` inspects or reconciles a saved operation.
 Uploaded copies retain input SHA-256 and observed provider checksum/version;

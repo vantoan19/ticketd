@@ -224,7 +224,7 @@ impl Workspace {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, Error> {
-        let mut statement = self.connection.prepare("SELECT i.external_id, 'T-' || t.number FROM external_identities i JOIN tickets t ON t.id = i.ticket_id WHERE i.provider = ?1")?;
+        let mut statement = self.connection.prepare("SELECT i.external_id, t.reference FROM external_identities i JOIN tickets t ON t.id = i.ticket_id WHERE i.provider = ?1")?;
         let known = statement
             .query_map([provider], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

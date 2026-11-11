@@ -126,7 +126,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
   let saved = {
     id: "1",
     trashed: false,
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "First",
     body: "Old",
     status: "Todo",
@@ -223,7 +223,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     title: string,
   ): import("@/lib/api/client").Ticket => ({
     id,
-    reference: `T-${id}`,
+    reference: `T-KQ${id}`,
     title,
     body: "",
     status: "Todo",
@@ -461,7 +461,7 @@ test("changing the scope drops an open ticket that is outside it", async () => {
   vi.useFakeTimers();
   const ticket = {
     id: "1",
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "First",
     body: "",
     status: "Todo",
@@ -562,7 +562,7 @@ test("moves focus between ticket rows without opening them until Enter, and reta
   let tickets = [
     {
       id: "1",
-      reference: "T-1",
+      reference: "T-KQ1",
       title:
         "A very long title that remains accessible even when the list truncates it",
       body: "",
@@ -578,7 +578,7 @@ test("moves focus between ticket rows without opening them until Enter, and reta
     },
     {
       id: "2",
-      reference: "T-2",
+      reference: "T-KQ2",
       title: "Second",
       body: "",
       status: "In progress",
@@ -828,7 +828,7 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
   vi.useFakeTimers();
   const ticket = {
     id: "1",
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "First",
     body: "",
     status: "Todo",
@@ -881,7 +881,7 @@ test("moves focus to the visible pane when expanding and returning", async () =>
   vi.useFakeTimers();
   const ticket = {
     id: "1",
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "First",
     body: "",
     status: "Todo",
@@ -909,7 +909,7 @@ test("moves focus to the visible pane when expanding and returning", async () =>
   expand.focus();
   fireEvent.click(expand);
   expect(document.activeElement).toBe(
-    screen.getByRole("heading", { name: "T-1" }),
+    screen.getByRole("heading", { name: "T-KQ1" }),
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Return to ticket list" }),
@@ -922,7 +922,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
   narrowViewport = true;
   const ticket = {
     id: "1",
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "First",
     body: "",
     status: "Todo",
@@ -948,7 +948,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
   row.focus();
   fireEvent.keyDown(row, { key: "Enter" });
   expect(document.activeElement).toBe(
-    screen.getByRole("heading", { name: "T-1" }),
+    screen.getByRole("heading", { name: "T-KQ1" }),
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Return to ticket list" }),
@@ -958,7 +958,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
 
 const bulkTicket = (index: number, overrides = {}) => ({
   id: String(index),
-  reference: `T-${index}`,
+  reference: `T-KQ${index}`,
   title: ["First", "Second", "Third"][index - 1],
   body: "",
   status: "Todo",
@@ -1013,7 +1013,7 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   });
   expect(screen.queryByRole("region", { name: "Bulk edit" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(screen.getByText("1 selected")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
   expect(screen.getByText("2 selected")).toBeTruthy();
@@ -1031,7 +1031,7 @@ test("shows the bulk bar only while tickets are selected and applies one status 
       "status",
     ).textContent,
   ).toContain("Set 2 tickets to Done");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
   expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
 });
@@ -1047,8 +1047,8 @@ test("keeps the selection and retries a failed bulk change with the same request
       return [];
     },
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ2" }));
   openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
@@ -1079,18 +1079,18 @@ test("names the ticket the core rejected and offers no Retry that cannot succeed
       throw {
         code: "batch_operation",
         index: 1,
-        message: "invalid batch: T-2 is trashed",
+        message: "invalid batch: T-KQ2 is trashed",
       };
     },
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ2" }));
   openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert");
   expect(alert.querySelector(".bulk-error-text")?.textContent).toBe(
-    "T-2 is trashed. Nothing changed.",
+    "T-KQ2 is trashed. Nothing changed.",
   );
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   expect(document.activeElement).toBe(alert);
@@ -1105,12 +1105,12 @@ test("moves selected tickets to a project from the Organize menu", async () => {
       { id: "p1", name: "Project one", path: "/p", paths: ["/p"] },
     ],
     bulk_change: (args: { references: string[]; change: unknown }) => {
-      expect(args.references).toEqual(["T-1"]);
+      expect(args.references).toEqual(["T-KQ1"]);
       changes.push(args.change);
       return [];
     },
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   openMenu("Organize selected tickets");
   openSubmenu("Move to project");
   fireEvent.click(screen.getByRole("menuitem", { name: "Project one" }));
@@ -1136,7 +1136,7 @@ test("sets an Plan in one request and shows how many selected tickets already ha
       return [];
     },
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   fireEvent.click(screen.getByRole("button", { name: "Select all 3" }));
   openMenu("Organize selected tickets");
   openSubmenu("Set Plan");
@@ -1157,12 +1157,12 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
       return [];
     },
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   openMenu("Organize selected tickets");
   openSubmenu("Set Plan");
   fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Plan" }));
   await act(async () => {});
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   openMenu("Organize selected tickets");
   expect(screen.queryByRole("menuitem", { name: /Add or remove/ })).toBeNull();
   fireEvent.click(screen.getByRole("menuitem", { name: "Remove tag…" }));
@@ -1186,7 +1186,7 @@ test("Organize has a separate Add tag action", async () => {
       return [];
     },
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   openMenu("Organize selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Add tag…" }));
   await act(async () => {});
@@ -1210,8 +1210,8 @@ test("the status menu counts tickets per status and checks the one all share", a
       bulkTicket(3, { status: "Done" }),
     ],
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ2" }));
   openMenu("Status of selected tickets");
   expect(screen.getByText("Set status for 2 tickets")).toBeTruthy();
   const todo = screen.getByRole("menuitem", { name: /^Todo/ });
@@ -1221,7 +1221,7 @@ test("the status menu counts tickets per status and checks the one all share", a
   fireEvent.keyDown(document.activeElement ?? document.body, {
     key: "Escape",
   });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-3" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ3" }));
   openMenu("Status of selected tickets");
   const mixed = screen.getByRole("menuitem", { name: /^Todo/ });
   expect(mixed.textContent).toContain("2 of 3");
@@ -1230,7 +1230,7 @@ test("the status menu counts tickets per status and checks the one all share", a
 
 test("Escape clears the selection and the bar shows the shortcut", async () => {
   await renderBulk({ find_tickets: () => [bulkTicket(1)] });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(
     screen.getByRole("button", { name: "Clear selection" }).textContent,
   ).toContain("Esc");
@@ -1288,7 +1288,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
   );
   const ticket = {
     id: "1",
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "First",
     body: "",
     status: "Todo",
@@ -1397,7 +1397,7 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
 
 test("a selection ends when the search or filters change, and the bar can be skipped to", async () => {
   await renderBulk({ find_tickets: () => [bulkTicket(1), bulkTicket(2)] });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(screen.getByText("1 selected")).toBeTruthy();
   const skip = screen.getByRole("link", { name: "Skip to selection actions" });
   fireEvent.click(skip);
@@ -1546,7 +1546,7 @@ test("the source filter narrows list and counts together and Refresh imports on 
       },
     ],
     refresh_sources: {
-      imported: ["T-1"],
+      imported: ["T-KQ1"],
       updated: [],
       unchanged: 0,
       failures: [],
@@ -1740,10 +1740,10 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
   fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
   await act(async () => {});
   const review = screen.getByRole("dialog", {
-    name: "Mark T-2 as a duplicate",
+    name: "Mark T-KQ2 as a duplicate",
   });
   expect(
-    within(review).getByText(/T-2 keeps its description and history/),
+    within(review).getByText(/T-KQ2 keeps its description and history/),
   ).toBeTruthy();
   // The cursor is where the next answer goes, not on the dialog's frame.
   expect(document.activeElement).toBe(
@@ -1780,14 +1780,14 @@ test("an exact reference leads the matches in the mark-duplicate search", async 
     name: "Mark a ticket as duplicate",
   });
   fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
-    target: { value: "T-3" },
+    target: { value: "T-KQ3" },
   });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(200);
   });
   const matches = within(dialog).getByRole("list", { name: "Matches" });
   expect(within(matches).getAllByRole("button")[0]?.textContent).toContain(
-    "T-3",
+    "T-KQ3",
   );
 });
 
@@ -1796,7 +1796,7 @@ test("Next at the end of a page opens the first ticket of the next page", async 
     Array.from({ length: size }, (_, index) => ({
       ...bulkTicket(1),
       id: String(offset + index + 1),
-      reference: `T-${offset + index + 1}`,
+      reference: `T-KQ${offset + index + 1}`,
       title: `Ticket ${offset + index + 1}`,
     }));
   const rows = (offset: number) => page(offset, offset === 0 ? 50 : 10);
@@ -1842,13 +1842,13 @@ test("pressing Next on the last page keeps focus in the pagination, on Previous"
   const all = Array.from({ length: 50 }, (_, index) => ({
     ...bulkTicket(1),
     id: String(index + 1),
-    reference: `T-${index + 1}`,
+    reference: `T-KQ${index + 1}`,
   }));
   await renderBulk({
     find_tickets: (args: { filter: { offset: number } }) =>
       args.filter.offset === 0
         ? all
-        : [{ ...bulkTicket(1), id: "51", reference: "T-51" }],
+        : [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }],
     show_ticket: () => all[0],
     count_tickets: () => counted({ todo: 51 }),
   });
@@ -1869,7 +1869,7 @@ test("a later page that empties moves back to the last page that exists", async 
   const all = Array.from({ length: 50 }, (_, index) => ({
     ...bulkTicket(1),
     id: String(index + 1),
-    reference: `T-${index + 1}`,
+    reference: `T-KQ${index + 1}`,
     title: `Ticket ${index + 1}`,
   }));
   let total = 51;
@@ -1879,7 +1879,7 @@ test("a later page that empties moves back to the last page that exists", async 
       offsets.push(args.filter.offset);
       if (args.filter.offset === 0) return all;
       return total > 50
-        ? [{ ...bulkTicket(1), id: "51", reference: "T-51" }]
+        ? [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }]
         : [];
     },
     show_ticket: () => all[0],
@@ -1917,8 +1917,8 @@ test.each(["ticket", "document", "plan"] as const)(
           {
             id: "1",
             kind,
-            label: "T-1 · First",
-            ticket_reference: kind === "ticket" ? "T-1" : null,
+            label: "T-KQ1 · First",
+            ticket_reference: kind === "ticket" ? "T-KQ1" : null,
             state: "Todo",
             trashed: false,
             activity_detail: false,
@@ -1941,7 +1941,7 @@ test.each(["ticket", "document", "plan"] as const)(
       await vi.advanceTimersByTimeAsync(0);
     });
     fireEvent.click(
-      screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+      screen.getAllByRole("button", { name: "T-KQ1 · First" }).at(-1)!,
     );
     fireEvent.click(
       screen.getByRole("button", { name: /^Open (ticket|item)$/ }),
@@ -2058,8 +2058,8 @@ test("returns to local graph state after opening an item", async () => {
   const node = {
     id: "1",
     kind: "ticket",
-    label: "T-1 · First",
-    ticket_reference: "T-1",
+    label: "T-KQ1 · First",
+    ticket_reference: "T-KQ1",
     state: "Todo",
     trashed: false,
     activity_detail: false,
@@ -2094,7 +2094,7 @@ test("returns to local graph state after opening an item", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(
-    screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+    screen.getAllByRole("button", { name: "T-KQ1 · First" }).at(-1)!,
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Show only its neighbors" }),
@@ -2132,7 +2132,7 @@ test("the ticket detail bounds its height so the document and rail can scroll on
   vi.useFakeTimers();
   const ticket = {
     id: "1",
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "First",
     body: "",
     status: "Todo",

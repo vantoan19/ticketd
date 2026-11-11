@@ -102,7 +102,7 @@ fn missing_retained_bytes_fail_review_and_restore_without_changing_the_workspace
     assert!(Workspace::restore(&path, &backup).is_err());
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
-        workspace.show_ticket("T-1").unwrap().title,
+        workspace.show_ticket("T-KQ1").unwrap().title,
         "Keep this workspace"
     );
     assert_eq!(fs::read(quarantine).unwrap(), b"quarantine");
@@ -403,7 +403,7 @@ fn failed_atomic_replacement_rolls_back_files_and_keeps_a_complete_safety_copy()
     drop(held);
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
-        workspace.show_ticket("T-2").unwrap().title,
+        workspace.show_ticket("T-KQ2").unwrap().title,
         "Keep after failed restore"
     );
     assert_eq!(workspace.attachment(&file.id).unwrap(), file);

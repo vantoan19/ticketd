@@ -25,10 +25,10 @@ test("each major ticket section opens with its heading row, set apart by space a
     command === "ticket_backlinks"
       ? [
           {
-            source_reference: "T-2",
+            source_reference: "T-KQ2",
             source_title: "Cache layer",
             activity_id: null,
-            passage: "Blocked on T-1.",
+            passage: "Blocked on T-KQ1.",
             mention_start: 11,
             mention_end: 14,
           },
@@ -48,14 +48,14 @@ test("each major ticket section opens with its heading row, set apart by space a
     <>
       <Subtickets work={work} select={() => {}} />
       <Evidence
-        reference="T-1"
+        reference="T-KQ1"
         revision={0}
         trashed={false}
         refresh={async () => {}}
       />
-      <Backlinks reference="T-1" revision={0} select={() => {}} />
+      <Backlinks reference="T-KQ1" revision={0} select={() => {}} />
       <Activity
-        reference="T-1"
+        reference="T-KQ1"
         status="Todo"
         revision={0}
         projects={[]}

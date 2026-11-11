@@ -38,7 +38,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 function entry(over: Partial<Entry> & Pick<Entry, "id">): Entry {
   return {
-    reference: `T-${over.id}`,
+    reference: `T-KQ${over.id}`,
     title: `Ticket ${over.id}`,
     kind: "status",
     from_value: "Todo",
@@ -53,10 +53,10 @@ function entry(over: Partial<Entry> & Pick<Entry, "id">): Entry {
 beforeEach(() => {
   calls.length = 0;
   store = [
-    entry({ id: 1, reference: "T-1", title: "First" }),
+    entry({ id: 1, reference: "T-KQ1", title: "First" }),
     entry({
       id: 2,
-      reference: "T-2",
+      reference: "T-KQ2",
       title: "Finding",
       kind: "activity",
       from_value: "note-id",
@@ -70,8 +70,8 @@ afterEach(cleanup);
 test("opening an entry marks it read and shown entries can be marked together", async () => {
   const select = vi.fn();
   render(<Inbox revision={0} select={select} onBrowse={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: /T-1.*First/ }));
-  expect(select).toHaveBeenCalledWith("T-1");
+  fireEvent.click(await screen.findByRole("button", { name: /T-KQ1.*First/ }));
+  expect(select).toHaveBeenCalledWith("T-KQ1");
   await waitFor(() => expect(store[0]?.read).toBe(true));
   const unreadState = { selector: ".sr-only" };
   await waitFor(() =>
@@ -87,8 +87,10 @@ test("opening an entry marks it read and shown entries can be marked together", 
 test("opens the note identified by an inbox entry and shows its text", async () => {
   const select = vi.fn();
   render(<Inbox revision={0} select={select} onBrowse={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: /T-2.*Finding/ }));
-  expect(select).toHaveBeenCalledWith("T-2", "note-id");
+  fireEvent.click(
+    await screen.findByRole("button", { name: /T-KQ2.*Finding/ }),
+  );
+  expect(select).toHaveBeenCalledWith("T-KQ2", "note-id");
   expect(screen.getByText(/New update: Original note · agent/)).toBeTruthy();
 });
 
@@ -100,7 +102,7 @@ test("groups entries by local day and never shows internal event keys", async ()
       title: "Long ago",
       kind: "relationship:discovered-while",
       from_value: "",
-      to_value: "T-9",
+      to_value: "T-KQ9",
       timestamp: hours(24 * 10),
     }),
   ];
@@ -110,7 +112,7 @@ test("groups entries by local day and never shows internal event keys", async ()
   await screen.findByText("Long ago");
   expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Earlier" })).toBeTruthy();
-  expect(screen.getByText("Discovered while working on T-9")).toBeTruthy();
+  expect(screen.getByText("Discovered while working on T-KQ9")).toBeTruthy();
   expect(view.container.textContent).not.toMatch(/relationship:/);
 });
 
@@ -119,13 +121,13 @@ test("the Unread filter asks the core for unread entries and loads older pages",
     entry({ id: 100 - i, read: i % 2 === 1 }),
   );
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
-  await screen.findByRole("button", { name: /^T-100/ });
+  await screen.findByRole("button", { name: /^T-KQ100/ });
   fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
   await waitFor(() =>
     expect(calls.some((c) => c.args.unreadOnly === true)).toBe(true),
   );
   await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(30));
-  expect(screen.queryByRole("button", { name: /^T-99/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^T-KQ99/ })).toBeNull();
   expect(screen.getByText(/That’s everything unread/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
 });
@@ -156,14 +158,14 @@ test("row actions are real buttons reachable by keyboard focus and mark one entr
   render(<Inbox revision={0} select={vi.fn()} onBrowse={vi.fn()} />);
   const row = (await screen.findByText("First")).closest("li")!;
   const action = within(row).getByRole("button", {
-    name: "Mark T-1 change read",
+    name: "Mark T-KQ1 change read",
   });
   action.focus();
   expect(document.activeElement).toBe(action);
   fireEvent.click(action);
   await waitFor(() =>
     expect(
-      within(row).getByRole("button", { name: "Mark T-1 change unread" }),
+      within(row).getByRole("button", { name: "Mark T-KQ1 change unread" }),
     ).toBeTruthy(),
   );
   expect(store.find((e) => e.id === 2)?.read).toBe(false);
@@ -173,7 +175,7 @@ test("snoozing a due reminder reschedules it without marking the entry read", as
   store = [
     entry({
       id: 7,
-      reference: "T-7",
+      reference: "T-KQ7",
       title: "Remember",
       kind: "reminder",
       from_value: "",
@@ -184,14 +186,14 @@ test("snoozing a due reminder reschedules it without marking the entry read", as
   expect(await screen.findByText("Your reminder is due")).toBeTruthy();
   const before = Date.now();
   fireEvent.click(
-    screen.getByRole("button", { name: "Snooze reminder for T-7" }),
+    screen.getByRole("button", { name: "Snooze reminder for T-KQ7" }),
   );
   fireEvent.click(await screen.findByRole("button", { name: "In one hour" }));
   await waitFor(() =>
     expect(calls.some((c) => c.command === "set_reminder")).toBe(true),
   );
   const call = calls.find((c) => c.command === "set_reminder")!;
-  expect(call.args.reference).toBe("T-7");
+  expect(call.args.reference).toBe("T-KQ7");
   const due = new Date(call.args.dueAt as string).getTime();
   expect(due).toBeGreaterThanOrEqual(before + 3600000 - 1000);
   expect(store[0]!.read).toBe(false);
@@ -218,5 +220,5 @@ test("a deleted update reads as deleted and opens the ticket with its id", async
   render(<Inbox revision={0} select={select} onBrowse={vi.fn()} />);
   expect(await screen.findByText("Update deleted")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Gone/ }));
-  expect(select).toHaveBeenCalledWith("T-9", "note-id");
+  expect(select).toHaveBeenCalledWith("T-KQ9", "note-id");
 });

@@ -339,7 +339,7 @@ own entry id. It has no write workflow: refresh replaces it in the same short
 write as the ticket, only when the issue changed since it was last read, and a
 failed read keeps what was retrieved. Authors are the source's identities, never
 an editing agent, and the rows survive takeover as provenance. Agents read it
-with `ticketd context T-n --conversation`.
+with `ticketd context T-KQ1 --conversation`.
 
 Freshness and availability are persisted, not inferred: `source_sync` records the
 start of each ticket's failure streak and `source_status` records each source's
@@ -423,7 +423,7 @@ workflow: `set_following` takes a ticket `reference` and `following` boolean;
 IDs actually displayed avoids marking later arrivals read.
 
 To review duplicate dependencies through the CLI, run `ticketd preview-duplicate
-T-1 T-2`. Submit the returned `canonical` as `expected_canonical` and each edge
+T-KQ1 T-KQ2`. Submit the returned `canonical` as `expected_canonical` and each edge
 with an explicit `replace`, `remove`, or `retain` choice using `ticketd write`
 with operation `mark_duplicate_reviewed`, source, canonical, decisions, and an
 optional agent. The preview records its `mode` (`duplicate`, or `separate` with

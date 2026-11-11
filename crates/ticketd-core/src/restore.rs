@@ -152,6 +152,12 @@ impl Workspace {
         let mut restored = Connection::open(staged.path())?;
         backup::copy(&source, &mut restored)?;
         backup_archive::unpack_database(&restored)?;
+        // The backup may be older than references this device has since issued, or come from
+        // another device: a fresh code keeps the restored counter from issuing one twice.
+        // A backup from before device codes gets its code when it is migrated on open.
+        if backup::table_exists(&restored, "device")? {
+            crate::device::renew_code(&restored)?;
+        }
 
         // All potentially failing staging work happens before touching live data.
         let current = if workspace.exists() {
