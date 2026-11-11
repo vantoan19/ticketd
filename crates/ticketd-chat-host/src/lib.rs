@@ -5,8 +5,10 @@
 //! through core workflows.
 
 pub mod cli;
+mod codex;
 pub mod context;
 mod contract;
 pub mod testing;
 
+pub use codex::CodexAdapter;
 pub use contract::*;

@@ -1,0 +1,12 @@
+{"note":"Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema) and the app-server documentation. Not captured from a live session; every value is synthetic."}
+{"server":{"method":"thread/futureThing/updated","params":{"threadId":"thr_1","value":42}}}
+{"server":{"method":"thread/tokenUsage/updated","params":{"threadId":"thr_1","tokenUsage":{}}}}
+{"server":{"id":"srv-7","method":"item/tool/call","params":{"threadId":"thr_1","turnId":"turn_9","callId":"call_1","tool":"lookup","arguments":{}}}}
+{"client":{"id":"srv-7","error":{"code":-32601,"message":"ticketd does not handle item/tool/call"}}}
+{"server":{"id":8,"method":"mcpServer/elicitation/request","params":{"threadId":"thr_1","serverName":"docs","mode":"form","message":"Pick one","requestedSchema":{"type":"object","properties":{}}}}}
+{"client":{"id":8,"result":{"action":"decline"}}}
+{"server":{"id":9,"method":"future/approval/request","params":{"threadId":"thr_1"}}}
+{"client":{"id":9,"error":{"code":-32601,"message":"ticketd does not handle future/approval/request"}}}
+{"server":{"method":"item/completed","params":{"threadId":"thr_1","turnId":"turn_9","completedAtMs":5,"item":{"type":"holoDeck","id":"item_9"}}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_9","status":"paused","items":[]}}}}
+{"server":{"method":"turn/started","params":{"threadId":"thr_other","turn":{"id":"turn_x","status":"inProgress","items":[]}}}}

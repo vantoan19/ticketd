@@ -1,0 +1,10 @@
+{"note":"Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema) and the app-server documentation. Not captured from a live session; every value is synthetic."}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Start","text_elements":[]}]}}}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"mark":"the turn is active"}
+{"client":{"id":4,"method":"turn/steer","params":{"threadId":"thr_1","expectedTurnId":"turn_1","clientUserMessageId":"sub-3","input":[{"type":"text","text":"Also check tests","text_elements":[]}]}}}
+{"server":{"id":4,"error":{"code":-32600,"message":"expected turn turn_0 but the active turn is turn_1"}}}
+{"client":{"id":5,"method":"turn/steer","params":{"threadId":"thr_1","expectedTurnId":"turn_1","clientUserMessageId":"sub-4","input":[{"type":"text","text":"Also check docs","text_elements":[]}]}}}
+{"server":{"id":5,"result":{"turnId":"turn_1"}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"completed","items":[],"error":null}}}}
