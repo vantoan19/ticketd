@@ -1,0 +1,71 @@
+# Workspace sync as one Markdown file per record in the person's Google Drive
+
+## Decision
+
+A person's desktops share one Workspace through that person's own Google Drive. Each device keeps its own SQLite Workspace and local Attachment files and stays fully usable offline. Every ticket, Document, Plan and project is also written to an app-created, visible Drive folder as one readable Markdown file: a YAML header for fields, then the Markdown text, with a ticket's Activities and Implementation evidence as sections of the ticket's file ([sync file format](../sync-file-format.md)). Managed Attachments are ordinary files beside them. Devices upload the files of records that changed and poll for files changed elsewhere. The live SQLite file is never synchronized.
+
+The files are not encrypted. There is no sync password, key handling or key recovery. Access stays within the existing `drive.file` scope, so ticketd sees only files it created.
+
+There is no ticketd server, account or subscription. One Workspace has one storage destination. Two Workspaces created independently are never merged automatically: a device joining sync either uploads its Workspace or replaces it with the one in Drive.
+
+## Why
+
+- **Readable files.** The person can open, search and back up their content in Drive without ticketd, and other tools can read it. A hand edit in Drive is accepted as an edit from another device once the file validates.
+- **Simple enough for one person.** The feature serves a single person moving between desktops, usually at different times. One file per record needs no server, no ordering protocol between devices and no cleanup of shared state. A device needs only the files and its own copy of each as last synced.
+- **Drive is not a transactional store.** It has no conditional update and no multi-file commit, listings carry no consistency guarantee across pages, and file names are not unique in a folder. A design that needs several files to change together, or that reads a listing as the complete truth, cannot be made reliable on it. Here each file stands alone: a missing file, an empty listing or a failed authorization is treated as a recovery event (upload again, or ask to reconnect) and never as a deletion.
+
+Joplin's one-file-per-item sync on plain file storage is the closest precedent, and its comparison against a stored sync base is the source of the merge rule below.
+
+## The dropped direction
+
+The earlier design encrypted content on the device and published immutable record revisions to Drive in batches, which devices then replayed. It was dropped before any of it was built:
+
+- it needed a sync password, key derivation, key storage and a recovery story for a lost password, all for one person's own Drive;
+- batches are multi-file units with an order, which is the kind of consistency Drive does not provide, and the approach was unproven there;
+- the remote content would have been unreadable without ticketd, and an ever-growing set of revisions would have needed snapshots, compaction and deletion records kept indefinitely;
+- the complexity was out of proportion to a single-person feature with no operator infrastructure.
+
+## Identity
+
+Every synchronized record is identified by its GUID, carried in the file header. A file is found by that GUID, never by its name, which is only a readable label in Drive. Tickets, Documents, Plans, projects, Activities, Implementation evidence and Attachments all have one. The GUID is the identity for sync now and for any later service.
+
+The Ticket reference is a readable label, not the identity: `T-`, the two-letter device code of the device that created the ticket, then that device's own counter, with no dash (`T-KQ43`). Devices therefore issue references offline without clashing. A device code is random; a device joining sync checks the device list kept in Drive and takes another code if its own is in use, and a Workspace restored or copied onto another machine takes a fresh one. An issued reference never changes. There are no numeric aliases such as `T-42`.
+
+Each relationship is written in exactly one file (a dependency in the blocked ticket, a parent in the child, tags in the tagged record), so no relationship can disagree with itself across two files.
+
+## Merging
+
+Each device keeps a copy of every file as it was last synced. When a record changed both locally and in Drive, each side is compared with that copy:
+
+- **Different fields changed:** both changes are kept, silently.
+- **The same field changed:** the local value is kept, the record is marked Needs review, and the person chooses or edits the value in a side-by-side comparison of the conflicting fields. A field is merged as a whole. The Markdown text is one field; there is no automatic text merging.
+- **Tags and other sets:** additions and removals from both sides combine. An addition wins over a concurrent removal. No review.
+- **Dependency loops:** two devices can each add a dependency that is valid alone and forms a loop together. Every device then drops the same edge, the later one, chosen by a rule that depends only on the set of edges, and shows a notice naming it.
+
+No duplicate ticket or conflict-copy file is ever created. A file that cannot be read is skipped with a Needs attention notice and changes nothing locally.
+
+## Trash and deletion
+
+Trash is the `trashed` field. Sync never deletes a record, locally or in Drive. Trashing on one device while another edits the record merges as two different fields: the record stays in Trash with the edit preserved, and restoring is an explicit act. Permanent deletion may be added later and would need its own design.
+
+## History
+
+Each device keeps earlier versions of tickets and Documents in its own database: whenever a local edit or an incoming sync replaces one, the previous version is saved. Versions are kept for 30 days and the current version always. Restoring a version is an ordinary edit, which then syncs. Versions themselves do not sync; a newly added desktop reads a record's earlier versions from Drive's own file revisions on request.
+
+This history is also what makes keeping the local value on a same-field conflict, and accepting hand edits from Drive, safe: an overwritten value can be recovered for 30 days.
+
+## Relation to ADR-0003
+
+[ADR-0003](0003-defer-record-versioning.md) still governs local edits. Writes from the desktop and the CLI on one device carry no record versions, change only supplied fields, and the last successful write to a field wins. Nothing in this decision adds stale-edit rejection to the workflow interface.
+
+This ADR governs only what happens between devices. The last-synced copy is a sync base held by the sync engine, not a record version callers see or supply. Local changes are captured inside the core in the same SQLite transaction as the write, so CLI edits made while the desktop is closed upload when it next runs, and applying an incoming file is not captured as a local change.
+
+## Consequences
+
+- Synced content is stored unencrypted in the person's Drive, protected by their Google account alone. The app says so at setup, and [PRIVACY.md](../../PRIVACY.md) records it.
+- Sync runs only while the desktop app is open. The CLI neither uploads nor downloads.
+- Because Drive has no conditional update, a file's version is checked immediately before upload. A write by another device inside that short window is replaced as the current file and remains in Drive's revisions. Two devices creating the same file at once can leave two Drive files; every device resolves to the oldest and ignores the other.
+- Change discovery lists the whole folder and compares file versions. This is adequate for one person's Workspace and is the first thing to revisit if a Workspace outgrows it.
+- Personal state stays on each device: Attention inbox read state, checkout paths, credentials, window layout, unfinished drafts and upload queues.
+- The remote side sits behind a narrow file-storage interface with a Google Drive adapter. Other storage providers are not planned.
+- A later paid ticketd cloud may use a stronger protocol with server-side ordering, accounts and encryption. Nothing here builds it; GUID identity and device-scoped references are the parts intended to carry over.

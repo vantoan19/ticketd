@@ -38,6 +38,16 @@ Two uppercase letters identifying one Workspace installation in the Ticket refer
 **Version**:
 An earlier state of a ticket or Document (title, body, status, trash), saved locally on the device whenever a local edit or an incoming sync replaces it. Versions are kept 30 days; the record itself is the current version and is always kept. Restoring a version is an ordinary edit.
 
+**Workspace sync**:
+Keeping one person's Workspace the same on several desktops through that person's own Google Drive. Each device keeps its own local Workspace; every ticket, Document, Plan and project is also stored in Drive as one readable, unencrypted Markdown file. It is distinct from the inbound synchronization of an externally owned ticket and never publishes to a tracker.
+_Avoid_: Cloud sync, backup
+
+**Last-synced copy**:
+A device's own copy of a synced record as it was when that device last synchronized it. When a record changed both locally and in Drive, each side is compared with this copy to tell which fields each side changed.
+
+**Needs review**:
+The state of a synced record whose same field was changed on two devices. The local value is kept until the person chooses or edits the value in a comparison of the conflicting fields. Changes to different fields, and to tags and other sets, combine without review.
+
 **Parent ticket**:
 A ticket whose outcome is broken into subtickets. It may be Done while subtickets remain open, and completing all subtickets does not necessarily fulfill its own outcome.
 

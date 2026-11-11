@@ -22,6 +22,28 @@ Workspace files and exports are not encrypted by ticketd. Protect them with OS
 permissions, disk encryption, and appropriate backup storage. Anyone who can read
 these files may be able to read their content.
 
+## Workspace sync
+
+Workspace sync is optional and off until you connect Google Drive for it. While
+it is on, ticketd stores a copy of your Workspace content in a visible folder it
+creates in your own Google Drive: one Markdown file for every ticket (with its
+authored Activities and Implementation evidence), Document, Plan and project,
+including tags, relationships, follows, reminders and external-source provenance,
+plus your managed Attachment files.
+
+**These files are not encrypted by ticketd.** They are readable in Drive by you,
+by anyone you share the folder with, and by anyone or anything with access to
+your Google account. There is no sync password. Google stores them under its own
+terms, and Drive keeps its own revisions of changed files. ticketd has no server
+and receives none of this content.
+
+Sync uses the same per-file `drive.file` access as attachments. ticketd can reach
+only files it created or you selected for it, not the rest of your Drive.
+
+The following never leave the device through sync: Attention inbox read state,
+project checkout paths, credentials, source connection settings, window layout,
+unfinished drafts, upload queues, and the 30-day local version history.
+
 ## When data leaves your machine
 
 | Action                                                    | Destination and data                                                                                                                                                                                 |
@@ -30,6 +52,7 @@ these files may be able to read their content.
 | Publish a ticket to a source                              | The selected provider receives the content included in the publication. Review the preview and destination before publishing.                                                                        |
 | Sign in to Google Drive or select a file                  | Google's sign-in and Picker services receive the authorization requests. ticketd requests per-file `drive.file` access and stores selected-file identity and metadata locally.                       |
 | Upload or retrieve a Drive attachment                     | Google receives the selected upload bytes and metadata, or serves the requested download. These operations need network access.                                                                      |
+| Use Workspace sync                                        | Google Drive receives your synced Workspace content and managed Attachment files, unencrypted, in a folder in your own Drive. See [Workspace sync](#workspace-sync).                                 |
 | Open an external link                                     | Your browser or OS handler opens the destination under its own privacy settings.                                                                                                                     |
 | Share an export, backup, screenshot, or diagnostic report | The recipient receives whatever you include; ticketd does not redact authored ticket content from a workspace backup or export.                                                                      |
 
@@ -55,6 +78,11 @@ Trashing an item is reversible and does not immediately erase all its data. Loca
 attachment cleanup, quarantine, and purge have distinct effects; review their
 confirmation messages. Removing a remote attachment from ticketd does not delete
 the corresponding Google Drive file.
+
+Workspace sync never deletes a record: an item you trash keeps its file in Drive,
+marked as in Trash. Turning sync off on a desktop removes nothing from that desktop or
+from Drive. To remove synced content from Google, delete the folder in Drive
+yourself; Drive's own trash and revision retention then apply.
 
 Uninstalling the desktop leaves workspace data behind. Backups and exports also
 remain wherever you saved them. A backup retains local workspace data and local
