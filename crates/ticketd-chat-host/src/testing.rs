@@ -57,6 +57,7 @@ struct State {
     close_outcome: CloseOutcome,
     opens: Vec<OpenRequest>,
     written: Vec<Written>,
+    respond_calls: usize,
     live: Option<Live>,
     turns_started: u64,
 }
@@ -111,6 +112,7 @@ impl FakeAdapter {
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
                 opens: Vec::new(),
                 written: Vec::new(),
+                respond_calls: 0,
                 live: None,
                 turns_started: 0,
             })),
@@ -190,6 +192,12 @@ impl FakeAdapter {
     /// Commands that reached the fake harness, in order.
     pub fn written(&self) -> Vec<Written> {
         self.state().written.clone()
+    }
+
+    /// How many answers were handed to a runtime, including ones it then refused. A
+    /// real harness may not refuse a repeated answer, so the host must not send one.
+    pub fn respond_calls(&self) -> usize {
+        self.state().respond_calls
     }
 
     /// Emits an event from the live runtime and keeps the fake's active turn and live
@@ -352,6 +360,7 @@ impl HarnessRuntime for FakeRuntime {
 
     async fn respond(&self, response: InteractionResponse) -> RespondOutcome {
         let mut state = self.fake.state();
+        state.respond_calls += 1;
         let live = match state.live_for(self.generation, response.generation) {
             Ok(live) => live,
             Err(refusal) => return RespondOutcome::NotSent(refusal),

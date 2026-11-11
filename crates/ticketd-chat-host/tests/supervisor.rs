@@ -281,6 +281,18 @@ async fn a_crash_between_recording_and_writing_is_uncertain_after_restart_and_no
     assert_eq!(f.queued(), ["queued before the crash"]);
     assert_eq!(f.fake.opens(), vec![]);
     assert_eq!(f.fake.written(), vec![]);
+
+    // Later work on a live runtime carries the new and the queued input, never the
+    // input whose delivery is uncertain.
+    let after = restarted.send(&f.chat.id, None, "after the restart", SendMode::Auto);
+    after.await.unwrap();
+    settle().await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let sent: Vec<_> = f.submits().into_iter().map(|sent| sent.text).collect();
+    assert_eq!(sent, ["after the restart", "queued before the crash"]);
+    let attempts = f.message(&input.id).attempts;
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].delivery, ChatDelivery::Uncertain);
 }
 
 #[tokio::test(start_paused = true)]
@@ -440,6 +452,8 @@ async fn only_the_first_of_two_answers_reaches_the_harness() {
         })
         .collect();
     assert_eq!(responses, [approve(ApprovalDecision::Deny)]);
+    // The second answer is refused by the host itself, not left for the harness to refuse.
+    assert_eq!(f.fake.respond_calls(), 1);
     let stored = f.items().into_iter().find_map(|item| match item {
         ChatItem::Interaction(interaction) => Some(interaction),
         _ => None,
