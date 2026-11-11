@@ -560,6 +560,57 @@ fn a_parent_loop_made_on_two_devices_is_broken_the_same_way_everywhere() {
         })
         .collect();
     assert_eq!(parents.len(), 1);
+    // A device that held the loop says so in the Activity of both tickets.
+    let mut recorded = 0;
+    for workspace in &devices.workspaces {
+        for notice in workspace.sync_notices().unwrap() {
+            let SyncNoticeKind::ParentRemoved {
+                reference, other, ..
+            } = notice.notice
+            else {
+                panic!("unexpected notice {notice:?}");
+            };
+            for (ticket, other, relation) in [
+                (&reference, &other, "parent"),
+                (&other, &reference, "child"),
+            ] {
+                let feed = workspace.activity_feed(ticket, 20, 0).unwrap();
+                assert!(feed.iter().any(|entry| matches!(entry, ActivityFeedEntry::Automatic { event, .. } if event.kind == "sync_parent_removed" && &event.from_value == other && event.to_value == relation)));
+                recorded += 1;
+            }
+        }
+    }
+    assert!(recorded >= 2);
+}
+
+#[test]
+fn an_upload_that_replaced_an_unseen_change_from_another_device_merges_it_back() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    // The other device's upload: the same file with one more tag.
+    let (_, synced) = devices.remote_text(RemoteKind::Ticket, &id);
+    let theirs = synced.replacen("trashed: false\n", "tags: [urgent]\ntrashed: false\n", 1);
+    assert_ne!(theirs, synced);
+    devices.remote.write_unseen_before_next_update(
+        &RemoteKey::new(RemoteKind::Ticket, id.clone()),
+        theirs.as_bytes(),
+    );
+    devices.workspaces[0]
+        .change_ticket(&reference, title("Sign in"))
+        .unwrap();
+
+    // The storage accepts the update although the tag landed first.
+    assert_eq!(devices.sync(0).uploaded, 1);
+    devices.settle([0, 1, 2]);
+
+    devices.assert_converged();
+    for workspace in &devices.workspaces {
+        let ticket = workspace.show_ticket(&reference).unwrap();
+        assert_eq!(ticket.title, "Sign in");
+        assert_eq!(ticket.tags, ["urgent"]);
+        assert_eq!(workspace.sync_conflicts().unwrap(), []);
+    }
 }
 
 #[test]

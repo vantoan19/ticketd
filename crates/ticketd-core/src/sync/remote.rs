@@ -236,6 +236,7 @@ struct FakeState {
     now: String,
     reversed: bool,
     omitted: Vec<RemoteKey>,
+    unseen: Vec<(RemoteKey, Vec<u8>)>,
 }
 
 /// In-memory [`RemoteStorage`] for engine tests: one fake is one storage
@@ -253,6 +254,7 @@ impl Default for FakeRemote {
             now: "2026-01-01T00:00:00Z".into(),
             reversed: false,
             omitted: Vec::new(),
+            unseen: Vec::new(),
         })))
     }
 }
@@ -293,6 +295,13 @@ impl FakeRemote {
     /// The next listing leaves these files out, as an inconsistent paged listing can.
     pub fn omit_from_next_listing(&self, keys: &[RemoteKey]) {
         self.state().omitted = keys.to_vec();
+    }
+
+    /// Another device's write of `key` lands just before the next update of it,
+    /// after that update's version check passed: the update still succeeds and
+    /// `content` is left only as the revision before it.
+    pub fn write_unseen_before_next_update(&self, key: &RemoteKey, content: &[u8]) {
+        self.state().unseen.push((key.clone(), content.to_vec()));
     }
 
     /// The folder and its files disappear, as when the person deletes it in the storage.
@@ -471,6 +480,14 @@ impl RemoteStorage for FakeRemote {
                 revisions: Vec::new(),
             });
             file.name = name.into();
+            if let Some(index) = state.unseen.iter().position(|(unseen, _)| unseen == key) {
+                file.revisions.push(FakeRevision {
+                    version: format!("v{}", state.versions),
+                    modified: state.now.clone(),
+                    bytes: Arc::new(state.unseen.remove(index).1),
+                });
+                state.versions += 1;
+            }
             file.revisions.push(FakeRevision {
                 version: format!("v{}", state.versions),
                 modified: state.now.clone(),

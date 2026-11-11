@@ -235,12 +235,16 @@ fn store(connection: &Connection, kind: SyncKind, id: &str, stored: &Stored) -> 
 }
 
 /// Views poll the change token; conflicts and notices are part of what they show.
-fn touch(connection: &Connection) -> Result<(), Error> {
+pub(super) fn touch(connection: &Connection) -> Result<(), Error> {
     connection.execute("UPDATE workspace_changes SET token = token + 1", [])?;
     Ok(())
 }
 
-fn notify(connection: &Connection, cause: &str, notice: &SyncNoticeKind) -> Result<(), Error> {
+pub(super) fn notify(
+    connection: &Connection,
+    cause: &str,
+    notice: &SyncNoticeKind,
+) -> Result<(), Error> {
     let notice =
         serde_json::to_string(notice).map_err(|error| Error::SyncFile(error.to_string()))?;
     // One notice per cause, however many runs meet it again.
@@ -422,6 +426,38 @@ fn is_file_fault(error: &Error) -> bool {
     }
 }
 
+/// The text of a version another device wrote between this device's last sync
+/// and its update, when the storage accepted the update anyway. Drive checks
+/// the expected version just before it uploads, so a write landing in between
+/// is replaced as the current version and only its revision remains.
+fn replaced_revision(
+    remote: &dyn RemoteStorage,
+    folder: &str,
+    key: &RemoteKey,
+    expected: &str,
+    written: &str,
+) -> Result<Option<String>, Error> {
+    let revisions = match remote.revisions(folder, key) {
+        Ok(revisions) => revisions,
+        Err(RemoteError::NotFound) => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let before = revisions
+        .iter()
+        .position(|revision| revision.version == written)
+        .and_then(|ours| ours.checked_sub(1))
+        .map(|index| revisions[index].version.as_str());
+    let Some(before) = before.filter(|before| *before != expected) else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
+    match remote.download(folder, key, before, &mut bytes) {
+        Ok(()) => Ok(String::from_utf8(bytes).ok()),
+        Err(RemoteError::NotFound) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 impl Workspace {
     /// One sync run against the Workspace folder `folder` of `remote`, as the
     /// desktop named `device`. Safe to repeat and to interrupt: a storage
@@ -432,8 +468,20 @@ impl Workspace {
         folder: &str,
         device: &str,
     ) -> Result<SyncReport, Error> {
+        let listing = remote.list(folder)?;
+        self.sync_listed(remote, folder, device, listing)
+    }
+
+    /// A sync run over a listing of the folder that the caller already holds.
+    pub(super) fn sync_listed(
+        &mut self,
+        remote: &dyn RemoteStorage,
+        folder: &str,
+        device: &str,
+        listing: Vec<RemoteFile>,
+    ) -> Result<SyncReport, Error> {
         let mut report = SyncReport::default();
-        self.download(remote, folder, &mut report)?;
+        self.download(remote, folder, listing, &mut report)?;
         self.retry_waiting()?;
         self.drop_loops()?;
         self.upload(remote, folder, device, &mut report)?;
@@ -445,10 +493,10 @@ impl Workspace {
         &mut self,
         remote: &dyn RemoteStorage,
         folder: &str,
+        listing: Vec<RemoteFile>,
         report: &mut SyncReport,
     ) -> Result<(), Error> {
-        let mut files: Vec<(SyncKind, RemoteFile)> = remote
-            .list(folder)?
+        let mut files: Vec<(SyncKind, RemoteFile)> = listing
             .into_iter()
             .filter_map(|file| Some((sync_kind(file.key.kind.as_str())?, file)))
             .collect();
@@ -704,6 +752,15 @@ impl Workspace {
             )?;
             let (reference, title) = ticket(&edge.blocked)?;
             let (other, _) = ticket(&edge.blocker)?;
+            for (ticket, other, relation) in [
+                (&edge.blocked, &other, "parent"),
+                (&edge.blocker, &reference, "child"),
+            ] {
+                transaction.execute(
+                    "INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'sync_parent_removed', ?2, ?3)",
+                    params![ticket, other, relation],
+                )?;
+            }
             notify(
                 &transaction,
                 &format!("parent:{}:{}", edge.blocked, edge.blocker),
@@ -775,6 +832,33 @@ impl Workspace {
             };
             match written {
                 Ok(file) => {
+                    let replaced = match stored.version.as_deref() {
+                        Some(expected) if expected != file.version => {
+                            replaced_revision(remote, folder, &key, expected, &file.version)?
+                        }
+                        _ => None,
+                    };
+                    if let Some(text) = replaced {
+                        // Merged against the copy both changes started from, which is
+                        // still the stored one. An unreadable revision is left alone.
+                        match self.merge_incoming(kind, &dirty.id, &file.version, &text) {
+                            Ok(conflicts) => {
+                                report.downloaded += 1;
+                                report.conflicts += conflicts;
+                            }
+                            Err(error) if is_file_fault(&error) => {}
+                            Err(error) => return Err(error),
+                        }
+                        // The storage holds what was just written; whatever the merge
+                        // added differs from it and uploads on the next run.
+                        let mut merged = self::stored(&self.connection, kind, &dirty.id)?;
+                        merged.version = Some(file.version);
+                        merged.base = Some(local);
+                        store(&self.connection, kind, &dirty.id, &merged)?;
+                        mark_dirty(&self.connection, dirty.kind, &dirty.id)?;
+                        report.uploaded += 1;
+                        continue;
+                    }
                     stored.version = Some(file.version);
                     stored.base = Some(local);
                     store(&self.connection, kind, &dirty.id, &stored)?;
