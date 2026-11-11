@@ -426,18 +426,12 @@ fn names_ticket(text: &str) -> bool {
 
 /// A status as ticketd writes it, from a spelling that differs only in letter
 /// case or in `-` or `_` for the space.
-fn canonical_status(text: &str) -> Option<&'static str> {
+fn canonical_status(text: &str) -> Option<String> {
     let fold = |name: &str| name.trim().to_lowercase().replace(['-', '_'], " ");
-    [
-        "Todo",
-        "In progress",
-        "In review",
-        "Done",
-        "Canceled",
-        "Duplicate",
-    ]
-    .into_iter()
-    .find(|name| fold(name) == fold(text))
+    crate::Status::ALL
+        .into_iter()
+        .map(|status| status.to_string())
+        .find(|name| fold(name) == fold(text))
 }
 
 /// The blocking ticket and the time of one `blocked_since` item.
@@ -700,7 +694,7 @@ fn typed(
                 return Err(invalid());
             }
             (Type::Status, Raw::Text(text)) => {
-                SyncValue::Text(canonical_status(&text).map_or(text, str::to_owned))
+                SyncValue::Text(canonical_status(&text).unwrap_or(text))
             }
             (_, Raw::Text(text)) => SyncValue::Text(text),
             _ => {

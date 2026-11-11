@@ -147,6 +147,15 @@ impl Workspace {
             .collect::<Result<_, _>>()?)
     }
 
+    /// The mark of the newest local change ever captured in this Workspace.
+    /// It only grows, also when marks are cleared, so a host can tell with one
+    /// small read that something changed since it last looked.
+    pub fn change_mark(&self) -> Result<i64, Error> {
+        Ok(self
+            .connection
+            .query_row("SELECT marks FROM sync_capture", [], |row| row.get(0))?)
+    }
+
     /// Clear a mark once its record is uploaded. Returns false, leaving the
     /// record dirty, when it changed again after `record` was read.
     pub fn clear_dirty(&mut self, record: &DirtyRecord) -> Result<bool, Error> {

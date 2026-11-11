@@ -116,14 +116,15 @@ impl Scheduler {
             *lock(&self.watch) = Watch::default();
             return Ok(None);
         };
-        let latest = workspace
-            .dirty_records()?
-            .iter()
-            .map(|record| record.mark)
-            .max()
-            .unwrap_or(0);
+        let latest = workspace.change_mark()?;
         let due = {
             let mut watch = lock(&self.watch);
+            if latest < watch.seen_mark {
+                // The marks of one Workspace only grow: this is another file
+                // at the same path (restored by the CLI, say), and it is
+                // synced like a new connection.
+                *watch = Watch::default();
+            }
             if latest > watch.seen_mark {
                 // Each further change moves the upload later, so a burst uploads once.
                 watch.seen_mark = latest;
@@ -167,9 +168,16 @@ impl Scheduler {
         now: Duration,
         run: Run,
     ) -> Result<SyncStatus, Error> {
-        let result =
-            workspace.and_then(|mut workspace| run(&mut workspace, binding.remote.as_ref()));
+        // What this run takes with it needs no upload of its own afterwards.
+        let mut taken = None;
+        let result = workspace.and_then(|mut workspace| {
+            taken = Some(workspace.change_mark()?);
+            run(&mut workspace, binding.remote.as_ref())
+        });
         let mut watch = lock(&self.watch);
+        if let Some(taken) = taken {
+            watch.seen_mark = watch.seen_mark.max(taken);
+        }
         watch.connected = true;
         watch.upload_at = None;
         let least = Duration::from_secs(MIN_POLL_INTERVAL_SECS);
@@ -574,6 +582,38 @@ mod tests {
         // A tick that runs opens the Workspace once for everything it does.
         assert!(desk.scheduler.tick(SECOND).unwrap().is_some());
         assert_eq!(opened(), 1);
+    }
+
+    #[test]
+    fn a_workspace_replaced_behind_the_scheduler_is_synced_like_a_new_connection() {
+        let desk = desk();
+        for title in ["Second", "Third", "Fourth"] {
+            desk.workspace().create_ticket(title).unwrap();
+        }
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+
+        // Replaced from outside the app, as a restore by the CLI does: the
+        // scheduler is not told, and the new file's change marks start over.
+        std::fs::remove_file(&desk.path).unwrap();
+        let mut replaced = desk.workspace();
+        replaced.create_ticket("Other").unwrap();
+        replaced
+            .sync_connect("connection", "mina@example.com")
+            .unwrap();
+        let status = replaced
+            .sync_upload_workspace(&desk.remote, "Other")
+            .unwrap();
+        drop(replaced);
+        desk.bind(Some(Binding {
+            folder: status.folder.unwrap().id,
+            ..desk.binding(MINUTE)
+        }));
+        assert!(desk.scheduler.tick(SECOND).unwrap().is_some());
+
+        desk.workspace().create_ticket("Another").unwrap();
+        assert_eq!(desk.scheduler.tick(2 * SECOND).unwrap(), None);
+        let status = desk.scheduler.tick(5 * SECOND).unwrap().unwrap();
+        assert_eq!(status.pending_uploads, []);
     }
 
     #[test]

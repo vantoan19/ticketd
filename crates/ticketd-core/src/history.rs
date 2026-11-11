@@ -19,6 +19,15 @@ pub enum Status {
 }
 
 impl Status {
+    pub(crate) const ALL: [Self; 6] = [
+        Self::Todo,
+        Self::InProgress,
+        Self::InReview,
+        Self::Done,
+        Self::Canceled,
+        Self::Duplicate,
+    ];
+
     /// Only Done satisfies a dependency on a ticket; In review, Canceled and Duplicate still block.
     pub fn satisfies_dependency(self) -> bool {
         self == Self::Done
