@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    Activity, ApprovalDecision, Capabilities, Capability, ChatHost, ChatProblem, ChatUpdate,
-    CloseOutcome, DeliveryEvidence, EventKind, Harness, HarnessAdapter, HostError,
-    INTERRUPT_TIMEOUT, InteractionAnswer, InteractionKind, InteractionRequest, NativeItemId,
-    NativeRequestId, NativeSessionId, NativeTurnId, Problem, ProblemKind, ResumeMode,
+    Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities, Capability, ChatHost,
+    ChatProblem, ChatUpdate, CloseOutcome, DeliveryEvidence, EventKind, Harness, HarnessAdapter,
+    HostError, INTERRUPT_TIMEOUT, InteractionAnswer, InteractionKind, InteractionRequest,
+    NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, Problem, ProblemKind, ResumeMode,
     RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission,
     SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL,
     ToolStatus, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener,
@@ -838,4 +838,53 @@ async fn chats_run_at_the_same_time_each_in_its_own_runtime() {
         assert_eq!(fake.opens().len(), 1);
         assert_eq!(fake.written().len(), 1);
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_session_gets_the_ticketd_context_once_and_it_is_kept_apart_from_the_input() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    f.host = ChatHost::with_context(
+        Arc::new(move || Workspace::open(&path)),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(|chat_id| Some(format!("context for {chat_id}")))),
+    )
+    .unwrap();
+
+    let first = f.send("first").await;
+    f.emit(EventKind::TurnEnded {
+        turn: NativeTurnId::new("turn-1"),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    f.send("second").await;
+
+    let context = format!("context for {}", f.chat.id);
+    assert_eq!(f.submits()[0].text, format!("{context}\n\nfirst"));
+    assert_eq!(f.submits()[1].text, "second");
+    assert_eq!(f.message(&first.id).text, "first");
+    let kept: Vec<_> = f
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == CONTEXT_RECORD_NAME => Some(tool.input),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kept, [context]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn live_state_is_readable_without_a_view_and_cleared_when_the_chat_stops() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let mut changed = f.host.changed();
+    changed.borrow_and_update();
+
+    f.send("first").await;
+
+    assert!(changed.has_changed().unwrap());
+    assert_eq!(f.host.live()[&f.chat.id].activity, Activity::Working);
+    f.host.stop_all().await;
+    assert!(f.host.live().is_empty());
 }

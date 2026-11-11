@@ -19,9 +19,10 @@ use tokio::time::{Instant, sleep_until, timeout, timeout_at};
 use uuid::Uuid;
 
 use crate::host::{
-    Activity, CLOSE_TIMEOUT, ChatLive, ChatProblem, ChatView, HostError, INTERRUPT_TIMEOUT,
-    LiveInteraction, ResumeMode, SNAPSHOT_ITEMS, SendMode, StopState, TEXT_CHECKPOINT_INTERVAL,
-    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
+    Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, ChatView,
+    ContextSource, HostError, INTERRUPT_TIMEOUT, LiveInteraction, ResumeMode, SNAPSHOT_ITEMS,
+    SendMode, StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener,
+    is_refusal,
 };
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::{
@@ -98,6 +99,7 @@ struct Opening {
     generation: RuntimeGeneration,
     origin: ChatSessionOrigin,
     preamble: Option<String>,
+    context: Option<String>,
     reply: Option<Reply<()>>,
 }
 
@@ -106,6 +108,7 @@ struct Dispatch {
     generation: RuntimeGeneration,
     starts_turn: bool,
     preamble: Option<String>,
+    context: Option<String>,
 }
 
 struct ActiveTurn {
@@ -135,6 +138,8 @@ pub(crate) struct Supervisor {
     chat_id: String,
     open_workspace: WorkspaceOpener,
     adapter: Option<Arc<dyn HarnessAdapter>>,
+    context: Option<ContextSource>,
+    board: Arc<Board>,
     commands: mpsc::Receiver<Command>,
     done: mpsc::UnboundedSender<Done>,
     finished: mpsc::UnboundedReceiver<Done>,
@@ -149,6 +154,10 @@ pub(crate) struct Supervisor {
     direct: VecDeque<String>,
     /// Selected history for a fresh session, sent with the next new turn.
     preamble: Option<String>,
+    /// The ticketd context of a new session, sent with its first new turn.
+    session_context: Option<String>,
+    /// Context handed over with a submission whose turn has not been recorded yet.
+    context_sent: Option<String>,
     text: Vec<TextBuffer>,
     pending_tools: Vec<(String, ChatObservation)>,
     interactions: BTreeMap<String, LiveRequest>,
@@ -184,6 +193,8 @@ impl Supervisor {
         chat: &Chat,
         open_workspace: WorkspaceOpener,
         adapter: Option<Arc<dyn HarnessAdapter>>,
+        context: Option<ContextSource>,
+        board: Arc<Board>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
@@ -191,6 +202,8 @@ impl Supervisor {
             chat_id: chat.id.clone(),
             open_workspace,
             adapter,
+            context,
+            board,
             commands,
             done,
             finished,
@@ -202,6 +215,8 @@ impl Supervisor {
             active: None,
             direct: VecDeque::new(),
             preamble: None,
+            session_context: None,
+            context_sent: None,
             text: Vec::new(),
             pending_tools: Vec::new(),
             interactions: BTreeMap::new(),
@@ -233,6 +248,7 @@ impl Supervisor {
                         self.shutting_down = true;
                         let unconfirmed = self.stop_runtime("ticketd stopped this Chat").await;
                         self.publish();
+                        self.board.report(&self.chat_id, None);
                         let _ = reply.send(unconfirmed);
                         return;
                     }
@@ -240,6 +256,7 @@ impl Supervisor {
                     None => {
                         self.shutting_down = true;
                         self.stop_runtime("ticketd stopped this Chat").await;
+                        self.board.report(&self.chat_id, None);
                         return;
                     }
                 },
@@ -553,6 +570,10 @@ impl Supervisor {
             }
             return;
         };
+        // A resumed native session already has it; a new one starts without it.
+        let context = (origin != ChatSessionOrigin::NativeResume)
+            .then(|| self.context.as_ref().and_then(|source| source(&chat.id)))
+            .flatten();
         self.generations += 1;
         let generation = RuntimeGeneration(self.generations);
         let request = OpenRequest {
@@ -564,6 +585,7 @@ impl Supervisor {
             generation,
             origin,
             preamble,
+            context,
             reply,
         });
         let done = self.done.clone();
@@ -764,10 +786,25 @@ impl Supervisor {
         } else {
             None
         };
-        let text = match &preamble {
-            Some(history) => format!("{history}\n\n{}", message.text),
-            None => message.text,
+        let context = if starts_turn {
+            self.session_context.take()
+        } else {
+            None
         };
+        if starts_turn {
+            self.context_sent = context.clone();
+        }
+        // Context and selected history go to the harness with the input; the stored
+        // message stays the person's own words.
+        let text = [
+            context.as_deref(),
+            preamble.as_deref(),
+            Some(&*message.text),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n");
         let submission = Submission {
             submission: SubmissionId(attempt.clone()),
             generation,
@@ -779,6 +816,7 @@ impl Supervisor {
             generation,
             starts_turn,
             preamble,
+            context,
         });
         let done = self.done.clone();
         tokio::spawn(async move {
@@ -862,6 +900,9 @@ impl Supervisor {
                 if opening.preamble.is_some() {
                     self.preamble = opening.preamble;
                 }
+                if opening.context.is_some() {
+                    self.session_context = opening.context;
+                }
                 self.problem = None;
                 Ok(())
             }
@@ -938,6 +979,10 @@ impl Supervisor {
         if dispatch.preamble.is_some() {
             self.preamble = dispatch.preamble;
         }
+        if dispatch.context.is_some() {
+            self.session_context = dispatch.context;
+            self.context_sent = None;
+        }
         if dispatch.starts_turn {
             self.stop_when_turn_known = false;
             if self.active.is_none() {
@@ -973,6 +1018,16 @@ impl Supervisor {
             turn_id: turn_id.clone(),
             native_turn_id: Some(native.0.clone()),
         });
+        if let Some(context) = self.context_sent.take() {
+            observations.push(ChatObservation::Tool {
+                tool_id: format!("{turn_id}:ticketd-context"),
+                turn_id: turn_id.clone(),
+                name: CONTEXT_RECORD_NAME.to_owned(),
+                input: context,
+                state: ChatToolState::Completed,
+                output: None,
+            });
+        }
         self.active = Some(ActiveTurn {
             turn_id: turn_id.clone(),
             native: native.clone(),
@@ -1341,6 +1396,7 @@ impl Supervisor {
 
     /// Publishes committed changes since the last call, then live state if it changed.
     fn publish(&mut self) {
+        self.board.report(&self.chat_id, Some(self.live()));
         self.subscribers.retain(Publisher::open);
         if self.subscribers.is_empty() {
             return;
