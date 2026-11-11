@@ -178,11 +178,16 @@ impl Scheduler {
     }
 
     /// One last run before quitting, given `limit` to finish. Returns what is
-    /// still waiting to upload: empty when everything reached the storage or
-    /// the Workspace does not sync. A failed upload is reported the same way.
-    pub fn flush(self: &Arc<Self>, now: Duration, limit: Duration) -> Result<Vec<SyncItem>, Error> {
+    /// still waiting to upload, as the first of them and how many there are:
+    /// none when everything reached the storage or the Workspace does not
+    /// sync. A failed upload is reported the same way.
+    pub fn flush(
+        self: &Arc<Self>,
+        now: Duration,
+        limit: Duration,
+    ) -> Result<(Vec<SyncItem>, u64), Error> {
         let Some(binding) = self.binding()? else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), 0));
         };
         let (done, finished) = mpsc::channel();
         let scheduler = Arc::clone(self);
@@ -196,7 +201,8 @@ impl Scheduler {
         if spawned.is_ok() {
             let _ = finished.recv_timeout(limit);
         }
-        Ok((self.open)()?.sync_status()?.pending_uploads)
+        let status = (self.open)()?.sync_status()?;
+        Ok((status.pending_uploads, status.pending_total))
     }
 
     /// Starts sync for as long as the app runs: `at_launch` once, then asks
@@ -494,7 +500,7 @@ mod tests {
     fn the_exit_flush_uploads_what_is_pending() {
         let desk = desk();
         let pending = desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap();
-        assert_eq!(pending, []);
+        assert_eq!(pending, (vec![], 0));
         assert!(!desk.remote.list(&desk.folder).unwrap().is_empty());
     }
 
@@ -502,10 +508,11 @@ mod tests {
     fn the_exit_flush_stops_waiting_at_its_limit_and_reports_what_is_left() {
         let desk = desk();
         let (open, reached) = gate(&desk);
-        let pending = desk
+        let (pending, total) = desk
             .scheduler
             .flush(Duration::ZERO, Duration::ZERO)
             .unwrap();
+        assert_eq!(total, 1);
         let titles: Vec<_> = pending.iter().map(|item| item.title.as_str()).collect();
         assert_eq!(titles, ["First"]);
 
@@ -519,13 +526,13 @@ mod tests {
     fn the_exit_flush_reports_a_failed_upload_as_pending_and_nothing_when_not_connected() {
         let desk = desk();
         desk.remote.fail(RemoteOp::List, 1, RemoteError::Offline);
-        let pending = desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap();
-        assert_eq!(pending.len(), 1);
+        let (pending, total) = desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap();
+        assert_eq!((pending.len(), total), (1, 1));
 
         desk.bind(None);
         assert_eq!(
             desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap(),
-            []
+            (vec![], 0)
         );
     }
 

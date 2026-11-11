@@ -115,6 +115,9 @@ fn name_this_desktop(
 pub fn at_launch() {
     let prepared = open_workspace().and_then(|mut workspace| {
         workspace.expire_versions(None)?;
+        // No download survives the app closing: what the last session left
+        // as downloading is fetched again by the next run.
+        workspace.reset_interrupted_downloads()?;
         if cfg!(target_os = "macos") {
             name_this_desktop(&mut workspace, mac_computer_name)?;
         }
@@ -654,7 +657,9 @@ fn restore(
 
 #[derive(Debug, Serialize)]
 pub struct ExitReport {
+    /// The first of what is left; `pending_total` counts all of it.
     pending: Vec<SyncItem>,
+    pending_total: u64,
 }
 
 #[tauri::command]
@@ -751,8 +756,10 @@ pub fn restore_record_version(
 /// A failed upload is an answer, not a failure of the command.
 #[tauri::command(async)]
 pub fn sync_flush_on_exit(host: tauri::State<'_, SyncHost>) -> Outcome<ExitReport> {
+    let (pending, pending_total) = host.scheduler.flush(host.started.elapsed(), EXIT_LIMIT)?;
     Ok(ExitReport {
-        pending: host.scheduler.flush(host.started.elapsed(), EXIT_LIMIT)?,
+        pending,
+        pending_total,
     })
 }
 
