@@ -208,9 +208,12 @@ export function WorkspaceSidebar({
   const openGraph = useContext(ContextGraphNavigation);
   const unread = (counts?.unread_inbox ?? 0) > 0;
   const chat = useChatFeature();
+  // Waiting for an answer, uncertain delivery, or Failed.
   const waiting = chat.overview.needs_you;
   const chatsLabel =
-    waiting > 0 ? `Chats · ${waiting} waiting for you` : "Chats";
+    waiting > 0
+      ? `Chats · ${waiting} ${waiting === 1 ? "needs" : "need"} you`
+      : "Chats";
   const archivedPlans = plans.filter((e) => e.archived).length;
   return (
     <Sidebar

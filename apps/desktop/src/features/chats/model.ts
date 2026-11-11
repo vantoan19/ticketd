@@ -127,8 +127,35 @@ export function hasComposer(chat: ChatState) {
   );
 }
 
+/** Problems that are an install or sign-in step: shown on the row, never counted. */
+const SETUP: ProblemKind[] = [
+  "not_installed",
+  "incompatible",
+  "probe_failed",
+  "not_signed_in",
+];
+
+/**
+ * Whether a Chat counts in the sidebar: it waits for an answer, its delivery
+ * is uncertain, or it Failed. The host computes the same rule for its rows.
+ */
+export function needsYou(
+  activity: ChatState["activity"],
+  problem: ProblemKind | undefined,
+) {
+  if (activity === "waiting" || problem === "uncertain_delivery") return true;
+  if (problem && SETUP.includes(problem)) return false;
+  return activity === "failed" || problem === "failed";
+}
+
+/** A turn is in progress, so it can be stopped. */
+export function isLive(chat: ChatState) {
+  return chat.activity === "working" || chat.activity === "waiting";
+}
+
 export type ComposerControls =
   | { kind: "send"; enabled: boolean }
+  /** Nothing typed during a turn: Stop is the only button. */
   | { kind: "stop" }
   | { kind: "steer"; hint: string }
   | { kind: "queue-only"; hint: string };
@@ -139,8 +166,7 @@ export function composerControls(
   text: string,
 ): ComposerControls {
   const typed = text.trim() !== "";
-  const live = chat.activity === "working" || chat.activity === "waiting";
-  if (!live)
+  if (!isLive(chat))
     return {
       kind: "send",
       enabled: typed && !(chat.problem && BLOCKING.includes(chat.problem.kind)),

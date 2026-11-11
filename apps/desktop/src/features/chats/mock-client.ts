@@ -13,6 +13,7 @@ import {
   type LinkedRecord,
   type TranscriptItem,
 } from "@/features/chats/client";
+import { needsYou } from "@/features/chats/model";
 
 /** A Chat state with quiet defaults, so a test or fixture spells out only what matters. */
 export function chatState(
@@ -152,9 +153,7 @@ export function createMockChatClient(
       first_ticket: ticket?.kind === "ticket" ? ticket.reference : null,
       retention: chat.retention,
       activity: chat.activity,
-      needs_you:
-        chat.activity === "waiting" ||
-        chat.problem?.kind === "uncertain_delivery",
+      needs_you: needsYou(chat.activity, chat.problem?.kind),
       problem: chat.problem?.kind ?? null,
       interruption:
         marker?.reason === "stopped"

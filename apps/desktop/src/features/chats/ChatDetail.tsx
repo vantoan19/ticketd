@@ -44,6 +44,7 @@ import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
   composerControls,
   hasComposer,
+  isLive,
   problemNotice,
   type NoticeAction,
 } from "@/features/chats/model";
@@ -401,7 +402,9 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                   )
                 }
                 onQueue={(text) => run(client.queue(id, text))}
-                onStop={() => quietly(client.stop(id))}
+                {...(isLive(chat) && {
+                  onStop: () => quietly(client.stop(id)),
+                })}
               />
             )}
           </>

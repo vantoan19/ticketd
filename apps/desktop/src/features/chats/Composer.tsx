@@ -8,7 +8,7 @@ import type { ComposerControls } from "@/features/chats/model";
  * The message box and its one button group. Which buttons show is decided by
  * `controls`; the text is kept until the action it was typed for succeeds, so
  * a refused send never loses what was written. Enter sends, Shift+Enter adds
- * a line.
+ * a line. Stop shows whenever `onStop` is given, whatever is typed.
  */
 export function Composer({
   placeholder,
@@ -28,6 +28,7 @@ export function Composer({
   /** Resolve to clear the box; reject to keep the text. */
   onSend: (text: string) => Promise<void>;
   onQueue?: (text: string) => Promise<void>;
+  /** Pass only while a turn is in progress. */
   onStop?: () => void;
   autoFocus?: boolean;
 }) {
@@ -84,16 +85,17 @@ export function Composer({
           }}
         />
         <div className="chat-composer-buttons">
-          {state.kind === "stop" ? (
+          {onStop && (
             <IconButton
               type="button"
-              variant="default"
+              variant={state.kind === "stop" ? "default" : "outline"}
               label="Stop"
               onClick={onStop}
             >
               <Square aria-hidden />
             </IconButton>
-          ) : state.kind === "queue-only" ? (
+          )}
+          {state.kind === "stop" ? null : state.kind === "queue-only" ? (
             <Button type="submit" size="sm" disabled={busy}>
               Queue
             </Button>

@@ -111,6 +111,30 @@ test("the overview counts Chats that need the person and Chats at work", async (
   expect(seen.at(-1)).toEqual({ needs_you: 0, working: 0 });
 });
 
+test("the count takes uncertain delivery and Failed, not install or sign-in blocks", async () => {
+  const chat = (id: string, over: object) => ({
+    chat: chatState({ id, title: id, ...over }),
+  });
+  const client = createMockChatClient({
+    chats: [
+      chat("uncertain", { problem: { kind: "uncertain_delivery" } }),
+      chat("failed", { activity: "failed" }),
+      chat("lost", { problem: { kind: "failed" } }),
+      chat("install", {
+        activity: "failed",
+        problem: { kind: "not_installed" },
+      }),
+      chat("sign-in", { problem: { kind: "not_signed_in" } }),
+      chat("idle", {}),
+    ],
+  });
+  expect((await client.overview()).needs_you).toBe(3);
+  const counted = (await client.listChats("active"))
+    .filter((row) => row.needs_you)
+    .map((row) => row.id);
+  expect(counted.sort()).toEqual(["failed", "lost", "uncertain"]);
+});
+
 test("quitting stops working Chats and says why in their history", async () => {
   const client = working();
   let asked = -1;

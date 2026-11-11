@@ -402,7 +402,9 @@ fn step(tool: &ChatTool, harness: &str) -> Step {
         ChatToolState::Failed => Some("failed"),
         ChatToolState::Unknown => Some("outcome unknown"),
     };
-    let cut = tool.output_truncated.then_some("output cut short");
+    let cut = tool
+        .output_truncated
+        .then_some("output cut short");
     let result: Vec<_> = outcome.into_iter().chain(cut).collect();
     Step {
         verb,
@@ -658,6 +660,17 @@ pub fn chat_state(
     }
 }
 
+/// Whether a Chat counts in the sidebar: it waits for an answer or a delivery decision
+/// (`asked`), or it Failed. An install or sign-in step is shown on the row and not
+/// counted. The desktop's `needsYou` states the same rule for its fixtures.
+fn needs_you(asked: bool, activity: &str, problem: Option<&str>) -> bool {
+    let setup = matches!(
+        problem,
+        Some("not_installed" | "incompatible" | "probe_failed" | "not_signed_in")
+    );
+    asked || (!setup && (activity == "failed" || problem == Some("failed")))
+}
+
 pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroundings) -> Summary {
     let activity = activity(live, tracker);
     let problem = problem(chat, live, tracker, around);
@@ -679,7 +692,11 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         }),
         retention: retention(chat),
         activity,
-        needs_you: !live.interactions.is_empty() || tracker.uncertain.is_some(),
+        needs_you: needs_you(
+            !live.interactions.is_empty() || tracker.uncertain.is_some(),
+            activity,
+            problem.as_ref().map(|problem| problem.kind),
+        ),
         problem: problem.map(|problem| problem.kind),
         interruption,
         preview: tracker
@@ -703,5 +720,23 @@ pub fn idle() -> ChatLive {
         interactions: Vec::new(),
         stop: None,
         problem: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_you;
+
+    #[test]
+    fn the_count_takes_waiting_uncertain_and_failed_chats_but_not_setup_blocks() {
+        assert!(needs_you(true, "waiting", None));
+        assert!(needs_you(true, "idle", Some("uncertain_delivery")));
+        assert!(needs_you(false, "failed", None));
+        assert!(needs_you(false, "idle", Some("failed")));
+        assert!(needs_you(false, "failed", Some("usage_limit")));
+        assert!(!needs_you(false, "failed", Some("not_installed")));
+        assert!(!needs_you(false, "idle", Some("not_signed_in")));
+        assert!(!needs_you(false, "interrupted", None));
+        assert!(!needs_you(false, "working", None));
     }
 }

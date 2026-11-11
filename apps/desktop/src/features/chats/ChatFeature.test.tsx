@@ -156,7 +156,7 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
   });
   app(client);
   const entry = await screen.findByRole("button", {
-    name: "Chats · 1 waiting for you",
+    name: "Chats · 1 needs you",
   });
   fireEvent.click(entry);
   expect(entry.getAttribute("aria-current")).toBe("page");

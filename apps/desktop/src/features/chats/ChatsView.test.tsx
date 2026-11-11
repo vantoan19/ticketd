@@ -119,6 +119,8 @@ test("while a turn runs, typed text can steer it or be queued, and the queue sta
       "Send adds this to the turn in progress. Queue holds it until the turn ends.",
     ),
   ).toBeTruthy();
+  // Stop stays beside Send and Queue while text is typed.
+  expect(button("Stop")).toBeTruthy();
   fireEvent.click(button("Queue until this turn ends"));
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("also cover the admin login")).toBeTruthy();
@@ -143,6 +145,7 @@ test("a harness that cannot be steered only offers Queue, and says why", async (
   );
   type("then update the docs");
   noButton("Send");
+  expect(button("Stop")).toBeTruthy();
   expect(
     screen.getByText(
       "Codex can't take messages mid-turn. This will be queued until the turn ends.",
