@@ -29,6 +29,7 @@ import {
   usePublicationPreview,
 } from "./use-publication-preview";
 import { Duplicates } from "@/features/tickets/Duplicates";
+import { RecordHistory } from "@/features/sync-review/RecordHistory";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { externalSource } from "@/features/tickets/ticket-source";
 import { client, type Ticket } from "@/lib/api/client";
@@ -72,6 +73,7 @@ export function TicketHeader({
   const [publishing, setPublishing] = useState(false);
   const { copied, error: copyError, copy } = useCopy();
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
   // Previous/Next replace the ticket (and, at a page edge, the page), which
   // remounts this group. Remember which one the keyboard used and give it focus back.
@@ -273,6 +275,9 @@ export function TicketHeader({
                     </DropdownMenuItem>
                   </>
                 )}
+                <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                  History…
+                </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
@@ -341,6 +346,15 @@ export function TicketHeader({
           provider={target.provider}
           refresh={refresh}
           onOpenChange={setPublishing}
+        />
+      )}
+      {ticket && historyOpen && (
+        <RecordHistory
+          kind="ticket"
+          id={ticket.id}
+          subtitle={`${ticket.reference} · ${ticket.title}`}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={() => void refresh()}
         />
       )}
       {ticket && duplicateOpen && (

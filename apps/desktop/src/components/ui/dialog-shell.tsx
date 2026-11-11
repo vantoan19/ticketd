@@ -22,6 +22,7 @@ export function DialogShell({
   title,
   description,
   primaryLabel,
+  cancelLabel = "Cancel",
   blockedReason,
   onSubmit,
   onCancel,
@@ -38,6 +39,8 @@ export function DialogShell({
   title: string;
   description?: string;
   primaryLabel: string;
+  /** The dismissing button, when Cancel would mislead: Later, Close. */
+  cancelLabel?: string;
   blockedReason: string | null;
   onSubmit: () => void;
   /** Cancel only (not Escape or an outside click): discard the draft. */
@@ -107,7 +110,7 @@ export function DialogShell({
                 onClick={onCancel}
                 disabled={busy}
               >
-                Cancel
+                {cancelLabel}
               </Button>
             </DialogClose>
             <Button

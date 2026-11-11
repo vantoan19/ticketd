@@ -4,6 +4,8 @@ import {
   Check,
   Eye,
   Circle,
+  FileWarning,
+  GitCompare,
   Link2,
   MessageSquare,
   Bell,
@@ -35,6 +37,13 @@ import {
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./inbox.css";
 import { Reference } from "@/components/ui/reference";
+import { ConflictReview } from "@/features/sync-review/ConflictReview";
+import {
+  mergeByTime,
+  useSyncEntries,
+  type SyncEntry,
+} from "@/features/sync-review/inbox-entries";
+import { syncReview, type ConflictSummary } from "@/lib/sync-review-api";
 
 const PAGE_SIZE = 50;
 const MARK_BATCH = 100;
@@ -113,6 +122,66 @@ function Snooze({
   );
 }
 
+/** A conflict or a notice from sync, drawn as any other Inbox entry. */
+function SyncRow({
+  entry,
+  time,
+  mark,
+  open,
+}: {
+  entry: SyncEntry;
+  time: string;
+  mark: (read: boolean) => void;
+  open: () => void;
+}) {
+  const Icon =
+    entry.icon === "review"
+      ? GitCompare
+      : entry.icon === "file"
+        ? FileWarning
+        : Link2;
+  return (
+    <li className="inbox-entry" data-read={entry.read}>
+      {entry.read ? (
+        <span className="inbox-dot" aria-hidden="true" />
+      ) : (
+        <span className="inbox-dot">
+          <StatusDot tone="unread" />
+        </span>
+      )}
+      <span className="inbox-icon">
+        <Icon aria-hidden="true" />
+      </span>
+      <button
+        className="inbox-ticket"
+        onClick={() => {
+          if (!entry.read) mark(true);
+          open();
+        }}
+      >
+        <span className="inbox-title-line">
+          {entry.reference && <Reference>{entry.reference}</Reference>}
+          <span className="inbox-title">{entry.title}</span>
+          {!entry.read && <span className="sr-only">Unread</span>}
+        </span>
+        <span className="inbox-summary">{entry.summary}</span>
+      </button>
+      <time dateTime={entry.timestamp}>{time}</time>
+      <span className="inbox-actions">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Mark ${entry.reference ?? "Drive file"} ${entry.conflict ? "review" : "notice"} ${entry.read ? "unread" : "read"}`}
+          title={entry.read ? "Mark unread" : "Mark read"}
+          onClick={() => mark(!entry.read)}
+        >
+          {entry.read ? <Circle /> : <Check />}
+        </Button>
+      </span>
+    </li>
+  );
+}
+
 export function Inbox({
   revision,
   select,
@@ -130,6 +199,8 @@ export function Inbox({
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
   const changeVersion = useWorkspaceChange();
+  const sync = useSyncEntries(revision);
+  const [reviewing, setReviewing] = useState<ConflictSummary | null>(null);
   const reload = () => setTick((value) => value + 1);
   useEffect(() => {
     let active = true;
@@ -174,8 +245,18 @@ export function Inbox({
     setEntries([]);
     setMore(false);
   }
+  async function markSync(ids: string[], read: boolean) {
+    try {
+      if (ids.length) await syncReview.setRead(ids, read);
+      sync.reload();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+  const syncShown = sync.entries.filter((e) => filter === "all" || !e.read);
   const unreadShown = entries.filter((e) => !e.read);
-  const groups = groupEntries(entries, new Date());
+  const unreadSync = syncShown.filter((e) => !e.read).map((e) => e.id);
+  const groups = groupEntries(mergeByTime(entries, syncShown), new Date());
   return (
     <div className="inbox">
       <ListHeader
@@ -184,13 +265,14 @@ export function Inbox({
           <Button
             variant="ghost"
             size="sm"
-            disabled={unreadShown.length === 0}
-            onClick={() =>
+            disabled={unreadShown.length + unreadSync.length === 0}
+            onClick={() => {
               void mark(
                 unreadShown.map((e) => e.id),
                 true,
-              )
-            }
+              );
+              void markSync(unreadSync, true);
+            }}
           >
             <Check />
             Mark shown as read
@@ -215,6 +297,19 @@ export function Inbox({
             <h2 id={`inbox-group-${group}`}>{group}</h2>
             <ul className="inbox-entries">
               {items.map((e) => {
+                if ("summary" in e)
+                  return (
+                    <SyncRow
+                      key={e.id}
+                      entry={e}
+                      time={entryTime(e.timestamp, group)}
+                      mark={(read) => void markSync([e.id], read)}
+                      open={() => {
+                        if (e.conflict) setReviewing(e.conflict);
+                        else if (e.reference) select(e.reference);
+                      }}
+                    />
+                  );
                 const noun = entryNoun(e);
                 return (
                   <li key={e.id} className="inbox-entry" data-read={e.read}>
@@ -271,25 +366,27 @@ export function Inbox({
             </ul>
           </section>
         ))}
-        {entries.length === 0 && filter === "all" && !error && (
-          <EmptyState
-            className="p-0 pb-10 md:p-0 md:pb-10"
-            icon={<InboxIcon />}
-            title="Nothing in your Inbox"
-            description="Changes on tickets you follow, and reminders that come due, appear here."
-            action={
-              <Button variant="outline" size="sm" onClick={onBrowse}>
-                Browse tickets to follow
-              </Button>
-            }
-            footnote={
-              <>
-                <Bell aria-hidden="true" />
-                Follow and Remind me live in each ticket’s Attention section.
-              </>
-            }
-          />
-        )}
+        {entries.length + syncShown.length === 0 &&
+          filter === "all" &&
+          !error && (
+            <EmptyState
+              className="p-0 pb-10 md:p-0 md:pb-10"
+              icon={<InboxIcon />}
+              title="Nothing in your Inbox"
+              description="Changes on tickets you follow, and reminders that come due, appear here."
+              action={
+                <Button variant="outline" size="sm" onClick={onBrowse}>
+                  Browse tickets to follow
+                </Button>
+              }
+              footnote={
+                <>
+                  <Bell aria-hidden="true" />
+                  Follow and Remind me live in each ticket’s Attention section.
+                </>
+              }
+            />
+          )}
         {more && (
           <div className="inbox-more">
             <Button
@@ -305,6 +402,13 @@ export function Inbox({
           <p className="inbox-note">
             That’s everything unread. Read changes stay under All.
           </p>
+        )}
+        {reviewing && (
+          <ConflictReview
+            conflict={reviewing}
+            onClose={() => setReviewing(null)}
+            onResolved={sync.reload}
+          />
         )}
         {entries.length > 0 && (
           <p className="inbox-footer">

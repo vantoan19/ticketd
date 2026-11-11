@@ -18,6 +18,8 @@ import { formatSize } from "./format-size";
 import { RenameAttachment } from "./RenameAttachment";
 import { AttachmentThumbnail } from "./AttachmentThumbnail";
 import "./attachment-library.css";
+import { useAvailability } from "@/features/sync-review/availability";
+import { StorageAvailability } from "@/features/sync-review/StorageAvailability";
 
 export function AttachmentLibrary({
   onPreview,
@@ -45,6 +47,12 @@ export function AttachmentLibrary({
     offset,
     refresh,
   );
+  const availability = useAvailability(
+    files
+      .filter(({ attachment }) => attachment.kind === "local_snapshot")
+      .map(({ attachment }) => attachment.id),
+  );
+  const [downloadError, setDownloadError] = useState("");
   return (
     <div className="attachment-workspace">
       <div className="attachment-library-bar">
@@ -155,11 +163,16 @@ export function AttachmentLibrary({
                         </button>
                       </td>
                       <td>
-                        {file.kind === "local_snapshot"
-                          ? "Local snapshot"
-                          : file.uploaded_copy
-                            ? "Uploaded copy"
-                            : "External reference"}
+                        {file.kind === "local_snapshot" ? (
+                          <StorageAvailability
+                            name={file.display_name}
+                            availability={availability.of(file.id)}
+                          />
+                        ) : file.uploaded_copy ? (
+                          "Uploaded copy"
+                        ) : (
+                          "External reference"
+                        )}
                       </td>
                       <td>
                         {file.size_bytes === null
@@ -236,6 +249,23 @@ export function AttachmentLibrary({
                               : "Permanently purge"}
                           </Button>
                         )}
+                        {availability.of(file.id)?.state ===
+                          "not_downloaded" && (
+                          <Button
+                            variant="ghost"
+                            aria-label={`Download ${file.display_name}`}
+                            onClick={() => {
+                              setDownloadError("");
+                              availability
+                                .download(file.id)
+                                .catch((reason: unknown) =>
+                                  setDownloadError(String(reason)),
+                                );
+                            }}
+                          >
+                            Download
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           aria-label={`Rename ${file.display_name}`}
@@ -249,6 +279,7 @@ export function AttachmentLibrary({
                 </tbody>
               </table>
             </div>
+            {downloadError && <p role="alert">{downloadError}</p>}
             {!files.length && <p>No matching files</p>}
             <footer>
               <span>Search covers filenames and available metadata</span>

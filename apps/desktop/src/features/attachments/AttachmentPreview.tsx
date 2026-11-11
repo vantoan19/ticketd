@@ -31,6 +31,10 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { RenameAttachment } from "./RenameAttachment";
 import "./attachment-preview.css";
+import {
+  storageWord,
+  useAvailability,
+} from "@/features/sync-review/availability";
 
 export type PreviewTarget =
   { uri: string } | { id: string; initial?: Attachment };
@@ -139,6 +143,13 @@ export function AttachmentPreview({
   }
   const id = "id" in target ? target.id : undefined;
   const uri = "uri" in target ? target.uri : undefined;
+  const availability = useAvailability(
+    file && file.kind !== "external_reference" ? [file.id] : [],
+  );
+  const stored = file ? availability.of(file.id) : undefined;
+  // The bytes are still in Drive, or on their way: there is nothing to preview
+  // yet. Once they arrive the preview is read again.
+  const awaited = stored !== undefined && stored.state !== "downloaded";
   useEffect(() => {
     const current = ++generation.current;
     void (async () => {
@@ -162,7 +173,7 @@ export function AttachmentPreview({
     return () => {
       generation.current += 1;
     };
-  }, [id, uri, attempt]);
+  }, [id, uri, attempt, awaited]);
   async function action(run: () => Promise<void>) {
     const current = generation.current;
     setBusy(true);
@@ -195,7 +206,9 @@ export function AttachmentPreview({
     file?.uploaded_copy === true ||
     info?.uploaded_copy === true ||
     copy !== null;
-  const available = !external && info?.status === "available" && !failed;
+  const storage = storageWord(stored);
+  const available =
+    !external && !awaited && info?.status === "available" && !failed;
   const purgeUnavailable =
     file?.purge_state === "pending" || file?.purge_state === "purged";
   return (
@@ -215,7 +228,7 @@ export function AttachmentPreview({
                   ? uploadedCopy
                     ? "Google Drive · Uploaded copy"
                     : "Google Drive · External reference"
-                  : "Local snapshot"}
+                  : storage}
                 {file?.size_bytes != null
                   ? ` · ${formatSize(file.size_bytes)}`
                   : ""}
@@ -226,7 +239,7 @@ export function AttachmentPreview({
                 <>
                   <Button
                     variant="outline"
-                    disabled={busy || info?.can_open === false}
+                    disabled={busy || awaited || info?.can_open === false}
                     onClick={() => void action(() => attachments.open(file.id))}
                   >
                     <ExternalLink aria-hidden="true" />
@@ -274,6 +287,24 @@ export function AttachmentPreview({
                   url={attachments.mediaUrl(workspace, file.id)}
                   onError={mediaFailed}
                 />
+              ) : awaited && file ? (
+                <div className="attachment-preview-fallback">
+                  <File aria-hidden="true" />
+                  <h3>{storage}</h3>
+                  <p role="status">This file is in your Google Drive.</p>
+                  {stored.state === "not_downloaded" && (
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        void action(() => availability.download(file.id))
+                      }
+                    >
+                      <Download aria-hidden="true" />
+                      Download
+                    </Button>
+                  )}
+                  {error && <p role="alert">{error}</p>}
+                </div>
               ) : (
                 <div className="attachment-preview-fallback">
                   <File aria-hidden="true" />
@@ -365,7 +396,7 @@ export function AttachmentPreview({
                           </>
                         )}
                         <dt>Storage</dt>
-                        <dd>Local snapshot</dd>
+                        <dd>{storage}</dd>
                       </>
                     )}
                   </dl>
@@ -487,7 +518,9 @@ export function AttachmentPreview({
                 ? "Google Drive · Removing a link keeps the file in Drive."
                 : purgeUnavailable
                   ? "Local bytes are unavailable. Its name, identity and references are preserved."
-                  : "Local snapshot · Removing a link keeps this file in your workspace."}
+                  : awaited
+                    ? `${storage} · Removing a link keeps this file in your Drive.`
+                    : "Local snapshot · Removing a link keeps this file in your workspace."}
             </p>
             <div className="attachment-actions">
               <Button variant="ghost" onClick={close}>
