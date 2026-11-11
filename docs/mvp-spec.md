@@ -97,7 +97,7 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 - Support Markdown content and checklists. Checklist items have no independent statuses or dependencies; unchecked items do not prevent Done.
 - Acceptance criteria can be written in the body; no separate mandatory field is required.
 - Support editable, deletable, timestamped authored activities with required human-readable briefs and optional supporting Documents for progress and findings (section 16). Record the editing agent when supplied; do not store human names in the MVP. Attribution is descriptive, not verified identity or authorization.
-- Keep automatic ticket history separate from authored activities: record status, relationship, project/Plan membership, and trash/restore changes. Full body revision history is outside the MVP.
+- Keep automatic ticket history separate from authored activities: record status, relationship, project/Plan membership, and trash/restore changes. Full body revision history is outside the MVP; section 20.6 later adds a 30-day version history of tickets and Documents.
 - Tags use a shared workspace vocabulary; a ticket may have multiple tags independently of other relationships.
 - Priority, deadlines, and custom fields are not required for the MVP. File attachments extend the original MVP as described in section 17.
 
@@ -421,7 +421,7 @@ These are draft verification criteria for review, not individually approved requ
 - Roadmap, calendar, time tracking, reporting, and gamification.
 - Full web/mobile clients, cloud hosting, account/auth, collaboration, and multi-device sync.
 - Plugin system, custom workflow engine, vector database, and MCP server.
-- Project archiving, permanent ticket/project deletion, full ticket body revision history, and record-version conflict detection.
+- Project archiving, permanent ticket/project deletion, full ticket body revision history (added later by section 20.6), and record-version conflict detection.
 
 These exclusions apply to the initial MVP. Section 15 records agreed product
 extensions and future integration intent; it does not commit delivery dates.
@@ -763,7 +763,8 @@ Shared tags never implicitly expand the context payload.
 Keep canonical Markdown, field-level last-successful-write behavior, explicit
 relationship additions/removals, atomic writes, and retry deduplication. Concurrent
 writes to the same body may overwrite one another; conflict resolution and full
-body revision history remain outside this version. Technical storage and graph
+body revision history remain outside this version (section 20 adds both for
+sync between desktops). Technical storage and graph
 query decisions are recorded in ADR 0007.
 
 ## 17. Local file attachments
@@ -1162,8 +1163,11 @@ and upload queues. Workspace sync never publishes to an external tracker.
   Workspaces created independently are never merged automatically.
 - A Workspace has one storage destination.
 - A desktop joining sync takes another device code if another desktop already
-  holds its own, so Ticket references issued on different desktops never clash.
-  References already issued never change.
+  holds its own or once held it, so Ticket references issued on different
+  desktops never clash. References already issued never change.
+- Restoring a backup disconnects the Workspace from its Drive folder. The
+  restored content is not overwritten by what Drive holds: the person chooses
+  upload or download again.
 
 ### 20.3. When sync runs
 
@@ -1203,13 +1207,25 @@ with it.
 - Sync never deletes a record. Trash is a synced field: when one desktop trashes
   a record that another edited, the record stays in Trash with the edit kept, and
   restoring is explicit.
-- A file missing from Drive, an empty folder listing or failed authorization is a
-  recovery event. The app uploads again or asks to reconnect; it never deletes
-  local content.
+- A file missing from Drive, an empty folder listing or failed authorization is
+  never a deletion and never removes local content. A single missing file is
+  uploaded again by the next sync run. A missing folder, or one that lists no
+  records where some were synced, is a recovery state whose action uploads the
+  Workspace again. Failed authorization asks to reconnect.
 - A file edited directly in Drive is treated as an edit from another desktop once
   it validates. An unreadable file is skipped with a Needs attention notice and
-  changes nothing locally. A file created by hand in the folder does not become a
-  record, because ticketd sees only files it created.
+  changes nothing locally; the next local change to that record replaces it. A
+  file created by hand in the folder does not become a record, because ticketd
+  sees only files it created.
+- A file written by a newer ticketd than this desktop runs (a higher format
+  number, or a field this version does not know) is skipped with the same notice
+  and is never replaced from this desktop. Local changes to that record wait
+  until the desktop is updated.
+- An Attachment whose bytes are missing or damaged on this desktop, or cannot be
+  saved here, is a Needs attention notice of its own. It does not stop records
+  or other Attachments from syncing.
+- Any other failure of a sync run shows as Needs attention with its message and
+  a Retry action, and clears when a run succeeds.
 
 ### 20.6. Version history
 

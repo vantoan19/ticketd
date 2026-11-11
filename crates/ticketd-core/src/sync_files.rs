@@ -839,8 +839,9 @@ pub(crate) fn resolve_ticket_references(
 }
 
 impl SyncRecord {
-    /// Where the record's file lives in the synced folder. The GUID names the file, so
-    /// the path never changes.
+    /// A path for the record's file that never changes, by kind and GUID. The
+    /// storage does not use it: there a file carries a readable name
+    /// ([`SyncRecord::display_name`]) and is found by its GUID.
     pub fn path(&self) -> String {
         format!("{}/{}.md", self.kind.table(), self.id)
     }

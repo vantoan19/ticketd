@@ -29,7 +29,9 @@ The earlier design encrypted content on the device and published immutable recor
 
 Every synchronized record is identified by its GUID, carried in the file header. A file is found by that GUID, never by its name, which is only a readable label in Drive. Tickets, Documents, Plans, projects, Activities, Implementation evidence and Attachments all have one. The GUID is the identity for sync now and for any later service.
 
-The Ticket reference is a readable label, not the identity: `T-`, the two-letter device code of the device that created the ticket, then that device's own counter, with no dash (`T-KQ43`). Devices therefore issue references offline without clashing. A device code is random; a device joining sync checks the device list kept in Drive and takes another code if its own is in use, and a Workspace restored or copied onto another machine takes a fresh one. An issued reference never changes. There are no numeric aliases such as `T-42`.
+The Ticket reference is a readable label, not the identity: `T-`, the two-letter device code of the device that created the ticket, then that device's own counter, with no dash (`T-KQ43`). Devices therefore issue references offline without clashing. A device code is random; a device joining sync checks the device list kept in Drive and takes another code if its own is in use there or was given up by a device of that folder (the list keeps retired codes, because tickets still carry them). A Workspace restored from a backup takes a fresh code. An issued reference never changes.
+
+A Workspace file copied by hand to another machine is out of scope: the copy keeps the device identity and code of the original, nothing detects it, and two such copies syncing to one folder can issue the same reference. Moving a Workspace between machines goes through backup and restore, or through downloading it from Drive. There are no numeric aliases such as `T-42`.
 
 Each relationship is written in exactly one file (a dependency in the blocked ticket, a parent in the child, tags in the tagged record), so no relationship can disagree with itself across two files.
 
@@ -44,9 +46,15 @@ Each device keeps a copy of every file as it was last synced. When a record chan
 
 No duplicate ticket or conflict-copy file is ever created. A file that cannot be read is skipped with a Needs attention notice and changes nothing locally.
 
+Files and the two shared JSON files carry a format number. A file from a newer ticketd (a higher number, or a field this version does not know) is skipped the same way and is never replaced by a device that cannot read it; that record's local changes wait until the device is updated. A device whose own last-synced copy of a file cannot be read treats the record as never synced, so a differing value goes to review instead of being taken or sent silently.
+
 ## Trash and deletion
 
 Trash is the `trashed` field. Sync never deletes a record, locally or in Drive. Trashing on one device while another edits the record merges as two different fields: the record stays in Trash with the edit preserved, and restoring is an explicit act. Permanent deletion may be added later and would need its own design.
+
+## Restoring a backup
+
+Restoring a backup on a connected device disconnects it: the sync folder is forgotten together with the last-synced copies, and the sign-in is kept. Left connected, the next run would merge the folder back in and silently undo the restore, since every file there is newer than the restored content. The person instead chooses again between uploading the restored Workspace (it merges with the folder like a first upload, with differing values going to review) and downloading the one in Drive. Downloading a Workspace is the one restore that keeps its folder, because that restore is how the downloaded Workspace is put in place.
 
 ## History
 
