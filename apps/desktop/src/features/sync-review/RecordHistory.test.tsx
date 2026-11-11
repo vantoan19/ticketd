@@ -262,3 +262,20 @@ test("a Workspace that does not sync offers nothing from Drive", async () => {
     screen.queryByRole("button", { name: "Older versions from Drive" }),
   ).toBeNull();
 });
+
+test("Drive versions are placed by time among this desktop's, one heading per day", async () => {
+  // A Drive revision from the day of the middle local version.
+  stored.drive = [
+    { id: "r1", timestamp: versions[1]!.timestamp, device: null, changed: [] },
+  ];
+  render(connected(history));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Older versions from Drive" }),
+  );
+  await screen.findByRole("button", { name: /Google Drive$/ });
+  const days = screen
+    .getAllByRole("heading", { level: 3 })
+    .map((heading) => heading.textContent);
+  expect(days).toHaveLength(3);
+  expect(new Set(days).size).toBe(3);
+});

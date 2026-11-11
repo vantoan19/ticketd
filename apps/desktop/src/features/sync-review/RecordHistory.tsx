@@ -39,9 +39,10 @@ function byDay(versions: Entry[], now: Date) {
 
 /**
  * History of a ticket or Document: earlier versions on the left, the selected
- * one beside the current one on the right, Restore as the one action. This
- * desktop's own versions come first. Google Drive's revisions of the file are
- * read when asked for, or at once on a desktop that has no versions yet.
+ * one beside the current one on the right, Restore as the one action, newest
+ * first. Google Drive's revisions of the file are read when asked for, or at
+ * once on a desktop that has no versions yet, and listed among this desktop's
+ * own by time.
  */
 export function RecordHistory({
   kind,
@@ -155,7 +156,10 @@ export function RecordHistory({
   // Shown once this desktop answered and, where it keeps nothing, Drive did too.
   const loaded = local !== null && (local.length > 0 || drive !== null);
   const fromDrive = local !== null && !loaded;
-  const versions = [...(local ?? []), ...(drive ?? [])];
+  // The two sources overlap in time, and a day gets one heading.
+  const versions = [...(local ?? []), ...(drive ?? [])].sort(
+    (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
+  );
   const chosen = versions.find((entry) => same(entry, selected));
   const noun = kind === "ticket" ? "ticket" : "Document";
   const blockedReason = !loaded
