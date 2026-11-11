@@ -36,6 +36,8 @@ const SYNC: &str = "ticketdSync";
 const ROLE: &str = "ticketdRole";
 const KIND: &str = "ticketdKind";
 const ID: &str = "ticketdId";
+/// ROLE of the Workspace folder itself; a subfolder's ROLE is its name.
+const WORKSPACE: &str = "workspace";
 
 impl From<DriveError> for RemoteError {
     fn from(error: DriveError) -> Self {
@@ -59,7 +61,34 @@ impl From<DriveError> for RemoteError {
 #[derive(Clone)]
 struct Folders {
     root: String,
-    attachments: Option<String>,
+    /// Subfolder name to Drive ID: where new files of each kind are created.
+    subfolders: HashMap<String, String>,
+    /// Every Drive folder of the Workspace folder, duplicates included, so a
+    /// file is found wherever a device put it.
+    all: Vec<String>,
+}
+
+impl Folders {
+    fn parents(&self) -> String {
+        let terms: Vec<String> = self
+            .all
+            .iter()
+            .map(|id| format!("'{id}' in parents"))
+            .collect();
+        format!("({})", terms.join(" or "))
+    }
+}
+
+/// `docs/sync-file-format.md` names these folders; the device registry sits beside them.
+fn subfolder(kind: RemoteKind) -> Option<&'static str> {
+    match kind {
+        RemoteKind::Ticket => Some("tickets"),
+        RemoteKind::Document => Some("documents"),
+        RemoteKind::Plan => Some("plans"),
+        RemoteKind::Project => Some("projects"),
+        RemoteKind::Attachment => Some("attachments"),
+        RemoteKind::Devices => None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -352,23 +381,34 @@ impl<'a> DriveRemote<'a> {
             return Ok(folders.clone());
         }
         let entries = self.query(&format!("{} and trashed=false", property(SYNC, folder)))?;
-        let pick = |role: &str| {
-            entries
-                .iter()
-                .filter(|entry| {
-                    entry.mime_type == FOLDER
-                        && entry.app_properties.get(ROLE).map(String::as_str) == Some(role)
-                })
-                .min_by(|a, b| a.age().cmp(&b.age()))
-                .map(|entry| entry.id.clone())
-        };
-        let Some(root) = pick("workspace") else {
-            lock(&self.folders).remove(folder);
-            return Err(RemoteError::FolderMissing);
+        let mut found: Vec<&Entry> = entries
+            .iter()
+            .filter(|entry| entry.mime_type == FOLDER)
+            .collect();
+        // Oldest first, so every device picks the same folder among duplicates.
+        found.sort_by(|a, b| a.age().cmp(&b.age()));
+        let mut root = None;
+        let mut subfolders = HashMap::new();
+        for entry in &found {
+            match entry.app_properties.get(ROLE).map(String::as_str) {
+                Some(WORKSPACE) => {
+                    root.get_or_insert_with(|| entry.id.clone());
+                }
+                Some(role) => {
+                    subfolders
+                        .entry(role.to_owned())
+                        .or_insert_with(|| entry.id.clone());
+                }
+                None => {}
+            }
+        }
+        let Some(root) = root else {
+            return Err(self.folder_gone(folder));
         };
         let folders = Folders {
             root,
-            attachments: pick("attachments"),
+            subfolders,
+            all: found.iter().map(|entry| entry.id.clone()).collect(),
         };
         lock(&self.folders).insert(folder.into(), folders.clone());
         Ok(folders)
@@ -413,13 +453,24 @@ impl<'a> DriveRemote<'a> {
         RemoteError::FolderMissing
     }
 
-    fn attachments_folder(&self, folder: &str, folders: &Folders) -> Result<String, RemoteError> {
-        if let Some(id) = &folders.attachments {
+    /// The Drive folder new files of `kind` go into. A subfolder removed in
+    /// Drive is created again.
+    fn parent(
+        &self,
+        folder: &str,
+        folders: &Folders,
+        kind: RemoteKind,
+    ) -> Result<String, RemoteError> {
+        let Some(name) = subfolder(kind) else {
+            return Ok(folders.root.clone());
+        };
+        if let Some(id) = folders.subfolders.get(name) {
             return Ok(id.clone());
         }
-        let id = self.create_folder(folder, "attachments", "attachments", Some(&folders.root))?;
+        let id = self.create_folder(folder, name, name, Some(&folders.root))?;
         if let Some(cached) = lock(&self.folders).get_mut(folder) {
-            cached.attachments = Some(id.clone());
+            cached.subfolders.insert(name.into(), id.clone());
+            cached.all.push(id.clone());
         }
         Ok(id)
     }
@@ -441,14 +492,10 @@ impl<'a> DriveRemote<'a> {
                 _ => lock(&self.files).remove(&cache_key),
             };
         }
-        let parent = match (key.kind, &folders.attachments) {
-            (RemoteKind::Attachment, Some(attachments)) => attachments,
-            (RemoteKind::Attachment, None) => return Ok(None),
-            _ => &folders.root,
-        };
         let found = self
             .query(&format!(
-                "'{parent}' in parents and {} and {} and trashed=false",
+                "{} and {} and {} and trashed=false",
+                folders.parents(),
                 property(KIND, key.kind.as_str()),
                 property(ID, &key.id)
             ))?
@@ -622,25 +669,25 @@ impl RemoteStorage for DriveRemote<'_> {
 
     fn ensure_folder(&self, folder: &str, name: &str) -> Result<(), RemoteError> {
         check(folder, None)?;
-        let root = match self.resolve(folder, false) {
-            Ok(Folders {
-                attachments: Some(_),
-                ..
-            }) => return Ok(()),
-            Ok(folders) => folders.root,
+        let folders = match self.resolve(folder, false) {
+            Ok(folders) => folders,
             Err(RemoteError::FolderMissing) => {
-                self.create_folder(folder, "workspace", name, None)?
+                let root = self.create_folder(folder, WORKSPACE, name, None)?;
+                let folders = Folders {
+                    root: root.clone(),
+                    subfolders: HashMap::new(),
+                    all: vec![root],
+                };
+                lock(&self.folders).insert(folder.into(), folders.clone());
+                folders
             }
             Err(error) => return Err(error),
         };
-        let attachments = self.create_folder(folder, "attachments", "attachments", Some(&root))?;
-        lock(&self.folders).insert(
-            folder.into(),
-            Folders {
-                root,
-                attachments: Some(attachments),
-            },
-        );
+        // Created up front by the one device that sets sync up, so two devices
+        // do not each add a subfolder for their first file of a kind.
+        for kind in RemoteKind::ALL {
+            self.parent(folder, &folders, kind)?;
+        }
         Ok(())
     }
 
@@ -650,16 +697,7 @@ impl RemoteStorage for DriveRemote<'_> {
     fn list(&self, folder: &str) -> Result<Vec<RemoteFile>, RemoteError> {
         check(folder, None)?;
         let folders = self.resolve(folder, false)?;
-        let parents = match &folders.attachments {
-            Some(attachments) => {
-                format!(
-                    "('{}' in parents or '{attachments}' in parents)",
-                    folders.root
-                )
-            }
-            None => format!("'{}' in parents", folders.root),
-        };
-        let entries = self.query(&format!("{parents} and trashed=false"))?;
+        let entries = self.query(&format!("{} and trashed=false", folders.parents()))?;
         let mut oldest: BTreeMap<RemoteKey, (&Entry, RemoteFile)> = BTreeMap::new();
         for entry in &entries {
             let Some(file) = entry.file() else { continue };
@@ -757,10 +795,7 @@ impl RemoteStorage for DriveRemote<'_> {
                 return stored.ok_or_else(unreadable);
             }
             (None, None) => {
-                let parent = match key.kind {
-                    RemoteKind::Attachment => self.attachments_folder(folder, &folders)?,
-                    _ => folders.root.clone(),
-                };
+                let parent = self.parent(folder, &folders, key.kind)?;
                 let id = self.reserve()?;
                 let metadata = serde_json::json!({
                     "id": id,

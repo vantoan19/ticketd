@@ -126,7 +126,7 @@ fn two_devices_exchange_files_through_a_disposable_drive_folder() {
     // Undocumented under drive.file, so this is an observation, not an assertion.
     match first.changed_file_ids(Some(&changes_start)) {
         Ok((ids, _)) => println!(
-            "changes.list under drive.file: answered, {} changed file ID(s) since the folder was created (4 files and folders were written)",
+            "changes.list under drive.file: answered, {} changed file ID(s) since the folder was created (a file was created, then updated, and an attachment created)",
             ids.len()
         ),
         Err(error) => println!("changes.list under drive.file: refused ({error})"),

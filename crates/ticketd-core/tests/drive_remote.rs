@@ -93,7 +93,7 @@ fn files_live_in_a_visible_folder_identified_by_properties_with_readable_names()
     assert_eq!(attachments["parents"], json!([root["id"]]));
 
     let file = named("T-KQ43 Fix login.md");
-    assert_eq!(file["parents"], json!([root["id"]]));
+    assert_eq!(file["parents"], json!([named("tickets")["id"]]));
     assert_eq!(file["mimeType"], "text/markdown");
     assert_eq!(
         file["appProperties"],
@@ -106,7 +106,10 @@ fn files_live_in_a_visible_folder_identified_by_properties_with_readable_names()
     let blob = named("diagram.png");
     assert_eq!(blob["parents"], json!([attachments["id"]]));
     assert_eq!(blob["appProperties"]["ticketdKind"], "attachment");
-    assert_eq!(items.len(), 4);
+    for name in ["documents", "plans", "projects"] {
+        assert_eq!(named(name)["parents"], json!([root["id"]]));
+    }
+    assert_eq!(items.len(), 8, "one folder, five subfolders and two files");
 }
 
 #[test]
@@ -131,7 +134,7 @@ fn an_expired_access_token_is_renewed_once_and_a_withdrawn_grant_asks_to_reconne
         put(&remote, &key("b"), None, b"b"),
         Err(RemoteError::Unauthorized)
     );
-    assert_eq!(sim.items().len(), 3, "nothing was written or removed");
+    assert_eq!(sim.items().len(), 7, "nothing was written or removed");
 }
 
 #[test]
@@ -157,8 +160,8 @@ fn listings_and_revisions_follow_every_page() {
     assert_eq!(listed, ["b", "c", "d", "e", "paged"]);
     assert_eq!(
         sim.count("GET", "pageToken="),
-        2,
-        "six folder entries, two per page"
+        6,
+        "two more pages of six folders, four more of ten folder entries"
     );
     let revisions = remote.revisions(FOLDER, &ticket).unwrap();
     assert_eq!(revisions.len(), 5);
