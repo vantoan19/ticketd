@@ -75,11 +75,15 @@ export function RecordHistory({
         if (active) setError(String(reason));
         return;
       }
-      // Drive is only a fallback: without sync, or offline, there is simply nothing earlier.
-      const drive = await syncReview
-        .versions({ kind, id, source: "drive" })
-        .catch(() => []);
-      if (active) show("drive", drive);
+      // Drive is only a fallback: without sync it answers with nothing earlier.
+      // When it cannot be asked, saying so beats claiming there are no versions.
+      try {
+        const drive = await syncReview.versions({ kind, id, source: "drive" });
+        if (active) show("drive", drive);
+      } catch (reason) {
+        if (active)
+          setError(reason instanceof Error ? reason.message : String(reason));
+      }
     })();
     return () => {
       active = false;

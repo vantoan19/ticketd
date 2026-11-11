@@ -37,9 +37,11 @@ const conflictSchema = conflictSummarySchema.extend({
     z.object({
       field: z.string(),
       local: z.string(),
-      local_changed_at: z.string(),
+      /** When this desktop last changed the field; null when nothing recorded it. */
+      local_changed_at: z.string().nullable(),
       remote: z.string(),
-      remote_changed_at: z.string(),
+      /** When Drive received the other value; null when Drive could not say. */
+      remote_changed_at: z.string().nullable(),
       /** Name of the desktop the other value came from. */
       remote_device: z.string(),
     }),
@@ -62,6 +64,15 @@ const noticeSchema = z.discriminatedUnion("kind", [
     reference: z.string(),
     title: z.string(),
     relation: z.enum(["blocks", "blocked_by"]),
+    other: z.string(),
+  }),
+  /** Sync dropped a parent link that would have made a loop. */
+  z.object({
+    ...noticeBase,
+    kind: z.literal("parent_removed"),
+    /** The child ticket, and the Ticket reference of the parent it lost. */
+    reference: z.string(),
+    title: z.string(),
     other: z.string(),
   }),
   /** A file in Drive could not be read and was skipped. */

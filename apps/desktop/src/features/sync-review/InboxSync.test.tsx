@@ -151,3 +151,24 @@ test("sync entries sit among the others by time and follow the Unread filter", a
     ),
   );
 });
+
+test("a removed parent link is a notice naming the parent", async () => {
+  vi.mocked(syncReview.conflicts).mockResolvedValue([]);
+  vi.mocked(syncReview.notices).mockResolvedValue([
+    {
+      kind: "parent_removed",
+      id: "notice-3",
+      timestamp: hours(1),
+      read: false,
+      reference: "T-MW10",
+      title: "Add a login audit log",
+      other: "T-KQ4",
+    },
+  ]);
+  open();
+  expect(
+    await screen.findByText(
+      "Sync removed parent T-KQ4 · it would have made a loop",
+    ),
+  ).toBeTruthy();
+});
