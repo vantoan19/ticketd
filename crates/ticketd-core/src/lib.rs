@@ -51,6 +51,8 @@ mod relationships;
 pub use relationships::RelationshipKind;
 mod search;
 pub use search::{Availability, TicketFilter, TicketOrder};
+mod sync_files;
+pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
 mod tags;
 mod ticket_documents;
 pub use plans::{Plan, PlanCounts, PlanView};
@@ -264,6 +266,8 @@ pub enum Error {
     Directory(#[from] std::io::Error),
     #[error("workspace database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("unreadable sync file: {0}")]
+    SyncFile(String),
     #[error("workspace schema version {0} is newer than this application supports")]
     NewerSchema(i64),
 }
