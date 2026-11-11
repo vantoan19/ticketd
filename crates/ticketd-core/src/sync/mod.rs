@@ -18,7 +18,7 @@ pub use engine::{
 };
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, SetupOptions,
-    SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem, SyncRecovery,
+    SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem, SyncRecovery,
     SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
 };
 
@@ -30,4 +30,9 @@ pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Er
 /// The sync destination and Attachment transfer state (format version 59).
 pub(crate) fn migrate_setup(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate(connection)
+}
+
+/// Format version 60.
+pub(crate) fn migrate_recovery(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_recovery(connection)
 }
