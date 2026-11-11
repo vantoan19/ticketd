@@ -165,6 +165,13 @@ settings and instruction discovery in the selected
 working directory. Domain writes retain existing source authority and concurrency
 rules. Agent attribution never substitutes for Chat identity or permission.
 
+`ticketd-chat-host` builds that context as text from the Chat's current links
+(`context`) and finds the CLI the same way Settings does (`cli`). The text names
+each record, the command that returns it, and the bundled `chat` guide; it holds no
+record content and the host writes nothing into harness settings, skills or hooks.
+Agents change records only by running the CLI. Save as Document is the ordinary
+Document-creation workflow applied to a stored response.
+
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process
 recovery. Only a live request registry can answer approvals. Native resume failure

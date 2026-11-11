@@ -22,5 +22,6 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+ticketd-chat-host.workspace = true
 tempfile = "3"
 rusqlite = { version = "0.37", features = ["bundled"] }
