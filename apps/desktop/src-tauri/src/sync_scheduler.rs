@@ -4,7 +4,7 @@
 //! binding, so none of it needs a clock or a network to be exercised.
 
 use std::{
-    sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError, mpsc},
     time::{Duration, Instant},
 };
 
@@ -31,7 +31,7 @@ pub struct Binding {
 
 type Open = dyn Fn() -> Result<Workspace, Error> + Send + Sync;
 /// `None` while the Workspace is not connected to a folder.
-type Bound = dyn Fn() -> Result<Option<Binding>, Error> + Send + Sync;
+type Bound = dyn Fn(&Workspace) -> Result<Option<Binding>, Error> + Send + Sync;
 /// A sync workflow of the core: an ordinary run, or the recovery action.
 type Run = fn(&mut Workspace, &dyn RemoteStorage) -> Result<SyncStatus, Error>;
 
@@ -68,13 +68,18 @@ impl Scheduler {
     }
 
     pub fn binding(&self) -> Result<Option<Binding>, Error> {
-        (self.binding)()
+        (self.binding)(&(self.open)()?)
     }
 
-    /// Keeps sync from running while the caller replaces the Workspace file;
-    /// waits for a run in progress.
+    /// Keeps sync away from the Workspace while the caller replaces its file:
+    /// waits for a run in progress, and no tick opens the Workspace until the
+    /// guard is dropped. What was watched belonged to the Workspace being
+    /// replaced, whose change marks the new one does not continue, so the
+    /// watch starts over.
     pub fn hold(&self) -> MutexGuard<'_, ()> {
-        lock(&self.running)
+        let held = lock(&self.running);
+        *lock(&self.watch) = Watch::default();
+        held
     }
 
     /// Runs sync if one is due at `now` (time since the app started). `None`
@@ -82,12 +87,20 @@ impl Scheduler {
     /// already in progress. A run the storage refused is not repeated before
     /// the next poll or local change.
     pub fn tick(&self, now: Duration) -> Result<Option<SyncStatus>, Error> {
-        let Some(binding) = self.binding()? else {
+        // Taken before anything opens the Workspace: whoever holds it may be
+        // replacing the Workspace file, which an open handle would refuse.
+        let _running = match self.running.try_lock() {
+            Ok(running) => running,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return Ok(None),
+        };
+        let workspace = (self.open)()?;
+        let Some(binding) = (self.binding)(&workspace)? else {
             // The next connection starts with a run.
             *lock(&self.watch) = Watch::default();
             return Ok(None);
         };
-        let latest = (self.open)()?
+        let latest = workspace
             .dirty_records()?
             .iter()
             .map(|record| record.mark)
@@ -105,10 +118,8 @@ impl Scheduler {
         if !due {
             return Ok(None);
         }
-        let Ok(_running) = self.running.try_lock() else {
-            return Ok(None);
-        };
-        self.run(&binding, now, Workspace::sync_now).map(Some)
+        self.run(Ok(workspace), &binding, now, Workspace::sync_now)
+            .map(Some)
     }
 
     /// Sync now: waits for a run in progress, then runs. `None` when not connected.
@@ -122,18 +133,26 @@ impl Scheduler {
     }
 
     fn exclusive(&self, now: Duration, run: Run) -> Result<Option<SyncStatus>, Error> {
-        let Some(binding) = self.binding()? else {
+        let _running = lock(&self.running);
+        let workspace = (self.open)()?;
+        let Some(binding) = (self.binding)(&workspace)? else {
             return Ok(None);
         };
-        let _running = lock(&self.running);
-        self.run(&binding, now, run).map(Some)
+        self.run(Ok(workspace), &binding, now, run).map(Some)
     }
 
-    fn run(&self, binding: &Binding, now: Duration, run: Run) -> Result<SyncStatus, Error> {
-        // The Workspace is opened for this run alone; its writes are short
-        // transactions, so other commands are not held up by the network.
+    /// The caller holds `running`. The Workspace handle is this run's alone;
+    /// its writes are short transactions, so other commands are not held up by
+    /// the network.
+    fn run(
+        &self,
+        workspace: Result<Workspace, Error>,
+        binding: &Binding,
+        now: Duration,
+        run: Run,
+    ) -> Result<SyncStatus, Error> {
         let result =
-            (self.open)().and_then(|mut workspace| run(&mut workspace, binding.remote.as_ref()));
+            workspace.and_then(|mut workspace| run(&mut workspace, binding.remote.as_ref()));
         let mut watch = lock(&self.watch);
         watch.connected = true;
         watch.upload_at = None;
@@ -155,7 +174,7 @@ impl Scheduler {
             .name("workspace-sync-exit".into())
             .spawn(move || {
                 let _running = lock(&scheduler.running);
-                let _ = scheduler.run(&binding, now, Workspace::sync_now);
+                let _ = scheduler.run((scheduler.open)(), &binding, now, Workspace::sync_now);
                 let _ = done.send(());
             });
         if spawned.is_ok() {
@@ -197,7 +216,10 @@ impl Scheduler {
 #[allow(clippy::unwrap_used)] // Setup that fails must fail the test.
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::{
+        io::Write,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
     use ticketd_core::{
         TicketPatch,
         sync::{
@@ -264,6 +286,8 @@ mod tests {
         _directory: tempfile::TempDir,
         remote: FakeRemote,
         scheduler: Arc<Scheduler>,
+        /// How often the scheduler opened the Workspace.
+        opens: Arc<AtomicUsize>,
         bound: Arc<Mutex<Option<Binding>>>,
         path: std::path::PathBuf,
         folder: String,
@@ -306,14 +330,20 @@ mod tests {
         let status = workspace.sync_upload_workspace(&remote, "Test").unwrap();
         let bound = Arc::new(Mutex::new(None));
         let (open_path, source) = (path.clone(), Arc::clone(&bound));
+        let opens = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&opens);
         let scheduler = Arc::new(Scheduler::new(
-            Box::new(move || Workspace::open(&open_path)),
-            Box::new(move || Ok(lock(&source).clone())),
+            Box::new(move || {
+                counted.fetch_add(1, Ordering::SeqCst);
+                Workspace::open(&open_path)
+            }),
+            Box::new(move |_| Ok(lock(&source).clone())),
         ));
         let desk = Desk {
             _directory: directory,
             remote,
             scheduler,
+            opens,
             bound,
             path,
             folder: status.folder.unwrap().id,
@@ -478,5 +508,56 @@ mod tests {
             desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap(),
             []
         );
+    }
+
+    #[test]
+    fn a_tick_leaves_the_workspace_alone_while_its_file_is_being_replaced() {
+        let desk = desk();
+        let opened = || desk.opens.load(Ordering::SeqCst);
+        let replacing = desk.scheduler.hold();
+        // Due, since nothing ran yet, but the Workspace is not even opened.
+        assert_eq!(desk.scheduler.tick(Duration::ZERO).unwrap(), None);
+        assert_eq!(opened(), 0);
+        drop(replacing);
+
+        // A tick that runs opens the Workspace once for everything it does.
+        assert!(desk.scheduler.tick(SECOND).unwrap().is_some());
+        assert_eq!(opened(), 1);
+    }
+
+    #[test]
+    fn a_replaced_workspace_uploads_its_changes_after_the_usual_wait() {
+        let desk = desk();
+        // Several changes here, so the watch has seen a high change mark.
+        for title in ["Second", "Third", "Fourth"] {
+            desk.workspace().create_ticket(title).unwrap();
+        }
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+
+        // The Workspace file is replaced by one whose marks start over.
+        let replacing = desk.scheduler.hold();
+        std::fs::remove_file(&desk.path).unwrap();
+        let mut replaced = desk.workspace();
+        replaced.create_ticket("Other").unwrap();
+        replaced
+            .sync_connect("connection", "mina@example.com")
+            .unwrap();
+        let status = replaced
+            .sync_upload_workspace(&desk.remote, "Other")
+            .unwrap();
+        drop(replaced);
+        desk.bind(Some(Binding {
+            folder: status.folder.unwrap().id,
+            ..desk.binding(MINUTE)
+        }));
+        drop(replacing);
+        // The replaced Workspace is synced straight away, like a new connection.
+        assert!(desk.scheduler.tick(SECOND).unwrap().is_some());
+
+        desk.workspace().create_ticket("Another").unwrap();
+        assert_eq!(desk.scheduler.tick(2 * SECOND).unwrap(), None);
+        assert_eq!(desk.pending(), 1);
+        let status = desk.scheduler.tick(5 * SECOND).unwrap().unwrap();
+        assert_eq!(status.pending_uploads, []);
     }
 }

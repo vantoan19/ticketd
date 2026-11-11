@@ -1130,8 +1130,13 @@ fn workspace_info() -> Result<WorkspaceInfo, String> {
         .and_then(|w| w.workspace_info())
         .map_err(|e| e.to_string())
 }
+/// Sync is held off while the Workspace file is replaced.
 #[tauri::command(async)]
-fn restore_workspace(path: String) -> Result<String, String> {
+fn restore_workspace(
+    host: tauri::State<'_, sync_commands::SyncHost>,
+    path: String,
+) -> Result<String, String> {
+    let _no_run = host.scheduler.hold();
     Workspace::restore_default(path)
         .map(|safety| safety.display().to_string())
         .map_err(|e| e.to_string())

@@ -76,8 +76,8 @@ fn binding_of(
     }))
 }
 
-pub fn binding() -> Result<Option<Binding>, Error> {
-    binding_of(&open_workspace()?, |connection| drive(connection))
+pub fn binding(workspace: &Workspace) -> Result<Option<Binding>, Error> {
+    binding_of(workspace, |connection| drive(connection))
 }
 
 /// The name macOS shows for this computer. Its apps get no host name in their
@@ -424,6 +424,7 @@ fn remote_key(kind: RecordKind, id: &str) -> RemoteKey {
 }
 
 /// The content History compares and restores, in the order it is shown.
+#[derive(PartialEq, Eq)]
 struct Content {
     title: String,
     /// Tickets only.
@@ -472,9 +473,19 @@ fn versions(
                 ));
             }
         };
-        // Oldest first, ending with the version this desktop already holds.
-        revisions.pop();
+        // Drive lists oldest first. Its newest revision is left out only when
+        // it is what this desktop holds now: a file changed elsewhere and not
+        // yet downloaded here is a version to compare and restore like the rest.
+        // ponytail: only the newest revision is read; an older one that equals
+        // the current content is listed and shows as unchanged when selected.
         revisions.reverse();
+        if let Some(newest) = revisions.first() {
+            let held = version_content(workspace, Some(bound), kind, id, source, &newest.version)
+                .is_ok_and(|content| content == Content::of(kind, &record));
+            if held {
+                revisions.remove(0);
+            }
+        }
         // ponytail: who wrote a revision and what it changed would cost a download
         // each; fetch them if the Drive list needs more than times.
         return Ok(revisions
@@ -1306,6 +1317,34 @@ mod tests {
         assert_eq!(
             desks.here.show_ticket(&ticket.reference).unwrap().title,
             "One"
+        );
+    }
+
+    #[test]
+    fn drive_history_lists_a_newest_revision_this_desktop_has_not_downloaded() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.remote.set_now("2026-03-01T09:00:00Z");
+        desks.sync_there();
+        desks.sync_here();
+        retitle(&mut desks.there, &ticket.reference, "Two");
+        desks.remote.set_now("2026-03-02T09:00:00Z");
+        desks.sync_there();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+
+        // This desktop still holds "One": Drive's newest revision is not it.
+        let list = versions(&desks.here, bound, kind, id, Source::Drive).unwrap();
+        assert_eq!(list[0].timestamp, "2026-03-02T09:00:00Z");
+        let detail =
+            version_detail(&desks.here, bound, kind, id, Source::Drive, &list[0].id).unwrap();
+        assert_eq!(
+            detail.fields,
+            [VersionField {
+                field: "title",
+                value: "Two".into(),
+                current: "One".into()
+            }]
         );
     }
 
