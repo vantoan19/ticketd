@@ -1,0 +1,1352 @@
+//! Sync files: every ticket, Document, Plan and project as one Markdown file with a
+//! YAML header, and back. The convention is recorded in `docs/sync-file-format.md`.
+//!
+//! One table of fields per block ([`shape`]) drives writing, parsing and validation,
+//! so the three cannot drift apart. Applying a record writes only the fields that
+//! differ from what the Workspace already holds.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use rusqlite::{Connection, OptionalExtension, ToSql, params, types::ValueRef};
+use saphyr::{LoadableYamlNode, Scalar, Yaml};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::{Error, Status, Workspace, document_links, inbox::LOCAL_PERSON};
+
+/// The record kinds that each have their own sync file, in an order that applies a
+/// relationship's target before its owner where the kinds allow it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncKind {
+    Project,
+    Document,
+    Plan,
+    Ticket,
+}
+
+impl SyncKind {
+    pub const ALL: [Self; 4] = [Self::Project, Self::Document, Self::Plan, Self::Ticket];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Document => "document",
+            Self::Plan => "plan",
+            Self::Ticket => "ticket",
+        }
+    }
+
+    /// The table holding the kind's records, which is also its folder of sync files.
+    fn table(self) -> &'static str {
+        match self {
+            Self::Project => "projects",
+            Self::Document => "documents",
+            Self::Plan => "plans",
+            Self::Ticket => "tickets",
+        }
+    }
+}
+
+/// The records kept as sections of their ticket's file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncPartKind {
+    Activity,
+    Evidence,
+}
+
+impl SyncPartKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Activity => "activity",
+            Self::Evidence => "evidence",
+        }
+    }
+}
+
+/// One field of a sync file. An absent field, an empty set and a false flag mean the same.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncValue {
+    /// A single value: text, a time, or the GUID of another record.
+    Text(String),
+    Flag(bool),
+    /// Tags, or the GUIDs of related records.
+    Set(BTreeSet<String>),
+}
+
+type Fields = BTreeMap<String, SyncValue>;
+
+/// An Activity or Implementation evidence section of a ticket's file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncPart {
+    pub kind: SyncPartKind,
+    pub id: String,
+    pub fields: Fields,
+}
+
+impl SyncPart {
+    /// Sections are written oldest first; the GUID settles equal times the same way everywhere.
+    fn order(&self) -> (SyncPartKind, &str, &str) {
+        let time = match self.kind {
+            SyncPartKind::Activity => "reported_at",
+            SyncPartKind::Evidence => "created_at",
+        };
+        (self.kind, text(&self.fields, time).unwrap_or(""), &self.id)
+    }
+}
+
+/// One synced record as the fields of its sync file. The Markdown text after the
+/// header is the field `body`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncRecord {
+    pub kind: SyncKind,
+    pub id: String,
+    pub fields: Fields,
+    /// A ticket's Activities and Implementation evidence; empty for other kinds.
+    pub parts: Vec<SyncPart>,
+}
+
+/// A relationship that was not applied because the record it names is not in this
+/// Workspace yet. Applying the same record again after that record arrives completes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissingTarget {
+    pub field: String,
+    pub id: String,
+}
+
+#[derive(Clone, Copy)]
+enum Type {
+    Text,
+    /// Text that must not be blank.
+    Name,
+    Flag,
+    Time,
+    Id,
+    Ids,
+    Tags,
+    Status,
+    Reference,
+    Choice(&'static [&'static str]),
+}
+
+/// Name, type, and whether the field is required.
+type Field = (&'static str, Type, bool);
+
+const TICKET: &[Field] = &[
+    ("ref", Type::Reference, true),
+    ("title", Type::Name, true),
+    ("status", Type::Status, true),
+    ("project", Type::Id, false),
+    ("plan", Type::Id, false),
+    ("parent", Type::Id, false),
+    ("blocked_by", Type::Ids, false),
+    ("related", Type::Ids, false),
+    ("discovered", Type::Ids, false),
+    ("duplicate_of", Type::Id, false),
+    ("duplicate_restore", Type::Status, false),
+    ("tags", Type::Tags, false),
+    ("documents", Type::Ids, false),
+    ("attachments", Type::Ids, false),
+    ("trashed", Type::Flag, false),
+    ("following", Type::Flag, false),
+    ("reminder", Type::Time, false),
+    ("source_provider", Type::Name, false),
+    ("source_external_id", Type::Name, false),
+    ("source_locator", Type::Text, false),
+    ("source_display", Type::Text, false),
+    ("source_url", Type::Text, false),
+    (
+        "source_origin",
+        Type::Choice(&["imported", "published"]),
+        false,
+    ),
+    ("source_linked_at", Type::Time, false),
+    (
+        "source_authority",
+        Type::Choice(&["external", "local"]),
+        false,
+    ),
+    ("source_authority_changed_at", Type::Time, false),
+    ("source_state", Type::Choice(&["open", "closed"]), false),
+    (
+        "source_closure_reason",
+        Type::Choice(&["completed", "not_planned", "duplicate", "unknown"]),
+        false,
+    ),
+    ("source_updated_at", Type::Text, false),
+];
+/// External-source provenance is stored and carried as a whole.
+const SOURCE_REQUIRED: &[&str] = &[
+    "source_provider",
+    "source_external_id",
+    "source_locator",
+    "source_display",
+    "source_url",
+    "source_origin",
+    "source_linked_at",
+    "source_authority",
+    "source_authority_changed_at",
+    "source_state",
+];
+const DOCUMENT: &[Field] = &[
+    ("title", Type::Text, false),
+    ("created_at", Type::Time, true),
+    ("tags", Type::Tags, false),
+    ("origin_activity", Type::Id, false),
+    ("trashed", Type::Flag, false),
+    ("kept", Type::Flag, false),
+    ("pinned", Type::Flag, false),
+];
+const PLAN: &[Field] = &[
+    ("name", Type::Name, true),
+    ("archived", Type::Flag, false),
+    ("spec", Type::Id, false),
+    ("documents", Type::Ids, false),
+];
+const PROJECT: &[Field] = &[("name", Type::Name, true)];
+const ACTIVITY: &[Field] = &[
+    ("reported_at", Type::Time, true),
+    ("updated_at", Type::Time, true),
+    ("agent", Type::Text, false),
+    ("document", Type::Id, false),
+];
+const EVIDENCE: &[Field] = &[
+    (
+        "kind",
+        Type::Choice(&[
+            "pull_request",
+            "commit",
+            "branch",
+            "worktree",
+            "verification",
+        ]),
+        true,
+    ),
+    ("name", Type::Name, true),
+    ("value", Type::Name, true),
+    ("created_at", Type::Time, true),
+    ("updated_at", Type::Time, true),
+    ("agent", Type::Text, false),
+];
+
+/// The header fields of a block, and whether Markdown text follows its header.
+fn shape(block: &str) -> (&'static [Field], bool) {
+    match block {
+        "ticket" => (TICKET, true),
+        "document" => (DOCUMENT, true),
+        "plan" => (PLAN, true),
+        "activity" => (ACTIVITY, true),
+        "evidence" => (EVIDENCE, false),
+        _ => (PROJECT, false),
+    }
+}
+
+/// A set-valued field stored as rows of `table`: `owner` is the record whose file
+/// carries it and `member` the other side.
+struct Relation {
+    table: &'static str,
+    owner: &'static str,
+    member: &'static str,
+    /// A column fixed to one value for this field.
+    fixed: Option<(&'static str, &'static str)>,
+    /// The table whose records the members name.
+    target: &'static str,
+}
+
+fn relation(kind: SyncKind, field: &str) -> Option<Relation> {
+    let (table, owner, member, fixed, target) = match (kind, field) {
+        (SyncKind::Ticket, "blocked_by") => (
+            "dependencies",
+            "dependent_id",
+            "blocker_id",
+            None,
+            "tickets",
+        ),
+        (SyncKind::Ticket, "related" | "discovered") => (
+            "contextual_relationships",
+            "source_id",
+            "target_id",
+            Some((
+                "kind",
+                if field == "related" {
+                    "related"
+                } else {
+                    "discovered"
+                },
+            )),
+            "tickets",
+        ),
+        (SyncKind::Ticket, "tags") => ("ticket_tags", "ticket_id", "tag_name", None, "tags"),
+        (SyncKind::Ticket, "documents") => (
+            "ticket_documents",
+            "ticket_id",
+            "document_id",
+            None,
+            "documents",
+        ),
+        (SyncKind::Ticket, "attachments") => (
+            "ticket_attachments",
+            "ticket_id",
+            "attachment_id",
+            None,
+            "attachments",
+        ),
+        (SyncKind::Document, "tags") => ("document_tags", "document_id", "tag_name", None, "tags"),
+        (SyncKind::Plan, "documents") => (
+            "plan_documents",
+            "plan_id",
+            "document_id",
+            None,
+            "documents",
+        ),
+        _ => return None,
+    };
+    Some(Relation {
+        table,
+        owner,
+        member,
+        fixed,
+        target,
+    })
+}
+
+impl Relation {
+    fn members(&self, c: &Connection, id: &str) -> Result<BTreeSet<String>, Error> {
+        let fixed = self.fixed.map_or(String::new(), |(column, value)| {
+            format!(" AND {column}='{value}'")
+        });
+        let mut statement = c.prepare(&format!(
+            "SELECT {} FROM {} WHERE {}=?1{fixed}",
+            self.member, self.table, self.owner
+        ))?;
+        Ok(statement
+            .query_map([id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
+    fn replace(&self, c: &Connection, id: &str, wanted: &BTreeSet<String>) -> Result<(), Error> {
+        let current = self.members(c, id)?;
+        let (and_fixed, column, value) = match self.fixed {
+            Some((column, value)) => (
+                format!(" AND {column}='{value}'"),
+                format!(", {column}"),
+                format!(", '{value}'"),
+            ),
+            None => Default::default(),
+        };
+        for gone in current.difference(wanted) {
+            c.execute(
+                &format!(
+                    "DELETE FROM {} WHERE {}=?1 AND {}=?2{and_fixed}",
+                    self.table, self.owner, self.member
+                ),
+                params![id, gone],
+            )?;
+        }
+        for new in wanted.difference(&current) {
+            c.execute(
+                &format!(
+                    "INSERT INTO {} ({}, {}{column}) VALUES (?1, ?2{value})",
+                    self.table, self.owner, self.member
+                ),
+                params![id, new],
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn bad(reason: impl Into<String>) -> Error {
+    Error::SyncFile(reason.into())
+}
+
+fn text<'a>(fields: &'a Fields, name: &str) -> Option<&'a str> {
+    match fields.get(name) {
+        Some(SyncValue::Text(text)) => Some(text),
+        _ => None,
+    }
+}
+
+fn set(fields: &Fields, name: &str) -> BTreeSet<String> {
+    match fields.get(name) {
+        Some(SyncValue::Set(members)) => members.clone(),
+        _ => BTreeSet::new(),
+    }
+}
+
+/// A field's value with the spellings of "nothing" folded together.
+fn present<'a>(fields: &'a Fields, name: &str) -> Option<&'a SyncValue> {
+    match fields.get(name) {
+        Some(SyncValue::Flag(false)) => None,
+        Some(SyncValue::Set(members)) if members.is_empty() => None,
+        value => value,
+    }
+}
+
+fn is_guid(text: &str) -> bool {
+    Uuid::parse_str(text).is_ok_and(|id| id.to_string() == text)
+}
+
+fn expected(kind: Type) -> String {
+    match kind {
+        Type::Text => "text; put the value in quotes".into(),
+        Type::Name => "text that is not blank".into(),
+        Type::Flag => "true or false".into(),
+        Type::Time => "a time such as \"2026-11-11T09:30:00Z\"".into(),
+        Type::Id => "the id of a record: a lowercase GUID".into(),
+        Type::Ids => "a list of record ids: lowercase GUIDs".into(),
+        Type::Tags => "a list of tags".into(),
+        Type::Status => "one of Todo, In progress, In review, Done, Canceled, Duplicate".into(),
+        Type::Reference => "a Ticket reference such as T-KQ43".into(),
+        Type::Choice(options) => format!("one of {}", options.join(", ")),
+    }
+}
+
+fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
+    let valid = match (kind, value) {
+        (Type::Flag, SyncValue::Flag(_)) => true,
+        (Type::Ids, SyncValue::Set(ids)) => ids.iter().all(|id| is_guid(id)),
+        (Type::Tags, SyncValue::Set(tags)) => tags
+            .iter()
+            .all(|tag| !tag.is_empty() && *tag == tag.trim().to_lowercase()),
+        (Type::Flag | Type::Ids | Type::Tags, _) | (_, SyncValue::Flag(_) | SyncValue::Set(_)) => {
+            false
+        }
+        (Type::Text, SyncValue::Text(_)) => true,
+        (Type::Name, SyncValue::Text(text)) => !text.trim().is_empty(),
+        (Type::Time, SyncValue::Text(text)) => chrono::DateTime::parse_from_rfc3339(text).is_ok(),
+        (Type::Id, SyncValue::Text(text)) => is_guid(text),
+        (Type::Status, SyncValue::Text(text)) => text.parse::<Status>().is_ok(),
+        (Type::Reference, SyncValue::Text(text)) => document_links::is_ticket_reference(text),
+        (Type::Choice(options), SyncValue::Text(text)) => options.contains(&text.as_str()),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(bad(format!("field '{name}' must be {}", expected(kind))))
+    }
+}
+
+fn validate(block: &str, id: &str, fields: &Fields) -> Result<(), Error> {
+    let (schema, has_body) = shape(block);
+    if !is_guid(id) {
+        return Err(bad(format!(
+            "field 'id' of a {block} must be {}",
+            expected(Type::Id)
+        )));
+    }
+    for (name, value) in fields {
+        let kind = if name == "body" && has_body {
+            Type::Text
+        } else {
+            schema
+                .iter()
+                .find(|field| field.0 == name)
+                .ok_or_else(|| bad(format!("unknown field '{name}' in a {block}")))?
+                .1
+        };
+        check(name, kind, value)?;
+    }
+    match schema
+        .iter()
+        .find(|field| field.2 && !fields.contains_key(field.0))
+    {
+        Some(field) => Err(bad(format!(
+            "a {block} is missing its required field '{}'",
+            field.0
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// A line of text that would read as file structure and is therefore written escaped.
+fn structural(line: &str) -> bool {
+    line.trim_start_matches('\\').starts_with("<!-- ticketd:")
+}
+
+/// A YAML double-quoted scalar. Everything YAML does not accept raw is escaped.
+fn quote(text: &str) -> String {
+    let mut quoted = String::from("\"");
+    for character in text.chars() {
+        match character {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{feff}') => {
+                quoted.push_str(&format!("\\u{:04x}", u32::from(c)));
+            }
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn write_block(out: &mut String, block: &str, top: bool, id: &str, fields: &Fields) {
+    let (schema, has_body) = shape(block);
+    out.push_str("---\n");
+    if top {
+        out.push_str(&format!("kind: {block}\n"));
+    }
+    out.push_str(&format!("id: {}\n", quote(id)));
+    for (name, kind, _) in schema {
+        match fields.get(*name) {
+            Some(SyncValue::Text(text)) => out.push_str(&format!("{name}: {}\n", quote(text))),
+            Some(SyncValue::Flag(flag)) => out.push_str(&format!("{name}: {flag}\n")),
+            Some(SyncValue::Set(members)) if !members.is_empty() => {
+                out.push_str(&format!("{name}:\n"));
+                for member in members {
+                    out.push_str(&format!("  - {}\n", quote(member)));
+                }
+            }
+            Some(SyncValue::Set(_)) => {}
+            None if matches!(kind, Type::Flag) => out.push_str(&format!("{name}: false\n")),
+            None => {}
+        }
+    }
+    out.push_str("---\n");
+    if has_body {
+        for line in text(fields, "body").unwrap_or("").split('\n') {
+            if structural(line) {
+                out.push('\\');
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+}
+
+/// A header value before its field's type is known.
+enum Raw {
+    Null,
+    Flag(bool),
+    Text(String),
+    List(Vec<Raw>),
+    Other,
+}
+
+fn raw(node: &Yaml<'_>) -> Raw {
+    match node {
+        Yaml::Value(Scalar::Null) => Raw::Null,
+        Yaml::Value(Scalar::Boolean(flag)) => Raw::Flag(*flag),
+        Yaml::Value(Scalar::String(text)) => Raw::Text(text.to_string()),
+        Yaml::Sequence(items) => Raw::List(items.iter().map(raw).collect()),
+        _ => Raw::Other,
+    }
+}
+
+/// Split a block into its header entries and the text after the header.
+fn read_block(block: &str) -> Result<(Vec<(String, Raw)>, String), Error> {
+    let is_rule = |line: &str| line.trim_end_matches(['\r', '\n']) == "---";
+    let mut lines = block.split_inclusive('\n');
+    if !lines.next().is_some_and(is_rule) {
+        return Err(bad(
+            "a sync file and each of its sections must start with a '---' line",
+        ));
+    }
+    let mut header = String::new();
+    loop {
+        match lines.next() {
+            None => return Err(bad("a header has no closing '---' line")),
+            Some(line) if is_rule(line) => break,
+            Some(line) => header.push_str(line),
+        }
+    }
+    let rest: String = lines.collect();
+    let body = rest
+        .strip_suffix('\n')
+        .unwrap_or(&rest)
+        .split('\n')
+        .map(|line| match line.strip_prefix('\\') {
+            Some(unescaped) if structural(line) => unescaped,
+            _ => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let documents = Yaml::load_from_str(&header)
+        .map_err(|error| bad(format!("the header is not valid YAML: {error}")))?;
+    let mut entries = Vec::new();
+    match documents.as_slice() {
+        [] => {}
+        [Yaml::Mapping(mapping)] => {
+            for (key, value) in mapping {
+                let Yaml::Value(Scalar::String(name)) = key else {
+                    return Err(bad("the header has a field name that is not plain text"));
+                };
+                entries.push((name.to_string(), raw(value)));
+            }
+        }
+        _ => return Err(bad("the header must be a list of 'field: value' lines")),
+    }
+    Ok((entries, body))
+}
+
+/// Give a block's header entries the types its fields have.
+fn typed(
+    block: &str,
+    entries: Vec<(String, Raw)>,
+    body: String,
+) -> Result<(String, Fields), Error> {
+    let (schema, has_body) = shape(block);
+    let mut id = None;
+    let mut fields = Fields::new();
+    for (name, value) in entries {
+        if name == "id" {
+            if let Raw::Text(text) = value {
+                id = Some(text);
+            }
+            continue;
+        }
+        let kind = schema
+            .iter()
+            .find(|field| field.0 == name)
+            .ok_or_else(|| bad(format!("unknown field '{name}' in a {block}")))?
+            .1;
+        let invalid = || bad(format!("field '{name}' must be {}", expected(kind)));
+        let value = match (kind, value) {
+            (_, Raw::Null) => continue,
+            (Type::Flag, Raw::Flag(flag)) => SyncValue::Flag(flag),
+            (Type::Ids | Type::Tags, Raw::List(items)) => {
+                let mut members = BTreeSet::new();
+                for item in items {
+                    let Raw::Text(member) = item else {
+                        return Err(invalid());
+                    };
+                    members.insert(if matches!(kind, Type::Tags) {
+                        member.trim().to_lowercase()
+                    } else {
+                        member
+                    });
+                }
+                SyncValue::Set(members)
+            }
+            (Type::Flag | Type::Ids | Type::Tags, _) => return Err(invalid()),
+            (_, Raw::Text(text)) => SyncValue::Text(text),
+            _ => {
+                return Err(bad(format!(
+                    "field '{name}' must be text; put the value in quotes"
+                )));
+            }
+        };
+        fields.insert(name, value);
+    }
+    for (name, kind, _) in schema {
+        if matches!(kind, Type::Flag) {
+            fields
+                .entry((*name).to_owned())
+                .or_insert(SyncValue::Flag(false));
+        }
+    }
+    fields.retain(|_, value| !matches!(value, SyncValue::Set(members) if members.is_empty()));
+    if has_body {
+        fields.insert("body".into(), SyncValue::Text(body));
+    } else if !body.trim().is_empty() {
+        return Err(bad(format!("a {block} has no text after its header")));
+    }
+    let id = id.ok_or_else(|| bad(format!("a {block} is missing its required field 'id'")))?;
+    Ok((id, fields))
+}
+
+impl SyncRecord {
+    /// Where the record's file lives in the synced folder. The GUID names the file, so
+    /// the path never changes.
+    pub fn path(&self) -> String {
+        format!("{}/{}.md", self.kind.table(), self.id)
+    }
+
+    /// The record's file text. The same record always gives the same bytes.
+    pub fn to_markdown(&self) -> String {
+        let mut out = String::new();
+        write_block(&mut out, self.kind.name(), true, &self.id, &self.fields);
+        let mut parts: Vec<&SyncPart> = self.parts.iter().collect();
+        parts.sort_by(|a, b| a.order().cmp(&b.order()));
+        for part in parts {
+            out.push_str(&format!("<!-- ticketd:{} -->\n", part.kind.name()));
+            write_block(&mut out, part.kind.name(), false, &part.id, &part.fields);
+        }
+        out
+    }
+
+    /// Read and validate a file's text. Nothing is read from or written to a Workspace.
+    pub fn parse(file: &str) -> Result<Self, Error> {
+        let file = file.strip_prefix('\u{feff}').unwrap_or(file);
+        let mut blocks: Vec<(Option<SyncPartKind>, String)> = vec![(None, String::new())];
+        for line in file.split_inclusive('\n') {
+            match line.trim_end_matches(['\r', '\n']) {
+                "<!-- ticketd:activity -->" => {
+                    blocks.push((Some(SyncPartKind::Activity), String::new()));
+                }
+                "<!-- ticketd:evidence -->" => {
+                    blocks.push((Some(SyncPartKind::Evidence), String::new()));
+                }
+                marker if marker.starts_with("<!-- ticketd:") => {
+                    return Err(bad(format!(
+                        "unknown section marker '{marker}'; a text line that starts this way is written with a leading backslash"
+                    )));
+                }
+                _ => {
+                    if let Some((_, block)) = blocks.last_mut() {
+                        block.push_str(line);
+                    }
+                }
+            }
+        }
+        let mut record = None;
+        for (part, block) in blocks {
+            let (mut entries, body) = read_block(&block)?;
+            match (part, &mut record) {
+                (Some(kind), Some(SyncRecord { parts, .. })) => {
+                    let (id, fields) = typed(kind.name(), entries, body)?;
+                    parts.push(SyncPart { kind, id, fields });
+                }
+                _ => {
+                    let kind = entries
+                        .iter()
+                        .position(|(name, _)| name == "kind")
+                        .map(|at| entries.remove(at).1);
+                    let kind = match kind {
+                        Some(Raw::Text(name)) => {
+                            SyncKind::ALL.into_iter().find(|kind| kind.name() == name)
+                        }
+                        _ => None,
+                    }
+                    .ok_or_else(|| {
+                        bad("field 'kind' must be one of project, document, plan, ticket")
+                    })?;
+                    let (id, fields) = typed(kind.name(), entries, body)?;
+                    record = Some(SyncRecord {
+                        kind,
+                        id,
+                        fields,
+                        parts: Vec::new(),
+                    });
+                }
+            }
+        }
+        let mut record = record.ok_or_else(|| bad("a sync file must start with a '---' line"))?;
+        record.parts.sort_by(|a, b| a.order().cmp(&b.order()));
+        record.validate()?;
+        Ok(record)
+    }
+
+    /// Check a record built or merged in code the way a parsed file is checked.
+    pub fn validate(&self) -> Result<(), Error> {
+        validate(self.kind.name(), &self.id, &self.fields)?;
+        let mut seen = BTreeSet::new();
+        for part in &self.parts {
+            if self.kind != SyncKind::Ticket {
+                return Err(bad("only a ticket has Activity and evidence sections"));
+            }
+            validate(part.kind.name(), &part.id, &part.fields)?;
+            if !seen.insert(&part.id) {
+                return Err(bad(format!("section id '{}' is used twice", part.id)));
+            }
+            if part.kind == SyncPartKind::Activity
+                && crate::activities::is_blank_brief(text(&part.fields, "body").unwrap_or(""))
+            {
+                return Err(bad(format!("Activity '{}' has no brief", part.id)));
+            }
+        }
+        if self.kind != SyncKind::Ticket {
+            return Ok(());
+        }
+        for name in ["parent", "duplicate_of"] {
+            if text(&self.fields, name) == Some(&self.id) {
+                return Err(bad(format!("field '{name}' must name another ticket")));
+            }
+        }
+        for name in ["blocked_by", "related", "discovered"] {
+            if set(&self.fields, name).contains(&self.id) {
+                return Err(bad(format!("field '{name}' must name other tickets")));
+            }
+        }
+        // Related is symmetric, so only one of the two files may carry it.
+        if set(&self.fields, "related")
+            .iter()
+            .any(|other| *other < self.id)
+        {
+            return Err(bad(
+                "field 'related' lists only tickets whose id sorts after this one; the other ticket's file carries the rest",
+            ));
+        }
+        let sourced = self.fields.keys().any(|name| name.starts_with("source_"));
+        match SOURCE_REQUIRED
+            .iter()
+            .find(|name| sourced && !self.fields.contains_key(**name))
+        {
+            Some(name) => Err(bad(format!(
+                "the source_ fields go together; '{name}' is missing"
+            ))),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Rows of a query by one id, as fields named by `names`. NULL leaves a field out,
+/// an integer is a flag and anything else is text.
+fn rows(c: &Connection, sql: &str, id: &str, names: &[&str]) -> Result<Vec<Fields>, Error> {
+    let mut statement = c.prepare(sql)?;
+    let mut rows = statement.query([id])?;
+    let mut found = Vec::new();
+    while let Some(row) = rows.next()? {
+        let mut fields = Fields::new();
+        for (index, name) in names.iter().enumerate() {
+            let value = match row.get_ref(index)? {
+                ValueRef::Null => continue,
+                ValueRef::Integer(flag) => SyncValue::Flag(flag != 0),
+                _ => SyncValue::Text(row.get(index)?),
+            };
+            fields.insert((*name).to_owned(), value);
+        }
+        found.push(fields);
+    }
+    Ok(found)
+}
+
+const SOURCE_SQL: &str = "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, i.linked_at, o.authority, o.changed_at, s.external_state, s.closure_reason, s.external_updated_at FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1";
+const SOURCE_NAMES: &[&str] = &[
+    "source_provider",
+    "source_external_id",
+    "source_locator",
+    "source_display",
+    "source_url",
+    "source_origin",
+    "source_linked_at",
+    "source_authority",
+    "source_authority_changed_at",
+    "source_state",
+    "source_closure_reason",
+    "source_updated_at",
+];
+
+fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRecord>, Error> {
+    let follows = format!(
+        "SELECT reference, title, status, body, project_id, plan_id, trashed, EXISTS(SELECT 1 FROM ticket_follows WHERE ticket_id = t.id AND person = '{LOCAL_PERSON}') FROM tickets t WHERE id = ?1"
+    );
+    let reminder = format!(
+        "SELECT due_at FROM ticket_reminders WHERE ticket_id = ?1 AND person = '{LOCAL_PERSON}'"
+    );
+    let queries: &[(&str, &[&str])] = match kind {
+        SyncKind::Project => &[("SELECT name FROM projects WHERE id = ?1", &["name"])],
+        SyncKind::Document => &[(
+            "SELECT title, body, created_at, originating_activity_id, trashed, kept, EXISTS(SELECT 1 FROM document_pins WHERE document_id = d.id) FROM documents d WHERE id = ?1",
+            &[
+                "title",
+                "body",
+                "created_at",
+                "origin_activity",
+                "trashed",
+                "kept",
+                "pinned",
+            ],
+        )],
+        SyncKind::Plan => &[(
+            "SELECT name, purpose, archived, spec_document_id FROM plans WHERE id = ?1",
+            &["name", "body", "archived", "spec"],
+        )],
+        SyncKind::Ticket => &[
+            (
+                &follows,
+                &[
+                    "ref",
+                    "title",
+                    "status",
+                    "body",
+                    "project",
+                    "plan",
+                    "trashed",
+                    "following",
+                ],
+            ),
+            (
+                "SELECT parent_id FROM ticket_parents WHERE child_id = ?1",
+                &["parent"],
+            ),
+            (
+                "SELECT canonical_id, restore_status FROM duplicate_tickets WHERE source_id = ?1",
+                &["duplicate_of", "duplicate_restore"],
+            ),
+            (&reminder, &["reminder"]),
+            (SOURCE_SQL, SOURCE_NAMES),
+        ],
+    };
+    let mut fields = Fields::new();
+    for (index, (sql, names)) in queries.iter().enumerate() {
+        match rows(c, sql, id, names)?.pop() {
+            Some(row) => fields.extend(row),
+            // The first query reads the record's own row.
+            None if index == 0 => return Ok(None),
+            None => {}
+        }
+    }
+    for (name, _, _) in shape(kind.name()).0 {
+        if let Some(relation) = relation(kind, name) {
+            let members = relation.members(c, id)?;
+            if !members.is_empty() {
+                fields.insert((*name).to_owned(), SyncValue::Set(members));
+            }
+        }
+    }
+    let mut parts = Vec::new();
+    if kind == SyncKind::Ticket {
+        let sections: [(SyncPartKind, &str, &[&str]); 2] = [
+            (
+                SyncPartKind::Activity,
+                "SELECT id, reported_at, updated_at, editing_agent, supporting_document_id, brief FROM activities WHERE ticket_id = ?1",
+                &[
+                    "id",
+                    "reported_at",
+                    "updated_at",
+                    "agent",
+                    "document",
+                    "body",
+                ],
+            ),
+            (
+                SyncPartKind::Evidence,
+                "SELECT id, kind, name, value, created_at, updated_at, editing_agent FROM evidence WHERE ticket_id = ?1",
+                &[
+                    "id",
+                    "kind",
+                    "name",
+                    "value",
+                    "created_at",
+                    "updated_at",
+                    "agent",
+                ],
+            ),
+        ];
+        for (kind, sql, names) in sections {
+            for mut fields in rows(c, sql, id, names)? {
+                if let Some(SyncValue::Text(id)) = fields.remove("id") {
+                    parts.push(SyncPart { kind, id, fields });
+                }
+            }
+        }
+        parts.sort_by(|a, b| a.order().cmp(&b.order()));
+    }
+    Ok(Some(SyncRecord {
+        kind,
+        id: id.to_owned(),
+        fields,
+        parts,
+    }))
+}
+
+fn exists(c: &Connection, table: &str, id: &str) -> Result<bool, Error> {
+    Ok(c.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1)"),
+        [id],
+        |row| row.get(0),
+    )?)
+}
+
+fn put(
+    c: &Connection,
+    table: &str,
+    column: &str,
+    id: &str,
+    value: &dyn ToSql,
+) -> Result<(), Error> {
+    c.execute(
+        &format!("UPDATE {table} SET {column} = ?2 WHERE id = ?1"),
+        params![id, value],
+    )?;
+    Ok(())
+}
+
+const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+
+/// Writes of one record. Relationships whose target is not here yet collect in `missing`.
+struct Apply<'a> {
+    c: &'a Connection,
+    record: &'a SyncRecord,
+    missing: Vec<MissingTarget>,
+}
+
+impl Apply<'_> {
+    /// The single record a field names: `Some(None)` clears it, and `None` means the
+    /// record has not arrived, so what the Workspace holds is left alone.
+    fn target(&mut self, field: &str, table: &str) -> Result<Option<Option<String>>, Error> {
+        let Some(id) = text(&self.record.fields, field) else {
+            return Ok(Some(None));
+        };
+        if exists(self.c, table, id)? {
+            return Ok(Some(Some(id.to_owned())));
+        }
+        self.missing.push(MissingTarget {
+            field: field.to_owned(),
+            id: id.to_owned(),
+        });
+        Ok(None)
+    }
+
+    fn create(&self) -> Result<(), Error> {
+        let (c, id, fields) = (self.c, &self.record.id, &self.record.fields);
+        match self.record.kind {
+            SyncKind::Project => {
+                // The checkout folder is device-local and is chosen on each device.
+                c.execute(
+                    "INSERT INTO projects (id, name, path) VALUES (?1, ?2, '')",
+                    params![id, text(fields, "name")],
+                )?;
+            }
+            SyncKind::Document => {
+                c.execute(
+                    "INSERT INTO entities (id, kind) VALUES (?1, 'document')",
+                    [id],
+                )?;
+                c.execute(
+                    "INSERT INTO documents (id, body, created_at) VALUES (?1, '', ?2)",
+                    params![id, text(fields, "created_at")],
+                )?;
+            }
+            SyncKind::Plan => {
+                c.execute(
+                    "INSERT INTO plans (id, name) VALUES (?1, ?2)",
+                    params![id, text(fields, "name")],
+                )?;
+            }
+            SyncKind::Ticket => {
+                let reference = text(fields, "ref");
+                if c.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM tickets WHERE reference = ?1)",
+                    [reference],
+                    |row| row.get(0),
+                )? {
+                    return Err(bad(format!(
+                        "reference {} already belongs to another ticket in this Workspace",
+                        reference.unwrap_or_default()
+                    )));
+                }
+                // The file carries the reference its own device issued; this device's
+                // counter is not used.
+                c.execute(
+                    "INSERT INTO tickets (id, reference, title, status) VALUES (?1, ?2, ?3, 'Todo')",
+                    params![id, reference, text(fields, "title")],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write(&mut self, field: &str) -> Result<(), Error> {
+        let (c, record) = (self.c, self.record);
+        let (id, fields, table) = (record.id.as_str(), &record.fields, record.kind.table());
+        let value = text(fields, field);
+        let flag = matches!(fields.get(field), Some(SyncValue::Flag(true)));
+        if let Some(relation) = relation(record.kind, field) {
+            let mut wanted = set(fields, field);
+            if relation.target == "tags" {
+                for tag in &wanted {
+                    c.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [tag])?;
+                }
+            } else {
+                for member in std::mem::take(&mut wanted) {
+                    if exists(c, relation.target, &member)? {
+                        wanted.insert(member);
+                    } else {
+                        self.missing.push(MissingTarget {
+                            field: field.to_owned(),
+                            id: member,
+                        });
+                    }
+                }
+            }
+            return relation.replace(c, id, &wanted);
+        }
+        match (record.kind, field) {
+            (SyncKind::Ticket, "ref") => {
+                return Err(bad(format!(
+                    "ticket {id} has another reference in this Workspace; a reference never changes"
+                )));
+            }
+            (SyncKind::Document, "title" | "body") => {
+                // The time of the last content change is this device's own, and it
+                // tells an open editor that the Document moved under it.
+                c.execute(
+                    &format!("UPDATE documents SET {field} = ?2, updated_at = {NOW} WHERE id = ?1"),
+                    params![id, value],
+                )?;
+            }
+            (SyncKind::Ticket, "body") => put(c, table, field, id, &value.unwrap_or(""))?,
+            (SyncKind::Plan, "body") => put(c, table, "purpose", id, &value.unwrap_or(""))?,
+            (_, "name" | "title" | "status" | "created_at") => put(c, table, field, id, &value)?,
+            (_, "trashed" | "kept" | "archived") => put(c, table, field, id, &flag)?,
+            (SyncKind::Document, "pinned") => {
+                c.execute(
+                    if flag {
+                        "INSERT OR IGNORE INTO document_pins (document_id) VALUES (?1)"
+                    } else {
+                        "DELETE FROM document_pins WHERE document_id = ?1"
+                    },
+                    [id],
+                )?;
+            }
+            (SyncKind::Document, "origin_activity") => {
+                if let Some(activity) = self.target(field, "activities")? {
+                    put(c, table, "originating_activity_id", id, &activity)?;
+                }
+            }
+            (SyncKind::Plan, "spec") => {
+                if let Some(document) = self.target(field, "documents")? {
+                    put(c, table, "spec_document_id", id, &document)?;
+                }
+            }
+            (SyncKind::Ticket, "project") => {
+                if let Some(project) = self.target(field, "projects")? {
+                    put(c, table, "project_id", id, &project)?;
+                }
+            }
+            (SyncKind::Ticket, "plan") => {
+                if let Some(plan) = self.target(field, "plans")? {
+                    put(c, table, "plan_id", id, &plan)?;
+                }
+            }
+            (SyncKind::Ticket, "parent") => match self.target(field, "tickets")? {
+                Some(Some(parent)) => {
+                    c.execute("INSERT INTO ticket_parents (child_id, parent_id) VALUES (?1, ?2) ON CONFLICT(child_id) DO UPDATE SET parent_id = excluded.parent_id", params![id, parent])?;
+                }
+                Some(None) => {
+                    c.execute("DELETE FROM ticket_parents WHERE child_id = ?1", [id])?;
+                }
+                None => {}
+            },
+            (SyncKind::Ticket, "duplicate_of" | "duplicate_restore") => {
+                match self.target("duplicate_of", "tickets")? {
+                    Some(Some(canonical)) => {
+                        c.execute("INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(source_id) DO UPDATE SET canonical_id = excluded.canonical_id, restore_status = excluded.restore_status", params![id, canonical, text(fields, "duplicate_restore")])?;
+                    }
+                    Some(None) => {
+                        c.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [id])?;
+                    }
+                    None => {}
+                }
+            }
+            (SyncKind::Ticket, "following") => {
+                c.execute(
+                    if flag {
+                        "INSERT OR IGNORE INTO ticket_follows (ticket_id, person) VALUES (?1, ?2)"
+                    } else {
+                        "DELETE FROM ticket_follows WHERE ticket_id = ?1 AND person = ?2"
+                    },
+                    params![id, LOCAL_PERSON],
+                )?;
+            }
+            (SyncKind::Ticket, "reminder") => match value {
+                // A changed time is a new occurrence, as when it is set on this device.
+                Some(due) => {
+                    c.execute("INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES (?2, ?1, ?3, 0) ON CONFLICT(person, ticket_id) DO UPDATE SET due_at = excluded.due_at, delivered = 0", params![id, LOCAL_PERSON, due])?;
+                }
+                None => {
+                    c.execute(
+                        "DELETE FROM ticket_reminders WHERE ticket_id = ?1 AND person = ?2",
+                        params![id, LOCAL_PERSON],
+                    )?;
+                }
+            },
+            (SyncKind::Ticket, _) if field.starts_with("source_") => self.write_source()?,
+            _ => {}
+        }
+        if field == "body" && record.kind != SyncKind::Plan {
+            // Links to files that have not arrived must not make the text unreadable.
+            document_links::index_external_body(c, id, value.unwrap_or(""))?;
+        }
+        Ok(())
+    }
+
+    /// Provenance, authority and the external state last seen. When and how this
+    /// device last refreshed from the source stays its own.
+    fn write_source(&self) -> Result<(), Error> {
+        let (c, id) = (self.c, &self.record.id);
+        let values: Vec<Option<&str>> = SOURCE_NAMES
+            .iter()
+            .map(|name| text(&self.record.fields, name))
+            .collect();
+        if values[0].is_none() {
+            c.execute("DELETE FROM source_sync WHERE ticket_id = ?1", [id])?;
+            c.execute("DELETE FROM external_ownership WHERE ticket_id = ?1", [id])?;
+            c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
+            return Ok(());
+        }
+        c.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin, linked_at = excluded.linked_at",
+            params![id, values[0], values[1], values[2], values[3], values[4], values[5], values[6]])?;
+        c.execute("INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3) ON CONFLICT(ticket_id) DO UPDATE SET authority = excluded.authority, changed_at = excluded.changed_at",
+            params![id, values[7], values[8]])?;
+        c.execute("INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(ticket_id) DO UPDATE SET external_state = excluded.external_state, closure_reason = excluded.closure_reason, external_updated_at = excluded.external_updated_at",
+            params![id, values[9], values[10], values[11].unwrap_or("")])?;
+        Ok(())
+    }
+
+    fn write_part(&mut self, part: &SyncPart, current: Option<&SyncPart>) -> Result<(), Error> {
+        let (c, ticket) = (self.c, &self.record.id);
+        let table = match part.kind {
+            SyncPartKind::Activity => "activities",
+            SyncPartKind::Evidence => "evidence",
+        };
+        let owner: Option<String> = c
+            .query_row(
+                &format!("SELECT ticket_id FROM {table} WHERE id = ?1"),
+                [&part.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if owner.is_some_and(|owner| owner != *ticket) {
+            return Err(bad(format!(
+                "section '{}' already belongs to another ticket in this Workspace",
+                part.id
+            )));
+        }
+        let field = |name: &str| text(&part.fields, name);
+        match part.kind {
+            SyncPartKind::Activity => {
+                let document = match field("document") {
+                    Some(document) if !exists(c, "documents", document)? => {
+                        self.missing.push(MissingTarget {
+                            field: "document".into(),
+                            id: document.to_owned(),
+                        });
+                        current.and_then(|current| text(&current.fields, "document"))
+                    }
+                    document => document,
+                };
+                let brief = field("body").unwrap_or("");
+                c.execute("INSERT INTO activities (id, ticket_id, brief, reported_at, updated_at, editing_agent, supporting_document_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(id) DO UPDATE SET brief = excluded.brief, reported_at = excluded.reported_at, updated_at = excluded.updated_at, editing_agent = excluded.editing_agent, supporting_document_id = excluded.supporting_document_id",
+                    params![part.id, ticket, brief, field("reported_at"), field("updated_at"), field("agent"), document])?;
+                document_links::index_external_activity(c, &part.id, brief)?;
+            }
+            SyncPartKind::Evidence => {
+                c.execute("INSERT INTO evidence (id, ticket_id, kind, name, value, created_at, updated_at, editing_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, value = excluded.value, created_at = excluded.created_at, updated_at = excluded.updated_at, editing_agent = excluded.editing_agent",
+                    params![part.id, ticket, field("kind"), field("name"), field("value"), field("created_at"), field("updated_at"), field("agent")])?;
+            }
+        }
+        Ok(())
+    }
+
+    fn run(&mut self) -> Result<(), Error> {
+        let (c, record) = (self.c, self.record);
+        let (current, created) = match read_record(c, record.kind, &record.id)? {
+            Some(current) => (current, false),
+            None => {
+                self.create()?;
+                let created = read_record(c, record.kind, &record.id)?
+                    .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+                (created, true)
+            }
+        };
+        let (schema, _) = shape(record.kind.name());
+        for name in schema.iter().map(|field| field.0).chain(["body"]) {
+            if present(&current.fields, name) != present(&record.fields, name) {
+                self.write(name)?;
+            }
+        }
+        for gone in &current.parts {
+            if !record.parts.iter().any(|part| part.id == gone.id) {
+                let table = match gone.kind {
+                    SyncPartKind::Activity => "activities",
+                    SyncPartKind::Evidence => "evidence",
+                };
+                c.execute(&format!("DELETE FROM {table} WHERE id = ?1"), [&gone.id])?;
+            }
+        }
+        for part in &record.parts {
+            let current = current.parts.iter().find(|current| current.id == part.id);
+            if current != Some(part) {
+                self.write_part(part, current)?;
+            }
+        }
+        if created {
+            // Text that arrived earlier may link to this record; its links resolve now.
+            match record.kind {
+                SyncKind::Ticket => {
+                    reindex_mentions(c, text(&record.fields, "ref").unwrap_or_default())?;
+                }
+                SyncKind::Document | SyncKind::Plan => reindex_mentions(c, &record.id)?,
+                SyncKind::Project => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+// ponytail: scans every body once per newly arrived record; keep an index of
+// unresolved link targets if a first download of a large Workspace gets slow.
+fn reindex_mentions(c: &Connection, needle: &str) -> Result<(), Error> {
+    for (sql, activity) in [
+        (
+            "SELECT id, body FROM tickets WHERE instr(body, ?1) > 0",
+            false,
+        ),
+        (
+            "SELECT id, body FROM documents WHERE instr(body, ?1) > 0",
+            false,
+        ),
+        (
+            "SELECT id, brief FROM activities WHERE instr(brief, ?1) > 0",
+            true,
+        ),
+    ] {
+        let mut statement = c.prepare(sql)?;
+        let sources = statement
+            .query_map([needle], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (id, body) in sources {
+            if activity {
+                document_links::index_external_activity(c, &id, &body)?;
+            } else {
+                document_links::index_external_body(c, &id, &body)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+impl Workspace {
+    /// The GUID of every record of a kind, including trashed ones, in a stable order.
+    pub fn sync_record_ids(&self, kind: SyncKind) -> Result<Vec<String>, Error> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("SELECT id FROM {} ORDER BY id", kind.table()))?;
+        Ok(statement
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// One record as its sync file's fields, read in a single snapshot. Device-local
+    /// data (checkout folders, inbox state, credentials) is never part of it.
+    pub fn export_sync_record(&self, kind: SyncKind, id: &str) -> Result<SyncRecord, Error> {
+        let snapshot = self.connection.unchecked_transaction()?;
+        read_record(&snapshot, kind, id)?.ok_or_else(|| match kind {
+            SyncKind::Project => Error::ProjectNotFound(id.to_owned()),
+            SyncKind::Document => Error::DocumentNotFound(id.to_owned()),
+            SyncKind::Plan => Error::PlanNotFound(id.to_owned()),
+            SyncKind::Ticket => Error::NotFound(id.to_owned()),
+        })
+    }
+
+    /// Make the Workspace hold exactly this record, creating it or updating the record
+    /// with the same GUID. Fields that already match are not written, and a record
+    /// that cannot be applied changes nothing.
+    ///
+    /// A relationship to a record that is not here yet is skipped and returned; apply
+    /// the same record again once that record has arrived. No history or inbox entry
+    /// is recorded, and the rules for edits made on this device (Trash, archived Plans,
+    /// external ownership, dependency loops) do not apply: the record is taken as it is.
+    pub fn apply_sync_record(&mut self, record: &SyncRecord) -> Result<Vec<MissingTarget>, Error> {
+        record.validate()?;
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        let mut apply = Apply {
+            c: &transaction,
+            record,
+            missing: Vec::new(),
+        };
+        apply.run()?;
+        let missing = apply.missing;
+        transaction.commit()?;
+        Ok(missing)
+    }
+}
