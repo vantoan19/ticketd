@@ -403,15 +403,33 @@ impl Workspace {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::open_within(path.as_ref(), OPEN_WORKSPACES_WAIT, MIGRATION_WAIT)
+    }
+
+    /// [`Workspace::open`] with other bounds on its two waits, so a test of
+    /// which wait applies does not have to sit one out.
+    #[cfg(feature = "test-lock-waits")]
+    pub fn open_with_lock_waits(
+        path: impl AsRef<Path>,
+        open_workspaces: Duration,
+        migration: Duration,
+    ) -> Result<Self, Error> {
+        Self::open_within(path.as_ref(), open_workspaces, migration)
+    }
+
+    fn open_within(
+        path: &Path,
+        open_workspaces_wait: Duration,
+        migration_wait: Duration,
+    ) -> Result<Self, Error> {
         use fs2::FileExt;
-        let path = path.as_ref();
         let resolved = if path.exists() {
             Some(path.canonicalize()?)
         } else {
             None
         };
         let path = resolved.as_deref().unwrap_or(path);
-        let migrating = Instant::now() + MIGRATION_WAIT;
+        let migrating = Instant::now() + migration_wait;
         // Starts when exclusive use is first refused, and anew after each
         // wait for a migration: that one was not an open Workspace.
         let mut open_elsewhere: Option<Instant> = None;
@@ -435,7 +453,7 @@ impl Workspace {
                     }
                     wait_for_migration_lock(
                         *open_elsewhere
-                            .get_or_insert_with(|| Instant::now() + OPEN_WORKSPACES_WAIT),
+                            .get_or_insert_with(|| Instant::now() + open_workspaces_wait),
                     )?;
                     continue;
                 }
@@ -477,7 +495,7 @@ impl Workspace {
                     return Err(error.into());
                 }
                 wait_for_migration_lock(
-                    *open_elsewhere.get_or_insert_with(|| Instant::now() + OPEN_WORKSPACES_WAIT),
+                    *open_elsewhere.get_or_insert_with(|| Instant::now() + open_workspaces_wait),
                 )?;
                 continue;
             }

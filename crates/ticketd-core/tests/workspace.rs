@@ -1367,7 +1367,8 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
 }
 
 #[test]
-fn opening_waits_for_a_migration_or_restore_that_takes_longer_than_ten_seconds() {
+fn opening_waits_for_a_migration_or_restore_longer_than_for_workspaces_open_elsewhere() {
+    use std::time::Duration;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     drop(Workspace::open(&path).unwrap());
@@ -1378,12 +1379,22 @@ fn opening_waits_for_a_migration_or_restore_that_takes_longer_than_ten_seconds()
         .open(format!("{}.lock", path.display()))
         .unwrap();
     fs2::FileExt::lock_exclusive(&lock).unwrap();
+    // Its wait is bounded.
+    assert!(matches!(
+        Workspace::open_with_lock_waits(&path, Duration::from_secs(600), Duration::ZERO),
+        Err(ticketd_core::Error::Backup(_))
+    ));
+    // And it is not the wait for Workspaces open elsewhere, which here is over at once.
     let opener = std::thread::spawn({
         let path = path.clone();
-        move || Workspace::open(path).map(|_| ())
+        move || {
+            Workspace::open_with_lock_waits(path, Duration::ZERO, Duration::from_secs(600))
+                .map(|_| ())
+        }
     });
 
-    std::thread::sleep(std::time::Duration::from_secs(11));
+    // Lets the opener meet the lock; the test holds whether or not it does.
+    std::thread::sleep(Duration::from_millis(200));
     drop(lock);
 
     opener.join().unwrap().unwrap();
