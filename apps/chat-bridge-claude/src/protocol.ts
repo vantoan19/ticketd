@@ -18,19 +18,16 @@ const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const decision = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("allow"),
-    updated_input: z.record(z.string(), z.unknown()).optional(),
     /** Also apply the permission updates Claude Code suggested for this request. */
     remember: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal("deny"),
     message: z.string().optional(),
-    interrupt: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal("answer"),
     answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
-    response: z.string().optional(),
   }),
 ]);
 
@@ -48,10 +45,8 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     cwd: absolutePath,
     claude_executable: absolutePath,
     resume_session_id: z.string().min(1).optional(),
-    // bypassPermissions is deliberately absent: the bridge never skips permissions.
-    permission_mode: z
-      .enum(["default", "acceptEdits", "plan", "dontAsk", "auto"])
-      .optional(),
+    // No permission mode can be passed: Claude Code's own setting applies, and the
+    // bridge can never be asked to skip permissions.
   }),
   z.strictObject({
     id,

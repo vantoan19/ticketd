@@ -219,9 +219,6 @@ export function createBridge(deps: BridgeDeps) {
         requestDecision(state, toolName, input, context),
       stderr: deps.diagnostic,
       ...(command.resume_session_id && { resume: command.resume_session_id }),
-      ...(command.permission_mode && {
-        permissionMode: command.permission_mode,
-      }),
     };
     let opening: Session;
     try {
@@ -417,7 +414,7 @@ export function createBridge(deps: BridgeDeps) {
       case "allow":
         pending.resolve({
           behavior: "allow",
-          updatedInput: decision.updated_input ?? pending.input,
+          updatedInput: pending.input,
           ...(decision.remember &&
             pending.suggestions.length > 0 && {
               updatedPermissions: pending.suggestions,
@@ -430,9 +427,6 @@ export function createBridge(deps: BridgeDeps) {
           updatedInput: {
             questions: pending.input.questions,
             answers: decision.answers,
-            ...(decision.response !== undefined && {
-              response: decision.response,
-            }),
           },
         });
         break;
@@ -440,7 +434,6 @@ export function createBridge(deps: BridgeDeps) {
         pending.resolve({
           behavior: "deny",
           message: decision.message ?? "The user denied this request",
-          ...(decision.interrupt && { interrupt: true }),
         });
     }
     emit({
