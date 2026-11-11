@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import { FileText, Plus, X } from "lucide-react";
+import { FileText, FolderKanban, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -14,8 +14,15 @@ import { TicketNavigation } from "@/features/tickets/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { useChatClient, type LinkedRecord } from "@/features/chats/client";
 
-/** The icon, reference and title of a linked ticket or Document. */
+/** The icon, reference and title of a linked ticket, Document or Project. */
 export function RecordLabel({ record }: { record: LinkedRecord }) {
+  if (record.kind === "project")
+    return (
+      <>
+        <FolderKanban size={14} aria-hidden />
+        <span className="chat-chip-title">{record.title}</span>
+      </>
+    );
   return record.kind === "ticket" ? (
     <>
       <StatusIcon status={record.status} size={14} decorative />
@@ -46,20 +53,29 @@ export function RecordChip({
   const name =
     record.kind === "ticket"
       ? `${record.reference} ${record.title}`
-      : `the Document ${record.title}`;
+      : record.kind === "project"
+        ? `the Project ${record.title}`
+        : `the Document ${record.title}`;
   return (
     <span className="chat-chip">
-      <button
-        type="button"
-        aria-label={`Open ${name}`}
-        onClick={() =>
-          record.kind === "ticket"
-            ? openTicket?.(record.reference)
-            : openDocument?.(record.id, backLabel)
-        }
-      >
-        <RecordLabel record={record} />
-      </button>
+      {record.kind === "project" ? (
+        // A Project is context for the agent; it has no page to open from here.
+        <span className="chat-chip-label">
+          <RecordLabel record={record} />
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-label={`Open ${name}`}
+          onClick={() =>
+            record.kind === "ticket"
+              ? openTicket?.(record.reference)
+              : openDocument?.(record.id, backLabel)
+          }
+        >
+          <RecordLabel record={record} />
+        </button>
+      )}
       <button
         type="button"
         aria-label={`Remove the link to ${name}`}
@@ -71,7 +87,7 @@ export function RecordChip({
   );
 }
 
-/** Finds a ticket or Document by title to link; never asks for an ID. */
+/** Finds a ticket, Document or Project by name to link; never asks for an ID. */
 export function LinkPicker({
   linked,
   onPick,
@@ -121,12 +137,12 @@ export function LinkPicker({
           <Button
             variant="ghost"
             size="xs"
-            aria-label="Link a ticket or Document"
+            aria-label="Link a ticket, Document or Project"
           >
             <Plus aria-hidden /> Link
           </Button>
         ) : (
-          <IconButton label="Link a ticket or Document">
+          <IconButton label="Link a ticket, Document or Project">
             <Plus aria-hidden />
           </IconButton>
         )}
@@ -134,13 +150,13 @@ export function LinkPicker({
       <PopoverContent
         align="start"
         className="w-80"
-        aria-label="Link a ticket or Document"
+        aria-label="Link a ticket, Document or Project"
       >
         <div className="flex flex-col gap-2">
           <Input
             className="h-8"
-            aria-label="Search tickets and Documents"
-            placeholder="Search tickets and Documents"
+            aria-label="Search tickets, Documents and Projects"
+            placeholder="Search tickets, Documents and Projects"
             value={query}
             autoFocus
             onChange={(event) => setQuery(event.target.value)}
@@ -169,7 +185,7 @@ export function LinkPicker({
           {!error && shown.length === 0 && (
             <p className="chat-fine">
               {query.trim()
-                ? "No ticket or Document has that in its title."
+                ? "No ticket, Document or Project has that in its name."
                 : "Nothing left to link."}
             </p>
           )}

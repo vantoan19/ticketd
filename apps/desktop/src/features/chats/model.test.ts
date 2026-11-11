@@ -5,6 +5,8 @@ import {
   chatTime,
   composerControls,
   elapsed,
+  harnessUsable,
+  problemNotice,
   stepTally,
   summaryLine,
 } from "@/features/chats/model";
@@ -174,4 +176,18 @@ test("times read as now, minutes, hours, Yesterday, then a date", () => {
 test("elapsed time reads in seconds, then minutes and seconds", () => {
   expect(elapsed(12_000)).toBe("12s");
   expect(elapsed(134_000)).toBe("2m 14s");
+});
+
+test("an uncertain delivery is worded without assuming why, and a set-aside harness status is usable", () => {
+  const notice = problemNotice({ kind: "uncertain_delivery" }, "Codex");
+  expect(notice.body).not.toMatch(/connection dropped/);
+  expect(notice.actions).toEqual(["resend", "discard"]);
+  expect(harnessUsable("not_subscription")).toBe(true);
+  expect(harnessUsable("sign_in_unknown")).toBe(true);
+  expect(harnessUsable("not_signed_in")).toBe(false);
+  // The provider's own words stand in when it gave no reset time.
+  expect(
+    problemNotice({ kind: "usage_limit", message: "Resets at 3 PM." }, "Codex")
+      .body,
+  ).toContain("Resets at 3 PM.");
 });

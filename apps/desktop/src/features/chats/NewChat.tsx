@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -27,6 +27,7 @@ import {
 import { ProblemNotice } from "@/features/chats/ChatDetail";
 import { Composer } from "@/features/chats/Composer";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
+import { harnessUsable } from "@/features/chats/model";
 
 const STATUS_PROBLEM: Record<
   Exclude<HarnessStatus["status"], "ready">,
@@ -35,6 +36,8 @@ const STATUS_PROBLEM: Record<
   not_installed: "not_installed",
   incompatible: "incompatible",
   not_signed_in: "not_signed_in",
+  not_subscription: "not_subscription",
+  sign_in_unknown: "sign_in_unknown",
   unknown: "probe_failed",
 };
 
@@ -70,6 +73,8 @@ export function NewChat({
   const [links, setLinks] = useState<LinkedRecord[]>([]);
   const [failure, setFailure] = useState("");
   const [probe, setProbe] = useState(0);
+  /** Names this attempt to the host, so sending again after a failure finds the same Chat. */
+  const attempt = useRef(crypto.randomUUID());
   useEffect(() => {
     let current = true;
     client.harnesses().then(
@@ -93,8 +98,9 @@ export function NewChat({
   const harness =
     harnesses.find((item) => item.id === harnessId) ??
     harnesses.find((item) => item.status === "ready") ??
+    harnesses.find((item) => harnessUsable(item.status)) ??
     harnesses[0];
-  const ready = harness?.status === "ready";
+  const ready = harness !== undefined && harnessUsable(harness.status);
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
   return (
     <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
@@ -140,14 +146,19 @@ export function NewChat({
           onSend={async (message) => {
             if (!harness) return;
             try {
-              const id = await client.createChat({
+              const created = await client.createChat({
+                command_id: attempt.current,
                 harness_id: harness.id,
                 folder,
                 links: links.map(({ kind, id }) => ({ kind, id })),
                 message,
               });
+              // The Chat exists but holds no message: sending again reaches the
+              // same Chat instead of starting another.
+              if (created.send_error) throw new Error(created.send_error);
+              attempt.current = crypto.randomUUID();
               setFailure("");
-              onCreated(id);
+              onCreated(created.chat_id);
             } catch (reason) {
               setFailure(
                 `Could not start the Chat: ${reason instanceof Error ? reason.message : String(reason)}`,

@@ -435,7 +435,8 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.chat-chip > button:first-child {
+.chat-chip > button:first-child,
+.chat-chip-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;

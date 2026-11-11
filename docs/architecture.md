@@ -132,6 +132,17 @@ Neither a successful transport write nor a lost response proves task completion
 or safe retry. Uncertain attempts are retained without automatic resubmission.
 Existing ticketd write-request deduplication does not imply harness idempotency.
 
+A turn the harness correlated with a submission is evidence that the submission
+arrived, with or without an explicit acknowledgment; losing contact afterwards
+leaves the turn's outcome unknown, not the delivery. A written new turn that
+nothing confirms within a bound is recorded as uncertain. The person's decision
+about an uncertain submission is recorded beside the attempt and never rewrites
+it: Discard keeps the message and its uncertainty, and Resend is a new attempt
+for that message alone, dispatched with the queue paused. A failed turn keeps
+the kind of failure the adapter reported. Warnings, retries and unmodelled
+provider traffic are stored as bounded notices, and the settings a harness
+reports as in effect are stored with the Chat.
+
 The core commits durable record changes and their ordered change entries
 atomically; the desktop publishes committed changes. A reconnecting view reads a
 snapshot and follows changes after its sequence, refreshing the snapshot when a
@@ -178,7 +189,14 @@ keeps the Chat readable and offers an explicit resume in a fresh harness session
 started with selected history, recorded under a new native-session identity; it
 never triggers automatic replay of uncertain submissions.
 Backups retain application records and queued input, not harness credentials or a
-promise of native resume state. Restore does not restart work automatically.
+promise of native resume state. Restore does not restart work automatically:
+the desktop stops every running Chat before the workspace is replaced, records
+what the backup held in progress as lost contact, and pauses restored queues
+until the person acts.
+
+Adapter writes and process shutdown are bounded. A harness that stops reading its
+input is killed, and an adapter's own shutdown bound is shorter than the
+supervisor's, so the kill has happened by the time the supervisor stops waiting.
 
 The desktop owns one `ChatHost` for the life of the process
 (`apps/desktop/src-tauri/src/chats.rs`, exposed by `chat_commands.rs`). The Chat

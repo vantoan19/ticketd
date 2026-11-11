@@ -67,6 +67,7 @@ async function open(chats: MockChat[], title?: string) {
         status: "Todo",
       },
       { kind: "document", id: "d1", title: "Login hardening spec" },
+      { kind: "project", id: "p1", title: "Storefront" },
     ],
   });
   render(
@@ -281,12 +282,12 @@ test("an uncertain delivery is never resent unless the person says so", async ()
     ),
   );
   expect(screen.getByText("Not confirmed")).toBeTruthy();
-  expect(screen.getByText("Did Codex get your last message?")).toBeTruthy();
+  expect(screen.getByText("Did Codex get your message?")).toBeTruthy();
   expect(screen.getByText("Needs your decision")).toBeTruthy();
   type("hello?");
   expect(button("Send")).toHaveProperty("disabled", true);
   fireEvent.click(button("Don't send"));
-  expect(await screen.findByText("Not sent")).toBeTruthy();
+  expect(await screen.findByText("Not confirmed · set aside")).toBeTruthy();
   const { items, chat } = await client.openChat("c1");
   expect(items).toHaveLength(1);
   expect(chat.activity).toBe("idle");
@@ -657,9 +658,9 @@ test("a response is saved as a Document only when asked", async () => {
 
 test("records are linked by title and unlinked from their chip", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
-  fireEvent.click(button("Link a ticket or Document"));
+  fireEvent.click(button("Link a ticket, Document or Project"));
   fireEvent.change(
-    await screen.findByLabelText("Search tickets and Documents"),
+    await screen.findByLabelText("Search tickets, Documents and Projects"),
     { target: { value: "wait" } },
   );
   fireEvent.click(await screen.findByRole("button", { name: /T-14/ }));
@@ -744,4 +745,56 @@ test("New Chat keeps the draft when the harness is missing and starts once it is
   ).toBeTruthy();
   // No Project or ticket was needed; ticketd keeps a folder for the Chat.
   expect((await client.openChat("chat-1")).chat.folder.managed).toBe(true);
+});
+
+test("New Chat says how the harness is signed in before the first message is sent", async () => {
+  const client = await open([]);
+  client.setHarnesses([
+    {
+      id: "codex",
+      name: "Codex",
+      status: "not_subscription",
+      message:
+        "Codex 1.0 is signed in with an API key; Codex bills usage there.",
+      command: "codex login",
+    },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  type("Draft the reset email", "Describe a task or ask a question");
+
+  expect(
+    await screen.findByText("Codex isn't using a subscription"),
+  ).toBeTruthy();
+  expect(screen.getByText(/Codex bills usage there\./)).toBeTruthy();
+  // It is told, not blocked.
+  expect(button("Send")).toHaveProperty("disabled", false);
+
+  client.setHarnesses([
+    { id: "codex", name: "Codex", status: "sign_in_unknown" },
+  ]);
+  fireEvent.click(button("Check again"));
+  expect(
+    await screen.findByText("ticketd can't check Codex's sign-in"),
+  ).toBeTruthy();
+});
+
+test("a Project is linked like a ticket or Document and has no page to open", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  fireEvent.click(button("Link a ticket, Document or Project"));
+  fireEvent.change(
+    await screen.findByLabelText("Search tickets, Documents and Projects"),
+    { target: { value: "store" } },
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  const links = within(
+    await screen.findByRole("group", { name: "Linked records" }),
+  );
+  expect(await links.findByText("Storefront")).toBeTruthy();
+  expect(links.queryByRole("button", { name: /Open/ })).toBeNull();
+  fireEvent.click(
+    links.getByRole("button", {
+      name: "Remove the link to the Project Storefront",
+    }),
+  );
+  await waitFor(() => expect(links.queryByText("Storefront")).toBeNull());
 });

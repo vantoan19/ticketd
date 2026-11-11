@@ -43,6 +43,7 @@ const DELIVERY_CAPTION = {
   delivered: "",
   not_sent: "Not sent",
   uncertain: "Not confirmed",
+  set_aside: "Not confirmed · set aside",
 } as const;
 
 function UserMessage({ item }: { item: Of<"user"> }) {

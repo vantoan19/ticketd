@@ -26,6 +26,10 @@ export const problemKindSchema = z.enum([
   "incompatible",
   "probe_failed",
   "not_signed_in",
+  /** Signed in with an API key or cloud provider: usable, billed there. */
+  "not_subscription",
+  /** ticketd cannot tell whether the harness is signed in. */
+  "sign_in_unknown",
   "usage_limit",
   "sandbox_unavailable",
   "capability_unavailable",
@@ -63,6 +67,7 @@ export const linkedRecordSchema = z.discriminatedUnion("kind", [
     status: z.string(),
   }),
   z.object({ kind: z.literal("document"), id: z.string(), title: z.string() }),
+  z.object({ kind: z.literal("project"), id: z.string(), title: z.string() }),
 ]);
 export type LinkedRecord = z.infer<typeof linkedRecordSchema>;
 
@@ -123,6 +128,10 @@ export const harnessStatusSchema = z.object({
     "not_installed",
     "incompatible",
     "not_signed_in",
+    /** Usable, but not on the harness subscription; `message` says how it bills. */
+    "not_subscription",
+    /** Usable as far as ticketd can tell; sign-in could not be checked. */
+    "sign_in_unknown",
     "unknown",
   ]),
   /** What was found or why the probe is uncertain: executable, version, requirement. */
@@ -161,7 +170,14 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     kind: z.literal("user"),
     text: z.string(),
     /** `sending` is saved locally only; it is not evidence the harness has it. */
-    delivery: z.enum(["sending", "delivered", "not_sent", "uncertain"]),
+    /** `set_aside`: delivery stayed unknown and the person chose not to resend. */
+    delivery: z.enum([
+      "sending",
+      "delivered",
+      "not_sent",
+      "uncertain",
+      "set_aside",
+    ]),
   }),
   z.object({
     ...item,
@@ -274,7 +290,14 @@ export const chatChangeSchema = z.discriminatedUnion("kind", [
 ]);
 export type ChatChange = z.infer<typeof chatChangeSchema>;
 
-export type LinkRef = { kind: "ticket" | "document"; id: string };
+export type LinkRef = { kind: LinkedRecord["kind"]; id: string };
+
+/** A created Chat. `send_error` says why its first message was not saved. */
+export const createdChatSchema = z.object({
+  chat_id: z.string(),
+  send_error: z.string().nullish(),
+});
+export type CreatedChat = z.infer<typeof createdChatSchema>;
 export type RequestAnswer = { option_id: string } | { text: string };
 export type HistorySelection =
   | { kind: "last_response" }
@@ -311,13 +334,17 @@ export interface ChatClient {
   pickFolder(): Promise<string | null>;
   /** How many Chats already run in the folder. */
   folderUse(path: string): Promise<number>;
-  /** `folder: null` asks for a managed folder. Resolves to the new Chat's id. */
+  /**
+   * `folder: null` asks for a managed folder. `command_id` is a UUID made once
+   * per attempt and repeated on a retry, which then finds the same Chat.
+   */
   createChat(input: {
+    command_id: string;
     harness_id: string;
     folder: string | null;
     links: LinkRef[];
     message: string;
-  }): Promise<string>;
+  }): Promise<CreatedChat>;
   openChat(id: string): Promise<ChatSnapshot>;
   /** Changes after `cursor`, in order. */
   subscribe(
@@ -346,7 +373,7 @@ export interface ChatClient {
   unarchive(id: string): Promise<void>;
   trash(id: string): Promise<void>;
   restore(id: string): Promise<void>;
-  /** Title search over tickets and Documents. */
+  /** Title search over tickets, Documents and Projects. */
   searchRecords(query: string): Promise<LinkedRecord[]>;
   addLink(id: string, link: LinkRef): Promise<void>;
   removeLink(id: string, link: LinkRef): Promise<void>;

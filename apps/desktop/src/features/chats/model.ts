@@ -3,6 +3,7 @@ import type {
   ChatSnapshot,
   ChatState,
   ChatSummary,
+  HarnessStatus,
   Problem,
   ProblemKind,
   RecordChange,
@@ -78,6 +79,8 @@ const PROBLEM_LINES: Record<ProblemKind, string> = {
   incompatible: "Not sent",
   probe_failed: "Not sent",
   not_signed_in: "Not sent",
+  not_subscription: "Not on a subscription",
+  sign_in_unknown: "Sign-in not checked",
   usage_limit: "Stopped: usage limit reached",
   sandbox_unavailable: "Stopped: sandbox unavailable",
   capability_unavailable: "Stopped: a capability is unavailable",
@@ -127,12 +130,26 @@ export function hasComposer(chat: ChatState) {
   );
 }
 
+/**
+ * Whether a Chat can be started on a harness with this status. A sign-in that is
+ * not a subscription, or that ticketd could not check, does not block: it is shown.
+ */
+export function harnessUsable(status: HarnessStatus["status"]) {
+  return (
+    status === "ready" ||
+    status === "not_subscription" ||
+    status === "sign_in_unknown"
+  );
+}
+
 /** Problems that are an install or sign-in step: shown on the row, never counted. */
 const SETUP: ProblemKind[] = [
   "not_installed",
   "incompatible",
   "probe_failed",
   "not_signed_in",
+  "not_subscription",
+  "sign_in_unknown",
 ];
 
 /**
@@ -214,12 +231,27 @@ export type Notice = {
  */
 export function problemNotice(problem: Problem, harness: string): Notice {
   const said = problem.message ? ` ${problem.message}` : "";
+  const signIn = problem.command ? `\`${problem.command}\`` : harness;
   switch (problem.kind) {
     case "not_signed_in":
       return {
         tone: "neutral",
         title: `${harness} isn't signed in`,
-        body: `Run ${problem.command ? `\`${problem.command}\`` : harness} in a terminal and sign in, then check again. ticketd never asks for your password or keys.${said}`,
+        body: `Run ${signIn} in a terminal and sign in, then check again. ticketd never asks for your password or keys.${said}`,
+        actions: problem.command ? ["copy-command", "check"] : ["check"],
+      };
+    case "not_subscription":
+      return {
+        tone: "neutral",
+        title: `${harness} isn't using a subscription`,
+        body: `${problem.message ?? `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
+        actions: problem.command ? ["copy-command", "check"] : ["check"],
+      };
+    case "sign_in_unknown":
+      return {
+        tone: "neutral",
+        title: `ticketd can't check ${harness}'s sign-in`,
+        body: `${problem.message ?? `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_installed":
@@ -249,7 +281,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: `${harness} reached your usage limit`,
-        body: `${problem.resets ? `It says the limit resets ${problem.resets}.` : "It didn't say when the limit resets."} Your work so far is kept. ticketd won't switch model or billing.`,
+        body: `${problem.resets ? `It says the limit resets ${problem.resets}.` : (problem.message ?? "It didn't say when the limit resets.")} Your work so far is kept. ticketd won't switch model or billing.`,
         actions: ["check"],
       };
     case "sandbox_unavailable":
@@ -270,8 +302,8 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "uncertain_delivery":
       return {
         tone: "neutral",
-        title: `Did ${harness} get your last message?`,
-        body: `The connection dropped right after it was sent. It may have started work. It hasn't been sent again.${said}`,
+        title: `Did ${harness} get your message?`,
+        body: `ticketd has no confirmation that ${harness} received it. It may have started work. It hasn't been sent again. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.${said}`,
         actions: ["resend", "discard"],
       };
     case "folder_missing":

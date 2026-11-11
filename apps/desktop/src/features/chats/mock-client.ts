@@ -13,7 +13,7 @@ import {
   type LinkedRecord,
   type TranscriptItem,
 } from "@/features/chats/client";
-import { needsYou } from "@/features/chats/model";
+import { harnessUsable, needsYou } from "@/features/chats/model";
 
 /** A Chat state with quiet defaults, so a test or fixture spells out only what matters. */
 export function chatState(
@@ -103,6 +103,7 @@ export function createMockChatClient(
   let enabled = seed.enabled ?? false;
   let harnesses = seed.harnesses ?? READY;
   let created = 0;
+  const requests = new Map<string, string>();
   const dropping = new Map<string, number>();
   const overviewListeners = new Set<(overview: ChatOverview) => void>();
   const quitListeners = new Set<(working: number) => void>();
@@ -288,9 +289,13 @@ export function createMockChatClient(
         .length,
     async createChat(input) {
       const harness = harnesses.find((item) => item.id === input.harness_id);
-      if (harness?.status !== "ready")
+      if (!harness || !harnessUsable(harness.status))
         throw new ChatError("failed", "The harness is not ready.");
+      // A repeated request finds the Chat the first try created.
+      const existing = requests.get(input.command_id);
+      if (existing) return { chat_id: existing };
       const id = `chat-${(created += 1)}`;
+      requests.set(input.command_id, id);
       const path = input.folder ?? `~/ticketd/chats/${id}`;
       store({
         chat: chatState({
@@ -310,7 +315,7 @@ export function createMockChatClient(
         }),
       });
       startTurn(id, input.message);
-      return id;
+      return { chat_id: id };
     },
     async openChat(id) {
       const entry = get(id);
@@ -375,7 +380,8 @@ export function createMockChatClient(
       if (message?.kind !== "user" || message.delivery !== "uncertain")
         throw new ChatError("stale", "That message is no longer in doubt.");
       if (decision === "discard") {
-        push(id, { ...message, delivery: "not_sent" });
+        // Set aside: it stays in the transcript, still not confirmed.
+        push(id, { ...message, delivery: "set_aside" });
         patch(id, { activity: "idle", problem: null });
       } else {
         push(id, { ...message, delivery: "delivered" });
@@ -389,7 +395,7 @@ export function createMockChatClient(
     async checkAgain(id) {
       const { chat } = get(id);
       const harness = harnesses.find((item) => item.id === chat.harness.id);
-      if (harness?.status === "ready")
+      if (harness && harnessUsable(harness.status))
         patch(id, { activity: "idle", problem: null });
     },
     async setFolder(id, path) {

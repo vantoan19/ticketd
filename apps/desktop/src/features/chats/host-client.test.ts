@@ -227,4 +227,22 @@ describe("the desktop Chat client", () => {
     expect(quits).toEqual([2]);
     expect(stub.events.has("chat-overview")).toBe(false);
   });
+
+  it("opens the Chat a failed first send left behind instead of losing it", async () => {
+    const input = {
+      command_id: "0b9a1c4e-0000-4000-8000-000000000001",
+      harness_id: "codex",
+      folder: null,
+      links: [{ kind: "project" as const, id: "p1" }],
+      message: "first",
+    };
+    const created = { chat_id: "c1", send_error: "storage failed" };
+    const client = createHostChatClient(
+      stubBridge({ chat_create: created }).bridge,
+    );
+    expect(await client.createChat(input)).toEqual(created);
+
+    const old = createHostChatClient(stubBridge({ chat_create: "c1" }).bridge);
+    await expect(old.createChat(input)).rejects.toThrow();
+  });
 });
