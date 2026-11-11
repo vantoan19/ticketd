@@ -50,11 +50,13 @@ export const problemSchema = z.object({
   /** A terminal command to copy, such as the harness's own sign-in. */
   command: z.string().nullish(),
   help_url: z.string().nullish(),
-  /** Provider-supplied reset time, already readable ("today at 3:00 PM"). */
-  resets: z.string().nullish(),
+  /** When the provider said a usage limit resets, in seconds since the Unix epoch. Absent when it did not say. */
+  resets_at: z.number().nullish(),
   path: z.string().nullish(),
   /** The submission whose delivery is uncertain. */
   message_id: z.string().nullish(),
+  /** Why the last turn stopped, not a condition observed now: told, and it does not block Send. */
+  past: z.boolean().nullish(),
 });
 export type Problem = z.infer<typeof problemSchema>;
 
@@ -106,6 +108,8 @@ export const chatSummarySchema = z.object({
   /** A live approval or question, or a delivery the person must decide about. */
   needs_you: z.boolean(),
   problem: problemKindSchema.nullish(),
+  /** `problem` is why the last turn stopped, not a condition observed now. */
+  problem_past: z.boolean().nullish(),
   interruption: interruptionSchema.nullish(),
   last_change: recordChangeSchema.nullish(),
   /** The start of the last response. */
@@ -292,7 +296,10 @@ export type ChatChange = z.infer<typeof chatChangeSchema>;
 
 export type LinkRef = { kind: LinkedRecord["kind"]; id: string };
 
-/** A created Chat. `send_error` says why its first message was not saved. */
+/**
+ * A created Chat. `send_error` says why its first message was not saved: the
+ * Chat exists, so the interface opens it with the unsent text in its composer.
+ */
 export const createdChatSchema = z.object({
   chat_id: z.string(),
   send_error: z.string().nullish(),
@@ -336,7 +343,8 @@ export interface ChatClient {
   folderUse(path: string): Promise<number>;
   /**
    * `folder: null` asks for a managed folder. `command_id` is a UUID made once
-   * per attempt and repeated on a retry, which then finds the same Chat.
+   * per request and repeated only when the very same request is sent again,
+   * which then finds the same Chat; a changed request needs a new one.
    */
   createChat(input: {
     command_id: string;

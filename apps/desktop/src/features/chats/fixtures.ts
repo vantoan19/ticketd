@@ -200,7 +200,11 @@ const chats: MockChat[] = [
       id: "limit",
       title: "Refactor the mailer",
       activity: "failed",
-      problem: { kind: "usage_limit", resets: "today at 3:00 PM" },
+      problem: {
+        kind: "usage_limit",
+        past: true,
+        resets_at: Math.floor(Date.now() / 1000) + 3 * 3600,
+      },
       queue: [{ id: "q3", text: "Add tests for the retry path" }],
     }),
     items: [you("l1", "Refactor the mailer to use the queue.")],

@@ -83,7 +83,7 @@ const PROBLEM_LINES: Record<ProblemKind, string> = {
   sign_in_unknown: "Sign-in not checked",
   usage_limit: "Stopped: usage limit reached",
   sandbox_unavailable: "Stopped: sandbox unavailable",
-  capability_unavailable: "Stopped: a capability is unavailable",
+  capability_unavailable: "A capability is unavailable",
   uncertain_delivery: "Needs your decision",
   folder_missing: "Folder missing",
   history_lost: "Session unavailable",
@@ -92,9 +92,19 @@ const PROBLEM_LINES: Record<ProblemKind, string> = {
   failed: "Failed",
 };
 
+/** Row wording for a problem that is why the last turn stopped, where it differs. */
+const PAST_PROBLEM_LINES: Partial<Record<ProblemKind, string>> = {
+  not_signed_in: "Stopped: not signed in",
+  session_in_use: "Stopped: session was in use elsewhere",
+};
+
 /** The second line of a Chat's list row. */
 export function summaryLine(chat: ChatSummary): string {
-  if (chat.problem) return PROBLEM_LINES[chat.problem];
+  if (chat.problem)
+    return (
+      (chat.problem_past && PAST_PROBLEM_LINES[chat.problem]) ||
+      PROBLEM_LINES[chat.problem]
+    );
   if (chat.activity === "waiting") return "Waiting for you";
   if (chat.activity === "working") return "Working…";
   if (chat.activity === "failed") return "Failed";
@@ -110,7 +120,10 @@ export function summaryLine(chat: ChatSummary): string {
   return chat.preview || "Idle";
 }
 
-/** Problems that keep the Chat from taking a new message until they are resolved. */
+/**
+ * Problems that keep the Chat from taking a new message until they are resolved.
+ * Only one observed now blocks; why the last turn stopped (`past`) never does.
+ */
 const BLOCKING: ProblemKind[] = [
   "not_installed",
   "incompatible",
@@ -123,10 +136,15 @@ const BLOCKING: ProblemKind[] = [
 /** Problems under which there is nothing to type into. */
 const NO_COMPOSER: ProblemKind[] = ["folder_missing", "history_lost"];
 
+export function blocksSend(problem: Problem | null | undefined) {
+  return Boolean(problem && !problem.past && BLOCKING.includes(problem.kind));
+}
+
 export function hasComposer(chat: ChatState) {
+  const problem = chat.problem;
   return (
     chat.retention !== "trashed" &&
-    !(chat.problem && NO_COMPOSER.includes(chat.problem.kind))
+    !(problem && !problem.past && NO_COMPOSER.includes(problem.kind))
   );
 }
 
@@ -186,7 +204,7 @@ export function composerControls(
   if (!isLive(chat))
     return {
       kind: "send",
-      enabled: typed && !(chat.problem && BLOCKING.includes(chat.problem.kind)),
+      enabled: typed && !blocksSend(chat.problem),
     };
   if (!typed) return { kind: "stop" };
   if (!chat.steering.available)
@@ -232,8 +250,18 @@ export type Notice = {
 export function problemNotice(problem: Problem, harness: string): Notice {
   const said = problem.message ? ` ${problem.message}` : "";
   const signIn = problem.command ? `\`${problem.command}\`` : harness;
+  // A failure of the last turn can be sent past; only a probe that can tell
+  // whether it still holds is worth offering.
+  const past = Boolean(problem.past);
   switch (problem.kind) {
     case "not_signed_in":
+      if (past)
+        return {
+          tone: "neutral",
+          title: `${harness} wasn't signed in`,
+          body: `The last turn stopped because ${harness} wasn't signed in. Run ${signIn} in a terminal and sign in, then check again or send your message. ticketd never asks for your password or keys.${said}`,
+          actions: problem.command ? ["copy-command", "check"] : ["check"],
+        };
       return {
         tone: "neutral",
         title: `${harness} isn't signed in`,
@@ -281,29 +309,43 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: `${harness} reached your usage limit`,
-        body: `${problem.resets ? `It says the limit resets ${problem.resets}.` : (problem.message ?? "It didn't say when the limit resets.")} Your work so far is kept. ticketd won't switch model or billing.`,
-        actions: ["check"],
+        body: [
+          problem.message,
+          resetTime(problem.resets_at)
+            ? `It says the limit resets ${resetTime(problem.resets_at)}.`
+            : "It didn't say when the limit resets.",
+          "Your work so far is kept. ticketd won't switch model or billing.",
+          past &&
+            "That is why the last turn stopped; you can send again once the limit has reset.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        actions: past ? [] : ["check"],
       };
     case "sandbox_unavailable":
       return {
         tone: "error",
         title: `${harness} can't run commands here`,
-        body: `${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
-        actions: ["help", "check"],
+        body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
+        actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
       };
     case "capability_unavailable":
       return {
         tone: "neutral",
         title: `Something ${harness} uses isn't available`,
-        body: `${problem.message ?? ""} ticketd won't substitute another model or provider. Other work can continue.`.trim(),
-        actions: ["check"],
+        // Nothing ticketd can probe tells whether it is back, so no Check again.
+        body: `${problem.message ?? ""} ticketd won't substitute another model or provider. Other work can continue; fix it in ${harness}'s own settings, then start a fresh session.`.trim(),
+        actions: [],
       };
     case "uncertain_delivery":
       return {
         tone: "neutral",
         title: `Did ${harness} get your message?`,
-        body: `ticketd has no confirmation that ${harness} received it. It may have started work. It hasn't been sent again. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.${said}`,
+        // With a message, a resend the person asked for was not accepted.
+        body: problem.message
+          ? `${problem.message} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
+          : `ticketd has no confirmation that ${harness} received it. It may have started work. It hasn't been sent again. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`,
         actions: ["resend", "discard"],
       };
     case "folder_missing":
@@ -321,6 +363,13 @@ export function problemNotice(problem: Problem, harness: string): Notice {
         actions: ["resume"],
       };
     case "session_in_use":
+      if (past)
+        return {
+          tone: "neutral",
+          title: `This ${harness} session was open somewhere else`,
+          body: `The last turn stopped because of that. Close it there before you send again.${said}`,
+          actions: [],
+        };
       return {
         tone: "neutral",
         title: `This ${harness} session is open somewhere else`,
@@ -342,6 +391,22 @@ export function problemNotice(problem: Problem, harness: string): Notice {
         actions: ["check"],
       };
   }
+}
+
+/** "on Nov 12 at 3:00 PM", local time, from seconds since the epoch; "" when there is none. */
+function resetTime(seconds: number | null | undefined): string {
+  if (seconds == null) return "";
+  const at = new Date(seconds * 1000);
+  if (Number.isNaN(at.getTime())) return "";
+  const day = at.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const time = at.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `on ${day} at ${time}`;
 }
 
 /** "now", "2m", "1h", "Yesterday", "Nov 8": the trailing time of a Chat row. */

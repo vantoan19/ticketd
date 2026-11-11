@@ -595,8 +595,15 @@ export const client = {
     // Whether the backup was also recorded as the last backup.
     return z.boolean().parse(await invoke("backup_workspace", { path }));
   },
+  /**
+   * Resolves once the workspace was replaced: `safety_path` is the copy of what
+   * it was before, and `warning` says what could not be confirmed around the
+   * restore. Rejects only when nothing was replaced.
+   */
   async restoreWorkspace(path: string) {
-    return z.string().parse(await invoke("restore_workspace", { path }));
+    return z
+      .object({ safety_path: z.string(), warning: z.string().nullish() })
+      .parse(await invoke("restore_workspace", { path }));
   },
   async exportWorkspace(path: string) {
     await invoke("export_workspace", { path });

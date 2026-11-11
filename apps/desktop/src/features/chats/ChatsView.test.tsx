@@ -300,7 +300,11 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
         id: "c1",
         title: "Limiter",
         activity: "failed",
-        problem: { kind: "usage_limit", resets: "today at 3:00 PM" },
+        problem: {
+          kind: "usage_limit",
+          past: true,
+          resets_at: new Date(2026, 10, 12, 15, 0).getTime() / 1000,
+        },
         queue: [{ id: "q1", text: "then add tests" }],
       },
       [reply("r1", "Half way there.")],
@@ -309,8 +313,12 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
   const notice = screen.getByRole("alert");
   expect(notice.textContent).toContain("Codex reached your usage limit");
   expect(notice.textContent).toContain(
-    "It says the limit resets today at 3:00 PM. Your work so far is kept. ticketd won't switch model or billing.",
+    "It says the limit resets on Nov 12 at 3:00 PM. Your work so far is kept. ticketd won't switch model or billing.",
   );
+  // It is why the last turn stopped: the person can still send.
+  type("try again");
+  expect(button("Send")).toHaveProperty("disabled", false);
+  type("");
   // Output and queued input are retained; nothing is sent for the person.
   expect(screen.getAllByText("Half way there.").length).toBeGreaterThan(0);
   expect(screen.getByText("then add tests")).toBeTruthy();
@@ -745,6 +753,74 @@ test("New Chat keeps the draft when the harness is missing and starts once it is
   ).toBeTruthy();
   // No Project or ticket was needed; ticketd keeps a folder for the Chat.
   expect((await client.openChat("chat-1")).chat.folder.managed).toBe(true);
+});
+
+test("a first message that was not sent opens the Chat with the text, and New Chat starts over", async () => {
+  const mock = createMockChatClient({
+    enabled: true,
+    chats: one({ id: "c1", title: "Left behind" }),
+  });
+  const asked: Parameters<typeof mock.createChat>[0][] = [];
+  const outcomes: (() => Promise<{ chat_id: string; send_error?: string }>)[] =
+    [
+      // The Chat was made; its first message was not saved.
+      async () => ({ chat_id: "c1", send_error: "storage failed" }),
+      // Nothing is known to have been made.
+      () => Promise.reject(new Error("bridge closed")),
+      () => Promise.reject(new Error("bridge closed")),
+      async () => ({ chat_id: "c1" }),
+    ];
+  const client = {
+    ...mock,
+    createChat: (input: Parameters<typeof mock.createChat>[0]) => {
+      asked.push(input);
+      const next = outcomes[asked.length - 1];
+      return next ? next() : mock.createChat(input);
+    },
+  };
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <ChatsView />
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  const newChat = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+    await waitFor(() => expect(button("Send")).toBeTruthy());
+  };
+  const describe = "Describe a task or ask a question";
+  const send = async (text: string) => {
+    type(text, describe);
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+  };
+
+  await newChat();
+  await send("first try");
+  // The Chat that exists is opened, with the unsent words ready to send there.
+  await screen.findByRole("heading", { name: "Left behind" });
+  expect(composer()).toHaveProperty("value", "first try");
+  expect(screen.getByRole("alert").textContent).toContain("storage failed");
+
+  // New Chat starts clean: a changed message is a new request, not a conflict.
+  await newChat();
+  expect(composer(describe)).toHaveProperty("value", "");
+  await send("something else");
+  await screen.findByText(/Could not start the Chat: bridge closed/);
+  expect(asked[1]?.command_id).not.toBe(asked[0]?.command_id);
+  // Sending the very same request again repeats its id, so it finds what it made.
+  expect(composer(describe)).toHaveProperty("value", "something else");
+  fireEvent.click(button("Send"));
+  await waitFor(() => expect(asked).toHaveLength(3));
+  expect(asked[2]?.command_id).toBe(asked[1]?.command_id);
+  // Changing what is asked for makes it a new request.
+  await screen.findByText(/Could not start the Chat: bridge closed/);
+  await send("something else entirely");
+  await waitFor(() => expect(asked).toHaveLength(4));
+  expect(asked[3]?.command_id).not.toBe(asked[2]?.command_id);
 });
 
 test("New Chat says how the harness is signed in before the first message is sent", async () => {

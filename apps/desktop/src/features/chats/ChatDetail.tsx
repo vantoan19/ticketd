@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -39,6 +39,7 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { Composer } from "@/features/chats/Composer";
+import { arrivals, drafts } from "@/features/chats/drafts";
 import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
@@ -53,9 +54,6 @@ import {
   type TranscriptActions,
 } from "@/features/chats/Transcript";
 import { useChat } from "@/features/chats/use-chats";
-
-/** What was typed into each Chat's composer, kept while the app is open. */
-const drafts = new Map<string, string>();
 
 /** Sets `code spans` of a notice's sentence in mono. */
 function NoticeText({ text }: { text: string }) {
@@ -218,7 +216,9 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
   const { chat, items } = snapshot;
   const id = chat.id;
   const harness = chat.harness.name;
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState(() => arrivals.get(id) ?? "");
+  // Said once: the next time this Chat opens it starts without the reason.
+  useEffect(() => void arrivals.delete(id), [id]);
   const [resuming, setResuming] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string> | null>(null);
   const [saving, setSaving] = useState<{ id: string; text: string } | null>(

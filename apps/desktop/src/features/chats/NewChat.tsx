@@ -26,6 +26,7 @@ import {
 } from "@/features/chats/client";
 import { ProblemNotice } from "@/features/chats/ChatDetail";
 import { Composer } from "@/features/chats/Composer";
+import { carryIntoChat } from "@/features/chats/drafts";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import { harnessUsable } from "@/features/chats/model";
 
@@ -73,8 +74,12 @@ export function NewChat({
   const [links, setLinks] = useState<LinkedRecord[]>([]);
   const [failure, setFailure] = useState("");
   const [probe, setProbe] = useState(0);
-  /** Names this attempt to the host, so sending again after a failure finds the same Chat. */
-  const attempt = useRef(crypto.randomUUID());
+  /**
+   * Names a request to the host. It is repeated only when the very same request
+   * is sent again after a failure, which then finds what the first try made; any
+   * change to the message, harness, folder or links is a new request.
+   */
+  const attempt = useRef({ id: crypto.randomUUID(), request: "" });
   useEffect(() => {
     let current = true;
     client.harnesses().then(
@@ -145,18 +150,31 @@ export function NewChat({
           })}
           onSend={async (message) => {
             if (!harness) return;
+            const input = {
+              harness_id: harness.id,
+              folder,
+              links: links.map(({ kind, id }) => ({ kind, id })),
+              message,
+            };
+            const request = JSON.stringify(input);
+            if (attempt.current.request !== request)
+              attempt.current = { id: crypto.randomUUID(), request };
             try {
               const created = await client.createChat({
-                command_id: attempt.current,
-                harness_id: harness.id,
-                folder,
-                links: links.map(({ kind, id }) => ({ kind, id })),
-                message,
+                command_id: attempt.current.id,
+                ...input,
               });
-              // The Chat exists but holds no message: sending again reaches the
-              // same Chat instead of starting another.
-              if (created.send_error) throw new Error(created.send_error);
-              attempt.current = crypto.randomUUID();
+              // Answered: whatever is asked for next is a new request.
+              attempt.current = { id: crypto.randomUUID(), request: "" };
+              // The Chat exists but holds no message. It is opened with the
+              // unsent words in its composer, so they are sent there and no
+              // second Chat is made for them.
+              if (created.send_error)
+                carryIntoChat(
+                  created.chat_id,
+                  message,
+                  `Your first message was not sent: ${created.send_error}. It is in the box below.`,
+                );
               setFailure("");
               onCreated(created.chat_id);
             } catch (reason) {
