@@ -1,0 +1,14 @@
+{"note":"Hand-built from apps/chat-bridge-claude/src/protocol.ts (protocol 1, Agent SDK 0.3.322). Not captured from a live session; every value is synthetic."}
+{"client":{"id":"c4","cmd":"submit","generation":7,"submission_id":"sub-1","text":"Change it"}}
+{"server":{"v":1,"event":"input_handed_to_sdk","generation":7,"submission_id":"sub-1"}}
+{"server":{"v":1,"event":"input_processing","generation":7,"submission_ids":["sub-1"]}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"tool_use","id":"toolu_1","name":"Write","input":{"file_path":"/work/chat-1/a.txt"}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-1","tool_name":"Write","tool_use_id":"toolu_1","input":{"file_path":"/work/chat-1/a.txt"},"title":"Write to a.txt","display_name":"Write","description":null,"decision_reason":null,"blocked_path":null,"agent_id":null,"default_to_no":false,"can_remember":true}}
+{"server":{"v":1,"event":"delta","generation":7,"kind":"text","text":"Waiting","index":0,"parent_tool_use_id":null}}
+{"mark":"a permission is pending while output continues"}
+{"client":{"id":"c5","cmd":"respond","generation":7,"request_id":"7-1","decision":{"kind":"allow"}}}
+{"server":{"v":1,"event":"request_resolved","generation":7,"id":"c5","request_id":"7-1","outcome":"allow"}}
+{"server":{"v":1,"event":"question_request","generation":7,"request_id":"7-2","tool_use_id":"toolu_2","questions":[{"question":"Which scope?","header":"Scope","options":[{"label":"Small","description":"Only this file"},{"label":"Large","description":"The whole folder"}],"multiSelect":false},{"question":"Which files?","header":"Files","options":[{"label":"a.txt","description":"First"},{"label":"b.txt","description":"Second"}],"multiSelect":true}]}}
+{"mark":"the permission was answered and a question asked"}
+{"client":{"id":"c6","cmd":"respond","generation":7,"request_id":"7-2","decision":{"kind":"answer","answers":{"Which scope?":"Small","Which files?":["a.txt","b.txt"]}}}}
+{"server":{"v":1,"event":"request_resolved","generation":7,"id":"c6","request_id":"7-2","outcome":"answer"}}

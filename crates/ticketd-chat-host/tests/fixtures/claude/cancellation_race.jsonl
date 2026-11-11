@@ -1,0 +1,18 @@
+{"note":"Hand-built from apps/chat-bridge-claude/src/protocol.ts (protocol 1, Agent SDK 0.3.322). Not captured from a live session; every value is synthetic."}
+{"client":{"id":"c4","cmd":"submit","generation":7,"submission_id":"sub-1","text":"Change it"}}
+{"server":{"v":1,"event":"input_handed_to_sdk","generation":7,"submission_id":"sub-1"}}
+{"server":{"v":1,"event":"input_processing","generation":7,"submission_ids":["sub-1"]}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-1","tool_name":"Write","tool_use_id":"toolu_1","input":{"file_path":"/work/chat-1/a.txt"},"title":"Write to a.txt","display_name":"Write","description":null,"decision_reason":null,"blocked_path":null,"agent_id":null,"default_to_no":false,"can_remember":true}}
+{"server":{"v":1,"event":"request_cancelled","generation":7,"request_id":"7-1","reason":"aborted"}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-2","tool_name":"Write","tool_use_id":"toolu_1","input":{"file_path":"/work/chat-1/a.txt"},"title":"Write to a.txt","display_name":"Write","description":null,"decision_reason":null,"blocked_path":null,"agent_id":null,"default_to_no":false,"can_remember":true}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-3","tool_name":"Write","tool_use_id":"toolu_3","input":{"file_path":"/work/chat-1/a.txt"},"title":"Write to a.txt","display_name":"Write","description":null,"decision_reason":null,"blocked_path":null,"agent_id":null,"default_to_no":false,"can_remember":true}}
+{"mark":"one request withdrawn by Claude Code, two pending"}
+{"client":{"id":"c5","cmd":"interrupt","generation":7}}
+{"server":{"v":1,"event":"request_cancelled","generation":7,"request_id":"7-2","reason":"interrupted"}}
+{"mark":"the interrupt cancelled one request so far"}
+{"client":{"id":"c6","cmd":"respond","generation":7,"request_id":"7-3","decision":{"kind":"allow"}}}
+{"server":{"v":1,"event":"request_cancelled","generation":7,"request_id":"7-3","reason":"interrupted"}}
+{"server":{"v":1,"event":"command_rejected","id":"c6","code":"stale_request","message":"request is not pending"}}
+{"server":{"v":1,"event":"interrupt_result","generation":7,"id":"c5","receipt":true,"still_queued_submission_ids":[]}}
+{"mark":"the interrupt was acknowledged"}
+{"server":{"v":1,"event":"turn_result","generation":7,"correlation":"uuid","submission_ids":["sub-1"],"unmatched_uuids":[],"pending_submission_ids":[],"subtype":"error_during_execution","is_error":true,"result_text":null,"errors":[],"stop_reason":null,"terminal_reason":"aborted","denied_tool_names":[],"queued_turn_count":0,"num_turns":1,"duration_ms":12,"session_id":"sess-1"}}

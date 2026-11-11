@@ -1,59 +1,14 @@
 //! Finding the user's installed Codex and judging what its version supports.
-//!
-//! A desktop application started from a launcher often has a shorter `PATH` than the
-//! user's shell, so the usual install locations are checked as well. Nothing here
-//! reads Codex's configuration or credentials.
+//! Nothing here reads Codex's configuration or credentials.
 
-use std::env;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use crate::install::Version;
+pub(super) use crate::install::{LaunchEnvironment, Os, parse_version};
 use crate::{Capabilities, Capability, SteeringBehavior};
 
 /// The oldest Codex whose app-server protocol this adapter was written against.
 pub(super) const MINIMUM_VERSION: Version = (0, 162, 1);
-
-pub(super) type Version = (u64, u64, u64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Os {
-    Windows,
-    Mac,
-    Linux,
-}
-
-impl Os {
-    pub fn current() -> Self {
-        if cfg!(windows) {
-            Self::Windows
-        } else if cfg!(target_os = "macos") {
-            Self::Mac
-        } else {
-            Self::Linux
-        }
-    }
-}
-
-/// The parts of the process environment that locate an installation.
-#[derive(Debug, Clone, Default)]
-pub(super) struct LaunchEnvironment {
-    pub path: Option<OsString>,
-    pub home: Option<PathBuf>,
-    pub local_app_data: Option<PathBuf>,
-    pub roaming_app_data: Option<PathBuf>,
-}
-
-impl LaunchEnvironment {
-    pub fn current() -> Self {
-        let folder = |name: &str| env::var_os(name).map(PathBuf::from);
-        Self {
-            path: env::var_os("PATH"),
-            home: folder("HOME").or_else(|| folder("USERPROFILE")),
-            local_app_data: folder("LOCALAPPDATA"),
-            roaming_app_data: folder("APPDATA"),
-        }
-    }
-}
 
 /// Where Codex may be, most specific first: `PATH` in order, then known locations.
 pub(super) fn candidates(os: Os, environment: &LaunchEnvironment) -> Vec<PathBuf> {
@@ -62,11 +17,6 @@ pub(super) fn candidates(os: Os, environment: &LaunchEnvironment) -> Vec<PathBuf
         Os::Windows => &["codex.exe", "codex.cmd"],
         Os::Mac | Os::Linux => &["codex"],
     };
-    let mut folders: Vec<PathBuf> = environment
-        .path
-        .as_ref()
-        .map(|path| env::split_paths(path).collect())
-        .unwrap_or_default();
     let home = |relative: &str| environment.home.as_ref().map(|home| home.join(relative));
     // ponytail: version-manager folders (nvm, fnm, volta) are not searched; a user
     // with such a setup selects the executable explicitly. Add them on demand.
@@ -95,11 +45,7 @@ pub(super) fn candidates(os: Os, environment: &LaunchEnvironment) -> Vec<PathBuf
             Some(PathBuf::from("/home/linuxbrew/.linuxbrew/bin")),
         ],
     };
-    folders.extend(known.into_iter().flatten());
-    folders
-        .iter()
-        .flat_map(|folder| names.iter().map(|name| folder.join(name)))
-        .collect()
+    environment.candidates(names, known)
 }
 
 pub(super) fn locate(
@@ -110,18 +56,6 @@ pub(super) fn locate(
     candidates(os, environment)
         .into_iter()
         .find(|candidate| is_file(candidate))
-}
-
-/// Reads `major.minor.patch` from `codex --version` output such as `codex-cli 0.162.1`.
-pub(super) fn parse_version(output: &str) -> Option<Version> {
-    output.split_whitespace().find_map(|word| {
-        let release = word.split(['-', '+']).next()?;
-        let mut parts = release.split('.').map(str::parse::<u64>);
-        match (parts.next()?, parts.next()?, parts.next()?, parts.next()) {
-            (Ok(major), Ok(minor), Ok(patch), None) => Some((major, minor, patch)),
-            _ => None,
-        }
-    })
 }
 
 pub(super) fn version_requirement() -> String {
@@ -168,6 +102,8 @@ pub(super) fn capabilities(version: Option<&str>) -> Capabilities {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
     use super::*;
 
     #[test]
