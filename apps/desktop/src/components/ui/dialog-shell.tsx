@@ -1,4 +1,4 @@
-import { useId, type ReactNode, type RefObject } from "react";
+import { useId, useRef, type ReactNode, type RefObject } from "react";
 import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +32,7 @@ export function DialogShell({
   footerNote,
   primaryHint,
   showClose = true,
+  focusPrimary = false,
   children,
   busy = false,
 }: {
@@ -58,12 +59,15 @@ export function DialogShell({
   primaryHint?: string;
   /** The corner Close button; off where the footer holds the only two ways out. */
   showClose?: boolean;
+  /** Opens with focus on the primary button, not the first control. */
+  focusPrimary?: boolean;
   children: ReactNode;
   /** A submitted write is still in flight, so dismissing must wait for its result. */
   busy?: boolean;
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
+  const primary = useRef<HTMLButtonElement>(null);
   return (
     <Dialog
       open={open}
@@ -76,6 +80,12 @@ export function DialogShell({
         style={{ maxWidth: `min(${width}px, calc(100vw - 32px))`, width }}
         showCloseButton={false}
         {...(returnFocus && { returnFocus })}
+        {...(focusPrimary && {
+          onOpenAutoFocus: (event: Event) => {
+            event.preventDefault();
+            primary.current?.focus();
+          },
+        })}
       >
         <form
           className="dialog-shell-form relative"
@@ -117,6 +127,7 @@ export function DialogShell({
               </Button>
             </DialogClose>
             <Button
+              ref={primary}
               type="submit"
               size="sm"
               disabled={blocked}

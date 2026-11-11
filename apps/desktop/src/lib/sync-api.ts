@@ -149,10 +149,16 @@ export const syncApi = {
 
   /**
    * `sync_download_workspace`: saves a safety backup, replaces this desktop's
-   * Workspace with the one in `folderId` and starts the first download.
+   * Workspace with the one in `folderId` and starts the first download. Answers
+   * with the new status and the path of the safety backup.
    */
-  downloadWorkspace: (folderId: string) =>
-    status(invoke("sync_download_workspace", { folderId })),
+  async downloadWorkspace(
+    folderId: string,
+  ): Promise<SyncStatus & { safety_backup: string }> {
+    return statusSchema
+      .extend({ safety_backup: z.string() })
+      .parse(await invoke("sync_download_workspace", { folderId }));
+  },
 
   /** `sync_now`: uploads and checks for changes now. */
   syncNow: () => status(invoke("sync_now")),

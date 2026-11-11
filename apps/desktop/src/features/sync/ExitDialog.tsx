@@ -97,6 +97,7 @@ export function ExitDialog() {
       primaryLabel={finishing ? "Quit now" : "Quit"}
       cancelLabel="Keep open"
       showClose={false}
+      focusPrimary
       blockedReason={null}
       width={480}
       onSubmit={() => void windowClient.quit()}

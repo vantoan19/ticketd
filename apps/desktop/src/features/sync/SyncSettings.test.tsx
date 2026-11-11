@@ -125,7 +125,10 @@ test("uploading this Workspace is the preselected setup choice", async () => {
 
 test("downloading an existing Workspace asks once before replacing this one", async () => {
   api.status.mockResolvedValue(choosing());
-  api.downloadWorkspace.mockResolvedValue(syncStatus());
+  api.downloadWorkspace.mockResolvedValue({
+    ...syncStatus(),
+    safety_backup: "/data/ticketd/backups/before-download.sqlite3",
+  });
   show();
   const download = await screen.findByRole("radio", {
     name: /Download an existing Workspace/,
@@ -155,6 +158,10 @@ test("downloading an existing Workspace asks once before replacing this one", as
   expect(
     await screen.findByRole("heading", { name: "This desktop" }),
   ).toBeTruthy();
+  // What was replaced can be found again.
+  expect(screen.getByLabelText("Safety backup path").textContent).toBe(
+    "/data/ticketd/backups/before-download.sqlite3",
+  );
 });
 
 test("a connected Workspace shows its account, folder and that files are not encrypted", async () => {

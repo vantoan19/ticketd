@@ -124,6 +124,19 @@ test("closing while uploads are pending says work is saved, lists them and quits
   expect(win.quit).toHaveBeenCalledTimes(1);
 });
 
+test("the exit dialog opens with focus on Quit", async () => {
+  api.status.mockResolvedValue(uploading([ticket]));
+  const finish = flush();
+  guard()();
+  const dialog = await screen.findByRole("dialog");
+  const quit = within(dialog).getByRole("button", { name: "Quit now" });
+  await waitFor(() => expect(document.activeElement).toBe(quit));
+  await finish([ticket]);
+  expect(document.activeElement).toBe(
+    within(dialog).getByRole("button", { name: "Quit" }),
+  );
+});
+
 test("after the limit the dialog stays open with what did not upload, until one click", async () => {
   api.status.mockResolvedValue(uploading([ticket, spec, image]));
   const finish = flush();

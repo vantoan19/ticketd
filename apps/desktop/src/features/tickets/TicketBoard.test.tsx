@@ -1481,3 +1481,32 @@ test("cards retain source, project, Plan and core readiness context; project and
   expect(screen.getByRole("radiogroup", { name: "Rows" })).toBeTruthy();
   expect(screen.queryByRole("radiogroup", { name: "Layout" })).toBeNull();
 });
+
+test("a board card says Needs review in place of its readiness", async () => {
+  const defaults = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args?: unknown) =>
+    command === "sync_conflicts"
+      ? [
+          {
+            kind: "ticket",
+            id: "1",
+            reference: "T-KQ1",
+            title: "Ticket 1",
+            fields: ["status"],
+            detected_at: "2026-11-11T18:41:00Z",
+            read: false,
+          },
+        ]
+      : defaults(command, args),
+  );
+  saved = [ticket(1), ticket(3)];
+  render(<App />);
+  await settle();
+  await showBoard();
+  const card = (reference: string) =>
+    document.querySelector(`[data-board-reference="${reference}"]`);
+  expect(card("T-KQ1")?.textContent).toContain("Needs review");
+  expect(card("T-KQ1")?.textContent).not.toContain("Ready");
+  expect(card("T-KQ3")?.textContent).toContain("Ready");
+  expect(card("T-KQ3")?.textContent).not.toContain("Needs review");
+});

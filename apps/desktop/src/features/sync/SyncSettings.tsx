@@ -88,6 +88,8 @@ export function SyncSettings({
   heading?: RefObject<HTMLHeadingElement | null>;
 }) {
   const { status } = useSyncStatus();
+  // Where the Workspace a download replaced was kept, while this page is open.
+  const [safetyBackup, setSafetyBackup] = useState("");
   return (
     <div className="settings-column source-settings-column">
       <h1 id="settings-heading" ref={heading} tabIndex={-1}>
@@ -97,11 +99,20 @@ export function SyncSettings({
         Keeps this Workspace the same on your desktops, through your own Google
         Drive.
       </p>
+      {safetyBackup && (
+        <Alert role="status">
+          <AlertTitle>This Workspace was replaced</AlertTitle>
+          <AlertDescription>
+            A safety backup of the Workspace this desktop had before is kept at{" "}
+            <code aria-label="Safety backup path">{safetyBackup}</code>
+          </AlertDescription>
+        </Alert>
+      )}
       {status &&
         (status.connection === "not_connected" ? (
           <Connect />
         ) : status.connection === "choosing" ? (
-          <Choose status={status} />
+          <Choose status={status} onDownloaded={setSafetyBackup} />
         ) : status.first_sync ? (
           <FirstSync status={status} progress={status.first_sync} />
         ) : (
@@ -151,7 +162,14 @@ function Connect() {
 
 const UPLOAD = "upload";
 
-function Choose({ status }: { status: SyncStatus }) {
+function Choose({
+  status,
+  onDownloaded,
+}: {
+  status: SyncStatus;
+  /** Told where the safety backup of the replaced Workspace is. */
+  onDownloaded: (safetyBackup: string) => void;
+}) {
   const now = useNow();
   const { busy, failure, run } = useCommand();
   const [options, setOptions] = useState<SyncSetupOptions | null>(null);
@@ -264,10 +282,13 @@ function Choose({ status }: { status: SyncStatus }) {
           width={573}
           onSubmit={() => {
             setConfirming(false);
-            void run(
-              () => syncApi.downloadWorkspace(download.folder_id),
-              "This Workspace was not replaced",
-            );
+            void run(async () => {
+              const replaced = await syncApi.downloadWorkspace(
+                download.folder_id,
+              );
+              onDownloaded(replaced.safety_backup);
+              return replaced;
+            }, "This Workspace was not replaced");
           }}
         >
           <dl className="sync-summary">

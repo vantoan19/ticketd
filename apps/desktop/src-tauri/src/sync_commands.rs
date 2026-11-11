@@ -836,20 +836,31 @@ pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
     Ok(workspace.sync_upload_workspace(remote.as_ref(), "ticketd Workspace")?)
 }
 
+/// The status after a download, and where the replaced Workspace was kept.
+#[derive(Debug, Serialize)]
+pub struct Downloaded {
+    #[serde(flatten)]
+    status: SyncStatus,
+    safety_backup: String,
+}
+
 /// Replaces the Workspace file, like restoring a backup: sync is held off
 /// meanwhile, and the handle used here is the one the core consumes.
 #[tauri::command(async)]
 pub fn sync_download_workspace(
     host: tauri::State<'_, SyncHost>,
     folder_id: String,
-) -> Outcome<SyncStatus> {
+) -> Outcome<Downloaded> {
     check_folder_id(&folder_id)?;
     let _no_run = host.scheduler.hold();
     let workspace = open_workspace()?;
     let remote = signed_in_drive(&workspace)?;
-    let (replaced, _safety_backup) =
+    let (replaced, safety_backup) =
         workspace.sync_download_workspace(remote.as_ref(), &folder_id)?;
-    Ok(replaced.sync_status()?)
+    Ok(Downloaded {
+        status: replaced.sync_status()?,
+        safety_backup: safety_backup.display().to_string(),
+    })
 }
 
 #[tauri::command(async)]
