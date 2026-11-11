@@ -76,12 +76,12 @@ use the normal application workspace. The override does not isolate OS credentia
 stores, browser sign-in, or all WebView preferences/drafts; use a separate OS user
 for complete isolation and packaged-app testing.
 
-A new Workspace normally takes a random two-letter device code for its Ticket
-references. Everything Cargo runs in this repository (`cargo test`, `cargo run`,
-`npm run desktop -- dev`) gets `TICKETD_TEST_DEVICE_CODE=KQ` from
-`.cargo/config.toml`, so tests can assert references such as `T-KQ1`. Installed
-builds do not have it. To try two devices from source, set the variable to a
-different code before creating the second Workspace.
+A new Workspace takes a random two-letter device code for its Ticket references,
+including under `cargo run` and `npm run desktop -- dev`. Only `cargo test` fixes
+the code to `KQ`, so tests can assert references such as `T-KQ1`: the
+`ticketd-core` and `ticketd-cli` dev-dependencies turn on the core's
+`test-device-code` feature. `cargo test` therefore leaves a `target/debug/ticketd`
+with the fixed code; `cargo build` or `cargo run` replaces it with a normal one.
 
 ## Run and test
 

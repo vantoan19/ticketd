@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { Activity } from "./Activity";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -23,6 +23,11 @@ vi.mock("@uiw/react-codemirror", () => ({
     />
   ),
 }));
+// The composer's editor loads lazily. Load it once up front so no test waits on the
+// import, which is slow when many test files start together.
+beforeAll(async () => {
+  await import("@/features/markdown/MarkdownEditor");
+});
 afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();

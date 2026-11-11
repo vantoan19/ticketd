@@ -1324,8 +1324,10 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     drop(lock);
     let mut workspaces: Vec<_> = (0..2)
         .map(|_| {
+            // Only a hang guard: `Workspace::open` bounds its own wait for the lock, and
+            // a migration under a loaded machine has outlasted five seconds.
             receiver
-                .recv_timeout(std::time::Duration::from_secs(5))
+                .recv_timeout(std::time::Duration::from_secs(120))
                 .expect("concurrent workspace open timed out")
         })
         .collect();
