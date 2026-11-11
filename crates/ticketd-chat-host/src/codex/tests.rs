@@ -393,9 +393,83 @@ async fn a_retrying_harness_keeps_the_turn_active_until_the_terminal_error() {
     };
     assert_eq!(problem.message, "You've hit your usage limit.");
     // The reset time from the rate-limit snapshot travels with the problem.
+    assert_eq!(problem.resets_at, Some(1_730_948_100));
     let detail = problem.detail.as_ref().map(|detail| detail.payload());
     assert!(detail.is_some_and(|payload| payload.contains("\"resetsAt\":1730948100")));
     peer.assert_nothing_written().await;
+}
+
+#[test]
+fn a_usage_limit_carries_a_reset_time_only_when_the_provider_gave_one() {
+    let resets_at = |limits: Option<Value>| {
+        let mut session = Session::default();
+        if let Some(limits) = limits {
+            session.notification("account/rateLimits/updated", &json!({"rateLimits": limits}));
+        }
+        let failed = json!({"threadId": "thr_1", "turn": {
+            "id": "turn_1",
+            "status": "failed",
+            "error": {"message": "limit", "codexErrorInfo": "usageLimitExceeded"},
+        }});
+        match session.notification("turn/completed", &failed).as_slice() {
+            [
+                EventKind::TurnEnded {
+                    outcome: TurnOutcome::Failed(problem),
+                    ..
+                },
+            ] => problem.resets_at,
+            other => panic!("one failed turn, got {other:?}"),
+        }
+    };
+    let window = |used: u64, resets: Value| json!({"usedPercent": used, "resetsAt": resets});
+
+    assert_eq!(resets_at(None), None);
+    // The limit lifts when the last exhausted window resets; others say nothing of it.
+    let both =
+        json!({"primary": window(100, json!(1_000)), "secondary": window(100, json!(2_000))});
+    assert_eq!(resets_at(Some(both)), Some(2_000));
+    let one = json!({"primary": window(100, json!(1_000)), "secondary": window(40, json!(2_000))});
+    assert_eq!(resets_at(Some(one)), Some(1_000));
+    let none = json!({"primary": window(40, json!(1_000))});
+    assert_eq!(resets_at(Some(none)), None);
+    // Not a time: text, a negative number, a year past 9999.
+    for bad in [json!("soon"), json!(-5), json!(9_999_999_999_999_999_i64)] {
+        assert_eq!(resets_at(Some(json!({"primary": window(100, bad)}))), None);
+    }
+    // Milliseconds are read as the same moment in seconds.
+    let millis = json!({"primary": window(100, json!(1_730_948_100_000_i64))});
+    assert_eq!(resets_at(Some(millis)), Some(1_730_948_100));
+}
+
+#[test]
+fn an_unavailable_model_or_mcp_server_is_reported_as_a_capability_not_a_warning() {
+    let mut session = Session::default();
+    let rerouted = session.notification("model/rerouted", &json!({"turnId": "turn_1"}));
+    let failed = json!({"name": "github", "status": "failed", "error": "exited with 1"});
+    let failed = session.notification("mcpServer/startupStatus/updated", &failed);
+    let ready = json!({"name": "github", "status": "ready"});
+    let ready = session.notification("mcpServer/startupStatus/updated", &ready);
+
+    let kinds = |events: &[EventKind]| -> Vec<String> { events.iter().map(brief).collect() };
+    assert_eq!(
+        kinds(&rerouted),
+        ["notice CapabilityUnavailable turn_1 \"Codex rerouted this turn to a different model\""]
+    );
+    let [
+        EventKind::Notice {
+            kind: NoticeKind::CapabilityUnavailable,
+            message,
+            ..
+        },
+    ] = failed.as_slice()
+    else {
+        panic!("one capability notice, got {failed:?}");
+    };
+    assert_eq!(
+        message,
+        "Codex could not start the MCP server github: exited with 1"
+    );
+    assert!(ready.is_empty(), "{ready:?}");
 }
 
 #[test]

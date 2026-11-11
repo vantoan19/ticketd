@@ -631,6 +631,7 @@ impl Supervisor {
                     kind: crate::ProblemKind::NotInstalled,
                     message: format!("no adapter is available for harness '{}'", chat.harness),
                     detail: None,
+                    resets_at: None,
                 },
                 native_resume: false,
             });
@@ -768,6 +769,13 @@ impl Supervisor {
         self.stop = None;
         self.stop_deadline = None;
         self.stop_when_turn_known = false;
+        // It was about the session that just ended.
+        if matches!(
+            self.problem,
+            Some(ChatProblem::CapabilityUnavailable { .. })
+        ) {
+            self.problem = None;
+        }
     }
 
     fn on_loss(&mut self, detail: String) {
@@ -1341,13 +1349,14 @@ impl Supervisor {
                         turn_id: turn_id.clone(),
                     });
                 }
-                let (state, detail, problem) = match outcome {
-                    TurnOutcome::Completed => (ChatTurnState::Completed, None, None),
-                    TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None),
+                let (state, detail, problem, problem_resets_at) = match outcome {
+                    TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
+                    TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None, None),
                     TurnOutcome::Failed(problem) => (
                         ChatTurnState::Failed,
                         Some(problem.message.chars().take(CHAT_NOTICE_LIMIT).collect()),
                         Some(problem_key(problem.kind).to_owned()),
+                        problem.resets_at,
                     ),
                 };
                 observations.push(ChatObservation::TurnEnded {
@@ -1355,6 +1364,7 @@ impl Supervisor {
                     state,
                     detail,
                     problem,
+                    problem_resets_at,
                 });
                 self.record(observations);
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
@@ -1387,6 +1397,17 @@ impl Supervisor {
                 ..
             } => match kind {
                 NoticeKind::Retrying | NoticeKind::Warning => self.notice(message),
+                NoticeKind::CapabilityUnavailable => {
+                    let detail: String = message.chars().take(CHAT_NOTICE_LIMIT).collect();
+                    self.notice(message);
+                    // It stops nothing, so it never replaces a problem that does.
+                    if matches!(
+                        self.problem,
+                        None | Some(ChatProblem::CapabilityUnavailable { .. })
+                    ) {
+                        self.problem = Some(ChatProblem::CapabilityUnavailable { detail });
+                    }
+                }
                 NoticeKind::EffectiveSettings => {
                     let settings = detail.map_or(message, |detail| detail.payload().to_owned());
                     let chat = self.chat_id.clone();

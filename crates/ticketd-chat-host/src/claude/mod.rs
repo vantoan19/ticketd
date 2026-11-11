@@ -100,6 +100,7 @@ impl ClaudeAdapter {
                 self.bridge.display()
             ),
             detail: Some(ProviderDetail::new("spawn", &error.to_string())),
+            resets_at: None,
         }
     }
 }
@@ -111,6 +112,7 @@ fn not_installed() -> Problem {
                   running `claude`, then recheck."
             .to_owned(),
         detail: None,
+        resets_at: None,
     }
 }
 

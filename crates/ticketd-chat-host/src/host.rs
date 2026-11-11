@@ -81,6 +81,10 @@ pub enum HostError {
     Working,
     #[error("ticketd is quitting")]
     Quitting,
+    #[error("the workspace is being restored from a backup; try again when it has finished")]
+    Restoring,
+    #[error("Chat is turned off")]
+    TurnedOff,
 }
 
 impl From<Error> for HostError {
@@ -160,6 +164,11 @@ pub enum ChatProblem {
     CleanupUnconfirmed {
         reason: String,
     },
+    /// An optional tool, MCP server or model of the running session is unavailable.
+    /// It stops nothing: the Chat still takes messages.
+    CapabilityUnavailable {
+        detail: String,
+    },
 }
 
 /// A request that can be answered right now. Stored interactions are history only.
@@ -230,6 +239,11 @@ struct Inner {
     adapters: HashMap<&'static str, Arc<dyn HarnessAdapter>>,
     chats: Mutex<HashMap<String, mpsc::Sender<Command>>>,
     quitting: AtomicBool,
+    /// Set while the workspace is being replaced by a backup. Checked where `quitting`
+    /// is, so every clone of the host refuses to start or reach a supervisor.
+    restoring: AtomicBool,
+    /// Set while Chat is switched off in Settings, for the same reason.
+    off: AtomicBool,
 }
 
 impl ChatHost {
@@ -263,6 +277,8 @@ impl ChatHost {
                     .collect(),
                 chats: Mutex::new(HashMap::new()),
                 quitting: AtomicBool::new(false),
+                restoring: AtomicBool::new(false),
+                off: AtomicBool::new(false),
             }),
         })
     }
@@ -367,8 +383,19 @@ impl ChatHost {
             .map_err(|_| HostError::Quitting)
     }
 
-    /// Stops every running Chat with bounded cleanup and keeps the host usable, for
-    /// turning Chat off in Settings.
+    /// Chat was switched off: refuses every request that would reach or start a
+    /// supervisor, on every clone of this host, then stops every running Chat.
+    pub async fn turn_off(&self) -> Vec<UnconfirmedCleanup> {
+        self.inner.off.store(true, Ordering::SeqCst);
+        self.stop_all().await
+    }
+
+    /// Chat was switched on again; requests are served.
+    pub fn turn_on(&self) {
+        self.inner.off.store(false, Ordering::SeqCst);
+    }
+
+    /// Stops every running Chat with bounded cleanup and keeps the host usable.
     pub async fn stop_all(&self) -> Vec<UnconfirmedCleanup> {
         let chats: Vec<_> = self.chats().drain().collect();
         let mut waiting = Vec::new();
@@ -393,6 +420,33 @@ impl ChatHost {
         self.stop_all().await
     }
 
+    /// Before the workspace is replaced by a backup: refuses every request that would
+    /// reach or start a supervisor, on every clone of this host, then stops every
+    /// running Chat. Nothing runs until `finish_restore`.
+    pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
+        self.inner.restoring.store(true, Ordering::SeqCst);
+        self.stop_all().await
+    }
+
+    /// The restore is over, whether or not it replaced anything; requests are served again.
+    pub fn finish_restore(&self) {
+        self.inner.restoring.store(false, Ordering::SeqCst);
+    }
+
+    /// Why no supervisor may be reached or started right now, if any reason.
+    fn closed(&self) -> Result<(), HostError> {
+        if self.inner.quitting.load(Ordering::SeqCst) {
+            return Err(HostError::Quitting);
+        }
+        if self.inner.restoring.load(Ordering::SeqCst) {
+            return Err(HostError::Restoring);
+        }
+        if self.inner.off.load(Ordering::SeqCst) {
+            return Err(HostError::TurnedOff);
+        }
+        Ok(())
+    }
+
     async fn ask<T>(
         &self,
         chat_id: &str,
@@ -410,15 +464,16 @@ impl ChatHost {
     // ponytail: supervisors and idle runtimes live until quit or trash; add an idle
     // timeout when the number of open harness processes becomes a cost.
     fn sender(&self, chat_id: &str) -> Result<mpsc::Sender<Command>, HostError> {
-        if self.inner.quitting.load(Ordering::SeqCst) {
-            return Err(HostError::Quitting);
-        }
+        self.closed()?;
         if let Some(commands) = self.chats().get(chat_id).filter(|c| !c.is_closed()) {
             return Ok(commands.clone());
         }
         let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
         let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
         let mut chats = self.chats();
+        // Checked again under the lock `stop_all` drains with, so a request racing
+        // Quit or a restore cannot add a supervisor after the running ones were stopped.
+        self.closed()?;
         let commands = chats
             .entry(chat_id.to_owned())
             .and_modify(|commands| {

@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ticketd_chat_host::{
     Activity, ChatHost, ChatLive, ChatProblem, ChatUpdate, ContextSource, HarnessAdapter,
-    HostError, Inspection, InteractionAnswer, InteractionKind, LoginState, QuestionAnswer,
-    ResumeMode, SendMode, Subscription, UnconfirmedCleanup, WorkspaceOpener, harness_key,
+    HostError, Inspection, InteractionAnswer, InteractionKind, LoginState, ProblemKind,
+    QuestionAnswer, ResumeMode, SendMode, Subscription, UnconfirmedCleanup, WorkspaceOpener,
+    harness_key, problem_kind,
 };
 use ticketd_core::{
     Chat, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
@@ -149,12 +150,49 @@ pub enum Retention {
     Restore,
 }
 
-/// A Chat that was created. `send_error` says why its first message was not saved; the
-/// Chat exists either way, so the interface opens it instead of creating another.
+/// A Chat that was created. `send_error` says why its first message was not saved. The
+/// Chat exists either way: the interface opens it with the unsent text in its composer
+/// and makes a new `command_id` for whatever New Chat is asked for next.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Created {
     pub chat_id: String,
     pub send_error: Option<String>,
+}
+
+/// A restore that replaced the workspace. `warning` says what could not be confirmed
+/// around it; the data is the backup's either way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Restored {
+    /// The safety copy of the workspace as it was before.
+    pub safety_path: String,
+    pub warning: Option<String>,
+}
+
+/// What a restore reports. `restored` is the safety copy, or why nothing was replaced:
+/// only that is a failure. An unconfirmed stop or a failed check of the restored Chats
+/// happened around a restore that did take place, so they are warnings on a success.
+pub fn restore_outcome(
+    restored: Result<PathBuf, String>,
+    reconciled: Outcome<()>,
+    unconfirmed: usize,
+) -> Result<Restored, String> {
+    let safety = restored?;
+    let unchecked = reconciled.err().map(|failure| {
+        format!(
+            "Its Chats could not be checked ({}); restart ticketd before using Chat.",
+            failure.message
+        )
+    });
+    let unstopped = (unconfirmed > 0).then(|| {
+        format!(
+            "Stopping {unconfirmed} Chat(s) could not be confirmed; a harness process may still be running."
+        )
+    });
+    let warnings: Vec<String> = unchecked.into_iter().chain(unstopped).collect();
+    Ok(Restored {
+        safety_path: safety.display().to_string(),
+        warning: Some(warnings.join(" ")).filter(|warning| !warning.is_empty()),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -326,6 +364,7 @@ fn surroundings(
     workspace: &Workspace,
     chat: &Chat,
     folder_users: &[Chat],
+    checked_turn: Option<String>,
 ) -> Result<Surroundings, ticketd_core::Error> {
     let shared_with = folder_users
         .iter()
@@ -333,6 +372,7 @@ fn surroundings(
         .map(|other| other.title.clone().unwrap_or("Untitled Chat".to_owned()))
         .collect();
     Ok(Surroundings {
+        checked_turn,
         folder_missing: !Path::new(&chat.execution_folder).is_dir(),
         shared_with,
         links: links(workspace, &chat.id)?,
@@ -384,9 +424,14 @@ pub struct Chats {
     /// The Experimental switch. The interface keeps the person's choice and tells the
     /// backend at startup; until then Chat is off and nothing can run.
     enabled: AtomicBool,
-    /// Set while the workspace is being replaced by a backup: nothing may start.
+    /// Set while the workspace is being replaced by a backup, so that no host is
+    /// started meanwhile. A host that already runs refuses work by itself.
     restoring: AtomicBool,
     host: Mutex<Option<ChatHost>>,
+    /// Per Chat, the failed turn after which "Check again" found the harness usable.
+    // ponytail: kept for this run of ticketd only; after a restart the last turn's
+    // failure is told again, as past. Store it if that proves annoying.
+    checked: Mutex<HashMap<String, String>>,
     feeds: Mutex<HashMap<u64, Feed>>,
     next_feed: AtomicU64,
     fresh: Mutex<HashMap<String, FreshHistory>>,
@@ -411,6 +456,7 @@ impl Chats {
             enabled: AtomicBool::new(false),
             restoring: AtomicBool::new(false),
             host: Mutex::new(None),
+            checked: Mutex::new(HashMap::new()),
             feeds: Mutex::new(HashMap::new()),
             next_feed: AtomicU64::new(1),
             fresh: Mutex::new(HashMap::new()),
@@ -493,8 +539,14 @@ impl Chats {
     pub async fn set_enabled(&self, enabled: bool) -> Vec<UnconfirmedCleanup> {
         self.enabled.store(enabled, Ordering::SeqCst);
         match self.started_host() {
-            Some(host) if !enabled => host.stop_all().await,
-            _ => Vec::new(),
+            // The host refuses on every clone of it, including one a command took
+            // while Chat was still on.
+            Some(host) if !enabled => host.turn_off().await,
+            Some(host) => {
+                host.turn_on();
+                Vec::new()
+            }
+            None => Vec::new(),
         }
     }
 
@@ -514,7 +566,9 @@ impl Chats {
     pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
         self.restoring.store(true, Ordering::SeqCst);
         match self.started_host() {
-            Some(host) => host.stop_all().await,
+            // The host refuses on every clone of it, including one a command took
+            // before this point.
+            Some(host) => host.begin_restore().await,
             None => Vec::new(),
         }
     }
@@ -541,6 +595,10 @@ impl Chats {
         });
         // Views read a new snapshot: their cursors belong to the replaced records.
         lock(&self.feeds).clear();
+        lock(&self.checked).clear();
+        if let Some(host) = self.started_host() {
+            host.finish_restore();
+        }
         self.restoring.store(false, Ordering::SeqCst);
         reconciled
     }
@@ -575,7 +633,7 @@ impl Chats {
                 &chat,
                 &live,
                 &Tracker::from_items(&items),
-                &surroundings(&workspace, &chat, &folder_users)?,
+                &surroundings(&workspace, &chat, &folder_users, self.checked(&chat.id))?,
             ));
         }
         Ok(summaries)
@@ -711,9 +769,15 @@ impl Chats {
         lock(&self.fresh).get(chat_id).copied()
     }
 
+    fn checked(&self, chat_id: &str) -> Option<String> {
+        lock(&self.checked).get(chat_id).cloned()
+    }
+
     fn state(&self, view: &View) -> Outcome<ChatState> {
         let workspace = self.workspace()?;
-        let around = surroundings(&workspace, &view.chat, &folder_users(&workspace)?)?;
+        let users = folder_users(&workspace)?;
+        let checked = self.checked(&view.chat.id);
+        let around = surroundings(&workspace, &view.chat, &users, checked)?;
         Ok(chat_view::chat_state(
             &view.chat,
             &view.live,
@@ -733,7 +797,12 @@ impl Chats {
             &chat,
             &attached.live,
             &tracker,
-            &surroundings(&workspace, &chat, &folder_users(&workspace)?)?,
+            &surroundings(
+                &workspace,
+                &chat,
+                &folder_users(&workspace)?,
+                self.checked(chat_id),
+            )?,
         );
         let fresh = self.fresh(chat_id);
         let items = attached
@@ -971,11 +1040,16 @@ impl Chats {
         }
     }
 
-    /// Probes the Chat's harness again and, when it is usable and the Chat was stopped
-    /// by a failed start, tries that start again. No input is sent by this.
+    /// Probes the Chat's harness again. When it is not usable, says why. When it is:
+    /// a Chat stopped by a failed start tries that start again, and a failure of the
+    /// last turn stops being told as a problem, since what the probe can see is in
+    /// order. No input is sent by this.
     pub async fn check_again(&self, chat_id: &str) -> Outcome<()> {
         let host = self.host()?;
-        let chat = self.workspace()?.chat(chat_id)?;
+        let workspace = self.workspace()?;
+        let chat = workspace.chat(chat_id)?;
+        let items = workspace.chat_snapshot(chat_id, SUMMARY_ITEMS)?.items;
+        drop(workspace);
         let (id, name) = HARNESSES
             .into_iter()
             .find(|(id, _)| *id == chat.harness)
@@ -989,6 +1063,17 @@ impl Chats {
             Some(ChatProblem::OpenFailed { .. })
         ) {
             host.resume(chat_id, ResumeMode::Native).await?;
+        }
+        if let Some(turn) = Tracker::from_items(&items).failed_turn() {
+            // A sign-in the probe cannot see is not shown to be in order by it.
+            let signed_out =
+                turn.problem.as_deref().map(problem_kind) == Some(ProblemKind::LoginRequired);
+            if signed_out && status.status == "sign_in_unknown" {
+                return Err(failed(status.message.unwrap_or_default()));
+            }
+            lock(&self.checked).insert(chat_id.to_owned(), turn.id.clone());
+            // No record changed, so the views are told to read the Chat again.
+            self.resync(chat_id);
         }
         Ok(host.notify_changed(chat_id).await?)
     }

@@ -11,7 +11,7 @@ use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
     NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
-    SubmissionId, ToolStatus, TurnOutcome,
+    SubmissionId, ToolStatus, TurnOutcome, reset_time,
 };
 
 #[derive(Debug)]
@@ -43,6 +43,8 @@ pub(super) struct Session {
     tools: HashMap<String, (String, ProviderDetail)>,
     /// Text blocks being streamed, oldest first, by content block index.
     streams: VecDeque<(i64, NativeItemId)>,
+    /// When the limit Claude Code last reported as exhausted resets, if it said.
+    limit_resets_at: Option<i64>,
 }
 
 fn text<'a>(event: &'a Value, field: &str) -> Option<&'a str> {
@@ -148,6 +150,19 @@ impl Session {
                 self.request_gone(event, InteractionResolution::Withdrawn, &mut events);
             }
             "turn_result" => self.turn_result(event, &mut events),
+            // The bridge passes rate-limit changes through as they are. They are kept
+            // for the failure they explain and are not shown as unknown traffic.
+            "sdk_message_unmapped" if text(event, "sdk_type") == Some("rate_limit_event") => {
+                let info = text(event, "json")
+                    .and_then(|json| serde_json::from_str::<Value>(json).ok())
+                    .map(|message| message["rate_limit_info"].clone())
+                    .unwrap_or_default();
+                // ponytail: `resetsAt` is taken as seconds (milliseconds if too large
+                // for that), from the Agent SDK types; confirm with a live session (#264).
+                self.limit_resets_at = (info["status"] == "rejected")
+                    .then(|| reset_time(&info["resetsAt"]))
+                    .flatten();
+            }
             "sdk_message_unmapped" => {
                 let kind = match (text(event, "sdk_type"), text(event, "sdk_subtype")) {
                     (Some(kind), Some(subtype)) => format!("{kind}/{subtype}"),
@@ -494,18 +509,22 @@ impl Session {
                 "terminal_reason": event.get("terminal_reason"),
                 "denied_tool_names": event.get("denied_tool_names"),
             });
+            let kind = match turn.and_then(|turn| turn.error).as_deref() {
+                Some("authentication_failed") => ProblemKind::LoginRequired,
+                Some("rate_limit" | "billing_error") => ProblemKind::QuotaExhausted,
+                _ => ProblemKind::Other,
+            };
             TurnOutcome::Failed(Problem {
-                kind: match turn.and_then(|turn| turn.error).as_deref() {
-                    Some("authentication_failed") => ProblemKind::LoginRequired,
-                    Some("rate_limit" | "billing_error") => ProblemKind::QuotaExhausted,
-                    _ => ProblemKind::Other,
-                },
+                kind,
                 message: if errors.is_empty() {
                     text(event, "result_text").unwrap_or(subtype).to_owned()
                 } else {
                     errors.join("; ")
                 },
                 detail: Some(ProviderDetail::new("turn_result", &detail.to_string())),
+                resets_at: self
+                    .limit_resets_at
+                    .filter(|_| kind == ProblemKind::QuotaExhausted),
             })
         };
         events.push(EventKind::TurnEnded {

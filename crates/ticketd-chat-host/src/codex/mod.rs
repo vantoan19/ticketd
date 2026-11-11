@@ -98,11 +98,13 @@ impl HarnessAdapter for CodexAdapter {
                       recheck."
                 .to_owned(),
             detail: None,
+            resets_at: None,
         })?;
         let io = spawn(&executable, ARGUMENTS).map_err(|error| Problem {
             kind: ProblemKind::Other,
             message: format!("Could not start {}: {error}", executable.display()),
             detail: Some(ProviderDetail::new("spawn", &error.to_string())),
+            resets_at: None,
         })?;
         runtime::open_over(io, &request, Options::default()).await
     }

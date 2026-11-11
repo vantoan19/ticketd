@@ -19,8 +19,8 @@ use ticketd_core::ChatListFilter;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, ChatFailure, Chats, CloseAction, Created, HarnessStatus, HistorySelection, LinkRef,
-    NewChatInput, Opened, Overview, QuitAction, Retention, UncertainDecision, close_action,
-    quit_action,
+    NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
+    close_action, quit_action, restore_outcome,
 };
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
@@ -339,7 +339,7 @@ pub async fn restore_workspace(
     app: AppHandle,
     bridge: State<'_, ChatBridge>,
     path: String,
-) -> Result<String, String> {
+) -> Result<Restored, String> {
     let chats = bridge.chats.clone();
     let unconfirmed = chats.begin_restore().await;
     let restored = tauri::async_runtime::spawn_blocking(move || {
@@ -350,22 +350,11 @@ pub async fn restore_workspace(
     if let Ok(overview) = chats.overview() {
         let _ = app.emit(OVERVIEW_EVENT, overview);
     }
-    let safety = restored
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
-    reconciled.map_err(|failure| {
-        format!(
-            "The workspace was restored, but its Chats could not be checked: {}",
-            failure.message
-        )
-    })?;
-    if !unconfirmed.is_empty() {
-        return Err(format!(
-            "The workspace was restored, but stopping {} Chat(s) could not be confirmed; a harness process may still be running.",
-            unconfirmed.len()
-        ));
-    }
-    Ok(safety.display().to_string())
+    let restored = match restored {
+        Ok(restored) => restored.map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    };
+    restore_outcome(restored, reconciled, unconfirmed.len())
 }
 
 /// The person's answer to the Quit confirmation.

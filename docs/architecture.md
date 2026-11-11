@@ -138,10 +138,23 @@ leaves the turn's outcome unknown, not the delivery. A written new turn that
 nothing confirms within a bound is recorded as uncertain. The person's decision
 about an uncertain submission is recorded beside the attempt and never rewrites
 it: Discard keeps the message and its uncertainty, and Resend is a new attempt
-for that message alone, dispatched with the queue paused. A failed turn keeps
-the kind of failure the adapter reported. Warnings, retries and unmodelled
-provider traffic are stored as bounded notices, and the settings a harness
-reports as in effect are stored with the Chat.
+for that message alone, dispatched with the queue paused. Where input stands
+(queued, sending, delivered, awaiting a decision or set aside) is derived in one
+place from all of its attempts and decisions: a discarded message is never queued
+again whatever is observed later, and a resend the harness refuses returns the
+message to awaiting a decision with the earlier uncertainty intact. A failed turn
+keeps the kind of failure the adapter reported and, for a usage limit, the reset
+time the provider gave. Such a failure describes the turn that ended; it does not
+block the next message, which only a condition observed now does. An optional
+tool, MCP server or model that is unavailable is a typed problem of the running
+session that blocks nothing. Warnings, retries and unmodelled provider traffic
+are stored as bounded notices, and the settings a harness reports as in effect
+are stored, bounded, with the Chat.
+
+A workspace restore stops every Chat first and the host refuses all Chat requests
+until it is over. A restore that replaced the data is reported as a success with
+its safety copy; an unconfirmed stop or a failed check of the restored Chats is a
+warning on that success.
 
 The core commits durable record changes and their ordered change entries
 atomically; the desktop publishes committed changes. A reconnecting view reads a

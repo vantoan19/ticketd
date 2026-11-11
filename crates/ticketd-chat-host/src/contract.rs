@@ -345,6 +345,10 @@ pub enum NoticeKind {
     Warning,
     /// The settings the harness reports as in effect for this session, in `detail`.
     EffectiveSettings,
+    /// An optional tool, MCP server or model the session asked for is unavailable.
+    /// `message` names it. The rest of the session can go on; nothing is substituted
+    /// by ticketd.
+    CapabilityUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -413,6 +417,24 @@ pub struct Problem {
     pub kind: ProblemKind,
     pub message: String,
     pub detail: Option<ProviderDetail>,
+    /// When the provider said the limit behind this failure resets, in seconds since
+    /// the Unix epoch, read with [`reset_time`]. `None` when it did not say.
+    pub resets_at: Option<i64>,
+}
+
+/// A provider's reset time as seconds since the Unix epoch, or `None` when the value
+/// is not a time: not a whole number, negative, or past year 9999. A value too large
+/// for seconds is read as milliseconds.
+pub fn reset_time(value: &serde_json::Value) -> Option<i64> {
+    let at = value.as_i64()?;
+    let seconds = if at > ticketd_core::CHAT_RESET_TIME_MAX {
+        at / 1000
+    } else {
+        at
+    };
+    (0..=ticketd_core::CHAT_RESET_TIME_MAX)
+        .contains(&seconds)
+        .then_some(seconds)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

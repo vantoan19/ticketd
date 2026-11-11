@@ -11,7 +11,7 @@ use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
     NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
-    SubmissionId, ToolStatus, TurnOutcome,
+    SubmissionId, ToolStatus, TurnOutcome, reset_time,
 };
 
 use super::rpc::{Reply, RpcError};
@@ -291,12 +291,25 @@ impl Session {
                     "Codex reported a warning",
                 )])
             }
+            // The model that was asked for is not the one answering.
             "model/rerouted" => Some(vec![notice(
-                NoticeKind::Warning,
+                NoticeKind::CapabilityUnavailable,
                 method,
                 params,
                 "Codex rerouted this turn to a different model",
             )]),
+            // ponytail: the field names come from the app-server schema and were not
+            // seen in a live session; any other shape stays ignored, as before.
+            "mcpServer/startupStatus/updated" if text(params, &["status"]) == Some("failed") => {
+                let server = text(params, &["name"]).unwrap_or("an MCP server");
+                let reason = text(params, &["error"]).unwrap_or("no reason given");
+                Some(vec![EventKind::Notice {
+                    turn: None,
+                    kind: NoticeKind::CapabilityUnavailable,
+                    message: format!("Codex could not start the MCP server {server}: {reason}"),
+                    detail: Some(detail(method, params)),
+                }])
+            }
             "windows/worldWritableWarning" => Some(vec![notice(
                 NoticeKind::Warning,
                 method,
@@ -384,6 +397,9 @@ impl Session {
                 .unwrap_or("Codex reported that the turn failed")
                 .to_owned(),
             detail: Some(detail("turn/error", &payload)),
+            resets_at: (kind == ProblemKind::QuotaExhausted)
+                .then(|| self.rate_limits.as_ref().and_then(limit_reset))
+                .flatten(),
         }
     }
 
@@ -753,6 +769,17 @@ fn delta(params: &Value) -> Option<(NativeTurnId, NativeItemId, &str)> {
         NativeItemId::new(text(params, &["itemId"])?),
         text(params, &["delta"])?,
     ))
+}
+
+/// When an exhausted limit resets: the latest reset among the windows the snapshot
+/// shows as used up. `None` when no window is, or none says when.
+fn limit_reset(limits: &Value) -> Option<i64> {
+    ["primary", "secondary"]
+        .into_iter()
+        .filter_map(|window| limits.get(window))
+        .filter(|window| window.get("usedPercent").and_then(Value::as_f64) >= Some(100.0))
+        .filter_map(|window| reset_time(window.get("resetsAt")?))
+        .max()
 }
 
 fn notice(kind: NoticeKind, method: &str, params: &Value, fallback: &str) -> EventKind {

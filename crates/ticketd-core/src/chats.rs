@@ -26,6 +26,13 @@ pub const CHAT_CHANGE_TAIL: usize = 2_000;
 /// Characters kept of one stored notice.
 pub const CHAT_NOTICE_LIMIT: usize = 2_000;
 
+/// Characters kept of the settings a harness reported as in effect.
+pub const CHAT_EFFECTIVE_SETTINGS_LIMIT: usize = 16_000;
+
+/// The latest reset time kept with a failed turn, in seconds since the Unix epoch
+/// (the end of year 9999). A value outside `0..=` this is not a time and is dropped.
+pub const CHAT_RESET_TIME_MAX: i64 = 253_402_300_799;
+
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 /// Chat tables are deliberately left without workspace change-token triggers: they
@@ -35,7 +42,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         "CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, title TEXT, harness TEXT NOT NULL, execution_folder TEXT NOT NULL, folder_managed INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, trashed INTEGER NOT NULL DEFAULT 0, queue_paused INTEGER NOT NULL DEFAULT 0, effective_settings TEXT, changes_trimmed_through INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT ({NOW}));
          CREATE TABLE IF NOT EXISTS chat_links (chat_id TEXT NOT NULL REFERENCES chats(id), kind TEXT NOT NULL, target_id TEXT NOT NULL, PRIMARY KEY(chat_id, kind, target_id));
          CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, native_session_id TEXT NOT NULL, origin TEXT NOT NULL, started_at TEXT NOT NULL DEFAULT ({NOW}));
-         CREATE TABLE IF NOT EXISTS chat_turns (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, native_turn_id TEXT, state TEXT NOT NULL, detail TEXT, problem TEXT, started_at TEXT NOT NULL DEFAULT ({NOW}), ended_at TEXT);
+         CREATE TABLE IF NOT EXISTS chat_turns (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, native_turn_id TEXT, state TEXT NOT NULL, detail TEXT, problem TEXT, problem_resets_at INTEGER, started_at TEXT NOT NULL DEFAULT ({NOW}), ended_at TEXT);
          CREATE UNIQUE INDEX IF NOT EXISTS chat_turns_active ON chat_turns(chat_id) WHERE state = 'active';
          CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, role TEXT NOT NULL, text TEXT NOT NULL, complete INTEGER NOT NULL, turn_id TEXT REFERENCES chat_turns(id), created_at TEXT NOT NULL DEFAULT ({NOW}));
          CREATE TABLE IF NOT EXISTS chat_submission_attempts (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), message_id TEXT NOT NULL REFERENCES chat_messages(id), intent TEXT NOT NULL, delivery TEXT NOT NULL, turn_id TEXT REFERENCES chat_turns(id), detail TEXT, decision TEXT, recorded_at TEXT NOT NULL DEFAULT ({NOW}));
@@ -218,15 +225,72 @@ pub struct ChatMessage {
     pub created_at: String,
 }
 
+/// Where user input stands, read from all of its attempts and the person's decisions
+/// together. Everything that asks "is it queued" or "does it await a decision" asks
+/// this, so a decision is never lost when a later observation arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatInputStanding {
+    /// Nothing may have reached the harness and nothing is undecided: it is in the queue.
+    Queued,
+    /// A submission was handed over and nothing is known about it yet.
+    Sending,
+    /// The harness acknowledged a submission or correlated a turn with one.
+    Delivered,
+    /// A submission may or may not have arrived, and either the person has not decided
+    /// or the resend they asked for was not accepted. Never sent without their request.
+    AwaitsDecision,
+    /// The person set it aside. It is never queued or sent again, whatever is observed
+    /// about its attempts afterwards.
+    SetAside,
+}
+
 impl ChatMessage {
-    /// The latest submission may or may not have arrived and the person has not
-    /// decided what to do about it.
+    /// Where this input stands. Meaningful for user input only.
+    pub fn standing(&self) -> ChatInputStanding {
+        let attempts = &self.attempts;
+        if attempts.iter().any(ChatSubmissionAttempt::received) {
+            return ChatInputStanding::Delivered;
+        }
+        let discarded = Some(ChatDeliveryDecision::Discarded);
+        if attempts.iter().any(|attempt| attempt.decision == discarded) {
+            return ChatInputStanding::SetAside;
+        }
+        // Nothing is queued while any submission is still in flight.
+        if attempts
+            .iter()
+            .any(|attempt| attempt.delivery == ChatDelivery::Possible)
+        {
+            return ChatInputStanding::Sending;
+        }
+        match attempts.last().map(|attempt| attempt.delivery) {
+            None => ChatInputStanding::Queued,
+            Some(ChatDelivery::Possible) => ChatInputStanding::Sending,
+            Some(ChatDelivery::Acknowledged) => ChatInputStanding::Delivered,
+            Some(ChatDelivery::Uncertain) => ChatInputStanding::AwaitsDecision,
+            // A resend that was not accepted settles nothing about the attempt before it.
+            Some(ChatDelivery::NotDelivered | ChatDelivery::Rejected) => {
+                if self.open_question().is_some() {
+                    ChatInputStanding::AwaitsDecision
+                } else {
+                    ChatInputStanding::Queued
+                }
+            }
+        }
+    }
+
+    /// The latest attempt whose delivery is still unknown.
+    pub fn open_question(&self) -> Option<&ChatSubmissionAttempt> {
+        self.attempts
+            .iter()
+            .rev()
+            .find(|attempt| attempt.delivery == ChatDelivery::Uncertain && !attempt.received())
+    }
+
+    /// A submission may or may not have arrived and what happens next is the person's
+    /// decision: they have not made one, or the resend they asked for was not accepted.
     pub fn awaits_decision(&self) -> bool {
-        self.attempts.last().is_some_and(|attempt| {
-            attempt.delivery == ChatDelivery::Uncertain
-                && !attempt.received()
-                && attempt.decision.is_none()
-        })
+        self.role == ChatRole::User && self.standing() == ChatInputStanding::AwaitsDecision
     }
 }
 
@@ -250,6 +314,9 @@ pub struct ChatTurn {
     pub detail: Option<String>,
     /// The kind of failure, as the host names it, when the turn ended with one.
     pub problem: Option<String>,
+    /// When the provider said the limit behind the failure resets, in seconds since
+    /// the Unix epoch. `None` when it did not say.
+    pub problem_resets_at: Option<i64>,
     pub started_at: String,
     pub ended_at: Option<String>,
 }
@@ -364,6 +431,10 @@ pub enum ChatObservation {
         detail: Option<String>,
         /// The kind of failure, as the host names it.
         problem: Option<String>,
+        /// When the provider said the limit behind the failure resets, in seconds
+        /// since the Unix epoch. Kept only within `0..=CHAT_RESET_TIME_MAX`.
+        #[serde(default)]
+        problem_resets_at: Option<i64>,
     },
     /// A checkpoint of an assistant message: `text` replaces what was stored.
     AssistantText {
@@ -510,10 +581,11 @@ fn turn_from_row(row: &Row<'_>) -> rusqlite::Result<ChatTurn> {
         started_at: row.get(5)?,
         ended_at: row.get(6)?,
         problem: row.get(7)?,
+        problem_resets_at: row.get(8)?,
     })
 }
 
-const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem FROM chat_turns";
+const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_at, ended_at, problem, problem_resets_at FROM chat_turns";
 
 fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
@@ -604,19 +676,9 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
             })
         })?
         .collect::<Result<_, _>>()?;
-    message.queued = message.role == ChatRole::User
-        && message
-            .attempts
-            .iter()
-            .all(|attempt| !may_have_been_delivered(attempt.delivery));
+    message.queued =
+        message.role == ChatRole::User && message.standing() == ChatInputStanding::Queued;
     Ok(Some(message))
-}
-
-fn may_have_been_delivered(delivery: ChatDelivery) -> bool {
-    match delivery {
-        ChatDelivery::Possible | ChatDelivery::Acknowledged | ChatDelivery::Uncertain => true,
-        ChatDelivery::NotDelivered | ChatDelivery::Rejected => false,
-    }
 }
 
 fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<ChatItem>, Error> {
@@ -971,8 +1033,10 @@ fn observe(
             state,
             detail,
             problem,
+            problem_resets_at,
         } => {
             require_turn(connection, chat_id, &turn_id)?;
+            let resets_at = problem_resets_at.filter(|at| (0..=CHAT_RESET_TIME_MAX).contains(at));
             if state == ChatTurnState::Active {
                 return Err(invalid("a turn cannot end as active"));
             }
@@ -992,8 +1056,8 @@ fn observe(
                 )));
             }
             connection.execute(
-                &format!("UPDATE chat_turns SET state = ?2, detail = ?3, problem = ?4, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
-                params![turn_id, name(state)?, detail, problem],
+                &format!("UPDATE chat_turns SET state = ?2, detail = ?3, problem = ?4, problem_resets_at = ?5, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
+                params![turn_id, name(state)?, detail, problem, resets_at],
             )?;
             log(connection, chat_id, "turn", &turn_id)?;
             expire_interactions(connection, chat_id, Some(&turn_id))
@@ -1137,7 +1201,8 @@ fn require_input(
         .ok_or_else(not_input)
 }
 
-/// Records the person's decision on the uncertain submission of `message`.
+/// Records the person's decision on the submission of `message` whose delivery is
+/// still unknown. A later decision replaces an earlier one that was not carried out.
 fn decide(
     connection: &Connection,
     chat_id: &str,
@@ -1145,8 +1210,7 @@ fn decide(
     decision: ChatDeliveryDecision,
 ) -> Result<(), Error> {
     let attempt = message
-        .attempts
-        .last()
+        .open_question()
         .filter(|_| message.awaits_decision())
         .ok_or_else(|| Error::ChatSubmissionUnresolved(message.id.clone()))?;
     connection.execute(
@@ -1474,9 +1538,10 @@ impl Workspace {
         let ids = statement
             .query_map([chat_id], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
+        // The query narrows; `queued` is the rule, with the person's decisions in view.
         let mut queue = Vec::with_capacity(ids.len());
         for id in ids {
-            queue.extend(read_message(&self.connection, &id)?);
+            queue.extend(read_message(&self.connection, &id)?.filter(|message| message.queued));
         }
         Ok(queue)
     }
@@ -1525,8 +1590,8 @@ impl Workspace {
     /// Record that the person asked for input whose delivery is uncertain to be sent
     /// again. The uncertain attempt keeps what was observed and gains the decision; the
     /// new submission is its own attempt, recorded as possible before the hand-off.
-    /// Refused unless the latest attempt is uncertain and undecided, so this can never
-    /// follow from anything but the person's request. Repeating `attempt_id` records
+    /// Refused unless the input awaits the person's decision, so this can never follow
+    /// from anything but their request. Repeating `attempt_id` records
     /// nothing new.
     pub fn record_chat_resubmission(
         &mut self,
@@ -1573,7 +1638,12 @@ impl Workspace {
     }
 
     /// Keep the settings the harness reported as in effect, replacing an earlier report.
+    /// Cut to `CHAT_EFFECTIVE_SETTINGS_LIMIT` characters.
     pub fn set_chat_effective_settings(&mut self, id: &str, settings: &str) -> Result<Chat, Error> {
+        let settings: String = settings
+            .chars()
+            .take(CHAT_EFFECTIVE_SETTINGS_LIMIT)
+            .collect();
         self.update_chat(id, |connection| {
             connection.execute(
                 "UPDATE chats SET effective_settings = ?2 WHERE id = ?1",

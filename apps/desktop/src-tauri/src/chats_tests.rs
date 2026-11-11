@@ -610,6 +610,7 @@ async fn a_typed_failure_notices_and_reported_settings_reach_a_view_opened_after
         kind,
         message: "said by the harness".to_owned(),
         detail: None,
+        resets_at: None,
     };
     f.emit(EventKind::Notice {
         turn: None,
@@ -878,4 +879,235 @@ async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the
     f.chats.set_link(&id, link(), false).await.unwrap();
     let (opened, _) = f.open(&id).await;
     assert!(opened.snapshot.chat.links.is_empty());
+}
+
+fn failure(kind: ProblemKind) -> Problem {
+    Problem {
+        kind,
+        message: "said by the harness".to_owned(),
+        detail: None,
+        resets_at: None,
+    }
+}
+
+fn failed_turn(turn: &str, problem: Problem) -> EventKind {
+    EventKind::TurnEnded {
+        turn: NativeTurnId::new(turn),
+        outcome: TurnOutcome::Failed(problem),
+        submissions: Vec::new(),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failure_of_the_last_turn_is_told_as_past_and_a_live_one_is_not() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let kinds = [
+        (ProblemKind::QuotaExhausted, "usage_limit"),
+        (ProblemKind::LoginRequired, "not_signed_in"),
+        (ProblemKind::PermissionUnavailable, "sandbox_unavailable"),
+        (ProblemKind::SessionInUse, "session_in_use"),
+    ];
+    for (turn, (kind, shown_as)) in kinds.into_iter().enumerate() {
+        let turn = format!("turn-{}", turn + 1);
+        f.emit(failed_turn(&turn, failure(kind))).await;
+        let (opened, _) = f.open(&id).await;
+        let shown = opened.snapshot.chat.problem.unwrap();
+        assert_eq!((shown.kind, shown.past), (shown_as, true));
+        // It says why the last turn stopped; it does not stop the next message.
+        f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+        settle().await;
+        assert_eq!(f.submitted().len(), turn_number(&turn) + 1, "{shown_as}");
+    }
+
+    // The same kind met when the harness cannot be started is the present state.
+    f.emit(failed_turn("turn-5", failure(ProblemKind::Other)))
+        .await;
+    f.fake.lose_process().await;
+    settle().await;
+    f.fake.fail_next_open(failure(ProblemKind::LoginRequired));
+    f.chats.send(&id, "blocked", SendMode::Auto).await.unwrap();
+    settle().await;
+    let (opened, _) = f.open(&id).await;
+    let shown = opened.snapshot.chat.problem.unwrap();
+    assert_eq!((shown.kind, shown.past), ("not_signed_in", false));
+}
+
+fn turn_number(turn: &str) -> usize {
+    turn.trim_start_matches("turn-").parse().unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_finds() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(failed_turn("turn-1", failure(ProblemKind::LoginRequired)))
+        .await;
+    let (_, seen) = f.open(&id).await;
+    let row = |f: &Fixture| f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row(&f).problem, Some("not_signed_in"));
+    assert!(
+        row(&f).problem_past,
+        "the row says it as the last turn's too"
+    );
+    assert!(!row(&f).needs_you, "a sign-in step is shown, not counted");
+
+    // Still signed out: the check says so and the notice stays.
+    let installed = |login| Inspection::Installed {
+        executable: PathBuf::from("harness"),
+        version: Some("1.0".to_owned()),
+        login,
+        capabilities: ticketd_chat_host::Capabilities {
+            steering: ticketd_chat_host::Capability::Unknown {
+                reason: String::new(),
+            },
+            native_resume: ticketd_chat_host::Capability::Unknown {
+                reason: String::new(),
+            },
+        },
+    };
+    f.fake.set_inspection(installed(LoginState::SignedOut));
+    assert!(f.chats.check_again(&id).await.is_err());
+    // A sign-in the probe cannot see is not taken as being in order.
+    f.fake.set_inspection(installed(LoginState::Unknown));
+    let unseen = f.chats.check_again(&id).await.unwrap_err();
+    assert!(unseen.message.contains("cannot check"), "{unseen:?}");
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(
+        opened.snapshot.chat.problem.map(|p| p.kind),
+        Some("not_signed_in")
+    );
+
+    // Signed in now: the notice about the past turn is cleared, and what is left is
+    // a Chat whose last turn Failed, which counts.
+    f.fake.set_inspection(installed(LoginState::SignedIn));
+    f.chats.check_again(&id).await.unwrap();
+    settle().await;
+    assert_eq!(seen.lock().unwrap().last().unwrap()["kind"], "resync");
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(opened.snapshot.chat.problem, None);
+    assert_eq!(opened.snapshot.chat.activity, "failed");
+    assert_eq!(row(&f).problem, None);
+    assert!(row(&f).needs_you, "a Failed Chat counts");
+    assert_eq!(f.submitted(), ["first"], "checking sent nothing");
+
+    // A later turn that fails the same way is told again.
+    f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(failed_turn("turn-2", failure(ProblemKind::LoginRequired)))
+        .await;
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(
+        opened.snapshot.chat.problem.map(|p| p.kind),
+        Some("not_signed_in")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_usage_limit_shows_its_reset_time_and_an_unavailable_capability_is_its_own_problem() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let mut limit = failure(ProblemKind::QuotaExhausted);
+    limit.resets_at = Some(1_730_948_100);
+    f.emit(failed_turn("turn-1", limit)).await;
+    let (opened, _) = f.open(&id).await;
+    let shown = opened.snapshot.chat.problem.unwrap();
+    assert_eq!((shown.kind, shown.past), ("usage_limit", true));
+    assert_eq!(shown.resets_at, Some(1_730_948_100));
+
+    // Without a reset time from the provider there is none to show.
+    f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(failed_turn("turn-2", failure(ProblemKind::QuotaExhausted)))
+        .await;
+    let (opened, _) = f.open(&id).await;
+    let shown = opened.snapshot.chat.problem.unwrap();
+    assert_eq!((shown.kind, shown.resets_at), ("usage_limit", None));
+
+    // An optional capability the running session lacks is said as such, and the
+    // Chat keeps working.
+    f.chats.send(&id, "more", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(EventKind::Notice {
+        turn: Some(NativeTurnId::new("turn-3")),
+        kind: NoticeKind::CapabilityUnavailable,
+        message: "The MCP server github did not start".to_owned(),
+        detail: None,
+    })
+    .await;
+    let (opened, _) = f.open(&id).await;
+    let shown = opened.snapshot.chat.problem.unwrap();
+    assert_eq!((shown.kind, shown.past), ("capability_unavailable", false));
+    assert_eq!(
+        shown.message.as_deref(),
+        Some("The MCP server github did not start")
+    );
+    assert_eq!(opened.snapshot.chat.activity, "working");
+    assert_eq!(f.chats.overview().unwrap().needs_you, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_resend_asks_the_person_again_and_says_what_happened() {
+    let f = Fixture::new().await;
+    f.fake.script_submit(SubmitReply::LoseProcess);
+    let id = f.chats.create(f.input("first")).await.unwrap().chat_id;
+    settle().await;
+    let (opened, _) = f.open(&id).await;
+    let message_id = opened.snapshot.chat.problem.unwrap().message_id.unwrap();
+    f.fake
+        .script_submit(SubmitReply::Reject("busy elsewhere".to_owned()));
+
+    let resend = UncertainDecision::Resend;
+    f.chats
+        .resolve_uncertain(&id, &message_id, resend)
+        .await
+        .unwrap();
+    settle().await;
+
+    let (opened, _) = f.open(&id).await;
+    // The first attempt may still have arrived: the message does not read "Not sent".
+    assert_eq!(user_deliveries(&opened), ["uncertain"]);
+    let problem = opened.snapshot.chat.problem.unwrap();
+    assert_eq!(problem.kind, "uncertain_delivery");
+    assert_eq!(problem.message_id.as_deref(), Some(message_id.as_str()));
+    let said = problem.message.unwrap();
+    assert!(said.contains("busy elsewhere"), "{said}");
+    assert!(!said.contains("queue"), "{said}");
+    assert!(opened.snapshot.chat.queue.is_empty());
+    assert_eq!(f.chats.overview().unwrap().needs_you, 1);
+
+    // The person can decide again; setting it aside sends nothing more.
+    let discard = UncertainDecision::Discard;
+    f.chats
+        .resolve_uncertain(&id, &message_id, discard)
+        .await
+        .unwrap();
+    f.chats.resume_queue(&id).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(user_deliveries(&opened), ["set_aside"]);
+    assert_eq!(f.submitted(), ["first", "first"]);
+    let said = opened.snapshot.chat.problem.and_then(|p| p.message);
+    assert!(!said.unwrap_or_default().contains("back in the queue"));
+}
+
+#[test]
+fn a_restore_that_replaced_the_data_is_a_success_whatever_followed_it() {
+    let safety = || Ok(PathBuf::from("/backups/safety.sqlite3"));
+    let clean = restore_outcome(safety(), Ok(()), 0).unwrap();
+    assert_eq!(clean.safety_path, "/backups/safety.sqlite3");
+    assert_eq!(clean.warning, None);
+
+    let unstopped = restore_outcome(safety(), Ok(()), 2).unwrap();
+    assert_eq!(unstopped.safety_path, "/backups/safety.sqlite3");
+    assert!(unstopped.warning.unwrap().contains("2 Chat"));
+
+    let unchecked = restore_outcome(safety(), Err(failed("disk")), 1).unwrap();
+    assert_eq!(unchecked.safety_path, "/backups/safety.sqlite3");
+    let warning = unchecked.warning.unwrap();
+    assert!(warning.contains("disk") && warning.contains("1 Chat"));
+
+    // Only a restore that did not happen is a failure.
+    let refused = restore_outcome(Err("not a ticketd backup".to_owned()), Ok(()), 3);
+    assert_eq!(refused.unwrap_err(), "not a ticketd backup");
 }

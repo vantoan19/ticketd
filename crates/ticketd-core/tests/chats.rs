@@ -1,7 +1,8 @@
 use ticketd_core::{
-    CHAT_CHANGE_TAIL, CHAT_NOTICE_LIMIT, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery,
-    ChatDeliveryDecision, ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink,
-    ChatLinkKind, ChatListFilter, ChatMessage, ChatObservation, ChatRecord, ChatSessionOrigin,
+    CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX,
+    CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatDeliveryDecision,
+    ChatInputStanding, ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind,
+    ChatListFilter, ChatMessage, ChatObservation, ChatRecord, ChatSessionOrigin,
     ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, FORMAT_VERSION, NewChat, Workspace,
 };
 
@@ -291,6 +292,7 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                     state: ChatTurnState::Completed,
                     detail: None,
                     problem: None,
+                    problem_resets_at: None,
                 },
             ],
         )
@@ -525,6 +527,7 @@ fn a_failed_observation_rolls_back_the_whole_batch_and_its_change_entries() {
                 state: ChatTurnState::Completed,
                 detail: None,
                 problem: None,
+                problem_resets_at: None,
             },
         ],
     );
@@ -743,6 +746,7 @@ fn archive_and_trash_keep_identity_history_queue_and_links() {
                 state: ChatTurnState::Interrupted,
                 detail: None,
                 problem: None,
+                problem_resets_at: None,
             }],
         )
         .unwrap();
@@ -998,6 +1002,7 @@ fn a_submission_its_turn_processed_stays_received_when_contact_is_lost() {
                     state: ChatTurnState::Completed,
                     detail: None,
                     problem: None,
+                    problem_resets_at: None,
                 },
             ],
         )
@@ -1095,6 +1100,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
                     state: ChatTurnState::Failed,
                     detail: Some("usage limit reached".into()),
                     problem: Some("quota_exhausted".into()),
+                    problem_resets_at: Some(1_730_948_100),
                 },
             ],
         )
@@ -1110,6 +1116,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
         _ => None,
     });
     assert_eq!(turn.unwrap().problem.as_deref(), Some("quota_exhausted"));
+    assert_eq!(turn.unwrap().problem_resets_at, Some(1_730_948_100));
     let notice = items.iter().find_map(|item| match item {
         ChatItem::Notice(notice) => Some(notice),
         _ => None,
@@ -1129,4 +1136,217 @@ fn input_of_another_chat_is_refused_with_the_reason() {
         .unwrap_err();
 
     assert!(refused.to_string().contains("belongs to another Chat"));
+}
+
+#[test]
+fn what_a_harness_reports_is_stored_within_bounds() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let long = "s".repeat(CHAT_EFFECTIVE_SETTINGS_LIMIT + 10);
+    let stored = workspace
+        .set_chat_effective_settings(&chat.id, &long)
+        .unwrap();
+    let kept = stored.effective_settings.map(|kept| kept.chars().count());
+    assert_eq!(kept, Some(CHAT_EFFECTIVE_SETTINGS_LIMIT));
+
+    // A reset time that is not a time is dropped, not stored.
+    for (turn, reported, kept) in [
+        ("t1", CHAT_RESET_TIME_MAX, Some(CHAT_RESET_TIME_MAX)),
+        ("t2", CHAT_RESET_TIME_MAX + 1, None),
+        ("t3", -1, None),
+    ] {
+        start_turn(&mut workspace, &chat, "go", turn);
+        let ended = ChatObservation::TurnEnded {
+            turn_id: turn.into(),
+            state: ChatTurnState::Failed,
+            detail: None,
+            problem: Some("quota_exhausted".into()),
+            problem_resets_at: Some(reported),
+        };
+        workspace
+            .record_chat_observations(&chat.id, vec![ended])
+            .unwrap();
+        let items = workspace.chat_snapshot(&chat.id, 50).unwrap().items;
+        let stored = items.iter().find_map(|item| match item {
+            ChatItem::Turn(stored) if stored.id == turn => Some(stored.problem_resets_at),
+            _ => None,
+        });
+        assert_eq!(stored, Some(kept), "{reported}");
+    }
+}
+
+/// One step of a submission's life, as the host or the person causes it.
+#[derive(Debug, Clone, Copy)]
+enum Step {
+    Submit(&'static str),
+    NotDelivered(&'static str),
+    Rejected(&'static str),
+    Acknowledged(&'static str),
+    Processing(&'static str),
+    LoseContact,
+    Resend(&'static str),
+    Discard,
+}
+
+#[test]
+fn every_combination_of_delivery_decision_and_later_observation_has_one_standing() {
+    use ChatInputStanding::{AwaitsDecision, Delivered, Queued, Sending, SetAside};
+    use Step::{
+        Acknowledged, Discard, LoseContact, NotDelivered, Processing, Rejected, Resend, Submit,
+    };
+    let uncertain = [Submit("a1"), LoseContact];
+    let discarded = [Submit("a1"), LoseContact, Discard];
+    let resent = [Submit("a1"), LoseContact, Resend("a2")];
+    let refused = [Submit("a1"), LoseContact, Resend("a2"), Rejected("a2")];
+    let then = |start: &[Step], more: &[Step]| [start, more].concat();
+    let table: Vec<(Vec<Step>, ChatInputStanding)> = vec![
+        // One attempt, as observed.
+        (vec![], Queued),
+        (vec![Submit("a1")], Sending),
+        (vec![Submit("a1"), NotDelivered("a1")], Queued),
+        (vec![Submit("a1"), Rejected("a1")], Queued),
+        (vec![Submit("a1"), Acknowledged("a1")], Delivered),
+        (vec![Submit("a1"), Processing("a1")], Delivered),
+        // Uncertain and undecided, then what is observed later.
+        (uncertain.to_vec(), AwaitsDecision),
+        (then(&uncertain, &[Rejected("a1")]), Queued),
+        (then(&uncertain, &[NotDelivered("a1")]), Queued),
+        (then(&uncertain, &[Acknowledged("a1")]), Delivered),
+        (then(&uncertain, &[Processing("a1")]), Delivered),
+        // Discarded: never queued again, whatever is observed later.
+        (discarded.to_vec(), SetAside),
+        (then(&discarded, &[Rejected("a1")]), SetAside),
+        (then(&discarded, &[NotDelivered("a1")]), SetAside),
+        (then(&discarded, &[Acknowledged("a1")]), Delivered),
+        (then(&discarded, &[Processing("a1")]), Delivered),
+        // Resent: the new attempt's outcome, with the first attempt still uncertain.
+        (resent.to_vec(), Sending),
+        (refused.to_vec(), AwaitsDecision),
+        (then(&resent, &[NotDelivered("a2")]), AwaitsDecision),
+        (then(&resent, &[Acknowledged("a2")]), Delivered),
+        (then(&resent, &[Processing("a2")]), Delivered),
+        (then(&resent, &[LoseContact]), AwaitsDecision),
+        (then(&resent, &[Rejected("a1")]), Sending),
+        (
+            then(&resent, &[LoseContact, Rejected("a2")]),
+            AwaitsDecision,
+        ),
+        (
+            then(&resent, &[LoseContact, Rejected("a1")]),
+            AwaitsDecision,
+        ),
+        (then(&resent, &[LoseContact, Discard]), SetAside),
+        (
+            then(&resent, &[LoseContact, Discard, Rejected("a2")]),
+            SetAside,
+        ),
+        // A refused resend, then a later observation or another decision.
+        (then(&refused, &[Rejected("a1")]), Queued),
+        (then(&refused, &[Acknowledged("a1")]), Delivered),
+        (then(&refused, &[Discard]), SetAside),
+        (then(&refused, &[Discard, Rejected("a1")]), SetAside),
+        (then(&refused, &[Resend("a3")]), Sending),
+        (
+            then(&refused, &[Resend("a3"), Rejected("a3")]),
+            AwaitsDecision,
+        ),
+        (
+            then(&refused, &[Resend("a3"), Acknowledged("a3")]),
+            Delivered,
+        ),
+    ];
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    for (row, (steps, expected)) in table.into_iter().enumerate() {
+        let chat = workspace.create_chat(None, new_chat()).unwrap();
+        let input = workspace.save_chat_input(None, &chat.id, "go").unwrap();
+        let id = |attempt: &str| format!("{row}-{attempt}");
+        let observe = |workspace: &mut Workspace, observation| {
+            workspace
+                .record_chat_observations(&chat.id, vec![observation])
+                .unwrap();
+        };
+        for step in &steps {
+            match *step {
+                Submit(attempt) => {
+                    let intent = ChatSubmissionIntent::NewTurn;
+                    workspace
+                        .record_chat_submission(&chat.id, &input.id, &id(attempt), intent)
+                        .unwrap();
+                }
+                NotDelivered(attempt) => observe(
+                    &mut workspace,
+                    ChatObservation::SubmissionNotDelivered {
+                        attempt_id: id(attempt),
+                        detail: None,
+                    },
+                ),
+                Rejected(attempt) => observe(
+                    &mut workspace,
+                    ChatObservation::SubmissionRejected {
+                        attempt_id: id(attempt),
+                        detail: None,
+                    },
+                ),
+                Acknowledged(attempt) => observe(
+                    &mut workspace,
+                    ChatObservation::SubmissionAcknowledged {
+                        attempt_id: id(attempt),
+                    },
+                ),
+                Processing(attempt) => {
+                    observe(
+                        &mut workspace,
+                        ChatObservation::TurnStarted {
+                            turn_id: id("turn"),
+                            native_turn_id: None,
+                        },
+                    );
+                    observe(
+                        &mut workspace,
+                        ChatObservation::SubmissionProcessing {
+                            attempt_id: id(attempt),
+                            turn_id: id("turn"),
+                        },
+                    );
+                }
+                LoseContact => {
+                    workspace
+                        .mark_chat_contact_lost(Some(&chat.id), "lost")
+                        .unwrap();
+                }
+                Resend(attempt) => {
+                    workspace
+                        .record_chat_resubmission(&chat.id, &input.id, &id(attempt))
+                        .unwrap();
+                }
+                Discard => {
+                    workspace
+                        .discard_uncertain_chat_submission(&chat.id, &input.id)
+                        .unwrap();
+                }
+            }
+        }
+        let after = message(&workspace, &chat, &input.id);
+        let case = format!("row {row}: {steps:?}");
+        assert_eq!(after.standing(), expected, "standing, {case}");
+        assert_eq!(after.queued, expected == Queued, "queued, {case}");
+        assert_eq!(
+            after.awaits_decision(),
+            expected == AwaitsDecision,
+            "awaits a decision, {case}"
+        );
+        let in_queue = !workspace.chat_queue(&chat.id).unwrap().is_empty();
+        assert_eq!(in_queue, expected == Queued, "in the queue, {case}");
+        // Only queued input can be submitted, and only an open decision can be resent.
+        if expected != Queued {
+            let intent = ChatSubmissionIntent::NewTurn;
+            let submitted =
+                workspace.record_chat_submission(&chat.id, &input.id, &id("next"), intent);
+            assert!(submitted.is_err(), "not submitted, {case}");
+            let resent = workspace.record_chat_resubmission(&chat.id, &input.id, &id("again"));
+            assert_eq!(resent.is_ok(), expected == AwaitsDecision, "resent, {case}");
+        }
+    }
 }

@@ -9,7 +9,7 @@ use ticketd_chat_host::{
     ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
 };
 use ticketd_core::{
-    Chat, ChatDelivery, ChatDeliveryDecision, ChatInteraction, ChatInteractionKind,
+    Chat, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatTool,
     ChatToolState, ChatTurn, ChatTurnState,
 };
@@ -51,6 +51,12 @@ pub struct Problem {
     pub help_url: Option<String>,
     pub path: Option<String>,
     pub message_id: Option<String>,
+    /// When the provider said a usage limit resets, in seconds since the Unix epoch.
+    /// `None` when it did not say.
+    pub resets_at: Option<i64>,
+    /// The problem is why the last turn stopped, not a condition observed now: it is
+    /// told, and it does not stop the next message.
+    pub past: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -193,6 +199,8 @@ pub struct Summary {
     pub activity: &'static str,
     pub needs_you: bool,
     pub problem: Option<&'static str>,
+    /// `problem` is why the last turn stopped, not a condition observed now.
+    pub problem_past: bool,
     pub interruption: Option<&'static str>,
     pub preview: Option<String>,
     pub updated_at: String,
@@ -216,6 +224,9 @@ pub struct Surroundings {
     pub shared_with: Vec<String>,
     pub links: Vec<LinkedRecord>,
     pub queue: Vec<Queued>,
+    /// The failed turn after which the person checked the harness again and it was
+    /// usable; its failure is no longer told as a problem.
+    pub checked_turn: Option<String>,
 }
 
 /// What a view has to remember from the history it has seen, because a change names
@@ -223,8 +234,9 @@ pub struct Surroundings {
 #[derive(Debug, Clone, Default)]
 pub struct Tracker {
     last_turn: Option<ChatTurn>,
-    /// A submission whose delivery the person has to decide about.
-    uncertain: Option<String>,
+    /// A submission whose delivery the person has to decide about, and why the resend
+    /// they asked for was not accepted, when that is how it came back to them.
+    uncertain: Option<(String, Option<String>)>,
     /// Requests stored as pending; whether one can be answered is the host's live state.
     pending: HashMap<String, ChatInteraction>,
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
@@ -233,24 +245,31 @@ pub struct Tracker {
     updated_at: Option<String>,
 }
 
-/// How the latest submission of user input reads. A turn the harness correlated with it
-/// is evidence it arrived, with or without an acknowledgment; nothing else is.
+/// How user input that was submitted at least once reads. The core decides where it
+/// stands, from every attempt and the person's decisions together.
 fn delivery(message: &ChatMessage) -> Option<&'static str> {
-    let attempt = message.attempts.last()?;
-    if attempt.received() {
-        return Some("delivered");
-    }
-    Some(match attempt.delivery {
-        ChatDelivery::Possible => "sending",
-        ChatDelivery::Acknowledged => "delivered",
+    message.attempts.last()?;
+    Some(match message.standing() {
+        ChatInputStanding::Sending => "sending",
+        ChatInputStanding::Delivered => "delivered",
         // The person set it aside; whether it arrived is still unknown.
-        ChatDelivery::Uncertain if attempt.decision == Some(ChatDeliveryDecision::Discarded) => {
-            "set_aside"
-        }
-        ChatDelivery::Uncertain => "uncertain",
+        ChatInputStanding::SetAside => "set_aside",
+        // Also after a refused resend: the earlier attempt may still have arrived.
+        ChatInputStanding::AwaitsDecision => "uncertain",
         // Back in the queue; the row stays so the attempt is not hidden.
-        ChatDelivery::NotDelivered | ChatDelivery::Rejected => "not_sent",
+        ChatInputStanding::Queued => "not_sent",
     })
+}
+
+/// Why the resend the person asked for did not happen, when the message awaits their
+/// decision because of that.
+fn refused_resend(message: &ChatMessage) -> Option<String> {
+    let last = message.attempts.last()?;
+    matches!(
+        last.delivery,
+        ChatDelivery::NotDelivered | ChatDelivery::Rejected
+    )
+    .then(|| last.detail.clone().unwrap_or("no reason given".to_owned()))
 }
 
 impl Tracker {
@@ -276,8 +295,8 @@ impl Tracker {
             }
             ChatItem::Message(message) if message.role == ChatRole::User => {
                 if message.awaits_decision() {
-                    self.uncertain = Some(message.id.clone());
-                } else if self.uncertain.as_ref() == Some(&message.id) {
+                    self.uncertain = Some((message.id.clone(), refused_resend(message)));
+                } else if self.uncertain.as_ref().map(|(id, _)| id) == Some(&message.id) {
                     self.uncertain = None;
                 }
                 self.updated_at = Some(message.created_at.clone());
@@ -321,6 +340,17 @@ impl Tracker {
         };
         self.open.insert(message_id.to_owned(), message);
         true
+    }
+
+    /// The last turn, when it failed with a kind of problem the person can act on.
+    pub fn failed_turn(&self) -> Option<&ChatTurn> {
+        self.last_turn.as_ref().filter(|turn| {
+            turn.state == ChatTurnState::Failed
+                && turn
+                    .problem
+                    .as_deref()
+                    .is_some_and(|key| problem_kind(key) != ProblemKind::Other)
+        })
     }
 
     /// Records whose display depends on the turn or on live state, to show again after
@@ -618,9 +648,15 @@ fn problem(
             ..Problem::default()
         });
     }
-    if let Some(message_id) = &tracker.uncertain {
+    if let Some((message_id, refused)) = &tracker.uncertain {
         return Some(Problem {
             kind: "uncertain_delivery",
+            message: refused.as_ref().map(|reason| {
+                format!(
+                    "You asked to send it again and {} did not accept that: {reason}.",
+                    harness_name(&chat.harness)
+                )
+            }),
             message_id: Some(message_id.clone()),
             ..Problem::default()
         });
@@ -639,22 +675,38 @@ fn problem(
         Some(ChatProblem::RuntimeLost { detail }) => Some(failed(format!(
             "Contact with the harness was lost: {detail}"
         ))),
+        // Whether the message is in the queue depends on what the person decided
+        // about it, so it is said only when the queue holds something.
+        Some(ChatProblem::DispatchRefused { detail }) if around.queue.is_empty() => Some(failed(
+            format!("The harness did not accept the message: {detail}"),
+        )),
         Some(ChatProblem::DispatchRefused { detail }) => Some(failed(format!(
             "The harness did not accept the message, so it is back in the queue: {detail}"
         ))),
+        Some(ChatProblem::CapabilityUnavailable { detail }) => Some(Problem {
+            kind: "capability_unavailable",
+            message: Some(detail.clone()),
+            ..Problem::default()
+        }),
         Some(ChatProblem::StorageFailed { detail }) => Some(failed(format!(
             "Chat storage failed, so no new work is accepted: {detail}"
         ))),
         Some(ChatProblem::CleanupUnconfirmed { reason }) => Some(unconfirmed(Some(reason.clone()))),
         None if live.stop == Some(StopState::Unconfirmed) => Some(unconfirmed(None)),
-        // Nothing is live: the last turn's recorded failure is what there is to say.
+        // Nothing is live: why the last turn stopped is what there is to say. It is
+        // told as past, because nothing shows the condition still holds.
         None => {
-            let turn = tracker.last_turn.as_ref().filter(|turn| {
-                live.activity == Activity::Idle && turn.state == ChatTurnState::Failed
+            let turn = tracker.failed_turn().filter(|turn| {
+                live.activity == Activity::Idle && around.checked_turn.as_ref() != Some(&turn.id)
             })?;
             let kind = problem_kind(turn.problem.as_deref()?);
-            (kind != ProblemKind::Other)
-                .then(|| harness_problem(&chat.harness, kind, turn.detail.clone()))
+            Some(Problem {
+                resets_at: turn
+                    .problem_resets_at
+                    .filter(|_| kind == ProblemKind::QuotaExhausted),
+                past: true,
+                ..harness_problem(&chat.harness, kind, turn.detail.clone())
+            })
         }
     }
 }
@@ -784,6 +836,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             activity,
             problem.as_ref().map(|problem| problem.kind),
         ),
+        problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,
         preview: tracker

@@ -115,7 +115,7 @@ impl Workspace {
             ),
             (
                 "chat_turns",
-                "id, chat_id, position, native_turn_id, state, detail, problem, started_at, ended_at",
+                "id, chat_id, position, native_turn_id, state, detail, problem, problem_resets_at, started_at, ended_at",
             ),
             (
                 "chat_messages",

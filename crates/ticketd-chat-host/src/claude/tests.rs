@@ -463,6 +463,11 @@ async fn structured_failures_end_the_turn_and_thrown_ones_do_not() {
     };
     assert_eq!(problem.kind, ProblemKind::QuotaExhausted);
     assert_eq!(problem.message, "Rate limited");
+    // The reset time Claude Code reported before failing travels with the problem,
+    // and the report itself is not shown as traffic ticketd does not understand.
+    assert_eq!(problem.resets_at, Some(1_730_948_100));
+    let unknown = |event: &EventKind| matches!(event, EventKind::Unknown { .. });
+    assert!(!failed.iter().any(unknown), "{failed:?}");
 
     submit(&mut peer, &runtime, start_turn("sub-2", "Again")).await;
     drain(&mut events).await;

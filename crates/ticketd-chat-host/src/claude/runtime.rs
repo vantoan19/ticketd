@@ -281,6 +281,7 @@ impl Connection {
             kind: ProblemKind::Other,
             message,
             detail: Some(ProviderDetail::new("stderr", &self.stderr.snapshot())),
+            resets_at: None,
         }
     }
 
@@ -312,6 +313,7 @@ impl Connection {
                     kind: ProblemKind::IncompatibleVersion,
                     message: requirement,
                     detail: None,
+                    resets_at: None,
                 });
             }
             Inspection::ProbeFailed { reason } => {
@@ -319,6 +321,7 @@ impl Connection {
                     kind: ProblemKind::Other,
                     message: format!("Could not run {}: {reason}", claude.display()),
                     detail: None,
+                    resets_at: None,
                 });
             }
             Inspection::NotInstalled => return Err(super::not_installed()),
@@ -653,6 +656,7 @@ fn open_problem(event: &Value, resuming: bool) -> Problem {
             event["event"].as_str().unwrap_or("open"),
             &event["error"].to_string(),
         )),
+        resets_at: None,
     }
 }
 

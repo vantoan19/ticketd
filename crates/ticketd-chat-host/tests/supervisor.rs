@@ -707,6 +707,7 @@ async fn a_failed_native_resume_keeps_the_chat_readable_and_a_fresh_session_is_e
         kind: ProblemKind::NativeHistoryUnavailable,
         message: "the session file is missing".to_owned(),
         detail: None,
+        resets_at: None,
     });
 
     let resumed = f.host.resume(&f.chat.id, ResumeMode::Native).await;
@@ -996,6 +997,7 @@ async fn a_failed_turn_keeps_its_problem_kind_and_notices_and_settings_reach_lat
             kind: ProblemKind::QuotaExhausted,
             message: "You have hit your usage limit".to_owned(),
             detail: None,
+            resets_at: Some(1_730_948_100),
         }),
     ))
     .await;
@@ -1004,6 +1006,7 @@ async fn a_failed_turn_keeps_its_problem_kind_and_notices_and_settings_reach_lat
     let turn = f.turns().remove(0);
     assert_eq!(turn.state, ChatTurnState::Failed);
     assert_eq!(turn.problem.as_deref(), Some("quota_exhausted"));
+    assert_eq!(turn.problem_resets_at, Some(1_730_948_100));
     assert_eq!(problem_kind("quota_exhausted"), ProblemKind::QuotaExhausted);
     assert_eq!(notices(&f), ["Reconnecting (2/5)"]);
     let chat = f.core().chat(&f.chat.id).unwrap();
@@ -1093,4 +1096,162 @@ async fn a_context_that_cannot_be_read_is_said_and_the_session_starts_without_it
 
     assert_eq!(f.submits()[0].text, "first");
     assert!(notices(&f)[0].contains("the workspace could not be opened"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_discarded_message_is_never_sent_even_when_its_rejection_arrives_late() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.fake.script_submit(SubmitReply::Timeout);
+    let input = f.send("first").await;
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    settle().await;
+    assert!(f.message(&input.id).awaits_decision());
+    f.core()
+        .discard_uncertain_chat_submission(&f.chat.id, &input.id)
+        .unwrap();
+    f.host.notify_changed(&f.chat.id).await.unwrap();
+
+    // The harness turns out to have refused it, after the person set it aside.
+    f.emit(EventKind::SubmissionEvidence {
+        submission: f.submits()[0].submission.clone(),
+        evidence: DeliveryEvidence::Rejected {
+            reason: "late".to_owned(),
+        },
+    })
+    .await;
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+
+    let after = f.message(&input.id);
+    assert_eq!(after.attempts[0].delivery, ChatDelivery::Rejected);
+    assert_eq!(
+        after.attempts[0].decision,
+        Some(ChatDeliveryDecision::Discarded)
+    );
+    assert!(!after.queued && !after.awaits_decision());
+    assert_eq!(f.queued(), [] as [&str; 0]);
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "a discarded message is not sent again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_resend_returns_the_message_to_the_person_and_keeps_the_uncertainty() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.fake.script_submit(SubmitReply::LoseProcess);
+    let input = f.send("first").await;
+    f.fake
+        .script_submit(SubmitReply::Reject("not now".to_owned()));
+
+    f.host.resend(&f.chat.id, &input.id).await.unwrap();
+    settle().await;
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+
+    let after = f.message(&input.id);
+    let deliveries: Vec<_> = after.attempts.iter().map(|a| a.delivery).collect();
+    assert_eq!(
+        deliveries,
+        [ChatDelivery::Uncertain, ChatDelivery::Rejected]
+    );
+    assert!(after.awaits_decision(), "the person decides again");
+    assert_eq!(f.queued(), [] as [&str; 0]);
+    assert_eq!(f.submits().len(), 2, "the refused resend is not repeated");
+
+    // Asking again is a new submission of the same message.
+    f.host.resend(&f.chat.id, &input.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.submits().len(), 3);
+    assert_eq!(f.message(&input.id).attempts.len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unavailable_optional_capability_is_a_typed_problem_that_blocks_nothing() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::Notice {
+        turn: Some(turn_1()),
+        kind: NoticeKind::CapabilityUnavailable,
+        message: "The MCP server 'github' did not start".to_owned(),
+        detail: None,
+    })
+    .await;
+
+    let unavailable = ChatProblem::CapabilityUnavailable {
+        detail: "The MCP server 'github' did not start".to_owned(),
+    };
+    let live = f.live().await;
+    assert_eq!(live.problem, Some(unavailable));
+    assert_eq!(live.activity, Activity::Working, "the turn goes on");
+    assert_eq!(notices(&f), ["The MCP server 'github' did not start"]);
+
+    // Other work stays available, and the problem ends with the runtime it was about.
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.send("second").await;
+    assert_eq!(f.submits().len(), 2);
+    f.fake.lose_process().await;
+    settle().await;
+    assert!(matches!(
+        f.live().await.problem,
+        Some(ChatProblem::RuntimeLost { .. })
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_host_handle_taken_before_a_restore_can_start_nothing_during_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let held = f.host.clone();
+
+    assert_eq!(f.host.begin_restore().await, Vec::new());
+    assert_eq!(f.fake.opens().len(), 1);
+    let refused = held.send(&f.chat.id, None, "during", SendMode::Auto).await;
+    assert!(matches!(refused, Err(HostError::Restoring)));
+    assert!(matches!(
+        held.attach(&f.chat.id).await,
+        Err(HostError::Restoring)
+    ));
+    assert!(matches!(
+        held.resume(&f.chat.id, ResumeMode::Native).await,
+        Err(HostError::Restoring)
+    ));
+    assert!(matches!(
+        held.notify_changed(&f.chat.id).await,
+        Err(HostError::Restoring)
+    ));
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+    assert_eq!(
+        f.fake.opens().len(),
+        1,
+        "no harness starts during a restore"
+    );
+    assert!(
+        held.live().is_empty(),
+        "no supervisor runs during a restore"
+    );
+    assert_eq!(f.queued(), [] as [&str; 0], "nothing was saved either");
+
+    f.host.finish_restore();
+    held.send(&f.chat.id, None, "after", SendMode::Auto)
+        .await
+        .unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 2);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    // Switching Chat off closes the host the same way.
+    assert_eq!(f.host.turn_off().await, Vec::new());
+    let refused = held.send(&f.chat.id, None, "while off", SendMode::Auto);
+    assert!(matches!(refused.await, Err(HostError::TurnedOff)));
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+    assert_eq!(
+        f.fake.opens().len(),
+        2,
+        "no harness starts while Chat is off"
+    );
+    f.host.turn_on();
+    assert!(held.attach(&f.chat.id).await.is_ok());
 }

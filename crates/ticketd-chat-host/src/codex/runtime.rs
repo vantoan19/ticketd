@@ -215,6 +215,7 @@ impl Connection {
                     kind: ProblemKind::Other,
                     message: format!("Codex answered {method} without the expected thread"),
                     detail: None,
+                    resets_at: None,
                 });
             }
         }
@@ -244,6 +245,7 @@ impl Connection {
             kind: ProblemKind::Other,
             message,
             detail,
+            resets_at: None,
         }
     }
 
@@ -390,6 +392,7 @@ fn resume_problem(error: &RpcError) -> Problem {
             "thread/resume",
             &error.data.to_string(),
         )),
+        resets_at: None,
     }
 }
 
