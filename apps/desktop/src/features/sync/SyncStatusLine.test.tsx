@@ -203,3 +203,29 @@ test("saved locally: a busy Drive is named, not called offline", async () => {
     within(await popover()).getByRole("button", { name: "Try now" }),
   ).toBeTruthy();
 });
+
+test("upload pending: the count is of everything waiting, not of the listed first few", async () => {
+  await footer(
+    syncStatus({
+      state: "upload_pending",
+      pending_uploads: [change("One"), change("Two")],
+      pending_total: 40,
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "Uploading 40 changes…Saved on this computer",
+  );
+});
+
+test("a sync failure with no state of its own needs attention and offers Retry", async () => {
+  await footer(
+    syncStatus({
+      state: "needs_attention",
+      recovery: "error",
+      recovery_message: "disk I/O error",
+    }),
+  );
+  expect((await line()).textContent).toContain("Sync needs attention");
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect((await popover()).textContent).toContain("disk I/O error");
+});

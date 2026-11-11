@@ -79,3 +79,17 @@ test("a Document changed on two desktops says Needs review", async () => {
   );
   expect(await screen.findByText("Needs review")).toBeTruthy();
 });
+
+test("a Document that may be among changes not listed is not called synced", async () => {
+  const waiting = await bar(
+    syncStatus({
+      state: "upload_pending",
+      pending_uploads: [
+        { kind: "ticket", id: "t1", reference: "T-KQ1", title: "Other" },
+      ],
+      pending_total: 2,
+    }),
+  );
+  expect(waiting.textContent).toBe("Saved on this computer");
+  expect(screen.queryByText("Synced to Drive")).toBeNull();
+});

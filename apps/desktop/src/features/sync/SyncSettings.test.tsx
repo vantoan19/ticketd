@@ -329,3 +329,23 @@ test.each([
     expect(within(notice).getAllByRole("button")).toHaveLength(1);
   },
 );
+
+test("a sync failure with no state of its own is a notice with its message and Retry", async () => {
+  api.status.mockResolvedValue(
+    syncStatus({
+      state: "needs_attention",
+      recovery: "error",
+      recovery_message: "storage: the storage answered nonsense",
+    }),
+  );
+  api.recover.mockResolvedValue(syncStatus());
+  show();
+  const notice = await screen.findByRole("alert");
+  expect(notice.textContent).toContain("Sync could not finish");
+  expect(notice.textContent).toContain(
+    "Your work is saved on this computer. The last sync stopped with: storage: the storage answered nonsense",
+  );
+  fireEvent.click(within(notice).getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText("Connected as you@example.com")).toBeTruthy();
+  expect(api.recover).toHaveBeenCalled();
+});

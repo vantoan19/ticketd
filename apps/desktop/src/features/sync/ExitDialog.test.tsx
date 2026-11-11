@@ -187,3 +187,23 @@ test("a flush that fails is reported as unfinished instead of quitting silently"
   ).toBeTruthy();
   expect(win.quit).not.toHaveBeenCalled();
 });
+
+test("uploads beyond the listed ones are counted and said as more", async () => {
+  api.status.mockResolvedValue(
+    syncStatus({
+      state: "upload_pending",
+      pending_uploads: [ticket, spec],
+      pending_total: 40,
+    }),
+  );
+  api.flushOnExit.mockResolvedValue({ pending: [spec], pending_total: 38 });
+  guard()();
+  const dialog = await screen.findByRole("dialog", {
+    name: "38 uploads did not finish",
+  });
+  expect(
+    within(dialog)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["Login hardening spec", "and 37 more"]);
+});

@@ -42,6 +42,13 @@ export function useSyncNavigation(navigation: SyncNavigation) {
   useEffect(() => setNavigation(navigation));
 }
 
+/** How many changes wait to upload; the list may hold only the first of them. */
+export function pendingCount(
+  status: Pick<SyncStatus, "pending_uploads" | "pending_total">,
+): number {
+  return status.pending_total ?? status.pending_uploads.length;
+}
+
 /** "3 changes", "1 change". */
 export function changes(count: number): string {
   return `${count} ${count === 1 ? "change" : "changes"}`;

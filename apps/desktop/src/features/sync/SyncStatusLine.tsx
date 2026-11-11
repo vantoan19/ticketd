@@ -22,7 +22,7 @@ import { ago } from "@/features/tickets/ticket-source";
 import { syncApi, type SyncReviewItem, type SyncStatus } from "@/lib/sync-api";
 import { useNow } from "@/lib/use-now";
 import { recoveryCopy } from "./sync-recovery";
-import { changes, useSyncStatus } from "./sync-status";
+import { changes, pendingCount, useSyncStatus } from "./sync-status";
 import "./sync.css";
 
 type Line = {
@@ -60,7 +60,7 @@ function describe(status: SyncStatus, now: number): Line {
     ? (ago(status.last_synced_at, now) ?? status.last_synced_at)
     : null;
   const lastSynced = synced ? `Last synced ${synced}` : "Not synced yet";
-  const waiting = status.pending_uploads.length;
+  const waiting = pendingCount(status);
   const safe = "Everything is saved on this computer";
   // Neither needs a decision: sync tries again by itself.
   const paused =

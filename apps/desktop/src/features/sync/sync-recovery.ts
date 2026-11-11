@@ -1,5 +1,5 @@
 import type { SyncStatus } from "@/lib/sync-api";
-import { changes } from "./sync-status";
+import { changes, pendingCount } from "./sync-status";
 
 export type RecoveryCopy = {
   /** The sidebar footer line. */
@@ -13,7 +13,7 @@ export type RecoveryCopy = {
 
 /** Wording for what stopped sync; `null` while nothing did. */
 export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
-  const waiting = status.pending_uploads.length;
+  const waiting = pendingCount(status);
   const are = waiting === 1 ? "is" : "are";
   switch (status.recovery) {
     case null:
@@ -55,6 +55,13 @@ export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
         title: "Google Drive is busy",
         description:
           "Google Drive asked ticketd to slow down. Changes are saved on this computer and upload a little later.",
+        action: "Retry",
+      };
+    case "error":
+      return {
+        label: "Sync needs attention",
+        title: "Sync could not finish",
+        description: `Your work is saved on this computer.${status.recovery_message ? ` The last sync stopped with: ${status.recovery_message}` : ""}`,
         action: "Retry",
       };
   }

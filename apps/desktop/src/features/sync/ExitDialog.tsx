@@ -13,7 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { Reference } from "@/components/ui/reference";
 import { windowClient } from "@/lib/api/window";
 import { syncApi, type SyncPendingItem } from "@/lib/sync-api";
-import { useSyncStatus } from "./sync-status";
+import { pendingCount, useSyncStatus } from "./sync-status";
 import "./sync.css";
 
 const ICONS: Record<SyncPendingItem["kind"], LucideIcon> = {
@@ -24,11 +24,17 @@ const ICONS: Record<SyncPendingItem["kind"], LucideIcon> = {
   attachment: Paperclip,
 };
 
+/** `count` is how many uploads wait; `pending` may list only the first of them. */
 type Exit =
   /** The flush is running; `total` is what was pending when it started. */
-  | { phase: "finishing"; total: number; pending: SyncPendingItem[] }
+  | {
+      phase: "finishing";
+      total: number;
+      count: number;
+      pending: SyncPendingItem[];
+    }
   /** The flush ended with work left. Stays until the person answers. */
-  | { phase: "unfinished"; pending: SyncPendingItem[] };
+  | { phase: "unfinished"; count: number; pending: SyncPendingItem[] };
 
 /**
  * Closing the window while changes are still uploading: the core gets up to 10
@@ -52,17 +58,21 @@ export function ExitDialog() {
           .current()
           .then(async (now) => {
             const pending = now.pending_uploads;
-            if (now.connection !== "connected" || pending.length === 0)
+            const total = pendingCount(now);
+            if (now.connection !== "connected" || total === 0)
               return windowClient.quit();
-            setExit({ phase: "finishing", total: pending.length, pending });
+            setExit({ phase: "finishing", total, count: total, pending });
             const left = await syncApi
               .flushOnExit()
-              .then((report) => report.pending)
+              .then((report) => ({
+                pending: report.pending,
+                count: report.pending_total ?? report.pending.length,
+              }))
               // Unknown is not uploaded: show what was pending.
-              .catch(() => pending);
+              .catch(() => ({ pending, count: total }));
             if (current !== attempt.current) return;
-            if (left.length === 0) return windowClient.quit();
-            setExit({ phase: "unfinished", pending: left });
+            if (left.count === 0) return windowClient.quit();
+            setExit({ phase: "unfinished", ...left });
           })
           // Sync cannot be asked, so there is nothing to wait for.
           .catch(() => windowClient.quit());
@@ -73,7 +83,8 @@ export function ExitDialog() {
   const finishing = exit.phase === "finishing";
   // The status poll keeps the list current while the flush runs.
   const pending = finishing && status ? status.pending_uploads : exit.pending;
-  const count = exit.pending.length;
+  const waiting = finishing && status ? pendingCount(status) : exit.count;
+  const count = exit.count;
   return (
     <DialogShell
       open
@@ -106,11 +117,11 @@ export function ExitDialog() {
         <div className="sync-progress-row" role="status">
           <Progress
             aria-label="Upload"
-            value={Math.max(exit.total - pending.length, 0)}
+            value={Math.max(exit.total - waiting, 0)}
             max={exit.total}
           />
           <span>
-            {Math.max(exit.total - pending.length, 0)} of {exit.total} uploaded
+            {Math.max(exit.total - waiting, 0)} of {exit.total} uploaded
           </span>
         </div>
       )}
@@ -127,6 +138,11 @@ export function ExitDialog() {
             </Item>
           );
         })}
+        {waiting > pending.length && (
+          <Item asChild>
+            <li>and {waiting - pending.length} more</li>
+          </Item>
+        )}
       </ul>
     </DialogShell>
   );

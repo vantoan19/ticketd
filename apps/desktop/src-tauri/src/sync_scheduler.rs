@@ -10,7 +10,7 @@ use std::{
 
 use ticketd_core::{
     Error, Workspace,
-    sync::{MIN_POLL_INTERVAL_SECS, SyncItem, SyncStatus, remote::RemoteStorage},
+    sync::{MIN_POLL_INTERVAL_SECS, SyncItem, SyncRecovery, SyncStatus, remote::RemoteStorage},
 };
 
 /// How long after the last local change its upload starts.
@@ -51,6 +51,22 @@ pub struct Scheduler {
     watch: Mutex<Watch>,
     /// Held for the length of a run, so two never overlap.
     running: Mutex<()>,
+}
+
+/// What a tick failed with, for stderr. The core keeps a failed run in the
+/// status, where the interface shows it; a tick that could not even open the
+/// Workspace or save that outcome is known only here.
+fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<String> {
+    match tick {
+        Err(error) => Some(error.to_string()),
+        Ok(Some(status)) if status.recovery == Some(SyncRecovery::Error) => Some(
+            status
+                .recovery_message
+                .clone()
+                .unwrap_or_else(|| "unknown failure".into()),
+        ),
+        Ok(_) => None,
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -194,13 +210,16 @@ impl Scheduler {
                 let mut reported: Option<String> = None;
                 loop {
                     match self.tick(started.elapsed()) {
-                        Ok(_) => reported = None,
-                        Err(error) => {
-                            let message = error.to_string();
-                            if reported.as_deref() != Some(message.as_str()) {
+                        // Nothing was due: what was last said still stands.
+                        Ok(None) => {}
+                        tick => {
+                            let message = failure(&tick);
+                            if let Some(message) = &message
+                                && reported.as_ref() != Some(message)
+                            {
                                 eprintln!("Workspace sync could not run: {message}");
-                                reported = Some(message);
                             }
+                            reported = message;
                         }
                     }
                     std::thread::sleep(Duration::from_secs(1));
@@ -508,6 +527,31 @@ mod tests {
             desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap(),
             []
         );
+    }
+
+    #[test]
+    fn a_failure_with_no_state_of_its_own_is_kept_in_the_status_and_said_on_stderr() {
+        let desk = desk();
+        desk.remote
+            .fail(RemoteOp::List, 1, RemoteError::Other("nonsense".into()));
+        let tick = desk.scheduler.tick(Duration::ZERO);
+        assert_eq!(
+            failure(&tick).as_deref(),
+            Some("sync storage: storage: nonsense")
+        );
+        // The interface reads the same failure from the status.
+        let status = desk.workspace().sync_status().unwrap();
+        assert_eq!(status.recovery, Some(SyncRecovery::Error));
+        assert_eq!(
+            status.recovery_message.as_deref(),
+            Some("sync storage: storage: nonsense")
+        );
+
+        // A state the interface words itself, and a run that worked, say nothing.
+        desk.remote.fail(RemoteOp::List, 1, RemoteError::Offline);
+        assert_eq!(failure(&desk.scheduler.tick(MINUTE)), None);
+        assert_eq!(failure(&desk.scheduler.tick(2 * MINUTE)), None);
+        assert!(failure(&Err(Error::NotFound("workspace".into()))).is_some());
     }
 
     #[test]

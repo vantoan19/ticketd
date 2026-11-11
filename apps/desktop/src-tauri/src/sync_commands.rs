@@ -63,15 +63,17 @@ fn binding_of(
     workspace: &Workspace,
     remote: impl FnOnce(&str) -> Arc<dyn RemoteStorage>,
 ) -> Result<Option<Binding>, Error> {
-    let status = workspace.sync_status()?;
-    let (Some(folder), Some(connection)) = (status.folder, status.connection_id) else {
+    // One small read: the scheduler asks every second.
+    let Some(bound) = workspace.sync_binding()? else {
         return Ok(None);
     };
-    let settings = workspace.sync_settings()?;
+    let Some(connection) = bound.connection_id else {
+        return Ok(None);
+    };
     Ok(Some(Binding {
-        folder: folder.id,
-        device: settings.desktop_name,
-        poll: Duration::from_secs(settings.poll_interval_secs),
+        folder: bound.folder_id,
+        device: bound.device_name,
+        poll: Duration::from_secs(bound.poll_secs),
         remote: remote(&connection),
     }))
 }
@@ -374,11 +376,8 @@ fn resolve(
 
 /// Unread sync entries the Inbox shows beside its own.
 pub fn unread(workspace: &Workspace) -> Result<u32, Error> {
-    let conflicts = workspace.sync_conflicts()?;
-    let notices = workspace.sync_notices()?;
-    let unread = conflicts.iter().filter(|conflict| !conflict.read).count()
-        + notices.iter().filter(|notice| !notice.read).count();
-    Ok(u32::try_from(unread).unwrap_or(u32::MAX))
+    // Counted by the core: the sidebar asks on every Workspace change.
+    Ok(u32::try_from(workspace.sync_unread_count()?).unwrap_or(u32::MAX))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

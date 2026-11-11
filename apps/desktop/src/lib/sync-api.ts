@@ -46,6 +46,8 @@ export const syncRecoveries = [
   "offline",
   /** Google Drive asked for fewer requests; sync tries again by itself. */
   "rate_limited",
+  /** Any other failed run; `recovery_message` says what went wrong. */
+  "error",
 ] as const;
 export type SyncRecovery = (typeof syncRecoveries)[number];
 
@@ -63,8 +65,12 @@ const statusSchema = z.object({
   state: z.enum(syncStates),
   /** RFC 3339 time of the last completed sync with Drive. */
   last_synced_at: z.string().nullable(),
-  /** Changes saved locally that have not been uploaded. */
+  /**
+   * Changes saved locally that have not been uploaded. A long list is cut to
+   * its first entries; `pending_total` then says how many there are.
+   */
   pending_uploads: z.array(pendingItemSchema),
+  pending_total: z.number().int().nonnegative().optional(),
   /** Managed Attachments still downloading to this desktop. */
   attachment_downloads: z.object({
     count: z.number().int().nonnegative(),
@@ -72,6 +78,8 @@ const statusSchema = z.object({
   }),
   needs_review: z.array(reviewItemSchema),
   recovery: z.enum(syncRecoveries).nullable(),
+  /** What went wrong, while `recovery` is `error`. */
+  recovery_message: z.string().nullable().optional(),
   /** Progress of the first upload or download after setup; `null` once it finished. */
   first_sync: z
     .object({
@@ -124,6 +132,8 @@ export type SyncSettingsChange = Omit<SyncSettings, "device_code">;
 const exitReportSchema = z.object({
   /** What still had not uploaded when the flush ended; empty when everything did. */
   pending: z.array(pendingItemSchema),
+  /** How many are left when `pending` holds only the first of them. */
+  pending_total: z.number().int().nonnegative().optional(),
 });
 export type SyncExitReport = z.infer<typeof exitReportSchema>;
 

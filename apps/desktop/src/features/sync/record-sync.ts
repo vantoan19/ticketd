@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSyncStatus } from "./sync-status";
+import { pendingCount, useSyncStatus } from "./sync-status";
 
 export type RecordSyncState = "synced" | "needs_review";
 
@@ -42,7 +42,9 @@ export function useRecordSyncState(
   return status.state === "saved_locally" ||
     status.recovery ||
     status.first_sync ||
-    status.pending_uploads.some((item) => item.id === id)
+    status.pending_uploads.some((item) => item.id === id) ||
+    // The record may be among the changes the list leaves out.
+    pendingCount(status) > status.pending_uploads.length
     ? null
     : "synced";
 }
