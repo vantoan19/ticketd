@@ -23,6 +23,11 @@ export default tseslint.config(
     },
   },
   {
+    files: ["apps/chat-bridge-claude/**/*.{ts,mjs}"],
+    languageOptions: { globals: globals.node },
+    rules: { "@typescript-eslint/no-explicit-any": "error" },
+  },
+  {
     // Design-system rules (DESIGN.md section 11). Findings that predate them
     // are held in apps/desktop/eslint-suppressions.json, which only shrinks.
     files: ["apps/desktop/src/**/*.tsx"],
