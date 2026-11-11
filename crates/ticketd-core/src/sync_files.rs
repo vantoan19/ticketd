@@ -66,7 +66,7 @@ impl SyncPartKind {
 }
 
 /// One field of a sync file. An absent field, an empty set and a false flag mean the same.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncValue {
     /// A single value: text, a time, or the GUID of another record.
@@ -88,7 +88,7 @@ pub struct SyncPart {
 
 impl SyncPart {
     /// Sections are written oldest first; the GUID settles equal times the same way everywhere.
-    fn order(&self) -> (SyncPartKind, &str, &str) {
+    pub(crate) fn order(&self) -> (SyncPartKind, &str, &str) {
         let time = match self.kind {
             SyncPartKind::Activity => "reported_at",
             SyncPartKind::Evidence => "created_at",
@@ -125,6 +125,8 @@ enum Type {
     Time,
     Id,
     Ids,
+    /// Items of `<GUID> <time>`: when each `blocked_by` relationship was made.
+    Edges,
     Tags,
     Status,
     Reference,
@@ -142,6 +144,7 @@ const TICKET: &[Field] = &[
     ("plan", Type::Id, false),
     ("parent", Type::Id, false),
     ("blocked_by", Type::Ids, false),
+    ("blocked_since", Type::Edges, false),
     ("related", Type::Ids, false),
     ("discovered", Type::Ids, false),
     ("duplicate_of", Type::Id, false),
@@ -389,6 +392,12 @@ fn is_guid(text: &str) -> bool {
     Uuid::parse_str(text).is_ok_and(|id| id.to_string() == text)
 }
 
+/// The blocking ticket and the time of one `blocked_since` item.
+fn edge_time(item: &str) -> Option<(&str, &str)> {
+    item.split_once(' ')
+        .filter(|(id, time)| is_guid(id) && chrono::DateTime::parse_from_rfc3339(time).is_ok())
+}
+
 fn expected(kind: Type) -> String {
     match kind {
         Type::Text => "text; put the value in quotes".into(),
@@ -398,6 +407,9 @@ fn expected(kind: Type) -> String {
         Type::Id => "the id of a record: a lowercase GUID".into(),
         Type::Ids => "a list of record ids: lowercase GUIDs".into(),
         Type::Tags => "a list of tags".into(),
+        Type::Edges => {
+            "a list of items such as \"<id of the blocking ticket> 2026-11-11T09:30:00Z\"".into()
+        }
         Type::Status => "one of Todo, In progress, In review, Done, Canceled, Duplicate".into(),
         Type::Reference => "a Ticket reference such as T-KQ43".into(),
         Type::Choice(options) => format!("one of {}", options.join(", ")),
@@ -411,9 +423,9 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
         (Type::Tags, SyncValue::Set(tags)) => tags
             .iter()
             .all(|tag| !tag.is_empty() && *tag == tag.trim().to_lowercase()),
-        (Type::Flag | Type::Ids | Type::Tags, _) | (_, SyncValue::Flag(_) | SyncValue::Set(_)) => {
-            false
-        }
+        (Type::Edges, SyncValue::Set(edges)) => edges.iter().all(|edge| edge_time(edge).is_some()),
+        (Type::Flag | Type::Ids | Type::Tags | Type::Edges, _)
+        | (_, SyncValue::Flag(_) | SyncValue::Set(_)) => false,
         (Type::Text, SyncValue::Text(_)) => true,
         (Type::Name, SyncValue::Text(text)) => !text.trim().is_empty(),
         (Type::Time, SyncValue::Text(text)) => chrono::DateTime::parse_from_rfc3339(text).is_ok(),
@@ -483,8 +495,22 @@ fn quote(text: &str) -> String {
     quoted
 }
 
-fn write_block(out: &mut String, block: &str, top: bool, id: &str, fields: &Fields) {
+/// Ticket GUID to Ticket reference, written as a comment beside the GUID for readers.
+type Labels = BTreeMap<String, String>;
+
+fn write_block(
+    out: &mut String,
+    block: &str,
+    top: bool,
+    id: &str,
+    fields: &Fields,
+    labels: &Labels,
+) {
     let (schema, has_body) = shape(block);
+    let quote = |text: &str| match labels.get(text) {
+        Some(label) => format!("{} # {label}", quote(text)),
+        None => quote(text),
+    };
     out.push_str("---\n");
     if top {
         out.push_str(&format!("kind: {block}\n"));
@@ -607,7 +633,7 @@ fn typed(
         let value = match (kind, value) {
             (_, Raw::Null) => continue,
             (Type::Flag, Raw::Flag(flag)) => SyncValue::Flag(flag),
-            (Type::Ids | Type::Tags, Raw::List(items)) => {
+            (Type::Ids | Type::Tags | Type::Edges, Raw::List(items)) => {
                 let mut members = BTreeSet::new();
                 for item in items {
                     let Raw::Text(member) = item else {
@@ -621,7 +647,7 @@ fn typed(
                 }
                 SyncValue::Set(members)
             }
-            (Type::Flag | Type::Ids | Type::Tags, _) => return Err(invalid()),
+            (Type::Flag | Type::Ids | Type::Tags | Type::Edges, _) => return Err(invalid()),
             (_, Raw::Text(text)) => SyncValue::Text(text),
             _ => {
                 return Err(bad(format!(
@@ -657,15 +683,46 @@ impl SyncRecord {
 
     /// The record's file text. The same record always gives the same bytes.
     pub fn to_markdown(&self) -> String {
+        self.to_text(&Labels::new())
+    }
+
+    fn to_text(&self, labels: &Labels) -> String {
         let mut out = String::new();
-        write_block(&mut out, self.kind.name(), true, &self.id, &self.fields);
+        let kind = self.kind.name();
+        write_block(&mut out, kind, true, &self.id, &self.fields, labels);
         let mut parts: Vec<&SyncPart> = self.parts.iter().collect();
         parts.sort_by(|a, b| a.order().cmp(&b.order()));
         for part in parts {
             out.push_str(&format!("<!-- ticketd:{} -->\n", part.kind.name()));
-            write_block(&mut out, part.kind.name(), false, &part.id, &part.fields);
+            let kind = part.kind.name();
+            write_block(&mut out, kind, false, &part.id, &part.fields, labels);
         }
         out
+    }
+
+    /// A readable name for the record's file: the Ticket reference and title, or the
+    /// title or name of another record. It is never an identity and may repeat.
+    pub fn display_name(&self) -> String {
+        let field = |name| text(&self.fields, name).unwrap_or_default();
+        let name = match self.kind {
+            SyncKind::Ticket => format!("{} {}", field("ref"), field("title")),
+            SyncKind::Document => field("title").to_owned(),
+            SyncKind::Plan | SyncKind::Project => field("name").to_owned(),
+        };
+        // Characters a file system or a storage listing would not show as typed.
+        let name: String = name
+            .chars()
+            .map(|c| match c {
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => ' ',
+                c if c.is_control() => ' ',
+                c => c,
+            })
+            .take(80)
+            .collect();
+        match name.trim() {
+            "" => "Untitled.md".to_owned(),
+            name => format!("{name}.md"),
+        }
     }
 
     /// Read and validate a file's text. Nothing is read from or written to a Workspace.
@@ -890,6 +947,15 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
     }
     let mut parts = Vec::new();
     if kind == SyncKind::Ticket {
+        let mut statement = c.prepare(
+            "SELECT blocker_id || ' ' || created_at FROM dependencies WHERE dependent_id = ?1 AND created_at != ''",
+        )?;
+        let since: BTreeSet<String> = statement
+            .query_map([id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        if !since.is_empty() {
+            fields.insert("blocked_since".into(), SyncValue::Set(since));
+        }
         let sections: [(SyncPartKind, &str, &[&str]); 2] = [
             (
                 SyncPartKind::Activity,
@@ -1054,9 +1120,14 @@ impl Apply<'_> {
                     }
                 }
             }
-            return relation.replace(c, id, &wanted);
+            relation.replace(c, id, &wanted)?;
+            if field == "blocked_by" {
+                self.write_edge_times()?;
+            }
+            return Ok(());
         }
         match (record.kind, field) {
+            (SyncKind::Ticket, "blocked_since") => self.write_edge_times()?,
             (SyncKind::Ticket, "ref") => {
                 return Err(bad(format!(
                     "ticket {id} has another reference in this Workspace; a reference never changes"
@@ -1152,6 +1223,31 @@ impl Apply<'_> {
         if field == "body" && record.kind != SyncKind::Plan {
             // Links to files that have not arrived must not make the text unreadable.
             document_links::index_external_body(c, id, value.unwrap_or(""))?;
+        }
+        Ok(())
+    }
+
+    /// Give each dependency the time its file carries, so every device orders the
+    /// edges alike; the earliest wins when devices added the same edge separately.
+    fn write_edge_times(&self) -> Result<(), Error> {
+        let mut times: BTreeMap<&str, &str> = BTreeMap::new();
+        let since = set(&self.record.fields, "blocked_since");
+        // Items sort by GUID then time, so the first one seen for a GUID is its earliest.
+        for (blocker, time) in since.iter().filter_map(|item| edge_time(item)) {
+            times.entry(blocker).or_insert(time);
+        }
+        let mut statement = self
+            .c
+            .prepare("SELECT blocker_id FROM dependencies WHERE dependent_id = ?1")?;
+        let blockers = statement
+            .query_map([&self.record.id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        for blocker in blockers {
+            let time = times.get(blocker.as_str()).copied().unwrap_or("");
+            self.c.execute(
+                "UPDATE dependencies SET created_at = ?3 WHERE dependent_id = ?1 AND blocker_id = ?2 AND created_at IS NOT ?3",
+                params![self.record.id, blocker, time],
+            )?;
         }
         Ok(())
     }
@@ -1318,13 +1414,42 @@ impl Workspace {
     /// One record as its sync file's fields, read in a single snapshot. Device-local
     /// data (checkout folders, inbox state, credentials) is never part of it.
     pub fn export_sync_record(&self, kind: SyncKind, id: &str) -> Result<SyncRecord, Error> {
-        let snapshot = self.connection.unchecked_transaction()?;
-        read_record(&snapshot, kind, id)?.ok_or_else(|| match kind {
+        // Inside a write that is already under way the read is part of that transaction.
+        let record = if self.connection.is_autocommit() {
+            let snapshot = self.connection.unchecked_transaction()?;
+            read_record(&snapshot, kind, id)?
+        } else {
+            read_record(&self.connection, kind, id)?
+        };
+        record.ok_or_else(|| match kind {
             SyncKind::Project => Error::ProjectNotFound(id.to_owned()),
             SyncKind::Document => Error::DocumentNotFound(id.to_owned()),
             SyncKind::Plan => Error::PlanNotFound(id.to_owned()),
             SyncKind::Ticket => Error::NotFound(id.to_owned()),
         })
+    }
+
+    /// The record's file text as ticketd writes it to storage: `to_markdown` with the
+    /// Ticket reference as a comment beside each ticket GUID this Workspace knows.
+    /// Reading ignores the comments, so the GUID alone is the identity.
+    pub fn sync_file_text(&self, record: &SyncRecord) -> Result<String, Error> {
+        let mut labels = Labels::new();
+        let mut statement = self
+            .connection
+            .prepare("SELECT reference FROM tickets WHERE id = ?1")?;
+        for (name, kind, _) in TICKET {
+            let ids = match (kind, record.fields.get(*name)) {
+                (Type::Id, Some(SyncValue::Text(id))) => BTreeSet::from([id.clone()]),
+                (Type::Ids, Some(SyncValue::Set(ids))) => ids.clone(),
+                _ => continue,
+            };
+            for id in ids {
+                if let Some(reference) = statement.query_row([&id], |row| row.get(0)).optional()? {
+                    labels.insert(id, reference);
+                }
+            }
+        }
+        Ok(record.to_text(&labels))
     }
 
     /// Make the Workspace hold exactly this record, creating it or updating the record
@@ -1349,4 +1474,14 @@ impl Workspace {
         transaction.commit()?;
         Ok(missing)
     }
+}
+
+/// One record as its sync file's fields, or `None` when the Workspace does not hold it.
+/// For use inside a write that is already under way.
+pub(crate) fn find_record(
+    connection: &Connection,
+    kind: SyncKind,
+    id: &str,
+) -> Result<Option<SyncRecord>, Error> {
+    read_record(connection, kind, id)
 }

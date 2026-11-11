@@ -1,24 +1,20 @@
-//! Merge rules for a record seen on two devices, independent of the file format.
+//! Merge rules for a record seen on two devices.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-/// One field of a synced record. A set merges by membership; a value is compared whole.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Field {
-    Value(String),
-    Set(BTreeSet<String>),
-}
+use crate::SyncValue;
 
-/// A record as field name to field. A missing name means the field is unset.
-pub type Fields = BTreeMap<String, Field>;
+/// A record as field name to value. A missing name means the field is unset,
+/// which for a set is the same as empty.
+pub type Fields = BTreeMap<String, SyncValue>;
 
 /// A field both sides changed to different values since the last-synced copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Conflict {
     pub field: String,
-    pub base: Option<Field>,
-    pub local: Option<Field>,
-    pub remote: Option<Field>,
+    pub base: Option<SyncValue>,
+    pub local: Option<SyncValue>,
+    pub remote: Option<SyncValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +23,22 @@ pub struct Merged {
     pub fields: Fields,
     /// In field-name order.
     pub conflicts: Vec<Conflict>,
+}
+
+/// The members when every side that has the field holds a set.
+fn sets(sides: [Option<&SyncValue>; 3]) -> Option<[BTreeSet<&String>; 3]> {
+    if sides.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut members = [BTreeSet::new(), BTreeSet::new(), BTreeSet::new()];
+    for (side, members) in sides.into_iter().zip(&mut members) {
+        match side {
+            Some(SyncValue::Set(set)) => members.extend(set),
+            Some(_) => return None,
+            None => {}
+        }
+    }
+    Some(members)
 }
 
 /// Three-way merge of `local` and `remote` against `base`, the last-synced copy.
@@ -44,25 +56,18 @@ pub fn merge(base: &Fields, local: &Fields, remote: &Fields) -> Merged {
     let mut conflicts = Vec::new();
     for name in names {
         let (b, l, r) = (base.get(name), local.get(name), remote.get(name));
-        let merged = if l == r || r == b {
+        let merged = if let Some([b, l, r]) = sets([b, l, r]) {
+            // Kept by both, or added by either: an addition is never undone by the other side.
+            let members: BTreeSet<String> = l
+                .union(&r)
+                .filter(|item| !b.contains(*item) || (l.contains(*item) && r.contains(*item)))
+                .map(|item| (*item).clone())
+                .collect();
+            (!members.is_empty()).then_some(SyncValue::Set(members))
+        } else if l == r || r == b {
             l.cloned()
         } else if l == b {
             r.cloned()
-        } else if let (Some(Field::Set(l)), Some(Field::Set(r)), None | Some(Field::Set(_))) =
-            (l, r, b)
-        {
-            let empty = BTreeSet::new();
-            let b = match b {
-                Some(Field::Set(b)) => b,
-                _ => &empty,
-            };
-            // Kept by both, or added by either: an addition is never undone by the other side.
-            Some(Field::Set(
-                l.union(r)
-                    .filter(|item| !b.contains(*item) || (l.contains(*item) && r.contains(*item)))
-                    .cloned()
-                    .collect(),
-            ))
         } else {
             conflicts.push(Conflict {
                 field: name.clone(),

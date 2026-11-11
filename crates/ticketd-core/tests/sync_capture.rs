@@ -218,7 +218,7 @@ fn writes_made_while_applying_incoming_files_leave_no_mark() {
     take(&mut workspace);
 
     let incoming = workspace
-        .applying_incoming(|workspace| {
+        .applying_incoming(None, |workspace| {
             let ticket = workspace.create_ticket("Incoming")?;
             workspace.add_tag(&ticket.reference, "synced")?;
             workspace.add_activity(&existing.reference, "From another device", None)?;
@@ -248,7 +248,7 @@ fn a_failed_apply_changes_nothing_and_leaves_capture_on() {
     let existing = workspace.create_ticket("Existing").unwrap();
     take(&mut workspace);
 
-    let failed: Result<(), Error> = workspace.applying_incoming(|workspace| {
+    let failed: Result<(), Error> = workspace.applying_incoming(None, |workspace| {
         workspace.change_ticket(&existing.reference, title("Half applied"))?;
         workspace.show_ticket("T-ZZ999")?;
         Ok(())

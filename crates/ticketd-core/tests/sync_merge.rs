@@ -1,15 +1,16 @@
 use std::collections::BTreeSet;
-use ticketd_core::sync::merge::{BlockedBy, Conflict, Field, Fields, loop_edges, merge};
+use ticketd_core::SyncValue;
+use ticketd_core::sync::merge::{BlockedBy, Conflict, Fields, loop_edges, merge};
 
-fn value(text: &str) -> Field {
-    Field::Value(text.into())
+fn value(text: &str) -> SyncValue {
+    SyncValue::Text(text.into())
 }
 
-fn set(items: &[&str]) -> Field {
-    Field::Set(items.iter().map(|item| item.to_string()).collect())
+fn set(items: &[&str]) -> SyncValue {
+    SyncValue::Set(items.iter().map(|item| item.to_string()).collect())
 }
 
-fn record(fields: &[(&str, Field)]) -> Fields {
+fn record(fields: &[(&str, SyncValue)]) -> Fields {
     fields
         .iter()
         .map(|(name, field)| (name.to_string(), field.clone()))
@@ -283,4 +284,19 @@ fn a_set_changed_against_a_plain_value_is_reviewed_like_any_field() {
     assert_eq!(merged.fields, local);
     assert_eq!(merged.conflicts.len(), 1);
     let _: BTreeSet<String> = BTreeSet::new();
+}
+
+#[test]
+fn a_set_emptied_on_one_side_still_merges_with_changes_on_the_other() {
+    // An empty set is written as no field at all.
+    let base = record(&[("tags", set(&["a", "b"]))]);
+    let emptied = Fields::new();
+    let changed = record(&[("tags", set(&["b", "c"]))]);
+    let expected = record(&[("tags", set(&["c"]))]);
+    for (local, remote) in [(&emptied, &changed), (&changed, &emptied)] {
+        let merged = merge(&base, local, remote);
+        assert_eq!(merged.fields, expected);
+        assert_eq!(merged.conflicts, []);
+    }
+    assert_eq!(merge(&base, &emptied, &emptied).fields, Fields::new());
 }

@@ -17,14 +17,17 @@ A file is a YAML header between two `---` lines, then the record's Markdown text
 
 ```markdown
 ---
+# synced from: Studio desktop
 kind: ticket
 id: "3f2c9a1e-5b7d-4c1a-9e2f-0a1b2c3d4e5f"
 ref: "T-KQ43"
 title: "Fix login"
 status: "In progress"
-parent: "8d1f6c2e-0b9a-4f3d-8c7e-6a5b4c3d2e1f"
+parent: "8d1f6c2e-0b9a-4f3d-8c7e-6a5b4c3d2e1f" # T-KQ7
 blocked_by:
-  - "c4a7e9b2-3d1f-4a6b-9c8d-7e6f5a4b3c2d"
+  - "c4a7e9b2-3d1f-4a6b-9c8d-7e6f5a4b3c2d" # T-MW12
+blocked_since:
+  - "c4a7e9b2-3d1f-4a6b-9c8d-7e6f5a4b3c2d 2026-11-10T16:05:00.000Z"
 tags:
   - "backend"
   - "urgent"
@@ -53,6 +56,7 @@ The same record always produces the same bytes, so a file changes only when its 
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
+- A file written to storage also carries comments for readers: `# synced from:` with the name of the desktop that wrote it, and the Ticket reference beside each ticket GUID. Comments are never read back as data; the GUID alone identifies a record.
 - The text after the header is the record's Markdown followed by one line break.
 - A text line that starts with `<!-- ticketd:` is written with a leading backslash, and one leading backslash is removed when reading, so text can never be mistaken for a section marker.
 - Lines end with a line feed. Line breaks inside the Markdown text are kept as they are.
@@ -87,6 +91,7 @@ Every relationship is written in exactly one file, as the GUID of the other reco
 | Originating Activity        | The Document: `origin_activity`                    |
 
 A file may arrive before a record it names. The relationship is then left out and reported; applying the same file again after the other record arrives completes it. Mentions and links inside Markdown text resolve once their target is present.
+`blocked_since` orders dependencies the same way on every device. When changes from different devices together make a dependency loop, every device removes the dependency in the loop that began last; equal times fall back to the GUIDs. A dependency added by hand without a time counts as the earliest.
 
 ## Fields
 
@@ -100,6 +105,7 @@ A file may arrive before a record it names. The relationship is then left out an
 | `project`, `plan`   | GUID of the project and of the Plan.                                 |
 | `parent`            | GUID of the parent ticket.                                           |
 | `blocked_by`        | GUIDs of the tickets that block this one.                            |
+| `blocked_since`     | One `<GUID> <time>` item per blocking ticket: when it began to block. |
 | `related`           | GUIDs of related tickets whose id sorts after this ticket's.         |
 | `discovered`        | GUIDs of tickets discovered while working on this one.               |
 | `duplicate_of`      | GUID of the canonical ticket.                                        |

@@ -269,6 +269,8 @@ pub enum Error {
     Directory(#[from] std::io::Error),
     #[error("workspace database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("sync storage: {0}")]
+    Remote(#[from] sync::remote::RemoteError),
     #[error("unreadable sync file: {0}")]
     SyncFile(String),
     #[error("workspace schema version {0} is newer than this application supports")]

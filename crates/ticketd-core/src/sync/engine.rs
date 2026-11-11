@@ -1,0 +1,913 @@
+//! The sync run: download files changed elsewhere, merge them with what this
+//! device holds against the last-synced copy, and upload what changed here.
+//!
+//! Nothing here deletes a record, and a failing storage call ends the run with
+//! everything still marked for the next one.
+
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Cursor,
+};
+
+use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::{
+    RecordKind,
+    capture::mark_dirty,
+    merge::{BlockedBy, loop_edges, merge},
+    remote::{RemoteError, RemoteFile, RemoteKey, RemoteKind, RemoteStorage},
+};
+use crate::{Error, SyncKind, SyncPart, SyncRecord, SyncValue, Workspace, sync_files::find_record};
+
+const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+/// The header comment naming the desktop that wrote a file.
+const DEVICE_LINE: &str = "# synced from: ";
+
+pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
+    connection.execute_batch(&format!(
+        "-- The last-synced copy of each file. `wanted` and `applied` are set while a
+         -- relationship of the record waits for a record that has not arrived.
+         CREATE TABLE IF NOT EXISTS sync_files (kind TEXT NOT NULL, id TEXT NOT NULL, version TEXT, content TEXT, wanted TEXT, applied TEXT, PRIMARY KEY(kind, id));
+         CREATE TABLE IF NOT EXISTS sync_conflicts (kind TEXT NOT NULL, id TEXT NOT NULL, field TEXT NOT NULL, base TEXT, remote TEXT, remote_device TEXT, detected_at TEXT NOT NULL DEFAULT ({NOW}), read INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind, id, field));
+         CREATE TABLE IF NOT EXISTS sync_notices (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL DEFAULT ({NOW}), read INTEGER NOT NULL DEFAULT 0, notice TEXT NOT NULL, cause TEXT NOT NULL UNIQUE);"
+    ))?;
+    let timed: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('dependencies') WHERE name = 'created_at')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !timed {
+        connection.execute_batch("ALTER TABLE dependencies ADD COLUMN created_at TEXT;")?;
+    }
+    // The time orders dependencies the same way on every device. An applied
+    // file sets it from the file; one made here gets this device's clock.
+    connection.execute_batch(&format!(
+        "CREATE TRIGGER IF NOT EXISTS sync_dependency_time AFTER INSERT ON dependencies WHEN NEW.created_at IS NULL BEGIN
+            UPDATE dependencies SET created_at = {NOW} WHERE blocker_id = NEW.blocker_id AND dependent_id = NEW.dependent_id;
+         END;"
+    ))?;
+    Ok(())
+}
+
+/// What one sync run did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncReport {
+    /// Files written to the storage.
+    pub uploaded: usize,
+    /// Files changed elsewhere that were merged into this Workspace.
+    pub downloaded: usize,
+    /// Fields newly waiting for review.
+    pub conflicts: usize,
+    /// Files skipped as unreadable, each with a notice.
+    pub skipped: usize,
+    /// Records still waiting to upload after the run.
+    pub pending: usize,
+}
+
+/// One field of a record that this device and another changed differently.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncConflictField {
+    /// A header field name or `body`; `<section GUID>:<field>` inside an
+    /// Activity or Implementation evidence section.
+    pub field: String,
+    pub base: Option<SyncValue>,
+    /// The value this Workspace holds now.
+    pub local: Option<SyncValue>,
+    pub remote: Option<SyncValue>,
+    /// The desktop the remote value came from, when its file names one.
+    pub remote_device: Option<String>,
+    pub detected_at: String,
+}
+
+/// A record that needs review, with every field still in conflict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncConflict {
+    pub kind: SyncKind,
+    pub id: String,
+    /// The Ticket reference; `None` for other kinds.
+    pub reference: Option<String>,
+    pub title: String,
+    pub detected_at: String,
+    pub read: bool,
+    pub fields: Vec<SyncConflictField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncChoice {
+    Local,
+    Remote,
+    Edited(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncResolution {
+    pub field: String,
+    pub choice: SyncChoice,
+}
+
+/// Something sync did that needs no decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SyncNoticeKind {
+    /// A dependency that closed a loop was removed from `reference`.
+    DependencyRemoved {
+        ticket_id: String,
+        reference: String,
+        title: String,
+        /// Always `blocked_by`: the notice is about the blocked ticket.
+        relation: String,
+        /// The Ticket reference of the ticket that no longer blocks it.
+        other: String,
+    },
+    /// A parent link that closed a loop was removed from the child `reference`.
+    ParentRemoved {
+        ticket_id: String,
+        reference: String,
+        title: String,
+        other: String,
+    },
+    /// A file in the storage could not be used and was left alone.
+    UnreadableFile { path: String, reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncNotice {
+    pub id: String,
+    pub timestamp: String,
+    pub read: bool,
+    #[serde(flatten)]
+    pub notice: SyncNoticeKind,
+}
+
+fn remote_kind(kind: SyncKind) -> RemoteKind {
+    match kind {
+        SyncKind::Project => RemoteKind::Project,
+        SyncKind::Document => RemoteKind::Document,
+        SyncKind::Plan => RemoteKind::Plan,
+        SyncKind::Ticket => RemoteKind::Ticket,
+    }
+}
+
+fn sync_kind(name: &str) -> Option<SyncKind> {
+    SyncKind::ALL
+        .into_iter()
+        .find(|kind| remote_kind(*kind).as_str() == name)
+}
+
+fn dirty_kind(kind: SyncKind) -> RecordKind {
+    match kind {
+        SyncKind::Project => RecordKind::Project,
+        SyncKind::Document => RecordKind::Document,
+        SyncKind::Plan => RecordKind::Plan,
+        SyncKind::Ticket => RecordKind::Ticket,
+    }
+}
+
+fn table(kind: SyncKind) -> &'static str {
+    match kind {
+        SyncKind::Project => "projects",
+        SyncKind::Document => "documents",
+        SyncKind::Plan => "plans",
+        SyncKind::Ticket => "tickets",
+    }
+}
+
+fn name(kind: SyncKind) -> &'static str {
+    remote_kind(kind).as_str()
+}
+
+/// What this device remembers of one record's file.
+#[derive(Default)]
+struct Stored {
+    /// The remote version last merged or written.
+    version: Option<String>,
+    /// The file as last synced: the base of the next merge.
+    base: Option<SyncRecord>,
+    /// The record this device should hold, kept while part of it could not be
+    /// applied because a record it names has not arrived.
+    wanted: Option<SyncRecord>,
+    /// What the Workspace held right after that partial apply.
+    applied: Option<SyncRecord>,
+}
+
+fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, Error> {
+    let row: Option<[Option<String>; 4]> = connection
+        .query_row(
+            "SELECT version, content, wanted, applied FROM sync_files WHERE kind = ?1 AND id = ?2",
+            params![name(kind), id],
+            |row| Ok([row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?]),
+        )
+        .optional()?;
+    let Some([version, base, wanted, applied]) = row else {
+        return Ok(Stored::default());
+    };
+    let parse = |text: Option<String>| text.as_deref().map(SyncRecord::parse).transpose();
+    Ok(Stored {
+        version,
+        base: parse(base)?,
+        wanted: parse(wanted)?,
+        applied: parse(applied)?,
+    })
+}
+
+fn store(connection: &Connection, kind: SyncKind, id: &str, stored: &Stored) -> Result<(), Error> {
+    let text = |record: &Option<SyncRecord>| record.as_ref().map(SyncRecord::to_markdown);
+    connection.execute(
+        "INSERT INTO sync_files (kind, id, version, content, wanted, applied) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(kind, id) DO UPDATE SET version = excluded.version, content = excluded.content, wanted = excluded.wanted, applied = excluded.applied",
+        params![name(kind), id, stored.version, text(&stored.base), text(&stored.wanted), text(&stored.applied)],
+    )?;
+    Ok(())
+}
+
+/// Views poll the change token; conflicts and notices are part of what they show.
+fn touch(connection: &Connection) -> Result<(), Error> {
+    connection.execute("UPDATE workspace_changes SET token = token + 1", [])?;
+    Ok(())
+}
+
+fn notify(connection: &Connection, cause: &str, notice: &SyncNoticeKind) -> Result<(), Error> {
+    let notice =
+        serde_json::to_string(notice).map_err(|error| Error::SyncFile(error.to_string()))?;
+    // One notice per cause, however many runs meet it again.
+    connection.execute(
+        "INSERT OR IGNORE INTO sync_notices (id, notice, cause) VALUES (?1, ?2, ?3)",
+        params![format!("notice-{}", Uuid::new_v4()), notice, cause],
+    )?;
+    touch(connection)
+}
+
+/// Merge two versions of a record against their last-synced copy. Sections are
+/// matched by GUID; one removed on a side that the other side changed is kept.
+/// Conflicts keep the local value and name sections as `<GUID>:<field>`.
+fn merge_records(
+    base: Option<&SyncRecord>,
+    local: &SyncRecord,
+    remote: &SyncRecord,
+) -> (SyncRecord, Vec<super::merge::Conflict>) {
+    let empty = BTreeMap::new();
+    let top = merge(
+        base.map_or(&empty, |base| &base.fields),
+        &local.fields,
+        &remote.fields,
+    );
+    let mut conflicts = top.conflicts;
+    let part = |record: Option<&'_ SyncRecord>, id: &str| {
+        record.and_then(|record| record.parts.iter().find(|part| part.id == id).cloned())
+    };
+    let ids: BTreeSet<&String> = local
+        .parts
+        .iter()
+        .chain(&remote.parts)
+        .map(|part| &part.id)
+        .collect();
+    let mut parts = Vec::new();
+    for id in ids {
+        let (b, l, r) = (
+            part(base, id),
+            part(Some(local), id),
+            part(Some(remote), id),
+        );
+        let kept = match (b, l, r) {
+            (b, Some(l), Some(r)) => {
+                let mut merged = merge(
+                    b.as_ref().map_or(&empty, |b| &b.fields),
+                    &l.fields,
+                    &r.fields,
+                );
+                for conflict in merged.conflicts {
+                    // Any edit moves the time, so two edits always differ here; the
+                    // later time describes the merged section.
+                    if conflict.field == "updated_at" {
+                        if conflict.remote > conflict.local {
+                            merged
+                                .fields
+                                .extend(conflict.remote.map(|later| (conflict.field, later)));
+                        }
+                    } else {
+                        conflicts.push(super::merge::Conflict {
+                            field: format!("{id}:{}", conflict.field),
+                            ..conflict
+                        });
+                    }
+                }
+                Some(SyncPart {
+                    fields: merged.fields,
+                    ..l
+                })
+            }
+            // Removed on one side: gone, unless the other side changed it meanwhile.
+            (Some(b), Some(changed), None) | (Some(b), None, Some(changed)) => {
+                (changed != b).then_some(changed)
+            }
+            (None, Some(added), None) | (None, None, Some(added)) => Some(added),
+            (_, None, None) => None,
+        };
+        parts.extend(kept);
+    }
+    parts.sort_by(|a, b| a.order().cmp(&b.order()));
+    let merged = SyncRecord {
+        kind: local.kind,
+        id: local.id.clone(),
+        fields: top.fields,
+        parts,
+    };
+    (merged, conflicts)
+}
+
+/// The record this device means to hold: what the Workspace holds, plus any
+/// relationship still waiting for its target.
+fn local_view(
+    connection: &Connection,
+    kind: SyncKind,
+    id: &str,
+    stored: &Stored,
+) -> Result<Option<SyncRecord>, Error> {
+    let Some(local) = find_record(connection, kind, id)? else {
+        return Ok(None);
+    };
+    Ok(Some(match (&stored.applied, &stored.wanted) {
+        (Some(applied), Some(wanted)) => merge_records(Some(applied), &local, wanted).0,
+        _ => local,
+    }))
+}
+
+fn value_at<'a>(record: &'a SyncRecord, field: &str) -> Option<&'a SyncValue> {
+    match field.split_once(':') {
+        Some((part, field)) => record
+            .parts
+            .iter()
+            .find(|candidate| candidate.id == part)?
+            .fields
+            .get(field),
+        None => record.fields.get(field),
+    }
+}
+
+fn set_at(record: &mut SyncRecord, field: &str, value: Option<SyncValue>) {
+    let (fields, field) = match field.split_once(':') {
+        Some((part, field)) => {
+            match record
+                .parts
+                .iter_mut()
+                .find(|candidate| candidate.id == part)
+            {
+                Some(part) => (&mut part.fields, field),
+                None => return,
+            }
+        }
+        None => (&mut record.fields, field),
+    };
+    match value {
+        Some(value) => fields.insert(field.to_owned(), value),
+        None => fields.remove(field),
+    };
+}
+
+fn json<T: Serialize>(value: &T) -> Result<String, Error> {
+    serde_json::to_string(value).map_err(|error| Error::SyncFile(error.to_string()))
+}
+
+fn from_json(text: Option<String>) -> Result<Option<SyncValue>, Error> {
+    match text {
+        Some(text) => {
+            serde_json::from_str(&text).map_err(|error| Error::SyncFile(error.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+/// The desktop a file says it was written by.
+fn device_of(file: &str) -> Option<String> {
+    file.lines()
+        .skip(1)
+        .take_while(|line| line.trim_end() != "---")
+        .find_map(|line| line.strip_prefix(DEVICE_LINE))
+        .map(|device| device.trim().to_owned())
+        .filter(|device| !device.is_empty())
+}
+
+fn with_device(file: &str, device: &str) -> String {
+    let device: String = device.chars().filter(|c| !c.is_control()).collect();
+    match file.split_once('\n') {
+        Some((first, rest)) if !device.trim().is_empty() => {
+            format!("{first}\n{DEVICE_LINE}{}\n{rest}", device.trim())
+        }
+        _ => file.to_owned(),
+    }
+}
+
+/// A failure that condemns one file, not the run: the file is skipped with a notice.
+fn is_file_fault(error: &Error) -> bool {
+    match error {
+        Error::SyncFile(_) => true,
+        Error::Database(rusqlite::Error::SqliteFailure(failure, _)) => {
+            failure.code == rusqlite::ErrorCode::ConstraintViolation
+        }
+        _ => false,
+    }
+}
+
+impl Workspace {
+    /// One sync run against the Workspace folder `folder` of `remote`, as the
+    /// desktop named `device`. Safe to repeat and to interrupt: a storage
+    /// failure returns the error with every unsent change still pending.
+    pub fn sync(
+        &mut self,
+        remote: &dyn RemoteStorage,
+        folder: &str,
+        device: &str,
+    ) -> Result<SyncReport, Error> {
+        let mut report = SyncReport::default();
+        self.download(remote, folder, &mut report)?;
+        self.retry_waiting()?;
+        self.drop_loops()?;
+        self.upload(remote, folder, device, &mut report)?;
+        report.pending = self.dirty_records()?.len();
+        Ok(report)
+    }
+
+    fn download(
+        &mut self,
+        remote: &dyn RemoteStorage,
+        folder: &str,
+        report: &mut SyncReport,
+    ) -> Result<(), Error> {
+        let mut files: Vec<(SyncKind, RemoteFile)> = remote
+            .list(folder)?
+            .into_iter()
+            .filter_map(|file| Some((sync_kind(file.key.kind.as_str())?, file)))
+            .collect();
+        // Projects, Documents and Plans first, so most relationships find their target.
+        files.sort_by(|a, b| (a.0, &a.1.key.id).cmp(&(b.0, &b.1.key.id)));
+        for (kind, file) in files {
+            let id = file.key.id.as_str();
+            let seen: Option<String> = self
+                .connection
+                .query_row(
+                    "SELECT version FROM sync_files WHERE kind = ?1 AND id = ?2",
+                    params![name(kind), id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            if seen.as_deref() == Some(&file.version) {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            match remote.download(folder, &file.key, &file.version, &mut bytes) {
+                Ok(()) => {}
+                // Replaced since the listing; the next run sees the newer version.
+                Err(RemoteError::NotFound) => continue,
+                Err(error) => return Err(error.into()),
+            }
+            let merged = String::from_utf8(bytes)
+                .map_err(|_| Error::SyncFile("the file is not UTF-8 text".into()))
+                .and_then(|text| self.merge_incoming(kind, id, &file.version, &text));
+            match merged {
+                Ok(conflicts) => {
+                    report.downloaded += 1;
+                    report.conflicts += conflicts;
+                }
+                Err(error) if is_file_fault(&error) => {
+                    report.skipped += 1;
+                    self.skip(kind, &file, &error)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    /// Leave an unusable file alone and say so once. Its version is remembered so
+    /// it is not read again, and a later local change replaces it.
+    fn skip(&mut self, kind: SyncKind, file: &RemoteFile, error: &Error) -> Result<(), Error> {
+        let id = file.key.id.as_str();
+        let transaction = self.connection.savepoint()?;
+        // A stored copy that cannot be read is no reason to fail the skip itself.
+        let mut seen = stored(&transaction, kind, id).unwrap_or_default();
+        seen.version = Some(file.version.clone());
+        store(&transaction, kind, id, &seen)?;
+        let reason = match error {
+            Error::SyncFile(reason) => reason.clone(),
+            error => error.to_string(),
+        };
+        notify(
+            &transaction,
+            &format!("unreadable:{}:{id}:{}", name(kind), file.version),
+            &SyncNoticeKind::UnreadableFile {
+                path: format!("{}/{}", table(kind), file.name),
+                reason,
+            },
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Merge one downloaded file into the Workspace and remember it as the
+    /// last-synced copy. Returns how many fields newly need review.
+    fn merge_incoming(
+        &mut self,
+        kind: SyncKind,
+        id: &str,
+        version: &str,
+        file: &str,
+    ) -> Result<usize, Error> {
+        let remote = SyncRecord::parse(file)?;
+        if remote.kind != kind || remote.id != id {
+            return Err(Error::SyncFile(
+                "the file's kind and id do not match where it is stored".into(),
+            ));
+        }
+        let device = device_of(file);
+        self.applying_incoming(device.as_deref(), |workspace| {
+            let mut stored = stored(&workspace.connection, kind, id)?;
+            let (merged, conflicts) = match local_view(&workspace.connection, kind, id, &stored)? {
+                Some(local) => merge_records(stored.base.as_ref(), &local, &remote),
+                None => (remote.clone(), Vec::new()),
+            };
+            let missing = workspace.apply_sync_record(&merged)?;
+            let connection = &workspace.connection;
+            (stored.wanted, stored.applied) = if missing.is_empty() {
+                (None, None)
+            } else {
+                (Some(merged.clone()), find_record(connection, kind, id)?)
+            };
+            stored.version = Some(version.to_owned());
+            // What local changes remain shows as a difference from the remote copy.
+            if merged != remote {
+                mark_dirty(connection, dirty_kind(kind), id)?;
+            }
+            stored.base = Some(remote);
+            store(connection, kind, id, &stored)?;
+            for conflict in &conflicts {
+                connection.execute(
+                    &format!(
+                        "INSERT INTO sync_conflicts (kind, id, field, base, remote, remote_device) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                         ON CONFLICT(kind, id, field) DO UPDATE SET base = excluded.base, remote = excluded.remote, remote_device = excluded.remote_device, detected_at = {NOW}, read = 0"
+                    ),
+                    params![
+                        name(kind),
+                        id,
+                        conflict.field,
+                        conflict.base.as_ref().map(json).transpose()?,
+                        conflict.remote.as_ref().map(json).transpose()?,
+                        device
+                    ],
+                )?;
+            }
+            if !conflicts.is_empty() {
+                touch(connection)?;
+            }
+            Ok(conflicts.len())
+        })
+    }
+
+    /// Apply again the records whose relationships waited for a record to arrive.
+    // ponytail: every waiting record is re-applied on every run; an Attachment link
+    // waits until Attachment rows sync. Index the awaited ids if this gets slow.
+    fn retry_waiting(&mut self) -> Result<(), Error> {
+        let mut statement = self.connection.prepare(
+            "SELECT kind, id FROM sync_files WHERE wanted IS NOT NULL ORDER BY kind, id",
+        )?;
+        let waiting = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        for (kind, id) in waiting {
+            let Some(kind) = sync_kind(&kind) else {
+                continue;
+            };
+            self.applying_incoming(None, |workspace| {
+                let mut stored = stored(&workspace.connection, kind, &id)?;
+                let Some(wanted) = local_view(&workspace.connection, kind, &id, &stored)? else {
+                    return Ok(());
+                };
+                let missing = workspace.apply_sync_record(&wanted)?;
+                (stored.wanted, stored.applied) = if missing.is_empty() {
+                    (None, None)
+                } else {
+                    let applied = find_record(&workspace.connection, kind, &id)?;
+                    (Some(wanted), applied)
+                };
+                store(&workspace.connection, kind, &id, &stored)
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Remove the later edge of every dependency or parent loop that merging made.
+    /// The removal is an ordinary change, so it uploads; every device holding the
+    /// same edges removes the same ones.
+    fn drop_loops(&mut self) -> Result<(), Error> {
+        let transaction = self.connection.savepoint()?;
+        let edges = |sql: &str| -> Result<Vec<BlockedBy>, Error> {
+            let mut statement = transaction.prepare(sql)?;
+            let edges = statement
+                .query_map([], |row| {
+                    Ok(BlockedBy {
+                        blocked: row.get(0)?,
+                        blocker: row.get(1)?,
+                        order: row.get(2)?,
+                    })
+                })?
+                .collect::<Result<_, _>>()?;
+            Ok(edges)
+        };
+        let ticket = |id: &str| -> Result<(String, String), Error> {
+            Ok(transaction.query_row(
+                "SELECT reference, title FROM tickets WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?)
+        };
+        let dependencies =
+            edges("SELECT dependent_id, blocker_id, COALESCE(created_at, '') FROM dependencies")?;
+        for edge in loop_edges(&dependencies) {
+            transaction.execute(
+                "DELETE FROM dependencies WHERE dependent_id = ?1 AND blocker_id = ?2",
+                params![edge.blocked, edge.blocker],
+            )?;
+            let (reference, title) = ticket(&edge.blocked)?;
+            let (other, _) = ticket(&edge.blocker)?;
+            for (ticket, other, relation) in [
+                (&edge.blocked, &other, "blocked_by"),
+                (&edge.blocker, &reference, "blocks"),
+            ] {
+                transaction.execute(
+                    "INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'sync_dependency_removed', ?2, ?3)",
+                    params![ticket, other, relation],
+                )?;
+            }
+            notify(
+                &transaction,
+                &format!(
+                    "dependency:{}:{}:{}",
+                    edge.blocked, edge.blocker, edge.order
+                ),
+                &SyncNoticeKind::DependencyRemoved {
+                    ticket_id: edge.blocked,
+                    reference,
+                    title,
+                    relation: "blocked_by".into(),
+                    other,
+                },
+            )?;
+        }
+        // A parent link carries no time; the GUIDs alone order the links of a loop.
+        let parents = edges("SELECT child_id, parent_id, '' FROM ticket_parents")?;
+        for edge in loop_edges(&parents) {
+            transaction.execute(
+                "DELETE FROM ticket_parents WHERE child_id = ?1",
+                [&edge.blocked],
+            )?;
+            let (reference, title) = ticket(&edge.blocked)?;
+            let (other, _) = ticket(&edge.blocker)?;
+            notify(
+                &transaction,
+                &format!("parent:{}:{}", edge.blocked, edge.blocker),
+                &SyncNoticeKind::ParentRemoved {
+                    ticket_id: edge.blocked,
+                    reference,
+                    title,
+                    other,
+                },
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn upload(
+        &mut self,
+        remote: &dyn RemoteStorage,
+        folder: &str,
+        device: &str,
+        report: &mut SyncReport,
+    ) -> Result<(), Error> {
+        // A record that never synced uploads even if it predates change capture.
+        for kind in SyncKind::ALL {
+            let mut statement = self.connection.prepare(&format!(
+                "SELECT id FROM {} WHERE id NOT IN (SELECT id FROM sync_files WHERE kind = ?1) AND id NOT IN (SELECT id FROM sync_dirty WHERE kind = ?1)",
+                table(kind)
+            ))?;
+            let unsynced = statement
+                .query_map([name(kind)], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            for id in unsynced {
+                mark_dirty(&self.connection, dirty_kind(kind), &id)?;
+            }
+        }
+        for dirty in self.dirty_records()? {
+            let Some(kind) = SyncKind::ALL
+                .into_iter()
+                .find(|kind| dirty_kind(*kind) == dirty.kind)
+            else {
+                // Attachment files are synced separately.
+                continue;
+            };
+            let mut stored = stored(&self.connection, kind, &dirty.id)?;
+            let Some(local) = local_view(&self.connection, kind, &dirty.id, &stored)? else {
+                self.clear_dirty(&dirty)?;
+                continue;
+            };
+            // Marks over-report; only a real difference is worth a write.
+            if stored.base.as_ref() == Some(&local) {
+                self.clear_dirty(&dirty)?;
+                continue;
+            }
+            let text = with_device(&self.sync_file_text(&local)?, device);
+            let key = RemoteKey::new(remote_kind(kind), dirty.id.clone());
+            let write = |expected: Option<&str>| {
+                remote.write(
+                    folder,
+                    &key,
+                    &local.display_name(),
+                    expected,
+                    &mut Cursor::new(text.as_bytes()),
+                )
+            };
+            let written = match write(stored.version.as_deref()) {
+                // The file is gone from the storage: put it back.
+                Err(RemoteError::PreconditionFailed { current: None }) => write(None),
+                result => result,
+            };
+            match written {
+                Ok(file) => {
+                    stored.version = Some(file.version);
+                    stored.base = Some(local);
+                    store(&self.connection, kind, &dirty.id, &stored)?;
+                    // False when the record changed during the upload: it stays pending.
+                    self.clear_dirty(&dirty)?;
+                    report.uploaded += 1;
+                }
+                // Changed elsewhere since the download: the next run merges it first.
+                Err(RemoteError::PreconditionFailed { .. }) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    }
+
+    /// The records that need review, most recently detected first.
+    pub fn sync_conflicts(&self) -> Result<Vec<SyncConflict>, Error> {
+        let mut statement = self.connection.prepare(
+            "SELECT kind, id FROM sync_conflicts GROUP BY kind, id ORDER BY MAX(detected_at) DESC, id",
+        )?;
+        let records = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut conflicts = Vec::new();
+        for (kind, id) in records {
+            if let Some(kind) = sync_kind(&kind) {
+                conflicts.push(self.sync_conflict(kind, &id)?);
+            }
+        }
+        Ok(conflicts)
+    }
+
+    /// One record's conflicting fields with both values, for the comparison.
+    pub fn sync_conflict(&self, kind: SyncKind, id: &str) -> Result<SyncConflict, Error> {
+        let record = self.export_sync_record(kind, id)?;
+        let mut statement = self.connection.prepare(
+            "SELECT field, base, remote, remote_device, detected_at, read FROM sync_conflicts WHERE kind = ?1 AND id = ?2 ORDER BY field",
+        )?;
+        let rows = statement
+            .query_map(params![name(kind), id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, bool>(5)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if rows.is_empty() {
+            return Err(Error::NotFound(format!("conflict on {} {id}", name(kind))));
+        }
+        let read = rows.iter().all(|row| row.5);
+        let detected_at = rows
+            .iter()
+            .map(|row| row.4.clone())
+            .max()
+            .unwrap_or_default();
+        let mut fields = Vec::new();
+        for (field, base, remote, remote_device, detected_at, _) in rows {
+            fields.push(SyncConflictField {
+                local: value_at(&record, &field).cloned(),
+                field,
+                base: from_json(base)?,
+                remote: from_json(remote)?,
+                remote_device,
+                detected_at,
+            });
+        }
+        let text = |field: &str| match record.fields.get(field) {
+            Some(SyncValue::Text(text)) => Some(text.clone()),
+            _ => None,
+        };
+        Ok(SyncConflict {
+            kind,
+            id: id.to_owned(),
+            reference: text("ref"),
+            title: text("title").or_else(|| text("name")).unwrap_or_default(),
+            detected_at,
+            read,
+            fields,
+        })
+    }
+
+    /// Settle conflicting fields of a record: keep the local value, take the
+    /// remote one, or save an edited value. The result is an ordinary change
+    /// that uploads on the next run; fields not named stay in review.
+    pub fn resolve_sync_conflict(
+        &mut self,
+        kind: SyncKind,
+        id: &str,
+        resolutions: &[SyncResolution],
+    ) -> Result<(), Error> {
+        let conflict = self.sync_conflict(kind, id)?;
+        let mut record = self.export_sync_record(kind, id)?;
+        for resolution in resolutions {
+            let field = conflict
+                .fields
+                .iter()
+                .find(|field| field.field == resolution.field)
+                .ok_or_else(|| {
+                    Error::NotFound(format!("conflict on field '{}'", resolution.field))
+                })?;
+            match &resolution.choice {
+                SyncChoice::Local => {}
+                SyncChoice::Remote => set_at(&mut record, &field.field, field.remote.clone()),
+                SyncChoice::Edited(value) => {
+                    set_at(
+                        &mut record,
+                        &field.field,
+                        Some(SyncValue::Text(value.clone())),
+                    );
+                }
+            }
+        }
+        self.apply_sync_record(&record)?;
+        for resolution in resolutions {
+            self.connection.execute(
+                "DELETE FROM sync_conflicts WHERE kind = ?1 AND id = ?2 AND field = ?3",
+                params![name(kind), id, resolution.field],
+            )?;
+        }
+        touch(&self.connection)
+    }
+
+    /// What sync did that needs no decision, newest first.
+    pub fn sync_notices(&self) -> Result<Vec<SyncNotice>, Error> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, timestamp, read, notice FROM sync_notices ORDER BY timestamp DESC, rowid DESC",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(id, timestamp, read, notice)| {
+                Ok(SyncNotice {
+                    id,
+                    timestamp,
+                    read,
+                    notice: serde_json::from_str(&notice)
+                        .map_err(|error| Error::SyncFile(error.to_string()))?,
+                })
+            })
+            .collect()
+    }
+
+    /// Mark notices (by notice id) and records in review (by GUID) read or unread.
+    /// Read state stays on this device.
+    pub fn set_sync_read(&mut self, ids: &[String], read: bool) -> Result<(), Error> {
+        for id in ids {
+            self.connection.execute(
+                "UPDATE sync_notices SET read = ?2 WHERE id = ?1",
+                params![id, read],
+            )?;
+            self.connection.execute(
+                "UPDATE sync_conflicts SET read = ?2 WHERE id = ?1",
+                params![id, read],
+            )?;
+        }
+        touch(&self.connection)
+    }
+}

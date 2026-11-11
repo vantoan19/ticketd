@@ -33,6 +33,9 @@ pub struct VersionSummary {
     pub replaced_at: String,
     /// The fields that change altered: `title`, `body`, `status`, `trashed`.
     pub changed: Vec<String>,
+    /// The desktop whose change replaced this version, when it arrived by sync;
+    /// `None` for a change made on this device.
+    pub device: Option<String>,
 }
 
 /// An earlier version of a ticket or Document, for comparison with the current record.
@@ -44,6 +47,9 @@ pub struct Version {
     pub record_id: String,
     pub replaced_at: String,
     pub changed: Vec<String>,
+    /// The desktop whose change replaced this version, when it arrived by sync;
+    /// `None` for a change made on this device.
+    pub device: Option<String>,
     /// A Document may have no title; a ticket always has one.
     pub title: Option<String>,
     pub body: String,
@@ -65,30 +71,33 @@ pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
             title TEXT,
             body TEXT NOT NULL,
             status TEXT,
-            trashed INTEGER NOT NULL);
+            trashed INTEGER NOT NULL,
+            device TEXT);
         CREATE INDEX IF NOT EXISTS record_versions_record ON record_versions(kind, record_id);
-        CREATE TRIGGER IF NOT EXISTS record_version_ticket AFTER UPDATE ON tickets
+        DROP TRIGGER IF EXISTS record_version_ticket;
+        DROP TRIGGER IF EXISTS record_version_document;
+        CREATE TRIGGER record_version_ticket AFTER UPDATE ON tickets
         WHEN OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body
             OR OLD.status IS NOT NEW.status OR OLD.trashed IS NOT NEW.trashed
         BEGIN
-            INSERT INTO record_versions (kind, record_id, changed, title, body, status, trashed)
+            INSERT INTO record_versions (kind, record_id, changed, title, body, status, trashed, device)
             VALUES ('ticket', OLD.id, trim(
                 CASE WHEN OLD.title IS NOT NEW.title THEN 'title ' ELSE '' END
                 || CASE WHEN OLD.body IS NOT NEW.body THEN 'body ' ELSE '' END
                 || CASE WHEN OLD.status IS NOT NEW.status THEN 'status ' ELSE '' END
                 || CASE WHEN OLD.trashed IS NOT NEW.trashed THEN 'trashed' ELSE '' END),
-                OLD.title, OLD.body, OLD.status, OLD.trashed);
+                OLD.title, OLD.body, OLD.status, OLD.trashed, (SELECT origin FROM sync_capture));
         END;
-        CREATE TRIGGER IF NOT EXISTS record_version_document AFTER UPDATE ON documents
+        CREATE TRIGGER record_version_document AFTER UPDATE ON documents
         WHEN OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body
             OR OLD.trashed IS NOT NEW.trashed
         BEGIN
-            INSERT INTO record_versions (kind, record_id, changed, title, body, trashed)
+            INSERT INTO record_versions (kind, record_id, changed, title, body, trashed, device)
             VALUES ('document', OLD.id, trim(
                 CASE WHEN OLD.title IS NOT NEW.title THEN 'title ' ELSE '' END
                 || CASE WHEN OLD.body IS NOT NEW.body THEN 'body ' ELSE '' END
                 || CASE WHEN OLD.trashed IS NOT NEW.trashed THEN 'trashed' ELSE '' END),
-                OLD.title, OLD.body, OLD.trashed);
+                OLD.title, OLD.body, OLD.trashed, (SELECT origin FROM sync_capture));
         END;
         PRAGMA user_version = 57;",
     )?;
@@ -100,9 +109,9 @@ fn changed_fields(changed: &str) -> Vec<String> {
 }
 
 fn read(connection: &Connection, id: i64) -> Result<Version, Error> {
-    let (kind, record_id, replaced_at, changed, title, body, status, trashed) = connection
+    let (kind, record_id, replaced_at, changed, title, body, status, trashed, device) = connection
         .query_row(
-            "SELECT kind, record_id, replaced_at, changed, title, body, status, trashed FROM record_versions WHERE id = ?1",
+            "SELECT kind, record_id, replaced_at, changed, title, body, status, trashed, device FROM record_versions WHERE id = ?1",
             [id],
             |row| {
                 Ok((
@@ -114,6 +123,7 @@ fn read(connection: &Connection, id: i64) -> Result<Version, Error> {
                     row.get(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get(7)?,
+                    row.get(8)?,
                 ))
             },
         )
@@ -129,6 +139,7 @@ fn read(connection: &Connection, id: i64) -> Result<Version, Error> {
         record_id,
         replaced_at,
         changed: changed_fields(&changed),
+        device,
         title,
         body,
         status: status.map(|status| status.parse()).transpose()?,
@@ -149,7 +160,7 @@ impl Workspace {
             RecordKind::Document => self.show_document(reference)?.id,
         };
         let mut statement = self.connection.prepare(
-            "SELECT id, replaced_at, changed FROM record_versions WHERE kind = ?1 AND record_id = ?2 ORDER BY id DESC",
+            "SELECT id, replaced_at, changed, device FROM record_versions WHERE kind = ?1 AND record_id = ?2 ORDER BY id DESC",
         )?;
         let versions = statement
             .query_map(params![kind.as_str(), record_id], |row| {
@@ -157,6 +168,7 @@ impl Workspace {
                     id: row.get(0)?,
                     replaced_at: row.get(1)?,
                     changed: changed_fields(&row.get::<_, String>(2)?),
+                    device: row.get(3)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

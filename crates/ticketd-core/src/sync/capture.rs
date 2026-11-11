@@ -96,7 +96,7 @@ pub(crate) fn captured_tables() -> impl Iterator<Item = &'static str> {
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS sync_dirty (kind TEXT NOT NULL, id TEXT NOT NULL, mark INTEGER NOT NULL, PRIMARY KEY(kind, id));
-         CREATE TABLE IF NOT EXISTS sync_capture (id INTEGER PRIMARY KEY CHECK (id = 1), applying INTEGER NOT NULL, marks INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS sync_capture (id INTEGER PRIMARY KEY CHECK (id = 1), applying INTEGER NOT NULL, marks INTEGER NOT NULL, origin TEXT);
          INSERT OR IGNORE INTO sync_capture (id, applying, marks) VALUES (1, 0, 0);",
     )?;
     for (table, kind, owner) in CAPTURED {
@@ -157,23 +157,31 @@ impl Workspace {
     }
 
     /// Run `apply` as one transaction whose writes are not captured, for
-    /// applying incoming files. Capture is switched off inside the transaction
-    /// only, so it is back on however `apply` ends, and a write another process
-    /// makes meanwhile is still captured.
+    /// applying incoming files. `device` names the desktop the incoming change
+    /// was made on, for version history. Capture is switched off inside the
+    /// transaction only, so it is back on however `apply` ends, and a write
+    /// another process makes meanwhile is still captured.
     pub fn applying_incoming<T>(
         &mut self,
+        device: Option<&str>,
         apply: impl FnOnce(&mut Workspace) -> Result<T, Error>,
     ) -> Result<T, Error> {
         self.connection.execute_batch("SAVEPOINT sync_incoming")?;
         let result = (|| {
-            let before: i64 =
-                self.connection
-                    .query_row("SELECT applying FROM sync_capture", [], |row| row.get(0))?;
-            self.connection
-                .execute("UPDATE sync_capture SET applying = 1", [])?;
+            let before: (i64, Option<String>) = self.connection.query_row(
+                "SELECT applying, origin FROM sync_capture",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            self.connection.execute(
+                "UPDATE sync_capture SET applying = 1, origin = ?1",
+                [device],
+            )?;
             let applied = apply(self)?;
-            self.connection
-                .execute("UPDATE sync_capture SET applying = ?1", [before])?;
+            self.connection.execute(
+                "UPDATE sync_capture SET applying = ?1, origin = ?2",
+                params![before.0, before.1],
+            )?;
             self.connection.execute_batch("RELEASE sync_incoming")?;
             Ok(applied)
         })();
@@ -183,4 +191,16 @@ impl Workspace {
         }
         result
     }
+}
+
+/// Mark a record the way a captured write would, for a change the engine made
+/// while capture was off that still has to be uploaded.
+pub(crate) fn mark_dirty(connection: &Connection, kind: RecordKind, id: &str) -> Result<(), Error> {
+    connection.execute("UPDATE sync_capture SET marks = marks + 1", [])?;
+    connection.execute(
+        "INSERT INTO sync_dirty (kind, id, mark) VALUES (?1, ?2, (SELECT marks FROM sync_capture))
+         ON CONFLICT(kind, id) DO UPDATE SET mark = excluded.mark",
+        params![kind.as_str(), id],
+    )?;
+    Ok(())
 }
