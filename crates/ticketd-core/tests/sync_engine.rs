@@ -536,6 +536,12 @@ fn a_dependency_loop_made_on_two_devices_loses_the_same_later_edge_everywhere() 
 
 #[test]
 fn a_parent_loop_made_on_two_devices_is_broken_the_same_way_everywhere() {
+    for order in ORDERS {
+        parent_loop_is_broken_the_same_way_everywhere(order);
+    }
+}
+
+fn parent_loop_is_broken_the_same_way_everywhere(order: [usize; 3]) {
     let mut devices = devices();
     let one = devices.workspaces[0].create_ticket("One").unwrap();
     let two = devices.workspaces[0].create_ticket("Two").unwrap();
@@ -547,7 +553,7 @@ fn a_parent_loop_made_on_two_devices_is_broken_the_same_way_everywhere() {
         .set_parent(&two.reference, Some(&one.reference), None)
         .unwrap();
 
-    devices.settle([0, 1, 2]);
+    devices.settle(order);
 
     devices.assert_converged();
     let parents: Vec<String> = files(&devices.workspaces[2])
@@ -568,7 +574,7 @@ fn a_parent_loop_made_on_two_devices_is_broken_the_same_way_everywhere() {
                 reference, other, ..
             } = notice.notice
             else {
-                panic!("unexpected notice {notice:?}");
+                unreachable!("unexpected notice {notice:?}");
             };
             for (ticket, other, relation) in [
                 (&reference, &other, "parent"),
@@ -775,15 +781,33 @@ fn a_missing_or_emptied_storage_never_removes_local_content() {
     let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
     let before = files(&devices.workspaces[1]);
 
-    // The file disappears from the storage: nothing is removed here, and the next
-    // local change puts it back.
+    // The file disappears from the storage: nothing is removed here, and the
+    // run that notices puts it back without waiting for a local change.
+    let (_, stored) = devices.remote_text(RemoteKind::Ticket, &id);
     assert!(
         devices
             .remote
             .remove_file(FOLDER, &RemoteKey::new(RemoteKind::Ticket, id.clone()))
     );
-    devices.sync(1);
+    assert_eq!(devices.sync(1).uploaded, 1);
     assert_eq!(files(&devices.workspaces[1]), before);
+    assert_eq!(
+        devices.remote_text(RemoteKind::Ticket, &id).1,
+        stored.replace("Desk A", "Desk B")
+    );
+    // A file that a listing merely left out is not written again.
+    devices
+        .remote
+        .omit_from_next_listing(&[RemoteKey::new(RemoteKind::Ticket, id.clone())]);
+    devices.sync(1);
+    assert_eq!(
+        devices
+            .remote
+            .revisions(FOLDER, &RemoteKey::new(RemoteKind::Ticket, id.clone()))
+            .unwrap()
+            .len(),
+        1
+    );
     devices.workspaces[1]
         .change_ticket(&reference, title("Still here"))
         .unwrap();
@@ -891,7 +915,7 @@ fn an_uploaded_file_is_readable_in_the_storage() {
     let (name, text) = devices.remote_text(RemoteKind::Ticket, &blocked.id);
 
     assert_eq!(name, format!("{} Fix login.md", blocked.reference));
-    assert!(text.starts_with("---\n# synced from: Desk A\nkind: ticket\n"));
+    assert!(text.starts_with("---\n# synced from: Desk A\nkind: ticket\nformat: 1\n"));
     assert!(text.contains(&format!(
         "parent: \"{}\" # {}\n",
         blocker.id, blocker.reference
@@ -939,5 +963,215 @@ fn history_names_the_desktop_an_incoming_change_was_made_on() {
     assert_eq!(
         b.version(versions[1].id).unwrap().device.as_deref(),
         Some("Desk A")
+    );
+}
+
+#[test]
+fn the_same_field_changed_on_two_devices_converges_in_every_order() {
+    for order in ORDERS {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("Login");
+        devices.workspaces[0]
+            .change_ticket(&reference, title("From A"))
+            .unwrap();
+        devices.workspaces[1]
+            .change_ticket(&reference, title("From B"))
+            .unwrap();
+
+        devices.settle(order);
+
+        devices.assert_converged();
+        // One value everywhere; the device whose value it is holds the other for review.
+        let kept = devices.workspaces[2].show_ticket(&reference).unwrap().title;
+        let reviewing: Vec<usize> = (0..3)
+            .filter(|device| {
+                !devices.workspaces[*device]
+                    .sync_conflicts()
+                    .unwrap()
+                    .is_empty()
+            })
+            .collect();
+        assert_eq!(
+            reviewing,
+            [if kept == "From A" { 0 } else { 1 }],
+            "{order:?} kept {kept}"
+        );
+    }
+}
+
+#[test]
+fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
+    // A higher format number, and a field this version does not know.
+    for (from, to) in [
+        ("format: 1\n", "format: 2\n"),
+        ("ref:", "mood: \"happy\"\nref:"),
+    ] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("Login");
+        let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+        let (_, synced) = devices.remote_text(RemoteKind::Ticket, &id);
+        let newer = synced.replacen(from, to, 1);
+        assert_ne!(newer, synced);
+        devices.hand_edit(RemoteKind::Ticket, &id, &newer);
+
+        assert_eq!(devices.sync(1).skipped, 1);
+        devices.workspaces[1]
+            .change_ticket(&reference, title("Changed here"))
+            .unwrap();
+        let report = devices.sync(1);
+
+        assert_eq!((report.uploaded, report.pending), (0, 1), "{to}");
+        assert_eq!(devices.remote_text(RemoteKind::Ticket, &id).1, newer);
+        let notices = devices.workspaces[1].sync_notices().unwrap();
+        assert!(
+            matches!(&notices[..], [notice] if matches!(notice.notice, SyncNoticeKind::UnreadableFile { .. })),
+            "{notices:?}"
+        );
+
+        // Once the file reads again, what was changed meanwhile is merged and sent.
+        devices.hand_edit(RemoteKind::Ticket, &id, &synced);
+        assert_eq!(devices.sync(1).uploaded, 1);
+        assert!(
+            devices
+                .remote_text(RemoteKind::Ticket, &id)
+                .1
+                .contains("Changed here")
+        );
+    }
+}
+
+#[test]
+fn a_last_synced_copy_that_cannot_be_read_is_taken_as_never_synced() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    // Desk B's stored copy of the file is damaged.
+    rusqlite::Connection::open(devices._directory.path().join("b"))
+        .unwrap()
+        .execute(
+            "UPDATE sync_files SET content = 'not a sync file' WHERE id = ?1",
+            [&id],
+        )
+        .unwrap();
+    devices.workspaces[0]
+        .change_ticket(&reference, title("From A"))
+        .unwrap();
+    devices.sync(0);
+
+    let report = devices.sync(1);
+
+    // Without a copy to compare with, a differing value is not taken silently.
+    assert_eq!(report.conflicts, 1);
+    let b = &devices.workspaces[1];
+    assert_eq!(b.show_ticket(&reference).unwrap().title, "Login");
+    assert_eq!(
+        b.sync_conflict(SyncKind::Ticket, &id).unwrap().fields[0].remote,
+        Some(SyncValue::Text("From A".into()))
+    );
+}
+
+#[test]
+fn taking_the_other_value_of_a_relationship_waits_for_a_record_that_has_not_arrived() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let theirs = devices.workspaces[0].create_ticket("Parent on A").unwrap();
+    let ours = devices.workspaces[1].create_ticket("Parent on B").unwrap();
+    devices.workspaces[0]
+        .set_parent(&reference, Some(&theirs.reference), None)
+        .unwrap();
+    devices.workspaces[1]
+        .set_parent(&reference, Some(&ours.reference), None)
+        .unwrap();
+    devices.sync(0);
+    // Desk B sees the conflict a run before the ticket the other value names.
+    devices
+        .remote
+        .omit_from_next_listing(&[RemoteKey::new(RemoteKind::Ticket, theirs.id.clone())]);
+    devices.sync(1);
+
+    devices.workspaces[1]
+        .resolve_sync_conflict(
+            SyncKind::Ticket,
+            &id,
+            &[SyncResolution {
+                field: "parent".into(),
+                choice: SyncChoice::Remote,
+            }],
+        )
+        .unwrap();
+    devices.settle([1, 0, 2]);
+
+    devices.assert_converged();
+    for workspace in &devices.workspaces {
+        let record = workspace.export_sync_record(SyncKind::Ticket, &id).unwrap();
+        assert_eq!(
+            record.fields.get("parent"),
+            Some(&SyncValue::Text(theirs.id.clone()))
+        );
+        assert_eq!(workspace.sync_conflicts().unwrap(), []);
+    }
+}
+
+#[test]
+fn a_hand_edit_may_name_a_ticket_by_its_reference_and_spell_a_status_loosely() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let blocker = devices.workspaces[0].create_ticket("Blocker").unwrap();
+    devices.settle([0, 1, 2]);
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    devices.hand_edit(
+        RemoteKind::Ticket,
+        &id,
+        &format!(
+            "---\nkind: ticket\nid: {id}\nref: {reference}\ntitle: Login\nstatus: in-progress\nparent: {blocker}\nblocked_by: [{blocker}, T-ZZ9]\n---\n",
+            blocker = blocker.reference
+        ),
+    );
+
+    devices.settle([1, 2, 0]);
+
+    devices.assert_converged();
+    for workspace in &devices.workspaces {
+        assert_eq!(
+            workspace.show_ticket(&reference).unwrap().status,
+            Status::InProgress
+        );
+        let record = workspace.export_sync_record(SyncKind::Ticket, &id).unwrap();
+        assert_eq!(
+            record.fields.get("parent"),
+            Some(&SyncValue::Text(blocker.id.clone()))
+        );
+        // The reference no ticket holds waits like any record that has not arrived.
+        assert_eq!(
+            record.fields.get("blocked_by"),
+            Some(&SyncValue::Set([blocker.id.clone()].into()))
+        );
+        assert_eq!(workspace.sync_notices().unwrap(), []);
+    }
+
+    // What ticketd writes names tickets by GUID and statuses as it shows them.
+    devices.workspaces[0]
+        .change_ticket(&reference, title("Sign in"))
+        .unwrap();
+    devices.sync(0);
+    let (_, written) = devices.remote_text(RemoteKind::Ticket, &id);
+    assert!(written.contains("status: \"In progress\"\n"), "{written}");
+    assert!(written.contains(&format!(
+        "parent: \"{}\" # {}\n",
+        blocker.id, blocker.reference
+    )));
+    assert!(written.contains(&format!(
+        "  - \"{}\" # {}
+",
+        blocker.id, blocker.reference
+    )));
+    // Kept as written until a ticket with that reference arrives.
+    assert!(
+        written.contains(
+            "  - \"T-ZZ9\"
+"
+        ),
+        "{written}"
     );
 }

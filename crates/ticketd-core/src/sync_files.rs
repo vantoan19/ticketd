@@ -28,7 +28,8 @@ pub enum SyncKind {
 impl SyncKind {
     pub const ALL: [Self; 4] = [Self::Project, Self::Document, Self::Plan, Self::Ticket];
 
-    fn name(self) -> &'static str {
+    /// The kind as a file's `kind` field and the sync tables spell it.
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Project => "project",
             Self::Document => "document",
@@ -37,8 +38,12 @@ impl SyncKind {
         }
     }
 
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+
     /// The table holding the kind's records, which is also its folder of sync files.
-    fn table(self) -> &'static str {
+    pub(crate) fn table(self) -> &'static str {
         match self {
             Self::Project => "projects",
             Self::Document => "documents",
@@ -47,6 +52,10 @@ impl SyncKind {
         }
     }
 }
+
+/// The format of sync files this version writes. A file that says a higher
+/// number is left alone until this desktop runs a ticketd that reads it.
+pub(crate) const FILE_FORMAT: i64 = 1;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -125,6 +134,9 @@ enum Type {
     Time,
     Id,
     Ids,
+    /// A ticket: its GUID, or on input its Ticket reference.
+    Ticket,
+    Tickets,
     /// Items of `<GUID> <time>`: when each `blocked_by` relationship was made.
     Edges,
     Tags,
@@ -142,12 +154,12 @@ const TICKET: &[Field] = &[
     ("status", Type::Status, true),
     ("project", Type::Id, false),
     ("plan", Type::Id, false),
-    ("parent", Type::Id, false),
-    ("blocked_by", Type::Ids, false),
+    ("parent", Type::Ticket, false),
+    ("blocked_by", Type::Tickets, false),
     ("blocked_since", Type::Edges, false),
-    ("related", Type::Ids, false),
-    ("discovered", Type::Ids, false),
-    ("duplicate_of", Type::Id, false),
+    ("related", Type::Tickets, false),
+    ("discovered", Type::Tickets, false),
+    ("duplicate_of", Type::Ticket, false),
     ("duplicate_restore", Type::Status, false),
     ("tags", Type::Tags, false),
     ("documents", Type::Ids, false),
@@ -234,15 +246,31 @@ const EVIDENCE: &[Field] = &[
     ("agent", Type::Text, false),
 ];
 
+/// A header with what follows it: a record, or a section of a ticket's file.
+#[derive(Clone, Copy)]
+enum Block {
+    Record(SyncKind),
+    Part(SyncPartKind),
+}
+
+impl Block {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Record(kind) => kind.name(),
+            Self::Part(kind) => kind.name(),
+        }
+    }
+}
+
 /// The header fields of a block, and whether Markdown text follows its header.
-fn shape(block: &str) -> (&'static [Field], bool) {
+fn shape(block: Block) -> (&'static [Field], bool) {
     match block {
-        "ticket" => (TICKET, true),
-        "document" => (DOCUMENT, true),
-        "plan" => (PLAN, true),
-        "activity" => (ACTIVITY, true),
-        "evidence" => (EVIDENCE, false),
-        _ => (PROJECT, false),
+        Block::Record(SyncKind::Ticket) => (TICKET, true),
+        Block::Record(SyncKind::Document) => (DOCUMENT, true),
+        Block::Record(SyncKind::Plan) => (PLAN, true),
+        Block::Record(SyncKind::Project) => (PROJECT, false),
+        Block::Part(SyncPartKind::Activity) => (ACTIVITY, true),
+        Block::Part(SyncPartKind::Evidence) => (EVIDENCE, false),
     }
 }
 
@@ -388,8 +416,28 @@ fn present<'a>(fields: &'a Fields, name: &str) -> Option<&'a SyncValue> {
     }
 }
 
-fn is_guid(text: &str) -> bool {
+pub(crate) fn is_guid(text: &str) -> bool {
     Uuid::parse_str(text).is_ok_and(|id| id.to_string() == text)
+}
+
+fn names_ticket(text: &str) -> bool {
+    is_guid(text) || document_links::is_ticket_reference(text)
+}
+
+/// A status as ticketd writes it, from a spelling that differs only in letter
+/// case or in `-` or `_` for the space.
+fn canonical_status(text: &str) -> Option<&'static str> {
+    let fold = |name: &str| name.trim().to_lowercase().replace(['-', '_'], " ");
+    [
+        "Todo",
+        "In progress",
+        "In review",
+        "Done",
+        "Canceled",
+        "Duplicate",
+    ]
+    .into_iter()
+    .find(|name| fold(name) == fold(text))
 }
 
 /// The blocking ticket and the time of one `blocked_since` item.
@@ -406,6 +454,8 @@ fn expected(kind: Type) -> String {
         Type::Time => "a time such as \"2026-11-11T09:30:00Z\"".into(),
         Type::Id => "the id of a record: a lowercase GUID".into(),
         Type::Ids => "a list of record ids: lowercase GUIDs".into(),
+        Type::Ticket => "a ticket: its id (a lowercase GUID) or its Ticket reference".into(),
+        Type::Tickets => "a list of tickets: ids (lowercase GUIDs) or Ticket references".into(),
         Type::Tags => "a list of tags".into(),
         Type::Edges => {
             "a list of items such as \"<id of the blocking ticket> 2026-11-11T09:30:00Z\"".into()
@@ -420,16 +470,18 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
     let valid = match (kind, value) {
         (Type::Flag, SyncValue::Flag(_)) => true,
         (Type::Ids, SyncValue::Set(ids)) => ids.iter().all(|id| is_guid(id)),
+        (Type::Tickets, SyncValue::Set(ids)) => ids.iter().all(|id| names_ticket(id)),
         (Type::Tags, SyncValue::Set(tags)) => tags
             .iter()
             .all(|tag| !tag.is_empty() && *tag == tag.trim().to_lowercase()),
         (Type::Edges, SyncValue::Set(edges)) => edges.iter().all(|edge| edge_time(edge).is_some()),
-        (Type::Flag | Type::Ids | Type::Tags | Type::Edges, _)
+        (Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges, _)
         | (_, SyncValue::Flag(_) | SyncValue::Set(_)) => false,
         (Type::Text, SyncValue::Text(_)) => true,
         (Type::Name, SyncValue::Text(text)) => !text.trim().is_empty(),
         (Type::Time, SyncValue::Text(text)) => chrono::DateTime::parse_from_rfc3339(text).is_ok(),
         (Type::Id, SyncValue::Text(text)) => is_guid(text),
+        (Type::Ticket, SyncValue::Text(text)) => names_ticket(text),
         (Type::Status, SyncValue::Text(text)) => text.parse::<Status>().is_ok(),
         (Type::Reference, SyncValue::Text(text)) => document_links::is_ticket_reference(text),
         (Type::Choice(options), SyncValue::Text(text)) => options.contains(&text.as_str()),
@@ -441,8 +493,9 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
     }
 }
 
-fn validate(block: &str, id: &str, fields: &Fields) -> Result<(), Error> {
+fn validate(block: Block, id: &str, fields: &Fields) -> Result<(), Error> {
     let (schema, has_body) = shape(block);
+    let block = block.name();
     if !is_guid(id) {
         return Err(bad(format!(
             "field 'id' of a {block} must be {}",
@@ -498,22 +551,15 @@ fn quote(text: &str) -> String {
 /// Ticket GUID to Ticket reference, written as a comment beside the GUID for readers.
 type Labels = BTreeMap<String, String>;
 
-fn write_block(
-    out: &mut String,
-    block: &str,
-    top: bool,
-    id: &str,
-    fields: &Fields,
-    labels: &Labels,
-) {
+fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels: &Labels) {
     let (schema, has_body) = shape(block);
     let quote = |text: &str| match labels.get(text) {
         Some(label) => format!("{} # {label}", quote(text)),
         None => quote(text),
     };
     out.push_str("---\n");
-    if top {
-        out.push_str(&format!("kind: {block}\n"));
+    if let Block::Record(kind) = block {
+        out.push_str(&format!("kind: {}\nformat: {FILE_FORMAT}\n", kind.name()));
     }
     out.push_str(&format!("id: {}\n", quote(id)));
     for (name, kind, _) in schema {
@@ -547,6 +593,7 @@ fn write_block(
 enum Raw {
     Null,
     Flag(bool),
+    Integer(i64),
     Text(String),
     List(Vec<Raw>),
     Other,
@@ -556,6 +603,7 @@ fn raw(node: &Yaml<'_>) -> Raw {
     match node {
         Yaml::Value(Scalar::Null) => Raw::Null,
         Yaml::Value(Scalar::Boolean(flag)) => Raw::Flag(*flag),
+        Yaml::Value(Scalar::Integer(number)) => Raw::Integer(*number),
         Yaml::Value(Scalar::String(text)) => Raw::Text(text.to_string()),
         Yaml::Sequence(items) => Raw::List(items.iter().map(raw).collect()),
         _ => Raw::Other,
@@ -610,11 +658,12 @@ fn read_block(block: &str) -> Result<(Vec<(String, Raw)>, String), Error> {
 
 /// Give a block's header entries the types its fields have.
 fn typed(
-    block: &str,
+    block: Block,
     entries: Vec<(String, Raw)>,
     body: String,
 ) -> Result<(String, Fields), Error> {
     let (schema, has_body) = shape(block);
+    let block = block.name();
     let mut id = None;
     let mut fields = Fields::new();
     for (name, value) in entries {
@@ -633,7 +682,7 @@ fn typed(
         let value = match (kind, value) {
             (_, Raw::Null) => continue,
             (Type::Flag, Raw::Flag(flag)) => SyncValue::Flag(flag),
-            (Type::Ids | Type::Tags | Type::Edges, Raw::List(items)) => {
+            (Type::Ids | Type::Tickets | Type::Tags | Type::Edges, Raw::List(items)) => {
                 let mut members = BTreeSet::new();
                 for item in items {
                     let Raw::Text(member) = item else {
@@ -647,7 +696,12 @@ fn typed(
                 }
                 SyncValue::Set(members)
             }
-            (Type::Flag | Type::Ids | Type::Tags | Type::Edges, _) => return Err(invalid()),
+            (Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges, _) => {
+                return Err(invalid());
+            }
+            (Type::Status, Raw::Text(text)) => {
+                SyncValue::Text(canonical_status(&text).map_or(text, str::to_owned))
+            }
             (_, Raw::Text(text)) => SyncValue::Text(text),
             _ => {
                 return Err(bad(format!(
@@ -674,6 +728,116 @@ fn typed(
     Ok((id, fields))
 }
 
+/// A file's text cut at its section markers: the record's own block first.
+fn blocks(file: &str) -> Result<Vec<(Option<SyncPartKind>, String)>, Error> {
+    let file = file.strip_prefix('\u{feff}').unwrap_or(file);
+    let mut blocks: Vec<(Option<SyncPartKind>, String)> = vec![(None, String::new())];
+    for line in file.split_inclusive('\n') {
+        match line.trim_end_matches(['\r', '\n']) {
+            "<!-- ticketd:activity -->" => {
+                blocks.push((Some(SyncPartKind::Activity), String::new()));
+            }
+            "<!-- ticketd:evidence -->" => {
+                blocks.push((Some(SyncPartKind::Evidence), String::new()));
+            }
+            marker if marker.starts_with("<!-- ticketd:") => {
+                return Err(bad(format!(
+                    "unknown section marker '{marker}'; a text line that starts this way is written with a leading backslash"
+                )));
+            }
+            _ => {
+                if let Some((_, block)) = blocks.last_mut() {
+                    block.push_str(line);
+                }
+            }
+        }
+    }
+    Ok(blocks)
+}
+
+/// Whether a file that does not parse holds what a newer ticketd may have
+/// written: a higher format number, a field or a section this version does not
+/// know. Such a file must not be replaced by a desktop that cannot read it.
+pub(crate) fn from_newer_version(file: &str) -> bool {
+    let Ok(blocks) = blocks(file) else {
+        // The only failure is a section marker this version does not know.
+        return true;
+    };
+    let mut record = None;
+    blocks.iter().any(|(part, block)| {
+        let Ok((entries, _)) = read_block(block) else {
+            return false;
+        };
+        let block = match (part, record) {
+            (Some(part), Some(_)) => Block::Part(*part),
+            _ => {
+                let kind = entries.iter().find_map(|(name, value)| match value {
+                    Raw::Text(kind) if name == "kind" => SyncKind::parse(kind),
+                    _ => None,
+                });
+                let Some(kind) = kind else {
+                    return false;
+                };
+                record = Some(kind);
+                Block::Record(kind)
+            }
+        };
+        let top = matches!(block, Block::Record(_));
+        entries.iter().any(|(name, value)| match name.as_str() {
+            "id" => false,
+            "kind" if top => false,
+            "format" if top => matches!(value, Raw::Integer(format) if *format > FILE_FORMAT),
+            name => !shape(block).0.iter().any(|field| field.0 == name),
+        })
+    })
+}
+
+/// The ticket a relationship names by GUID or by Ticket reference, if it is here.
+fn ticket_id(c: &Connection, named: &str) -> Result<Option<String>, Error> {
+    Ok(c.query_row(
+        "SELECT id FROM tickets WHERE id = ?1 OR reference = ?1",
+        [named],
+        |row| row.get(0),
+    )
+    .optional()?)
+}
+
+/// Write each relationship that names a ticket of this Workspace by its Ticket
+/// reference as that ticket's GUID. A reference no ticket here holds stays as
+/// written, and applying the record reports it as a missing target.
+pub(crate) fn resolve_ticket_references(
+    c: &Connection,
+    record: &mut SyncRecord,
+) -> Result<(), Error> {
+    if record.kind != SyncKind::Ticket {
+        return Ok(());
+    }
+    for (name, kind, _) in TICKET {
+        if !matches!(kind, Type::Ticket | Type::Tickets) {
+            continue;
+        }
+        match record.fields.get_mut(*name) {
+            Some(SyncValue::Text(named)) if !is_guid(named) => {
+                if let Some(id) = ticket_id(c, named)? {
+                    *named = id;
+                }
+            }
+            Some(SyncValue::Set(members)) => {
+                for named in std::mem::take(members) {
+                    let id = if is_guid(&named) {
+                        None
+                    } else {
+                        ticket_id(c, &named)?
+                    };
+                    members.insert(id.unwrap_or(named));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 impl SyncRecord {
     /// Where the record's file lives in the synced folder. The GUID names the file, so
     /// the path never changes.
@@ -688,14 +852,14 @@ impl SyncRecord {
 
     fn to_text(&self, labels: &Labels) -> String {
         let mut out = String::new();
-        let kind = self.kind.name();
-        write_block(&mut out, kind, true, &self.id, &self.fields, labels);
+        let block = Block::Record(self.kind);
+        write_block(&mut out, block, &self.id, &self.fields, labels);
         let mut parts: Vec<&SyncPart> = self.parts.iter().collect();
         parts.sort_by(|a, b| a.order().cmp(&b.order()));
         for part in parts {
             out.push_str(&format!("<!-- ticketd:{} -->\n", part.kind.name()));
-            let kind = part.kind.name();
-            write_block(&mut out, kind, false, &part.id, &part.fields, labels);
+            let block = Block::Part(part.kind);
+            write_block(&mut out, block, &part.id, &part.fields, labels);
         }
         out
     }
@@ -727,51 +891,40 @@ impl SyncRecord {
 
     /// Read and validate a file's text. Nothing is read from or written to a Workspace.
     pub fn parse(file: &str) -> Result<Self, Error> {
-        let file = file.strip_prefix('\u{feff}').unwrap_or(file);
-        let mut blocks: Vec<(Option<SyncPartKind>, String)> = vec![(None, String::new())];
-        for line in file.split_inclusive('\n') {
-            match line.trim_end_matches(['\r', '\n']) {
-                "<!-- ticketd:activity -->" => {
-                    blocks.push((Some(SyncPartKind::Activity), String::new()));
-                }
-                "<!-- ticketd:evidence -->" => {
-                    blocks.push((Some(SyncPartKind::Evidence), String::new()));
-                }
-                marker if marker.starts_with("<!-- ticketd:") => {
-                    return Err(bad(format!(
-                        "unknown section marker '{marker}'; a text line that starts this way is written with a leading backslash"
-                    )));
-                }
-                _ => {
-                    if let Some((_, block)) = blocks.last_mut() {
-                        block.push_str(line);
-                    }
-                }
-            }
-        }
         let mut record = None;
-        for (part, block) in blocks {
+        for (part, block) in blocks(file)? {
             let (mut entries, body) = read_block(&block)?;
             match (part, &mut record) {
                 (Some(kind), Some(SyncRecord { parts, .. })) => {
-                    let (id, fields) = typed(kind.name(), entries, body)?;
+                    let (id, fields) = typed(Block::Part(kind), entries, body)?;
                     parts.push(SyncPart { kind, id, fields });
                 }
                 _ => {
-                    let kind = entries
-                        .iter()
-                        .position(|(name, _)| name == "kind")
-                        .map(|at| entries.remove(at).1);
-                    let kind = match kind {
-                        Some(Raw::Text(name)) => {
-                            SyncKind::ALL.into_iter().find(|kind| kind.name() == name)
-                        }
+                    let mut take = |field: &str| {
+                        entries
+                            .iter()
+                            .position(|(name, _)| name == field)
+                            .map(|at| entries.remove(at).1)
+                    };
+                    let kind = match take("kind") {
+                        Some(Raw::Text(name)) => SyncKind::parse(&name),
                         _ => None,
                     }
                     .ok_or_else(|| {
                         bad("field 'kind' must be one of project, document, plan, ticket")
                     })?;
-                    let (id, fields) = typed(kind.name(), entries, body)?;
+                    match take("format") {
+                        // Files from before the marker are format 1.
+                        None | Some(Raw::Null) => {}
+                        Some(Raw::Integer(format)) if (1..=FILE_FORMAT).contains(&format) => {}
+                        Some(Raw::Integer(format)) if format > FILE_FORMAT => {
+                            return Err(bad(format!(
+                                "the file is in format {format}, which a newer ticketd wrote; update ticketd on this desktop to read it"
+                            )));
+                        }
+                        Some(_) => return Err(bad("field 'format' must be a whole number")),
+                    }
+                    let (id, fields) = typed(Block::Record(kind), entries, body)?;
                     record = Some(SyncRecord {
                         kind,
                         id,
@@ -789,13 +942,13 @@ impl SyncRecord {
 
     /// Check a record built or merged in code the way a parsed file is checked.
     pub fn validate(&self) -> Result<(), Error> {
-        validate(self.kind.name(), &self.id, &self.fields)?;
+        validate(Block::Record(self.kind), &self.id, &self.fields)?;
         let mut seen = BTreeSet::new();
         for part in &self.parts {
             if self.kind != SyncKind::Ticket {
                 return Err(bad("only a ticket has Activity and evidence sections"));
             }
-            validate(part.kind.name(), &part.id, &part.fields)?;
+            validate(Block::Part(part.kind), &part.id, &part.fields)?;
             if !seen.insert(&part.id) {
                 return Err(bad(format!("section id '{}' is used twice", part.id)));
             }
@@ -808,20 +961,21 @@ impl SyncRecord {
         if self.kind != SyncKind::Ticket {
             return Ok(());
         }
+        let own = |other: &str| other == self.id || Some(other) == text(&self.fields, "ref");
         for name in ["parent", "duplicate_of"] {
-            if text(&self.fields, name) == Some(&self.id) {
+            if text(&self.fields, name).is_some_and(own) {
                 return Err(bad(format!("field '{name}' must name another ticket")));
             }
         }
         for name in ["blocked_by", "related", "discovered"] {
-            if set(&self.fields, name).contains(&self.id) {
+            if set(&self.fields, name).iter().any(|other| own(other)) {
                 return Err(bad(format!("field '{name}' must name other tickets")));
             }
         }
         // Related is symmetric, so only one of the two files may carry it.
         if set(&self.fields, "related")
             .iter()
-            .any(|other| *other < self.id)
+            .any(|other| is_guid(other) && *other < self.id)
         {
             return Err(bad(
                 "field 'related' lists only tickets whose id sorts after this one; the other ticket's file carries the rest",
@@ -937,7 +1091,7 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
             None => {}
         }
     }
-    for (name, _, _) in shape(kind.name()).0 {
+    for (name, _, _) in shape(Block::Record(kind)).0 {
         if let Some(relation) = relation(kind, name) {
             let members = relation.members(c, id)?;
             if !members.is_empty() {
@@ -1038,7 +1192,11 @@ impl Apply<'_> {
         let Some(id) = text(&self.record.fields, field) else {
             return Ok(Some(None));
         };
-        if exists(self.c, table, id)? {
+        if table == "tickets" {
+            if let Some(ticket) = ticket_id(self.c, id)? {
+                return Ok(Some(Some(ticket)));
+            }
+        } else if exists(self.c, table, id)? {
             return Ok(Some(Some(id.to_owned())));
         }
         self.missing.push(MissingTarget {
@@ -1110,8 +1268,13 @@ impl Apply<'_> {
                 }
             } else {
                 for member in std::mem::take(&mut wanted) {
-                    if exists(c, relation.target, &member)? {
-                        wanted.insert(member);
+                    let found = if relation.target == "tickets" {
+                        ticket_id(c, &member)?
+                    } else {
+                        exists(c, relation.target, &member)?.then(|| member.clone())
+                    };
+                    if let Some(found) = found {
+                        wanted.insert(found);
                     } else {
                         self.missing.push(MissingTarget {
                             field: field.to_owned(),
@@ -1331,7 +1494,7 @@ impl Apply<'_> {
                 (created, true)
             }
         };
-        let (schema, _) = shape(record.kind.name());
+        let (schema, _) = shape(Block::Record(record.kind));
         for name in schema.iter().map(|field| field.0).chain(["body"]) {
             if present(&current.fields, name) != present(&record.fields, name) {
                 self.write(name)?;
@@ -1439,8 +1602,8 @@ impl Workspace {
             .prepare("SELECT reference FROM tickets WHERE id = ?1")?;
         for (name, kind, _) in TICKET {
             let ids = match (kind, record.fields.get(*name)) {
-                (Type::Id, Some(SyncValue::Text(id))) => BTreeSet::from([id.clone()]),
-                (Type::Ids, Some(SyncValue::Set(ids))) => ids.clone(),
+                (Type::Ticket, Some(SyncValue::Text(id))) => BTreeSet::from([id.clone()]),
+                (Type::Tickets, Some(SyncValue::Set(ids))) => ids.clone(),
                 _ => continue,
             };
             for id in ids {

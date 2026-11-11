@@ -71,7 +71,7 @@ fn a_ticket_exports_as_one_markdown_file_with_a_yaml_header() {
     assert_eq!(
         record.to_markdown(),
         format!(
-            "---\nkind: ticket\nid: \"{}\"\nref: \"T-KQ1\"\ntitle: \"Fix \\\"login\\\"\"\nstatus: \"In progress\"\ntags:\n  - \"backend\"\n  - \"urgent\"\ntrashed: false\nfollowing: false\n---\nUsers are logged out.\n\n- after 5 minutes\n",
+            "---\nkind: ticket\nformat: 1\nid: \"{}\"\nref: \"T-KQ1\"\ntitle: \"Fix \\\"login\\\"\"\nstatus: \"In progress\"\ntags:\n  - \"backend\"\n  - \"urgent\"\ntrashed: false\nfollowing: false\n---\nUsers are logged out.\n\n- after 5 minutes\n",
             ticket.id
         )
     );
@@ -411,13 +411,20 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             "'reminder'",
         ),
         (
-            good.replace("trashed: false", "blocked_by: [\"T-KQ2\"]"),
+            good.replace("trashed: false", "blocked_by: [\"KQ2\"]"),
             "'blocked_by'",
         ),
         (
             good.replace("trashed: false", &format!("parent: \"{}\"", ticket.id)),
             "'parent'",
         ),
+        // Its own reference names the ticket itself as much as its id does.
+        (
+            good.replace("trashed: false", "parent: \"T-KQ1\""),
+            "'parent'",
+        ),
+        (good.replace("format: 1", "format: 2"), "newer ticketd"),
+        (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),
             "'source_",
@@ -479,7 +486,7 @@ fn a_file_that_cannot_be_applied_leaves_the_workspace_unchanged() {
 fn external_source_provenance_travels_with_the_ticket() {
     let directory = tempfile::tempdir().unwrap();
     let mut workspace = workspace(&directory, "a.sqlite3");
-    let text = "---\nkind: ticket\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Done\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"I_42\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"closed\"\nsource_closure_reason: \"completed\"\nsource_updated_at: \"2026-01-03T00:00:00Z\"\n---\nFrom the tracker.\n";
+    let text = "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Done\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"I_42\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"closed\"\nsource_closure_reason: \"completed\"\nsource_updated_at: \"2026-01-03T00:00:00Z\"\n---\nFrom the tracker.\n";
     let record = SyncRecord::parse(text).unwrap();
 
     workspace.apply_sync_record(&record).unwrap();
