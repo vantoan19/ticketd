@@ -2,6 +2,8 @@ import "./styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "@/app/App";
+import { ChatClientContext } from "@/features/chats/client";
+import { createHostChatClient } from "@/features/chats/host-client";
 import { applyStoredTheme } from "@/lib/preferences";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import { keepWebviewInStep } from "@/lib/webview-scale";
@@ -38,6 +40,17 @@ if (import.meta.env.DEV && window.location.hash === "#plate-prototype") {
       </StrictMode>,
     );
   });
+} else if ("__TAURI_INTERNALS__" in window) {
+  // Inside the desktop shell the backend owns Chat; elsewhere Chat reads as off.
+  applicationRoot.render(
+    <StrictMode>
+      <DraftRecoveryProvider>
+        <ChatClientContext value={createHostChatClient()}>
+          <App />
+        </ChatClientContext>
+      </DraftRecoveryProvider>
+    </StrictMode>,
+  );
 } else {
   applicationRoot.render(
     <StrictMode>

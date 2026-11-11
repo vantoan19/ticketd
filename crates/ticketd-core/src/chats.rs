@@ -1316,6 +1316,24 @@ impl Workspace {
         })
     }
 
+    /// Withdraw queued input the person no longer wants sent. Refused once a submission
+    /// may have reached the harness: that input is history, not queue.
+    pub fn withdraw_chat_input(&mut self, chat_id: &str, message_id: &str) -> Result<Chat, Error> {
+        self.update_chat(chat_id, |connection| {
+            let queued = owned(connection, "chat_messages", chat_id, message_id)?
+                && read_message(connection, message_id)?.is_some_and(|message| message.queued);
+            if !queued {
+                return Err(invalid("this input is not in the queue"));
+            }
+            connection.execute(
+                "DELETE FROM chat_submission_attempts WHERE message_id = ?1",
+                [message_id],
+            )?;
+            connection.execute("DELETE FROM chat_messages WHERE id = ?1", [message_id])?;
+            Ok(())
+        })
+    }
+
     /// Queued input in the order it was saved.
     pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
         read_chat(&self.connection, chat_id)?;

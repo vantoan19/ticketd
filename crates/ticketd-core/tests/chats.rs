@@ -945,3 +945,22 @@ fn linked_records_are_read_as_they_are_now_not_as_they_were_when_linked() {
         Err(Error::ChatNotFound(_))
     ));
 }
+
+#[test]
+fn queued_input_can_be_withdrawn_until_a_submission_may_have_reached_the_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let waiting = workspace.save_chat_input(None, &chat.id, "later").unwrap();
+    let sent = start_turn(&mut workspace, &chat, "now", "turn-1");
+
+    workspace
+        .withdraw_chat_input(&chat.id, &waiting.id)
+        .unwrap();
+
+    assert!(workspace.chat_queue(&chat.id).unwrap().is_empty());
+    assert!(matches!(
+        workspace.withdraw_chat_input(&chat.id, &sent.id),
+        Err(Error::Chat(_))
+    ));
+    assert_eq!(message(&workspace, &chat, &sent.id).text, "now");
+}

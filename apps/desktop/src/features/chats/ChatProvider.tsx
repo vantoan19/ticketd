@@ -58,8 +58,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       overview: enabled ? overview : { needs_you: 0, working: 0 },
       revision,
       setEnabled: async (value: boolean) => {
-        await client.setEnabled(value);
-        setEnabledState(value);
+        try {
+          await client.setEnabled(value);
+          setEnabledState(value);
+        } catch (reason) {
+          // A refusal can still have changed the switch, such as Chat turned off
+          // with a harness that would not confirm it stopped. Show what holds now.
+          await client.getEnabled().then(setEnabledState, () => {});
+          throw reason;
+        }
       },
     }),
     [client, enabled, overview, revision],

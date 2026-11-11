@@ -2,6 +2,9 @@
 mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
+mod chat_commands;
+mod chat_view;
+mod chats;
 mod cli_status;
 mod drive_commands;
 
@@ -1391,6 +1394,11 @@ pub fn run() -> Result<(), tauri::Error> {
         ticketd_core::source::RefreshPolicy::default(),
     ));
     tauri::Builder::default()
+        // Must be the first plugin. One process owns Chat execution: starting ticketd
+        // again shows the running app's window instead of starting a second host.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            chat_commands::show_window(app);
+        }))
         .register_asynchronous_uri_scheme_protocol(
             "attachment-media",
             |context, request, responder| {
@@ -1403,7 +1411,9 @@ pub fn run() -> Result<(), tauri::Error> {
         )
         .manage(drive_commands::DrivePickerOperations::default())
         .manage(Refresher(std::sync::Arc::clone(&coordinator)))
-        .setup(move |_| {
+        .setup(move |app| {
+            let version = app.package_info().version.to_string();
+            tauri::Manager::manage(app, chat_commands::ChatBridge::new(version));
             start_periodic_refresh(coordinator);
             Ok(())
         })
@@ -1569,7 +1579,32 @@ pub fn run() -> Result<(), tauri::Error> {
             add_dependency,
             remove_dependency,
             set_parent,
-            detach_child
+            detach_child,
+            chat_commands::chat_enabled,
+            chat_commands::chat_set_enabled,
+            chat_commands::chat_overview,
+            chat_commands::chat_list,
+            chat_commands::chat_harnesses,
+            chat_commands::chat_folder_use,
+            chat_commands::chat_create,
+            chat_commands::chat_open,
+            chat_commands::chat_close,
+            chat_commands::chat_send,
+            chat_commands::chat_remove_queued,
+            chat_commands::chat_resume_queue,
+            chat_commands::chat_stop,
+            chat_commands::chat_answer,
+            chat_commands::chat_resolve_uncertain,
+            chat_commands::chat_check_again,
+            chat_commands::chat_set_folder,
+            chat_commands::chat_set_retention,
+            chat_commands::chat_search_records,
+            chat_commands::chat_set_link,
+            chat_commands::chat_resume,
+            chat_commands::chat_save_as_document,
+            chat_commands::chat_answer_quit
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())?
+        .run(|app, event| chat_commands::on_run_event(app, &event));
+    Ok(())
 }

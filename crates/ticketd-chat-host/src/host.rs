@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use ticketd_core::{ChatMessage, ChatSnapshot, Error, Workspace};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
@@ -28,6 +28,17 @@ pub const SNAPSHOT_ITEMS: usize = 200;
 /// Opens the workspace for one short operation, as every other desktop command does.
 /// The host holds no connection between operations, so backup and restore are not blocked.
 pub type WorkspaceOpener = Arc<dyn Fn() -> Result<Workspace, Error> + Send + Sync>;
+
+/// The ticketd context for a Chat (see `context::for_chat`), read when a harness
+/// session starts. `None` sends nothing.
+pub type ContextSource = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// The name of the tool record that keeps the context text a session was started with,
+/// so the transcript shows what the agent was given apart from the person's words.
+pub const CONTEXT_RECORD_NAME: &str = "ticketd context";
+
+/// The detail recorded on a turn ticketd itself stopped, on Quit or when Chat is turned off.
+pub const STOPPED_BY_TICKETD: &str = "ticketd stopped this Chat";
 
 /// The `Chat.harness` value an adapter serves.
 pub fn harness_key(harness: Harness) -> &'static str {
@@ -177,8 +188,33 @@ pub struct ChatHost {
     inner: Arc<Inner>,
 }
 
+/// What every Chat's supervisor last reported, for readers that have no view attached:
+/// the Chats list, the counts, and the checks before Quit or turning Chat off.
+pub(crate) struct Board {
+    live: Mutex<HashMap<String, ChatLive>>,
+    changed: watch::Sender<u64>,
+}
+
+impl Board {
+    fn live(&self) -> MutexGuard<'_, HashMap<String, ChatLive>> {
+        self.live.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Called by a supervisor after each step; `None` once it has stopped.
+    pub(crate) fn report(&self, chat_id: &str, live: Option<ChatLive>) {
+        match live {
+            Some(live) => self.live().insert(chat_id.to_owned(), live),
+            None => self.live().remove(chat_id),
+        };
+        self.changed
+            .send_modify(|count| *count = count.wrapping_add(1));
+    }
+}
+
 struct Inner {
     open_workspace: WorkspaceOpener,
+    context: Option<ContextSource>,
+    board: Arc<Board>,
     adapters: HashMap<&'static str, Arc<dyn HarnessAdapter>>,
     chats: Mutex<HashMap<String, mpsc::Sender<Command>>>,
     quitting: AtomicBool,
@@ -191,10 +227,24 @@ impl ChatHost {
         open_workspace: WorkspaceOpener,
         adapters: Vec<Arc<dyn HarnessAdapter>>,
     ) -> Result<Self, HostError> {
+        Self::with_context(open_workspace, adapters, None)
+    }
+
+    /// As `new`, giving each new harness session the ticketd context from `context`.
+    pub fn with_context(
+        open_workspace: WorkspaceOpener,
+        adapters: Vec<Arc<dyn HarnessAdapter>>,
+        context: Option<ContextSource>,
+    ) -> Result<Self, HostError> {
         open_workspace()?.mark_chat_contact_lost(None, "ticketd was restarted")?;
         Ok(Self {
             inner: Arc::new(Inner {
                 open_workspace,
+                context,
+                board: Arc::new(Board {
+                    live: Mutex::new(HashMap::new()),
+                    changed: watch::channel(0).0,
+                }),
                 adapters: adapters
                     .into_iter()
                     .map(|adapter| (harness_key(adapter.harness()), adapter))
@@ -203,6 +253,18 @@ impl ChatHost {
                 quitting: AtomicBool::new(false),
             }),
         })
+    }
+
+    /// Live state of every Chat that has a supervisor. A Chat that is absent is idle
+    /// with no harness process.
+    pub fn live(&self) -> HashMap<String, ChatLive> {
+        self.inner.board.live().clone()
+    }
+
+    /// Moves whenever any Chat's records or live state may have changed. It can move
+    /// without a visible difference, so readers compare what they show.
+    pub fn changed(&self) -> watch::Receiver<u64> {
+        self.inner.board.changed.subscribe()
     }
 
     pub async fn inspect(&self, harness: &str) -> Result<Inspection, HostError> {
@@ -340,17 +402,25 @@ impl ChatHost {
             .entry(chat_id.to_owned())
             .and_modify(|commands| {
                 if commands.is_closed() {
-                    *commands = Supervisor::spawn(
-                        &chat,
-                        self.inner.open_workspace.clone(),
-                        adapter.clone(),
-                    );
+                    *commands = self.spawn(&chat, adapter.clone());
                 }
             })
-            .or_insert_with(|| {
-                Supervisor::spawn(&chat, self.inner.open_workspace.clone(), adapter.clone())
-            });
+            .or_insert_with(|| self.spawn(&chat, adapter.clone()));
         Ok(commands.clone())
+    }
+
+    fn spawn(
+        &self,
+        chat: &ticketd_core::Chat,
+        adapter: Option<Arc<dyn HarnessAdapter>>,
+    ) -> mpsc::Sender<Command> {
+        Supervisor::spawn(
+            chat,
+            self.inner.open_workspace.clone(),
+            adapter,
+            self.inner.context.clone(),
+            self.inner.board.clone(),
+        )
     }
 
     fn chats(&self) -> MutexGuard<'_, HashMap<String, mpsc::Sender<Command>>> {
