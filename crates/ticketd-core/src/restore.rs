@@ -158,6 +158,10 @@ impl Workspace {
         if backup::table_exists(&restored, "device")? {
             crate::device::renew_code(&restored)?;
         }
+        // For the same reason it joins its sync folder as a device of its own.
+        if backup::table_exists(&restored, "sync_state")? {
+            restored.execute("UPDATE sync_state SET device_id = NULL", [])?;
+        }
 
         // All potentially failing staging work happens before touching live data.
         let current = if workspace.exists() {

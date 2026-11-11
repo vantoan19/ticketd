@@ -237,13 +237,21 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
         {
             return Err(Error::Backup("Permanent attachment purge is pending. Retry the explicit purge before creating a complete backup; no deletion was retried automatically.".into()));
         }
-        let mut query = connection.prepare(
-            if has_purge {
-                "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot' AND purge_state='retained'"
-            } else {
-                "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot'"
-            },
-        )?;
+        // An Attachment synced from another device and not downloaded yet has no
+        // bytes here to keep; the restored Workspace downloads them as before.
+        let downloaded = if table_exists(connection, "sync_attachments")? {
+            " AND id NOT IN (SELECT id FROM sync_attachments WHERE state != 'downloaded')"
+        } else {
+            ""
+        };
+        let retained = if has_purge {
+            " AND purge_state='retained'"
+        } else {
+            ""
+        };
+        let mut query = connection.prepare(&format!(
+            "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot'{retained}{downloaded}"
+        ))?;
         let mut rows = query.query([])?;
         let mut missing = Vec::new();
         while let Some(row) = rows.next()? {

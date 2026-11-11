@@ -105,7 +105,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 58;
+pub const FORMAT_VERSION: i64 = 59;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -273,6 +273,8 @@ pub enum Error {
     Remote(#[from] sync::remote::RemoteError),
     #[error("unreadable sync file: {0}")]
     SyncFile(String),
+    #[error("sync: {0}")]
+    Sync(String),
     #[error("workspace schema version {0} is newer than this application supports")]
     NewerSchema(i64),
 }
@@ -798,6 +800,10 @@ impl Workspace {
         if version < 58 {
             sync::migrate(&transaction)?;
             transaction.execute_batch("PRAGMA user_version = 58;")?;
+        }
+        if version < 59 {
+            sync::migrate_setup(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 59;")?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

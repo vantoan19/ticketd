@@ -202,11 +202,7 @@ impl Workspace {
                 "supply a nonempty upload request ID for safe retry".into(),
             ));
         }
-        if filename.is_empty()
-            || filename == "."
-            || filename == ".."
-            || filename.contains(['/', '\\', ':', '\0'])
-        {
+        if !valid_filename(filename) {
             return Err(Error::Attachment(
                 "supply a filename without directories or drive/stream syntax".into(),
             ));
@@ -581,6 +577,11 @@ impl Workspace {
         sync_directory(parent)?;
         Ok(())
     }
+}
+
+/// A file name that stays inside its Attachment's own directory.
+pub(crate) fn valid_filename(name: &str) -> bool {
+    !matches!(name, "" | "." | "..") && !name.contains(['/', '\\', ':', '\0'])
 }
 
 fn upload_limit_error(limit: u64) -> Error {

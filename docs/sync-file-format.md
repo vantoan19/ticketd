@@ -184,3 +184,15 @@ A project file has no text after its header.
 These are never written to a sync file: checkout folders of a project, Attention inbox entries and their read state, recently opened Documents, credentials, source connection settings, the conversation and refresh state fetched from an external source, publication attempts, automatic history entries, the time a ticket or Document last changed, and tags no record uses.
 
 A project that arrives from another device has no checkout folder until one is registered on this device.
+
+## Files that are not records
+
+Beside the record folders, a Workspace folder holds:
+
+- `devices.json`: the device registry. Each desktop that joined the folder is listed under its device id with its name, its two-letter device code and the time it last uploaded a change. A desktop joining with a code that is already listed takes a new one.
+- `attachments.json`: one entry per managed Attachment with its display name, file name, size, SHA-256 and the storage version of its bytes. A desktop lists an Attachment from this entry before it has the bytes, and checks the bytes against it after downloading them.
+- `attachments/`: the bytes of each managed Attachment as one file, written once and never changed. They are uploaded before any record that names the Attachment.
+
+Every desktop writes the two JSON files. A desktop whose write meets a newer file reads it and adds its own entries again, and each sync run puts back an entry of its own that is missing. Editing these files by hand is not supported: an entry that does not validate is ignored.
+
+The folder is identified by the Workspace's own identity, which every desktop that downloads the Workspace takes over, so an Attachment link in a description (`ticketd://attachment/<Workspace>/<Attachment>`) means the same on each of them. Attachments that only reference a file elsewhere are not synced.

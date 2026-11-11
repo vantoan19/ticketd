@@ -168,7 +168,7 @@ fn sync_kind(name: &str) -> Option<SyncKind> {
         .find(|kind| remote_kind(*kind).as_str() == name)
 }
 
-fn dirty_kind(kind: SyncKind) -> RecordKind {
+pub(super) fn dirty_kind(kind: SyncKind) -> RecordKind {
     match kind {
         SyncKind::Project => RecordKind::Project,
         SyncKind::Document => RecordKind::Document,
