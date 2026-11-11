@@ -22,6 +22,8 @@ export function DialogShell({
   title,
   description,
   primaryLabel,
+  primaryVariant = "default",
+  cancelLabel = "Cancel",
   blockedReason,
   onSubmit,
   onCancel,
@@ -38,6 +40,10 @@ export function DialogShell({
   title: string;
   description?: string;
   primaryLabel: string;
+  /** `destructive` when confirming stops or removes something. */
+  primaryVariant?: "default" | "destructive";
+  /** The quiet way out, when "Cancel" would not say what is kept. */
+  cancelLabel?: string;
   blockedReason: string | null;
   onSubmit: () => void;
   /** Cancel only (not Escape or an outside click): discard the draft. */
@@ -107,11 +113,12 @@ export function DialogShell({
                 onClick={onCancel}
                 disabled={busy}
               >
-                Cancel
+                {cancelLabel}
               </Button>
             </DialogClose>
             <Button
               type="submit"
+              variant={primaryVariant}
               size="sm"
               disabled={blocked}
               {...(blocked && { "aria-describedby": reasonId })}
