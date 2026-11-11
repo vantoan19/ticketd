@@ -86,7 +86,7 @@ pub(crate) fn ticket_references(text: &str) -> Vec<(usize, usize)> {
 }
 
 /// Whether `text` is exactly one well-formed Ticket reference.
-fn is_ticket_reference(text: &str) -> bool {
+pub(crate) fn is_ticket_reference(text: &str) -> bool {
     ticket_references(text) == [(0, text.len())]
 }
 
@@ -115,6 +115,16 @@ pub(crate) fn index_external_body(tx: &Connection, id: &str, body: &str) -> Resu
 
 pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     crate::embedded_attachments::index(tx, id, body)?;
+    index_activity_mentions(tx, id, body)
+}
+
+/// A brief received from another device stays readable when its file links cannot resolve here.
+pub(crate) fn index_external_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
+    crate::embedded_attachments::index_external(tx, id, body)?;
+    index_activity_mentions(tx, id, body)
+}
+
+fn index_activity_mentions(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     index_numbers(tx, id, body, true)?;
     index_text(tx, id, body, true)?;
     // Backlinks recognize visible ticket references even in link text and
