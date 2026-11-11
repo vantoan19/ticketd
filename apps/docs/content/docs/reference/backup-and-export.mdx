@@ -1,0 +1,59 @@
+---
+title: Backup and export
+description: A backup preserves the whole workspace. An export is a portable JSON snapshot for inspection and transfer.
+---
+
+Your workspace lives on your computer, in your application-data directory. Find
+it with:
+
+```sh
+ticketd workspace
+```
+
+## Backup
+
+A backup is a consistent copy of the entire workspace, written to a new file.
+
+```sh
+ticketd backup ~/backups/ticketd-2026-11-11.sqlite3
+```
+
+To restore, close other ticketd operations first, including the desktop app:
+
+```sh
+ticketd restore-workspace ~/backups/ticketd-2026-11-11.sqlite3
+```
+
+<Callout title="When to back up">
+  Save a backup before upgrading or uninstalling ticketd.
+</Callout>
+
+## Export
+
+An export is one UTF-8 JSON document holding the workspace's records, including
+the trash, from a single read snapshot.
+
+```sh
+ticketd export --file workspace.json
+ticketd export > workspace.json
+```
+
+Prefer `--file`. It refuses to overwrite an existing path and publishes the file
+only after the complete snapshot is written. Redirecting stdout yourself can
+leave a partial file if the command fails. The desktop app offers the same export
+from Settings.
+
+### What an export is not
+
+- **Not a backup.** Database metadata and request replay outcomes are left out,
+  so restored retry guarantees need a backup.
+- **Not importable.** Generic import is not supported. Use it for inspection and
+  transfer.
+
+Checkout paths describe the machine that made the export and may need adjusting
+elsewhere. Saved source configurations hold repositories and filters only, never
+a credential.
+
+The complete format, array by array, is in
+[`docs/export.md`](https://github.com/vantoan19/ticketd/blob/main/docs/export.md)
+in the repository.

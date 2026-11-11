@@ -1,69 +1,122 @@
 # ticketd docs
 
-Standalone landing page for ticketd: ticket and context management alongside AI
-agents, with native assistance, automations, integrations and sync. All interactions
-are deterministic local examples. They never open a workspace, run a CLI command,
-contact an agent or connect to Tauri.
+The ticketd website: the factory landing page and the documentation, built with
+[Fumadocs](https://www.fumadocs.dev) on React Router and Vite, and written out as a
+static site.
 
 From the repository root:
 
 ```sh
 npm ci
-npm run docs
-npm run build:docs
+npm run docs          # dev server
+npm run build:docs    # static site in apps/docs/build/client
 npm test --workspace @ticketd/docs
+npm run preview --workspace @ticketd/docs
 ```
 
-The production output is `apps/docs/dist`. Serve it with a static web server or
-`npm run preview --workspace @ticketd/docs`. Fonts use Google Fonts, with local
-system-font fallbacks. No credentials or environment variables are required.
+Serve `apps/docs/build/client` with any static web server. Documentation pages are
+prerendered, the search index is a static file, and searching runs in the browser.
+Fonts use Google Fonts, with local system-font fallbacks. No credentials or
+environment variables are required.
 
-## Page and examples
+## Layout
 
-`Landing.tsx` owns the page, system theme and reduced-motion preference. A centered
-headline introduces one main factory illustration. Three product examples then
-explain shared tickets and context, agent visibility, and grounded AI assistance.
-The product is readable before any interaction. Small document connectors,
-stippled edges and the cat supervisor carry the illustration style into these
-examples without adding separate machinery to each section.
+```text
+content/docs/        Documentation pages (MDX) and their order (meta.json)
+src/root.tsx         Document shell, fonts, theme and search providers
+src/routes.ts        Routes: landing, docs, search index, llms.txt
+src/routes/          home (landing), docs, search, not-found
+src/app.css          Tokens and theme for the documentation
+src/Landing.jsx      The landing page
+src/landing.css      The landing page's own tokens, layout and motion
+src/LineScene.jsx    The five-machine line
+src/screens/         Captured desktop app screens
+```
 
-`FactoryHero.tsx` owns the factory exchange: organize a brief, pass context to an
-agent, receive a report, and review the result. One “See it work” action runs the
-exchange and stops for human review. Playback can be paused or reset; reduced
-motion goes straight to the report. The HTML product view stays readable inside
-the SVG housing. On narrow screens the drawing can be panned; the surrounding
-page fits the viewport.
+## Landing page
 
-`ProductExamples.tsx` owns the three independent examples:
+The landing page runs a deterministic recorded demonstration; it never opens a
+workspace, runs a CLI command, contacts an agent, or connects to Tauri.
 
-- Select tickets in the Login hardening Plan to see their linked context.
-- Inspect an agent's evidence and mark the example reviewed.
-- Choose an assistant question, inspect its sources, and confirm or discard a
-  proposed ticket. Adding the ticket requires an explicit action.
+The drawings and scoped stylesheet implement the approved November 10, 2026 design
+(canvas version 27) for [issue 238](https://github.com/vantoan19/ticketd/issues/238).
+`Landing.jsx` ports the design's interactions to React. `landing.css` owns the
+page's paper, ink, accent and motion tokens, independently of the desktop app.
 
-`factoryRecords.ts` supplies the shared sources. Examples reset on reload and do
-not share state with each other. These are launch-vision fixtures, not recordings
-of shipped AI or sync functionality. Publication is deferred until the promised
-capabilities are hardened.
+`Landing.markup.json` contains static SVG artwork. `LineScene.jsx` displays the
+five-machine horizontal conveyor from `LineScene.markup.json`, including its
+station positions. The ticket carrier follows the selected station; reduced
+motion skips its travel. Narrow screens scroll the drawing to the selected machine.
+The files under `src/screens` contain captured app markup and the app stylesheet,
+from desktop/CLI revision
+`5c1a242`. These are trusted, checked-in fixtures, never user-supplied HTML. The app
+captures are inert; page controls and the monitor/dock's pointer overlays navigate
+the recorded states. Equivalent labeled controls support keyboard navigation.
+Only clock times, ticket ages and home-relative paths were adjusted. GitHub uses
+the offline `acme/web-app` fixture, not a live account.
 
-`landing.css` owns paper, ink, accent and layout tokens independently of the
-desktop app; `factory-hero.css` owns the main drawing's layout and finite motion.
-The artwork uses oblique projection, stippling and a hard-hat pixel cat, continuing
-the approved design for [issue 238](https://github.com/vantoan19/ticketd/issues/238).
+To refresh the recordings, build the desktop and CLI from the same revision.
+Replay the spec → Plan → create → wire → update → context story in a disposable
+workspace, then the four monitor moments and the dock views. Capture each app
+view's markup at 1280 × 772 with the matching stylesheet scoped beneath `.app`.
+Replace the corresponding screen fixture, update its highlight rectangles if
+layout changed, and update the commands/outputs in `Landing.jsx` from that run.
+Keep credentials, personal paths and raw session logs out of the fixtures. Update
+every drawing's revision plate together, then compare desktop and phone captures
+in both themes and rerun the interaction tests and repository checks.
 
-## Artwork and retained studies
+### Rhythm
 
-Edit `artwork/hero.mjs` and the shared primitives in `artwork/draw.mjs`, then run
-`npm run artwork --workspace @ticketd/docs` to regenerate the static plates in
-`FactoryPlates.markup.json`. No runtime drawing library is required. The page also
-uses the SVG pattern definitions from `Landing.markup.json`.
+Sections are allowed to run longer than one screen. Each opens with generous room
+above its heading and between the heading and its drawing; the per-section grids
+in `landing.css` arrange a demo's parts without squeezing them to fit a viewport.
 
-Earlier design studies remain in `concepts`, `FactoryScenes.tsx`, `FactoryPlates.tsx`
-and `LineScene.jsx`, with their associated artwork and styles. The captured app
-fixtures under `src/screens` come from desktop/CLI revision `5c1a242`. These studies
-and app captures are not rendered by the current landing page. Keep their fixture
-sources separate from the simplified product examples.
+The numbered callouts on a drawing belong to its "Drawing notes": they appear when
+the notes are opened, beside the legend that explains them, and stay off the
+drawing otherwise.
 
-`src/links.ts` owns the installation, repository and glossary destinations. The
-repository currently requires access; verify anonymous reachability before a
-public launch. This app does not select hosting or publish a deployment.
+### Drawing conventions
+
+The drawings are static SVG markup with no generator, so these conventions are
+kept by hand when a drawing is edited:
+
+- **Line weight.** A box carries one heavier contour round its outside (class
+  `x-edge`: 2.6 for a machine body, 2.2 for a mid-sized part or a long beam or
+  belt, 1.8 and 1.4 for small parts) and keeps its three inner edges at 1. Other
+  primary outlines (the sphere, hoppers, drums, gauges) are 2 to 2.2. Detail
+  stays at 1 to 1.2.
+- **Labels.** Nothing on a drawing is set below 8, and each drawing is shown near
+  its natural size, so a label is about as large on screen as it is in the
+  markup. Decorative serial plates were removed rather than enlarged.
+- **Dither.** Dark on the side turned from the light, light on top. A face that
+  carries a label keeps only the lightest texture (`d1`).
+
+### How the landing page sits in the site
+
+`src/routes/home.tsx` hosts the landing page. The page reads the window as it
+renders (theme, motion, layout), so the route draws it in the browser only; the
+prerendered home page is its paper ground.
+
+The site has one theme. The home route passes the documentation's theme to the
+landing page, and the landing page reports a change made with its own toggle
+(`onTheme`), so the choice carries over to `/docs` and back.
+
+`src/links.ts` owns the destinations. "Get started", the install guide and the
+glossary lead to the documentation; the header has a "Docs" link. The repository
+currently requires access; verify anonymous reachability before a public launch.
+This app does not select hosting or publish a deployment.
+
+## Documentation
+
+Pages live in `content/docs` as MDX. Each folder's `meta.json` sets the order in
+the sidebar. Fumadocs supplies the sidebar, table of contents, search and the
+Markdown copy of each page. `src/app.css` gives the documentation the same paper
+and ink as the landing page.
+
+The documentation states only what the CLI and the repository's guides state.
+Check a command against `ticketd COMMAND --help` before documenting it. The
+glossary page includes the repository's `GLOSSARY.md` rather than copying it, so
+the terms have one source.
+
+Agents can read the documentation as plain text at `/llms.txt` (an index),
+`/llms-full.txt` (everything), and `/llms.mdx/docs/<page>/content.md`.

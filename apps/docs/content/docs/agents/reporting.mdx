@@ -1,0 +1,90 @@
+---
+title: Reporting progress
+description: How an agent posts updates, attaches evidence and retries safely.
+---
+
+## When to post an update
+
+Post an authored Activity when the agent:
+
+- begins work,
+- reaches a meaningful result,
+- changes direction,
+- needs input,
+- pauses, or
+- hands off for review or completion.
+
+Keep the brief readable on its own. Posting an update does not change the
+ticket's status or readiness; change the status separately.
+
+```sh
+ticketd activity add T-12 --agent coding-agent \
+  --brief "Limiter tests pass on CI. Opened #87 for review."
+```
+
+Read a longer brief from a file, or from stdin with `-`:
+
+```sh
+ticketd activity add T-12 --file update.md --agent coding-agent
+printf '%s\n' 'Investigating the failure' | ticketd activity add T-12 --file - --agent coding-agent
+```
+
+<Callout title="The brief is Markdown">
+  Write `\*` and `\_`, or wrap text in backticks, to keep a literal `*` or `_`.
+</Callout>
+
+## Attaching evidence
+
+Evidence points at the work: a branch, a worktree, a commit, a pull request, or a
+verification result.
+
+```sh
+ticketd evidence add T-12 --kind branch --name branch \
+  --value feat/login-rate-limit --agent coding-agent
+ticketd evidence add T-12 --kind verification --name checks \
+  --value './scripts/check passed' --agent coding-agent
+```
+
+## Safe retries [#safe-retries]
+
+An agent may not know whether a command succeeded, for example after a timeout.
+A request ID makes the retry safe: repeating the same ID with the same input
+returns the first result instead of writing again.
+
+```sh
+ticketd activity add T-12 --agent coding-agent \
+  --brief "Investigating the failure" --request-id checkpoint-1
+```
+
+`activity add`, `activity edit`, `document create` and `document change` accept
+`--request-id` directly. For other writes, send a JSON request through
+`ticketd write`:
+
+```json title="report.json"
+{
+  "operation": "ticket_change",
+  "reference": "T-12",
+  "change": {
+    "status": "In progress",
+    "activities": ["Investigating the failure"],
+    "editing_agent": "coding-agent"
+  }
+}
+```
+
+```sh
+ticketd write report.json --request-id checkpoint-1
+```
+
+This applies the status change and the update together. Use the same ID with the
+identical request to retry, and a new ID for a new checkpoint.
+
+## Reading the latest report
+
+```sh
+ticketd context T-12 --latest-update
+ticketd list --latest-update
+```
+
+Briefs returned this way are limited to 1024 characters and carry a `truncated`
+flag. Fetch the complete brief with `ticketd activity show T-12 ACTIVITY_ID`.

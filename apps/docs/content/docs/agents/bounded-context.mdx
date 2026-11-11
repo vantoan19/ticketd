@@ -1,0 +1,95 @@
+---
+title: Bounded context
+description: ticketd context returns a capped JSON snapshot of one ticket. Select only the scopes the job needs.
+---
+
+```sh
+ticketd context T-12
+```
+
+With no flags, the result holds the ticket itself: its reference, title,
+description, status, availability and tags. Everything else is opt-in.
+
+## Scopes
+
+| Flag              | Adds                                                                      |
+| ----------------- | ------------------------------------------------------------------------- |
+| `--project`       | The linked project.                                                       |
+| `--plan`          | The Plan the ticket belongs to.                                           |
+| `--relationships` | Parent, subtickets, blockers, dependents, related tickets and duplicates. |
+| `--activities`    | The authored updates.                                                     |
+| `--latest-update` | Only the most recent update.                                              |
+| `--evidence`      | Branches, commits, pull requests and verification results.                |
+| `--backlinks`     | Incoming references from other tickets and Documents.                     |
+| `--documents`     | The Documents attached with `document link-ticket`.                       |
+| `--conversation`  | For a ticket from an external source, its comments and events. Read-only. |
+
+```sh
+ticketd context T-12 --latest-update --evidence --documents
+```
+
+A scope you did not select is absent from the result. A scope you selected that
+has nothing linked, such as a ticket with no Plan, is `null`.
+
+## Limits
+
+- **Lists hold at most 20 items.** Each list has a `next_offset`. When it is not
+  null, repeat the command with `--offset` set to that value. The offset applies
+  to every list in the response.
+- **Text is capped.** Text values are objects with `text` and `truncated`.
+  Descriptions and update briefs are limited to 4096 characters, and other text
+  to 256.
+- **Each call reads one snapshot.** Later pages can reflect changes made in
+  between.
+
+```json
+{
+  "ticket": {
+    "reference": "T-12",
+    "title": { "text": "Rate-limit failed login attempts", "truncated": false },
+    "status": "In review",
+    "availability": null,
+    "tags": {
+      "items": [{ "text": "security", "truncated": false }],
+      "next_offset": null
+    }
+  }
+}
+```
+
+<Callout type="warn" title="Do not edit from the bounded description">
+  The description in `context` may be truncated. To edit a ticket, read the full
+  content with `ticketd show T-12` first.
+</Callout>
+
+## Fetching the full thing
+
+The bounded result tells you what exists. Fetch full content only when you need
+it:
+
+| You need                | Run                                      |
+| ----------------------- | ---------------------------------------- |
+| The whole ticket        | `ticketd show T-12`                      |
+| The whole activity feed | `ticketd activity list T-12`             |
+| One complete update     | `ticketd activity show T-12 ACTIVITY_ID` |
+| A page of a Document    | `ticketd document read DOCUMENT_ID`      |
+| All evidence            | `ticketd evidence list T-12`             |
+
+Each Document in the `documents` scope carries a `fetch` field with the exact
+command to read it.
+
+## Errors
+
+A missing ticket, or a missing linked project or Plan, produces an error on
+stderr and a nonzero exit code. Nothing is printed on stdout.
+
+## Finding tickets
+
+```sh
+ticketd search "rate limit"
+ticketd list --status "In review" --latest-update
+ticketd backlinks T-12
+```
+
+`search` matches a literal substring in titles, descriptions and update briefs.
+ASCII letters match without regard to case. Results exclude the trash.

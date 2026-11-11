@@ -4,3 +4,8 @@ node_modules/
 **/dist/
 **/src-tauri/gen/
 *.tsbuildinfo
+
+# React Router and Fumadocs output
+**/.react-router/
+**/.source/
+apps/docs/build/

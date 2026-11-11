@@ -1,0 +1,131 @@
+---
+title: Quickstart
+description: Turn a spec into a Plan, three tickets, a dependency and a first report, using the commands an agent would run.
+---
+
+This walk-through builds a small piece of work from the CLI. Open the desktop app
+beside your terminal to watch each step arrive. The results below are from a real
+session and are shortened with `…`.
+
+<Steps>
+<Step>
+
+### Capture the spec as a Document
+
+A [Document](/docs/concepts/context) holds reusable context. Write the spec to
+`spec.md`, then:
+
+```sh
+ticketd document create --title "Login hardening spec" --body-file spec.md
+```
+
+```json
+{"id":"1cf45a9d…","title":"Login hardening spec","trashed":false,…}
+```
+
+The result includes the Document's `id`. You use it in the next step.
+
+</Step>
+<Step>
+
+### Create a Plan and name its spec
+
+A [Plan](/docs/concepts/context#plans) groups tickets that pursue one objective.
+
+```sh
+ticketd plan create "Login hardening"
+ticketd plan spec PLAN_ID DOCUMENT_ID
+```
+
+```json
+{"id":"cab50e32…","name":"Login hardening","spec_document_id":"1cf45a9d…",…}
+```
+
+</Step>
+<Step>
+
+### Create the tickets
+
+```sh
+ticketd create "Rate-limit failed login attempts" --plan PLAN_ID
+ticketd create "Alert on-call when failed logins spike" --plan PLAN_ID
+ticketd create "Show the remaining wait time on the login form" --plan PLAN_ID
+```
+
+Each result carries the ticket's reference, such as `T-12`, and its availability:
+
+```json
+{"reference":"T-12","status":"Todo","availability":"Ready",…}
+```
+
+</Step>
+<Step>
+
+### Say what must finish first
+
+Alerting depends on the rate limiter, so make the first ticket block the second:
+
+```sh
+ticketd add-dependency T-12 T-13
+```
+
+```json
+{"reference":"T-13","availability":"Blocked","prerequisites":[{"reference":"T-12","unresolved":true,…}],…}
+```
+
+`T-13` is now [Blocked](/docs/concepts/readiness) until `T-12` is Done.
+
+</Step>
+<Step>
+
+### Ask for Ready work
+
+This is how an agent picks what to do next:
+
+```sh
+ticketd list --availability ready --plan PLAN_ID --limit 1
+```
+
+</Step>
+<Step>
+
+### Report progress
+
+Start the ticket, attach evidence, and post an update:
+
+```sh
+ticketd change T-12 --status "In progress" --agent coding-agent
+ticketd evidence add T-12 --kind branch --name branch \
+  --value feat/login-rate-limit --agent coding-agent
+ticketd activity add T-12 --agent coding-agent \
+  --brief "Added a sliding-window limiter. Next: show the wait time."
+```
+
+The status, the evidence and the update all appear on the ticket in the app.
+
+</Step>
+<Step>
+
+### Read the context back
+
+A later session, or another agent, starts from the same ticket:
+
+```sh
+ticketd context T-12 --latest-update --evidence --documents
+```
+
+See [Bounded context](/docs/agents/bounded-context) for what each scope returns.
+
+</Step>
+</Steps>
+
+## Next
+
+<Cards>
+  <Card title="Connect an agent" href="/docs/agents/connect">
+    Make these commands part of how your agent works.
+  </Card>
+  <Card title="Readiness" href="/docs/concepts/readiness">
+    How dependencies decide what is Ready.
+  </Card>
+</Cards>

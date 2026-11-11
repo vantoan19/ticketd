@@ -1,5 +1,6 @@
 export const links = {
-  install: "https://github.com/vantoan19/ticketd/blob/main/docs/install.md",
+  docs: "/docs",
+  install: "/docs/install",
+  glossary: "/docs/reference/glossary",
   repository: "https://github.com/vantoan19/ticketd",
-  glossary: "https://github.com/vantoan19/ticketd/blob/main/GLOSSARY.md",
 } as const;

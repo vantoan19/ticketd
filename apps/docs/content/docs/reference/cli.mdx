@@ -1,0 +1,84 @@
+---
+title: CLI reference
+description: Every ticketd command, grouped by what it works on.
+---
+
+Run `ticketd COMMAND --help` for a command's arguments and flags. Commands print
+JSON on stdout. Errors go to stderr with a nonzero exit code.
+
+## Tickets
+
+| Command                          | Does                                                      |
+| -------------------------------- | --------------------------------------------------------- |
+| `create TITLE`                   | Create a ticket.                                          |
+| `show REFERENCE`                 | Show a ticket.                                            |
+| `change REFERENCE`               | Change the title, description, status or project.         |
+| `list`                           | List tickets with combined filters.                       |
+| `search QUERY`                   | Search titles, descriptions and update briefs.            |
+| `context REFERENCE`              | Retrieve [bounded context](/docs/agents/bounded-context). |
+| `history REFERENCE`              | Show ticket history.                                      |
+| `backlinks REFERENCE`            | List incoming references with their passages.             |
+| `trash`, `restore`, `trash-list` | Move to trash, restore, and list trashed tickets.         |
+
+## Relationships
+
+| Command                                  | Does                                           |
+| ---------------------------------------- | ---------------------------------------------- |
+| `add-dependency BLOCKER DEPENDENT`       | Add a blocking dependency.                     |
+| `remove-dependency BLOCKER DEPENDENT`    | Remove a blocking dependency.                  |
+| `set-parent REFERENCE --parent PARENT`   | Assign a parent. Omit `--parent` to remove it. |
+| `add-relationship SOURCE TARGET KIND`    | Add a `related` or `discovered` link.          |
+| `remove-relationship SOURCE TARGET KIND` | Remove that link.                              |
+| `mark-duplicate SOURCE CANONICAL`        | Mark a ticket as a duplicate.                  |
+| `preview-duplicate SOURCE CANONICAL`     | Preview dependencies before marking.           |
+| `remove-duplicate`                       | Remove a duplicate designation.                |
+| `add-tag REFERENCE TAG`, `remove-tag`    | Add or remove a tag.                           |
+| `graph [REFERENCE]`                      | View a bounded dependency graph.               |
+
+## Progress
+
+| Command    | Does                                                              |
+| ---------- | ----------------------------------------------------------------- |
+| `activity` | `add`, `edit`, `delete`, `show` and `list` a ticket's activities. |
+| `evidence` | `add`, `edit`, `delete` and `list` implementation evidence.       |
+| `inbox`    | List your inbox entries, newest first.                            |
+| `reminder` | `show`, `set`, `snooze` and `dismiss` a ticket reminder.          |
+
+## Documents and Plans
+
+| Command    | Does                                                                               |
+| ---------- | ---------------------------------------------------------------------------------- |
+| `document` | Create, read, search, change, pin, tag, link and trash Documents.                  |
+| `plan`     | Create, list, show, rename, archive and reactivate Plans; manage tickets and spec. |
+| `project`  | Create, edit, show and list projects; register and unregister checkouts.           |
+
+## Writes for agents
+
+| Command      | Does                                                                  |
+| ------------ | --------------------------------------------------------------------- |
+| `write FILE` | Execute one JSON write request. With `--request-id`, a retry is safe. |
+| `batch FILE` | Apply a JSON array of operations [atomically](/docs/agents/batches).  |
+
+## Workspace
+
+| Command                  | Does                                                 |
+| ------------------------ | ---------------------------------------------------- |
+| `workspace`              | Print the workspace path and format versions.        |
+| `backup PATH`            | Save a consistent backup to a new file.              |
+| `restore-workspace PATH` | Restore a backup.                                    |
+| `export`                 | Export a portable JSON snapshot.                     |
+| `source`                 | Connect and configure ticket sources such as GitHub. |
+
+## Filters shared by `list` and `search`
+
+| Flag                                | Keeps                                          |
+| ----------------------------------- | ---------------------------------------------- |
+| `--project ID`, `--unlinked`        | One project's tickets, or tickets without one. |
+| `--plan ID`                         | One Plan's tickets.                            |
+| `--status STATUS`                   | One status.                                    |
+| `--tag TAG`                         | Tickets with every tag given. Repeat the flag. |
+| `--availability ready` or `blocked` | Ready or Blocked tickets.                      |
+| `--family REFERENCE`                | A parent ticket and its subtickets.            |
+| `--source github` or `local`        | Tickets owned by a source, or local ones.      |
+| `--limit N`, `--offset N`           | A page of results. The default limit is 50.    |
+| `--latest-update`                   | Adds each ticket's latest update.              |

@@ -1,0 +1,79 @@
+---
+title: Readiness
+description: Blocking dependencies decide which Todo tickets are Ready and which are Blocked.
+---
+
+A **blocking dependency** says that one ticket must be Done before another is
+considered Ready. Dependencies can cross projects.
+
+```sh
+ticketd add-dependency T-12 T-13
+```
+
+The first ticket blocks; the second waits.
+
+## Ready and Blocked
+
+- A ticket is **Ready** when it is Todo, not in the trash, and has no unresolved
+  blocking dependencies.
+- A ticket is **Blocked** when it is Todo, not in the trash, and has at least one
+  unresolved blocking dependency.
+
+Tickets that are started, finished or trashed are neither Ready nor Blocked.
+Their dependency lists still show any unresolved prerequisites.
+
+## What resolves a blocker
+
+Only **Done** resolves a blocking dependency.
+
+| Blocker's status | Dependent is                             |
+| ---------------- | ---------------------------------------- |
+| Todo             | Blocked                                  |
+| In progress      | Blocked                                  |
+| In review        | Blocked                                  |
+| Done             | Ready                                    |
+| Canceled         | Blocked, until the dependency is removed |
+| Duplicate        | Blocked, until the dependency is removed |
+
+<Callout title="Readiness guides, it does not lock">
+  Readiness helps people and agents choose what to pick up next. It does not
+  prevent anyone from starting a Blocked ticket.
+</Callout>
+
+## Asking for Ready work
+
+```sh
+ticketd list --availability ready
+ticketd list --availability ready --plan PLAN_ID --limit 1
+ticketd list --availability blocked
+```
+
+## Seeing the dependencies
+
+```sh
+ticketd graph T-12
+```
+
+In the desktop app, a Plan's Dependencies view draws the same relationships, with
+each arrow pointing at the ticket that waits.
+
+## Removing a dependency
+
+```sh
+ticketd remove-dependency T-12 T-13
+```
+
+## Links that do not block
+
+Some relationships carry context without affecting readiness:
+
+- **Related tickets** share context. The link is symmetric.
+- A **discovery relationship** records that a ticket was found while working on
+  another.
+
+```sh
+ticketd add-relationship T-12 T-10 related
+ticketd add-relationship T-12 T-16 discovered
+```
+
+For `discovered`, the first ticket is the work during which the second was found.

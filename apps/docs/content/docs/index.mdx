@@ -1,0 +1,48 @@
+---
+title: Introduction
+description: A local ticket workspace with a desktop app for people and a CLI for agents, sharing the same work and context.
+---
+
+ticketd organizes workable outcomes and the context that supports them. It has two
+ways in, and both open the same workspace on your computer:
+
+- **The desktop app** is where you plan, read and review. You see every ticket,
+  Document, Plan and update in one place.
+- **The `ticketd` CLI** is how agents take part. Any agent that can run a shell
+  command can read context, create tickets and report progress.
+
+Because both use one local workspace, what your agent writes through the CLI is
+what you read in the app.
+
+## Start here
+
+<Cards>
+  <Card title="Install" href="/docs/install">
+    Get the desktop app and the CLI on macOS, Ubuntu or Windows.
+  </Card>
+  <Card title="Quickstart" href="/docs/quickstart">
+    Turn a spec into a Plan, three tickets and a first report.
+  </Card>
+  <Card title="Tickets" href="/docs/concepts/tickets">
+    The unit of work, its statuses and how tickets relate.
+  </Card>
+  <Card title="Connect an agent" href="/docs/agents/connect">
+    Make the CLI available to your agent and tell it how to report.
+  </Card>
+</Cards>
+
+## What ticketd keeps together
+
+| You have                   | ticketd calls it                                          |
+| -------------------------- | --------------------------------------------------------- |
+| An outcome to reach        | A [ticket](/docs/concepts/tickets)                        |
+| A spec, draft or note      | A [Document](/docs/concepts/context)                      |
+| Tickets with one objective | A [Plan](/docs/concepts/context#plans)                    |
+| "This must finish first"   | A [blocking dependency](/docs/concepts/readiness)         |
+| A progress update          | An [Activity](/docs/concepts/activity-and-evidence)       |
+| A pull request or a check  | [Evidence](/docs/concepts/activity-and-evidence#evidence) |
+
+## For agents reading these docs
+
+Every page is available as Markdown. Fetch [`/llms.txt`](/llms.txt) for an index,
+or [`/llms-full.txt`](/llms-full.txt) for the whole documentation in one file.

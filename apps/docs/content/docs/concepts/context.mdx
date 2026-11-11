@@ -1,0 +1,88 @@
+---
+title: Documents and Plans
+description: Documents hold reusable context. Plans group tickets around a shared objective and name the spec they follow.
+---
+
+## Documents
+
+A **Document** is reusable context: a thought, a draft, a spec, or supporting
+detail. It has a stable identity, an optional title and Markdown content. One
+Document can be linked from many tickets, Plans and other Documents without being
+copied.
+
+```sh
+ticketd document create --title "Login hardening spec" --body-file spec.md
+ticketd document show DOCUMENT_ID
+ticketd document search "rate limit"
+```
+
+### Attaching a Document to a ticket
+
+A ticket's Documents are the ones its description mentions, plus the ones attached
+explicitly:
+
+```sh
+ticketd document link-ticket DOCUMENT_ID T-12
+ticketd document unlink-ticket DOCUMENT_ID T-12
+```
+
+Detaching removes only the explicit attachment. It never edits the description.
+
+To mention a Document inside a description, paste the link text that this prints:
+
+```sh
+ticketd document link DOCUMENT_ID
+```
+
+### Creating a ticket from a Document
+
+```sh
+ticketd document create-ticket DOCUMENT_ID "Rate-limit failed login attempts"
+```
+
+The new ticket's description links back to the Document.
+
+## Plans
+
+A **Plan** is a named group of tickets pursuing a shared objective. A Plan can
+span several projects. Each ticket belongs to at most one Plan, and belonging to
+one is optional.
+
+```sh
+ticketd plan create "Login hardening"
+ticketd plan add PLAN_ID T-12
+ticketd plan show PLAN_ID
+```
+
+A Plan's progress is the count of its tickets by status. Parents and subtickets
+count equally, and trashed tickets are left out.
+
+### A Plan's spec and supporting Documents
+
+Designate one Document as the Plan's primary spec, and add others as supporting
+context:
+
+```sh
+ticketd plan spec PLAN_ID DOCUMENT_ID
+ticketd plan document PLAN_ID OTHER_DOCUMENT_ID
+ticketd plan context PLAN_ID --bodies
+```
+
+### Archiving
+
+An archived Plan leaves the active Plan views and can be made active again. Its
+tickets stay searchable and editable, with their statuses and relationships
+unchanged.
+
+```sh
+ticketd plan archive PLAN_ID
+ticketd plan reactivate PLAN_ID
+```
+
+## The context graph
+
+The context graph is a bounded view of the explicit relationships among tickets,
+Documents and Plans. Open it from a ticket, a Document or a Plan in the desktop
+app, or open the workspace graph from the sidebar.
+
+Tags classify items in the graph. They do not create links between them.

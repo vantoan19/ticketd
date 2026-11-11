@@ -11,7 +11,17 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "allowJs": true,
-    "types": ["vite/client", "node"]
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "types": ["vite/client", "node"],
+    "rootDirs": [".", "./.react-router/types"],
+    "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "react-router.config.ts",
+    ".react-router/types/**/*"
+  ]
 }

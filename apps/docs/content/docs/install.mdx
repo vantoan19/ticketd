@@ -1,0 +1,79 @@
+---
+title: Install
+description: Install the desktop app and the matching CLI, then check that your agent can find it.
+---
+
+Each download contains a desktop installer and the matching `ticketd` CLI. Builds
+exist for macOS 26 on Apple Silicon, Ubuntu 24.04 x86-64 and Windows 11 x86-64.
+
+<Callout type="warn" title="These are unsigned build artifacts">
+  The downloads are not signed releases yet. macOS Gatekeeper may block an
+  unsigned app, and Windows SmartScreen or Smart App Control may warn about or
+  block an unsigned installer.
+</Callout>
+
+## Install the app and the CLI
+
+<Tabs items={["macOS", "Ubuntu", "Windows"]}>
+  <Tab value="macOS">
+    1. Open the DMG and drag ticketd to Applications.
+    2. Copy `ticketd` to a directory on your `PATH`, for example `~/.local/bin`.
+    3. Make sure the file is executable.
+  </Tab>
+  <Tab value="Ubuntu">
+    1. From the extracted download, install the package. The package manager
+       installs the desktop dependencies.
+
+       ```sh
+       sudo apt install ./ticketd_*.deb
+       ```
+
+    2. Copy `ticketd` to `~/.local/bin`, and add that directory to `PATH` if it
+       is not there already.
+
+  </Tab>
+  <Tab value="Windows">
+    1. Run the MSI installer.
+    2. Copy `ticketd.exe` to a user directory, for example
+       `%LOCALAPPDATA%\Programs\ticketd-cli`.
+    3. Add that directory to your user `PATH` in Windows environment settings.
+    4. Restart terminals and agent harnesses so they pick up the new `PATH`.
+  </Tab>
+</Tabs>
+
+WSL interoperability has not been validated.
+
+## Check the CLI
+
+Run these in the same environment your agent runs in:
+
+```sh
+ticketd --version
+ticketd --help
+```
+
+If the agent's harness cannot find `ticketd` on `PATH`, give it the absolute path
+to the executable.
+
+## One workspace for both
+
+The desktop app and the CLI use the same default workspace for the same
+operating-system user and environment, so start both as that user. On Linux,
+`XDG_DATA_HOME` changes where the workspace lives; set it the same way for both.
+
+To see which workspace the CLI uses, without creating or migrating it:
+
+```sh
+ticketd workspace
+```
+
+## Uninstall
+
+Uninstall the desktop app through the operating system or package manager, and
+delete the CLI executable you copied. The workspace is stored separately in your
+application-data directory and is kept.
+
+<Callout title="Back up first">
+  Save a [backup](/docs/reference/backup-and-export) before uninstalling or
+  upgrading.
+</Callout>

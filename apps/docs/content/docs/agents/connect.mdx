@@ -1,0 +1,79 @@
+---
+title: Connect an agent
+description: Any agent that can run a shell command can use ticketd. Make the CLI available, set the project context, and tell the agent how to work.
+---
+
+ticketd does not replace your agent tools. Keep your editor, terminal or agent
+app; the agent takes part by running `ticketd`.
+
+## 1. Make the CLI available
+
+The agent needs `ticketd` on its `PATH`, in the same environment and as the same
+operating-system user as the desktop app. Check from inside the agent's shell:
+
+```sh
+ticketd --version
+ticketd workspace
+```
+
+`ticketd workspace` prints the workspace path, so you can confirm the agent and
+the app are looking at the same one. If the harness cannot find the executable,
+give it the absolute path. See [Install](/docs/install).
+
+## 2. Set the project context [#project-context]
+
+A project is a repository with a stable identity. Register each checkout, and
+tickets created from inside it are linked to that project automatically,
+including from nested directories.
+
+```sh
+ticketd project create web-app /path/to/web-app
+ticketd project register PROJECT_ID /path/to/another/checkout
+```
+
+- `--project PROJECT_ID` overrides the inferred project.
+- If a directory matches more than one project, the command fails.
+- From an unregistered directory, the new ticket is unlinked. The app shows this
+  as "No project".
+
+## 3. Tell the agent how to work
+
+Agents follow written instructions. Add a short section to the file your agent
+reads, such as `AGENTS.md` or `CLAUDE.md`. Adapt this example to your project:
+
+```md
+## Tickets
+
+Work is tracked in ticketd. Use the `ticketd` CLI.
+
+- Find work: `ticketd list --availability ready --limit 5`
+- Before starting, read the ticket:
+  `ticketd context T-N --documents --latest-update --relationships`
+- When you start: `ticketd change T-N --status "In progress" --agent NAME`
+- Post an update when you start, reach a result, change direction, need input,
+  or hand off: `ticketd activity add T-N --agent NAME --brief "..."`
+- Attach evidence: `ticketd evidence add T-N --kind pull-request --name ... --value URL --agent NAME`
+- When the work is ready for me: `ticketd change T-N --status "In review" --agent NAME`
+```
+
+## What the agent can rely on
+
+- **Results are JSON.** Commands print a JSON object or array on stdout.
+- **Failures are loud.** An error goes to stderr with a nonzero exit code, and
+  no JSON is printed on stdout.
+- **Context is bounded.** `ticketd context` caps lists and long text, so a busy
+  ticket cannot flood the conversation. See
+  [Bounded context](/docs/agents/bounded-context).
+- **Retries are safe** when a request ID is supplied. See
+  [Reporting progress](/docs/agents/reporting#safe-retries).
+
+## Next
+
+<Cards>
+  <Card title="Bounded context" href="/docs/agents/bounded-context">
+    What an agent reads before it starts.
+  </Card>
+  <Card title="Reporting progress" href="/docs/agents/reporting">
+    Updates, evidence and safe retries.
+  </Card>
+</Cards>

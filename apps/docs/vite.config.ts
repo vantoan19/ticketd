@@ -1,7 +1,9 @@
-import { defineConfig } from "vitest/config";
-import react from "@vitejs/plugin-react";
+import { reactRouter } from "@react-router/dev/vite";
+import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
+import { fumadocsMdx } from "fumadocs-mdx/vite";
 
 export default defineConfig({
-  plugins: [react()],
-  test: { environment: "jsdom", testTimeout: 15000 },
+  plugins: [fumadocsMdx(), tailwindcss(), reactRouter()],
+  resolve: { tsconfigPaths: true },
 });
