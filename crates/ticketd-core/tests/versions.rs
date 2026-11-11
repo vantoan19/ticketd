@@ -1,5 +1,6 @@
 use ticketd_core::{DocumentPatch, RecordKind, Status, TicketPatch, Workspace};
 
+#[allow(clippy::unwrap_used)] // A Workspace that cannot open fails the test during setup.
 fn workspace() -> (tempfile::TempDir, Workspace) {
     let dir = tempfile::tempdir().unwrap();
     let workspace = Workspace::open(dir.path().join("versions.sqlite3")).unwrap();
