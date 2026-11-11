@@ -10,12 +10,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     io::Write,
+    time::{Duration, Instant},
 };
-
-use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use super::{
     RecordKind, SyncNoticeKind,
@@ -23,11 +19,20 @@ use super::{
     remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage, digest},
 };
 use crate::{Error, Workspace, attachments};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// The id of the manifest file, beside the device registry.
 pub(super) const MANIFEST: &str = "attachments";
 /// How many received bytes pass between two saved progress values.
 const PROGRESS_STEP: u64 = 1024 * 1024;
+/// `sync_attachments.failed` of an Attachment whose bytes on this device are
+/// missing or damaged, so they cannot be uploaded.
+const UNREADABLE_HERE: &str = "local";
+/// How long a download on another connection may show no progress before an
+/// open that waits for it gives up.
+const STALLED: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Entry {
@@ -40,12 +45,17 @@ struct Entry {
     version: String,
     #[serde(default)]
     added_at: Option<String>,
+    /// What a newer ticketd keeps here, written back as it was read.
+    #[serde(flatten)]
+    other: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Manifest {
     #[serde(default)]
     attachments: BTreeMap<String, Entry>,
+    #[serde(flatten)]
+    other: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,7 +84,7 @@ pub struct AttachmentDownloads {
 
 /// What a manifest entry must satisfy before any of it names a local file.
 fn usable(id: &str, entry: &Entry) -> bool {
-    Uuid::parse_str(id).is_ok()
+    crate::sync_files::is_guid(id)
         && attachments::valid_filename(&entry.filename)
         && !entry.name.trim().is_empty()
         && entry.sha256.len() == 64
@@ -82,14 +92,27 @@ fn usable(id: &str, entry: &Entry) -> bool {
         && i64::try_from(entry.size).is_ok()
 }
 
-/// Managed Attachments held here that the storage does not hold yet: id and display name.
-pub(super) fn pending_uploads(connection: &Connection) -> Result<Vec<(String, String)>, Error> {
+/// Managed Attachments held here that the storage does not hold yet: id and
+/// display name. One whose bytes could not be read here is reported by a
+/// notice instead, and is listed only for `retrying`.
+fn awaiting_upload(
+    connection: &Connection,
+    retrying: bool,
+) -> Result<Vec<(String, String)>, Error> {
     let mut statement = connection.prepare(
-        "SELECT id, display_name FROM attachments WHERE kind = 'local_snapshot' AND quarantined = 0 AND purge_state = 'retained' AND id NOT IN (SELECT id FROM sync_attachments) ORDER BY rowid",
+        "SELECT id, display_name FROM attachments WHERE kind = 'local_snapshot' AND quarantined = 0 AND purge_state = 'retained'
+         AND id NOT IN (SELECT id FROM sync_attachments WHERE NOT (?1 AND failed IS ?2 AND version IS NULL)) ORDER BY rowid",
     )?;
     Ok(statement
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .query_map(params![retrying, UNREADABLE_HERE], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
         .collect::<Result<_, _>>()?)
+}
+
+/// What the status lists as Attachments still to upload.
+pub(super) fn pending_uploads(connection: &Connection) -> Result<Vec<(String, String)>, Error> {
+    awaiting_upload(connection, false)
 }
 
 /// What is downloading now, plus everything not downloaded when downloads are automatic.
@@ -167,17 +190,51 @@ impl Workspace {
             .filter(|dirty| dirty.kind == RecordKind::Attachment)
             .collect();
         let changed: BTreeSet<&str> = marks.iter().map(|dirty| dirty.id.as_str()).collect();
+        // The display name of each changed Attachment, to publish in the manifest.
+        let mut renamed = BTreeMap::new();
+        for id in &changed {
+            let name: Option<String> = self
+                .connection
+                .query_row(
+                    "SELECT display_name FROM attachments WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            renamed.extend(name.map(|name| ((*id).to_owned(), name)));
+        }
 
         let mut uploaded = BTreeSet::new();
-        for (id, _) in pending_uploads(&self.connection)? {
+        for (id, _) in awaiting_upload(&self.connection, true)? {
             let attachment = attachments::read_attachment(&self.connection, &id)?;
-            // Bytes that are missing or damaged here cannot be offered to other devices.
-            let Ok(path) = attachments::validate_attachment_bytes(&self.connection, &attachment)
-            else {
-                continue;
+            let readable = attachments::validate_attachment_bytes(&self.connection, &attachment)
+                .and_then(|path| Ok(File::open(path)?))
+                .and_then(|mut file| {
+                    let (sha256, _) = digest(&mut file)?;
+                    Ok((file, sha256))
+                });
+            let (mut file, sha256) = match readable {
+                Ok(readable) => readable,
+                // Bytes that are missing or damaged here cannot be offered to
+                // other devices. That is this one Attachment's trouble: it is
+                // reported once and tried again by each run, without holding
+                // up the rest or counting as an upload that is on its way.
+                Err(error) => {
+                    self.connection.execute(
+                        "INSERT INTO sync_attachments (id, sha256, state, failed) VALUES (?1, '', 'downloaded', ?2) ON CONFLICT(id) DO NOTHING",
+                        params![id, UNREADABLE_HERE],
+                    )?;
+                    notify(
+                        &self.connection,
+                        &format!("attachment-here:{id}"),
+                        &SyncNoticeKind::UnreadableFile {
+                            path: format!("attachments/{}", attachment.original_filename),
+                            reason: error.to_string(),
+                        },
+                    )?;
+                    continue;
+                }
             };
-            let mut file = File::open(path)?;
-            let (sha256, _) = digest(&mut file)?;
             let key = RemoteKey::new(RemoteKind::Attachment, id.clone());
             let stored =
                 match remote.write(folder, &key, &attachment.original_filename, None, &mut file) {
@@ -189,7 +246,8 @@ impl Workspace {
                     Err(error) => return Err(error.into()),
                 };
             self.connection.execute(
-                "INSERT INTO sync_attachments (id, sha256, version, state) VALUES (?1, ?2, ?3, 'downloaded')",
+                "INSERT INTO sync_attachments (id, sha256, version, state) VALUES (?1, ?2, ?3, 'downloaded')
+                 ON CONFLICT(id) DO UPDATE SET sha256 = excluded.sha256, version = excluded.version, failed = NULL",
                 params![id, sha256, stored.version],
             )?;
             touch(&self.connection)?;
@@ -211,6 +269,7 @@ impl Workspace {
                         sha256: row.get(4)?,
                         version: row.get(5)?,
                         added_at: row.get(6)?,
+                        other: BTreeMap::new(),
                     },
                 ))
             })?
@@ -237,11 +296,16 @@ impl Workspace {
                                 listed.sha256.clone_from(&entry.sha256);
                                 written = true;
                             }
-                            if changed.contains(id.as_str()) && listed.name != entry.name {
-                                listed.name.clone_from(&entry.name);
-                                written = true;
-                            }
                         }
+                    }
+                }
+                // A rename is published whether or not the bytes are here.
+                for (id, name) in &renamed {
+                    if let Some(listed) = manifest.attachments.get_mut(id)
+                        && listed.name != *name
+                    {
+                        listed.name.clone_from(name);
+                        written = true;
                     }
                 }
                 written
@@ -296,14 +360,23 @@ impl Workspace {
             Ok(())
         })?;
         for mark in &marks {
-            self.clear_dirty(mark)?;
+            // An Attachment the manifest does not list gets its entry, with the
+            // name it has then, when its bytes upload.
+            let published = match (renamed.get(&mark.id), manifest.attachments.get(&mark.id)) {
+                (Some(name), Some(listed)) => listed.name == *name,
+                _ => true,
+            };
+            if published {
+                self.clear_dirty(mark)?;
+            }
         }
         Ok(())
     }
 
     /// Fetch every Attachment not downloaded yet. One whose bytes are missing
-    /// from the storage or fail the integrity check is left for later and does
-    /// not stop the others.
+    /// from the storage, fail the integrity check or cannot be saved here is
+    /// left for later and does not stop the others or fail the run; one that
+    /// another connection is fetching is left to it.
     pub(super) fn download_attachments(
         &mut self,
         remote: &dyn RemoteStorage,
@@ -317,16 +390,38 @@ impl Workspace {
             .collect::<Result<_, _>>()?;
         drop(statement);
         for id in waiting {
-            match self.fetch_attachment(remote, folder, &id) {
-                Ok(()) | Err(Error::Attachment(_) | Error::Remote(RemoteError::NotFound)) => {}
+            match self.fetch_attachment(remote, folder, &id, false) {
+                Ok(()) => {}
+                // Recorded where it happened.
+                Err(
+                    Error::Attachment(_)
+                    | Error::Directory(_)
+                    | Error::Remote(RemoteError::NotFound | RemoteError::Other(_)),
+                ) => {}
                 Err(error) => return Err(error),
             }
         }
         Ok(())
     }
 
+    /// Give up the downloads that were under way when the app last stopped,
+    /// so they start again. For the host to call once at launch, before its
+    /// first run: while the app runs, a download under way belongs to the
+    /// connection fetching it.
+    pub fn reset_interrupted_downloads(&mut self) -> Result<(), Error> {
+        let reset = self.connection.execute(
+            "UPDATE sync_attachments SET state = 'not_downloaded', progress = 0 WHERE state = 'downloading'",
+            [],
+        )?;
+        if reset > 0 {
+            touch(&self.connection)?;
+        }
+        Ok(())
+    }
+
     /// Fetch one Attachment's bytes now, for opening it. Does nothing when
-    /// they are already here.
+    /// they are already here, and waits when another connection (a scheduled
+    /// run, another open) is fetching them.
     pub fn download_attachment(
         &mut self,
         remote: &dyn RemoteStorage,
@@ -338,7 +433,7 @@ impl Workspace {
         let folder = folder.ok_or_else(|| {
             Error::Sync("this Workspace is not connected to a sync folder".into())
         })?;
-        self.fetch_attachment(remote, &folder, id)
+        self.fetch_attachment(remote, &folder, id, true)
     }
 
     /// Whether each Attachment's bytes are on this device. Ids that are not
@@ -381,29 +476,44 @@ impl Workspace {
         Ok(found)
     }
 
+    /// Wait while another connection fetches an Attachment's bytes.
+    fn await_download(&self, id: &str, name: &str) -> Result<(), Error> {
+        let mut moved: (Option<u64>, Instant) = (None, Instant::now());
+        loop {
+            let progress: Option<u64> = self
+                .connection
+                .query_row(
+                    "SELECT progress FROM sync_attachments WHERE id = ?1 AND state = 'downloading'",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(progress) = progress else {
+                return Ok(());
+            };
+            if moved.0 != Some(progress) {
+                moved = (Some(progress), Instant::now());
+            } else if moved.1.elapsed() > STALLED {
+                return Err(Error::Attachment(format!(
+                    "'{name}' is being downloaded and has not moved for a minute; try again"
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    /// Fetch one Attachment's bytes unless they are here. A row in state
+    /// `downloading` belongs to the connection that set it: with `wait` this
+    /// call waits for that download and uses its result, without it the
+    /// Attachment is left to its owner.
     fn fetch_attachment(
         &mut self,
         remote: &dyn RemoteStorage,
         folder: &str,
         id: &str,
+        wait: bool,
     ) -> Result<(), Error> {
         let attachment = attachments::read_attachment(&self.connection, id)?;
-        type Row = (String, Option<String>, String);
-        let row: Option<Row> = self
-            .connection
-            .query_row(
-                "SELECT sha256, version, state FROM sync_attachments WHERE id = ?1",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-        let Some((sha256, version, state)) = row else {
-            return Ok(());
-        };
-        if state == "downloaded" {
-            return Ok(());
-        }
-        let version = version.ok_or(RemoteError::NotFound)?;
         let filename = attachment.original_filename.as_str();
         let size = attachment.size_bytes.unwrap_or_default();
         let set = |state: &str| -> Result<(), Error> {
@@ -417,17 +527,50 @@ impl Workspace {
         fs::create_dir_all(&root)?;
         let target = root.join(id);
         let existing = target.join("bytes").join(filename);
-        if existing.is_file() {
-            // Left by a download that finished just before the app stopped.
-            if digest(&mut File::open(&existing)?)? == (sha256, size) {
-                return set("downloaded");
+        let (sha256, version) = loop {
+            type Row = (String, Option<String>, String);
+            let row: Option<Row> = self
+                .connection
+                .query_row(
+                    "SELECT sha256, version, state FROM sync_attachments WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?;
+            let Some((sha256, version, state)) = row else {
+                return Ok(());
+            };
+            if state == "downloaded" {
+                return Ok(());
             }
-            return Err(Error::Attachment(format!(
-                "'{}' has other content on this device than was uploaded; its files were left as they are",
-                attachment.display_name
-            )));
-        }
-        set("downloading")?;
+            if state == "downloading" {
+                if !wait {
+                    return Ok(());
+                }
+                self.await_download(id, &attachment.display_name)?;
+                continue;
+            }
+            let version = version.ok_or(RemoteError::NotFound)?;
+            if existing.is_file() {
+                // Left by a download that finished just before the app stopped.
+                if digest(&mut File::open(&existing)?)? == (sha256, size) {
+                    return set("downloaded");
+                }
+                return Err(Error::Attachment(format!(
+                    "'{}' has other content on this device than was uploaded; its files were left as they are",
+                    attachment.display_name
+                )));
+            }
+            // Only one connection gets the row from `not_downloaded`.
+            let claimed = self.connection.execute(
+                "UPDATE sync_attachments SET state = 'downloading', progress = 0 WHERE id = ?1 AND state = 'not_downloaded'",
+                [id],
+            )?;
+            if claimed == 1 {
+                touch(&self.connection)?;
+                break (sha256, version);
+            }
+        };
         let received = (|| -> Result<bool, Error> {
             // The prefix that backups and upload recovery already skip.
             let staged = tempfile::Builder::new()
@@ -453,11 +596,18 @@ impl Workspace {
             file.sync_all()?;
             // Windows does not move a directory with an open file in it.
             drop(file);
-            if (hex(hash), received) != (sha256, size) {
+            if (hex(hash), received) != (sha256.clone(), size) {
                 return Ok(false);
             }
             let _uploads = attachments::lock_uploads(&root)?;
-            fs::rename(staged.path(), &target)?;
+            if let Err(error) = fs::rename(staged.path(), &target) {
+                // Something is there already. If it is these very bytes, they are here.
+                let same = existing.is_file()
+                    && digest(&mut File::open(&existing)?)? == (sha256.clone(), size);
+                if !same {
+                    return Err(error.into());
+                }
+            }
             attachments::sync_directory(&root)?;
             Ok(true)
         })();
@@ -485,6 +635,22 @@ impl Workspace {
             }
             Err(error) => {
                 set("not_downloaded")?;
+                // A fault of this device or of this one file (no room, no
+                // permission, a broken transfer) is told once per version;
+                // being offline or signed out is the run's to report.
+                if matches!(
+                    error,
+                    Error::Directory(_) | Error::Remote(RemoteError::Other(_))
+                ) {
+                    notify(
+                        &self.connection,
+                        &format!("attachment-save:{id}:{version}"),
+                        &SyncNoticeKind::UnreadableFile {
+                            path: format!("attachments/{filename}"),
+                            reason: error.to_string(),
+                        },
+                    )?;
+                }
                 Err(error)
             }
         }

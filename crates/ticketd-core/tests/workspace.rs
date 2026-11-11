@@ -1316,21 +1316,18 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
             let sender = sender.clone();
             std::thread::spawn(move || {
                 barrier.wait();
-                sender.send(Workspace::open(path).unwrap()).unwrap();
+                sender.send(Workspace::open(path)).unwrap();
             })
         })
         .collect();
+    // Only the openers send: a failed open arrives as its own error, and an
+    // opener that panicked closes the channel instead of leaving a wait.
+    drop(sender);
+    // Widens the window in which both openers see the old format; the test
+    // holds whether or not they do.
     std::thread::sleep(std::time::Duration::from_millis(200));
     drop(lock);
-    let mut workspaces: Vec<_> = (0..2)
-        .map(|_| {
-            // Only a hang guard: `Workspace::open` bounds its own wait for the lock, and
-            // a migration under a loaded machine has outlasted five seconds.
-            receiver
-                .recv_timeout(std::time::Duration::from_secs(120))
-                .expect("concurrent workspace open timed out")
-        })
-        .collect();
+    let mut workspaces: Vec<_> = (0..2).map(|_| receiver.recv().unwrap().unwrap()).collect();
     for handle in handles {
         handle.join().unwrap();
     }
@@ -1367,6 +1364,29 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
         workspace.show_ticket(&reference).unwrap().tags,
         vec!["kept"]
     );
+}
+
+#[test]
+fn opening_waits_for_a_migration_or_restore_that_takes_longer_than_ten_seconds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    drop(Workspace::open(&path).unwrap());
+    // What a migration or a restore holds while it works.
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("{}.lock", path.display()))
+        .unwrap();
+    fs2::FileExt::lock_exclusive(&lock).unwrap();
+    let opener = std::thread::spawn({
+        let path = path.clone();
+        move || Workspace::open(path).map(|_| ())
+    });
+
+    std::thread::sleep(std::time::Duration::from_secs(11));
+    drop(lock);
+
+    opener.join().unwrap().unwrap();
 }
 
 #[test]

@@ -446,3 +446,24 @@ fn project_commands_refuse_a_checkout_folder_registered_elsewhere() {
         );
     }
 }
+
+#[test]
+fn a_write_through_the_cli_is_marked_for_sync() {
+    use ticketd_core::{Workspace, sync::RecordKind};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    run(dir.path(), &["create", "First"]);
+    let mut workspace = Workspace::open(&path).unwrap();
+    let first = workspace.dirty_records().unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].kind, RecordKind::Ticket);
+    assert!(workspace.clear_dirty(&first[0]).unwrap());
+    drop(workspace);
+
+    // The desktop is not running: the CLI's own process leaves the mark.
+    run(dir.path(), &["create", "Second"]);
+
+    let dirty = Workspace::open(&path).unwrap().dirty_records().unwrap();
+    assert_eq!(dirty.len(), 1);
+    assert_ne!(dirty[0].id, first[0].id);
+}

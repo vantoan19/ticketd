@@ -696,15 +696,15 @@ Each device keeps its own SQLite Workspace and Attachment files, which remain th
 working copy. The live database is never placed in Drive. All sync logic lives in
 the core; the desktop only schedules it and shows its state.
 
-| Part                     | Responsibility                                                                                                                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Device identity          | `device.rs` holds the device code and issues Ticket references. A ticket arriving by sync keeps the reference in its file.                                                               |
-| Change capture           | `sync/capture.rs` marks the owning record of every synced change in the writing transaction, so writes from the CLI and the desktop are captured alike with no caller involvement.       |
-| Markdown converter       | `sync_files.rs` turns a record into its file and back, validates incoming files, and applies a record to the Workspace. It knows nothing about storage.                                  |
-| Merge rules              | `sync/merge.rs` is pure: the three-way field merge against the last-synced copy, set merging, and the choice of which dependency to drop from a loop.                                    |
-| Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions) and an in-memory fake used by tests.                               |
-| Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                       |
-| Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked. |
+| Part                     | Responsibility                                                                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Device identity          | `device.rs` holds the device code and issues Ticket references. A ticket arriving by sync keeps the reference in its file.                                                                 |
+| Change capture           | `sync/capture.rs` marks the owning record of every synced change in the writing transaction, so writes from the CLI and the desktop are captured alike with no caller involvement.         |
+| Markdown converter       | `sync_files.rs` turns a record into its file and back, validates incoming files, and applies a record to the Workspace. It knows nothing about storage.                                    |
+| Merge rules              | `sync/merge.rs` is pure: the three-way field merge against the last-synced copy, set merging, and the choice of which dependency to drop from a loop.                                      |
+| Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests. |
+| Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                         |
+| Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.   |
 
 A captured mark names a record, not a change. The file is produced from current
 state at upload time and compared with the last-synced copy, so a mark for a
@@ -716,8 +716,10 @@ leave it set. Version history is still recorded for applied files.
 A record is identified by its GUID everywhere: in its file, in storage keys and in
 relationships between files. The file name shown in Drive is a readable label
 only. Listing a folder is never taken as the complete truth: a file absent from a
-listing is not a deletion, and a missing folder, an empty listing or a failed
-authorization is reported as a recovery state.
+listing is not a deletion (its record is written again by that run, which finds
+the file in place if the listing only left it out), and a missing folder, an
+empty listing or a failed authorization is reported as a recovery state. Any
+other failure of a run is saved as a recovery state too, with its message.
 
 Drive has no conditional update. The adapter checks a file's version immediately
 before uploading, and repeating a write whose bytes are already stored creates no

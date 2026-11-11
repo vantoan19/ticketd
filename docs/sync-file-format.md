@@ -4,14 +4,14 @@ Workspace sync writes every ticket, Document, Plan and project as one Markdown f
 
 ## Files
 
-| Record   | Path                |
-| -------- | ------------------- |
-| Ticket   | `tickets/<id>.md`   |
-| Document | `documents/<id>.md` |
-| Plan     | `plans/<id>.md`     |
-| Project  | `projects/<id>.md`  |
+| Record   | Folder       | File name                                             |
+| -------- | ------------ | ----------------------------------------------------- |
+| Ticket   | `tickets/`   | The Ticket reference and title: `T-KQ43 Fix login.md` |
+| Document | `documents/` | The title, or `Untitled.md`                           |
+| Plan     | `plans/`     | The name                                              |
+| Project  | `projects/`  | The name                                              |
 
-`<id>` is the record's GUID, which is its identity. The path of a record never changes.
+The file name is a readable label. It changes when the title does, may repeat, and is never used to find a record. A record's identity is its GUID, which never changes: it is the `id` field of the header, and ticketd also sets it as a property on the Drive file, which is how a file is found. A file that has no such property, such as one created by hand in the folder, is not a record.
 
 A file is a YAML header between two `---` lines, then the record's Markdown text:
 
@@ -19,6 +19,7 @@ A file is a YAML header between two `---` lines, then the record's Markdown text
 ---
 # synced from: Studio desktop
 kind: ticket
+format: 1
 id: "3f2c9a1e-5b7d-4c1a-9e2f-0a1b2c3d4e5f"
 ref: "T-KQ43"
 title: "Fix login"
@@ -53,6 +54,7 @@ Reproduced with an expired session cookie.
 
 The same record always produces the same bytes, so a file changes only when its record does.
 
+- `kind` comes first, then `format`, the number of the file format (1), then `id`.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
@@ -63,14 +65,24 @@ The same record always produces the same bytes, so a file changes only when its 
 
 ## What ticketd accepts
 
-A file edited by hand may use ordinary YAML: unquoted text, `[a, b]` lists, comments, and `~` or an empty value for "no value". Text that YAML would read as a number, `true`, `false` or `null` must be quoted. A file is rejected as a whole, with the reason, when:
+A file edited by hand may use ordinary YAML: unquoted text, `[a, b]` lists, comments, and `~` or an empty value for "no value". Text that YAML would read as a number, `true`, `false` or `null` must be quoted. Two spellings are accepted on input and written back in ticketd's own form:
+
+- A relationship to a ticket (`parent`, `blocked_by`, `related`, `discovered`, `duplicate_of`) may name it by its Ticket reference instead of its GUID: `blocked_by: [T-3F12]`. The reference is resolved in the Workspace that reads the file. A reference no ticket there holds is kept as written and waits like a record that has not arrived.
+- A status may differ in letter case and use `-` or `_` for the space: `status: in-progress`.
+
+`format` may be left out, which means 1.
+
+A file is rejected as a whole, with the reason, when:
 
 - it does not start with a header, or the header is not valid YAML;
 - `kind` or `id` is missing, or an id is not a lowercase GUID;
 - a required field is missing, a field is unknown, or a value has the wrong form;
+- `format` is higher than this version reads;
 - a ticket names itself in a relationship.
 
-A rejected file changes nothing in the Workspace.
+A rejected file changes nothing in the Workspace. The next change made to that record in ticketd replaces the file, with one exception: a file that a newer ticketd may have written (a higher `format`, an unknown field or an unknown section marker) is never replaced by a desktop that cannot read it. Changes made to that record on such a desktop wait until it runs a ticketd that reads the file, or until the file is corrected.
+
+A file that disappears from the folder is not a deletion. The next sync run of a desktop that had synced it writes it again.
 
 ## Relationships
 
@@ -189,10 +201,12 @@ A project that arrives from another device has no checkout folder until one is r
 
 Beside the record folders, a Workspace folder holds:
 
-- `devices.json`: the device registry. Each desktop that joined the folder is listed under its device id with its name, its two-letter device code and the time it last uploaded a change. A desktop joining with a code that is already listed takes a new one.
+- `devices.json`: the device registry. Each desktop that joined the folder is listed under its device id with its name, its two-letter device code and the time it last uploaded a change. `retired` lists the codes a desktop of the folder held and gave up. A desktop joining with a code that is listed either way takes a new one.
 - `attachments.json`: one entry per managed Attachment with its display name, file name, size, SHA-256 and the storage version of its bytes. A desktop lists an Attachment from this entry before it has the bytes, and checks the bytes against it after downloading them.
 - `attachments/`: the bytes of each managed Attachment as one file, written once and never changed. They are uploaded before any record that names the Attachment.
 
 Every desktop writes the two JSON files. A desktop whose write meets a newer file reads it and adds its own entries again, and each sync run puts back an entry of its own that is missing. Editing these files by hand is not supported: an entry that does not validate is ignored.
+
+Both carry `format`, the number of their format (1; a file without it is format 1). Entries and fields this version does not know are written back as they were read. A file with a higher `format` is not rewritten: the sync run stops with a Needs attention state that asks to update ticketd on that desktop.
 
 The folder is identified by the Workspace's own identity, which every desktop that downloads the Workspace takes over, so an Attachment link in a description (`ticketd://attachment/<Workspace>/<Attachment>`) means the same on each of them. Attachments that only reference a file elsewhere are not synced.

@@ -5,6 +5,8 @@
 mod attachments;
 mod capture;
 mod engine;
+#[cfg(feature = "fake-remote")]
+mod fake_remote;
 pub mod merge;
 pub mod remote;
 mod setup;
@@ -30,6 +32,12 @@ pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Er
 /// The sync destination and Attachment transfer state (format version 59).
 pub(crate) fn migrate_setup(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate(connection)
+}
+
+/// Leave the sync folder and drop the last-synced copies, in a Workspace that
+/// was just restored from a backup of any format version that has sync.
+pub(crate) fn forget_folder(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::forget_folder(connection)
 }
 
 /// Format version 60.

@@ -373,6 +373,14 @@ fn external_status_message(
     }
 }
 
+/// How long an open waits for exclusive use while others merely have the
+/// Workspace open: they may keep it open for as long as they run.
+const OPEN_WORKSPACES_WAIT: Duration = Duration::from_secs(10);
+/// How long an open waits for a migration or restore under way. Its holder is
+/// at work and will finish (the lock is freed if its process dies), and a
+/// migration on a busy machine has taken longer than ten seconds.
+const MIGRATION_WAIT: Duration = Duration::from_secs(600);
+
 fn wait_for_migration_lock(deadline: Instant) -> Result<(), Error> {
     if Instant::now() >= deadline {
         return Err(Error::Backup(
@@ -403,14 +411,19 @@ impl Workspace {
             None
         };
         let path = resolved.as_deref().unwrap_or(path);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let migrating = Instant::now() + MIGRATION_WAIT;
+        // Starts when exclusive use is first refused, and anew after each
+        // wait for a migration: that one was not an open Workspace.
+        let mut open_elsewhere: Option<Instant> = None;
         loop {
             let lock = backup::lock_file(path)?;
             if let Err(error) = FileExt::try_lock_shared(&lock) {
                 if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                     return Err(error.into());
                 }
-                wait_for_migration_lock(deadline)?;
+                // Only a migration or a restore holds the lock exclusively.
+                open_elsewhere = None;
+                wait_for_migration_lock(migrating)?;
                 continue;
             }
             if restore::pending(path) {
@@ -420,7 +433,10 @@ impl Workspace {
                     if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                         return Err(error.into());
                     }
-                    wait_for_migration_lock(deadline)?;
+                    wait_for_migration_lock(
+                        *open_elsewhere
+                            .get_or_insert_with(|| Instant::now() + OPEN_WORKSPACES_WAIT),
+                    )?;
                     continue;
                 }
                 restore::recover(path)?;
@@ -460,7 +476,9 @@ impl Workspace {
                 if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                     return Err(error.into());
                 }
-                wait_for_migration_lock(deadline)?;
+                wait_for_migration_lock(
+                    *open_elsewhere.get_or_insert_with(|| Instant::now() + OPEN_WORKSPACES_WAIT),
+                )?;
                 continue;
             }
             let mut connection = Connection::open(path)?;

@@ -5,7 +5,11 @@
 //! One Workspace syncs to one folder. Nothing here deletes a record or a file
 //! in the storage; disconnecting only forgets the folder.
 
-use std::{collections::BTreeMap, io::Cursor, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Cursor,
+    path::PathBuf,
+};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -17,13 +21,18 @@ use super::{
     engine::{dirty_kind, touch},
     remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
 };
-use crate::{Error, Workspace};
+use crate::{Error, SyncKind, Workspace};
 
 /// The shortest time between two polls of the storage.
 pub const MIN_POLL_INTERVAL_SECS: u64 = 30;
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 const REGISTRY: &str = "devices";
+/// How many pending uploads the status names; the rest are only counted.
+const PENDING_PAGE: usize = 50;
+/// The format of the shared JSON files this version writes. A file that says
+/// a higher number is not rewritten from here.
+const SHARED_FORMAT: u64 = 1;
 /// The `sync_files.kind` values of records, as opposed to the shared files.
 const RECORDS: &str = "('ticket', 'document', 'plan', 'project')";
 
@@ -190,7 +199,9 @@ pub struct SyncStatus {
     pub state: SyncState,
     pub last_synced_at: Option<String>,
     /// Empty unless connected. A saved change is listed as soon as it commits.
+    /// Only the oldest few are named; `pending_total` counts all of them.
     pub pending_uploads: Vec<SyncItem>,
+    pub pending_total: u64,
     pub attachment_downloads: AttachmentDownloads,
     pub needs_review: Vec<SyncItem>,
     pub recovery: Option<SyncRecovery>,
@@ -240,6 +251,9 @@ struct RegisteredDevice {
     code: String,
     #[serde(default)]
     last_synced_at: Option<String>,
+    /// What a newer ticketd keeps here, written back as it was read.
+    #[serde(flatten)]
+    other: BTreeMap<String, serde_json::Value>,
 }
 
 /// The device registry file: every desktop that joined the folder, by device id.
@@ -247,6 +261,35 @@ struct RegisteredDevice {
 struct Registry {
     #[serde(default)]
     devices: BTreeMap<String, RegisteredDevice>,
+    /// Device codes a desktop of this folder held and gave up. Tickets carry
+    /// them in their references, so no desktop takes one again.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    retired: BTreeSet<String>,
+    #[serde(flatten)]
+    other: BTreeMap<String, serde_json::Value>,
+}
+
+/// Read a shared JSON file. One that is not JSON at all is replaced by the
+/// next write; one in a newer format stops the run instead.
+fn read_shared<T: DeserializeOwned + Default>(bytes: &[u8]) -> Result<T, Error> {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return Ok(T::default());
+    };
+    let format = value.get("format").and_then(serde_json::Value::as_u64);
+    if format.is_some_and(|format| format > SHARED_FORMAT) {
+        return Err(Error::Sync(
+            "the sync folder was written by a newer ticketd; update ticketd on this desktop to sync with it".into(),
+        ));
+    }
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+fn write_shared<T: Serialize>(value: &T) -> Result<String, Error> {
+    let mut json = serde_json::to_value(value)?;
+    if let Some(object) = json.as_object_mut() {
+        object.insert("format".into(), SHARED_FORMAT.into());
+    }
+    Ok(serde_json::to_string_pretty(&json)?)
 }
 
 struct State {
@@ -329,6 +372,37 @@ fn forget_synced(connection: &Connection) -> Result<(), Error> {
         "DELETE FROM sync_files; DELETE FROM sync_attachments WHERE state = 'downloaded';",
     )?;
     Ok(())
+}
+
+/// See [`super::forget_folder`]. The backup may be of an earlier format
+/// version, so only what format version 59 has is named.
+pub(super) fn forget_folder(connection: &Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "UPDATE sync_state SET folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, first_sync = NULL;",
+    )?;
+    forget_synced(connection)
+}
+
+/// A record as the status names it, or `None` when it is not in this Workspace.
+fn item(connection: &Connection, kind: RecordKind, id: &str) -> Result<Option<SyncItem>, Error> {
+    let sql = match kind {
+        RecordKind::Ticket => "SELECT reference, title FROM tickets WHERE id = ?1",
+        RecordKind::Document => "SELECT NULL, COALESCE(title, '') FROM documents WHERE id = ?1",
+        RecordKind::Plan => "SELECT NULL, name FROM plans WHERE id = ?1",
+        RecordKind::Project => "SELECT NULL, name FROM projects WHERE id = ?1",
+        // Named by what the storage holds, not by a mark.
+        RecordKind::Attachment => return Ok(None),
+    };
+    Ok(connection
+        .query_row(sql, [id], |row| {
+            Ok(SyncItem {
+                kind,
+                id: id.to_owned(),
+                reference: row.get(0)?,
+                title: row.get(1)?,
+            })
+        })
+        .optional()?)
 }
 
 fn bind(
@@ -437,35 +511,21 @@ impl Workspace {
         let state = state(connection)?;
         let connected = state.folder.is_some();
         let mut pending_uploads = Vec::new();
+        let mut pending_total = 0;
         if connected {
             for dirty in self.dirty_records()? {
-                let named = |sql: &str| {
-                    connection
-                        .query_row(sql, [&dirty.id], |row| Ok((row.get(0)?, row.get(1)?)))
-                        .optional()
-                };
-                let found: Option<(Option<String>, String)> = match dirty.kind {
-                    RecordKind::Ticket => {
-                        named("SELECT reference, title FROM tickets WHERE id = ?1")?
-                    }
-                    RecordKind::Document => {
-                        named("SELECT NULL, COALESCE(title, '') FROM documents WHERE id = ?1")?
-                    }
-                    RecordKind::Plan => named("SELECT NULL, name FROM plans WHERE id = ?1")?,
-                    RecordKind::Project => named("SELECT NULL, name FROM projects WHERE id = ?1")?,
-                    // Listed below, by what the storage holds rather than by mark.
-                    RecordKind::Attachment => None,
-                };
-                if let Some((reference, title)) = found {
-                    pending_uploads.push(SyncItem {
-                        kind: dirty.kind,
-                        id: dirty.id,
-                        reference,
-                        title,
-                    });
+                if pending_uploads.len() == PENDING_PAGE {
+                    break;
                 }
+                pending_uploads.extend(item(connection, dirty.kind, &dirty.id)?);
             }
-            for (id, title) in super::attachments::pending_uploads(connection)? {
+            let attachments = super::attachments::pending_uploads(connection)?;
+            pending_total = count(
+                connection,
+                "SELECT COUNT(*) FROM sync_dirty d WHERE (d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects))",
+            )? + attachments.len() as u64;
+            let room = PENDING_PAGE - pending_uploads.len();
+            for (id, title) in attachments.into_iter().take(room) {
                 pending_uploads.push(SyncItem {
                     kind: RecordKind::Attachment,
                     id,
@@ -474,16 +534,21 @@ impl Workspace {
                 });
             }
         }
-        let needs_review: Vec<SyncItem> = self
-            .sync_conflicts()?
-            .into_iter()
-            .map(|conflict| SyncItem {
-                kind: dirty_kind(conflict.kind),
-                id: conflict.id,
-                reference: conflict.reference,
-                title: conflict.title,
-            })
-            .collect();
+        let mut statement = connection.prepare(
+            "SELECT kind, id FROM sync_conflicts GROUP BY kind, id ORDER BY MAX(detected_at) DESC, id",
+        )?;
+        let conflicting = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        let mut needs_review = Vec::new();
+        for (kind, id) in conflicting {
+            if let Some(kind) = SyncKind::parse(&kind) {
+                needs_review.extend(item(connection, dirty_kind(kind), &id)?);
+            }
+        }
         let attachment_downloads = if connected {
             super::attachments::downloads(
                 connection,
@@ -509,7 +574,7 @@ impl Workspace {
             SyncState::NeedsAttention
         } else if !connected || state.recovery.is_some() {
             SyncState::SavedLocally
-        } else if !pending_uploads.is_empty() {
+        } else if pending_total > 0 {
             SyncState::UploadPending
         } else if attachment_downloads.count > 0 {
             SyncState::AttachmentDownloadPending
@@ -554,6 +619,7 @@ impl Workspace {
             state: sync_state,
             last_synced_at: state.last_synced_at,
             pending_uploads,
+            pending_total,
             attachment_downloads,
             needs_review,
             recovery_message: state
@@ -593,7 +659,7 @@ impl Workspace {
                     remote
                         .download(&folder.id, &file.key, &file.version, &mut bytes)
                         .ok()?;
-                    serde_json::from_slice(&bytes).ok()
+                    read_shared(&bytes).ok()
                 })
                 .unwrap_or_default();
             let last = registry
@@ -696,7 +762,7 @@ impl Workspace {
             empty.backup(&replacement)?;
         }
         drop(self);
-        let safety = Workspace::restore(&path, &replacement)?;
+        let safety = Workspace::restore_from(&path, &replacement, true)?;
         Ok((Workspace::open(&path)?, safety))
     }
 
@@ -732,10 +798,11 @@ impl Workspace {
     }
 
     fn conclude(&mut self, outcome: Result<(), Error>) -> Result<SyncStatus, Error> {
+        let before = state(&self.connection)?;
         let (recovery, message) = match outcome {
             Ok(()) => (None, None),
             // Nothing ran, so there is nothing to recover from.
-            Err(error) if state(&self.connection)?.folder.is_none() => return Err(error),
+            Err(error) if before.folder.is_none() => return Err(error),
             Err(error) => match &error {
                 Error::Remote(remote) if SyncRecovery::of(remote).is_some() => {
                     (SyncRecovery::of(remote), None)
@@ -753,18 +820,20 @@ impl Workspace {
                 [],
             )?;
         }
-        touch(&self.connection)?;
+        // Whatever else the run changed moved the change token as it happened.
+        // The time of the last sync alone does not: a view that shows it reads
+        // the status on its own clock.
+        let shown = (before.recovery, &before.recovery_message) != (recovery, &message)
+            || (recovery.is_none() && before.first_sync.is_some());
+        if shown {
+            touch(&self.connection)?;
+        }
         self.sync_status()
     }
 
     fn run(&mut self, remote: &dyn RemoteStorage) -> Result<(), Error> {
         let state = state(&self.connection)?;
         let folder = state.folder.clone().ok_or_else(not_connected)?;
-        // A download that was cut off by the app closing.
-        self.connection.execute(
-            "UPDATE sync_attachments SET state = 'not_downloaded', progress = 0 WHERE state = 'downloading'",
-            [],
-        )?;
         let listing = remote.list(&folder)?;
         let records = listing
             .iter()
@@ -858,11 +927,14 @@ impl Workspace {
                 .min()
         };
         let mut code = self.device_code()?;
-        // A device that is joining gives way. Of two that joined at the same
-        // moment with one code, the one with the later id does.
+        // A device that is joining gives way, also to a code that was given up:
+        // tickets made under it are still around. Of two that joined at the
+        // same moment with one code, the one with the later id gives way.
         let joined = registry.devices.contains_key(&id);
-        if holder(&code).is_some_and(|other| !joined || other < id) {
-            while holder(&code).is_some() {
+        if (!joined && registry.retired.contains(&code))
+            || holder(&code).is_some_and(|other| !joined || other < id)
+        {
+            while holder(&code).is_some() || registry.retired.contains(&code) {
                 code = self.renew_device_code()?;
             }
         }
@@ -873,12 +945,18 @@ impl Workspace {
             REGISTRY,
             known.as_deref(),
             &mut |registry| {
-                let device = registry.devices.entry(id.clone()).or_default();
+                let Registry {
+                    devices, retired, ..
+                } = registry;
+                let device = devices.entry(id.clone()).or_default();
                 if device.name == name && device.code == code {
                     return false;
                 }
                 device.name.clone_from(&name);
-                device.code.clone_from(&code);
+                let before = std::mem::replace(&mut device.code, code.clone());
+                if !before.is_empty() && before != code {
+                    retired.insert(before);
+                }
                 true
             },
         )?;
@@ -919,8 +997,7 @@ impl Workspace {
         let fetch = |version: &str| -> Result<Option<T>, Error> {
             let mut bytes = Vec::new();
             match remote.download(folder, &key, version, &mut bytes) {
-                // A file that cannot be read is replaced by the next write.
-                Ok(()) => Ok(Some(serde_json::from_slice(&bytes).unwrap_or_default())),
+                Ok(()) => Ok(Some(read_shared(&bytes)?)),
                 Err(RemoteError::NotFound) => Ok(None),
                 Err(error) => Err(error.into()),
             }
@@ -936,7 +1013,7 @@ impl Workspace {
         let mut version = current.map(str::to_owned);
         let mut value: T = match (&version, cached) {
             (Some(current), Some((Some(seen), Some(content)))) if *current == seen => {
-                serde_json::from_str(&content).unwrap_or_default()
+                read_shared(content.as_bytes())?
             }
             (Some(current), _) => match fetch(current)? {
                 Some(value) => value,
@@ -951,7 +1028,7 @@ impl Workspace {
         // attempts are plenty for a handful of desktops.
         for _ in 0..5 {
             let text = if change(&mut value) {
-                let text = serde_json::to_string_pretty(&value)?;
+                let text = write_shared(&value)?;
                 match remote.write(
                     folder,
                     &key,
@@ -973,7 +1050,7 @@ impl Workspace {
                 }
                 text
             } else {
-                serde_json::to_string_pretty(&value)?
+                write_shared(&value)?
             };
             self.connection.execute(
                 "INSERT INTO sync_files (kind, id, version, content) VALUES ('devices', ?1, ?2, ?3)

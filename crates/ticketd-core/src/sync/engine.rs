@@ -19,7 +19,10 @@ use super::{
     merge::{BlockedBy, loop_edges, merge},
     remote::{RemoteError, RemoteFile, RemoteKey, RemoteKind, RemoteStorage},
 };
-use crate::{Error, SyncKind, SyncPart, SyncRecord, SyncValue, Workspace, sync_files::find_record};
+use crate::{
+    Error, SyncKind, SyncPart, SyncRecord, SyncValue, Workspace,
+    sync_files::{find_record, from_newer_version, resolve_ticket_references},
+};
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 /// The header comment naming the desktop that wrote a file.
@@ -162,12 +165,6 @@ fn remote_kind(kind: SyncKind) -> RemoteKind {
     }
 }
 
-fn sync_kind(name: &str) -> Option<SyncKind> {
-    SyncKind::ALL
-        .into_iter()
-        .find(|kind| remote_kind(*kind).as_str() == name)
-}
-
 pub(super) fn dirty_kind(kind: SyncKind) -> RecordKind {
     match kind {
         SyncKind::Project => RecordKind::Project,
@@ -177,17 +174,9 @@ pub(super) fn dirty_kind(kind: SyncKind) -> RecordKind {
     }
 }
 
-fn table(kind: SyncKind) -> &'static str {
-    match kind {
-        SyncKind::Project => "projects",
-        SyncKind::Document => "documents",
-        SyncKind::Plan => "plans",
-        SyncKind::Ticket => "tickets",
-    }
-}
-
+/// The kind as the sync tables spell it, which is also how the storage does.
 fn name(kind: SyncKind) -> &'static str {
-    remote_kind(kind).as_str()
+    kind.name()
 }
 
 /// What this device remembers of one record's file.
@@ -202,34 +191,46 @@ struct Stored {
     wanted: Option<SyncRecord>,
     /// What the Workspace held right after that partial apply.
     applied: Option<SyncRecord>,
+    /// The file in the storage is one only a newer ticketd reads: it is not
+    /// replaced from here.
+    newer: bool,
 }
 
 fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, Error> {
-    let row: Option<[Option<String>; 4]> = connection
+    let row: Option<([Option<String>; 4], bool)> = connection
         .query_row(
-            "SELECT version, content, wanted, applied FROM sync_files WHERE kind = ?1 AND id = ?2",
+            "SELECT version, content, wanted, applied, newer FROM sync_files WHERE kind = ?1 AND id = ?2",
             params![name(kind), id],
-            |row| Ok([row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?]),
+            |row| {
+                Ok((
+                    [row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?],
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()?;
-    let Some([version, base, wanted, applied]) = row else {
+    let Some(([version, base, wanted, applied], newer)) = row else {
         return Ok(Stored::default());
     };
-    let parse = |text: Option<String>| text.as_deref().map(SyncRecord::parse).transpose();
+    // A copy this version cannot read is no copy: the record is then merged as
+    // one that never synced, where a differing value goes to review instead of
+    // being taken or sent silently.
+    let parse = |text: Option<String>| text.and_then(|text| SyncRecord::parse(&text).ok());
     Ok(Stored {
         version,
-        base: parse(base)?,
-        wanted: parse(wanted)?,
-        applied: parse(applied)?,
+        base: parse(base),
+        wanted: parse(wanted),
+        applied: parse(applied),
+        newer,
     })
 }
 
 fn store(connection: &Connection, kind: SyncKind, id: &str, stored: &Stored) -> Result<(), Error> {
     let text = |record: &Option<SyncRecord>| record.as_ref().map(SyncRecord::to_markdown);
     connection.execute(
-        "INSERT INTO sync_files (kind, id, version, content, wanted, applied) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(kind, id) DO UPDATE SET version = excluded.version, content = excluded.content, wanted = excluded.wanted, applied = excluded.applied",
-        params![name(kind), id, stored.version, text(&stored.base), text(&stored.wanted), text(&stored.applied)],
+        "INSERT INTO sync_files (kind, id, version, content, wanted, applied, newer) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(kind, id) DO UPDATE SET version = excluded.version, content = excluded.content, wanted = excluded.wanted, applied = excluded.applied, newer = excluded.newer",
+        params![name(kind), id, stored.version, text(&stored.base), text(&stored.wanted), text(&stored.applied), stored.newer],
     )?;
     Ok(())
 }
@@ -248,11 +249,14 @@ pub(super) fn notify(
     let notice =
         serde_json::to_string(notice).map_err(|error| Error::SyncFile(error.to_string()))?;
     // One notice per cause, however many runs meet it again.
-    connection.execute(
+    let recorded = connection.execute(
         "INSERT OR IGNORE INTO sync_notices (id, notice, cause) VALUES (?1, ?2, ?3)",
         params![format!("notice-{}", Uuid::new_v4()), notice, cause],
     )?;
-    touch(connection)
+    if recorded > 0 {
+        touch(connection)?;
+    }
+    Ok(())
 }
 
 /// Merge two versions of a record against their last-synced copy. Sections are
@@ -496,9 +500,10 @@ impl Workspace {
         listing: Vec<RemoteFile>,
         report: &mut SyncReport,
     ) -> Result<(), Error> {
+        self.restore_unlisted(&listing)?;
         let mut files: Vec<(SyncKind, RemoteFile)> = listing
             .into_iter()
-            .filter_map(|file| Some((sync_kind(file.key.kind.as_str())?, file)))
+            .filter_map(|file| Some((SyncKind::parse(file.key.kind.as_str())?, file)))
             .collect();
         // Projects, Documents and Plans first, so most relationships find their target.
         files.sort_by(|a, b| (a.0, &a.1.key.id).cmp(&(b.0, &b.1.key.id)));
@@ -523,9 +528,11 @@ impl Workspace {
                 Err(RemoteError::NotFound) => continue,
                 Err(error) => return Err(error.into()),
             }
-            let merged = String::from_utf8(bytes)
-                .map_err(|_| Error::SyncFile("the file is not UTF-8 text".into()))
-                .and_then(|text| self.merge_incoming(kind, id, &file.version, &text));
+            let text = String::from_utf8(bytes);
+            let merged = match &text {
+                Ok(text) => self.merge_incoming(kind, id, &file.version, text),
+                Err(_) => Err(Error::SyncFile("the file is not UTF-8 text".into())),
+            };
             match merged {
                 Ok(conflicts) => {
                     report.downloaded += 1;
@@ -536,10 +543,48 @@ impl Workspace {
                 }
                 Err(error) if is_file_fault(&error) => {
                     report.skipped += 1;
-                    self.skip(kind, &file, &error)?;
+                    let newer = matches!(error, Error::SyncFile(_))
+                        && text.as_deref().is_ok_and(from_newer_version);
+                    self.skip(kind, &file, &error, newer)?;
                 }
                 Err(error) => return Err(error),
             }
+        }
+        Ok(())
+    }
+
+    /// Mark for upload every record whose synced file the listing does not
+    /// hold. A missing file is never a deletion: if it is really gone the
+    /// upload puts it back, and if the listing only left it out the write
+    /// finds the file there and changes nothing.
+    fn restore_unlisted(&mut self, listing: &[RemoteFile]) -> Result<(), Error> {
+        let listed: BTreeSet<(&str, &str)> = listing
+            .iter()
+            .map(|file| (file.key.kind.as_str(), file.key.id.as_str()))
+            .collect();
+        let mut statement = self
+            .connection
+            .prepare("SELECT kind, id FROM sync_files WHERE version IS NOT NULL")?;
+        let synced = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        for (kind, id) in synced {
+            let Some(kind) = SyncKind::parse(&kind) else {
+                continue;
+            };
+            if listed.contains(&(name(kind), id.as_str())) {
+                continue;
+            }
+            // Without a version the upload creates the file, and a later
+            // listing that holds it again is merged against the kept copy.
+            self.connection.execute(
+                "UPDATE sync_files SET version = NULL WHERE kind = ?1 AND id = ?2",
+                params![name(kind), id],
+            )?;
+            mark_dirty(&self.connection, dirty_kind(kind), &id)?;
         }
         Ok(())
     }
@@ -568,12 +613,26 @@ impl Workspace {
 
     /// Leave an unusable file alone and say so once. Its version is remembered so
     /// it is not read again, and a later local change replaces it.
-    fn skip(&mut self, kind: SyncKind, file: &RemoteFile, error: &Error) -> Result<(), Error> {
+    ///
+    /// A file only a `newer` ticketd reads is different: it is never replaced
+    /// from here, and it is read again on every run, so the run after this
+    /// desktop is updated takes it.
+    // ponytail: one download per such file per run; remember the version and
+    // re-read after an update of the app if a folder ever holds many of them.
+    fn skip(
+        &mut self,
+        kind: SyncKind,
+        file: &RemoteFile,
+        error: &Error,
+        newer: bool,
+    ) -> Result<(), Error> {
         let id = file.key.id.as_str();
         let transaction = self.connection.savepoint()?;
-        // A stored copy that cannot be read is no reason to fail the skip itself.
-        let mut seen = stored(&transaction, kind, id).unwrap_or_default();
-        seen.version = Some(file.version.clone());
+        let mut seen = stored(&transaction, kind, id)?;
+        seen.newer = newer;
+        if !newer {
+            seen.version = Some(file.version.clone());
+        }
         store(&transaction, kind, id, &seen)?;
         let reason = match error {
             Error::SyncFile(reason) => reason.clone(),
@@ -583,7 +642,7 @@ impl Workspace {
             &transaction,
             &format!("unreadable:{}:{id}:{}", name(kind), file.version),
             &SyncNoticeKind::UnreadableFile {
-                path: format!("{}/{}", table(kind), file.name),
+                path: format!("{}/{}", kind.table(), file.name),
                 reason,
             },
         )?;
@@ -600,7 +659,7 @@ impl Workspace {
         version: &str,
         file: &str,
     ) -> Result<usize, Error> {
-        let remote = SyncRecord::parse(file)?;
+        let mut remote = SyncRecord::parse(file)?;
         if remote.kind != kind || remote.id != id {
             return Err(Error::SyncFile(
                 "the file's kind and id do not match where it is stored".into(),
@@ -608,7 +667,10 @@ impl Workspace {
         }
         let device = device_of(file);
         self.applying_incoming(device.as_deref(), |workspace| {
+            // A hand edit may name a ticket by its reference; records hold GUIDs.
+            resolve_ticket_references(&workspace.connection, &mut remote)?;
             let mut stored = stored(&workspace.connection, kind, id)?;
+            stored.newer = false;
             let (merged, conflicts) = match local_view(&workspace.connection, kind, id, &stored)? {
                 Some(local) => merge_records(stored.base.as_ref(), &local, &remote),
                 None => (remote.clone(), Vec::new()),
@@ -664,7 +726,7 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
         for (kind, id) in waiting {
-            let Some(kind) = sync_kind(&kind) else {
+            let Some(kind) = SyncKind::parse(&kind) else {
                 continue;
             };
             self.applying_incoming(None, |workspace| {
@@ -787,7 +849,7 @@ impl Workspace {
         for kind in SyncKind::ALL {
             let mut statement = self.connection.prepare(&format!(
                 "SELECT id FROM {} WHERE id NOT IN (SELECT id FROM sync_files WHERE kind = ?1) AND id NOT IN (SELECT id FROM sync_dirty WHERE kind = ?1)",
-                table(kind)
+                kind.table()
             ))?;
             let unsynced = statement
                 .query_map([name(kind)], |row| row.get::<_, String>(0))?
@@ -805,12 +867,17 @@ impl Workspace {
                 continue;
             };
             let mut stored = stored(&self.connection, kind, &dirty.id)?;
+            if stored.newer {
+                // Stays pending until this desktop can read what is there.
+                continue;
+            }
             let Some(local) = local_view(&self.connection, kind, &dirty.id, &stored)? else {
                 self.clear_dirty(&dirty)?;
                 continue;
             };
-            // Marks over-report; only a real difference is worth a write.
-            if stored.base.as_ref() == Some(&local) {
+            // Marks over-report; only a real difference is worth a write. A file
+            // that is gone from the storage (no version) is always written.
+            if stored.version.is_some() && stored.base.as_ref() == Some(&local) {
                 self.clear_dirty(&dirty)?;
                 continue;
             }
@@ -886,7 +953,7 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         let mut conflicts = Vec::new();
         for (kind, id) in records {
-            if let Some(kind) = sync_kind(&kind) {
+            if let Some(kind) = SyncKind::parse(&kind) {
                 conflicts.push(self.sync_conflict(kind, &id)?);
             }
         }
@@ -965,7 +1032,9 @@ impl Workspace {
         resolutions: &[SyncResolution],
     ) -> Result<(), Error> {
         let conflict = self.sync_conflict(kind, id)?;
-        let mut record = self.export_sync_record(kind, id)?;
+        let mut stored = stored(&self.connection, kind, id)?;
+        let mut record = local_view(&self.connection, kind, id, &stored)?
+            .ok_or_else(|| Error::NotFound(format!("{} {id}", name(kind))))?;
         for resolution in resolutions {
             let field = conflict
                 .fields
@@ -986,7 +1055,18 @@ impl Workspace {
                 }
             }
         }
-        self.apply_sync_record(&record)?;
+        let missing = self.apply_sync_record(&record)?;
+        if !missing.is_empty() || stored.wanted.is_some() {
+            // A chosen value that names a record which has not arrived is kept
+            // and applied when the record does, and uploads as chosen meanwhile.
+            (stored.wanted, stored.applied) = if missing.is_empty() {
+                (None, None)
+            } else {
+                (Some(record), find_record(&self.connection, kind, id)?)
+            };
+            store(&self.connection, kind, id, &stored)?;
+            mark_dirty(&self.connection, dirty_kind(kind), id)?;
+        }
         for resolution in resolutions {
             self.connection.execute(
                 "DELETE FROM sync_conflicts WHERE kind = ?1 AND id = ?2 AND field = ?3",
