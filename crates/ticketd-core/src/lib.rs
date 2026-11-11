@@ -91,15 +91,23 @@ pub use attachments::{
     DEFAULT_ATTACHMENT_LIMIT,
 };
 mod change_token;
+mod chats;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
+};
+pub use chats::{
+    CHAT_CHANGE_TAIL, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatChange, ChatDelivery,
+    ChatHistoryPage, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatItem,
+    ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatObservation, ChatRecord, ChatRole,
+    ChatSession, ChatSessionOrigin, ChatSnapshot, ChatSubmissionAttempt, ChatSubmissionIntent,
+    ChatTool, ChatToolState, ChatTurn, ChatTurnState, NewChat,
 };
 pub use history::{HistoryEntry, Readiness, Status};
 pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 55;
+pub const FORMAT_VERSION: i64 = 56;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -113,6 +121,16 @@ pub enum Error {
     DocumentChanged(String),
     #[error("document '{0}' was not found")]
     DocumentNotFound(String),
+    #[error("Chat '{0}' was not found")]
+    ChatNotFound(String),
+    #[error("Chat '{0}' is in trash; restore it before sending")]
+    ChatTrashed(String),
+    #[error(
+        "input '{0}' already has a submission that may have been delivered; it is not submitted again"
+    )]
+    ChatSubmissionUnresolved(String),
+    #[error("invalid Chat record: {0}")]
+    Chat(String),
     #[error("backup or restore failed: {0}")]
     Backup(String),
     #[error(
@@ -782,6 +800,9 @@ impl Workspace {
         }
         if version < 55 {
             upload_destination::migrate(&transaction)?;
+        }
+        if version < 56 {
+            chats::migrate(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
