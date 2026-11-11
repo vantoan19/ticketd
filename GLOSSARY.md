@@ -35,6 +35,9 @@ A short, workspace-unique label for a ticket: `T-`, the device code of the Works
 **Device code**:
 Two uppercase letters identifying one Workspace installation in the Ticket references it issues, so desktops sharing a Workspace never issue the same reference. It is random by default; a restored Workspace, or a copy whose code another device holds, takes a fresh one.
 
+**Version**:
+An earlier state of a ticket or Document (title, body, status, trash), saved locally on the device whenever a local edit or an incoming sync replaces it. Versions are kept 30 days; the record itself is the current version and is always kept. Restoring a version is an ordinary edit.
+
 **Parent ticket**:
 A ticket whose outcome is broken into subtickets. It may be Done while subtickets remain open, and completing all subtickets does not necessarily fulfill its own outcome.
 
