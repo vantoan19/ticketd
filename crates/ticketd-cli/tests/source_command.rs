@@ -375,6 +375,85 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     assert!(cli.run(&["show", "T-1"])["source"]["last_error"]["code"] == "unauthenticated");
 }
 
+/// Naming an agent changes attribution only: a hosted agent meets the same source
+/// authority as anyone, and keeps the local progress writes everyone has.
+#[test]
+fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_its_content() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "refresh"]);
+    let agent = ["--agent", "codex"];
+
+    let stderr = cli.fail(
+        &[&["change", "T-1", "--title", "Mine"], &agent[..]].concat(),
+        None,
+    );
+    assert!(stderr.contains("owned by GitHub"), "{stderr}");
+    let request = cli.dir.path().join("rewrite.json");
+    std::fs::write(
+        &request,
+        json!({"operation": "change_ticket", "reference": "T-1",
+               "patch": {"body": "Mine", "editing_agent": "codex"}})
+        .to_string(),
+    )
+    .unwrap();
+    let stderr = cli.fail(
+        &[
+            "write",
+            request.to_str().unwrap(),
+            "--request-id",
+            "rewrite-1",
+        ],
+        None,
+    );
+    assert!(stderr.contains("owned by GitHub"), "{stderr}");
+    let stderr = cli.fail(
+        &[&["change", "T-1", "--status", "Done"], &agent[..]].concat(),
+        None,
+    );
+    assert!(stderr.contains("GitHub"), "{stderr}");
+
+    let changed = cli.run(&[&["change", "T-1", "--status", "In progress"], &agent[..]].concat());
+    assert_eq!(changed["status"], "In progress");
+    let activity = cli.run(
+        &[
+            &["activity", "add", "T-1", "--brief", "Started"],
+            &agent[..],
+        ]
+        .concat(),
+    );
+    assert_eq!(activity["editing_agent"], "codex");
+    let document = cli.run(&[
+        "document", "create", "--title", "Findings", "--body", "Notes",
+    ]);
+    cli.command(
+        &[
+            "document",
+            "link-ticket",
+            document["id"].as_str().unwrap(),
+            "T-1",
+        ],
+        None,
+    );
+    let evidence = cli.run(
+        &[
+            &[
+                "evidence", "add", "T-1", "--kind", "commit", "--name", "fix", "--value", "abc123",
+            ],
+            &agent[..],
+        ]
+        .concat(),
+    );
+    assert_eq!(evidence["editing_agent"], "codex");
+
+    let shown = cli.run(&["show", "T-1"]);
+    assert_eq!(shown["title"], "Real issue");
+    assert_eq!(shown["body"], "secret description");
+    assert_eq!(shown["source"]["ownership"], "external");
+    let linked = cli.run(&["context", "T-1", "--documents"]);
+    assert_eq!(linked["documents"]["items"][0]["id"], document["id"]);
+}
+
 fn local_ticket(cli: &Cli) -> String {
     let created = cli.run(&["create", "Escalate me"]);
     let reference = created["reference"].as_str().unwrap().to_owned();

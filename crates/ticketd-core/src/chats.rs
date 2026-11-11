@@ -64,6 +64,19 @@ pub struct ChatLink {
     pub id: String,
 }
 
+/// What a linked record is called now. Read on request and never stored with the Chat,
+/// so a reference built from it cannot go stale.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatLinkedRecord {
+    pub kind: ChatLinkKind,
+    pub id: String,
+    /// The `T-n` reference; only tickets have one.
+    pub reference: Option<String>,
+    /// A ticket title, Document heading or project name, cut to 200 characters.
+    pub title: String,
+    pub trashed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewChat {
     pub title: Option<String>,
@@ -1106,6 +1119,43 @@ impl Workspace {
 
     pub fn chat(&self, id: &str) -> Result<Chat, Error> {
         read_chat(&self.connection, id)
+    }
+
+    /// The Chat's linked records as they are now, in link order.
+    pub fn chat_linked_records(&self, id: &str) -> Result<Vec<ChatLinkedRecord>, Error> {
+        let heading = crate::documents::HEADING;
+        let mut records = Vec::new();
+        for link in self.chat(id)?.links {
+            let query = match link.kind {
+                ChatLinkKind::Project => {
+                    "SELECT NULL, substr(name, 1, 200), 0 FROM projects WHERE id = ?1".to_owned()
+                }
+                ChatLinkKind::Ticket => {
+                    "SELECT 'T-' || number, substr(title, 1, 200), trashed FROM tickets WHERE id = ?1"
+                        .to_owned()
+                }
+                ChatLinkKind::Document => {
+                    format!("SELECT NULL, {heading}, d.trashed FROM documents d WHERE d.id = ?1")
+                }
+            };
+            let found = self
+                .connection
+                .query_row(&query, [&link.id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .optional()?;
+            // Linked records are trashed, never deleted; a missing one has nothing to show.
+            if let Some((reference, title, trashed)) = found {
+                records.push(ChatLinkedRecord {
+                    kind: link.kind,
+                    id: link.id,
+                    reference,
+                    title,
+                    trashed,
+                });
+            }
+        }
+        Ok(records)
     }
 
     /// Chats with the most recently changed first.

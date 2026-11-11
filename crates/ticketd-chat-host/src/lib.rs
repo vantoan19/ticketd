@@ -4,7 +4,9 @@
 //! write workspace storage and never decide queue policy; the supervisor does both
 //! through core workflows.
 
+pub mod cli;
 mod codex;
+pub mod context;
 mod contract;
 mod host;
 mod subscription;
