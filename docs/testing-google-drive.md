@@ -16,7 +16,9 @@ The focused suite covers publisher configuration, OAuth and Picker validation,
 account/file identity, scoped authorization, resumable upload/reconciliation,
 destination binding, access recovery, uploaded-copy inspection and byte export,
 portable links, backup exclusion of credentials and remote bytes, protected
-removal, and the shared editor's upload/recovery interactions.
+removal, the shared editor's upload/recovery interactions, and the Workspace
+sync storage contract (one suite for the in-memory fake and the Drive adapter)
+with the adapter's authorization renewal, pagination, retries and recovery states.
 
 Environment-gated migration and OS-vault tests report as ignored in the ordinary
 suite. Run them explicitly with their documented prerequisites when those
@@ -51,7 +53,8 @@ an explicitly provided authorized connection and writable folder, and an isolate
 Workspace. Follow its help for parameters. It creates uniquely named synthetic
 files and preserves remote files for inspection. Keep its reports under ignored
 `target` output and keep credentials out of Git. The CLI runner never uses the
-person's default Workspace.
+person's default Workspace. `google-drive-sync.ps1` in the same directory checks
+the Workspace sync adapter with a saved connection alone; see `tests/live/README.md`.
 
 Use an isolated development Workspace for native checks where available. When
 verifying the person's running app, limit writes to dedicated synthetic QA

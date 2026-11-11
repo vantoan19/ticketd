@@ -42,6 +42,7 @@ pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspa
 mod plans;
 mod retry;
 pub mod source;
+pub mod sync;
 pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
