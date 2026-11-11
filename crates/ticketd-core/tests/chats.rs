@@ -1,0 +1,879 @@
+use ticketd_core::{
+    CHAT_CHANGE_TAIL, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatInteractionKind,
+    ChatInteractionState, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
+    ChatObservation, ChatRecord, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState,
+    ChatTurnState, Error, FORMAT_VERSION, NewChat, Workspace,
+};
+
+const CHAT_TABLES: &str = "DROP TABLE chat_changes; DROP TABLE chat_interactions; DROP TABLE chat_tools; DROP TABLE chat_submission_attempts; DROP TABLE chat_messages; DROP TABLE chat_turns; DROP TABLE chat_sessions; DROP TABLE chat_links; DROP TABLE chats;";
+
+fn new_chat() -> NewChat {
+    NewChat {
+        title: None,
+        harness: "claude-code".into(),
+        execution_folder: "/work/app".into(),
+        folder_managed: false,
+        links: Vec::new(),
+    }
+}
+
+// Clippy only exempts #[test] functions from the unwrap lint, not their helpers.
+#[allow(clippy::unwrap_used)]
+fn workspace_with_chat(dir: &tempfile::TempDir) -> (Workspace, Chat) {
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let chat = workspace.create_chat(None, new_chat()).unwrap();
+    (workspace, chat)
+}
+
+/// Saves one input and takes it through a possible submission into an active turn.
+#[allow(clippy::unwrap_used)]
+fn start_turn(workspace: &mut Workspace, chat: &Chat, text: &str, turn: &str) -> ChatMessage {
+    let input = workspace.save_chat_input(None, &chat.id, text).unwrap();
+    let attempt = format!("attempt-{turn}");
+    workspace
+        .record_chat_submission(&chat.id, &input.id, &attempt, ChatSubmissionIntent::NewTurn)
+        .unwrap();
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                ChatObservation::SubmissionAcknowledged {
+                    attempt_id: attempt.clone(),
+                },
+                ChatObservation::TurnStarted {
+                    turn_id: turn.into(),
+                    native_turn_id: None,
+                },
+                ChatObservation::SubmissionProcessing {
+                    attempt_id: attempt,
+                    turn_id: turn.into(),
+                },
+            ],
+        )
+        .unwrap();
+    input
+}
+
+#[allow(clippy::unwrap_used)]
+fn message(workspace: &Workspace, chat: &Chat, id: &str) -> ChatMessage {
+    workspace
+        .chat_snapshot(&chat.id, 500)
+        .unwrap()
+        .items
+        .into_iter()
+        .find_map(|item| match item {
+            ChatItem::Message(message) if message.id == id => Some(message),
+            _ => None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_chat_links_to_several_records_without_belonging_to_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Outcome").unwrap();
+    let other = workspace.create_ticket("Other outcome").unwrap();
+    let document = workspace.create_document(Some("Notes"), "Body").unwrap();
+    let first = workspace.create_project("App", "/work/app").unwrap();
+    let second = workspace.create_project("Site", "/work/site").unwrap();
+    let link = |kind, id: &str| ChatLink {
+        kind,
+        id: id.into(),
+    };
+
+    let projectless = workspace.create_chat(None, new_chat()).unwrap();
+    assert!(projectless.links.is_empty());
+    assert_eq!(projectless.native_session_id, None);
+
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                folder_managed: true,
+                links: vec![
+                    link(ChatLinkKind::Project, &first.id),
+                    link(ChatLinkKind::Project, &second.id),
+                    link(ChatLinkKind::Ticket, &ticket.id),
+                ],
+                ..new_chat()
+            },
+        )
+        .unwrap();
+    workspace
+        .set_chat_link(&chat.id, link(ChatLinkKind::Ticket, &other.id), true)
+        .unwrap();
+    let chat = workspace
+        .set_chat_link(&chat.id, link(ChatLinkKind::Document, &document.id), true)
+        .unwrap();
+    assert_eq!(chat.links.len(), 5);
+    assert!(chat.folder_managed);
+    assert_eq!(chat.harness, "claude-code");
+
+    let chat = workspace
+        .set_chat_link(&chat.id, link(ChatLinkKind::Project, &second.id), false)
+        .unwrap();
+    assert_eq!(chat.links.len(), 4);
+    assert!(matches!(
+        workspace.set_chat_link(&chat.id, link(ChatLinkKind::Ticket, "missing"), true),
+        Err(Error::NotFound(_))
+    ));
+    // Linked records are untouched and the ticket still has no project.
+    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    assert_eq!(workspace.list_projects().unwrap().len(), 2);
+    assert_eq!(
+        workspace.list_chats(ChatListFilter::Active).unwrap().len(),
+        2
+    );
+}
+
+#[test]
+fn a_repeated_command_id_returns_the_first_result_instead_of_a_second_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let chat = workspace.create_chat(Some("create-1"), new_chat()).unwrap();
+    let again = workspace.create_chat(Some("create-1"), new_chat()).unwrap();
+    assert_eq!(again.id, chat.id);
+    assert_eq!(
+        workspace.list_chats(ChatListFilter::Active).unwrap().len(),
+        1
+    );
+
+    let input = workspace
+        .save_chat_input(Some("send-1"), &chat.id, "Run the tests")
+        .unwrap();
+    let repeated = workspace
+        .save_chat_input(Some("send-1"), &chat.id, "Run the tests")
+        .unwrap();
+    assert_eq!(repeated.id, input.id);
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
+    assert!(matches!(
+        workspace.save_chat_input(Some("send-1"), &chat.id, "Something else"),
+        Err(Error::RequestConflict(_))
+    ));
+
+    // The same attempt identity is one attempt; it never becomes a second submission.
+    workspace
+        .record_chat_submission(
+            &chat.id,
+            &input.id,
+            "attempt-1",
+            ChatSubmissionIntent::NewTurn,
+        )
+        .unwrap();
+    let repeated = workspace
+        .record_chat_submission(
+            &chat.id,
+            &input.id,
+            "attempt-1",
+            ChatSubmissionIntent::NewTurn,
+        )
+        .unwrap();
+    assert_eq!(repeated.attempts.len(), 1);
+}
+
+#[test]
+fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_separate_facts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+
+    let input = workspace
+        .save_chat_input(None, &chat.id, "Fix the bug")
+        .unwrap();
+    assert!(input.queued);
+    assert!(input.attempts.is_empty());
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap(), vec![input.clone()]);
+
+    let submitted = workspace
+        .record_chat_submission(
+            &chat.id,
+            &input.id,
+            "attempt-1",
+            ChatSubmissionIntent::NewTurn,
+        )
+        .unwrap();
+    assert!(!submitted.queued);
+    assert_eq!(submitted.attempts[0].delivery, ChatDelivery::Possible);
+    assert_eq!(submitted.attempts[0].turn_id, None);
+    assert!(workspace.chat_queue(&chat.id).unwrap().is_empty());
+    assert_eq!(workspace.chat(&chat.id).unwrap().active_turn, None);
+
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::SubmissionAcknowledged {
+                attempt_id: "attempt-1".into(),
+            }],
+        )
+        .unwrap();
+    let acknowledged = message(&workspace, &chat, &input.id);
+    assert_eq!(
+        acknowledged.attempts[0].delivery,
+        ChatDelivery::Acknowledged
+    );
+    assert_eq!(acknowledged.attempts[0].turn_id, None);
+    assert_eq!(workspace.chat(&chat.id).unwrap().active_turn, None);
+
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                ChatObservation::TurnStarted {
+                    turn_id: "turn-1".into(),
+                    native_turn_id: Some("native-7".into()),
+                },
+                ChatObservation::SubmissionProcessing {
+                    attempt_id: "attempt-1".into(),
+                    turn_id: "turn-1".into(),
+                },
+            ],
+        )
+        .unwrap();
+    let active = workspace.chat(&chat.id).unwrap().active_turn.unwrap();
+    assert_eq!(active.state, ChatTurnState::Active);
+    assert_eq!(active.native_turn_id.as_deref(), Some("native-7"));
+    assert_eq!(
+        message(&workspace, &chat, &input.id).attempts[0]
+            .turn_id
+            .as_deref(),
+        Some("turn-1")
+    );
+    // A Chat has at most one active turn.
+    assert!(matches!(
+        workspace.record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnStarted {
+                turn_id: "turn-2".into(),
+                native_turn_id: None,
+            }],
+        ),
+        Err(Error::Chat(_))
+    ));
+
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                ChatObservation::AssistantText {
+                    message_id: "reply-1".into(),
+                    turn_id: "turn-1".into(),
+                    text: "Looking".into(),
+                    complete: false,
+                },
+                ChatObservation::Tool {
+                    tool_id: "tool-1".into(),
+                    turn_id: "turn-1".into(),
+                    name: "Bash".into(),
+                    input: "cargo test".into(),
+                    state: ChatToolState::Completed,
+                    output: Some("é".repeat(CHAT_TOOL_OUTPUT_LIMIT)),
+                },
+                ChatObservation::InteractionRequested {
+                    interaction_id: "ask-1".into(),
+                    turn_id: "turn-1".into(),
+                    kind: ChatInteractionKind::Approval,
+                    native_request_id: Some("req-1".into()),
+                    prompt: "Allow Bash?".into(),
+                },
+                ChatObservation::InteractionResolved {
+                    interaction_id: "ask-1".into(),
+                    state: ChatInteractionState::Answered,
+                    response: Some("allow".into()),
+                },
+                ChatObservation::AssistantText {
+                    message_id: "reply-1".into(),
+                    turn_id: "turn-1".into(),
+                    text: "Looking. Fixed.".into(),
+                    complete: true,
+                },
+                ChatObservation::TurnEnded {
+                    turn_id: "turn-1".into(),
+                    state: ChatTurnState::Completed,
+                    detail: None,
+                },
+            ],
+        )
+        .unwrap();
+    assert_eq!(workspace.chat(&chat.id).unwrap().active_turn, None);
+    let snapshot = workspace.chat_snapshot(&chat.id, 50).unwrap();
+    let kinds: Vec<&str> = snapshot
+        .items
+        .iter()
+        .map(|item| match item {
+            ChatItem::Session(_) => "session",
+            ChatItem::Message(_) => "message",
+            ChatItem::Turn(_) => "turn",
+            ChatItem::Tool(_) => "tool",
+            ChatItem::Interaction(_) => "interaction",
+        })
+        .collect();
+    assert_eq!(kinds, ["message", "turn", "message", "tool", "interaction"]);
+    let reply = message(&workspace, &chat, "reply-1");
+    assert_eq!(
+        (reply.text.as_str(), reply.complete),
+        ("Looking. Fixed.", true)
+    );
+    let ChatItem::Tool(tool) = &snapshot.items[3] else {
+        panic!("expected the tool");
+    };
+    assert!(tool.output_truncated);
+    assert!(tool.output.as_ref().unwrap().len() <= CHAT_TOOL_OUTPUT_LIMIT);
+    let ChatItem::Interaction(interaction) = &snapshot.items[4] else {
+        panic!("expected the interaction");
+    };
+    assert_eq!(interaction.state, ChatInteractionState::Answered);
+    let ChatItem::Turn(turn) = &snapshot.items[1] else {
+        panic!("expected the turn");
+    };
+    assert_eq!(turn.state, ChatTurnState::Completed);
+}
+
+#[test]
+fn input_known_not_delivered_returns_to_the_queue_but_uncertain_delivery_is_never_resubmitted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let input = workspace.save_chat_input(None, &chat.id, "Deploy").unwrap();
+    let submit = |workspace: &mut Workspace, attempt: &str| {
+        workspace.record_chat_submission(&chat.id, &input.id, attempt, ChatSubmissionIntent::Steer)
+    };
+
+    submit(&mut workspace, "attempt-1").unwrap();
+    // While the first attempt is unresolved a second one is refused.
+    assert!(matches!(
+        submit(&mut workspace, "attempt-2"),
+        Err(Error::ChatSubmissionUnresolved(_))
+    ));
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::SubmissionNotDelivered {
+                attempt_id: "attempt-1".into(),
+                detail: Some("steering is not supported".into()),
+            }],
+        )
+        .unwrap();
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
+
+    submit(&mut workspace, "attempt-2").unwrap();
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::SubmissionUncertain {
+                attempt_id: "attempt-2".into(),
+                detail: Some("the reply was lost".into()),
+            }],
+        )
+        .unwrap();
+    let uncertain = message(&workspace, &chat, &input.id);
+    assert_eq!(uncertain.attempts.len(), 2);
+    assert_eq!(uncertain.attempts[1].delivery, ChatDelivery::Uncertain);
+    assert!(!uncertain.queued);
+    assert!(workspace.chat_queue(&chat.id).unwrap().is_empty());
+    assert!(matches!(
+        submit(&mut workspace, "attempt-3"),
+        Err(Error::ChatSubmissionUnresolved(_))
+    ));
+
+    // Later native evidence can settle an uncertain attempt.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::SubmissionAcknowledged {
+                attempt_id: "attempt-2".into(),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        message(&workspace, &chat, &input.id).attempts[1].delivery,
+        ChatDelivery::Acknowledged
+    );
+    // An acknowledged attempt cannot be rewritten as not delivered.
+    assert!(matches!(
+        workspace.record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::SubmissionNotDelivered {
+                attempt_id: "attempt-2".into(),
+                detail: None,
+            }],
+        ),
+        Err(Error::Chat(_))
+    ));
+}
+
+#[test]
+fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                ChatObservation::AssistantText {
+                    message_id: "reply-1".into(),
+                    turn_id: "turn-1".into(),
+                    text: "Partial".into(),
+                    complete: false,
+                },
+                ChatObservation::Tool {
+                    tool_id: "tool-1".into(),
+                    turn_id: "turn-1".into(),
+                    name: "Bash".into(),
+                    input: "sleep 100".into(),
+                    state: ChatToolState::Running,
+                    output: None,
+                },
+                ChatObservation::InteractionRequested {
+                    interaction_id: "ask-1".into(),
+                    turn_id: "turn-1".into(),
+                    kind: ChatInteractionKind::Question,
+                    native_request_id: None,
+                    prompt: "Which branch?".into(),
+                },
+            ],
+        )
+        .unwrap();
+    let steering = workspace
+        .save_chat_input(None, &chat.id, "Also this")
+        .unwrap();
+    workspace
+        .record_chat_submission(
+            &chat.id,
+            &steering.id,
+            "steer-1",
+            ChatSubmissionIntent::Steer,
+        )
+        .unwrap();
+    let queued = workspace.save_chat_input(None, &chat.id, "Later").unwrap();
+
+    let affected = workspace
+        .mark_chat_contact_lost(None, "the harness process exited")
+        .unwrap();
+    assert_eq!(affected, vec![chat.id.clone()]);
+    assert_eq!(workspace.chat(&chat.id).unwrap().active_turn, None);
+    let snapshot = workspace.chat_snapshot(&chat.id, 50).unwrap();
+    for item in &snapshot.items {
+        match item {
+            ChatItem::Turn(turn) => {
+                assert_eq!(turn.state, ChatTurnState::Unknown);
+                assert_eq!(turn.detail.as_deref(), Some("the harness process exited"));
+            }
+            ChatItem::Tool(tool) => assert_eq!(tool.state, ChatToolState::Unknown),
+            ChatItem::Interaction(interaction) => {
+                assert_eq!(interaction.state, ChatInteractionState::Expired);
+            }
+            ChatItem::Message(message) if message.id == "reply-1" => {
+                assert_eq!(
+                    (message.text.as_str(), message.complete),
+                    ("Partial", false)
+                );
+            }
+            ChatItem::Message(_) | ChatItem::Session(_) => {}
+        }
+    }
+    assert_eq!(
+        message(&workspace, &chat, &steering.id).attempts[0].delivery,
+        ChatDelivery::Uncertain
+    );
+    // Queued input is retained, untouched, and nothing was submitted for it.
+    let queue = workspace.chat_queue(&chat.id).unwrap();
+    assert_eq!(queue, vec![queued]);
+    // An expired request cannot be answered later.
+    assert!(matches!(
+        workspace.record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::InteractionResolved {
+                interaction_id: "ask-1".into(),
+                state: ChatInteractionState::Answered,
+                response: Some("main".into()),
+            }],
+        ),
+        Err(Error::Chat(_))
+    ));
+    // Nothing is left to reconcile the second time.
+    assert!(
+        workspace
+            .mark_chat_contact_lost(None, "again")
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_failed_observation_rolls_back_the_whole_batch_and_its_change_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    let before = workspace.chat_snapshot(&chat.id, 50).unwrap();
+
+    let result = workspace.record_chat_observations(
+        &chat.id,
+        vec![
+            ChatObservation::AssistantText {
+                message_id: "reply-1".into(),
+                turn_id: "turn-1".into(),
+                text: "Half".into(),
+                complete: false,
+            },
+            ChatObservation::TurnEnded {
+                turn_id: "no-such-turn".into(),
+                state: ChatTurnState::Completed,
+                detail: None,
+            },
+        ],
+    );
+    assert!(matches!(result, Err(Error::Chat(_))));
+    let after = workspace.chat_snapshot(&chat.id, 50).unwrap();
+    assert_eq!(after, before);
+    assert_eq!(workspace.chat_change_sequence().unwrap(), before.sequence);
+    assert!(matches!(
+        workspace.chat_changes(&chat.id, before.sequence, 10).unwrap(),
+        ChatCatchUp::Changes { changes, .. } if changes.is_empty()
+    ));
+}
+
+#[test]
+fn a_view_reads_a_bounded_snapshot_then_follows_ordered_changes_and_resyncs_on_a_gap() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let other = workspace.create_chat(None, new_chat()).unwrap();
+    let token = workspace.change_token().unwrap();
+    for index in 0..5 {
+        workspace
+            .save_chat_input(None, &chat.id, &format!("Input {index}"))
+            .unwrap();
+    }
+
+    let snapshot = workspace.chat_snapshot(&chat.id, 2).unwrap();
+    let texts = |items: &[ChatItem]| -> Vec<String> {
+        items
+            .iter()
+            .map(|item| match item {
+                ChatItem::Message(message) => message.text.clone(),
+                other => panic!("unexpected item {other:?}"),
+            })
+            .collect()
+    };
+    assert_eq!(texts(&snapshot.items), ["Input 3", "Input 4"]);
+    assert!(snapshot.earlier);
+    let ChatItem::Message(oldest) = &snapshot.items[0] else {
+        panic!("expected a message");
+    };
+    let earlier = workspace
+        .chat_history(&chat.id, oldest.position, 10)
+        .unwrap();
+    assert_eq!(texts(&earlier.items), ["Input 0", "Input 1", "Input 2"]);
+    assert!(!earlier.earlier);
+
+    // Changes in another Chat are not delivered to this one.
+    workspace
+        .save_chat_input(None, &other.id, "Elsewhere")
+        .unwrap();
+    let sixth = workspace
+        .save_chat_input(None, &chat.id, "Input 5")
+        .unwrap();
+    workspace
+        .record_chat_submission(
+            &chat.id,
+            &sixth.id,
+            "attempt-1",
+            ChatSubmissionIntent::NewTurn,
+        )
+        .unwrap();
+    workspace.set_chat_archived(&chat.id, true).unwrap();
+    workspace
+        .save_chat_input(None, &chat.id, "Input 6")
+        .unwrap();
+
+    let ChatCatchUp::Changes {
+        changes,
+        sequence,
+        more,
+    } = workspace
+        .chat_changes(&chat.id, snapshot.sequence, 2)
+        .unwrap()
+    else {
+        panic!("expected changes");
+    };
+    assert!(more);
+    assert!(changes[0].sequence < changes[1].sequence);
+    assert_eq!(sequence, changes[1].sequence);
+    // The input changed twice; a follower receives its latest state once.
+    assert!(matches!(
+        &changes[0].record,
+        ChatRecord::Item(ChatItem::Message(message))
+            if message.id == sixth.id && message.attempts.len() == 1
+    ));
+    assert!(matches!(&changes[1].record, ChatRecord::Chat(chat) if chat.archived));
+    let ChatCatchUp::Changes { changes, more, .. } =
+        workspace.chat_changes(&chat.id, sequence, 2).unwrap()
+    else {
+        panic!("expected changes");
+    };
+    assert!(!more);
+    assert_eq!(changes.len(), 1);
+    assert!(matches!(
+        &changes[0].record,
+        ChatRecord::Item(ChatItem::Message(message)) if message.text == "Input 6"
+    ));
+
+    // High-frequency Chat writes leave the workspace change token alone.
+    assert_eq!(workspace.change_token().unwrap(), token);
+
+    // A cursor from before the retained tail, or from another database, must resync.
+    start_turn(&mut workspace, &chat, "Long answer", "turn-1");
+    let checkpoints = (0..CHAT_CHANGE_TAIL + 10)
+        .map(|index| ChatObservation::AssistantText {
+            message_id: "reply-1".into(),
+            turn_id: "turn-1".into(),
+            text: format!("checkpoint {index}"),
+            complete: false,
+        })
+        .collect();
+    let head = workspace
+        .record_chat_observations(&chat.id, checkpoints)
+        .unwrap();
+    assert_eq!(head, workspace.chat_change_sequence().unwrap());
+    assert_eq!(
+        workspace
+            .chat_changes(&chat.id, snapshot.sequence, 10)
+            .unwrap(),
+        ChatCatchUp::Resync
+    );
+    assert_eq!(
+        workspace.chat_changes(&chat.id, head + 1, 10).unwrap(),
+        ChatCatchUp::Resync
+    );
+    let fresh = workspace.chat_snapshot(&chat.id, 2).unwrap();
+    assert_eq!(fresh.sequence, head);
+    assert!(matches!(
+        workspace.chat_changes(&chat.id, fresh.sequence, 10).unwrap(),
+        ChatCatchUp::Changes { changes, .. } if changes.is_empty()
+    ));
+    // The other Chat's log was not trimmed by this one's activity.
+    assert!(matches!(
+        workspace.chat_changes(&other.id, 0, 10).unwrap(),
+        ChatCatchUp::Changes { changes, .. } if changes.len() == 2
+    ));
+}
+
+#[test]
+fn archive_and_trash_keep_identity_history_queue_and_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Outcome").unwrap();
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                links: vec![ChatLink {
+                    kind: ChatLinkKind::Ticket,
+                    id: ticket.id.clone(),
+                }],
+                ..new_chat()
+            },
+        )
+        .unwrap();
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    let queued = workspace.save_chat_input(None, &chat.id, "Queued").unwrap();
+    let list = |workspace: &Workspace, filter| -> Vec<String> {
+        workspace
+            .list_chats(filter)
+            .unwrap()
+            .into_iter()
+            .map(|chat| chat.id)
+            .collect()
+    };
+
+    // Archive hides the Chat; its active work and queue are unaffected.
+    let archived = workspace.set_chat_archived(&chat.id, true).unwrap();
+    assert!(archived.archived);
+    assert!(archived.active_turn.is_some());
+    assert!(list(&workspace, ChatListFilter::Active).is_empty());
+    assert_eq!(
+        list(&workspace, ChatListFilter::Archived),
+        vec![chat.id.clone()]
+    );
+    workspace
+        .save_chat_input(None, &chat.id, "Still accepted")
+        .unwrap();
+    workspace.set_chat_archived(&chat.id, false).unwrap();
+    assert_eq!(
+        list(&workspace, ChatListFilter::Active),
+        vec![chat.id.clone()]
+    );
+
+    // Trash exposes the still-active turn so the host can stop it, and refuses new work.
+    let trashed = workspace.set_chat_trashed(&chat.id, true).unwrap();
+    assert!(trashed.trashed);
+    assert_eq!(
+        trashed.active_turn.as_ref().map(|turn| turn.id.as_str()),
+        Some("turn-1")
+    );
+    assert!(list(&workspace, ChatListFilter::Active).is_empty());
+    assert_eq!(
+        list(&workspace, ChatListFilter::Trashed),
+        vec![chat.id.clone()]
+    );
+    assert!(matches!(
+        workspace.save_chat_input(None, &chat.id, "Not while trashed"),
+        Err(Error::ChatTrashed(_))
+    ));
+    assert!(matches!(
+        workspace.record_chat_submission(
+            &chat.id,
+            &queued.id,
+            "attempt-9",
+            ChatSubmissionIntent::NewTurn
+        ),
+        Err(Error::ChatTrashed(_))
+    ));
+    // The host's stop is still recorded against the trashed Chat.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnEnded {
+                turn_id: "turn-1".into(),
+                state: ChatTurnState::Interrupted,
+                detail: None,
+            }],
+        )
+        .unwrap();
+
+    let restored = workspace.set_chat_trashed(&chat.id, false).unwrap();
+    assert_eq!(restored.id, chat.id);
+    assert_eq!(restored.links, chat.links);
+    assert_eq!(restored.active_turn, None);
+    let queue = workspace.chat_queue(&chat.id).unwrap();
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue[0], queued);
+    assert_eq!(
+        workspace.chat_snapshot(&chat.id, 50).unwrap().items.len(),
+        4
+    );
+    // The linked ticket was never touched.
+    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    assert!(workspace.list_trash().unwrap().is_empty());
+}
+
+#[test]
+fn a_resume_records_a_new_native_session_identity_for_the_same_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let started = workspace
+        .record_chat_session(&chat.id, "native-a", ChatSessionOrigin::New)
+        .unwrap();
+    assert_eq!(started.native_session_id.as_deref(), Some("native-a"));
+    // Reporting the identity already in use is not a new session.
+    workspace
+        .record_chat_session(&chat.id, "native-a", ChatSessionOrigin::NativeResume)
+        .unwrap();
+    workspace.save_chat_input(None, &chat.id, "Before").unwrap();
+    let resumed = workspace
+        .record_chat_session(&chat.id, "native-b", ChatSessionOrigin::FreshSession)
+        .unwrap();
+    assert_eq!(resumed.id, chat.id);
+    assert_eq!(resumed.native_session_id.as_deref(), Some("native-b"));
+
+    let sessions: Vec<(String, ChatSessionOrigin)> = workspace
+        .chat_snapshot(&chat.id, 50)
+        .unwrap()
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Session(session) => Some((session.native_session_id, session.origin)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sessions,
+        [
+            ("native-a".to_owned(), ChatSessionOrigin::New),
+            ("native-b".to_owned(), ChatSessionOrigin::FreshSession)
+        ]
+    );
+    // The earlier input keeps its place and is not replayed into the new session.
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
+}
+
+#[test]
+fn chat_state_survives_backup_and_restore_without_resuming_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.create_chat(Some("create-1"), new_chat()).unwrap();
+    workspace
+        .record_chat_session(&chat.id, "native-a", ChatSessionOrigin::New)
+        .unwrap();
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    workspace.save_chat_input(None, &chat.id, "Queued").unwrap();
+    workspace.set_chat_queue_paused(&chat.id, true).unwrap();
+    workspace
+        .set_chat_execution_folder(&chat.id, "/work/elsewhere", false)
+        .unwrap();
+    let saved = workspace.chat_snapshot(&chat.id, 50).unwrap();
+    workspace.backup(&backup).unwrap();
+    let export = workspace.export().unwrap();
+    assert_eq!(export["chats"][0]["id"], chat.id.as_str());
+    assert_eq!(export["chat_messages"].as_array().unwrap().len(), 2);
+    workspace.set_chat_trashed(&chat.id, true).unwrap();
+    drop(workspace);
+
+    Workspace::restore(&path, &backup).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let restored = workspace.chat_snapshot(&chat.id, 50).unwrap();
+    assert_eq!(restored, saved);
+    assert!(restored.chat.queue_paused);
+    assert_eq!(restored.chat.execution_folder, "/work/elsewhere");
+    assert_eq!(restored.chat.native_session_id.as_deref(), Some("native-a"));
+    assert_eq!(
+        workspace
+            .create_chat(Some("create-1"), new_chat())
+            .unwrap()
+            .id,
+        chat.id
+    );
+    // The restored turn has no process behind it; the host reconciles before anything runs.
+    assert_eq!(
+        workspace.mark_chat_contact_lost(None, "restored").unwrap(),
+        vec![chat.id.clone()]
+    );
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
+}
+
+#[test]
+fn the_previous_format_and_its_backups_gain_chat_storage_without_losing_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("old-backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Kept").unwrap();
+    drop(workspace);
+    let previous = FORMAT_VERSION - 1;
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(&format!("{CHAT_TABLES} PRAGMA user_version = {previous};"))
+        .unwrap();
+    db.execute("VACUUM INTO ?1", [backup.to_string_lossy()])
+        .unwrap();
+    drop(db);
+
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    let chat = workspace.create_chat(None, new_chat()).unwrap();
+    workspace.save_chat_input(None, &chat.id, "Hello").unwrap();
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
+    drop(workspace);
+
+    // A backup taken before Chat existed still restores and then migrates on open.
+    Workspace::restore(&path, &backup).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    assert!(
+        workspace
+            .list_chats(ChatListFilter::Active)
+            .unwrap()
+            .is_empty()
+    );
+    workspace.create_chat(None, new_chat()).unwrap();
+}
