@@ -877,3 +877,71 @@ fn the_previous_format_and_its_backups_gain_chat_storage_without_losing_records(
     );
     workspace.create_chat(None, new_chat()).unwrap();
 }
+
+#[test]
+fn linked_records_are_read_as_they_are_now_not_as_they_were_when_linked() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("First title").unwrap();
+    let document = workspace.create_document(None, "# Notes\n\nBody").unwrap();
+    let project = workspace.create_project("App", "/work/app").unwrap();
+    let link = |kind, id: &str| ChatLink {
+        kind,
+        id: id.into(),
+    };
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                links: vec![
+                    link(ChatLinkKind::Ticket, &ticket.id),
+                    link(ChatLinkKind::Document, &document.id),
+                    link(ChatLinkKind::Project, &project.id),
+                ],
+                ..new_chat()
+            },
+        )
+        .unwrap();
+
+    let summary = |workspace: &Workspace| -> Vec<(Option<String>, String, bool)> {
+        workspace
+            .chat_linked_records(&chat.id)
+            .unwrap()
+            .into_iter()
+            .map(|record| (record.reference, record.title, record.trashed))
+            .collect()
+    };
+    assert_eq!(
+        summary(&workspace),
+        [
+            (Some("T-1".into()), "First title".into(), false),
+            (None, "Notes".into(), false),
+            (None, "App".into(), false),
+        ]
+    );
+
+    workspace
+        .change_ticket(
+            "T-1",
+            ticketd_core::TicketPatch {
+                title: Some("Second title".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace.set_document_trashed(&document.id, true).unwrap();
+    let records = workspace.chat_linked_records(&chat.id).unwrap();
+    assert_eq!(records[0].title, "Second title");
+    assert_eq!(records[0].id, ticket.id);
+    assert_eq!(records[0].kind, ChatLinkKind::Ticket);
+    assert!(records[1].trashed);
+    // Linking a project is context only; the Chat keeps its own folder.
+    assert_eq!(
+        workspace.chat(&chat.id).unwrap().execution_folder,
+        "/work/app"
+    );
+    assert!(matches!(
+        workspace.chat_linked_records("missing"),
+        Err(Error::ChatNotFound(_))
+    ));
+}

@@ -5,7 +5,9 @@
 //! through core workflows.
 
 mod claude;
+pub mod cli;
 mod codex;
+pub mod context;
 mod contract;
 mod host;
 mod install;

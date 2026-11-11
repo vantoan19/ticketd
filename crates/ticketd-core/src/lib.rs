@@ -98,9 +98,9 @@ pub use activities::{
 pub use chats::{
     CHAT_CHANGE_TAIL, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatChange, ChatDelivery,
     ChatHistoryPage, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatItem,
-    ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatObservation, ChatRecord, ChatRole,
-    ChatSession, ChatSessionOrigin, ChatSnapshot, ChatSubmissionAttempt, ChatSubmissionIntent,
-    ChatTool, ChatToolState, ChatTurn, ChatTurnState, NewChat,
+    ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter, ChatMessage, ChatObservation,
+    ChatRecord, ChatRole, ChatSession, ChatSessionOrigin, ChatSnapshot, ChatSubmissionAttempt,
+    ChatSubmissionIntent, ChatTool, ChatToolState, ChatTurn, ChatTurnState, NewChat,
 };
 pub use history::{HistoryEntry, Readiness, Status};
 pub use projects::Project;

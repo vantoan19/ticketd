@@ -64,6 +64,11 @@ const GUIDES: &[Guide] = &[
         description: "Workspace location, backups, export, and personal state",
         content: include_str!("../skill-data/workspace.md"),
     },
+    Guide {
+        name: "chat",
+        description: "Working from a ticketd Chat: read linked records first, write progress back",
+        content: include_str!("../skill-data/chat.md"),
+    },
 ];
 
 pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
