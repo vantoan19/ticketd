@@ -156,3 +156,18 @@ test("no versions anywhere is an empty state with nothing to restore", async () 
     screen.getByRole<HTMLButtonElement>("button", { name: "Restore" }).disabled,
   ).toBe(true);
 });
+
+test("a Drive listing that fails is reported, not shown as no versions", async () => {
+  vi.mocked(syncReview.versions).mockImplementation(({ source }) =>
+    source === "local"
+      ? Promise.resolve([])
+      : Promise.reject(
+          new Error("Could not load versions from Google Drive: offline"),
+        ),
+  );
+  open();
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not load versions from Google Drive: offline",
+  );
+  expect(screen.queryByText("No earlier versions")).toBeNull();
+});

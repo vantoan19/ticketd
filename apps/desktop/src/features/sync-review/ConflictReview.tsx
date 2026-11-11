@@ -17,7 +17,9 @@ import "./sync-review.css";
 
 type Choice = Resolution["choice"];
 
-const latest = (times: string[]) => times.reduce((a, b) => (b > a ? b : a), "");
+/** The latest known change time, or `otherwise` when none was recorded. */
+const latest = (times: (string | null)[], otherwise: string) =>
+  times.reduce<string>((a, b) => (b && b > a ? b : a), "") || otherwise;
 
 /**
  * The comparison of a record's conflicting fields: this desktop's value beside
@@ -106,7 +108,10 @@ export function ConflictReview({
             <span>
               {conflict.local_device} ·{" "}
               {dayTime(
-                latest(fields.map((field) => field.local_changed_at)),
+                latest(
+                  fields.map((field) => field.local_changed_at),
+                  conflict.detected_at,
+                ),
                 now,
               ).replace(/^[TY]/, (letter) => letter.toLowerCase())}
             </span>
@@ -115,7 +120,10 @@ export function ConflictReview({
             <strong>{devices.join(", ")}</strong>
             <span>
               {dayTime(
-                latest(fields.map((field) => field.remote_changed_at)),
+                latest(
+                  fields.map((field) => field.remote_changed_at),
+                  conflict.detected_at,
+                ),
                 now,
               )}
             </span>

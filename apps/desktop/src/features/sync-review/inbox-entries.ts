@@ -46,6 +46,16 @@ function fromNotice(notice: Notice): SyncEntry {
       summary: `${notice.path} was skipped · nothing here changed`,
       icon: "file",
     };
+  if (notice.kind === "parent_removed")
+    return {
+      id,
+      timestamp,
+      read,
+      reference: notice.reference,
+      title: notice.title,
+      summary: `Sync removed parent ${notice.other} · it would have made a loop`,
+      icon: "dependency",
+    };
   return {
     id,
     timestamp,

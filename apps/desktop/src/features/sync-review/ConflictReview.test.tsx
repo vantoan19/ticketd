@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { syncReview, type Conflict } from "@/lib/sync-review-api";
 import { ConflictReview } from "./ConflictReview";
+import { dayTime } from "./labels";
 
 vi.mock("@/lib/sync-review-api", () => ({
   syncReview: { conflict: vi.fn(), resolve: vi.fn() },
@@ -148,4 +149,30 @@ test("Later closes without deciding, and a failed save stays open with its reaso
   expect(onResolved).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Later" }));
   expect(onClose).toHaveBeenCalled();
+});
+
+test("a side with no recorded change time shows when the conflict was found", async () => {
+  vi.mocked(syncReview.conflict).mockResolvedValue({
+    ...conflict,
+    fields: conflict.fields.map((field) => ({
+      ...field,
+      local_changed_at: null,
+      remote_changed_at: null,
+    })),
+  });
+  open();
+  await screen.findByRole("radio", {
+    name: "Status from this desktop: In review",
+  });
+  const found = dayTime(conflict.detected_at, new Date());
+  expect(screen.getByText(found)).toBeTruthy();
+  expect(
+    screen.getByText((_, element) =>
+      Boolean(
+        element?.tagName === "SPAN" &&
+        element.textContent ===
+          `Laptop · ${found.replace(/^[TY]/, (letter) => letter.toLowerCase())}`,
+      ),
+    ),
+  ).toBeTruthy();
 });
