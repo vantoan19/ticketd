@@ -54,6 +54,10 @@ AI-assisted contributions are welcome. The author remains responsible for unders
 reviewing, and testing the submitted work and respecting third-party licenses.
 Remove credentials and private data before sharing context with an external tool.
 
+Contributions to ticketd are provided under the [MIT License](LICENSE).
+Retain applicable third-party copyright and license notices when adapting code
+or assets.
+
 ## Review and decisions
 
 Maintainers decide product direction and merge changes after review. Review may

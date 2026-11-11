@@ -62,7 +62,9 @@ change distinct from signed-release publication.
 4. If advertising Drive support, complete the configured-account and secure-store
    checks in [Drive verification](testing-google-drive.md). Fixture tests do not
    establish live authorization or packaged-app behavior.
-5. Verify the root license and all required third-party license texts accompany
+5. Replace the default Tauri application icon with an original ticketd icon before
+   distributing binaries; see the [Tauri attribution](../THIRD_PARTY_NOTICES.md#tauri-application-scaffold).
+6. Verify the root license and all required third-party license texts accompany
    the distributed files. Use [the attribution index](../THIRD_PARTY_NOTICES.md)
    as a starting point, then review the actual dependency and asset contents of
    each platform artifact. The current workflow does not assemble a complete
@@ -70,8 +72,11 @@ change distinct from signed-release publication.
 
 ## Publish a public release
 
-Before publishing, resolve the license, private reporting routes, public-PR runner
-safety, repository-history review, and repository access/protection settings.
+Before publishing, verify the MIT license and third-party notices, private
+reporting routes, public-PR runner safety, repository-history review, and
+repository access/protection settings. Enable GitHub private vulnerability
+reporting once the repository is public and verify the reporting form from
+outside the maintainer account. The email route in `SECURITY.md` remains available.
 These are publication prerequisites, not changes performed by the artifact workflow.
 
 Sign and notarize distributions where applicable, or explicitly identify unsigned
