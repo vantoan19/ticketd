@@ -1,0 +1,12 @@
+{"note":"Hand-built from apps/chat-bridge-claude/src/protocol.ts (protocol 1, Agent SDK 0.3.322). Not captured from a live session; every value is synthetic."}
+{"client":{"id":"c4","cmd":"submit","generation":7,"submission_id":"sub-1","text":"First"}}
+{"server":{"v":1,"event":"input_handed_to_sdk","generation":7,"submission_id":"sub-1"}}
+{"server":{"v":1,"event":"input_processing","generation":7,"submission_ids":["sub-1","sub-2"]}}
+{"server":{"v":1,"event":"turn_result","generation":7,"correlation":"uuid","submission_ids":["sub-1","sub-2"],"unmatched_uuids":[],"pending_submission_ids":[],"subtype":"success","is_error":false,"result_text":"Done.","errors":[],"stop_reason":"end_turn","terminal_reason":null,"denied_tool_names":[],"queued_turn_count":0,"num_turns":1,"duration_ms":12,"session_id":"sess-1"}}
+{"mark":"one result resolved two inputs"}
+{"client":{"id":"c5","cmd":"submit","generation":7,"submission_id":"sub-3","text":"Third"}}
+{"server":{"v":1,"event":"input_handed_to_sdk","generation":7,"submission_id":"sub-3"}}
+{"server":{"v":1,"event":"turn_result","generation":7,"correlation":"none","submission_ids":[],"unmatched_uuids":[],"pending_submission_ids":["sub-3"],"subtype":"error_during_execution","is_error":true,"result_text":null,"errors":["boom"],"stop_reason":null,"terminal_reason":null,"denied_tool_names":[],"queued_turn_count":0,"num_turns":1,"duration_ms":12,"session_id":"sess-1"}}
+{"mark":"an uncorrelated result resolved nothing"}
+{"client":{"id":"c6","cmd":"submit","generation":7,"submission_id":"sub-4","text":"Fourth"}}
+{"server":{"v":1,"event":"command_rejected","id":"c6","code":"turn_active","message":"a turn is active"}}

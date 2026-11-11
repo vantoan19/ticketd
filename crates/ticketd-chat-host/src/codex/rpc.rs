@@ -3,16 +3,17 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::Value;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt};
+use tokio::io::AsyncBufRead;
 use tokio::sync::oneshot;
+
+pub(super) use crate::stdio::StderrTail;
+use crate::stdio::{Line, read_line};
 
 /// Largest protocol frame kept. Provisional; a completed item carries a command's
 /// whole aggregated output in one frame.
 pub(super) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
-pub(super) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
 /// Timed-out requests remembered so a late reply reconciles instead of looking unknown.
 pub(super) const MAX_TOMBSTONES: usize = 64;
 
@@ -50,41 +51,16 @@ pub(super) enum Frame {
     },
 }
 
-/// Reads the next frame, or `None` at end of stream. An unterminated final line is
-/// treated as end of stream. Memory use is bounded by `max_bytes`.
+/// Reads the next frame, or `None` at end of stream. Memory use is bounded by
+/// `max_bytes`.
 pub(super) async fn read_frame<R>(reader: &mut R, max_bytes: usize) -> io::Result<Option<Frame>>
 where
     R: AsyncBufRead + Unpin,
 {
-    loop {
-        let mut line = Vec::new();
-        let mut total = 0usize;
-        loop {
-            let available = reader.fill_buf().await?;
-            if available.is_empty() {
-                return Ok(None);
-            }
-            let newline = available.iter().position(|byte| *byte == b'\n');
-            let chunk = &available[..newline.unwrap_or(available.len())];
-            total += chunk.len();
-            if total <= max_bytes {
-                line.extend_from_slice(chunk);
-            } else {
-                line = Vec::new();
-            }
-            let consumed = chunk.len() + usize::from(newline.is_some());
-            reader.consume(consumed);
-            if newline.is_some() {
-                break;
-            }
-        }
-        if total > max_bytes {
-            return Ok(Some(Frame::Oversized { bytes: total }));
-        }
-        if !line.iter().all(u8::is_ascii_whitespace) {
-            return Ok(Some(parse_frame(&line)));
-        }
-    }
+    Ok(read_line(reader, max_bytes).await?.map(|line| match line {
+        Line::Complete(line) => parse_frame(&line),
+        Line::Oversized { bytes } => Frame::Oversized { bytes },
+    }))
 }
 
 fn parse_frame(line: &[u8]) -> Frame {
@@ -196,38 +172,13 @@ impl<C> Pending<C> {
     }
 }
 
-/// The last bytes of the provider's stderr, for diagnostics after a loss.
-#[derive(Debug, Clone, Default)]
-pub(super) struct StderrTail(Arc<Mutex<VecDeque<u8>>>);
-
-impl StderrTail {
-    /// Drains `stderr` to its end, keeping only the tail.
-    pub async fn drain<R: AsyncRead + Unpin>(self, mut stderr: R) {
-        let mut buffer = [0u8; 4096];
-        while let Ok(read) = stderr.read(&mut buffer).await {
-            if read == 0 {
-                break;
-            }
-            let mut tail = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            tail.extend(&buffer[..read]);
-            let excess = tail.len().saturating_sub(MAX_STDERR_TAIL_BYTES);
-            tail.drain(..excess);
-        }
-    }
-
-    pub fn snapshot(&self) -> String {
-        let tail = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let bytes: Vec<u8> = tail.iter().copied().collect();
-        String::from_utf8_lossy(&bytes).trim().to_owned()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
     use tokio::io::BufReader;
 
     use super::*;
+    use crate::stdio::MAX_STDERR_TAIL_BYTES;
 
     async fn frames(input: &[u8], max_bytes: usize) -> Vec<Frame> {
         let mut reader = BufReader::with_capacity(8, input);

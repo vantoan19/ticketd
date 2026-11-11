@@ -15,7 +15,8 @@
   "scripts": {
     "dev": "npm run dev --workspace @ticketd/desktop",
     "desktop": "npm run tauri --workspace @ticketd/desktop --",
-    "build": "npm run build --workspace @ticketd/desktop",
+    "build": "npm run build:bridge && npm run build --workspace @ticketd/desktop",
+    "build:bridge": "npm run build:executable --workspace @ticketd/chat-bridge-claude",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "npm run lint --workspaces",
