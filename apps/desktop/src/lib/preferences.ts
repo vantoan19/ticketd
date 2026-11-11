@@ -11,6 +11,8 @@ const preferencesSchema = z.object({
   ticketRows: z.enum(["detailed", "simple"]).catch("detailed"),
   followCreated: z.boolean().catch(true),
   notifyReminders: z.boolean().catch(false),
+  /** The Experimental Chat switch. The desktop backend is told at startup. */
+  chat: z.boolean().catch(false),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -26,6 +28,7 @@ const DEFAULTS: Preferences = {
   ticketRows: "detailed",
   followCreated: true,
   notifyReminders: false,
+  chat: false,
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

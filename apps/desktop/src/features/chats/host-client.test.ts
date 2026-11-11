@@ -38,7 +38,10 @@ function stubBridge(replies: Record<string, unknown> = {}) {
   const events = new Map<string, (payload: unknown) => void>();
   const invoke = vi.fn(async (command: string) => {
     const reply = replies[command];
-    if (reply instanceof Error || (reply && typeof reply === "object" && "code" in reply))
+    if (
+      reply instanceof Error ||
+      (reply && typeof reply === "object" && "code" in reply)
+    )
       throw reply;
     return reply;
   });
@@ -140,7 +143,10 @@ describe("the desktop Chat client", () => {
   it("rejects backend values that do not match the contract", async () => {
     const stub = stubBridge({
       chat_list: [{ id: "c1", title: "No activity field" }],
-      chat_open: { subscription: 1, snapshot: { chat, items: [{}], cursor: 0 } },
+      chat_open: {
+        subscription: 1,
+        snapshot: { chat, items: [{}], cursor: 0 },
+      },
       chat_overview: { needs_you: -1, working: 0 },
     });
     const client = createHostChatClient(stub.bridge);
@@ -156,7 +162,7 @@ describe("the desktop Chat client", () => {
         code: "stale",
         message: "this request is no longer waiting for an answer",
       },
-      chat_stop: "the workspace is locked",
+      chat_stop: new Error("the workspace is locked"),
     });
     const client = createHostChatClient(stub.bridge);
 

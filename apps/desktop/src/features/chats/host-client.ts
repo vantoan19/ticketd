@@ -22,7 +22,10 @@ import { loadPreferences, setPreference } from "@/lib/preferences";
 export type HostBridge = {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
   /** Resolves to a function that stops listening. */
-  listen(event: string, handler: (payload: unknown) => void): Promise<() => void>;
+  listen(
+    event: string,
+    handler: (payload: unknown) => void,
+  ): Promise<() => void>;
   /** A value to pass as a command argument; the backend sends messages to it. */
   channel(onMessage: (message: unknown) => void): unknown;
   pickFolder(): Promise<string | null>;
@@ -245,7 +248,8 @@ export function createHostChatClient(
       run("chat_set_retention", { chatId: id, retention: "archive" }),
     unarchive: (id) =>
       run("chat_set_retention", { chatId: id, retention: "unarchive" }),
-    trash: (id) => run("chat_set_retention", { chatId: id, retention: "trash" }),
+    trash: (id) =>
+      run("chat_set_retention", { chatId: id, retention: "trash" }),
     restore: (id) =>
       run("chat_set_retention", { chatId: id, retention: "restore" }),
     searchRecords: async (query) =>
@@ -258,11 +262,13 @@ export function createHostChatClient(
       run("chat_set_link", { chatId: id, link, present: false }),
     resume: (id, history) => run("chat_resume", { chatId: id, history }),
     saveAsDocument: async (id, responseId, title) =>
-      z
-        .string()
-        .parse(
-          await call("chat_save_as_document", { chatId: id, responseId, title }),
-        ),
+      z.string().parse(
+        await call("chat_save_as_document", {
+          chatId: id,
+          responseId,
+          title,
+        }),
+      ),
     onQuitRequested: (listener) =>
       subscribeTo(
         "chat-quit-requested",

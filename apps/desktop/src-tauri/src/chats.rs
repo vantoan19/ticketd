@@ -227,10 +227,11 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
                 found(executable, version),
                 Some(format!("{id} login")),
             ),
+            // Not every harness can be asked; it says so itself when a Chat starts.
             LoginState::Unknown => (
-                "unknown",
+                "ready",
                 format!(
-                    "{}. Whether it is signed in could not be checked.",
+                    "{}. ticketd cannot check whether it is signed in; {name} reports that when a Chat starts.",
                     found(executable, version)
                 ),
                 None,
@@ -350,6 +351,8 @@ struct View {
 pub struct Chats {
     open_workspace: WorkspaceOpener,
     adapters: Vec<Arc<dyn HarnessAdapter>>,
+    /// Why a harness has no adapter in this run, by harness id.
+    unavailable: Vec<(&'static str, String)>,
     context: Option<ContextSource>,
     /// The Experimental switch. The interface keeps the person's choice and tells the
     /// backend at startup; until then Chat is off and nothing can run.
@@ -368,11 +371,13 @@ impl Chats {
     pub fn new(
         open_workspace: WorkspaceOpener,
         adapters: Vec<Arc<dyn HarnessAdapter>>,
+        unavailable: Vec<(&'static str, String)>,
         context: Option<ContextSource>,
     ) -> Arc<Self> {
         Arc::new(Self {
             open_workspace,
             adapters,
+            unavailable,
             context,
             enabled: AtomicBool::new(false),
             host: Mutex::new(None),
@@ -380,6 +385,21 @@ impl Chats {
             next_feed: AtomicU64::new(1),
             fresh: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Why Chats cannot run on this harness here. One harness being unavailable never
+    /// stops the others.
+    fn unavailable(&self, harness: &str) -> String {
+        let reason = self.unavailable.iter().find(|(id, _)| *id == harness);
+        reason.map_or_else(
+            || {
+                format!(
+                    "{} is not available in this build of ticketd.",
+                    harness_name(harness)
+                )
+            },
+            |(_, reason)| reason.clone(),
+        )
     }
 
     fn workspace(&self) -> Outcome<Workspace> {
@@ -520,7 +540,7 @@ impl Chats {
                     id,
                     name,
                     status: "incompatible",
-                    message: Some(format!("{name} is not available in this build of ticketd.")),
+                    message: Some(self.unavailable(id)),
                     command: None,
                     help_url: None,
                 },
@@ -548,10 +568,7 @@ impl Chats {
         text_argument(&input.message, "The message")?;
         let served = |adapter: &Arc<dyn HarnessAdapter>| harness_key(adapter.harness());
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
-            return Err(failed(format!(
-                "{} is not available in this build of ticketd.",
-                harness_name(&input.harness_id)
-            )));
+            return Err(failed(self.unavailable(&input.harness_id)));
         }
         let mut workspace = self.workspace()?;
         let (execution_folder, folder_managed) = match &input.folder {

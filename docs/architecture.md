@@ -122,8 +122,7 @@ implementation details.
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
 tables do not move the workspace change token, so streaming a turn does not make
-other views refetch; Chat views follow the Chat change log instead. The supervisor,
-adapters and interface are not yet built.
+other views refetch; Chat views follow the Chat change log instead.
 
 User input and submission attempts are separate. The core saves input before
 dispatch and records possible submission before the adapter hands it to the
@@ -180,6 +179,26 @@ started with selected history, recorded under a new native-session identity; it
 never triggers automatic replay of uncertain submissions.
 Backups retain application records and queued input, not harness credentials or a
 promise of native resume state. Restore does not restart work automatically.
+
+The desktop owns one `ChatHost` for the life of the process
+(`apps/desktop/src-tauri/src/chats.rs`, exposed by `chat_commands.rs`). The Chat
+screens reach it through `chat_*` commands with validated arguments. Opening a
+Chat returns a snapshot and a per-view channel of changes numbered one apart,
+already translated into the view model (`chat_view.rs`); a view that falls behind
+or cannot be served receives one `resync` entry and reads a new snapshot. List
+rows and counts follow the `chat-overview` event, which comes from the host and
+not from the workspace poll. The Experimental switch is a per-computer
+preference kept by the interface; the backend starts with Chat off and is told
+the choice at startup.
+
+Closing the window while Chat is on and a Chat is working hides the window and
+shows a tray icon; the process, the host and the page stay, so showing the
+window again attaches to the same work. Starting ticketd a second time shows the
+running window instead of starting a second host
+(`tauri-plugin-single-instance`). Quit from the tray or the system asks in the
+window first, then stops app-owned execution with bounded cleanup before the
+process exits. With Chat off or no Chat working, closing the window exits as
+before.
 
 The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#20-native-agent-chats).
 Provider support clarification and live compatibility checks remain requirements

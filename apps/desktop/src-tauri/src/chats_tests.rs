@@ -32,6 +32,10 @@ impl Fixture {
         let chats = Chats::new(
             Arc::new(move || Workspace::open(&path)),
             vec![Arc::new(fake.clone())],
+            vec![(
+                "claude-code",
+                "Claude Code is unavailable: the bridge is missing.".to_owned(),
+            )],
             None,
         );
         chats.set_enabled(true).await;
@@ -173,7 +177,7 @@ async fn requests_are_checked_before_anything_is_stored() {
     let refused = f.chats.create(claude).await.unwrap_err();
     assert_eq!(
         refused.message,
-        "Claude Code is not available in this build of ticketd."
+        "Claude Code is unavailable: the bridge is missing."
     );
     assert!(f.chats.create(missing).await.is_err());
     assert!(f.chats.create(f.input("  ")).await.is_err());

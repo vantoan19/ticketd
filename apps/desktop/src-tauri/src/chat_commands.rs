@@ -10,7 +10,10 @@ use tauri::ipc::Channel;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
-use ticketd_chat_host::{CodexAdapter, ContextSource, HarnessAdapter, SendMode, cli, context};
+use ticketd_chat_host::{
+    BRIDGE_SIDECAR_NAME, ClaudeAdapter, CodexAdapter, ContextSource, HarnessAdapter, SendMode, cli,
+    context,
+};
 use ticketd_core::ChatListFilter;
 
 use crate::chat_view::{LinkedRecord, Summary};
@@ -38,13 +41,21 @@ pub struct ChatBridge {
     quit_confirmed: AtomicBool,
 }
 
-/// The harness adapters this build can run.
-///
-/// PLUG-IN POINT (#264): add the Claude Code adapter here once it is merged, for example
-/// `Arc::new(ClaudeAdapter::new(..))` with the packaged bridge sidecar's path. Until
-/// then Claude Code is reported as not available in this build.
-fn harness_adapters() -> Vec<Arc<dyn HarnessAdapter>> {
-    vec![Arc::new(CodexAdapter::new())]
+/// The Claude bridge is shipped as a sidecar beside the application executable. In
+/// development, copy the built bridge there (see `apps/chat-bridge-claude`).
+fn claude_bridge() -> Result<PathBuf, String> {
+    let name = format!("{BRIDGE_SIDECAR_NAME}{}", std::env::consts::EXE_SUFFIX);
+    let folder = std::env::current_exe()
+        .ok()
+        .and_then(|executable| Some(executable.parent()?.to_owned()));
+    match folder.map(|folder| folder.join(&name)) {
+        Some(bridge) if bridge.is_file() => Ok(bridge),
+        Some(bridge) => Err(format!(
+            "Claude Code is unavailable: ticketd's Claude bridge is missing at {}. Reinstall ticketd to restore it.",
+            bridge.display()
+        )),
+        None => Err("Claude Code is unavailable: ticketd could not find its own folder to look for its Claude bridge.".to_owned()),
+    }
 }
 
 /// The linked-record reference text a new harness session starts with (#266). It is
@@ -61,10 +72,19 @@ fn context_source(app_version: String) -> ContextSource {
 
 impl ChatBridge {
     pub fn new(app_version: String) -> Self {
+        // The harnesses this run can use, and why any other is unavailable. A new
+        // harness is registered here.
+        let mut adapters: Vec<Arc<dyn HarnessAdapter>> = vec![Arc::new(CodexAdapter::new())];
+        let mut unavailable = Vec::new();
+        match claude_bridge() {
+            Ok(bridge) => adapters.push(Arc::new(ClaudeAdapter::new(bridge))),
+            Err(reason) => unavailable.push(("claude-code", reason)),
+        }
         Self {
             chats: Chats::new(
                 Arc::new(crate::open_workspace),
-                harness_adapters(),
+                adapters,
+                unavailable,
                 Some(context_source(app_version)),
             ),
             watching: AtomicBool::new(false),
