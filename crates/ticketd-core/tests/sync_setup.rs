@@ -398,7 +398,9 @@ fn downloaded_bytes_that_are_not_the_uploaded_ones_are_refused() {
     assert_eq!(status.state, SyncState::NeedsAttention);
     assert_eq!(status.attachment_downloads.count, 1);
     assert_eq!(
-        b.attachment_availability(&[attachment.clone()]).unwrap()[0].state,
+        b.attachment_availability(std::slice::from_ref(&attachment))
+            .unwrap()[0]
+            .state,
         AttachmentAvailabilityState::NotDownloaded
     );
     assert!(b.attachment_open_path(&attachment).is_err());
