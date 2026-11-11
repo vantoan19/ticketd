@@ -39,11 +39,11 @@ export function dayGroup(timestamp: string, now: Date): DayGroup {
   return day >= yesterday ? "Yesterday" : "Earlier";
 }
 
-export function groupEntries(
-  entries: Entry[],
+export function groupEntries<T extends { timestamp: string }>(
+  entries: T[],
   now: Date,
-): { group: DayGroup; entries: Entry[] }[] {
-  const groups: { group: DayGroup; entries: Entry[] }[] = [];
+): { group: DayGroup; entries: T[] }[] {
+  const groups: { group: DayGroup; entries: T[] }[] = [];
   for (const entry of entries) {
     const group = dayGroup(entry.timestamp, now);
     const last = groups[groups.length - 1];

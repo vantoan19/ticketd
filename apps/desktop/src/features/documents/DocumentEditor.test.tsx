@@ -12,6 +12,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DocumentEditor } from "./DocumentEditor";
 import { documents } from "./api";
 import { TickingChanges } from "@/test/ticking-changes";
+import { syncReview } from "@/lib/sync-review-api";
+
+vi.mock("@/lib/sync-review-api", () => ({
+  syncReview: {
+    conflicts: vi.fn(async () => []),
+    versions: vi.fn(async () => []),
+  },
+}));
 const renderEditor = (ui: ReactElement) =>
   render(<TickingChanges>{ui}</TickingChanges>);
 vi.mock("./api", () => ({
@@ -1000,4 +1008,38 @@ it("quotes a passage shared by several connections once", async () => {
   await screen.findByRole("button", { name: "T-KQ1" });
   expect(screen.getAllByText(/See\s+T-KQ1/)).toHaveLength(2);
   expect(screen.getAllByText(/^Both from\s*“/)).toHaveLength(1);
+});
+
+it("opens the Document's History from its actions, and says when it Needs review", async () => {
+  vi.mocked(syncReview.conflicts).mockResolvedValue([
+    {
+      kind: "document",
+      id: "d1",
+      reference: null,
+      title: "Original",
+      fields: ["body"],
+      detected_at: "2026-11-11T18:41:00Z",
+      read: false,
+    },
+  ]);
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  const notice = await screen.findByRole("region", { name: "Needs review" });
+  expect(notice.textContent).toContain("Text was changed on two desktops.");
+  expect(
+    screen
+      .getAllByRole("status")
+      .some((status) => status.textContent === "Needs review"),
+  ).toBe(true);
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Document actions" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "History…" }));
+  expect(await screen.findByRole("dialog", { name: "History" })).toBeTruthy();
+  expect(syncReview.versions).toHaveBeenCalledWith({
+    kind: "document",
+    id: "d1",
+    source: "local",
+  });
+  expect(await screen.findByText("No earlier versions")).toBeTruthy();
 });
