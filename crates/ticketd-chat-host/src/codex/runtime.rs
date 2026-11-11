@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use tokio::time::timeout;
 
@@ -21,30 +21,14 @@ use crate::{
     RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission, SubmissionKind,
 };
 
+pub(super) use crate::stdio::{ChildProcess, Io, Reader, Writer};
+
 use super::discovery;
 use super::mapping::{Call, Session, rejection_reason, unknown};
 use super::rpc::{self, Frame, MAX_FRAME_BYTES, Pending, Reply, Resolved, RpcError, StderrTail};
 
 /// How long a loss waits to learn the exit code before reporting without one.
 const EXIT_OBSERVATION: Duration = Duration::from_secs(2);
-
-pub(super) type Reader = Box<dyn AsyncRead + Send + Unpin>;
-pub(super) type Writer = Box<dyn AsyncWrite + Send + Unpin>;
-
-/// The provider process behind the pipes.
-#[async_trait]
-pub(super) trait ChildProcess: Send {
-    /// Waits for the process to exit. Repeated calls report the same exit code.
-    async fn wait(&mut self) -> Option<i32>;
-    async fn kill(&mut self);
-}
-
-pub(super) struct Io {
-    pub stdout: Reader,
-    pub stdin: Writer,
-    pub stderr: Option<Reader>,
-    pub child: Box<dyn ChildProcess>,
-}
 
 #[derive(Debug, Clone)]
 pub(super) struct Options {

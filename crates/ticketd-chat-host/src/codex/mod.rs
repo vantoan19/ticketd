@@ -12,22 +12,19 @@ mod runtime;
 mod tests;
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::process::{Child, Command};
-use tokio::time::timeout;
 
+use crate::stdio::{spawn, version_output};
 use crate::{
     Harness, HarnessAdapter, Inspection, OpenRequest, OpenedRuntime, Problem, ProblemKind,
     ProviderDetail,
 };
 
 use discovery::{LaunchEnvironment, Os};
-use runtime::{ChildProcess, Io, Options};
+use runtime::Options;
 
-const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const ARGUMENTS: &[&str] = &["app-server"];
 
 /// Hosts Chats on the Codex installation found in the launch environment, or on an
 /// executable the user selected.
@@ -81,7 +78,7 @@ impl HarnessAdapter for CodexAdapter {
                 requirement: discovery::version_requirement(),
             };
         }
-        let login = match spawn(&executable) {
+        let login = match spawn(&executable, ARGUMENTS) {
             Ok(io) => runtime::probe_login(io, Options::default()).await,
             Err(_) => crate::LoginState::Unknown,
         };
@@ -102,81 +99,11 @@ impl HarnessAdapter for CodexAdapter {
                 .to_owned(),
             detail: None,
         })?;
-        let io = spawn(&executable).map_err(|error| Problem {
+        let io = spawn(&executable, ARGUMENTS).map_err(|error| Problem {
             kind: ProblemKind::Other,
             message: format!("Could not start {}: {error}", executable.display()),
             detail: Some(ProviderDetail::new("spawn", &error.to_string())),
         })?;
         runtime::open_over(io, &request, Options::default()).await
-    }
-}
-
-async fn version_output(executable: &Path) -> Result<String, String> {
-    let mut command = Command::new(executable);
-    command
-        .arg("--version")
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
-    hide_console(&mut command);
-    let output = timeout(VERSION_PROBE_TIMEOUT, command.output())
-        .await
-        .map_err(|_| format!("`{} --version` did not finish", executable.display()))?
-        .map_err(|error| format!("Could not run {}: {error}", executable.display()))?;
-    if !output.status.success() {
-        return Err(format!(
-            "`{} --version` exited with {}",
-            executable.display(),
-            output.status
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Starts `codex app-server` on stdio with the launch environment unchanged, so
-/// Codex finds its own configuration and sign-in.
-fn spawn(executable: &Path) -> std::io::Result<Io> {
-    let mut command = Command::new(executable);
-    command
-        .arg("app-server")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    hide_console(&mut command);
-    let mut child = command.spawn()?;
-    let missing = || std::io::Error::other("the Codex process has no standard streams");
-    Ok(Io {
-        stdin: Box::new(child.stdin.take().ok_or_else(missing)?),
-        stdout: Box::new(child.stdout.take().ok_or_else(missing)?),
-        stderr: child
-            .stderr
-            .take()
-            .map(|stderr| Box::new(stderr) as runtime::Reader),
-        child: Box::new(Process(child)),
-    })
-}
-
-/// A windowed application must not flash a console for each child it starts.
-fn hide_console(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    #[cfg(not(windows))]
-    let _ = command;
-}
-
-struct Process(Child);
-
-#[async_trait]
-impl ChildProcess for Process {
-    async fn wait(&mut self) -> Option<i32> {
-        self.0.wait().await.ok().and_then(|status| status.code())
-    }
-
-    async fn kill(&mut self) {
-        // A process that already exited needs no kill.
-        let _ = self.0.kill().await;
     }
 }
