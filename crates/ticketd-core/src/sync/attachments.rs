@@ -25,8 +25,13 @@ use sha2::{Digest, Sha256};
 
 /// The id of the manifest file, beside the device registry.
 pub(super) const MANIFEST: &str = "attachments";
-/// How many received bytes pass between two saved progress values.
-const PROGRESS_STEP: u64 = 1024 * 1024;
+/// How many received bytes pass between two saved progress values. Small, so
+/// that a slow transfer still shows as moving to whoever waits for it.
+// ponytail: progress moves as the storage hands bytes over (Drive: 256 KiB
+// ranges), so a transfer slower than one such piece a minute still reads as
+// stalled to a waiting open; have the adapter report bytes within a range if
+// such links have to be waited out.
+const PROGRESS_STEP: u64 = 64 * 1024;
 /// `sync_attachments.failed` of an Attachment whose bytes on this device are
 /// missing or damaged, so they cannot be uploaded.
 const UNREADABLE_HERE: &str = "local";
@@ -389,6 +394,7 @@ impl Workspace {
             .query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
         drop(statement);
+        let mut failed = None;
         for id in waiting {
             match self.fetch_attachment(remote, folder, &id, false) {
                 Ok(()) => {}
@@ -396,12 +402,18 @@ impl Workspace {
                 Err(
                     Error::Attachment(_)
                     | Error::Directory(_)
-                    | Error::Remote(RemoteError::NotFound | RemoteError::Other(_)),
+                    | Error::Remote(RemoteError::NotFound),
                 ) => {}
+                // A failure of the storage that may well pass: the others are
+                // still tried, and the run fails with it so the next one
+                // tries again and nothing is left to read once it worked.
+                Err(error @ Error::Remote(RemoteError::Other(_))) => {
+                    failed.get_or_insert(error);
+                }
                 Err(error) => return Err(error),
             }
         }
-        Ok(())
+        failed.map_or(Ok(()), Err)
     }
 
     /// Give up the downloads that were under way when the app last stopped,
@@ -506,6 +518,10 @@ impl Workspace {
     /// `downloading` belongs to the connection that set it: with `wait` this
     /// call waits for that download and uses its result, without it the
     /// Attachment is left to its owner.
+    ///
+    /// A fault of this device (no room, no permission, something in the way)
+    /// needs the person, so it is told once per Attachment wherever in the
+    /// fetch it happens. A failure of the storage is the caller's to report.
     fn fetch_attachment(
         &mut self,
         remote: &dyn RemoteStorage,
@@ -514,6 +530,28 @@ impl Workspace {
         wait: bool,
     ) -> Result<(), Error> {
         let attachment = attachments::read_attachment(&self.connection, id)?;
+        let fetched = self.fetch_bytes(remote, folder, id, &attachment, wait);
+        if let Err(error @ Error::Directory(_)) = &fetched {
+            notify(
+                &self.connection,
+                &format!("attachment-save:{id}"),
+                &SyncNoticeKind::UnreadableFile {
+                    path: format!("attachments/{}", attachment.original_filename),
+                    reason: error.to_string(),
+                },
+            )?;
+        }
+        fetched
+    }
+
+    fn fetch_bytes(
+        &mut self,
+        remote: &dyn RemoteStorage,
+        folder: &str,
+        id: &str,
+        attachment: &attachments::Attachment,
+        wait: bool,
+    ) -> Result<(), Error> {
         let filename = attachment.original_filename.as_str();
         let size = attachment.size_bytes.unwrap_or_default();
         let set = |state: &str| -> Result<(), Error> {
@@ -556,10 +594,19 @@ impl Workspace {
                 if digest(&mut File::open(&existing)?)? == (sha256, size) {
                     return set("downloaded");
                 }
-                return Err(Error::Attachment(format!(
+                let reason = format!(
                     "'{}' has other content on this device than was uploaded; its files were left as they are",
                     attachment.display_name
-                )));
+                );
+                notify(
+                    &self.connection,
+                    &format!("attachment-save:{id}"),
+                    &SyncNoticeKind::UnreadableFile {
+                        path: format!("attachments/{filename}"),
+                        reason: reason.clone(),
+                    },
+                )?;
+                return Err(Error::Attachment(reason));
             }
             // Only one connection gets the row from `not_downloaded`.
             let claimed = self.connection.execute(
@@ -596,6 +643,14 @@ impl Workspace {
             file.sync_all()?;
             // Windows does not move a directory with an open file in it.
             drop(file);
+            if received < size {
+                // Cut short on the way, which says nothing about the file.
+                return Err(RemoteError::Other(format!(
+                    "the download of '{}' stopped before all of it arrived",
+                    attachment.display_name
+                ))
+                .into());
+            }
             if (hex(hash), received) != (sha256.clone(), size) {
                 return Ok(false);
             }
@@ -635,22 +690,6 @@ impl Workspace {
             }
             Err(error) => {
                 set("not_downloaded")?;
-                // A fault of this device or of this one file (no room, no
-                // permission, a broken transfer) is told once per version;
-                // being offline or signed out is the run's to report.
-                if matches!(
-                    error,
-                    Error::Directory(_) | Error::Remote(RemoteError::Other(_))
-                ) {
-                    notify(
-                        &self.connection,
-                        &format!("attachment-save:{id}:{version}"),
-                        &SyncNoticeKind::UnreadableFile {
-                            path: format!("attachments/{filename}"),
-                            reason: error.to_string(),
-                        },
-                    )?;
-                }
                 Err(error)
             }
         }

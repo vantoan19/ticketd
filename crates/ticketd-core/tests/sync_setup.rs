@@ -601,6 +601,9 @@ fn a_conflict_needs_attention_and_names_the_record_to_review() {
 struct Hooked<'a> {
     remote: FakeRemote,
     during_download: Box<dyn Fn() + Send + Sync + 'a>,
+    /// Called when half the bytes have been handed over; says whether the
+    /// rest follows.
+    halfway: Option<Box<dyn Fn() -> bool + Send + Sync + 'a>>,
 }
 
 impl RemoteStorage for Hooked<'_> {
@@ -626,10 +629,21 @@ impl RemoteStorage for Hooked<'_> {
         version: &str,
         output: &mut dyn std::io::Write,
     ) -> Result<(), RemoteError> {
-        if key.kind == RemoteKind::Attachment {
-            (self.during_download)();
+        if key.kind != RemoteKind::Attachment {
+            return self.remote.download(folder, key, version, output);
         }
-        self.remote.download(folder, key, version, output)
+        (self.during_download)();
+        let Some(halfway) = &self.halfway else {
+            return self.remote.download(folder, key, version, output);
+        };
+        let mut bytes = Vec::new();
+        self.remote.download(folder, key, version, &mut bytes)?;
+        let (first, rest) = bytes.split_at(bytes.len() / 2);
+        output.write_all(first).unwrap();
+        if halfway() {
+            output.write_all(rest).unwrap();
+        }
+        Ok(())
     }
 
     fn write(
@@ -669,6 +683,7 @@ fn an_attachment_shows_as_downloading_while_its_bytes_arrive_and_not_downloaded_
                 .unwrap();
             seen.lock().unwrap().push(found[0].state);
         }),
+        halfway: None,
     };
     let state = |workspace: &Workspace| {
         workspace
@@ -885,6 +900,7 @@ fn one_attachment_is_fetched_once_when_a_run_and_an_open_ask_for_it_together() {
             // Lets the second open find the download under way; it must pass either way.
             std::thread::sleep(std::time::Duration::from_millis(200));
         }),
+        halfway: None,
     };
     b.download_attachment(&racing, &attachment).unwrap();
     let second = waiting.lock().unwrap().take().unwrap().join().unwrap();
@@ -1261,4 +1277,152 @@ fn a_record_held_back_by_a_newer_format_file_is_not_a_pending_upload_and_is_put_
     assert_eq!(status.pending_total, 0);
     let restored = String::from_utf8(desks.file(&key).1).unwrap();
     assert!(restored.contains("Changed here"), "{restored}");
+}
+
+fn availability_of(workspace: &Workspace, attachment: &str) -> AttachmentAvailabilityState {
+    workspace
+        .attachment_availability(&[attachment.to_owned()])
+        .unwrap()[0]
+        .state
+}
+
+#[test]
+fn a_passing_storage_failure_during_an_attachment_download_fails_the_run_and_leaves_no_notice() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+    b.set_sync_settings("Desk B", 60, AttachmentDownload::Automatic)
+        .unwrap();
+
+    // The storage answers with a failure of its own.
+    desks.remote.fail(
+        RemoteOp::Download,
+        1,
+        RemoteError::Other("the storage answered 503".into()),
+    );
+    let status = b.sync_now(&desks.remote).unwrap();
+    assert_eq!(
+        recovered(&status),
+        (Some(SyncRecovery::Error), SyncState::NeedsAttention)
+    );
+
+    // The transfer ends before all the bytes arrived.
+    let cut = Hooked {
+        remote: desks.remote.clone(),
+        during_download: Box::new(|| {}),
+        halfway: Some(Box::new(|| false)),
+    };
+    let status = b.sync_now(&cut).unwrap();
+    assert_eq!(
+        recovered(&status),
+        (Some(SyncRecovery::Error), SyncState::NeedsAttention)
+    );
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::NotDownloaded
+    );
+
+    // Neither is a fault of the file: the next run fetches it, and nothing is left to read.
+    let status = b.sync_now(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::Downloaded
+    );
+    assert_eq!(b.sync_notices().unwrap(), []);
+}
+
+#[test]
+fn an_attachment_folder_that_cannot_be_made_here_is_reported() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    // A file sits where this Workspace keeps its Attachments.
+    let root = desks.directory.path().join("Desk B.attachments");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::write(&root, "in the way").unwrap();
+
+    let status = b.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(recovered(&status), (None, SyncState::NeedsAttention));
+    assert_eq!(unreadable(&b), ["attachments/notes.txt"]);
+
+    std::fs::remove_file(&root).unwrap();
+    b.sync_now(&desks.remote).unwrap();
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::Downloaded
+    );
+}
+
+#[test]
+fn a_download_under_way_in_a_backup_or_at_disconnect_does_not_stay_under_way() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+    let path = desks.directory.path().join("Desk B");
+    let under_way = || {
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("UPDATE sync_attachments SET state = 'downloading'", [])
+            .unwrap();
+    };
+
+    under_way();
+    b.sync_disconnect().unwrap();
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::NotDownloaded
+    );
+
+    under_way();
+    let backup = desks.directory.path().join("backup.sqlite3");
+    b.backup(&backup).unwrap();
+    drop(b);
+    Workspace::restore(&path, &backup).unwrap();
+    let b = Workspace::open(&path).unwrap();
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::NotDownloaded
+    );
+}
+
+#[test]
+fn a_slow_download_shows_it_is_moving_well_before_a_megabyte_arrived() {
+    let desks = desks();
+    let mut a = desks.desk("Desk A");
+    let reference = a.create_ticket("Login").unwrap().reference;
+    let large = vec![7_u8; 200 * 1024];
+    let attachment = a
+        .import_attachment_bytes("request-1", "large.bin", &large, |_, _| true)
+        .unwrap()
+        .id;
+    a.set_ticket_attachment(&reference, &attachment, true)
+        .unwrap();
+    a.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+
+    // What an open waiting on another connection goes by.
+    let seen = std::sync::Mutex::new(None);
+    let slow = Hooked {
+        remote: desks.remote.clone(),
+        during_download: Box::new(|| {}),
+        halfway: Some(Box::new(|| {
+            let other = Workspace::open(desks.directory.path().join("Desk B")).unwrap();
+            let found = other
+                .attachment_availability(std::slice::from_ref(&attachment))
+                .unwrap();
+            *seen.lock().unwrap() = found[0].progress;
+            true
+        })),
+    };
+    b.download_attachment(&slow, &attachment).unwrap();
+
+    let progress = seen.lock().unwrap().unwrap();
+    assert!((1..=50).contains(&progress), "{progress}");
 }

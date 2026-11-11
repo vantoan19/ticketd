@@ -402,12 +402,17 @@ fn forget_synced(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// A download under way has no one left to finish it once the folder is let
+/// go of: the row would say `downloading` until the next launch.
+const GIVE_UP_DOWNLOADS: &str = "UPDATE sync_attachments SET state = 'not_downloaded', progress = 0 WHERE state = 'downloading';";
+
 /// See [`super::forget_folder`]. The backup may be of an earlier format
 /// version, so only what format version 59 has is named.
 pub(super) fn forget_folder(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "UPDATE sync_state SET folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, first_sync = NULL;",
     )?;
+    connection.execute_batch(GIVE_UP_DOWNLOADS)?;
     forget_synced(connection)
 }
 
@@ -502,6 +507,7 @@ impl Workspace {
             "UPDATE sync_state SET connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
             [],
         )?;
+        self.connection.execute_batch(GIVE_UP_DOWNLOADS)?;
         touch(&self.connection)?;
         self.sync_status()
     }
@@ -910,9 +916,6 @@ impl Workspace {
         // Bytes go up before any record that names them.
         self.sync_attachment_records(remote, &folder, manifest.as_deref())?;
         let report = self.sync_listed(remote, &folder, &device_name, listing)?;
-        if state.attachment_download == AttachmentDownload::Automatic {
-            self.download_attachments(remote, &folder)?;
-        }
         if report.uploaded > 0 {
             let now: String = self
                 .connection
@@ -931,6 +934,10 @@ impl Workspace {
                     None => false,
                 },
             )?;
+        }
+        // Last, so that a download that fails takes nothing else with it.
+        if state.attachment_download == AttachmentDownload::Automatic {
+            self.download_attachments(remote, &folder)?;
         }
         Ok(())
     }
