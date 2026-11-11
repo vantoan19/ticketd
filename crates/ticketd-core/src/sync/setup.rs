@@ -52,10 +52,29 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 /// its own, and the mark of a file written in a newer format than this
 /// desktop reads.
 pub(crate) fn migrate_recovery(connection: &Connection) -> Result<(), Error> {
-    for (table, column, definition) in [
-        ("sync_state", "recovery_message", "TEXT"),
-        ("sync_files", "newer", "INTEGER NOT NULL DEFAULT 0"),
-    ] {
+    add_columns(
+        connection,
+        &[
+            ("sync_state", "recovery_message", "TEXT"),
+            ("sync_files", "newer", "INTEGER NOT NULL DEFAULT 0"),
+        ],
+    )
+}
+
+/// Format version 61: the run token this desktop last wrote into its entry of
+/// the device registry, and the one before it.
+pub(crate) fn migrate_run_token(connection: &Connection) -> Result<(), Error> {
+    add_columns(
+        connection,
+        &[
+            ("sync_state", "run_token", "TEXT"),
+            ("sync_state", "run_previous", "TEXT"),
+        ],
+    )
+}
+
+fn add_columns(connection: &Connection, columns: &[(&str, &str, &str)]) -> Result<(), Error> {
+    for (table, column, definition) in columns {
         let present: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
             [table, column],
@@ -251,6 +270,11 @@ struct RegisteredDevice {
     code: String,
     #[serde(default)]
     last_synced_at: Option<String>,
+    /// A random value the desktop replaces on every run and also keeps
+    /// locally. A desktop that finds another value here than the ones it
+    /// wrote is a copy of the Workspace that did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<String>,
     /// What a newer ticketd keeps here, written back as it was read.
     #[serde(flatten)]
     other: BTreeMap<String, serde_json::Value>,
@@ -306,6 +330,8 @@ struct State {
     recovery_message: Option<String>,
     first_sync: Option<SyncDirection>,
     first_total: u64,
+    run_token: Option<String>,
+    run_previous: Option<String>,
 }
 
 /// A unit enum as the text serde gives it, for a column.
@@ -322,7 +348,7 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
 
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message FROM sync_state",
+        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous FROM sync_state",
         [],
         |row| {
             Ok(State {
@@ -340,6 +366,8 @@ fn state(connection: &Connection) -> Result<State, Error> {
                 first_sync: from_label(row.get(10)?),
                 first_total: row.get(11)?,
                 recovery_message: row.get(12)?,
+                run_token: row.get(13)?,
+                run_previous: row.get(14)?,
             })
         },
     )?)
@@ -513,16 +541,26 @@ impl Workspace {
         let mut pending_uploads = Vec::new();
         let mut pending_total = 0;
         if connected {
+            // A record whose file only a newer ticketd reads is not on its way
+            // anywhere: its notice says so instead.
+            let mut statement = connection.prepare("SELECT id FROM sync_files WHERE newer")?;
+            let held = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<BTreeSet<_>, _>>()?;
+            drop(statement);
             for dirty in self.dirty_records()? {
                 if pending_uploads.len() == PENDING_PAGE {
                     break;
+                }
+                if held.contains(&dirty.id) {
+                    continue;
                 }
                 pending_uploads.extend(item(connection, dirty.kind, &dirty.id)?);
             }
             let attachments = super::attachments::pending_uploads(connection)?;
             pending_total = count(
                 connection,
-                "SELECT COUNT(*) FROM sync_dirty d WHERE (d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects))",
+                "SELECT COUNT(*) FROM sync_dirty d WHERE d.id NOT IN (SELECT id FROM sync_files WHERE newer) AND ((d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects)))",
             )? + attachments.len() as u64;
             let room = PENDING_PAGE - pending_uploads.len();
             for (id, title) in attachments.into_iter().take(room) {
@@ -907,17 +945,40 @@ impl Workspace {
         state: &State,
     ) -> Result<(String, String), Error> {
         let name = state.device_name.clone().unwrap_or_else(computer_name);
-        let id = match &state.device_id {
-            Some(id) => id.clone(),
-            None => {
-                let id = Uuid::new_v4().to_string();
-                self.connection
-                    .execute("UPDATE sync_state SET device_id = ?1", [&id])?;
-                id
-            }
-        };
         let registry: Registry =
             self.shared_file(remote, folder, REGISTRY, listed, &mut |_| false)?;
+        let wrote = [&state.run_token, &state.run_previous];
+        let seen = state
+            .device_id
+            .as_ref()
+            .and_then(|id| registry.devices.get(id))
+            .and_then(|device| device.run.clone());
+        // A run token this desktop did not write: a copy of this Workspace
+        // file synced under the same device identity. The one that finds out
+        // leaves the entry to the other and joins as a new desktop, which
+        // below also gives it a code the other does not hold.
+        let copied = seen
+            .as_ref()
+            .is_some_and(|seen| !wrote.contains(&&Some(seen.clone())));
+        let (id, token) = match &state.device_id {
+            Some(id) if !copied => {
+                // The token before is kept because the answer to a write can
+                // be lost; a write that did not arrive is repeated as it was.
+                let token = match &state.run_token {
+                    Some(token) if seen != state.run_token => token.clone(),
+                    _ => Uuid::new_v4().to_string(),
+                };
+                (id.clone(), token)
+            }
+            _ => (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()),
+        };
+        if state.run_token.as_ref() != Some(&token) {
+            let previous = state.run_token.as_ref().filter(|_| !copied);
+            self.connection.execute(
+                "UPDATE sync_state SET device_id = ?1, run_token = ?2, run_previous = ?3",
+                params![id, token, previous],
+            )?;
+        }
         let holder = |code: &str| {
             registry
                 .devices
@@ -949,9 +1010,11 @@ impl Workspace {
                     devices, retired, ..
                 } = registry;
                 let device = devices.entry(id.clone()).or_default();
-                if device.name == name && device.code == code {
+                if device.name == name && device.code == code && device.run.as_ref() == Some(&token)
+                {
                     return false;
                 }
+                device.run = Some(token.clone());
                 device.name.clone_from(&name);
                 let before = std::mem::replace(&mut device.code, code.clone());
                 if !before.is_empty() && before != code {

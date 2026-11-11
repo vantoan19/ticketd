@@ -385,13 +385,14 @@ fn an_attachment_is_downloaded_on_demand_when_downloads_are_not_automatic() {
         std::fs::read(b.attachment_open_path(&attachment).unwrap()).unwrap(),
         BYTES
     );
-    // Nothing is fetched or uploaded twice.
+    // Nothing is fetched or uploaded twice: the one write of a run that has
+    // nothing to send is this desk's run token in the device registry.
     let before = desks.remote.calls().len();
     b.download_attachment(&desks.remote, &attachment).unwrap();
     assert_eq!(desks.remote.calls().len(), before);
     b.sync_now(&desks.remote).unwrap();
     let writes = |calls: &[RemoteOp]| calls.iter().filter(|op| **op == RemoteOp::Write).count();
-    assert_eq!(writes(&desks.remote.calls()[before..]), 0);
+    assert_eq!(writes(&desks.remote.calls()[before..]), 1);
 }
 
 #[test]
@@ -1127,4 +1128,137 @@ fn an_attachment_upload_whose_answer_is_lost_repeats_without_a_second_copy() {
         std::fs::read(b.attachment_open_path(&extra).unwrap()).unwrap(),
         b"more"
     );
+}
+
+fn registered(desks: &Desks) -> serde_json::Value {
+    let (_, stored) = desks.file(&RemoteKey::new(RemoteKind::Devices, "devices"));
+    serde_json::from_slice(&stored).unwrap()
+}
+
+#[test]
+fn a_workspace_file_copied_to_another_desktop_joins_as_a_desktop_of_its_own() {
+    let desks = desks();
+    let mut a = desks.desk("Desk A");
+    a.create_ticket("Login").unwrap();
+    a.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    drop(a);
+    let path = |name: &str| desks.directory.path().join(name);
+    std::fs::copy(path("Desk A"), path("Desk C")).unwrap();
+    let mut a = Workspace::open(path("Desk A")).unwrap();
+    let mut copy = Workspace::open(path("Desk C")).unwrap();
+    let shared = a.device_code().unwrap();
+    assert_eq!(copy.device_code().unwrap(), shared);
+
+    // Whichever of the two runs after the other has synced is the one that
+    // finds out and gives way.
+    copy.sync_now(&desks.remote).unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    copy.sync_now(&desks.remote).unwrap();
+
+    let codes = [a.device_code().unwrap(), copy.device_code().unwrap()];
+    assert_ne!(codes[0], codes[1]);
+    assert!(codes.contains(&shared), "{codes:?}");
+    let registry = registered(&desks);
+    assert_eq!(registry["devices"].as_object().unwrap().len(), 2);
+    // The code both held is still in use, so it is not given up.
+    assert_eq!(registry.get("retired"), None);
+
+    let from_a = a.create_ticket("From A").unwrap().reference;
+    let from_copy = copy.create_ticket("From the copy").unwrap().reference;
+    assert_ne!(from_a, from_copy);
+    a.sync_now(&desks.remote).unwrap();
+    for desk in [&mut copy, &mut a] {
+        let status = desk.sync_now(&desks.remote).unwrap();
+        assert_eq!(status.state, SyncState::Uploaded);
+    }
+    for desk in [&a, &copy] {
+        let mut all = titles(desk);
+        all.sort();
+        assert_eq!(all, ["From A", "From the copy", "Login"]);
+        assert_eq!(desk.show_ticket("T-KQ1").unwrap().title, "Login");
+    }
+    // Neither changes again once they are apart.
+    assert_eq!(
+        codes,
+        [a.device_code().unwrap(), copy.device_code().unwrap()]
+    );
+    assert_eq!(registered(&desks)["devices"].as_object().unwrap().len(), 2);
+}
+
+#[test]
+fn a_desktop_that_synced_before_run_tokens_existed_keeps_its_identity() {
+    let desks = desks();
+    let mut a = desks.desk("Desk A");
+    a.create_ticket("Login").unwrap();
+    a.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    let code = a.device_code().unwrap();
+
+    // The registry as an earlier ticketd left it: no run token in any entry.
+    let key = RemoteKey::new(RemoteKind::Devices, "devices");
+    let (version, _) = desks.file(&key);
+    let mut earlier = registered(&desks);
+    for device in earlier["devices"].as_object_mut().unwrap().values_mut() {
+        device.as_object_mut().unwrap().remove("run");
+    }
+    desks
+        .remote
+        .write(
+            &desks.folder(),
+            &key,
+            "devices.json",
+            Some(&version),
+            &mut Cursor::new(serde_json::to_vec(&earlier).unwrap()),
+        )
+        .unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(a.device_code().unwrap(), code);
+    let registry = registered(&desks);
+    assert_eq!(registry["devices"].as_object().unwrap().len(), 1);
+}
+
+#[test]
+fn a_record_held_back_by_a_newer_format_file_is_not_a_pending_upload_and_is_put_back_if_the_file_goes()
+ {
+    let desks = desks();
+    let (mut a, reference, _) = desks.uploaded("Desk A");
+    let key = RemoteKey::new(RemoteKind::Ticket, a.show_ticket(&reference).unwrap().id);
+    let (version, synced) = desks.file(&key);
+    let newer = String::from_utf8(synced)
+        .unwrap()
+        .replacen("format: 1\n", "format: 2\n", 1);
+    desks
+        .remote
+        .write(
+            &desks.folder(),
+            &key,
+            "Login.md",
+            Some(&version),
+            &mut Cursor::new(newer.as_bytes()),
+        )
+        .unwrap();
+    // A second file, so the folder is not taken for an emptied one later.
+    a.create_ticket("Other").unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    retitle(&mut a, &reference, "Changed here");
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    // Nothing this desktop can send: it is told as a file it cannot read.
+    assert_eq!((status.pending_uploads.len(), status.pending_total), (0, 0));
+    assert_eq!(status.state, SyncState::NeedsAttention);
+    assert_eq!(unreadable(&a).len(), 1);
+    assert_eq!(desks.file(&key).1, newer.as_bytes());
+
+    // With the file gone there is nothing left to protect.
+    desks.remote.remove_file(&desks.folder(), &key);
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.pending_total, 0);
+    let restored = String::from_utf8(desks.file(&key).1).unwrap();
+    assert!(restored.contains("Changed here"), "{restored}");
 }

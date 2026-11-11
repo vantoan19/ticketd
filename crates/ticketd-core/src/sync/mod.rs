@@ -44,3 +44,8 @@ pub(crate) fn forget_folder(connection: &rusqlite::Connection) -> Result<(), cra
 pub(crate) fn migrate_recovery(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_recovery(connection)
 }
+
+/// Format version 61.
+pub(crate) fn migrate_run_token(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_run_token(connection)
+}

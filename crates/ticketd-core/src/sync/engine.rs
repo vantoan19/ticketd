@@ -564,7 +564,7 @@ impl Workspace {
             .collect();
         let mut statement = self
             .connection
-            .prepare("SELECT kind, id FROM sync_files WHERE version IS NOT NULL")?;
+            .prepare("SELECT kind, id FROM sync_files WHERE version IS NOT NULL OR newer")?;
         let synced = statement
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -579,9 +579,10 @@ impl Workspace {
                 continue;
             }
             // Without a version the upload creates the file, and a later
-            // listing that holds it again is merged against the kept copy.
+            // listing that holds it again is merged against the kept copy. A
+            // file that was held back as one from a newer ticketd is gone too.
             self.connection.execute(
-                "UPDATE sync_files SET version = NULL WHERE kind = ?1 AND id = ?2",
+                "UPDATE sync_files SET version = NULL, newer = 0 WHERE kind = ?1 AND id = ?2",
                 params![name(kind), id],
             )?;
             mark_dirty(&self.connection, dirty_kind(kind), &id)?;
