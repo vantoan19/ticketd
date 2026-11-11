@@ -30,16 +30,22 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         "-- The last-synced copy of each file. `wanted` and `applied` are set while a
          -- relationship of the record waits for a record that has not arrived.
          CREATE TABLE IF NOT EXISTS sync_files (kind TEXT NOT NULL, id TEXT NOT NULL, version TEXT, content TEXT, wanted TEXT, applied TEXT, PRIMARY KEY(kind, id));
-         CREATE TABLE IF NOT EXISTS sync_conflicts (kind TEXT NOT NULL, id TEXT NOT NULL, field TEXT NOT NULL, base TEXT, remote TEXT, remote_device TEXT, detected_at TEXT NOT NULL DEFAULT ({NOW}), read INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind, id, field));
+         CREATE TABLE IF NOT EXISTS sync_conflicts (kind TEXT NOT NULL, id TEXT NOT NULL, field TEXT NOT NULL, base TEXT, remote TEXT, remote_device TEXT, detected_at TEXT NOT NULL DEFAULT ({NOW}), read INTEGER NOT NULL DEFAULT 0, remote_changed_at TEXT, PRIMARY KEY(kind, id, field));
          CREATE TABLE IF NOT EXISTS sync_notices (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL DEFAULT ({NOW}), read INTEGER NOT NULL DEFAULT 0, notice TEXT NOT NULL, cause TEXT NOT NULL UNIQUE);"
     ))?;
-    let timed: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('dependencies') WHERE name = 'created_at')",
-        [],
-        |row| row.get(0),
-    )?;
-    if !timed {
-        connection.execute_batch("ALTER TABLE dependencies ADD COLUMN created_at TEXT;")?;
+    // `remote_changed_at` is here for a Workspace that made the table before it had one.
+    for (table, column) in [
+        ("dependencies", "created_at"),
+        ("sync_conflicts", "remote_changed_at"),
+    ] {
+        let present: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            [table, column],
+            |row| row.get(0),
+        )?;
+        if !present {
+            connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT;"))?;
+        }
     }
     // The time orders dependencies the same way on every device. An applied
     // file sets it from the file; one made here gets this device's clock.
@@ -78,6 +84,11 @@ pub struct SyncConflictField {
     pub remote: Option<SyncValue>,
     /// The desktop the remote value came from, when its file names one.
     pub remote_device: Option<String>,
+    /// When this device last changed the field. Known for the `title`, `body`,
+    /// `status` and `trashed` of a ticket or Document, while version history keeps it.
+    pub local_changed_at: Option<String>,
+    /// When the storage received the file holding the remote value, if it could say.
+    pub remote_changed_at: Option<String>,
     pub detected_at: String,
 }
 
@@ -471,6 +482,9 @@ impl Workspace {
                 Ok(conflicts) => {
                     report.downloaded += 1;
                     report.conflicts += conflicts;
+                    if conflicts > 0 {
+                        self.time_conflicts(remote, folder, kind, &file)?;
+                    }
                 }
                 Err(error) if is_file_fault(&error) => {
                     report.skipped += 1;
@@ -479,6 +493,28 @@ impl Workspace {
                 Err(error) => return Err(error),
             }
         }
+        Ok(())
+    }
+
+    /// Note when the storage received the version the new conflicts came from.
+    /// The time is for display only, so a storage that cannot give it now is
+    /// not asked again and does not fail the run.
+    fn time_conflicts(
+        &mut self,
+        remote: &dyn RemoteStorage,
+        folder: &str,
+        kind: SyncKind,
+        file: &RemoteFile,
+    ) -> Result<(), Error> {
+        let modified = remote.revisions(folder, &file.key).ok().and_then(|all| {
+            all.into_iter()
+                .find(|revision| revision.version == file.version)
+                .map(|revision| revision.modified)
+        });
+        self.connection.execute(
+            "UPDATE sync_conflicts SET remote_changed_at = ?3 WHERE kind = ?1 AND id = ?2 AND remote_changed_at IS NULL",
+            params![name(kind), file.key.id, modified],
+        )?;
         Ok(())
     }
 
@@ -547,7 +583,7 @@ impl Workspace {
                 connection.execute(
                     &format!(
                         "INSERT INTO sync_conflicts (kind, id, field, base, remote, remote_device) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                         ON CONFLICT(kind, id, field) DO UPDATE SET base = excluded.base, remote = excluded.remote, remote_device = excluded.remote_device, detected_at = {NOW}, read = 0"
+                         ON CONFLICT(kind, id, field) DO UPDATE SET base = excluded.base, remote = excluded.remote, remote_device = excluded.remote_device, remote_changed_at = NULL, detected_at = {NOW}, read = 0"
                     ),
                     params![
                         name(kind),
@@ -777,7 +813,7 @@ impl Workspace {
     pub fn sync_conflict(&self, kind: SyncKind, id: &str) -> Result<SyncConflict, Error> {
         let record = self.export_sync_record(kind, id)?;
         let mut statement = self.connection.prepare(
-            "SELECT field, base, remote, remote_device, detected_at, read FROM sync_conflicts WHERE kind = ?1 AND id = ?2 ORDER BY field",
+            "SELECT field, base, remote, remote_device, detected_at, read, remote_changed_at FROM sync_conflicts WHERE kind = ?1 AND id = ?2 ORDER BY field",
         )?;
         let rows = statement
             .query_map(params![name(kind), id], |row| {
@@ -788,6 +824,7 @@ impl Workspace {
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, bool>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -801,9 +838,17 @@ impl Workspace {
             .max()
             .unwrap_or_default();
         let mut fields = Vec::new();
-        for (field, base, remote, remote_device, detected_at, _) in rows {
+        for (field, base, remote, remote_device, detected_at, _, remote_changed_at) in rows {
+            // Version history is the only record of when a field changed here.
+            let local_changed_at = self.connection.query_row(
+                "SELECT MAX(replaced_at) FROM record_versions WHERE kind = ?1 AND record_id = ?2 AND device IS NULL AND instr(' ' || changed || ' ', ' ' || ?3 || ' ') > 0",
+                params![name(kind), id, field],
+                |row| row.get(0),
+            )?;
             fields.push(SyncConflictField {
                 local: value_at(&record, &field).cloned(),
+                local_changed_at,
+                remote_changed_at,
                 field,
                 base: from_json(base)?,
                 remote: from_json(remote)?,

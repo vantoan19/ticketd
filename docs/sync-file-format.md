@@ -97,26 +97,26 @@ A file may arrive before a record it names. The relationship is then left out an
 
 ### Ticket
 
-| Field               | Value                                                                |
-| ------------------- | -------------------------------------------------------------------- |
-| `ref`               | Required. The Ticket reference; it never changes.                    |
-| `title`             | Required, not blank.                                                 |
-| `status`            | Required: Todo, In progress, In review, Done, Canceled or Duplicate. |
-| `project`, `plan`   | GUID of the project and of the Plan.                                 |
-| `parent`            | GUID of the parent ticket.                                           |
-| `blocked_by`        | GUIDs of the tickets that block this one.                            |
+| Field               | Value                                                                 |
+| ------------------- | --------------------------------------------------------------------- |
+| `ref`               | Required. The Ticket reference; it never changes.                     |
+| `title`             | Required, not blank.                                                  |
+| `status`            | Required: Todo, In progress, In review, Done, Canceled or Duplicate.  |
+| `project`, `plan`   | GUID of the project and of the Plan.                                  |
+| `parent`            | GUID of the parent ticket.                                            |
+| `blocked_by`        | GUIDs of the tickets that block this one.                             |
 | `blocked_since`     | One `<GUID> <time>` item per blocking ticket: when it began to block. |
-| `related`           | GUIDs of related tickets whose id sorts after this ticket's.         |
-| `discovered`        | GUIDs of tickets discovered while working on this one.               |
-| `duplicate_of`      | GUID of the canonical ticket.                                        |
-| `duplicate_restore` | The status the ticket returns to when it stops being a duplicate.    |
-| `tags`              | Lowercase tag names.                                                 |
-| `documents`         | GUIDs of linked Documents.                                           |
-| `attachments`       | GUIDs of attached files.                                             |
-| `trashed`           | Whether the ticket is in Trash.                                      |
-| `following`         | Whether the person follows the ticket.                               |
-| `reminder`          | When the Ticket reminder is due.                                     |
-| `source_*`          | External-source provenance; see below.                               |
+| `related`           | GUIDs of related tickets whose id sorts after this ticket's.          |
+| `discovered`        | GUIDs of tickets discovered while working on this one.                |
+| `duplicate_of`      | GUID of the canonical ticket.                                         |
+| `duplicate_restore` | The status the ticket returns to when it stops being a duplicate.     |
+| `tags`              | Lowercase tag names.                                                  |
+| `documents`         | GUIDs of linked Documents.                                            |
+| `attachments`       | GUIDs of attached files.                                              |
+| `trashed`           | Whether the ticket is in Trash.                                       |
+| `following`         | Whether the person follows the ticket.                                |
+| `reminder`          | When the Ticket reminder is due.                                      |
+| `source_*`          | External-source provenance; see below.                                |
 
 The text after the header is the description. Activities and Implementation evidence follow as sections, oldest first.
 

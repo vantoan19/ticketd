@@ -258,6 +258,7 @@ fn the_same_field_changed_on_two_devices_keeps_local_and_waits_for_review() {
         .change_ticket(&reference, title("From B"))
         .unwrap();
 
+    devices.remote.set_now("2026-03-04T05:06:07Z");
     devices.sync(0);
     let report = devices.sync(1);
 
@@ -290,6 +291,15 @@ fn the_same_field_changed_on_two_devices_keeps_local_and_waits_for_review() {
     assert_eq!(field.local, Some(SyncValue::Text("From B".into())));
     assert_eq!(field.remote, Some(SyncValue::Text("From A".into())));
     assert_eq!(field.remote_device.as_deref(), Some("Desk A"));
+    assert_eq!(
+        field.remote_changed_at.as_deref(),
+        Some("2026-03-04T05:06:07Z")
+    );
+    let versions = b.versions(RecordKind::Ticket, &reference).unwrap();
+    assert_eq!(
+        field.local_changed_at.as_deref(),
+        Some(versions[0].replaced_at.as_str())
+    );
 
     // Every device converges on one value, and the conflict stays until someone decides.
     devices.settle([2, 0, 1]);
