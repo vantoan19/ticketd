@@ -6,10 +6,6 @@ use uuid::Uuid;
 
 use crate::{Error, Workspace};
 
-fn valid_code(code: &str) -> bool {
-    code.len() == 2 && code.bytes().all(|byte| byte.is_ascii_uppercase())
-}
-
 fn random_code() -> String {
     // The first two bytes of a version 4 UUID are entirely random.
     Uuid::new_v4().as_bytes()[..2]
@@ -19,11 +15,13 @@ fn random_code() -> String {
 }
 
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
-    // Automated tests fix the code so the references they assert are stable.
-    let code = std::env::var("TICKETD_TEST_DEVICE_CODE")
-        .ok()
-        .filter(|code| valid_code(code))
-        .unwrap_or_else(random_code);
+    // Automated tests fix the code so the references they assert are stable. Only the
+    // crates' dev-dependencies turn this feature on, so no built application has it.
+    let code = if cfg!(feature = "test-device-code") {
+        "KQ".to_owned()
+    } else {
+        random_code()
+    };
     let has_column = |table: &str, column: &str| {
         tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
