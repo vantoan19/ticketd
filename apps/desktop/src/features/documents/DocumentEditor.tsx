@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  CloudCheck,
+  GitCompareArrows,
   ArrowLeft,
   Check,
   FileText,
@@ -46,6 +48,7 @@ import {
 import { DocumentNavigation, PlanNavigation } from "./navigation";
 import { z } from "zod";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import { useRecordSyncState } from "@/features/sync/record-sync";
 
 function DocumentSurface({
   capture,
@@ -675,10 +678,23 @@ export function DocumentEditor({
     </FieldGroup>
   );
   const isSaved = status === "Saved on this computer";
+  const sync = useRecordSyncState(savedDocument?.id ?? null, isSaved);
   const statusLine = (
     <span role="status" className="document-status">
-      {isSaved && <Check aria-hidden="true" />}
-      {capture && isSaved ? "Saved to Documents as you type" : status}
+      {sync === "needs_review" ? (
+        <GitCompareArrows aria-hidden="true" />
+      ) : sync === "synced" ? (
+        <CloudCheck aria-hidden="true" />
+      ) : (
+        isSaved && <Check aria-hidden="true" />
+      )}
+      {sync === "needs_review"
+        ? "Needs review"
+        : sync === "synced"
+          ? "Synced to Drive"
+          : capture && isSaved
+            ? "Saved to Documents as you type"
+            : status}
     </span>
   );
   const saveError = failed && (

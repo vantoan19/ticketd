@@ -1,0 +1,187 @@
+// @vitest-environment jsdom
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
+import { syncApi, type SyncStatus } from "@/lib/sync-api";
+import { SyncStatusProvider } from "./SyncStatusProvider";
+import { useSyncNavigation } from "./sync-status";
+import { notConnected, syncStatus } from "./sync-fixtures";
+
+vi.mock("@/lib/sync-api", async (original) => ({
+  ...(await original<typeof import("@/lib/sync-api")>()),
+  syncApi: { status: vi.fn(), syncNow: vi.fn(), recover: vi.fn() },
+}));
+const api = vi.mocked(syncApi);
+window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+
+const openSettings = vi.fn();
+const openReview = vi.fn();
+/** The app shell: it owns navigation and holds the sidebar footer. */
+function Shell() {
+  useSyncNavigation({ openSettings, openReview });
+  return <SourceStatusFooter />;
+}
+async function footer(status: SyncStatus) {
+  api.status.mockResolvedValue(status);
+  render(
+    <SyncStatusProvider>
+      <Shell />
+    </SyncStatusProvider>,
+  );
+  await waitFor(() => expect(api.status).toHaveBeenCalled());
+}
+const line = () => screen.findByRole("button", { expanded: false });
+async function popover() {
+  fireEvent.click(await line());
+  return screen.findByRole("dialog", { name: "Google Drive sync" });
+}
+const change = (title: string) => ({
+  kind: "ticket" as const,
+  id: title,
+  reference: "T-KQ12",
+  title,
+});
+
+test("the footer has no Drive line until this Workspace syncs", async () => {
+  await footer(notConnected());
+  await Promise.resolve();
+  expect(screen.queryByRole("group")).toBeNull();
+});
+
+test("uploaded: the line says Drive synced and when, and the popover offers Sync now", async () => {
+  await footer(syncStatus());
+  expect((await line()).textContent).toBe("Drive synced1 min ago");
+  expect(screen.getByRole("group", { name: "Sync" })).toBeTruthy();
+  const dialog = await popover();
+  expect(dialog.textContent).toContain("Last synced 1 min ago");
+  expect(within(dialog).queryByRole("list")).toBeNull();
+  const now = syncStatus({ last_synced_at: new Date().toISOString() });
+  api.syncNow.mockResolvedValue(now);
+  api.status.mockResolvedValue(now);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Sync now" }));
+  expect(await within(dialog).findByText("Last synced just now")).toBeTruthy();
+});
+
+test("upload pending: the line counts the changes and says they are saved here", async () => {
+  await footer(
+    syncStatus({
+      state: "upload_pending",
+      pending_uploads: [change("A"), change("B"), change("C")],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "Uploading 3 changes…Saved on this computer",
+  );
+  const dialog = await popover();
+  expect(dialog.textContent).toContain("Uploading to Drive");
+  expect(within(dialog).getByRole("listitem").textContent).toBe(
+    "3 changes uploading",
+  );
+});
+
+test("saved locally: offline changes wait, and the popover offers Try now", async () => {
+  await footer(
+    syncStatus({
+      state: "saved_locally",
+      recovery: "offline",
+      pending_uploads: [change("A"), change("B"), change("C")],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "Saved on this computerOffline · 3 changes waiting",
+  );
+  // Offline needs no decision, so the footer carries no action of its own.
+  expect(screen.getAllByRole("button")).toHaveLength(1);
+  const dialog = await popover();
+  expect(within(dialog).getByRole("listitem").textContent).toBe(
+    "3 changes waiting to upload",
+  );
+  api.syncNow.mockRejectedValue(new Error("no network"));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Try now" }));
+  expect((await within(dialog).findByRole("alert")).textContent).toContain(
+    "no network",
+  );
+});
+
+test("Attachment download pending: the line counts files and what is left", async () => {
+  await footer(
+    syncStatus({
+      state: "attachment_download_pending",
+      attachment_downloads: { count: 2, bytes_left: 6.4 * 1048576 },
+    }),
+  );
+  expect((await line()).textContent).toBe("Downloading 2 files…6.4 MiB left");
+  const dialog = await popover();
+  expect(within(dialog).getByRole("listitem").textContent).toBe(
+    "2 Attachments downloading",
+  );
+});
+
+test("needs review: the line counts the tickets and Review opens them", async () => {
+  await footer(
+    syncStatus({
+      state: "needs_attention",
+      needs_review: [
+        {
+          kind: "ticket",
+          id: "3f2c",
+          reference: "T-KQ12",
+          title: "Rate-limit failed login attempts",
+        },
+      ],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "1 ticket needs reviewSynced 1 min ago",
+  );
+  const dialog = await popover();
+  expect(dialog.textContent).toContain("Changed on two desktops");
+  expect(within(dialog).getByRole("listitem").textContent).toBe(
+    "Rate-limit failed login attempts",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Review" }));
+  expect(openReview).toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("an expired sign-in puts Reconnect on the footer line", async () => {
+  await footer(
+    syncStatus({ state: "needs_attention", recovery: "authorization_expired" }),
+  );
+  expect((await line()).textContent).toBe(
+    "Drive sign-in expiredSaved on this computer",
+  );
+  api.recover.mockResolvedValue(syncStatus());
+  api.status.mockResolvedValue(syncStatus());
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  await waitFor(async () =>
+    expect((await line()).textContent).toBe("Drive synced1 min ago"),
+  );
+  expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
+});
+
+test("the popover is reachable by keyboard and leads to Sync settings", async () => {
+  await footer(syncStatus());
+  const trigger = await line();
+  expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+  const dialog = await popover();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Settings" }));
+  expect(openSettings).toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
