@@ -195,3 +195,49 @@ test("a field inside an Activity is named by the Activity, and its text can be e
   expect(await screen.findByText("Activity from Today: text")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Edit instead" })).toBeTruthy();
 });
+
+test("each edited text keeps its own words when two are edited and saved", async () => {
+  const activity = "0c8f3a51-6f0e-4a0b-9d55-2f1f6f3f8a10:body";
+  vi.mocked(syncReview.conflict).mockResolvedValue({
+    ...conflict,
+    fields: [
+      conflict.fields[1]!,
+      {
+        ...conflict.fields[1]!,
+        field: activity,
+        section: {
+          kind: "activity",
+          reported_at: new Date().toISOString(),
+          name: null,
+        },
+        local: "Started here",
+        remote: "Started there",
+      },
+    ],
+  });
+  open();
+  await screen.findByRole("radio", { name: "Description from this desktop" });
+  for (const button of screen.getAllByRole("button", { name: "Edit instead" }))
+    fireEvent.click(button);
+  const description = screen.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "Edited description",
+  });
+  const text = screen.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "Edited activity from today: text",
+  });
+  // Opening the second editor leaves the first one's text alone.
+  expect(description.value).toBe("Allow 5 failed attempts");
+  expect(text.value).toBe("Started here");
+  fireEvent.change(description, { target: { value: "Allow 7" } });
+  fireEvent.change(text, { target: { value: "Started everywhere" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(syncReview.resolve).toHaveBeenCalledWith(
+      { kind: "ticket", id: "guid-12" },
+      [
+        { field: "body", choice: "edited", value: "Allow 7" },
+        { field: activity, choice: "edited", value: "Started everywhere" },
+      ],
+    ),
+  );
+});

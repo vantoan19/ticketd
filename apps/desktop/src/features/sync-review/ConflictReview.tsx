@@ -39,7 +39,8 @@ export function ConflictReview({
   const { kind, id } = summary;
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
-  const [draft, setDraft] = useState("");
+  // One edit draft per field: two texts can be edited in the same review.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -67,7 +68,7 @@ export function ConflictReview({
         conflict.fields.map(({ field }): Resolution => {
           const choice = choiceOf(field);
           return choice === "edited"
-            ? { field, choice, value: draft }
+            ? { field, choice, value: drafts[field] ?? "" }
             : { field, choice };
         }),
       );
@@ -192,9 +193,14 @@ export function ConflictReview({
                           <Textarea
                             autoFocus
                             aria-label={`Edited ${label.toLowerCase()}`}
-                            value={draft}
+                            value={drafts[field] ?? ""}
                             disabled={busy}
-                            onChange={(event) => setDraft(event.target.value)}
+                            onChange={(event) =>
+                              setDrafts({
+                                ...drafts,
+                                [field]: event.target.value,
+                              })
+                            }
                           />
                         </>
                       ) : (
@@ -206,7 +212,10 @@ export function ConflictReview({
                             disabled={busy}
                             onClick={() => {
                               // The edit starts from the side that was selected.
-                              setDraft(choice === "remote" ? remote : local);
+                              setDrafts({
+                                ...drafts,
+                                [field]: choice === "remote" ? remote : local,
+                              });
                               setChoices({ ...choices, [field]: "edited" });
                             }}
                           >
