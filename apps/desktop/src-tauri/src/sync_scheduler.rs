@@ -14,6 +14,10 @@ use ticketd_core::{
 };
 
 /// How often Drive is checked for changes unless the person chose otherwise.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the binding uses it once a Workspace can connect")
+)]
 pub const DEFAULT_POLL: Duration = Duration::from_secs(60);
 /// The shortest poll a setting may ask for.
 pub const MIN_POLL: Duration = Duration::from_secs(30);
@@ -108,6 +112,13 @@ impl Scheduler {
     }
 
     /// Sync now: waits for a run in progress, then runs. `None` when not connected.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "its command answers with the sync status, which is not built yet"
+        )
+    )]
     pub fn sync_now(&self, now: Duration) -> Result<Option<SyncReport>, Error> {
         let Some(binding) = self.binding()? else {
             return Ok(None);
