@@ -1,0 +1,744 @@
+// @vitest-environment jsdom
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import {
+  ChatClientContext,
+  type TranscriptItem,
+} from "@/features/chats/client";
+import { ChatProvider } from "@/features/chats/ChatProvider";
+import { ChatsView } from "@/features/chats/ChatsView";
+import {
+  chatState,
+  createMockChatClient,
+  type MockChat,
+} from "@/features/chats/mock-client";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
+afterEach(cleanup);
+
+const at = "2026-11-10T10:00:00Z";
+const reply = (id: string, text: string): TranscriptItem => ({
+  id,
+  at,
+  kind: "response",
+  text,
+  state: "complete",
+});
+const approval: TranscriptItem = {
+  id: "req-1",
+  at,
+  kind: "request",
+  request: "approval",
+  title: "Codex wants to run a command",
+  subject: "npm install @pagerduty/pdjs",
+  options: [
+    { id: "once", label: "Allow once" },
+    { id: "session", label: "Allow for this session" },
+    { id: "deny", label: "Deny" },
+  ],
+  free_text: false,
+  state: "pending",
+};
+
+async function open(chats: MockChat[], title?: string) {
+  const client = createMockChatClient({
+    enabled: true,
+    chats,
+    records: [
+      {
+        kind: "ticket",
+        id: "t14",
+        reference: "T-14",
+        title: "Show the remaining wait time",
+        status: "Todo",
+      },
+      { kind: "document", id: "d1", title: "Login hardening spec" },
+    ],
+  });
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <ChatsView />
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  const first = chats[0];
+  if (first) {
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(title ?? first.chat.title),
+      }),
+    );
+    await screen.findByRole("heading", { name: title ?? first.chat.title });
+  }
+  return client;
+}
+const one = (over: Parameters<typeof chatState>[0], items?: TranscriptItem[]) =>
+  [{ chat: chatState(over), ...(items && { items }) }] satisfies MockChat[];
+const composer = (name = "Message Codex") => screen.getByLabelText(name);
+const type = (text: string, name?: string) =>
+  fireEvent.change(composer(name), { target: { value: text } });
+const button = (name: string | RegExp) => screen.getByRole("button", { name });
+const noButton = (name: string | RegExp) =>
+  expect(screen.queryByRole("button", { name })).toBeNull();
+const openMenu = (name: string) =>
+  fireEvent.keyDown(button(name), { key: "Enter" });
+
+test("an idle Chat sends what was typed and shows the turn as working, not done", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  expect(button("Send")).toHaveProperty("disabled", true);
+  type("Add a rate limiter");
+  fireEvent.click(button("Send"));
+  expect(await screen.findByText("Add a rate limiter")).toBeTruthy();
+  expect((await screen.findByRole("status")).textContent).toContain("Working");
+  await waitFor(() => expect(composer()).toHaveProperty("value", ""));
+  // With nothing typed, the one button is Stop.
+  expect(button("Stop")).toBeTruthy();
+  noButton("Send");
+});
+
+test("while a turn runs, typed text can steer it or be queued, and the queue stays visible", async () => {
+  await open(one({ id: "c1", title: "Limiter", activity: "working" }));
+  type("also cover the admin login");
+  expect(
+    screen.getByText(
+      "Send adds this to the turn in progress. Queue holds it until the turn ends.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(button("Queue until this turn ends"));
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("also cover the admin login")).toBeTruthy();
+  type("use Redis");
+  fireEvent.click(button("Send"));
+  expect(await screen.findByText("use Redis")).toBeTruthy();
+  expect(within(queue).queryByText("use Redis")).toBeNull();
+  fireEvent.click(button("Remove queued message"));
+  await waitFor(() =>
+    expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull(),
+  );
+});
+
+test("a harness that cannot be steered only offers Queue, and says why", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      steering: { available: false },
+    }),
+  );
+  type("then update the docs");
+  noButton("Send");
+  expect(
+    screen.getByText(
+      "Codex can't take messages mid-turn. This will be queued until the turn ends.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(button("Queue"));
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("then update the docs")).toBeTruthy();
+});
+
+test("Stop marks the turn, pauses the queue and waits for Resume", async () => {
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      queue: [{ id: "q1", text: "then add tests" }],
+    }),
+  );
+  fireEvent.click(button("Stop"));
+  expect(
+    await screen.findByText(
+      "You stopped this turn. Edits already made are kept.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Queue paused. Nothing sends until you resume."),
+  ).toBeTruthy();
+  expect(screen.getByText("then add tests")).toBeTruthy();
+  expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
+  fireEvent.click(button("Resume"));
+  await waitFor(() =>
+    expect(
+      screen.queryByText("Queue paused. Nothing sends until you resume."),
+    ).toBeNull(),
+  );
+});
+
+test("an approval is answered once and becomes a receipt without buttons", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
+  );
+  const card = screen.getByRole("region", { name: "Approval request" });
+  expect(within(card).getByText("npm install @pagerduty/pdjs")).toBeTruthy();
+  fireEvent.click(within(card).getByRole("button", { name: "Allow once" }));
+  const receipt = await screen.findByRole("region", {
+    name: "Answered request",
+  });
+  expect(receipt.textContent).toContain('You chose "Allow once"');
+  expect(within(receipt).queryByRole("button")).toBeNull();
+});
+
+test("an expired request cannot be answered", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [{ ...approval, state: "expired" }]),
+  );
+  const card = screen.getByRole("region", { name: "Expired request" });
+  expect(card.textContent).toContain(
+    "Expired. The turn ended before this was answered.",
+  );
+  expect(within(card).queryByRole("button")).toBeNull();
+});
+
+test("answering a request that expired behind a lost update is refused, then the view resyncs", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
+  );
+  // The expiry never reaches this view.
+  client.dropChanges("c1", 1);
+  act(() => client.push("c1", { ...approval, state: "expired" }));
+  fireEvent.click(button("Allow once"));
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "This request is no longer waiting for an answer.",
+  );
+  // The next change exposes the gap; the view takes a fresh snapshot.
+  act(() => client.patch("c1", { activity: "idle" }));
+  expect(
+    await screen.findByRole("region", { name: "Expired request" }),
+  ).toBeTruthy();
+  noButton("Allow once");
+});
+
+test("a question takes an option or a typed answer", async () => {
+  const question: TranscriptItem = {
+    id: "q-1",
+    at,
+    kind: "request",
+    request: "question",
+    title: "What should the limiter do when Redis is unreachable?",
+    options: [
+      {
+        id: "open",
+        label: "Fail open",
+        description: "Let logins through and log a warning",
+      },
+      { id: "closed", label: "Fail closed" },
+    ],
+    free_text: true,
+    state: "pending",
+  };
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+  );
+  expect(
+    screen.getByRole("region", { name: "Question from Codex" }),
+  ).toBeTruthy();
+  expect(screen.getByText("Or type your own answer below.")).toBeTruthy();
+  type("Fail open for five minutes", "Answer Codex");
+  fireEvent.click(button("Send"));
+  expect((await screen.findByText(/You answered/)).textContent).toBeTruthy();
+  const { items } = await client.openChat("c1");
+  expect(items.filter((item) => item.kind === "user")).toEqual([]);
+});
+
+test("an uncertain delivery is never resent unless the person says so", async () => {
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "interrupted",
+        problem: { kind: "uncertain_delivery", message_id: "u1" },
+      },
+      [
+        {
+          id: "u1",
+          at,
+          kind: "user",
+          text: "Ship it",
+          delivery: "uncertain",
+        },
+      ],
+    ),
+  );
+  expect(screen.getByText("Not confirmed")).toBeTruthy();
+  expect(screen.getByText("Did Codex get your last message?")).toBeTruthy();
+  expect(screen.getByText("Needs your decision")).toBeTruthy();
+  type("hello?");
+  expect(button("Send")).toHaveProperty("disabled", true);
+  fireEvent.click(button("Don't send"));
+  expect(await screen.findByText("Not sent")).toBeTruthy();
+  const { items, chat } = await client.openChat("c1");
+  expect(items).toHaveLength(1);
+  expect(chat.activity).toBe("idle");
+});
+
+test("failures say exactly what stopped the Chat and how to recover", async () => {
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "failed",
+        problem: { kind: "usage_limit", resets: "today at 3:00 PM" },
+        queue: [{ id: "q1", text: "then add tests" }],
+      },
+      [reply("r1", "Half way there.")],
+    ),
+  );
+  const notice = screen.getByRole("alert");
+  expect(notice.textContent).toContain("Codex reached your usage limit");
+  expect(notice.textContent).toContain(
+    "It says the limit resets today at 3:00 PM. Your work so far is kept. ticketd won't switch model or billing.",
+  );
+  // Output and queued input are retained; nothing is sent for the person.
+  expect(screen.getAllByText("Half way there.").length).toBeGreaterThan(0);
+  expect(screen.getByText("then add tests")).toBeTruthy();
+  expect(screen.getByText("Stopped: usage limit reached")).toBeTruthy();
+
+  act(() =>
+    client.patch("c1", {
+      problem: {
+        kind: "sandbox_unavailable",
+        help_url: "https://example.com/sandbox",
+      },
+    }),
+  );
+  const sandbox = await screen.findByText("Codex can't run commands here");
+  expect(sandbox.closest("[data-tone]")?.getAttribute("data-tone")).toBe(
+    "error",
+  );
+  expect(button(/Sandbox help/)).toBeTruthy();
+
+  act(() =>
+    client.patch("c1", {
+      problem: { kind: "failed", message: "The process exited with code 1." },
+    }),
+  );
+  expect(
+    (await screen.findByText("Codex stopped with an error")).parentElement
+      ?.textContent,
+  ).toContain(
+    "The process exited with code 1. What it finished before that is kept; the turn is not complete.",
+  );
+  fireEvent.click(button("Check again"));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
+test("a missing folder keeps the Chat readable and offers another folder", async () => {
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Reset email",
+        activity: "failed",
+        folder: { missing: true, path: "~/ticketd/chats/reset-email" },
+        problem: {
+          kind: "folder_missing",
+          path: "~/ticketd/chats/reset-email",
+        },
+      },
+      [reply("r1", "Drafted the copy.")],
+    ),
+  );
+  expect(screen.getAllByText("Drafted the copy.").length).toBeGreaterThan(0);
+  expect(screen.queryByLabelText("Message Codex")).toBeNull();
+  expect(button("Harness and folder").textContent).toBe("Codex");
+  client.nextFolder = "~/code/emails";
+  fireEvent.click(button("Pick another folder…"));
+  expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
+  expect(button("Harness and folder").textContent).toBe("Codex · emails");
+});
+
+test("lost native history resumes the same Chat in a fresh session with chosen history", async () => {
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "failed",
+        problem: { kind: "history_lost" },
+      },
+      [
+        {
+          id: "u1",
+          at,
+          kind: "user",
+          text: "Add a limiter",
+          delivery: "delivered",
+        },
+        reply("r1", "Added the limiter."),
+      ],
+    ),
+  );
+  expect(screen.queryByLabelText("Message Codex")).toBeNull();
+  fireEvent.click(button("Resume in a fresh session…"));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Resume in a fresh session",
+  });
+  const choices = within(dialog).getByRole("radiogroup", {
+    name: "History to give the new session",
+  });
+  expect(
+    within(choices).getByRole("radio", { name: /The last response/ }),
+  ).toHaveProperty("checked", true);
+  expect(within(choices).getByText("2 messages")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
+  expect(
+    await screen.findByText("Fresh session · started with the last response"),
+  ).toBeTruthy();
+  expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
+  // Nothing was sent on the person's behalf.
+  const { items } = await client.openChat("c1");
+  expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+});
+
+test("picking messages turns the transcript into the history picker", async () => {
+  await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "failed",
+        problem: { kind: "history_lost" },
+      },
+      [
+        {
+          id: "u1",
+          at,
+          kind: "user",
+          text: "Add a limiter",
+          delivery: "delivered",
+        },
+        reply("r1", "Added the limiter."),
+      ],
+    ),
+  );
+  fireEvent.click(button("Resume in a fresh session…"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(
+    within(dialog).getByRole("radio", { name: "Let me pick messages…" }),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
+  expect(await screen.findByText("0 of 2 messages picked")).toBeTruthy();
+  expect(button("Resume")).toHaveProperty("disabled", true);
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: "Include the reply: Added the limiter.",
+    }),
+  );
+  expect(screen.getByText("1 of 2 messages picked")).toBeTruthy();
+  fireEvent.click(button("Resume"));
+  expect(
+    await screen.findByText("Fresh session · started with 1 picked message"),
+  ).toBeTruthy();
+});
+
+test("archive keeps the work running; trash stops it and restore re-runs nothing", async () => {
+  const client = await open(
+    one({ id: "kept", title: "Limiter", activity: "working" }),
+  );
+  openMenu("Chat actions");
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+  expect(await screen.findByRole("button", { name: "Unarchive" })).toBeTruthy();
+  expect(
+    await screen.findByText("No Chats yet. Start one with New Chat."),
+  ).toBeTruthy();
+  expect(button("Stop")).toBeTruthy();
+  expect((await client.openChat("kept")).chat.activity).toBe("working");
+
+  openMenu("Show active, archived or trashed Chats");
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
+  expect(await screen.findByRole("heading", { name: "Archived" })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: /Limiter/ }));
+  await screen.findByRole("button", { name: "Unarchive" });
+
+  openMenu("Chat actions");
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Move to Trash" }),
+  );
+  expect(await screen.findByText(/^In Trash\. It was stopped/)).toBeTruthy();
+  expect(screen.queryByLabelText("Message Codex")).toBeNull();
+  expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull();
+  fireEvent.click(button("Restore"));
+  expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
+  const { chat, items } = await client.openChat("kept");
+  expect(chat).toMatchObject({ retention: "active", activity: "interrupted" });
+  expect(items.filter((item) => item.kind === "user")).toEqual([]);
+});
+
+test("the list says which Chats need the person, in words as well as the dot", async () => {
+  await open([
+    {
+      chat: chatState({
+        id: "c1",
+        title: "Alert on-call",
+        activity: "waiting",
+        links: [
+          {
+            kind: "ticket",
+            id: "t13",
+            reference: "T-13",
+            title: "Page on-call",
+            status: "In progress",
+          },
+        ],
+      }),
+      items: [approval],
+    },
+    { chat: chatState({ id: "c2", title: "Limiter", activity: "working" }) },
+  ]);
+  const rows = within(screen.getByRole("list", { name: "Chats" }));
+  const waiting = rows.getByRole("button", { name: /Alert on-call/ });
+  expect(waiting.textContent).toContain("Waiting for you");
+  expect(waiting.textContent).toContain("T-13 · web-app");
+  expect(waiting.getAttribute("aria-current")).toBe("true");
+  expect(rows.getByRole("button", { name: /Limiter/ }).textContent).toContain(
+    "Working…",
+  );
+});
+
+test("a view that missed changes resyncs from a snapshot instead of showing a broken transcript", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [
+      { id: "r1", at, kind: "response", text: "Reading", state: "streaming" },
+    ]),
+  );
+  client.dropChanges("c1", 2);
+  act(() => {
+    client.streamText("c1", "r1", " the spec,");
+    client.streamText("c1", "r1", " then the tests,");
+    client.streamText("c1", "r1", " then writing.");
+  });
+  expect(
+    await screen.findByText("Reading the spec, then the tests, then writing."),
+  ).toBeTruthy();
+});
+
+test("a large transcript keeps up with many small streamed updates", async () => {
+  const history: TranscriptItem[] = Array.from({ length: 300 }, (_, index) =>
+    index % 2
+      ? reply(`r${index}`, `Reply ${index}`)
+      : {
+          id: `u${index}`,
+          at,
+          kind: "user",
+          text: `Message ${index}`,
+          delivery: "delivered",
+        },
+  );
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [
+      ...history,
+      { id: "live", at, kind: "response", text: "", state: "streaming" },
+    ]),
+  );
+  expect(screen.getByText("Message 0")).toBeTruthy();
+  // Deltas arrive in separate ticks, as coalesced host updates do.
+  for (let batch = 0; batch < 20; batch += 1)
+    act(() => {
+      for (let part = 0; part < 25; part += 1)
+        client.streamText("c1", "live", `${batch * 25 + part} `);
+    });
+  const expected = Array.from({ length: 500 }, (_, index) => index).join(" ");
+  expect(await screen.findByText(expected)).toBeTruthy();
+  expect(screen.getByText("Reply 299")).toBeTruthy();
+});
+
+test("steps open into a list, with output and an honest truncation note", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      {
+        id: "s1",
+        at,
+        kind: "steps",
+        steps: [
+          { verb: "read", target: "src/auth/login.ts", more: 5 },
+          {
+            verb: "edited",
+            target: "src/auth/limiter.ts",
+            more: 0,
+            result: "+48",
+          },
+          {
+            verb: "ran",
+            target: "npm run test:all",
+            more: 0,
+            result: "1 failed",
+            output: "FAIL limiter.test.ts",
+            truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
+          },
+        ],
+      },
+    ]),
+  );
+  const line = button("Read 6 files, edited 1 file, ran 1 command");
+  expect(line.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(line);
+  expect(line.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("FAIL limiter.test.ts")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Truncated: ticketd keeps the last 1 MiB of 3.4 MiB. Codex saw all of it.",
+    ),
+  ).toBeTruthy();
+});
+
+test("what the agent changed in ticketd is listed where it happened", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      {
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          {
+            kind: "status",
+            reference: "T-12",
+            title: "Rate-limit failed login attempts",
+            from: "In progress",
+            to: "In review",
+          },
+          { kind: "document", document_id: "d9", title: "Reset email copy" },
+        ],
+      },
+    ]),
+  );
+  const block = within(
+    screen.getByRole("list", { name: "Updated in ticketd" }),
+  );
+  expect(block.getByText("In progress → In review")).toBeTruthy();
+  expect(block.getByText("Document created")).toBeTruthy();
+  expect(
+    screen.getByText('Created the Document "Reset email copy"'),
+  ).toBeTruthy();
+});
+
+test("a response is saved as a Document only when asked", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter" }, [
+      reply("r1", "# Login rate limiter\n\nWhat was built."),
+    ]),
+  );
+  fireEvent.click(button("Save as Document"));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Save as Document",
+  });
+  expect(within(dialog).getByLabelText("Title")).toHaveProperty(
+    "value",
+    "Login rate limiter",
+  );
+  expect(client.savedDocuments).toEqual([]);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  expect(
+    await screen.findByText("Saved “Login rate limiter” to Documents."),
+  ).toBeTruthy();
+  expect(client.savedDocuments).toEqual(["Login rate limiter"]);
+});
+
+test("records are linked by title and unlinked from their chip", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  fireEvent.click(button("Link a ticket or Document"));
+  fireEvent.change(
+    await screen.findByLabelText("Search tickets and Documents"),
+    { target: { value: "wait" } },
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /T-14/ }));
+  const links = within(
+    await screen.findByRole("group", { name: "Linked records" }),
+  );
+  expect(
+    await links.findByRole("button", {
+      name: "Open T-14 Show the remaining wait time",
+    }),
+  ).toBeTruthy();
+  fireEvent.click(
+    links.getByRole("button", {
+      name: "Remove the link to T-14 Show the remaining wait time",
+    }),
+  );
+  await waitFor(() =>
+    expect(links.queryByRole("button", { name: /Open T-14/ })).toBeNull(),
+  );
+});
+
+test("the folder popover names the other Chats sharing the folder", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      harness: { permissions: "Uses your Codex settings." },
+      folder: { shared_with: ["Alert on-call"] },
+    }),
+  );
+  fireEvent.click(button("Harness and folder"));
+  const popover = await screen.findByRole("dialog", {
+    name: "Harness and folder",
+  });
+  expect(popover.textContent).toContain("~/code/web-app");
+  expect(popover.textContent).toContain("Also used by Alert on-call");
+  expect(popover.textContent).toContain("Uses your Codex settings.");
+});
+
+test("after reopening the window the view says it is catching up while work continues", async () => {
+  await open(
+    one({
+      id: "reopened",
+      title: "Limiter",
+      activity: "working",
+      catching_up: true,
+    }),
+  );
+  expect(screen.getByRole("status").textContent).toBe("Catching up…");
+  expect(button("Stop")).toBeTruthy();
+});
+
+test("New Chat keeps the draft when the harness is missing and starts once it is found", async () => {
+  const client = await open([]);
+  client.setHarnesses([
+    {
+      id: "codex",
+      name: "Codex",
+      status: "not_installed",
+      help_url: "https://example.com/install",
+    },
+  ]);
+  client.nextFolder = "~/code/web-app";
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  expect(
+    await screen.findByRole("heading", { name: "What should we work on?" }),
+  ).toBeTruthy();
+  type("Draft the reset email", "Describe a task or ask a question");
+  expect(await screen.findByText("Codex isn't installed")).toBeTruthy();
+  expect(button("Send")).toHaveProperty("disabled", true);
+
+  client.setHarnesses([{ id: "codex", name: "Codex", status: "ready" }]);
+  fireEvent.click(button("Check again"));
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  expect(composer("Describe a task or ask a question")).toHaveProperty(
+    "value",
+    "Draft the reset email",
+  );
+  fireEvent.click(button("Send"));
+  expect(
+    await screen.findByRole("heading", { name: "Draft the reset email" }),
+  ).toBeTruthy();
+  // No Project or ticket was needed; ticketd keeps a folder for the Chat.
+  expect((await client.openChat("chat-1")).chat.folder.managed).toBe(true);
+});

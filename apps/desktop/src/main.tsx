@@ -22,6 +22,22 @@ if (import.meta.env.DEV && window.location.hash === "#plate-prototype") {
       );
     },
   );
+} else if (import.meta.env.DEV && window.location.hash === "#chat-fixtures") {
+  // The Chat screens over in-memory fixtures; no harness is started.
+  void Promise.all([
+    import("@/features/chats/fixtures"),
+    import("@/features/chats/client"),
+  ]).then(([{ fixtureChatClient }, { ChatClientContext }]) => {
+    applicationRoot.render(
+      <StrictMode>
+        <DraftRecoveryProvider>
+          <ChatClientContext value={fixtureChatClient()}>
+            <App />
+          </ChatClientContext>
+        </DraftRecoveryProvider>
+      </StrictMode>,
+    );
+  });
 } else {
   applicationRoot.render(
     <StrictMode>
