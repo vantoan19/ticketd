@@ -18,4 +18,7 @@ Use native GitHub sub-issues and blocking dependencies where supported by the in
 
 When a skill says to publish to the tracker, create a GitHub issue here. When it says to fetch a ticket, read the issue and its comments. Wayfinder maps and child tickets also live in GitHub Issues.
 
-**PRs as a request surface: no.**
+Use issues for product requests and implementation planning. Small fixes and
+documentation improvements may be submitted directly as PRs; see
+[contribution guidance](../../CONTRIBUTING.md). Substantial changes need scope
+discussion before implementation.

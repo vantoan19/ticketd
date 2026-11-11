@@ -1,6 +1,7 @@
 {
   "name": "ticketd",
   "private": true,
+  "repository": "github:vantoan19/ticketd",
   "version": "0.1.0",
   "type": "module",
   "workspaces": [

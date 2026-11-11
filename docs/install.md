@@ -1,5 +1,12 @@
 # Install ticketd
 
+## Availability
+
+Public signed releases are not available yet. To run ticketd now, follow
+[development setup](development.md). Maintainer workflow artifacts are temporary
+inspection builds with seven-day retention, not stable download links. The
+instructions below describe those packaged artifacts when one has been supplied.
+
 Each distribution download contains a desktop installer and the matching `ticketd`
 CLI. Select macOS 26 on Apple Silicon, Ubuntu 24.04 x86-64, or Windows 11
 x86-64. WSL interoperability and mobile distribution are outside this matrix.
@@ -21,8 +28,18 @@ external harness. Supply the absolute path to the executable if the harness
 cannot discover it on PATH. Desktop and CLI use the same default workspace for
 the same operating-system user and environment; launch both under that user.
 On Linux `XDG_DATA_HOME` changes the location, so set it consistently for both.
-Registered project paths belong to the native OS environment; see the repository
-README for project context commands.
+Registered project paths belong to the native OS environment; see
+[CLI project context](cli.md#project-context) for registration commands.
+
+## Upgrades and removal
+
+Use desktop and CLI from the same version. Run `ticketd workspace` to inspect the
+path and supported format without changing data. Most other workspace commands
+may create or migrate the database. Back up before upgrading; an older binary
+may refuse a newer workspace, and downgrade compatibility is not guaranteed.
+Close both desktop and CLI processes before replacing binaries or restoring a backup.
+See [workspace operations](../crates/ticketd-cli/skill-data/workspace.md) for backup
+and restore commands and [export documentation](export.md) for what they preserve.
 
 Uninstall the desktop through the OS or package manager and remove the copied
 CLI executable. The workspace is stored separately in the user's application-data
