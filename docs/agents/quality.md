@@ -38,7 +38,9 @@
 
 `./scripts/check` checks Markdown, whitespace, Rust formatting/Clippy/tests, and frontend formatting/lint/types/tests. Install dependencies with `npm ci`, build the frontend with `npm run build`, and use the pinned Rust toolchain before running it. See [development setup](../development.md) for platform prerequisites and a disposable workspace.
 
-CI runs the same check command and builds the frontend, desktop, and CLI on the self-hosted Linux runner for every pull request. macOS and Windows run `cargo test` and build the desktop and CLI on pushes to `main`, nightly, and on pull requests labeled `platform-check`. All jobs use pinned toolchains and committed lockfiles. Public-PR runner safety must be reviewed before changing repository visibility.
+CI runs the same check command and builds the frontend, desktop, and CLI on a fresh GitHub-hosted Ubuntu runner for every pull request. macOS and Windows run `cargo test` and build the desktop and CLI on pushes to `main`, nightly, and on pull requests labeled `platform-check`. All jobs use pinned toolchains and committed lockfiles.
+
+Keep self-hosted runners disconnected from this repository: a contribution can change its workflow's runner selection. PR checks use read-only permissions and no distribution credentials. Credential-bearing distribution builds run only by manual dispatch on `main`. Before changing repository visibility or CI permissions, follow the [repository CI settings](../releasing.md#repository-ci-settings).
 
 Review should assess interface simplicity, domain correctness, error paths, and whether tests protect observable behavior. CI checks mechanics; it does not replace design review. Use dependency updates scoped to the intended change and pin CI actions to commit SHAs.
 

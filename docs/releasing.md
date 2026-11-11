@@ -7,7 +7,7 @@ have already been met.
 ## Current build workflow
 
 The [Quality workflow](../.github/workflows/quality.yml) has a manual `distribution`
-input. It builds the standalone CLI and desktop installer for macOS Apple Silicon,
+input, accepted only on `main`. It builds the standalone CLI and desktop installer for macOS Apple Silicon,
 Ubuntu 24.04 x86-64, and Windows x86-64. `linux_only` limits that distribution run
 to Linux. The workflow uploads artifacts with seven-day retention. It does not
 publish a GitHub Release or configure signing/notarization.
@@ -16,6 +16,35 @@ Distribution CI requires a platform-specific Google desktop app registration;
 see [publisher configuration](install.md#publisher-and-developer-configuration).
 An independent local build can omit Google configuration and keep Drive disabled;
 see [development packaging](development.md#build-packages).
+
+## Repository CI settings
+
+All jobs use standard GitHub-hosted runners. Keep repository-level self-hosted
+runner registrations empty and, if the repository moves into an organization,
+exclude it from self-hosted runner groups. A workflow condition alone cannot
+protect a registered runner from a PR that changes the workflow.
+
+Keep the default workflow token read-only, with permission to approve pull
+requests disabled. Use `pull_request` for contribution checks; privileged
+workflows must not check out or execute unreviewed PR content. Distribution
+credentials belong only in the manual `main` build path.
+
+At public launch, configure and verify these settings:
+
+- Require workflow approval for all outside collaborators. This is an execution
+  gate, not a substitute for runner isolation or code review.
+- Protect `main` with pull requests and the required `Quality checks (Linux)`
+  check from GitHub Actions; require the branch to be up to date. Keep force
+  pushes and branch deletion disabled. Optional labeled platform jobs are not
+  universally required checks.
+- Verify a harmless PR from an outside fork: approval is required, Linux runs
+  on a GitHub-hosted runner, distribution is skipped, and the required check
+  reports against the PR before merge.
+
+GitHub may reject fork-approval or protection configuration while this repository
+is private on its current plan. Record those pending checks in the launch issue
+and apply them when public visibility makes them available. Keep the visibility
+change distinct from signed-release publication.
 
 ## Prepare a release candidate
 
