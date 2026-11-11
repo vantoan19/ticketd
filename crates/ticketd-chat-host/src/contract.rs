@@ -1,0 +1,507 @@
+//! The internal adapter interface shared by the Codex adapter, the Claude bridge
+//! transport and the fake adapter. It is not the React interface.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use tokio::sync::mpsc;
+
+/// Capacity of a runtime's event channel. A full channel backpressures the adapter's
+/// protocol reader, so the supervisor must keep receiving while commands are pending.
+pub const EVENT_BUFFER: usize = 256;
+
+/// Upper bound for one [`ProviderDetail`] payload.
+pub const MAX_PROVIDER_DETAIL_BYTES: usize = 16 * 1024;
+
+macro_rules! string_id {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub struct $name(pub String);
+
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Self {
+                Self(value.into())
+            }
+        }
+    };
+}
+
+string_id!(
+    /// ticketd's identity for one submission attempt. It supplies correlation, not a
+    /// provider-side idempotency guarantee.
+    SubmissionId
+);
+string_id!(
+    /// The harness's own session identity, distinct from Chat identity.
+    NativeSessionId
+);
+string_id!(
+    /// A turn identity as the adapter reports it for the current runtime.
+    NativeTurnId
+);
+string_id!(
+    /// A message or tool item inside a turn.
+    NativeItemId
+);
+string_id!(
+    /// A live approval or question awaiting an answer in the current runtime.
+    NativeRequestId
+);
+
+/// Identifies one provider process owned by a Chat. The supervisor assigns a new
+/// generation on every open; commands and events from another generation are stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RuntimeGeneration(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Harness {
+    ClaudeCode,
+    Codex,
+}
+
+// ---------------------------------------------------------------------------
+// Inspection and capabilities
+// ---------------------------------------------------------------------------
+
+/// What an installation probe observed. A failed probe is not an incompatibility verdict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Inspection {
+    Installed {
+        executable: PathBuf,
+        version: Option<String>,
+        login: LoginState,
+        capabilities: Capabilities,
+    },
+    Incompatible {
+        executable: PathBuf,
+        version: Option<String>,
+        /// The capability or version the installation lacks.
+        requirement: String,
+    },
+    NotInstalled,
+    ProbeFailed {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginState {
+    SignedIn,
+    SignedOut,
+    Unknown,
+}
+
+/// Effective support for one operation, with the behavior it has and why we believe it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Capability<B> {
+    Supported { behavior: B, evidence: String },
+    Unsupported { reason: String },
+    Unknown { reason: String },
+}
+
+impl<B> Capability<B> {
+    pub fn behavior(&self) -> Option<&B> {
+        match self {
+            Self::Supported { behavior, .. } => Some(behavior),
+            Self::Unsupported { .. } | Self::Unknown { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SteeringBehavior {
+    /// Applying steering input may interrupt tools that are already running.
+    pub interrupts_tools: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Adding input to the active turn. Without it the supervisor queues.
+    pub steering: Capability<SteeringBehavior>,
+    /// Reopening a native session in a replacement process.
+    pub native_resume: Capability<()>,
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenRequest {
+    pub generation: RuntimeGeneration,
+    pub working_directory: PathBuf,
+    pub session: SessionStart,
+}
+
+/// Resuming restores native history only. It never resubmits input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionStart {
+    New,
+    Resume(NativeSessionId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Submission {
+    pub submission: SubmissionId,
+    pub generation: RuntimeGeneration,
+    pub kind: SubmissionKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubmissionKind {
+    /// Expects no active turn.
+    StartTurn,
+    /// Expects `expected_turn` to still be the active turn.
+    Steer { expected_turn: NativeTurnId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractionResponse {
+    pub generation: RuntimeGeneration,
+    pub request: NativeRequestId,
+    pub answer: InteractionAnswer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InteractionAnswer {
+    Approval(ApprovalDecision),
+    Answers(Vec<QuestionAnswer>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    Allow,
+    AllowForSession,
+    Deny,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestionAnswer {
+    pub question_id: String,
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterruptRequest {
+    pub generation: RuntimeGeneration,
+    pub expected_turn: NativeTurnId,
+}
+
+// ---------------------------------------------------------------------------
+// Command outcomes
+// ---------------------------------------------------------------------------
+
+/// Why a command was refused before anything was written to the harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// The command names a generation other than this runtime's.
+    StaleGeneration { current: RuntimeGeneration },
+    /// The expected turn is not the active turn.
+    TurnMismatch { active: Option<NativeTurnId> },
+    /// No live request has this identity: never issued, already answered or withdrawn.
+    UnknownRequest,
+    /// The effective capabilities do not include this operation.
+    Unsupported,
+    /// The runtime was closed, replaced or lost before the write.
+    RuntimeClosed,
+}
+
+/// Submission evidence available when `submit` returns. It never describes task
+/// completion; the terminal outcome is [`EventKind::TurnEnded`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchOutcome {
+    /// Known not sent. Safe to queue or dispatch again.
+    NotSent(Refusal),
+    /// Handed to the harness; acknowledgment is pending and may arrive later as
+    /// [`EventKind::SubmissionEvidence`]. Possibly delivered: never resend.
+    Written,
+    /// The harness acknowledged the input for this turn.
+    Acknowledged { turn: NativeTurnId },
+    /// The harness explicitly refused the input. Safe to queue.
+    Rejected { reason: String },
+    /// Written, then the runtime was lost before any reply. Never resend.
+    UnknownAfterLoss,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RespondOutcome {
+    /// The answer was written to the live request. Resolution is observed separately.
+    Sent,
+    NotSent(Refusal),
+    UnknownAfterLoss,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterruptOutcome {
+    /// The harness accepted the request. The turn ends only with
+    /// [`EventKind::TurnEnded`]; tools may still be running.
+    Acknowledged,
+    NotSent(Refusal),
+    /// Written without an acknowledgment: timeout or loss of contact.
+    Unconfirmed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseOutcome {
+    /// Every owned process was observed to exit.
+    Confirmed { exit_code: Option<i32> },
+    /// Cleanup ran out of time or could not observe the whole process tree.
+    Unconfirmed { reason: String },
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+pub type EventStream = mpsc::Receiver<RuntimeEvent>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeEvent {
+    pub generation: RuntimeGeneration,
+    pub kind: EventKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventKind {
+    SessionIdentified {
+        native_session: NativeSessionId,
+    },
+    /// Evidence about an earlier submission, including one whose `submit` already
+    /// returned `Written` or timed out, or one made in an earlier generation.
+    SubmissionEvidence {
+        submission: SubmissionId,
+        evidence: DeliveryEvidence,
+    },
+    TurnStarted {
+        turn: NativeTurnId,
+    },
+    /// Streamed text. May be coalesced or lost; `MessageCompleted` is authoritative.
+    TextDelta {
+        turn: NativeTurnId,
+        item: NativeItemId,
+        text: String,
+    },
+    /// The full final text of one assistant message, replacing its deltas.
+    MessageCompleted {
+        turn: NativeTurnId,
+        item: NativeItemId,
+        text: String,
+    },
+    /// The latest state of one tool item. `output` is whatever the harness reported so
+    /// far; the supervisor bounds what it stores.
+    ToolUpdated {
+        turn: NativeTurnId,
+        item: NativeItemId,
+        title: String,
+        status: ToolStatus,
+        output: Option<String>,
+        detail: Option<ProviderDetail>,
+    },
+    InteractionRequested(InteractionRequest),
+    /// The live request is gone; later answers to it are refused.
+    InteractionResolved {
+        request: NativeRequestId,
+        resolution: InteractionResolution,
+    },
+    /// Terminal outcome of a turn, with the submissions the harness correlated to it.
+    TurnEnded {
+        turn: NativeTurnId,
+        outcome: TurnOutcome,
+        submissions: Vec<SubmissionId>,
+    },
+    /// The provider process or its transport is gone. Always the last event.
+    RuntimeLost {
+        exit_code: Option<i32>,
+        /// Bounded tail of stderr.
+        diagnostics: String,
+    },
+    /// Provider traffic the adapter does not model. Never completion or approval.
+    Unknown {
+        summary: String,
+        detail: ProviderDetail,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryEvidence {
+    /// An explicit provider acknowledgment of the input.
+    Acknowledged { turn: NativeTurnId },
+    /// Provider output correlated to the input, without an explicit acknowledgment.
+    Processing { turn: NativeTurnId },
+    /// The provider refused the input after `submit` had returned.
+    Rejected { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolStatus {
+    Running,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractionRequest {
+    pub request: NativeRequestId,
+    pub turn: Option<NativeTurnId>,
+    pub kind: InteractionKind,
+    pub detail: Option<ProviderDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InteractionKind {
+    Approval {
+        description: String,
+        /// The decisions this harness accepts for this request.
+        decisions: Vec<ApprovalDecision>,
+    },
+    Question {
+        questions: Vec<Question>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    pub id: String,
+    pub prompt: String,
+    /// Empty when the answer is free text.
+    pub options: Vec<String>,
+    pub multi_select: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractionResolution {
+    Answered,
+    /// The harness cancelled the request before an answer arrived.
+    Withdrawn,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnOutcome {
+    Completed,
+    Interrupted,
+    Failed(Problem),
+}
+
+/// A failure the UI explains alongside the activity state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Problem {
+    pub kind: ProblemKind,
+    pub message: String,
+    pub detail: Option<ProviderDetail>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProblemKind {
+    NotInstalled,
+    IncompatibleVersion,
+    LoginRequired,
+    QuotaExhausted,
+    /// Native history for a resume is missing or unreadable.
+    NativeHistoryUnavailable,
+    SessionInUse,
+    /// A required permission or sandbox capability is unavailable.
+    PermissionUnavailable,
+    Other,
+}
+
+/// Provider-specific data kept for display or diagnosis, bounded at construction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderDetail {
+    kind: String,
+    payload: String,
+    original_bytes: usize,
+}
+
+impl ProviderDetail {
+    /// `kind` is the provider's name for the payload, such as a method or message type.
+    pub fn new(kind: impl Into<String>, payload: &str) -> Self {
+        let mut end = payload.len().min(MAX_PROVIDER_DETAIL_BYTES);
+        while !payload.is_char_boundary(end) {
+            end -= 1;
+        }
+        Self {
+            kind: kind.into(),
+            payload: payload[..end].to_owned(),
+            original_bytes: payload.len(),
+        }
+    }
+
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub fn payload(&self) -> &str {
+        &self.payload
+    }
+
+    pub fn original_bytes(&self) -> usize {
+        self.original_bytes
+    }
+
+    pub fn truncated(&self) -> bool {
+        self.payload.len() < self.original_bytes
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adapter interface
+// ---------------------------------------------------------------------------
+
+/// One harness integration. Opening starts a provider process for a single Chat.
+#[async_trait]
+pub trait HarnessAdapter: Send + Sync {
+    fn harness(&self) -> Harness;
+
+    /// Probes the installation, login and capabilities without starting a session.
+    async fn inspect(&self) -> Inspection;
+
+    /// Starts a provider process for `request.generation` with a new or resumed
+    /// native session.
+    async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem>;
+}
+
+#[derive(Debug)]
+pub struct OpenedRuntime {
+    pub runtime: Arc<dyn HarnessRuntime>,
+    pub events: EventStream,
+    /// Capabilities in effect for this session, which may differ from inspection.
+    pub capabilities: Capabilities,
+}
+
+/// A live provider process bound to one runtime generation. Methods may be called
+/// concurrently and must not block the adapter's protocol reader.
+#[async_trait]
+pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
+    /// Hands input to the harness after rechecking generation and expected turn
+    /// immediately before the write.
+    async fn submit(&self, submission: Submission) -> DispatchOutcome;
+
+    /// Answers a live approval or question. Each request accepts one answer.
+    async fn respond(&self, response: InteractionResponse) -> RespondOutcome;
+
+    /// Requests interruption of the expected active turn.
+    async fn interrupt(&self, request: InterruptRequest) -> InterruptOutcome;
+
+    /// Stops the owned process tree with bounded cleanup and ends the event stream.
+    async fn close(&self) -> CloseOutcome;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_detail_truncates_on_a_character_boundary_and_reports_it() {
+        let payload = "é".repeat(MAX_PROVIDER_DETAIL_BYTES);
+
+        let detail = ProviderDetail::new("item/unknown", &payload);
+
+        assert_eq!(detail.payload().len(), MAX_PROVIDER_DETAIL_BYTES);
+        assert_eq!(detail.original_bytes(), 2 * MAX_PROVIDER_DETAIL_BYTES);
+        assert!(detail.truncated());
+        assert!(!ProviderDetail::new("item/unknown", "short").truncated());
+    }
+}
