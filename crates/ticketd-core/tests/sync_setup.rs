@@ -385,14 +385,13 @@ fn an_attachment_is_downloaded_on_demand_when_downloads_are_not_automatic() {
         std::fs::read(b.attachment_open_path(&attachment).unwrap()).unwrap(),
         BYTES
     );
-    // Nothing is fetched or uploaded twice: the one write of a run that has
-    // nothing to send is this desk's run token in the device registry.
+    // Nothing is fetched or uploaded twice.
     let before = desks.remote.calls().len();
     b.download_attachment(&desks.remote, &attachment).unwrap();
     assert_eq!(desks.remote.calls().len(), before);
     b.sync_now(&desks.remote).unwrap();
     let writes = |calls: &[RemoteOp]| calls.iter().filter(|op| **op == RemoteOp::Write).count();
-    assert_eq!(writes(&desks.remote.calls()[before..]), 1);
+    assert_eq!(writes(&desks.remote.calls()[before..]), 0);
 }
 
 #[test]
@@ -1166,6 +1165,8 @@ fn a_workspace_file_copied_to_another_desktop_joins_as_a_desktop_of_its_own() {
     let mut copy = Workspace::open(path("Desk C")).unwrap();
     let shared = a.device_code().unwrap();
     assert_eq!(copy.device_code().unwrap(), shared);
+    // The app is launched on the copy.
+    copy.start_sync_session().unwrap();
 
     // Whichever of the two runs after the other has synced is the one that
     // finds out and gives way.
@@ -1440,6 +1441,7 @@ fn tickets_made_on_both_copies_before_the_copy_is_detected_are_reported_not_merg
     std::fs::copy(path("Desk A"), path("Desk C")).unwrap();
     let mut a = Workspace::open(path("Desk A")).unwrap();
     let mut copy = Workspace::open(path("Desk C")).unwrap();
+    copy.start_sync_session().unwrap();
     let from_a = a.create_ticket("From A").unwrap().reference;
     let from_copy = copy.create_ticket("From the copy").unwrap().reference;
     assert_eq!(from_a, from_copy);
@@ -1455,4 +1457,33 @@ fn tickets_made_on_both_copies_before_the_copy_is_detected_are_reported_not_merg
         assert_eq!(unreadable(desk).len(), 1);
     }
     assert_ne!(a.device_code().unwrap(), copy.device_code().unwrap());
+}
+
+#[test]
+fn runs_with_nothing_to_send_write_nothing_after_the_first_of_an_app_session() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let writes = |desks: &Desks| {
+        desks
+            .remote
+            .calls()
+            .into_iter()
+            .filter(|op| *op == RemoteOp::Write)
+            .count()
+    };
+
+    let before = writes(&desks);
+    for _ in 0..3 {
+        a.sync_now(&desks.remote).unwrap();
+    }
+    assert_eq!(writes(&desks), before);
+
+    // The next launch writes this desk's run token once.
+    let token = registered(&desks)["devices"].clone();
+    a.start_sync_session().unwrap();
+    for _ in 0..3 {
+        a.sync_now(&desks.remote).unwrap();
+    }
+    assert_eq!(writes(&desks), before + 1);
+    assert_ne!(registered(&desks)["devices"], token);
 }

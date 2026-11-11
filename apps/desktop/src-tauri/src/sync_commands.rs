@@ -117,7 +117,7 @@ pub fn at_launch() {
         workspace.expire_versions(None)?;
         // No download survives the app closing: what the last session left
         // as downloading is fetched again by the next run.
-        workspace.reset_interrupted_downloads()?;
+        workspace.start_sync_session()?;
         if cfg!(target_os = "macos") {
             name_this_desktop(&mut workspace, mac_computer_name)?;
         }

@@ -69,6 +69,8 @@ pub(crate) fn migrate_run_token(connection: &Connection) -> Result<(), Error> {
         &[
             ("sync_state", "run_token", "TEXT"),
             ("sync_state", "run_previous", "TEXT"),
+            // Whether the next run writes a fresh token: once per app session.
+            ("sync_state", "run_due", "INTEGER NOT NULL DEFAULT 1"),
         ],
     )
 }
@@ -270,8 +272,8 @@ struct RegisteredDevice {
     code: String,
     #[serde(default)]
     last_synced_at: Option<String>,
-    /// A random value the desktop replaces on every run and also keeps
-    /// locally. A desktop that finds another value here than the ones it
+    /// A random value the desktop replaces on the first run of each app
+    /// session and also keeps locally. A desktop that finds another value here than the ones it
     /// wrote is a copy of the Workspace that did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     run: Option<String>,
@@ -332,6 +334,7 @@ struct State {
     first_total: u64,
     run_token: Option<String>,
     run_previous: Option<String>,
+    run_due: bool,
 }
 
 /// A unit enum as the text serde gives it, for a column.
@@ -348,7 +351,7 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
 
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous FROM sync_state",
+        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due FROM sync_state",
         [],
         |row| {
             Ok(State {
@@ -368,6 +371,7 @@ fn state(connection: &Connection) -> Result<State, Error> {
                 recovery_message: row.get(12)?,
                 run_token: row.get(13)?,
                 run_previous: row.get(14)?,
+                run_due: row.get(15)?,
             })
         },
     )?)
@@ -810,6 +814,17 @@ impl Workspace {
         Ok((Workspace::open(&path)?, safety))
     }
 
+    /// For the host to call once at launch, before its first run: downloads
+    /// cut off when the app last stopped start again, and the first run
+    /// writes a fresh run token into this desktop's entry of the device
+    /// registry, which is how a copy of this Workspace file that also syncs
+    /// is found out.
+    pub fn start_sync_session(&mut self) -> Result<(), Error> {
+        self.connection
+            .execute("UPDATE sync_state SET run_due = 1", [])?;
+        self.reset_interrupted_downloads()
+    }
+
     /// One full sync run: join the device registry, send Attachment bytes, sync
     /// the records, fetch Attachment bytes.
     ///
@@ -969,10 +984,12 @@ impl Workspace {
             .is_some_and(|seen| !wrote.contains(&&Some(seen.clone())));
         let (id, token) = match &state.device_id {
             Some(id) if !copied => {
-                // The token before is kept because the answer to a write can
-                // be lost; a write that did not arrive is repeated as it was.
+                // A fresh token once per app session, so that a run with
+                // nothing to send writes nothing. The token before is kept
+                // because the answer to a write can be lost; a write that
+                // did not arrive is repeated as it was.
                 let token = match &state.run_token {
-                    Some(token) if seen != state.run_token => token.clone(),
+                    Some(token) if !(state.run_due && seen == state.run_token) => token.clone(),
                     _ => Uuid::new_v4().to_string(),
                 };
                 (id.clone(), token)
@@ -1030,6 +1047,10 @@ impl Workspace {
                 true
             },
         )?;
+        if state.run_due {
+            self.connection
+                .execute("UPDATE sync_state SET run_due = 0", [])?;
+        }
         Ok((id, name))
     }
 
