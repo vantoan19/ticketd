@@ -93,7 +93,7 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 - Use **tags** for categories such as bug, research, or feature. No mandatory issue-type system.
 - Only the title is mandatory user-entered content. Project and Plan links are optional.
 - A ticket describes an intended outcome, including when it has subtickets.
-- Short ticket references are unique across the workspace and remain unchanged when project or Plan links change. A reference is `T-`, the creating installation's two-letter device code and that device's counter (`T-KQ43`); a plain number such as `T-42` is not a reference.
+- Short ticket references are unique across the workspace and remain unchanged when project or Plan links change. The one exception to uniqueness is a Workspace file copied by hand, until sync detects the copy ([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md#identity)). A reference is `T-`, the creating installation's two-letter device code and that device's counter (`T-KQ43`); a plain number such as `T-42` is not a reference.
 - Support Markdown content and checklists. Checklist items have no independent statuses or dependencies; unchecked items do not prevent Done.
 - Acceptance criteria can be written in the body; no separate mandatory field is required.
 - Support editable, deletable, timestamped authored activities with required human-readable briefs and optional supporting Documents for progress and findings (section 16). Record the editing agent when supplied; do not store human names in the MVP. Attribution is descriptive, not verified identity or authorization.
@@ -1227,7 +1227,9 @@ with it.
   until the desktop is updated.
 - An Attachment whose bytes are missing or damaged on this desktop, or cannot be
   saved here, is a Needs attention notice of its own. It does not stop records
-  or other Attachments from syncing.
+  or other Attachments from syncing. An Attachment that Drive fails to deliver
+  fails the run the first times, since that may pass; from the third failure in
+  a row it is such a notice too, runs succeed again, and Download still tries it.
 - Any other failure of a sync run shows as Needs attention with its message and
   a Retry action, and clears when a run succeeds.
 
