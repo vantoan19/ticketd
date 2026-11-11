@@ -44,14 +44,11 @@ SOFTWARE.
 
 ## Tauri application scaffold
 
-The application scaffold and default icons in `apps/desktop/src-tauri/icons/`
-come from [create-tauri-app](https://github.com/tauri-apps/create-tauri-app).
-The upstream template's `128x128.png` and `icon.png` match this repository's
-assets byte for byte. The scaffold's MIT license notice is reproduced below.
-
-The license does not grant rights to Tauri trademarks. Replace the default
-Tauri icon before distributing ticketd binaries, following the
-[Tauri trademark policy](https://tauri.app/about/trademark/).
+The application scaffold comes from
+[create-tauri-app](https://github.com/tauri-apps/create-tauri-app).
+Its MIT license notice is reproduced below. The default Tauri icons have been
+replaced with the maintainer-provided ticketd artwork in
+`apps/desktop/src-tauri/app-icon.svg`, covered by the project's MIT license.
 
 MIT License
 

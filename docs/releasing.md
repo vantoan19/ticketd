@@ -62,8 +62,10 @@ change distinct from signed-release publication.
 4. If advertising Drive support, complete the configured-account and secure-store
    checks in [Drive verification](testing-google-drive.md). Fixture tests do not
    establish live authorization or packaged-app behavior.
-5. Replace the default Tauri application icon with an original ticketd icon before
-   distributing binaries; see the [Tauri attribution](../THIRD_PARTY_NOTICES.md#tauri-application-scaffold).
+5. Verify the ticketd icon in each packaged application and installer. Its source
+   is `apps/desktop/src-tauri/app-icon.svg`. To regenerate icons, run
+   `npm run desktop -- icon src-tauri/app-icon.svg` from the repository root;
+   retain the desktop outputs in `apps/desktop/src-tauri/icons/`.
 6. Verify the root license and all required third-party license texts accompany
    the distributed files. Use [the attribution index](../THIRD_PARTY_NOTICES.md)
    as a starting point, then review the actual dependency and asset contents of
