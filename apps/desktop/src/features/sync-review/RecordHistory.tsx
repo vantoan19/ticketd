@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useState } from "react";
 import { History } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSyncStatus } from "@/features/sync/sync-status";
 import { formatTime } from "@/lib/format";
 import {
   syncReview,
@@ -15,12 +17,17 @@ import { FieldValue } from "./FieldValue";
 import { dayLabel, dayTime, fieldLabel } from "./labels";
 import "./sync-review.css";
 
-const CURRENT = "current";
+/** A version and where it is kept; the two sources name versions separately. */
+type Entry = Version & { source: VersionSource };
+type Chosen = Pick<Entry, "source" | "id">;
 
-type Loaded = { source: VersionSource; versions: Version[] };
+const from = (source: VersionSource, versions: Version[]): Entry[] =>
+  versions.map((version) => ({ ...version, source }));
+const same = (a: Chosen | null, b: Chosen | null) =>
+  a?.source === b?.source && a?.id === b?.id;
 
-function byDay(versions: Version[], now: Date) {
-  const days: { day: string; versions: Version[] }[] = [];
+function byDay(versions: Entry[], now: Date) {
+  const days: { day: string; versions: Entry[] }[] = [];
   for (const version of versions) {
     const day = dayLabel(version.timestamp, now);
     const last = days[days.length - 1];
@@ -33,8 +40,8 @@ function byDay(versions: Version[], now: Date) {
 /**
  * History of a ticket or Document: earlier versions on the left, the selected
  * one beside the current one on the right, Restore as the one action. This
- * desktop's own versions come first; a desktop that has none yet asks Google
- * Drive for the file's revisions.
+ * desktop's own versions come first. Google Drive's revisions of the file are
+ * read when asked for, or at once on a desktop that has no versions yet.
  */
 export function RecordHistory({
   kind,
@@ -50,36 +57,46 @@ export function RecordHistory({
   onClose: () => void;
   onRestored?: () => void;
 }) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [fromDrive, setFromDrive] = useState(false);
-  const [selected, setSelected] = useState(CURRENT);
+  const connected = useSyncStatus().status?.connection === "connected";
+  const [local, setLocal] = useState<Entry[] | null>(null);
+  /** `null` until Drive was asked and answered. */
+  const [drive, setDrive] = useState<Entry[] | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [selected, setSelected] = useState<Chosen | null>(null);
   const [detail, setDetail] = useState<{
-    version: string;
+    version: Chosen;
     fields: VersionDetail["fields"];
   } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let active = true;
-    const show = (source: VersionSource, versions: Version[]) => {
-      setLoaded({ source, versions });
-      setSelected(versions[0]?.id ?? CURRENT);
-    };
     void (async () => {
+      let found: Entry[];
       try {
-        const local = await syncReview.versions({ kind, id, source: "local" });
-        if (!active) return;
-        if (local.length > 0) return show("local", local);
-        setFromDrive(true);
+        found = from(
+          "local",
+          await syncReview.versions({ kind, id, source: "local" }),
+        );
       } catch (reason) {
         if (active) setError(String(reason));
         return;
       }
-      // Drive is only a fallback: without sync it answers with nothing earlier.
-      // When it cannot be asked, saying so beats claiming there are no versions.
+      if (!active) return;
+      setLocal(found);
+      setSelected(found[0] ?? null);
+      if (found.length > 0) return;
+      // Nothing kept here yet: Drive is asked without waiting to be. Without
+      // sync it answers with nothing earlier. When it cannot be asked, saying
+      // so beats claiming there are no versions.
       try {
-        const drive = await syncReview.versions({ kind, id, source: "drive" });
-        if (active) show("drive", drive);
+        const older = from(
+          "drive",
+          await syncReview.versions({ kind, id, source: "drive" }),
+        );
+        if (!active) return;
+        setDrive(older);
+        setSelected(older[0] ?? null);
       } catch (reason) {
         if (active)
           setError(reason instanceof Error ? reason.message : String(reason));
@@ -89,13 +106,26 @@ export function RecordHistory({
       active = false;
     };
   }, [kind, id]);
-  const source = loaded?.source;
+  async function older() {
+    setAsking(true);
+    setError("");
+    try {
+      setDrive(
+        from("drive", await syncReview.versions({ kind, id, source: "drive" })),
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+    setAsking(false);
+  }
+  const source = selected?.source;
+  const version = selected?.id;
   useEffect(() => {
-    if (!source || selected === CURRENT) return;
+    if (!source || version === undefined) return;
     let active = true;
-    syncReview.version({ kind, id, source }, selected).then(
+    syncReview.version({ kind, id, source }, version).then(
       ({ fields }) => {
-        if (active) setDetail({ version: selected, fields });
+        if (active) setDetail({ version: { source, id: version }, fields });
       },
       (reason: unknown) => {
         if (active) setError(String(reason));
@@ -104,13 +134,16 @@ export function RecordHistory({
     return () => {
       active = false;
     };
-  }, [kind, id, source, selected]);
+  }, [kind, id, source, version]);
   async function restore() {
-    if (!source) return;
+    if (!selected) return;
     setBusy(true);
     setError("");
     try {
-      await syncReview.restore({ kind, id, source }, selected);
+      await syncReview.restore(
+        { kind, id, source: selected.source },
+        selected.id,
+      );
       onRestored?.();
       onClose();
     } catch (reason) {
@@ -119,8 +152,11 @@ export function RecordHistory({
     }
   }
   const now = new Date();
-  const versions = loaded?.versions ?? [];
-  const chosen = versions.find((version) => version.id === selected);
+  // Shown once this desktop answered and, where it keeps nothing, Drive did too.
+  const loaded = local !== null && (local.length > 0 || drive !== null);
+  const fromDrive = local !== null && !loaded;
+  const versions = [...(local ?? []), ...(drive ?? [])];
+  const chosen = versions.find((entry) => same(entry, selected));
   const noun = kind === "ticket" ? "ticket" : "Document";
   const blockedReason = !loaded
     ? error
@@ -145,7 +181,7 @@ export function RecordHistory({
       cancelLabel="Close"
       blockedReason={blockedReason}
       footerNote={
-        source === "drive"
+        (chosen ?? versions[0])?.source === "drive"
           ? "From Google Drive. Restoring adds a new version; nothing is lost."
           : "Kept for 30 days. Restoring adds a new version; nothing is lost."
       }
@@ -195,8 +231,8 @@ export function RecordHistory({
                   <button
                     type="button"
                     className="sync-version"
-                    aria-current={selected === CURRENT || undefined}
-                    onClick={() => setSelected(CURRENT)}
+                    aria-current={selected === null || undefined}
+                    onClick={() => setSelected(null)}
                   >
                     <span>Current version</span>
                     <small>This desktop</small>
@@ -204,22 +240,27 @@ export function RecordHistory({
                 </li>
               </ul>
               {byDay(versions, now).map(({ day, versions: items }) => (
-                <Fragment key={day}>
+                <Fragment key={`${items[0]?.source}:${items[0]?.id}`}>
                   <h3>{day}</h3>
                   <ul>
-                    {items.map((version) => (
-                      <li key={version.id}>
+                    {items.map((entry) => (
+                      <li key={`${entry.source}:${entry.id}`}>
                         <button
                           type="button"
                           className="sync-version"
-                          aria-current={selected === version.id || undefined}
-                          onClick={() => setSelected(version.id)}
+                          aria-current={same(entry, selected) || undefined}
+                          onClick={() =>
+                            setSelected({ source: entry.source, id: entry.id })
+                          }
                         >
-                          <span>{formatTime(new Date(version.timestamp))}</span>
+                          <span>{formatTime(new Date(entry.timestamp))}</span>
                           <small>
                             {[
-                              version.device ?? "This desktop",
-                              ...version.changed.map((field) =>
+                              // Drive does not say which desktop wrote a revision.
+                              entry.source === "drive"
+                                ? "Google Drive"
+                                : (entry.device ?? "This desktop"),
+                              ...entry.changed.map((field) =>
                                 fieldLabel(kind, field),
                               ),
                             ].join(" · ")}
@@ -230,11 +271,27 @@ export function RecordHistory({
                   </ul>
                 </Fragment>
               ))}
+              {drive === null && connected && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={asking}
+                  onClick={() => void older()}
+                >
+                  {asking
+                    ? "Loading from Google Drive…"
+                    : "Older versions from Drive"}
+                </Button>
+              )}
+              {drive?.length === 0 && (
+                <p role="status">No older versions in Google Drive</p>
+              )}
             </nav>
             <div className="sync-history-detail">
               {!chosen ? (
                 <p>This is the {noun} as it is now.</p>
-              ) : detail?.version !== chosen.id ? (
+              ) : !detail || !same(detail.version, chosen) ? (
                 <p role="status">Loading this version…</p>
               ) : detail.fields.length === 0 ? (
                 <p>This version is the same as the current one.</p>

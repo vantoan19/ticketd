@@ -8,12 +8,15 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   syncReview,
   type Version,
   type VersionSource,
 } from "@/lib/sync-review-api";
+import { SyncStatusContext } from "@/features/sync/sync-status";
+import { syncStatus } from "@/features/sync/sync-fixtures";
 import { RecordHistory } from "./RecordHistory";
 
 vi.mock("@/lib/sync-review-api", () => ({
@@ -125,7 +128,7 @@ test("a desktop without local versions loads them from Google Drive and says so"
     screen.getByRole<HTMLButtonElement>("button", { name: "Restore" }).disabled,
   ).toBe(true);
   deliver([versions[1]!]);
-  await screen.findByRole("button", { name: /This desktop · Description/ });
+  await screen.findByRole("button", { name: /Google Drive · Description/ });
   expect(screen.getByText(/From Google Drive/)).toBeTruthy();
   await waitFor(() =>
     expect(syncReview.version).toHaveBeenCalledWith(
@@ -170,4 +173,92 @@ test("a Drive listing that fails is reported, not shown as no versions", async (
     "Could not load versions from Google Drive: offline",
   );
   expect(screen.queryByText("No earlier versions")).toBeNull();
+});
+
+const connected = (view: ReactNode) => (
+  <SyncStatusContext
+    value={{
+      status: syncStatus(),
+      apply: () => {},
+      refresh: () => Promise.reject(new Error("unused")),
+      openSettings: () => {},
+      openReview: () => {},
+      setNavigation: () => {},
+    }}
+  >
+    {view}
+  </SyncStatusContext>
+);
+const history = (
+  <RecordHistory
+    kind="ticket"
+    id="guid-12"
+    subtitle="T-KQ12"
+    onClose={onClose}
+    onRestored={onRestored}
+  />
+);
+
+test("a synced record offers older versions from Drive below its own, loaded when asked", async () => {
+  // Drive names its revisions its own way; an id can repeat a local one.
+  stored.drive = [
+    { id: "v2", timestamp: hours(24 * 40), device: null, changed: [] },
+  ];
+  render(connected(history));
+  const list = within(
+    await screen.findByRole("navigation", { name: "Versions" }),
+  );
+  expect(syncReview.versions).toHaveBeenCalledTimes(1);
+  fireEvent.click(
+    list.getByRole("button", { name: "Older versions from Drive" }),
+  );
+  const older = await list.findByRole("button", { name: /Google Drive$/ });
+  expect(list.getAllByRole("button", { name: /This desktop ·/ })).toHaveLength(
+    2,
+  );
+  expect(
+    list.queryByRole("button", { name: "Older versions from Drive" }),
+  ).toBeNull();
+  fireEvent.click(older);
+  expect(older.getAttribute("aria-current")).toBe("true");
+  expect(
+    list
+      .getByRole("button", { name: /This desktop · Description/ })
+      .getAttribute("aria-current"),
+  ).toBeNull();
+  expect(await screen.findByText(/From Google Drive/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await waitFor(() =>
+    expect(syncReview.restore).toHaveBeenCalledWith(
+      { kind: "ticket", id: "guid-12", source: "drive" },
+      "v2",
+    ),
+  );
+});
+
+test("older versions that Drive cannot list say why and can be asked for again", async () => {
+  vi.mocked(syncReview.versions).mockImplementation(({ source }) =>
+    source === "local"
+      ? Promise.resolve(versions)
+      : Promise.reject(new Error("Could not load versions: offline")),
+  );
+  render(connected(history));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Older versions from Drive" }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not load versions: offline",
+  );
+  expect(
+    screen.getByRole("button", { name: "Older versions from Drive" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Studio desktop/ })).toBeTruthy();
+});
+
+test("a Workspace that does not sync offers nothing from Drive", async () => {
+  open();
+  await screen.findByRole("navigation", { name: "Versions" });
+  expect(
+    screen.queryByRole("button", { name: "Older versions from Drive" }),
+  ).toBeNull();
 });
