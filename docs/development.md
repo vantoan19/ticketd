@@ -127,3 +127,27 @@ npm run desktop -- build -- --locked
 These local builds do not require publisher Google secrets when the OAuth build
 variable is unset. They are not signed public releases. See
 [releasing](releasing.md) for the separate publisher workflow.
+
+### Claude Chat bridge executable
+
+The Claude Chat bridge (`apps/chat-bridge-claude`) is compiled into one
+self-contained executable, so users need neither Node nor Bun. Bun is a pinned
+development dependency; `npm ci` installs it.
+
+```sh
+npm run build:executable --workspace @ticketd/chat-bridge-claude
+npm run build:executable --workspace @ticketd/chat-bridge-claude -- bun-darwin-arm64
+```
+
+Without an argument the script builds for the current platform. The shipped
+targets are `bun-windows-x64`, `bun-darwin-arm64` and `bun-linux-x64`; Bun
+cross-compiles each from any host by downloading that target's runtime. Output
+goes to `apps/chat-bridge-claude/dist/` under the Tauri sidecar naming
+convention, `ticketd-chat-bridge-claude-<Rust target triple>`. Signing, where a
+platform needs it, happens on that platform.
+
+The executable contains the Agent SDK but no Claude Code: the SDK's optional
+per-platform Claude Code packages are not bundled, the bridge always starts the
+executable path the host gives it, and the build fails if the output looks like
+it contains one. The SDK version is pinned exactly in the bridge's
+`package.json`.

@@ -4,7 +4,9 @@
 //! write workspace storage and never decide queue policy; the supervisor does both
 //! through core workflows.
 
+mod codex;
 mod contract;
 pub mod testing;
 
+pub use codex::CodexAdapter;
 pub use contract::*;
