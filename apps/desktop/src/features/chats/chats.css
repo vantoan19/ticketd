@@ -102,11 +102,15 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-/* A long title gives way before the harness and folder trigger, which keeps at
-   most 60% of the group; past that the trigger shortens too. */
+/* Only one of title and trigger flexes at a time; weighted shrinking would cut
+   the trigger by a fraction of a pixel, and its ellipsis then eats two letters.
+   The title grows into what the full trigger leaves, up to its own text. When
+   both do not fit, the title holds the lesser of its text and 40% (the basis,
+   clamped by max-width) and the trigger alone shortens into the rest. */
 .chat-head-title {
-  flex: 0 1000 auto;
+  flex: 1 0 40%;
   min-width: 0;
+  max-width: max-content;
   overflow: hidden;
   color: var(--foreground);
   text-overflow: ellipsis;
@@ -126,7 +130,7 @@
   .chat-pane .detail-title-group > button {
     flex: none;
   }
-  .chat-pane .detail-title-group > button > .truncate {
+  .chat-pane .detail-title-group > button > span {
     display: none;
   }
 }

@@ -200,7 +200,7 @@ fn restore_outcome(
 /// damaged workspace is replaced, and the restore checks the backup itself.
 fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
     if !backup.is_file() {
-        return Err(format!("backup file not found: {}", backup.display()));
+        return Err("That backup file wasn't found.".to_owned());
     }
     let Ok(inspection) = open().and_then(|workspace| workspace.inspect_backup(backup)) else {
         return Ok(());

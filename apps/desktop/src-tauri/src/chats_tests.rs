@@ -1134,20 +1134,27 @@ async fn a_backup_that_cannot_be_restored_stops_no_chat() {
     f.chat().await;
     let not_a_backup = f.dir.path().join("notes.txt");
     std::fs::write(&not_a_backup, "not a database").unwrap();
+    // Each refusal is a sentence for a person, as the restore review words it.
     let backups = [
-        f.dir.path().join("missing.ticketd-backup"),
-        not_a_backup,
-        f.dir.path().join("workspace.sqlite3"),
+        (
+            f.dir.path().join("missing.ticketd-backup"),
+            "That backup file wasn't found.",
+        ),
+        (not_a_backup, "This isn't a ticketd backup."),
+        (
+            f.dir.path().join("workspace.sqlite3"),
+            "This is the current workspace.",
+        ),
     ];
 
-    for backup in backups {
+    for (backup, reason) in backups {
         let refused = f
             .chats
             .restore(backup.clone(), |_| Err("replaced".to_owned()))
             .await
             .unwrap_err();
 
-        assert_ne!(refused, "replaced", "{backup:?} reached the replacement");
+        assert_eq!(refused, reason, "{backup:?}");
         assert_eq!(f.chats.working(), 1, "{backup:?} stopped the Chat");
     }
     assert!(

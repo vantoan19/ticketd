@@ -394,6 +394,10 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Harness and folder").textContent).toBe(
     "Codex · reset-email (missing)",
   );
+  // The folder name is what shortens; the marker never is (U23).
+  const marker = within(button("Harness and folder")).getByText("(missing)");
+  expect(marker.closest(".truncate")).toBeNull();
+  expect(marker.className).toContain("shrink-0");
   // The path reads like the folder popover's: one line, not a code block.
   const notice = screen.getByRole("alert");
   expect(within(notice).getByTitle("~/ticketd/chats/reset-email")).toBeTruthy();
