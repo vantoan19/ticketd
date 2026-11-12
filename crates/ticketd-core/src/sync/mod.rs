@@ -14,6 +14,7 @@ mod setup;
 pub use attachments::{AttachmentAvailability, AttachmentAvailabilityState, AttachmentDownloads};
 pub use capture::{DirtyRecord, RecordKind};
 pub(crate) use capture::{TRIGGER_EVENTS, captured_tables};
+pub(crate) use engine::removed_by_sync;
 pub use engine::{
     SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncReport,
     SyncResolution,
@@ -48,4 +49,16 @@ pub(crate) fn migrate_recovery(connection: &rusqlite::Connection) -> Result<(), 
 /// Format version 61.
 pub(crate) fn migrate_run_token(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_run_token(connection)
+}
+
+/// Format version 62.
+pub(crate) fn migrate_download_attempts(
+    connection: &rusqlite::Connection,
+) -> Result<(), crate::Error> {
+    setup::migrate_download_attempts(connection)
+}
+
+/// Format version 63.
+pub(crate) fn migrate_file_identity(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_file_identity(connection)
 }

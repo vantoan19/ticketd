@@ -509,6 +509,13 @@ impl DriveSim {
 
 impl DriveTransport for DriveSim {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+        // The real transport refuses anything outside its allow-list.
+        assert!(
+            ticketd_core::drive::request_allowed(request.method, &request.url),
+            "GoogleTransport refuses {} {}",
+            request.method,
+            request.url
+        );
         let mut state = self.state();
         state
             .requests

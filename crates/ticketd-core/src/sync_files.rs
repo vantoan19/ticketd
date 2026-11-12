@@ -53,6 +53,13 @@ impl SyncKind {
     }
 }
 
+/// The largest file read as a record. Larger ones are skipped unread.
+pub(crate) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// How far into a header line list and key markers may reach. Every nested
+/// list starts further right, so this bounds how deep a header nests; the
+/// YAML reader bounds `[`-style nesting itself. ticketd writes two columns.
+const MAX_HEADER_INDENT: usize = 64;
+
 /// The format of sync files this version writes. A file that says a higher
 /// number is left alone until this desktop runs a ticketd that reads it.
 pub(crate) const FILE_FORMAT: i64 = 1;
@@ -139,6 +146,8 @@ enum Type {
     Tickets,
     /// Items of `<GUID> <time>`: when each `blocked_by` relationship was made.
     Edges,
+    /// Items of `<GUID>` or `<GUID> <time>`: relationships sync removed to break a loop.
+    Removed,
     Tags,
     Status,
     Reference,
@@ -157,6 +166,8 @@ const TICKET: &[Field] = &[
     ("parent", Type::Ticket, false),
     ("blocked_by", Type::Tickets, false),
     ("blocked_since", Type::Edges, false),
+    ("blocked_by_removed", Type::Removed, false),
+    ("parent_removed", Type::Removed, false),
     ("related", Type::Tickets, false),
     ("discovered", Type::Tickets, false),
     ("duplicate_of", Type::Ticket, false),
@@ -454,6 +465,9 @@ fn expected(kind: Type) -> String {
         Type::Edges => {
             "a list of items such as \"<id of the blocking ticket> 2026-11-11T09:30:00Z\"".into()
         }
+        Type::Removed => {
+            "a list of items such as \"<id of a ticket>\" or \"<id of a ticket> 2026-11-11T09:30:00Z\"".into()
+        }
         Type::Status => "one of Todo, In progress, In review, Done, Canceled, Duplicate".into(),
         Type::Reference => "a Ticket reference such as T-KQ43".into(),
         Type::Choice(options) => format!("one of {}", options.join(", ")),
@@ -469,7 +483,10 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
             .iter()
             .all(|tag| !tag.is_empty() && *tag == tag.trim().to_lowercase()),
         (Type::Edges, SyncValue::Set(edges)) => edges.iter().all(|edge| edge_time(edge).is_some()),
-        (Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges, _)
+        (Type::Removed, SyncValue::Set(items)) => items
+            .iter()
+            .all(|item| is_guid(item) || edge_time(item).is_some()),
+        (Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges | Type::Removed, _)
         | (_, SyncValue::Flag(_) | SyncValue::Set(_)) => false,
         (Type::Text, SyncValue::Text(_)) => true,
         (Type::Name, SyncValue::Text(text)) => !text.trim().is_empty(),
@@ -618,6 +635,16 @@ fn read_block(block: &str) -> Result<(Vec<(String, Raw)>, String), Error> {
         match lines.next() {
             None => return Err(bad("a header has no closing '---' line")),
             Some(line) if is_rule(line) => break,
+            // The values read from a header are walked and freed recursively.
+            Some(line)
+                if line
+                    .bytes()
+                    .take_while(|byte| matches!(byte, b' ' | b'-' | b'?'))
+                    .count()
+                    > MAX_HEADER_INDENT =>
+            {
+                return Err(bad("the header nests lists too deeply"));
+            }
             Some(line) => header.push_str(line),
         }
     }
@@ -676,7 +703,10 @@ fn typed(
         let value = match (kind, value) {
             (_, Raw::Null) => continue,
             (Type::Flag, Raw::Flag(flag)) => SyncValue::Flag(flag),
-            (Type::Ids | Type::Tickets | Type::Tags | Type::Edges, Raw::List(items)) => {
+            (
+                Type::Ids | Type::Tickets | Type::Tags | Type::Edges | Type::Removed,
+                Raw::List(items),
+            ) => {
                 let mut members = BTreeSet::new();
                 for item in items {
                     let Raw::Text(member) = item else {
@@ -690,7 +720,10 @@ fn typed(
                 }
                 SyncValue::Set(members)
             }
-            (Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges, _) => {
+            (
+                Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges | Type::Removed,
+                _,
+            ) => {
                 return Err(invalid());
             }
             (Type::Status, Raw::Text(text)) => {
@@ -1104,6 +1137,12 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
             .collect::<Result<_, _>>()?;
         if !since.is_empty() {
             fields.insert("blocked_since".into(), SyncValue::Set(since));
+        }
+        // Kept as this desktop's notices, so each removal is recorded once here.
+        for (name, removed) in crate::sync::removed_by_sync(c, id)? {
+            if !removed.is_empty() {
+                fields.insert(name.into(), SyncValue::Set(removed));
+            }
         }
         let sections: [(SyncPartKind, &str, &[&str]); 2] = [
             (

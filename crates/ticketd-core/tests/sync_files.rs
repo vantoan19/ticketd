@@ -562,3 +562,32 @@ fn documents_plans_and_projects_update_by_guid() {
     assert!(target.show_plan(&plan).unwrap().plan.archived);
     assert_eq!(target.show_project(&project).unwrap().name, "Web");
 }
+
+/// F37: the documented example is what a person copies; it must parse exactly as written.
+#[test]
+fn every_example_file_in_the_format_document_parses_as_written() {
+    let document = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/sync-file-format.md"
+    ))
+    .unwrap()
+    .replace("\r\n", "\n");
+    let examples: Vec<&str> = document
+        .split("```markdown\n")
+        .skip(1)
+        .map(|rest| rest.split("\n```").next().unwrap())
+        .collect();
+    assert!(!examples.is_empty());
+    for example in examples {
+        let record = SyncRecord::parse(&format!("{example}\n")).unwrap_or_else(|error| {
+            panic!("the example does not parse: {error}\n{example}");
+        });
+        assert_eq!(record.parts.len(), 1);
+        assert_eq!(
+            record.fields.get("body"),
+            Some(&SyncValue::Text(
+                "Users are logged out after 5 minutes.".into()
+            ))
+        );
+    }
+}

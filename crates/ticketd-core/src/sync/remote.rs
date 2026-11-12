@@ -74,6 +74,11 @@ pub struct RemoteFile {
     /// Opaque. Changes whenever the stored bytes change; compare for equality only.
     pub version: String,
     pub size: u64,
+    /// The storage's own identity of the stored file. A key can come to name
+    /// another file (one removed and written again, or the first one restored);
+    /// its content then shares no history with the file last synced. Compare
+    /// for equality only.
+    pub file_id: String,
 }
 
 /// One stored version of a file, oldest first in listings.

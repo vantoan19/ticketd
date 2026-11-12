@@ -24,6 +24,13 @@ struct Http {
 #[allow(clippy::unwrap_used)] // Fixture synchronization failures should fail the test.
 impl DriveTransport for Http {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+        // The real transport refuses anything outside its allow-list.
+        assert!(
+            ticketd_core::drive::request_allowed(request.method, &request.url),
+            "GoogleTransport refuses {} {}",
+            request.method,
+            request.url
+        );
         self.requests.lock().unwrap().push(request);
         Ok(self.responses.lock().unwrap().remove(0))
     }

@@ -30,6 +30,8 @@ const FILE_FIELDS: &str =
 /// Download range size; the transport refuses response bodies above 1 MiB.
 const CHUNK: u64 = 256 * 1024;
 const MAX_RETRIES: u32 = 4;
+/// The longest `Retry-After` a call waits out itself.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 // appProperties keys. Folders carry SYNC + ROLE, files carry KIND + ID.
 const SYNC: &str = "ticketdSync";
@@ -128,6 +130,7 @@ impl Entry {
             name: self.name.clone(),
             version: self.head_revision_id.clone()?,
             size: self.size.as_deref()?.parse().ok()?,
+            file_id: self.id.clone(),
         })
     }
 }
@@ -307,7 +310,8 @@ impl<'a> DriveRemote<'a> {
                 RemoteError::Offline => None,
                 _ => return Err(error),
             };
-            if attempt == MAX_RETRIES {
+            // A server may ask for any wait; a long one is the caller's to schedule.
+            if attempt == MAX_RETRIES || retry_after.is_some_and(|wait| wait > MAX_RETRY_AFTER) {
                 return Err(error);
             }
             (self.pause)(backoff(attempt, retry_after));
@@ -839,6 +843,7 @@ impl RemoteStorage for DriveRemote<'_> {
             name: name.into(),
             version: uploaded.head_revision_id.ok_or_else(unreadable)?,
             size,
+            file_id: uploaded.id,
         })
     }
 

@@ -489,7 +489,9 @@ fn a_dependency_loop_made_on_two_devices_loses_the_same_later_edge_everywhere() 
         for workspace in &devices.workspaces {
             assert_eq!(dependencies(workspace), std::slice::from_ref(&kept));
         }
-        // The devices that met the loop say which dependency went, once.
+        // Every device says which dependency went, once, whether it met the
+        // loop itself or received the repaired file; more runs add nothing.
+        devices.settle([order[2], order[0], order[1]]);
         let reference_of = |id: &str| {
             if id == one.id {
                 &one.reference
@@ -500,7 +502,7 @@ fn a_dependency_loop_made_on_two_devices_loses_the_same_later_edge_everywhere() 
         let mut noticed = 0;
         for workspace in &devices.workspaces {
             let notices = workspace.sync_notices().unwrap();
-            assert!(notices.len() <= 1);
+            assert_eq!(notices.len(), 1, "{order:?}");
             for notice in notices {
                 noticed += 1;
                 let SyncNoticeKind::DependencyRemoved {
@@ -530,7 +532,7 @@ fn a_dependency_loop_made_on_two_devices_loses_the_same_later_edge_everywhere() 
                 );
             }
         }
-        assert!(noticed >= 1);
+        assert_eq!(noticed, 3);
     }
 }
 
@@ -566,9 +568,11 @@ fn parent_loop_is_broken_the_same_way_everywhere(order: [usize; 3]) {
         })
         .collect();
     assert_eq!(parents.len(), 1);
-    // A device that held the loop says so in the Activity of both tickets.
+    // Every device says so once, in the Activity of both tickets.
+    devices.settle([order[2], order[0], order[1]]);
     let mut recorded = 0;
     for workspace in &devices.workspaces {
+        assert_eq!(workspace.sync_notices().unwrap().len(), 1, "{order:?}");
         for notice in workspace.sync_notices().unwrap() {
             let SyncNoticeKind::ParentRemoved {
                 reference, other, ..
@@ -581,12 +585,12 @@ fn parent_loop_is_broken_the_same_way_everywhere(order: [usize; 3]) {
                 (&other, &reference, "child"),
             ] {
                 let feed = workspace.activity_feed(ticket, 20, 0).unwrap();
-                assert!(feed.iter().any(|entry| matches!(entry, ActivityFeedEntry::Automatic { event, .. } if event.kind == "sync_parent_removed" && &event.from_value == other && event.to_value == relation)));
+                assert_eq!(feed.iter().filter(|entry| matches!(entry, ActivityFeedEntry::Automatic { event, .. } if event.kind == "sync_parent_removed" && &event.from_value == other && event.to_value == relation)).count(), 1);
                 recorded += 1;
             }
         }
     }
-    assert!(recorded >= 2);
+    assert_eq!(recorded, 6);
 }
 
 #[test]
@@ -814,9 +818,18 @@ fn a_missing_or_emptied_storage_never_removes_local_content() {
     assert_eq!(devices.sync(1).uploaded, 1);
     devices.settle([0, 2, 1]);
     devices.assert_converged();
+    // The other desktops meet a file that is not the one they synced: its
+    // content shares no history with theirs, so the difference waits for review.
+    let waiting = devices.workspaces[0]
+        .sync_conflict(SyncKind::Ticket, &id)
+        .unwrap();
+    assert_eq!(
+        waiting.fields[0].remote,
+        Some(SyncValue::Text("Still here".into()))
+    );
     assert_eq!(
         devices.workspaces[0].show_ticket(&reference).unwrap().title,
-        "Still here"
+        "Login"
     );
 
     // The whole folder is gone: the run reports it and local content stays.
@@ -1174,4 +1187,254 @@ fn a_hand_edit_may_name_a_ticket_by_its_reference_and_spell_a_status_loosely() {
         ),
         "{written}"
     );
+}
+
+/// F43: a field in review whose values later agree, or whose other value was
+/// replaced by a later change, no longer waits with a stale value.
+#[test]
+fn a_conflict_is_withdrawn_when_later_changes_settle_the_field() {
+    for case in [
+        "remote moved on",
+        "edited here to the other value",
+        "conflicts again",
+    ] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("Login");
+        let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+        devices.workspaces[0]
+            .change_ticket(&reference, title("From A"))
+            .unwrap();
+        devices.workspaces[1]
+            .change_ticket(&reference, title("From B"))
+            .unwrap();
+        devices.sync(0);
+        assert_eq!(devices.sync(1).conflicts, 1, "{case}");
+        match case {
+            "remote moved on" => {
+                // A takes B's value silently, then changes the title again.
+                devices.sync(0);
+                devices.workspaces[0]
+                    .change_ticket(&reference, title("Third"))
+                    .unwrap();
+                devices.sync(0);
+                devices.sync(1);
+                assert_eq!(
+                    devices.workspaces[1].sync_conflicts().unwrap(),
+                    [],
+                    "{case}"
+                );
+                assert_eq!(
+                    devices.workspaces[1].show_ticket(&reference).unwrap().title,
+                    "Third"
+                );
+            }
+            "edited here to the other value" => {
+                devices.workspaces[1]
+                    .change_ticket(&reference, title("From A"))
+                    .unwrap();
+                devices.sync(1);
+                assert_eq!(
+                    devices.workspaces[1].sync_conflicts().unwrap(),
+                    [],
+                    "{case}"
+                );
+            }
+            _ => {
+                // Both change the title again: one row, showing the newer other value.
+                devices.sync(0);
+                devices.workspaces[0]
+                    .change_ticket(&reference, title("A again"))
+                    .unwrap();
+                devices.workspaces[1]
+                    .change_ticket(&reference, title("B again"))
+                    .unwrap();
+                devices.sync(0);
+                devices.sync(1);
+                let conflict = devices.workspaces[1]
+                    .sync_conflict(SyncKind::Ticket, &id)
+                    .unwrap();
+                assert_eq!(conflict.fields.len(), 1, "{case}");
+                assert_eq!(
+                    conflict.fields[0].remote,
+                    Some(SyncValue::Text("A again".into()))
+                );
+            }
+        }
+        devices.settle([0, 1, 2]);
+        devices.assert_converged();
+    }
+}
+
+fn sourced(state: &str, updated: &str) -> String {
+    let closure = if state == "closed" {
+        "source_closure_reason: \"completed\"\n"
+    } else {
+        ""
+    };
+    format!(
+        "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Todo\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"I_42\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42 at {updated}\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"{state}\"\n{closure}source_updated_at: \"{updated}\"\n---\nFrom the tracker.\n"
+    )
+}
+
+/// F38: what two desktops each refreshed from the tracker is not a decision for
+/// a person: the later refresh wins for the source fields as a whole.
+#[test]
+fn source_fields_refreshed_on_two_devices_take_the_later_refresh_without_review() {
+    for order in [[0, 1, 2], [1, 0, 2]] {
+        let mut devices = devices();
+        let apply = |workspace: &mut Workspace, state: &str, updated: &str| {
+            let record = ticketd_core::SyncRecord::parse(&sourced(state, updated)).unwrap();
+            workspace.apply_sync_record(&record).unwrap();
+        };
+        apply(&mut devices.workspaces[0], "open", "2026-01-03T00:00:00Z");
+        devices.settle([0, 1, 2]);
+        apply(&mut devices.workspaces[0], "closed", "2026-01-04T00:00:00Z");
+        apply(&mut devices.workspaces[1], "open", "2026-01-05T00:00:00Z");
+
+        devices.settle(order);
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_conflicts().unwrap(), [], "{order:?}");
+            let record = workspace
+                .export_sync_record(SyncKind::Ticket, "3f2c9a1e-0000-4000-8000-000000000001")
+                .unwrap();
+            let field = |name: &str| record.fields.get(name).cloned();
+            assert_eq!(
+                field("source_updated_at"),
+                Some(SyncValue::Text("2026-01-05T00:00:00Z".into()))
+            );
+            assert_eq!(field("source_state"), Some(SyncValue::Text("open".into())));
+            assert_eq!(field("source_closure_reason"), None, "{order:?}");
+        }
+    }
+}
+
+/// F41: a record's file is removed in the storage and written again, then the
+/// first file comes back. It is another file than the one last synced, so its
+/// older content must not replace newer edits without review.
+#[test]
+fn a_restored_older_file_for_a_record_goes_to_review_instead_of_reverting_edits() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let key = RemoteKey::new(RemoteKind::Ticket, id.clone());
+    let original = devices.remote.list(FOLDER).unwrap()[0].file_id.clone();
+
+    assert!(devices.remote.remove_file(FOLDER, &key));
+    assert_eq!(devices.sync(0).uploaded, 1);
+    assert_ne!(devices.remote.list(FOLDER).unwrap()[0].file_id, original);
+    devices.workspaces[0]
+        .change_ticket(&reference, title("Newer"))
+        .unwrap();
+    assert_eq!(devices.sync(0).uploaded, 1);
+    assert!(devices.remote.restore_file(FOLDER, &key));
+    assert_eq!(devices.remote.list(FOLDER).unwrap()[0].file_id, original);
+
+    let report = devices.sync(0);
+    assert_eq!(report.conflicts, 1);
+    assert_eq!(
+        devices.workspaces[0].show_ticket(&reference).unwrap().title,
+        "Newer"
+    );
+    let conflict = devices.workspaces[0]
+        .sync_conflict(SyncKind::Ticket, &id)
+        .unwrap();
+    assert_eq!(conflict.fields.len(), 1);
+    assert_eq!(conflict.fields[0].field, "title");
+    assert_eq!(
+        conflict.fields[0].remote,
+        Some(SyncValue::Text("Login".into()))
+    );
+    // Repeated runs neither revert nor report it again.
+    assert_eq!(devices.sync(0).conflicts, 0);
+    devices.settle([1, 2, 0]);
+    devices.assert_converged();
+    for workspace in &devices.workspaces {
+        assert_eq!(workspace.show_ticket(&reference).unwrap().title, "Newer");
+    }
+}
+
+/// F39: two desktops that track the same external source each import the same
+/// issue before they sync. The ticket with the lower GUID keeps the source; the
+/// other becomes a Duplicate of it, identically on every desktop.
+#[test]
+fn the_same_external_issue_imported_on_two_devices_converges_as_a_duplicate() {
+    const KEEPER: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    const OTHER: &str = "3f2c9a1e-0000-4000-8000-000000000002";
+    for order in [[0, 1, 2], [1, 0, 2], [2, 1, 0]] {
+        let mut devices = devices();
+        let import = |workspace: &mut Workspace, id: &str, reference: &str| {
+            let text = sourced("open", "2026-01-03T00:00:00Z")
+                .replace(KEEPER, id)
+                .replace("T-ZZ7", reference);
+            let record = ticketd_core::SyncRecord::parse(&text).unwrap();
+            workspace.apply_sync_record(&record).unwrap();
+        };
+        import(&mut devices.workspaces[0], KEEPER, "T-ZZ7");
+        import(&mut devices.workspaces[1], OTHER, "T-YY8");
+
+        for _ in 0..3 {
+            for device in order {
+                assert_eq!(devices.sync(device).skipped, 0, "{order:?}");
+            }
+        }
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_notices().unwrap(), [], "{order:?}");
+            assert_eq!(workspace.sync_conflicts().unwrap(), [], "{order:?}");
+            let field = |id: &str, name: &str| {
+                let record = workspace.export_sync_record(SyncKind::Ticket, id).unwrap();
+                record.fields.get(name).cloned()
+            };
+            let text = |value: &str| Some(SyncValue::Text(value.into()));
+            assert_eq!(field(KEEPER, "source_external_id"), text("I_42"));
+            assert_eq!(field(KEEPER, "status"), text("Todo"));
+            assert_eq!(field(OTHER, "source_external_id"), None, "{order:?}");
+            assert_eq!(field(OTHER, "source_provider"), None);
+            assert_eq!(field(OTHER, "status"), text("Duplicate"));
+            assert_eq!(field(OTHER, "duplicate_of"), text(KEEPER));
+            assert_eq!(field(OTHER, "duplicate_restore"), text("Todo"));
+        }
+    }
+}
+
+/// F45: a file too large to be a record, or one whose header nests without
+/// end, is skipped with the normal notice instead of being read into memory or
+/// overflowing the stack.
+#[test]
+fn an_oversized_or_endlessly_nested_file_is_skipped_with_a_notice() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let (_, good) = devices.remote_text(RemoteKind::Ticket, &id);
+    let before = files(&devices.workspaces[1]);
+
+    let nested = good.replace(
+        "trashed: false",
+        &format!("tags:\n  {}x\ntrashed: false", "- ".repeat(5000)),
+    );
+    devices.hand_edit(RemoteKind::Ticket, &id, &nested);
+    assert_eq!(devices.sync(1).skipped, 1);
+    let reason = |workspace: &Workspace| match &workspace.sync_notices().unwrap()[0].notice {
+        SyncNoticeKind::UnreadableFile { reason, .. } => reason.clone(),
+        other => panic!("unexpected notice {other:?}"),
+    };
+    assert!(
+        reason(&devices.workspaces[1]).contains("nest"),
+        "{}",
+        reason(&devices.workspaces[1])
+    );
+
+    let huge = format!("{good}{}", "x".repeat(8 * 1024 * 1024));
+    devices.hand_edit(RemoteKind::Ticket, &id, &huge);
+    let calls = devices.remote.calls().len();
+    assert_eq!(devices.sync(1).skipped, 1);
+    assert!(!devices.remote.calls()[calls..].contains(&RemoteOp::Download));
+    assert!(
+        reason(&devices.workspaces[1]).contains("8 MiB"),
+        "{}",
+        reason(&devices.workspaces[1])
+    );
+    assert_eq!(files(&devices.workspaces[1]), before);
+    assert_eq!(devices.sync(1).skipped, 0);
 }

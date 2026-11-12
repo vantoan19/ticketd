@@ -130,7 +130,7 @@ pub(super) fn downloads(
 ) -> Result<AttachmentDownloads, Error> {
     Ok(connection.query_row(
         "SELECT COUNT(*), COALESCE(SUM(MAX(a.size_bytes - s.progress, 0)), 0) FROM sync_attachments s JOIN attachments a ON a.id = s.id
-         WHERE s.state = 'downloading' OR (?1 AND s.state = 'not_downloaded')",
+         WHERE s.state = 'downloading' OR (?1 AND s.state = 'not_downloaded' AND s.failed IS NOT s.version)",
         [automatic],
         |row| {
             Ok(AttachmentDownloads {
@@ -694,6 +694,11 @@ impl Workspace {
                     "UPDATE sync_attachments SET attempts = 0, failed = NULL WHERE id = ?1",
                     [id],
                 )?;
+                // What was told about this Attachment's download is no longer true.
+                self.connection.execute(
+                    "DELETE FROM sync_notices WHERE cause = 'attachment-save:' || ?1 OR cause LIKE 'attachment:' || ?1 || ':%' OR cause LIKE 'attachment-fetch:' || ?1 || ':%'",
+                    [id],
+                )?;
                 set("downloaded")
             }
             Ok(false) => {
@@ -748,6 +753,18 @@ impl Workspace {
                     },
                 )?;
                 Err(Error::Attachment(message))
+            }
+            // A fault of this device after bytes arrived (a full disk, something
+            // in the way). The caller tells the person; after a few runs it is
+            // left to an explicit download like a failing storage, so the same
+            // bytes are not fetched again by every run.
+            Err(error @ Error::Directory(_)) => {
+                set("not_downloaded")?;
+                self.connection.execute(
+                    "UPDATE sync_attachments SET attempts = attempts + 1, failed = CASE WHEN attempts + 1 >= ?3 THEN ?2 ELSE failed END WHERE id = ?1",
+                    params![id, version, DOWNLOAD_ATTEMPTS],
+                )?;
+                Err(error)
             }
             Err(error) => {
                 set("not_downloaded")?;

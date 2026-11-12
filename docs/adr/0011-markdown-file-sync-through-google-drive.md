@@ -47,6 +47,8 @@ Each device keeps a copy of every file as it was last synced. When a record chan
 - **The same field changed:** the local value is kept, the record is marked Needs review, and the person chooses or edits the value in a side-by-side comparison of the conflicting fields. A field is merged as a whole. The Markdown text is one field; there is no automatic text merging.
 - **Tags and other sets:** additions and removals from both sides combine. An addition wins over a concurrent removal. No review.
 - **Dependency loops:** two devices can each add a dependency that is valid alone and forms a loop together. Every device then drops the same edge, the later one, chosen by a rule that depends only on the set of edges, and shows a notice naming it.
+- **The same external issue imported on two devices:** each device made its own ticket before they synced, and only one ticket may hold a source identity. The ticket with the lower GUID keeps the source on every device; the other loses its source fields and becomes a Duplicate of it, with its content kept. No review and no notice.
+- **Source fields refreshed on two devices:** the refresh with the later `source_updated_at` wins for the source fields as a whole. No review.
 
 No duplicate ticket or conflict-copy file is ever created. A file that cannot be read is skipped with a Needs attention notice and changes nothing locally.
 

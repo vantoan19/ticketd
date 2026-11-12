@@ -420,7 +420,8 @@ fn downloaded_bytes_that_are_not_the_uploaded_ones_are_refused() {
     let status = b.sync_now(&desks.remote).unwrap();
 
     assert_eq!(status.state, SyncState::NeedsAttention);
-    assert_eq!(status.attachment_downloads.count, 1);
+    // Given up on, so it no longer counts as a download still to come (F35).
+    assert_eq!(status.attachment_downloads.count, 0);
     assert_eq!(
         b.attachment_availability(std::slice::from_ref(&attachment))
             .unwrap()[0]
@@ -861,11 +862,11 @@ fn an_attachment_that_cannot_be_saved_here_is_reported_and_records_still_sync() 
     assert_eq!(unreadable(&b), ["attachments/notes.txt"]);
     assert_eq!(state(&b), AttachmentAvailabilityState::NotDownloaded);
 
-    // With the way clear, the next run fetches it and says nothing more.
+    // With the way clear, the next run fetches it and withdraws the notice.
     std::fs::remove_dir_all(root.join(&attachment)).unwrap();
     b.sync_now(&desks.remote).unwrap();
     assert_eq!(state(&b), AttachmentAvailabilityState::Downloaded);
-    assert_eq!(unreadable(&b).len(), 1);
+    assert_eq!(b.sync_notices().unwrap(), []);
 }
 
 #[test]
@@ -1604,6 +1605,7 @@ fn an_attachment_download_that_keeps_failing_becomes_a_notice_and_runs_succeed_a
     let before = desks.remote.calls().len();
     let status = b.sync_now(&desks.remote).unwrap();
     assert_eq!(status.recovery, None);
+    assert_eq!(status.attachment_downloads.count, 0);
     assert!(!desks.remote.calls()[before..].contains(&RemoteOp::Download));
 
     // Asking for it still tries, and a success is a success.
@@ -1612,5 +1614,80 @@ fn an_attachment_download_that_keeps_failing_becomes_a_notice_and_runs_succeed_a
         availability_of(&b, &attachment),
         AttachmentAvailabilityState::Downloaded
     );
-    assert_eq!(unreadable(&b).len(), 1);
+    // Its failure is no longer true, so the notice is withdrawn (F35).
+    assert_eq!(b.sync_notices().unwrap(), []);
+}
+
+/// F40: format 61 was in use before `sync_attachments.attempts` joined it, so a
+/// Workspace at 61 can lack the column. Format 62 adds it.
+#[test]
+fn a_format_61_workspace_without_download_attempts_gains_the_column() {
+    let desks = desks();
+    let (desk, _, _) = desks.uploaded("a");
+    drop(desk);
+    let path = desks.directory.path().join("a");
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture
+        .execute_batch(
+            "ALTER TABLE sync_attachments DROP COLUMN attempts; PRAGMA user_version = 61;",
+        )
+        .unwrap();
+    drop(fixture);
+
+    let mut desk = Workspace::open(&path).unwrap();
+    desk.sync_now(&desks.remote).unwrap();
+    drop(desk);
+    let migrated = rusqlite::Connection::open(&path).unwrap();
+    let attempts: i64 = migrated
+        .query_row(
+            "SELECT COALESCE(SUM(attempts), 0) FROM sync_attachments",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attempts, 0);
+}
+
+/// F42: bytes that arrive but cannot be saved on this device (a full disk,
+/// something in the way) must not be fetched again by every run.
+#[test]
+fn an_attachment_that_cannot_be_saved_here_is_not_downloaded_again_by_every_run() {
+    let desks = desks();
+    let (_a, _, attachment) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    b.sync_now(&desks.remote).unwrap();
+    // Something else sits where the Attachment's files go.
+    let taken = desks
+        .directory
+        .path()
+        .join("Desk B.attachments")
+        .join(&attachment);
+    std::fs::create_dir_all(taken.join("in the way")).unwrap();
+    b.set_sync_settings("Desk B", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    let downloads = |b: &mut Workspace| {
+        let before = desks.remote.calls().len();
+        let status = b.sync_now(&desks.remote).unwrap();
+        let fetched = desks.remote.calls()[before..]
+            .iter()
+            .filter(|op| **op == RemoteOp::Download)
+            .count();
+        (fetched, status)
+    };
+
+    let tried: usize = (0..5).map(|_| downloads(&mut b).0).sum();
+    assert_eq!(tried, 3);
+    let (fetched, status) = downloads(&mut b);
+    assert_eq!(fetched, 0);
+    assert_eq!(status.attachment_downloads.count, 0);
+    assert_eq!(unreadable(&b), ["attachments/notes.txt"]);
+
+    // With the way clear, asking for it fetches it and withdraws the notice.
+    std::fs::remove_dir_all(&taken).unwrap();
+    b.download_attachment(&desks.remote, &attachment).unwrap();
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::Downloaded
+    );
+    assert_eq!(b.sync_notices().unwrap(), []);
 }
