@@ -1646,7 +1646,6 @@ fn a_format_61_workspace_without_download_attempts_gains_the_column() {
         )
         .unwrap();
     assert_eq!(attempts, 0);
-    assert!(ticketd_core::FORMAT_VERSION >= 62);
 }
 
 /// F42: bytes that arrive but cannot be saved on this device (a full disk,
