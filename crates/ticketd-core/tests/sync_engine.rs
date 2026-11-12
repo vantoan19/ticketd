@@ -489,7 +489,9 @@ fn a_dependency_loop_made_on_two_devices_loses_the_same_later_edge_everywhere() 
         for workspace in &devices.workspaces {
             assert_eq!(dependencies(workspace), std::slice::from_ref(&kept));
         }
-        // The devices that met the loop say which dependency went, once.
+        // Every device says which dependency went, once, whether it met the
+        // loop itself or received the repaired file; more runs add nothing.
+        devices.settle([order[2], order[0], order[1]]);
         let reference_of = |id: &str| {
             if id == one.id {
                 &one.reference
@@ -500,7 +502,7 @@ fn a_dependency_loop_made_on_two_devices_loses_the_same_later_edge_everywhere() 
         let mut noticed = 0;
         for workspace in &devices.workspaces {
             let notices = workspace.sync_notices().unwrap();
-            assert!(notices.len() <= 1);
+            assert_eq!(notices.len(), 1, "{order:?}");
             for notice in notices {
                 noticed += 1;
                 let SyncNoticeKind::DependencyRemoved {
@@ -530,7 +532,7 @@ fn a_dependency_loop_made_on_two_devices_loses_the_same_later_edge_everywhere() 
                 );
             }
         }
-        assert!(noticed >= 1);
+        assert_eq!(noticed, 3);
     }
 }
 
@@ -566,9 +568,11 @@ fn parent_loop_is_broken_the_same_way_everywhere(order: [usize; 3]) {
         })
         .collect();
     assert_eq!(parents.len(), 1);
-    // A device that held the loop says so in the Activity of both tickets.
+    // Every device says so once, in the Activity of both tickets.
+    devices.settle([order[2], order[0], order[1]]);
     let mut recorded = 0;
     for workspace in &devices.workspaces {
+        assert_eq!(workspace.sync_notices().unwrap().len(), 1, "{order:?}");
         for notice in workspace.sync_notices().unwrap() {
             let SyncNoticeKind::ParentRemoved {
                 reference, other, ..
@@ -581,12 +585,12 @@ fn parent_loop_is_broken_the_same_way_everywhere(order: [usize; 3]) {
                 (&other, &reference, "child"),
             ] {
                 let feed = workspace.activity_feed(ticket, 20, 0).unwrap();
-                assert!(feed.iter().any(|entry| matches!(entry, ActivityFeedEntry::Automatic { event, .. } if event.kind == "sync_parent_removed" && &event.from_value == other && event.to_value == relation)));
+                assert_eq!(feed.iter().filter(|entry| matches!(entry, ActivityFeedEntry::Automatic { event, .. } if event.kind == "sync_parent_removed" && &event.from_value == other && event.to_value == relation)).count(), 1);
                 recorded += 1;
             }
         }
     }
-    assert!(recorded >= 2);
+    assert_eq!(recorded, 6);
 }
 
 #[test]

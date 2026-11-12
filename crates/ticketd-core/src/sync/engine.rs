@@ -249,17 +249,137 @@ pub(super) fn notify(
     cause: &str,
     notice: &SyncNoticeKind,
 ) -> Result<(), Error> {
+    notify_once(connection, cause, notice, false).map(|_| ())
+}
+
+/// Record a notice unless its cause already has one; says whether it was new.
+fn notify_once(
+    connection: &Connection,
+    cause: &str,
+    notice: &SyncNoticeKind,
+    read: bool,
+) -> Result<bool, Error> {
     let notice =
         serde_json::to_string(notice).map_err(|error| Error::SyncFile(error.to_string()))?;
     // One notice per cause, however many runs meet it again.
     let recorded = connection.execute(
-        "INSERT OR IGNORE INTO sync_notices (id, notice, cause) VALUES (?1, ?2, ?3)",
-        params![format!("notice-{}", Uuid::new_v4()), notice, cause],
+        "INSERT OR IGNORE INTO sync_notices (id, notice, cause, read) VALUES (?1, ?2, ?3, ?4)",
+        params![format!("notice-{}", Uuid::new_v4()), notice, cause, read],
     )?;
     if recorded > 0 {
         touch(connection)?;
     }
-    Ok(())
+    Ok(recorded > 0)
+}
+
+/// The two relationships sync removes to break a loop, as the ticket file
+/// fields that carry the removals to every desktop.
+const REMOVED: [(&str, &str); 2] = [
+    ("blocked_by_removed", "dependency"),
+    ("parent_removed", "parent"),
+];
+
+/// The removals this desktop has recorded for a ticket, as the items of its
+/// file's `blocked_by_removed` and `parent_removed` fields: the other ticket's
+/// GUID, followed by the time the dependency was made when it has one.
+pub(crate) fn removed_by_sync(
+    connection: &Connection,
+    ticket: &str,
+) -> Result<[(&'static str, BTreeSet<String>); 2], Error> {
+    let mut found = REMOVED.map(|(field, _)| (field, BTreeSet::new()));
+    let mut statement =
+        connection.prepare_cached("SELECT cause FROM sync_notices WHERE cause LIKE ?1")?;
+    for ((_, items), (_, cause)) in found.iter_mut().zip(REMOVED) {
+        let prefix = format!("{cause}:{ticket}:");
+        let causes = statement.query_map([format!("{prefix}%")], |row| row.get::<_, String>(0))?;
+        for cause in causes {
+            // `<other GUID>` or `<other GUID>:<time>`; a GUID holds no colon.
+            let cause = cause?;
+            let rest = cause.strip_prefix(&prefix).unwrap_or_default();
+            let (other, time) = rest.split_once(':').unwrap_or((rest, ""));
+            items.insert(format!("{other} {time}").trim_end().to_owned());
+        }
+    }
+    Ok(found)
+}
+
+/// Record that sync removed a relationship of `ticket` to break a loop: one
+/// notice and one history entry on each of the two tickets, once per desktop
+/// however often and from wherever the removal is learned. `false` when one of
+/// the tickets is not in this Workspace yet.
+fn note_removed(
+    connection: &Connection,
+    field: &str,
+    ticket: &str,
+    item: &str,
+    read: bool,
+) -> Result<bool, Error> {
+    let (other_id, time) = item.split_once(' ').unwrap_or((item, ""));
+    let named = |id: &str| -> Result<Option<(String, String)>, Error> {
+        Ok(connection
+            .query_row(
+                "SELECT reference, title FROM tickets WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    };
+    let (Some((reference, title)), Some((other, _))) = (named(ticket)?, named(other_id)?) else {
+        return Ok(false);
+    };
+    let dependency = field == "blocked_by_removed";
+    let (cause, kind, relations, notice) = if dependency {
+        (
+            format!("dependency:{ticket}:{other_id}:{time}"),
+            "sync_dependency_removed",
+            ["blocked_by", "blocks"],
+            SyncNoticeKind::DependencyRemoved {
+                ticket_id: ticket.to_owned(),
+                reference: reference.clone(),
+                title,
+                relation: "blocked_by".into(),
+                other: other.clone(),
+            },
+        )
+    } else {
+        (
+            format!("parent:{ticket}:{other_id}"),
+            "sync_parent_removed",
+            ["parent", "child"],
+            SyncNoticeKind::ParentRemoved {
+                ticket_id: ticket.to_owned(),
+                reference: reference.clone(),
+                title,
+                other: other.clone(),
+            },
+        )
+    };
+    if notify_once(connection, &cause, &notice, read)? {
+        for (ticket, other, relation) in [
+            (ticket, &other, relations[0]),
+            (other_id, &reference, relations[1]),
+        ] {
+            connection.execute(
+                "INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, ?2, ?3, ?4)",
+                params![ticket, kind, other, relation],
+            )?;
+        }
+    }
+    Ok(true)
+}
+
+/// Record the removals a ticket's file carries. `false` while one of them
+/// names a ticket that has not arrived.
+fn note_removals(connection: &Connection, record: &SyncRecord, read: bool) -> Result<bool, Error> {
+    let mut all = true;
+    for (field, _) in REMOVED {
+        if let Some(SyncValue::Set(items)) = record.fields.get(field) {
+            for item in items {
+                all &= note_removed(connection, field, &record.id, item, read)?;
+            }
+        }
+    }
+    Ok(all)
 }
 
 /// The source fields describe one refresh from the tracker and go together.
@@ -531,9 +651,9 @@ impl Workspace {
         listing: Vec<RemoteFile>,
     ) -> Result<SyncReport, Error> {
         let mut report = SyncReport::default();
-        self.download(remote, folder, listing, &mut report)?;
+        let arrived = self.download(remote, folder, listing, &mut report)?;
         self.withdraw_agreed_conflicts()?;
-        self.retry_waiting()?;
+        self.retry_waiting(&arrived)?;
         self.drop_loops()?;
         self.upload(remote, folder, device, &mut report)?;
         report.pending = self.dirty_records()?.len();
@@ -546,7 +666,9 @@ impl Workspace {
         folder: &str,
         listing: Vec<RemoteFile>,
         report: &mut SyncReport,
-    ) -> Result<(), Error> {
+    ) -> Result<BTreeSet<String>, Error> {
+        // The records this run brought to this desktop for the first time.
+        let mut arrived = BTreeSet::new();
         self.restore_unlisted(&listing)?;
         let mut files: Vec<(SyncKind, RemoteFile)> = listing
             .into_iter()
@@ -577,7 +699,7 @@ impl Workspace {
             }
             let text = String::from_utf8(bytes);
             let merged = match &text {
-                Ok(text) => self.merge_incoming(kind, id, &file, text),
+                Ok(text) => self.merge_incoming(kind, id, &file, text, &mut arrived),
                 Err(_) => Err(Error::SyncFile("the file is not UTF-8 text".into())),
             };
             match merged {
@@ -597,7 +719,7 @@ impl Workspace {
                 Err(error) => return Err(error),
             }
         }
-        Ok(())
+        Ok(arrived)
     }
 
     /// Withdraw the fields in review that an edit on this device has since
@@ -730,6 +852,7 @@ impl Workspace {
         id: &str,
         from: &RemoteFile,
         file: &str,
+        arrived: &mut BTreeSet<String>,
     ) -> Result<usize, Error> {
         let mut remote = SyncRecord::parse(file)?;
         if remote.kind != kind || remote.id != id {
@@ -752,11 +875,17 @@ impl Workspace {
             }
             let (merged, conflicts) = match local_view(&workspace.connection, kind, id, &stored)? {
                 Some(local) => merge_records(stored.base.as_ref(), &local, &remote),
-                None => (remote.clone(), Vec::new()),
+                None => {
+                    arrived.insert(id.to_owned());
+                    (remote.clone(), Vec::new())
+                }
             };
             let missing = workspace.apply_sync_record(&merged)?;
             let connection = &workspace.connection;
-            (stored.wanted, stored.applied) = if missing.is_empty() {
+            // A removal that came with a record new to this desktop is old news
+            // here: it is recorded as read.
+            let noted = note_removals(connection, &merged, arrived.contains(id))?;
+            (stored.wanted, stored.applied) = if missing.is_empty() && noted {
                 (None, None)
             } else {
                 (Some(merged.clone()), find_record(connection, kind, id)?)
@@ -821,7 +950,7 @@ impl Workspace {
     /// Apply again the records whose relationships waited for a record to arrive.
     // ponytail: every waiting record is re-applied on every run; an Attachment link
     // waits until Attachment rows sync. Index the awaited ids if this gets slow.
-    fn retry_waiting(&mut self) -> Result<(), Error> {
+    fn retry_waiting(&mut self, arrived: &BTreeSet<String>) -> Result<(), Error> {
         let mut statement = self.connection.prepare(
             "SELECT kind, id FROM sync_files WHERE wanted IS NOT NULL ORDER BY kind, id",
         )?;
@@ -841,7 +970,8 @@ impl Workspace {
                     return Ok(());
                 };
                 let missing = workspace.apply_sync_record(&wanted)?;
-                (stored.wanted, stored.applied) = if missing.is_empty() {
+                let noted = note_removals(&workspace.connection, &wanted, arrived.contains(&id))?;
+                (stored.wanted, stored.applied) = if missing.is_empty() && noted {
                     (None, None)
                 } else {
                     let applied = find_record(&workspace.connection, kind, &id)?;
@@ -871,13 +1001,8 @@ impl Workspace {
                 .collect::<Result<_, _>>()?;
             Ok(edges)
         };
-        let ticket = |id: &str| -> Result<(String, String), Error> {
-            Ok(transaction.query_row(
-                "SELECT reference, title FROM tickets WHERE id = ?1",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?)
-        };
+        // The notice is also what the ticket's file carries the removal in, so
+        // a desktop that only receives the repaired file records it as well.
         let dependencies =
             edges("SELECT dependent_id, blocker_id, COALESCE(created_at, '') FROM dependencies")?;
         for edge in loop_edges(&dependencies) {
@@ -885,30 +1010,13 @@ impl Workspace {
                 "DELETE FROM dependencies WHERE dependent_id = ?1 AND blocker_id = ?2",
                 params![edge.blocked, edge.blocker],
             )?;
-            let (reference, title) = ticket(&edge.blocked)?;
-            let (other, _) = ticket(&edge.blocker)?;
-            for (ticket, other, relation) in [
-                (&edge.blocked, &other, "blocked_by"),
-                (&edge.blocker, &reference, "blocks"),
-            ] {
-                transaction.execute(
-                    "INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'sync_dependency_removed', ?2, ?3)",
-                    params![ticket, other, relation],
-                )?;
-            }
-            notify(
+            let item = format!("{} {}", edge.blocker, edge.order);
+            note_removed(
                 &transaction,
-                &format!(
-                    "dependency:{}:{}:{}",
-                    edge.blocked, edge.blocker, edge.order
-                ),
-                &SyncNoticeKind::DependencyRemoved {
-                    ticket_id: edge.blocked,
-                    reference,
-                    title,
-                    relation: "blocked_by".into(),
-                    other,
-                },
+                "blocked_by_removed",
+                &edge.blocked,
+                item.trim_end(),
+                false,
             )?;
         }
         // A parent link carries no time; the GUIDs alone order the links of a loop.
@@ -918,26 +1026,12 @@ impl Workspace {
                 "DELETE FROM ticket_parents WHERE child_id = ?1",
                 [&edge.blocked],
             )?;
-            let (reference, title) = ticket(&edge.blocked)?;
-            let (other, _) = ticket(&edge.blocker)?;
-            for (ticket, other, relation) in [
-                (&edge.blocked, &other, "parent"),
-                (&edge.blocker, &reference, "child"),
-            ] {
-                transaction.execute(
-                    "INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'sync_parent_removed', ?2, ?3)",
-                    params![ticket, other, relation],
-                )?;
-            }
-            notify(
+            note_removed(
                 &transaction,
-                &format!("parent:{}:{}", edge.blocked, edge.blocker),
-                &SyncNoticeKind::ParentRemoved {
-                    ticket_id: edge.blocked,
-                    reference,
-                    title,
-                    other,
-                },
+                "parent_removed",
+                &edge.blocked,
+                &edge.blocker,
+                false,
             )?;
         }
         transaction.commit()?;
@@ -1014,7 +1108,13 @@ impl Workspace {
                     if let Some(text) = replaced {
                         // Merged against the copy both changes started from, which is
                         // still the stored one. An unreadable revision is left alone.
-                        match self.merge_incoming(kind, &dirty.id, &file, &text) {
+                        match self.merge_incoming(
+                            kind,
+                            &dirty.id,
+                            &file,
+                            &text,
+                            &mut BTreeSet::new(),
+                        ) {
                             Ok(conflicts) => {
                                 report.downloaded += 1;
                                 report.conflicts += conflicts;

@@ -103,32 +103,36 @@ Every relationship is written in exactly one file, as the GUID of the other reco
 | Originating Activity        | The Document: `origin_activity`                    |
 
 A file may arrive before a record it names. The relationship is then left out and reported; applying the same file again after the other record arrives completes it. Mentions and links inside Markdown text resolve once their target is present.
-`blocked_since` orders dependencies the same way on every device. When changes from different devices together make a dependency loop, every device removes the dependency in the loop that began last; equal times fall back to the GUIDs. A dependency added by hand without a time counts as the earliest.
+`blocked_since` orders dependencies the same way on every device. When changes from different devices together make a dependency loop, every device removes the dependency in the loop that began last; equal times fall back to the GUIDs. A dependency added by hand without a time counts as the earliest. A loop of parents is broken the same way, by the GUIDs alone.
+
+The ticket that lost the relationship lists it in `blocked_by_removed` or `parent_removed`, as the other ticket's GUID followed by the time of the dependency when it has one. A desktop records a notice and an Activity entry for each item once, whether it removed the relationship itself or received the file; items are never taken out again. A removal that arrives together with a ticket new to that desktop is recorded as already read.
 
 ## Fields
 
 ### Ticket
 
-| Field               | Value                                                                 |
-| ------------------- | --------------------------------------------------------------------- |
-| `ref`               | Required. The Ticket reference; it never changes.                     |
-| `title`             | Required, not blank.                                                  |
-| `status`            | Required: Todo, In progress, In review, Done, Canceled or Duplicate.  |
-| `project`, `plan`   | GUID of the project and of the Plan.                                  |
-| `parent`            | GUID of the parent ticket.                                            |
-| `blocked_by`        | GUIDs of the tickets that block this one.                             |
-| `blocked_since`     | One `<GUID> <time>` item per blocking ticket: when it began to block. |
-| `related`           | GUIDs of related tickets whose id sorts after this ticket's.          |
-| `discovered`        | GUIDs of tickets discovered while working on this one.                |
-| `duplicate_of`      | GUID of the canonical ticket.                                         |
-| `duplicate_restore` | The status the ticket returns to when it stops being a duplicate.     |
-| `tags`              | Lowercase tag names.                                                  |
-| `documents`         | GUIDs of linked Documents.                                            |
-| `attachments`       | GUIDs of attached files.                                              |
-| `trashed`           | Whether the ticket is in Trash.                                       |
-| `following`         | Whether the person follows the ticket.                                |
-| `reminder`          | When the Ticket reminder is due.                                      |
-| `source_*`          | External-source provenance; see below.                                |
+| Field                | Value                                                                 |
+| -------------------- | --------------------------------------------------------------------- |
+| `ref`                | Required. The Ticket reference; it never changes.                     |
+| `title`              | Required, not blank.                                                  |
+| `status`             | Required: Todo, In progress, In review, Done, Canceled or Duplicate.  |
+| `project`, `plan`    | GUID of the project and of the Plan.                                  |
+| `parent`             | GUID of the parent ticket.                                            |
+| `blocked_by`         | GUIDs of the tickets that block this one.                             |
+| `blocked_since`      | One `<GUID> <time>` item per blocking ticket: when it began to block. |
+| `blocked_by_removed` | Dependencies sync removed to break a loop; see Relationships.         |
+| `parent_removed`     | A parent sync removed to break a loop; see Relationships.             |
+| `related`            | GUIDs of related tickets whose id sorts after this ticket's.          |
+| `discovered`         | GUIDs of tickets discovered while working on this one.                |
+| `duplicate_of`       | GUID of the canonical ticket.                                         |
+| `duplicate_restore`  | The status the ticket returns to when it stops being a duplicate.     |
+| `tags`               | Lowercase tag names.                                                  |
+| `documents`          | GUIDs of linked Documents.                                            |
+| `attachments`        | GUIDs of attached files.                                              |
+| `trashed`            | Whether the ticket is in Trash.                                       |
+| `following`          | Whether the person follows the ticket.                                |
+| `reminder`           | When the Ticket reminder is due.                                      |
+| `source_*`           | External-source provenance; see below.                                |
 
 The text after the header is the description. Activities and Implementation evidence follow as sections, oldest first.
 
