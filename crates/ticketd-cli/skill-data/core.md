@@ -34,6 +34,7 @@ in a row, load that row's guide; load only the guides your task reaches.
 | Send a write that must survive a retry, replace shared text, or change several tickets at once | `ticketd skills get writes`    |
 | Touch a ticket an external source owns, change source settings, refresh, or publish            | `ticketd skills get sources`   |
 | Move, back up, restore, or export the workspace; use reminders or the personal inbox           | `ticketd skills get workspace` |
+| Start work in a ticketd Chat (the app started you and named linked records)                    | `ticketd skills get chat`      |
 
 `ticketd COMMAND --help` and `ticketd GROUP COMMAND --help` describe current
 arguments and flags. Examples use placeholders such as PROJECT_ID and DOCUMENT_ID; substitute actual

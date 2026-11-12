@@ -7,6 +7,7 @@ export type SettingsGroup = "Preferences" | "Workspace" | "Sources" | "Help";
 export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Appearance", group: "Preferences" },
   { id: "attention", label: "Attention", group: "Preferences" },
+  { id: "experimental", label: "Experimental", group: "Preferences" },
   { id: "location", label: "Location", group: "Workspace" },
   { id: "sync", label: "Sync", group: "Workspace" },
   { id: "attachments", label: "Attachments", group: "Workspace" },

@@ -6,6 +6,9 @@ The direct-access process model is the selected direction, conditional on valida
 
 ## Runtime
 
+This diagram describes the existing direct-access runtime. The approved native
+Chat extension is shown separately below until its implementation is delivered.
+
 ```mermaid
 flowchart TB
     Person[Person] --> UI
@@ -41,6 +44,209 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `a
 | Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly            |
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
+
+## Planned native Chat runtime and storage
+
+The approved native Chat design extends the runtime above; it is not yet
+implemented. The Rust desktop host supervises a provider process for each active
+Chat, using Codex app-server directly or a packaged TypeScript Claude Agent SDK
+bridge pointed at the user's installed official Claude Code executable. The
+harness owns authentication and native session state. The independently usable
+CLI continues to call the shared core without requiring the desktop.
+
+```mermaid
+flowchart TB
+    UI[React Chat view] --> Host[Rust desktop Chat supervisor]
+    Host --> Core[Shared Rust core workflows]
+    Core --> DB[(Workspace SQLite)]
+    Host --> Codex[Rust Codex adapter]
+    Codex <-->|structured stdio| AppServer[Installed codex app-server]
+    Host --> Claude[Rust bridge transport]
+    Claude <-->|versioned structured stdio| SDK[Packaged TypeScript Agent SDK bridge]
+    SDK --> Binary[Installed official Claude Code]
+    AppServer --> CLI[Independent ticketd CLI]
+    Binary --> CLI
+    CLI --> Core
+```
+
+The shared core is a library instantiated by each caller, not a shared process.
+Harness-to-CLI calls use the ordinary ticketd interface for context and writes.
+The bridge/runtime is packaged by ticketd; harness installation, updates and
+credentials remain user-managed. Native Windows, macOS and Ubuntu use the product
+specification's existing release matrix.
+
+### Runtime ownership and adapter interface
+
+The Chat supervisor owns dispatch, the visible queue, one active turn per Chat,
+and runtime lifetime. Adapters translate protocols and report capabilities and
+observations. They coordinate with the supervisor around submission and approval
+responses; they do not write workspace storage. The supervisor calls core
+workflows, which own validation, transactions and durable Chat records.
+
+Use an internal adapter interface with installation/capability inspection,
+new-session or explicit native-resume opening, input submission (new turn or
+supported steering), live interaction response, interruption, closure, and an
+independent event stream. Capabilities describe effective behavior and its
+evidence, including whether steering interrupts tools, rather than only booleans.
+Do not expose provider wire formats as the React interface.
+
+Commands carry application submission identity, current runtime generation and
+expected native turn/request identity where applicable. Adapters report known
+non-delivery, possible delivery, rejection and acknowledgment only as observed;
+completion arrives separately. Recheck ownership before dispatch and after awaited
+work before answering a live callback. A local request ID supplies correlation,
+not a provider-side idempotency guarantee. Claude input-stream completion is not a
+per-message acknowledgment. A timed-out command may still receive later evidence.
+
+Continuously drain duplex protocol traffic while outgoing RPCs or human answers
+are pending. Route replies, notifications and incoming requests independently;
+drain bounded stderr diagnostics separately from stdout protocol frames. The
+Claude bridge holds SDK objects and callbacks but has no second durable Chat store.
+
+Navigation and window closure only detach views. Explicit Quit stops new dispatch,
+interrupts/closes owned runtimes with bounded cleanup, flushes retained observations
+and closes storage last. Verify Windows process-tree ownership separately from
+POSIX process groups. A wrapper process exiting does not prove all tools stopped.
+Archive does not stop execution; trash does. Process pooling and a standalone
+always-running service are not selected for the initial design.
+
+### Persistence and delivery observations
+
+Chat storage uses structured records in the existing SQLite workspace for Chats
+and their links, messages, submission attempts, turns, tool activity and retained
+interaction state. A small ordered change log supports UI reconnection. These
+records are authoritative for ticketd's history; reconstructing a Chat from all
+raw provider events is not required. Exact table names and schema are internal
+implementation details.
+
+The storage half of this design exists: the core's Chat workflows
+(`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
+tables do not move the workspace change token, so streaming a turn does not make
+other views refetch; Chat views follow the Chat change log instead.
+
+User input and submission attempts are separate. The core saves input before
+dispatch and records possible submission before the adapter hands it to the
+harness. Provider acknowledgment, correlated processing and terminal outcome
+are separate observations, recorded only when supported by actual evidence.
+Neither a successful transport write nor a lost response proves task completion
+or safe retry. Uncertain attempts are retained without automatic resubmission.
+Existing ticketd write-request deduplication does not imply harness idempotency.
+
+A turn the harness correlated with a submission is evidence that the submission
+arrived, with or without an explicit acknowledgment; losing contact afterwards
+leaves the turn's outcome unknown, not the delivery. A written new turn that
+nothing confirms within a bound is recorded as uncertain. The person's decision
+about an uncertain submission is recorded beside the attempt and never rewrites
+it: Discard keeps the message and its uncertainty, and Resend is a new attempt
+for that message alone, dispatched with the queue paused. Where input stands
+(queued, sending, delivered, awaiting a decision or set aside) is derived in one
+place from all of its attempts and decisions: a discarded message is never queued
+again whatever is observed later, and a resend the harness refuses returns the
+message to awaiting a decision with the earlier uncertainty intact. A failed turn
+keeps the kind of failure the adapter reported and, for a usage limit, the reset
+time the provider gave. Such a failure describes the turn that ended; it does not
+block the next message, which only a condition observed now does. An optional
+tool, MCP server or model that is unavailable is a typed problem of the running
+session that blocks nothing. Warnings, retries and unmodelled provider traffic
+are stored as bounded notices, and the settings a harness reports as in effect
+are stored, bounded, with the Chat.
+
+A workspace restore stops every Chat first and the host refuses all Chat requests
+until it is over. A restore that replaced the data is reported as a success with
+its safety copy; an unconfirmed stop or a failed check of the restored Chats is a
+warning on that success.
+
+The core commits durable record changes and their ordered change entries
+atomically; the desktop publishes committed changes. A reconnecting view reads a
+snapshot and follows changes after its sequence, refreshing the snapshot when a
+cursor cannot be served. Reattaching the UI does not restart the harness. Native
+session identity remains distinct from Chat identity and the current runtime
+generation.
+
+Stored approval/question state preserves history, not callable authority. Live
+responses are checked against the current generation and native request; stale
+callbacks and commands cannot target replacement processes. Text updates may be
+coalesced and checkpointed with explicit bounds, while critical submission,
+interaction and terminal observations are retained. A hard crash can lose an
+uncheckpointed streamed suffix. Provider-specific details remain available through
+bounded typed extensions rather than unrestricted raw transport storage.
+
+Bound parser frames, pending requests, diagnostics, output previews and subscriber
+backlogs separately. Slow views can be directed to a new snapshot instead of
+accumulating an unbounded backlog. Flush preceding text before critical control
+observations and reconcile authoritative final content without duplicating deltas.
+Do not destructively truncate execution input to fit a display budget. On storage
+failure, stop admitting/dispatching additional work, report uncertainty about work
+already in flight, and perform controlled shutdown/reconciliation. No local
+transaction can atomically commit an arbitrary harness side effect.
+
+### Context and recovery boundaries
+
+The host supplies lightweight linked-record references and locates the independent
+CLI. Current context is read through core-backed operations. Preserve native
+settings and instruction discovery in the selected
+working directory. Domain writes retain existing source authority and concurrency
+rules. Agent attribution never substitutes for Chat identity or permission.
+
+`ticketd-chat-host` builds that context as text from the Chat's current links
+(`context`) and finds the CLI the same way Settings does (`cli`). The text names
+each record, the command that returns it, and the bundled `chat` guide; it holds no
+record content and the host writes nothing into harness settings, skills or hooks.
+When links change, the next new turn of a live session carries the context again,
+and a resumed native session gets it when it differs from what it was last given.
+Agents change records only by running the CLI. When the workspace change token moved
+during a turn, the host lists the status moves and Activities written for that
+Chat in that turn's time and keeps them with the turn for the transcript. The host
+starts each harness process with the Chat's ID in `TICKETD_CHAT_ID` (only the ID);
+the CLI the harness runs inherits it and records which Chat each status move and
+Activity was written for (`chat_record_writes`). A write with no Chat ID (an older
+CLI, or a harness that strips the variable) counts for the Chat only when it
+carries the Chat's harness as agent name and no other Chat of that harness had a
+turn running at that moment; otherwise it is shown for no Chat rather than the
+wrong one. Save as Document is the ordinary Document-creation workflow applied to a
+stored response.
+
+Keep view reattachment and replacement-process native resume distinct; a broken
+stdio transport means the process is gone, so there is no separate live-process
+recovery. Only a live request registry can answer approvals. Native resume failure
+keeps the Chat readable and offers an explicit resume in a fresh harness session
+started with selected history, recorded under a new native-session identity; it
+never triggers automatic replay of uncertain submissions.
+Backups retain application records and queued input, not harness credentials or a
+promise of native resume state. Restore does not restart work automatically:
+the desktop stops every running Chat before the workspace is replaced, records
+what the backup held in progress as lost contact, and pauses restored queues
+until the person acts.
+
+Adapter writes and process shutdown are bounded. A harness that stops reading its
+input is killed, and an adapter's own shutdown bound is shorter than the
+supervisor's, so the kill has happened by the time the supervisor stops waiting.
+
+The desktop owns one `ChatHost` for the life of the process
+(`apps/desktop/src-tauri/src/chats.rs`, exposed by `chat_commands.rs`). The Chat
+screens reach it through `chat_*` commands with validated arguments. Opening a
+Chat returns a snapshot and a per-view channel of changes numbered one apart,
+already translated into the view model (`chat_view.rs`); a view that falls behind
+or cannot be served receives one `resync` entry and reads a new snapshot. List
+rows and counts follow the `chat-overview` event, which comes from the host and
+not from the workspace poll. The Experimental switch is a per-computer
+preference kept by the interface; the backend starts with Chat off and is told
+the choice at startup.
+
+Closing the window while Chat is on and a Chat is working hides the window and
+shows a tray icon; the process, the host and the page stay, so showing the
+window again attaches to the same work. Starting ticketd a second time shows the
+running window instead of starting a second host
+(`tauri-plugin-single-instance`). Quit from the tray or the system asks in the
+window first, then stops app-owned execution with bounded cleanup before the
+process exits. With Chat off or no Chat working, closing the window exits as
+before.
+
+The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#20-native-agent-chats).
+Provider support clarification and live compatibility checks remain requirements
+before release; this architecture does not claim they have passed. Exact SQL
+schema, Rust signatures, bridge framing, buffer limits and version ranges are
+implementation details to validate against this contract.
 
 ## Local attachment storage
 

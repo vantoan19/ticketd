@@ -9,6 +9,10 @@ fn is_untracked(table: &str) -> bool {
         || table == "request_outcomes"
         || table == "last_backup"
         || table == "document_opens"
+        // Chat tables change many times a second while a turn streams; Chat views
+        // follow `chat_changes` instead.
+        || table == "chats"
+        || table.starts_with("chat_")
         // Full-text index tables are derived from the tables they index.
         || table.contains("_fts")
 }

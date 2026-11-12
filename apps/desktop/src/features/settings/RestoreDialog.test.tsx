@@ -245,7 +245,9 @@ test("Choose another checks the new file and keeps the old one when cancelled", 
 
 test("Replace workspace shows the safety backup, reloads views, and lists it afterward", async () => {
   const safety = "/w/workspace.sqlite3.safety-3f2c9a1e.sqlite3";
-  vi.mocked(client.restoreWorkspace).mockResolvedValue(safety);
+  vi.mocked(client.restoreWorkspace).mockResolvedValue({
+    safety_path: safety,
+  });
   const reload = vi.fn(async () => {});
   const write = vi.fn(async () => {});
   Object.assign(navigator, { clipboard: { writeText: write } });
@@ -279,6 +281,30 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
   const region = await screen.findByRole("region", { name: "Safety backups" });
   expect(await within(region).findByText(safety)).toBeTruthy();
   expect(within(region).getByText("Before a restore")).toBeTruthy();
+});
+
+test("a restore that happened with something unconfirmed is a success with a warning", async () => {
+  const safety = "/w/workspace.sqlite3.safety-3f2c9a1e.sqlite3";
+  const warning =
+    "Stopping 1 Chat(s) could not be confirmed; a harness process may still be running.";
+  vi.mocked(client.restoreWorkspace).mockResolvedValue({
+    safety_path: safety,
+    warning,
+  });
+  const reload = vi.fn(async () => {});
+  const dialog = await openReview(reload);
+  await within(dialog).findByText("Backup checked.");
+  fireEvent.click(replaceButton(dialog));
+
+  // The data was replaced: views reload and the safety copy is shown, as for any
+  // restore, and the warning is said beside them.
+  expect(
+    (await within(dialog).findByLabelText("Safety backup path")).textContent,
+  ).toBe(safety);
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(dialog.textContent).toContain("Workspace restored.");
+  expect(dialog.textContent).not.toContain("Restore failed");
+  expect(within(dialog).getByRole("alert").textContent).toBe(warning);
 });
 
 test("a failed restore keeps the review open and says so", async () => {

@@ -1,0 +1,440 @@
+//! A scriptable adapter for tests of the supervisor and of anything above it.
+//!
+//! The fake enforces the contract's local checks (generation, expected turn, live
+//! request, capability) itself. Tests script what the "harness" then does: reply,
+//! reject, stay silent, die, or reply late, and emit events at any point.
+
+use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use async_trait::async_trait;
+use tokio::sync::{mpsc, oneshot};
+
+use crate::{
+    Capabilities, Capability, CloseOutcome, DispatchOutcome, EVENT_BUFFER, EventKind, Harness,
+    HarnessAdapter, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
+    InterruptRequest, LoginState, NativeRequestId, NativeTurnId, OpenRequest, OpenedRuntime,
+    Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SteeringBehavior,
+    Submission, SubmissionKind,
+};
+
+/// What the fake harness does with a submission after it was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubmitReply {
+    /// Acknowledge it. A new turn becomes active; steering names the steered turn.
+    Acknowledge,
+    Reject(String),
+    /// Never reply: `submit` returns `Written`. Emit evidence later with
+    /// [`FakeAdapter::emit`].
+    Timeout,
+    /// The process dies before replying.
+    LoseProcess,
+}
+
+/// A command that passed the local checks and reached the fake harness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Written {
+    Submit(Submission),
+    Respond(InteractionResponse),
+    Interrupt(InterruptRequest),
+    Close(RuntimeGeneration),
+}
+
+#[derive(Debug, Clone)]
+pub struct FakeAdapter {
+    harness: Harness,
+    state: Arc<Mutex<State>>,
+}
+
+#[derive(Debug)]
+struct State {
+    inspection: Inspection,
+    capabilities: Capabilities,
+    open_failures: VecDeque<Problem>,
+    open_holds: VecDeque<oneshot::Receiver<()>>,
+    respond_holds: VecDeque<oneshot::Receiver<()>>,
+    submit_replies: VecDeque<ScriptedReply>,
+    interrupt_outcomes: VecDeque<InterruptOutcome>,
+    close_outcome: CloseOutcome,
+    opens: Vec<OpenRequest>,
+    written: Vec<Written>,
+    respond_calls: usize,
+    live: Option<Live>,
+    turns_started: u64,
+}
+
+#[derive(Debug)]
+enum ScriptedReply {
+    Now(SubmitReply),
+    Held(oneshot::Receiver<SubmitReply>),
+}
+
+#[derive(Debug)]
+struct Live {
+    generation: RuntimeGeneration,
+    events: mpsc::Sender<RuntimeEvent>,
+    active_turn: Option<NativeTurnId>,
+    pending_requests: HashSet<NativeRequestId>,
+}
+
+impl State {
+    /// The local checks every adapter makes immediately before a write.
+    fn live_for(
+        &mut self,
+        runtime: RuntimeGeneration,
+        command: RuntimeGeneration,
+    ) -> Result<&mut Live, Refusal> {
+        if command != runtime {
+            return Err(Refusal::StaleGeneration { current: runtime });
+        }
+        self.live
+            .as_mut()
+            .filter(|live| live.generation == runtime)
+            .ok_or(Refusal::RuntimeClosed)
+    }
+}
+
+impl FakeAdapter {
+    pub fn new(harness: Harness, capabilities: Capabilities) -> Self {
+        let inspection = Inspection::Installed {
+            executable: PathBuf::from("fake-harness"),
+            version: Some("0.0.0-fake".to_owned()),
+            login: LoginState::SignedIn,
+            capabilities: capabilities.clone(),
+        };
+        Self {
+            harness,
+            state: Arc::new(Mutex::new(State {
+                inspection,
+                capabilities,
+                open_failures: VecDeque::new(),
+                open_holds: VecDeque::new(),
+                respond_holds: VecDeque::new(),
+                submit_replies: VecDeque::new(),
+                interrupt_outcomes: VecDeque::new(),
+                close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
+                opens: Vec::new(),
+                written: Vec::new(),
+                respond_calls: 0,
+                live: None,
+                turns_started: 0,
+            })),
+        }
+    }
+
+    /// Steering supported without interrupting tools; native resume supported.
+    pub fn codex() -> Self {
+        Self::new(
+            Harness::Codex,
+            Capabilities {
+                steering: Capability::Supported {
+                    behavior: SteeringBehavior {
+                        interrupts_tools: false,
+                    },
+                    evidence: "fake".to_owned(),
+                },
+                native_resume: supported_resume(),
+            },
+        )
+    }
+
+    pub fn without_steering() -> Self {
+        Self::new(
+            Harness::Codex,
+            Capabilities {
+                steering: Capability::Unsupported {
+                    reason: "fake harness without steering".to_owned(),
+                },
+                native_resume: supported_resume(),
+            },
+        )
+    }
+
+    pub fn set_inspection(&self, inspection: Inspection) {
+        self.state().inspection = inspection;
+    }
+
+    /// The next `open` waits for the returned sender before it opens or fails.
+    pub fn hold_next_open(&self) -> oneshot::Sender<()> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().open_holds.push_back(receiver);
+        sender
+    }
+
+    /// The next `open` fails with this problem.
+    pub fn fail_next_open(&self, problem: Problem) {
+        self.state().open_failures.push_back(problem);
+    }
+
+    /// Scripts the reply to the next unscripted submission. Unscripted submissions
+    /// are acknowledged.
+    pub fn script_submit(&self, reply: SubmitReply) {
+        self.state()
+            .submit_replies
+            .push_back(ScriptedReply::Now(reply));
+    }
+
+    /// The next answer is written, then waits for the returned sender before it
+    /// reports `Sent`, as a harness may confirm the answer before the write returns.
+    pub fn hold_next_respond(&self) -> oneshot::Sender<()> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().respond_holds.push_back(receiver);
+        sender
+    }
+
+    /// The next submission is written, then waits for the returned sender. Dropping
+    /// the sender behaves like [`SubmitReply::Timeout`].
+    pub fn hold_next_submit(&self) -> oneshot::Sender<SubmitReply> {
+        let (sender, receiver) = oneshot::channel();
+        self.state()
+            .submit_replies
+            .push_back(ScriptedReply::Held(receiver));
+        sender
+    }
+
+    /// Scripts the outcome of the next interrupt that reaches the harness. Unscripted
+    /// interrupts are acknowledged. No `TurnEnded` is emitted automatically.
+    pub fn script_interrupt(&self, outcome: InterruptOutcome) {
+        self.state().interrupt_outcomes.push_back(outcome);
+    }
+
+    pub fn set_close_outcome(&self, outcome: CloseOutcome) {
+        self.state().close_outcome = outcome;
+    }
+
+    /// Every successful open, in order.
+    pub fn opens(&self) -> Vec<OpenRequest> {
+        self.state().opens.clone()
+    }
+
+    /// Commands that reached the fake harness, in order.
+    pub fn written(&self) -> Vec<Written> {
+        self.state().written.clone()
+    }
+
+    /// How many answers were handed to a runtime, including ones it then refused. A
+    /// real harness may not refuse a repeated answer, so the host must not send one.
+    pub fn respond_calls(&self) -> usize {
+        self.state().respond_calls
+    }
+
+    /// Emits an event from the live runtime and keeps the fake's active turn and live
+    /// requests consistent with it. Returns false when no runtime is live or its
+    /// stream was dropped.
+    pub async fn emit(&self, kind: EventKind) -> bool {
+        let (generation, events) = {
+            let mut state = self.state();
+            let Some(live) = state.live.as_mut() else {
+                return false;
+            };
+            match &kind {
+                EventKind::TurnStarted { turn } => live.active_turn = Some(turn.clone()),
+                EventKind::TurnEnded { turn, .. } if live.active_turn.as_ref() == Some(turn) => {
+                    live.active_turn = None;
+                }
+                EventKind::InteractionRequested(request) => {
+                    live.pending_requests.insert(request.request.clone());
+                }
+                EventKind::InteractionResolved { request, .. } => {
+                    live.pending_requests.remove(request);
+                }
+                _ => {}
+            }
+            (live.generation, live.events.clone())
+        };
+        events.send(RuntimeEvent { generation, kind }).await.is_ok()
+    }
+
+    /// Kills the live process: emits `RuntimeLost`, ends the stream and makes later
+    /// commands `RuntimeClosed`.
+    pub async fn lose_process(&self) {
+        let Some(live) = self.state().live.take() else {
+            return;
+        };
+        let lost = RuntimeEvent {
+            generation: live.generation,
+            kind: EventKind::RuntimeLost {
+                exit_code: None,
+                diagnostics: "fake process lost".to_owned(),
+            },
+        };
+        // A dropped receiver already knows the stream ended.
+        let _ = live.events.send(lost).await;
+    }
+
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+fn supported_resume() -> Capability<()> {
+    Capability::Supported {
+        behavior: (),
+        evidence: "fake".to_owned(),
+    }
+}
+
+#[async_trait]
+impl HarnessAdapter for FakeAdapter {
+    fn harness(&self) -> Harness {
+        self.harness
+    }
+
+    async fn inspect(&self) -> Inspection {
+        self.state().inspection.clone()
+    }
+
+    /// Opening replaces any live runtime, whose stream then ends.
+    async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
+        let hold = self.state().open_holds.pop_front();
+        if let Some(hold) = hold {
+            let _ = hold.await;
+        }
+        let mut state = self.state();
+        if let Some(problem) = state.open_failures.pop_front() {
+            return Err(problem);
+        }
+        let (sender, events) = mpsc::channel(EVENT_BUFFER);
+        state.live = Some(Live {
+            generation: request.generation,
+            events: sender,
+            active_turn: None,
+            pending_requests: HashSet::new(),
+        });
+        let generation = request.generation;
+        state.opens.push(request);
+        Ok(OpenedRuntime {
+            runtime: Arc::new(FakeRuntime {
+                generation,
+                fake: self.clone(),
+            }),
+            events,
+            capabilities: state.capabilities.clone(),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct FakeRuntime {
+    generation: RuntimeGeneration,
+    fake: FakeAdapter,
+}
+
+#[async_trait]
+impl HarnessRuntime for FakeRuntime {
+    async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        let scripted = {
+            let mut state = self.fake.state();
+            let steering = state.capabilities.steering.behavior().is_some();
+            let live = match state.live_for(self.generation, submission.generation) {
+                Ok(live) => live,
+                Err(refusal) => return DispatchOutcome::NotSent(refusal),
+            };
+            match (&submission.kind, &live.active_turn) {
+                (SubmissionKind::Steer { .. }, _) if !steering => {
+                    return DispatchOutcome::NotSent(Refusal::Unsupported);
+                }
+                (SubmissionKind::StartTurn, None) => {}
+                (SubmissionKind::Steer { expected_turn }, Some(active))
+                    if expected_turn == active => {}
+                (_, active) => {
+                    return DispatchOutcome::NotSent(Refusal::TurnMismatch {
+                        active: active.clone(),
+                    });
+                }
+            }
+            state.written.push(Written::Submit(submission.clone()));
+            state.submit_replies.pop_front()
+        };
+        let reply = match scripted {
+            None => SubmitReply::Acknowledge,
+            Some(ScriptedReply::Now(reply)) => reply,
+            Some(ScriptedReply::Held(reply)) => reply.await.unwrap_or(SubmitReply::Timeout),
+        };
+        if reply == SubmitReply::LoseProcess {
+            self.fake.lose_process().await;
+        }
+
+        // The process may have gone while the reply was pending.
+        let mut state = self.fake.state();
+        if state.live_for(self.generation, self.generation).is_err() {
+            return DispatchOutcome::UnknownAfterLoss;
+        }
+        match reply {
+            SubmitReply::Acknowledge => match submission.kind {
+                SubmissionKind::Steer { expected_turn } => DispatchOutcome::Acknowledged {
+                    turn: expected_turn,
+                },
+                SubmissionKind::StartTurn => {
+                    state.turns_started += 1;
+                    let turn = NativeTurnId(format!("turn-{}", state.turns_started));
+                    if let Some(live) = state.live.as_mut() {
+                        live.active_turn = Some(turn.clone());
+                    }
+                    DispatchOutcome::Acknowledged { turn }
+                }
+            },
+            SubmitReply::Reject(reason) => DispatchOutcome::Rejected { reason },
+            SubmitReply::Timeout => DispatchOutcome::Written,
+            SubmitReply::LoseProcess => DispatchOutcome::UnknownAfterLoss,
+        }
+    }
+
+    async fn respond(&self, response: InteractionResponse) -> RespondOutcome {
+        let hold = {
+            let mut state = self.fake.state();
+            state.respond_calls += 1;
+            let live = match state.live_for(self.generation, response.generation) {
+                Ok(live) => live,
+                Err(refusal) => return RespondOutcome::NotSent(refusal),
+            };
+            if !live.pending_requests.remove(&response.request) {
+                return RespondOutcome::NotSent(Refusal::UnknownRequest);
+            }
+            state.written.push(Written::Respond(response));
+            state.respond_holds.pop_front()
+        };
+        if let Some(hold) = hold {
+            let _ = hold.await;
+        }
+        RespondOutcome::Sent
+    }
+
+    async fn interrupt(&self, request: InterruptRequest) -> InterruptOutcome {
+        let mut state = self.fake.state();
+        let live = match state.live_for(self.generation, request.generation) {
+            Ok(live) => live,
+            Err(refusal) => return InterruptOutcome::NotSent(refusal),
+        };
+        if live.active_turn.as_ref() != Some(&request.expected_turn) {
+            return InterruptOutcome::NotSent(Refusal::TurnMismatch {
+                active: live.active_turn.clone(),
+            });
+        }
+        state.written.push(Written::Interrupt(request));
+        state
+            .interrupt_outcomes
+            .pop_front()
+            .unwrap_or(InterruptOutcome::Acknowledged)
+    }
+
+    /// Closing a runtime that is no longer live reports the scripted outcome too.
+    async fn close(&self) -> CloseOutcome {
+        let outcome = {
+            let mut state = self.fake.state();
+            if state
+                .live
+                .as_ref()
+                .is_some_and(|live| live.generation == self.generation)
+            {
+                state.live = None;
+                state.written.push(Written::Close(self.generation));
+            }
+            state.close_outcome.clone()
+        };
+        // As with a real process: its event stream has ended before `close` returns.
+        tokio::task::yield_now().await;
+        outcome
+    }
+}

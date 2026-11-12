@@ -42,6 +42,23 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Claude Agent SDK
+
+The Claude Chat bridge executable shipped beside the desktop
+(`apps/chat-bridge-claude`) contains the
+[Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
+for TypeScript, pinned in that package's `package.json`, and the
+[Bun](https://github.com/oven-sh/bun) runtime that runs it.
+
+The SDK is not open-source software. Its `LICENSE.md` reads:
+
+> © Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements
+> outlined here: <https://code.claude.com/docs/en/legal-and-compliance>.
+
+Re-read the license file of the exact SDK release shipped before distributing a
+build. The bridge contains no Claude Code; it starts the Claude Code the user
+installed, which stays under the terms the user accepted for it.
+
 ## Package dependencies and distribution
 
 Rust dependencies are recorded in `Cargo.lock`; JavaScript dependencies are

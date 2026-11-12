@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /** Set once the app decided to close, so the close guard lets the next request through. */
@@ -17,7 +18,12 @@ export const windowClient = {
       .onCloseRequested((event) => {
         if (quitting) return;
         event.preventDefault();
-        handler();
+        // With Chats working the shell hides the window and nothing is quitting.
+        void invoke<boolean>("close_keeps_running")
+          .catch(() => false)
+          .then((hidden) => {
+            if (!hidden) handler();
+          });
       })
       .then((unlisten) => {
         if (stopped) unlisten();

@@ -41,12 +41,17 @@ import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
 import { useSyncNavigation } from "@/features/sync/sync-status";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { useDraftRecoveryGeneration } from "@/lib/draft-recovery-context";
+import { ChatProvider } from "@/features/chats/ChatProvider";
+import { ChatsView } from "@/features/chats/ChatsView";
+import { useChatFeature } from "@/features/chats/use-chats";
 
 export function App() {
   return (
     <WorkspaceChangeProvider value={useWorkspaceChangePoll()}>
       <SyncStatusProvider>
-        <AppContent />
+        <ChatProvider>
+          <AppContent />
+        </ChatProvider>
         <ExitDialog />
       </SyncStatusProvider>
     </WorkspaceChangeProvider>
@@ -64,7 +69,12 @@ function AppContent() {
     | "inbox"
     | "documents"
     | "attachments"
+    | "chats"
   >("tickets");
+  const chat = useChatFeature();
+  // Turning Chat off hides its screen at once; the Chats themselves are kept.
+  if (view === "chats" && !chat.enabled) setViewState("tickets");
+  const [newChatRequest, setNewChatRequest] = useState(0);
   const [attachmentPreview, setAttachmentPreview] = useState<Attachment | null>(
     null,
   );
@@ -330,6 +340,10 @@ function AppContent() {
                   ) : (
                     <WorkspaceSidebar
                       onCapture={openCapture}
+                      onNewChat={() => {
+                        setNewChatRequest((count) => count + 1);
+                        openView("chats");
+                      }}
                       counts={counts}
                       activePlanCount={
                         view === "tickets" &&
@@ -558,6 +572,14 @@ function AppContent() {
                           }}
                           onOpen={openGraphItem}
                         />
+                      </div>
+                    )}
+                    {chat.enabled && (
+                      <div
+                        className="context-view-wrapper"
+                        hidden={view !== "chats" || graphOrigin !== null}
+                      >
+                        <ChatsView newChatRequest={newChatRequest} />
                       </div>
                     )}
                     <TicketWorkspaceView

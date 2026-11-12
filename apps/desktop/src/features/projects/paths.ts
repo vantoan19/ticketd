@@ -3,6 +3,11 @@ export function homeRelative(path: string): string {
   return path.replace(/^(?:\/Users|\/home)\/[^/]+(?=\/|$)/, "~");
 }
 
+/** A Windows path without the verbatim "\\?\" prefix, which people never type. */
+export function withoutVerbatim(path: string): string {
+  return path.replace(/^\\\\[?]\\(?!UNC\\)/, "");
+}
+
 /** Splits a display path into the part that may shrink and the folder name that stays. */
 export function splitPath(path: string): { head: string; tail: string } {
   const at = path.lastIndexOf("/");
@@ -19,10 +24,9 @@ export function splitPathMiddle(path: string): {
   middle: string;
   tail: string;
 } {
-  // A Windows path uses backslashes, and may carry the verbatim "\?\" prefix.
   const windows = path.includes("\\") && !path.includes("/");
   const sep = windows ? "\\" : "/";
-  const shown = windows ? path.replace(/^\\\\[?]\\/, "") : path;
+  const shown = withoutVerbatim(path);
   const parts = shown.split(sep);
   // "~/a/b" and "/a/b" both start with a root part that is kept.
   const rootParts = shown.startsWith(sep) ? 2 : 1;

@@ -1,0 +1,15 @@
+{"note":"Hand-built from the codex-cli 0.162.1 JSON schema (codex app-server generate-json-schema) and the app-server documentation. Not captured from a live session; every value is synthetic."}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Change it","text_elements":[]}]}}}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
+{"server":{"id":20,"method":"item/fileChange/requestApproval","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_1","startedAtMs":3,"reason":"Write outside the workspace"}}}
+{"server":{"method":"serverRequest/resolved","params":{"threadId":"thr_1","requestId":20}}}
+{"server":{"id":21,"method":"item/tool/requestUserInput","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_2","isBlocking":true,"questions":[{"id":"q1","header":"Scope","question":"Which scope?","options":[{"label":"Small","description":"Only this file"},{"label":"Large","description":"The whole folder"}]}]}}}
+{"server":{"id":22,"method":"item/permissions/requestApproval","params":{"threadId":"thr_1","turnId":"turn_1","itemId":"item_3","startedAtMs":4,"cwd":"/work/chat-1","permissions":{"network":{"enabled":true}},"reason":"Fetch the changelog"}}}
+{"mark":"three requests were seen and one withdrawn"}
+{"client":{"id":21,"result":{"answers":{"q1":{"answers":["Small"]}}}}}
+{"server":{"method":"serverRequest/resolved","params":{"threadId":"thr_1","requestId":21}}}
+{"mark":"the question was answered"}
+{"client":{"id":4,"method":"turn/interrupt","params":{"threadId":"thr_1","turnId":"turn_1"}}}
+{"server":{"id":4,"result":{}}}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"interrupted","items":[],"error":null}}}}

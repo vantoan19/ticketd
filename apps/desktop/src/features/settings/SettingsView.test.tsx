@@ -120,6 +120,7 @@ test("the section list only offers sections that have cards", () => {
   expect(labels).toEqual([
     "Appearance",
     "Attention",
+    "Experimental",
     "Location",
     "Sync",
     "Attachments",

@@ -107,6 +107,36 @@ impl Workspace {
                 "publication_attempts",
                 "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url",
             ),
+            (
+                "chats",
+                "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, effective_settings, created_at",
+            ),
+            ("chat_links", "chat_id, kind, target_id"),
+            (
+                "chat_sessions",
+                "id, chat_id, position, native_session_id, origin, started_at",
+            ),
+            (
+                "chat_turns",
+                "id, chat_id, position, native_turn_id, state, detail, problem, problem_resets_at, started_at, ended_at",
+            ),
+            (
+                "chat_messages",
+                "id, chat_id, position, role, text, complete, turn_id, created_at",
+            ),
+            (
+                "chat_submission_attempts",
+                "id, chat_id, message_id, intent, delivery, turn_id, detail, decision, recorded_at",
+            ),
+            (
+                "chat_tools",
+                "id, chat_id, position, turn_id, name, input, state, output, output_truncated",
+            ),
+            (
+                "chat_interactions",
+                "id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, response",
+            ),
+            ("chat_notices", "id, chat_id, position, text, created_at"),
         ] {
             let mut statement =
                 tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;

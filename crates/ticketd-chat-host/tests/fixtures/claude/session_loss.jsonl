@@ -1,0 +1,4 @@
+{"note":"Hand-built from apps/chat-bridge-claude/src/protocol.ts (protocol 1, Agent SDK 0.3.322). Not captured from a live session; every value is synthetic."}
+{"client":{"id":"c4","cmd":"submit","generation":7,"submission_id":"sub-1","text":"Deploy it"}}
+{"server":{"v":1,"event":"session_ended","generation":7,"reason":"sdk_error","error":{"name":"Error","message":"Claude Code process exited with code 1"},"unresolved_inputs":[{"submission_id":"sub-1","evidence":"none"}]}}
+{"server":{"v":1,"event":"delta","generation":7,"kind":"text","text":"void","index":0,"parent_tool_use_id":null}}
