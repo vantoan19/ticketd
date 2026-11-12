@@ -183,10 +183,7 @@ export function TicketPage({
     />
   );
   const relationships = active && (
-    <>
-      <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
-      {!ticket.trashed && <LinkedWorkDialogs work={work} />}
-    </>
+    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
   // Folded, the rail's controls sit under the title in rail order.
   const stateAndChips = (
@@ -217,6 +214,9 @@ export function TicketPage({
       hidden={!active}
       data-trashed={ticket.trashed || undefined}
     >
+      {/* Mounted here, not inside the rail or the narrow layout, so crossing
+          the breakpoint never remounts an open review and drops its state. */}
+      {active && !ticket.trashed && <LinkedWorkDialogs work={work} />}
       <div className="detail-document">
         {active && (
           <NeedsReviewNotice kind="ticket" id={ticket.id} className="mb-6" />
