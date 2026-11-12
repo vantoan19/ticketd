@@ -392,15 +392,20 @@ impl HarnessRuntime for FakeRuntime {
 
     /// Closing a runtime that is no longer live reports the scripted outcome too.
     async fn close(&self) -> CloseOutcome {
-        let mut state = self.fake.state();
-        if state
-            .live
-            .as_ref()
-            .is_some_and(|live| live.generation == self.generation)
-        {
-            state.live = None;
-            state.written.push(Written::Close(self.generation));
-        }
-        state.close_outcome.clone()
+        let outcome = {
+            let mut state = self.fake.state();
+            if state
+                .live
+                .as_ref()
+                .is_some_and(|live| live.generation == self.generation)
+            {
+                state.live = None;
+                state.written.push(Written::Close(self.generation));
+            }
+            state.close_outcome.clone()
+        };
+        // As with a real process: its event stream has ended before `close` returns.
+        tokio::task::yield_now().await;
+        outcome
     }
 }

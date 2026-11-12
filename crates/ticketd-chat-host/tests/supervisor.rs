@@ -284,14 +284,14 @@ async fn a_crash_between_recording_and_writing_is_uncertain_after_restart_and_no
     assert_eq!(f.fake.opens(), vec![]);
     assert_eq!(f.fake.written(), vec![]);
 
-    // Later work on a live runtime carries the new and the queued input, never the
-    // input whose delivery is uncertain.
+    // Later work carries the queued and the new input, in the order they were saved,
+    // never the input whose delivery is uncertain.
     let after = restarted.send(&f.chat.id, None, "after the restart", SendMode::Auto);
     after.await.unwrap();
     settle().await;
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     let sent: Vec<_> = f.submits().into_iter().map(|sent| sent.text).collect();
-    assert_eq!(sent, ["after the restart", "queued before the crash"]);
+    assert_eq!(sent, ["queued before the crash", "after the restart"]);
     let attempts = f.message(&input.id).attempts;
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].delivery, ChatDelivery::Uncertain);
@@ -1054,10 +1054,10 @@ async fn a_resend_is_a_new_submission_of_that_input_alone_and_only_when_asked() 
     let f = Fixture::new(FakeAdapter::codex());
     f.fake.script_submit(SubmitReply::LoseProcess);
     let input = f.send("first").await;
-    f.queue("later").await;
     f.host.resume_queue(&f.chat.id).await.unwrap();
     tokio::time::sleep(Duration::from_secs(3_600)).await;
     assert_eq!(f.submits().len(), 1, "nothing is resent by itself");
+    f.queue("later").await;
 
     f.host.resend(&f.chat.id, &input.id).await.unwrap();
     settle().await;
@@ -1251,4 +1251,75 @@ async fn a_host_handle_taken_before_a_restore_can_start_nothing_during_it() {
     );
     f.host.turn_on();
     assert!(held.attach(&f.chat.id).await.is_ok());
+}
+
+/// L7: an idle harness that exits ended its session; no turn failed.
+#[tokio::test(start_paused = true)]
+async fn a_harness_that_exits_while_idle_is_not_a_failed_turn() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    f.fake.lose_process().await;
+    settle().await;
+
+    let live = f.live().await;
+    assert_eq!(live.problem, None);
+    assert_eq!(live.activity, Activity::Idle);
+    assert!(!live.running);
+    assert!(!f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.turns()[0].state, ChatTurnState::Completed);
+    // The next message opens the session again.
+    f.send("second").await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 2);
+}
+
+/// L7: ticketd closing an idle runtime itself (trash) is not a lost harness either.
+#[tokio::test(start_paused = true)]
+async fn closing_an_idle_runtime_leaves_no_problem_behind() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    assert_eq!(f.host.trash(&f.chat.id).await.unwrap(), None);
+    f.core().set_chat_trashed(&f.chat.id, false).unwrap();
+    f.host.notify_changed(&f.chat.id).await.unwrap();
+    settle().await;
+
+    assert_eq!(f.live().await.problem, None);
+}
+
+/// L6: Resume on a paused queue opens a session when none is live, and the queue goes
+/// out in the order it was saved.
+#[tokio::test(start_paused = true)]
+async fn resuming_the_queue_with_no_session_opens_one_and_sends_in_queue_order() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.queue("older").await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    f.queue("old").await;
+    settle().await;
+    assert!(f.fake.opens().is_empty(), "queueing starts nothing");
+
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(texts(&f), ["older"]);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(texts(&f), ["older", "old"]);
+}
+
+/// L6: a message sent while older input waits in a queue that is not paused goes after
+/// it, and the queue runs.
+#[tokio::test(start_paused = true)]
+async fn a_message_sent_while_older_input_waits_in_a_running_queue_goes_after_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.queue("older").await;
+    f.send("newer").await;
+
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(texts(&f), ["older"], "queue order is kept");
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(texts(&f), ["older", "newer"]);
 }

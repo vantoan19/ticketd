@@ -183,6 +183,11 @@ pub(crate) struct Supervisor {
     checkpoint_at: Option<Instant>,
     stop_deadline: Option<Instant>,
     shutting_down: bool,
+    /// The person resumed the queue or sent into it, so it may open a session. Without
+    /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
+    queue_started: bool,
+    /// The runtime is being closed on purpose; its connection ending is not a loss.
+    closing: bool,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -244,6 +249,8 @@ impl Supervisor {
             checkpoint_at: None,
             stop_deadline: None,
             shutting_down: false,
+            queue_started: false,
+            closing: false,
         };
         tokio::spawn(supervisor.run());
         sender
@@ -386,10 +393,13 @@ impl Supervisor {
             Command::ResumeQueue(reply) => {
                 let chat = self.chat_id.clone();
                 let result = self.write(|core| core.set_chat_queue_paused(&chat, false));
-                if result.is_ok()
-                    && matches!(self.problem, Some(ChatProblem::DispatchRefused { .. }))
-                {
-                    self.problem = None;
+                if result.is_ok() {
+                    // The person asked for the queue to run: it opens a session when
+                    // none is live.
+                    self.queue_started = true;
+                    if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
+                        self.problem = None;
+                    }
                 }
                 let _ = reply.send(result.map(|_| ()).map_err(HostError::from));
             }
@@ -450,9 +460,29 @@ impl Supervisor {
             && message.queued
             && !self.direct.contains(&message.id)
         {
-            self.direct.push_back(message.id.clone());
+            if self.active.is_none() && self.older_input_waits(&message.id) {
+                // Older input waits in a queue that is not paused: this goes after
+                // it, and the queue runs.
+                self.queue_started = true;
+            } else {
+                self.direct.push_back(message.id.clone());
+            }
         }
         Ok(message)
+    }
+
+    /// Whether the queue, not paused, holds input saved before `message_id`.
+    fn older_input_waits(&self, message_id: &str) -> bool {
+        let chat = self.chat_id.clone();
+        self.core(|core| {
+            Ok(!core.chat(&chat)?.queue_paused
+                && core
+                    .chat_queue(&chat)?
+                    .first()
+                    .is_some_and(|first| first.id != message_id))
+        })
+        // Unreadable now: sent directly, as before; the dispatch reads storage again.
+        .unwrap_or(false)
     }
 
     /// Stop pauses the queue first, so nothing unsent is dispatched whatever the
@@ -679,6 +709,13 @@ impl Supervisor {
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
     /// Returns why cleanup could not be confirmed, if it could not.
     async fn stop_runtime(&mut self, detail: &str) -> Option<String> {
+        self.closing = true;
+        let unconfirmed = self.close_runtime(detail).await;
+        self.closing = false;
+        unconfirmed
+    }
+
+    async fn close_runtime(&mut self, detail: &str) -> Option<String> {
         self.record(Vec::new());
         let deadline = Instant::now() + CLOSE_TIMEOUT;
         while self.opening.is_some() {
@@ -772,10 +809,23 @@ impl Supervisor {
     }
 
     fn on_loss(&mut self, detail: String) {
+        // With nothing in flight, or while ticketd itself closes the runtime, the
+        // session simply ended: no turn failed, and the next message opens it again.
+        let quiet = self.closing
+            || (self.active.is_none()
+                && self.dispatching.is_none()
+                && self.unconfirmed_start.is_none()
+                && self.interactions.is_empty());
         self.record(Vec::new());
         self.runtime = None;
+        if self.closing {
+            // `stop_runtime` settles what was open, with its own reason.
+            return;
+        }
         self.runtime_gone(&detail);
-        self.pause(ChatProblem::RuntimeLost { detail });
+        if !quiet {
+            self.pause(ChatProblem::RuntimeLost { detail });
+        }
     }
 
     // ------------------------------------------------------------------
@@ -822,16 +872,27 @@ impl Supervisor {
                 Some(_) => {
                     self.direct.pop_front();
                 }
-                None if idle && !chat.queue_paused && self.runtime.is_some() => {
+                None if idle
+                    && !chat.queue_paused
+                    && (self.runtime.is_some() || self.queue_started) =>
+                {
                     match self.core(|core| core.chat_queue(&chat_id)) {
                         Ok(queue) => match queue.into_iter().next() {
                             Some(message) => break message.id,
-                            None => return,
+                            None => {
+                                self.queue_started = false;
+                                return;
+                            }
                         },
                         Err(_) => return,
                     }
                 }
-                None => return,
+                None => {
+                    if chat.queue_paused {
+                        self.queue_started = false;
+                    }
+                    return;
+                }
             }
         };
         if self.runtime.is_none() {
@@ -1092,10 +1153,16 @@ impl Supervisor {
                 self.record(observations);
             }
             DispatchOutcome::UnknownAfterLoss => {
+                let detail = "contact was lost before the harness replied".to_owned();
                 self.record(vec![ChatObservation::SubmissionUncertain {
                     attempt_id,
-                    detail: Some("contact was lost before the harness replied".to_owned()),
+                    detail: Some(detail.clone()),
                 }]);
+                // The loss may have been seen first, with nothing else in flight: it
+                // was not a quiet end, since this input may have reached the harness.
+                if self.problem.is_none() {
+                    self.pause(ChatProblem::RuntimeLost { detail });
+                }
             }
         }
     }

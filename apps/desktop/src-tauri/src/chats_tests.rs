@@ -534,7 +534,6 @@ async fn resending_an_uncertain_message_sends_that_message_alone_as_a_new_submis
     let id = f.chats.create(f.input("first")).await.unwrap().chat_id;
     settle().await;
     f.chats.send(&id, "later", SendMode::Queue).await.unwrap();
-    f.chats.resume_queue(&id).await.unwrap();
     let (opened, _) = f.open(&id).await;
     let message_id = opened.snapshot.chat.problem.unwrap().message_id.unwrap();
 
