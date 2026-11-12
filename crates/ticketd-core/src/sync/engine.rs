@@ -501,6 +501,21 @@ fn merge_records(
     );
     let mut top = top;
     settle_source(base, local, remote, &mut top);
+    // The status a Duplicate returns to is bookkeeping, not a decision. Two
+    // desktops that made the ticket a Duplicate from different statuses keep
+    // the same one of the two.
+    top.conflicts.retain(|conflict| {
+        let (Some(ours), Some(theirs)) = (&conflict.local, &conflict.remote) else {
+            return true;
+        };
+        if conflict.field != "duplicate_restore" {
+            return true;
+        }
+        if theirs > ours {
+            top.fields.insert(conflict.field.clone(), theirs.clone());
+        }
+        false
+    });
     let mut conflicts = top.conflicts;
     let part = |record: Option<&'_ SyncRecord>, id: &str| {
         record.and_then(|record| record.parts.iter().find(|part| part.id == id).cloned())
@@ -971,12 +986,22 @@ impl Workspace {
             };
             // Two desktops can each import the same external issue before they
             // sync, as two tickets. Only one ticket may hold a source identity:
-            // the lower GUID keeps it on every desktop, and the other becomes a
-            // Duplicate of it without the source.
+            // the one published from this Workspace keeps it over an import, then
+            // the lower GUID, on every desktop, and the other becomes a Duplicate
+            // of it without the source.
             let mut merged = merged;
             let mut demoted = None;
             if let Some(holder) = source_holder(&workspace.connection, &merged)? {
-                if holder.as_str() < id {
+                let held: String = workspace.connection.query_row(
+                    "SELECT origin FROM external_identities WHERE ticket_id = ?1",
+                    [&holder],
+                    |row| row.get(0),
+                )?;
+                let incoming = merged.fields.get("source_origin");
+                let published = SyncValue::Text("published".into());
+                let holder_keeps = (held != "published", holder.as_str())
+                    < (incoming != Some(&published), id);
+                if holder_keeps {
                     duplicate_without_source(&mut merged, &holder);
                 } else if let Some(mut other) =
                     find_record(&workspace.connection, SyncKind::Ticket, &holder)?

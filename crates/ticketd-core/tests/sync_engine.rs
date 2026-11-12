@@ -1514,6 +1514,135 @@ fn the_same_external_issue_imported_on_two_devices_converges_as_a_duplicate() {
     }
 }
 
+const LOWER: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+const HIGHER: &str = "3f2c9a1e-0000-4000-8000-000000000002";
+
+/// A ticket for external issue `I_42`, as a desktop holds it before any sync.
+fn import_issue(workspace: &mut Workspace, id: &str, reference: &str, change: (&str, &str)) {
+    let text = sourced("open", "2026-01-03T00:00:00Z")
+        .replace(LOWER, id)
+        .replace("T-ZZ7", reference)
+        .replace(change.0, change.1);
+    let record = ticketd_core::SyncRecord::parse(&text).unwrap();
+    workspace.apply_sync_record(&record).unwrap();
+}
+
+fn field_of(workspace: &Workspace, id: &str, name: &str) -> Option<SyncValue> {
+    let record = workspace.export_sync_record(SyncKind::Ticket, id).unwrap();
+    record.fields.get(name).cloned()
+}
+
+fn text_value(value: &str) -> Option<SyncValue> {
+    Some(SyncValue::Text(value.into()))
+}
+
+/// F53: the ticket that was published from this Workspace is the original, so
+/// it keeps the source over a ticket another desktop imported for the same
+/// issue, whichever GUID is lower.
+#[test]
+fn a_published_ticket_keeps_its_source_over_an_import_of_the_same_issue() {
+    for order in [[0, 1, 2], [1, 0, 2], [2, 1, 0]] {
+        let mut devices = devices();
+        import_issue(&mut devices.workspaces[0], LOWER, "T-ZZ7", ("", ""));
+        let published = (
+            "source_origin: \"imported\"",
+            "source_origin: \"published\"",
+        );
+        import_issue(&mut devices.workspaces[1], HIGHER, "T-YY8", published);
+
+        devices.settle(order);
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_conflicts().unwrap(), [], "{order:?}");
+            assert_eq!(
+                field_of(workspace, HIGHER, "source_external_id"),
+                text_value("I_42"),
+                "{order:?}"
+            );
+            assert_eq!(field_of(workspace, HIGHER, "status"), text_value("Todo"));
+            assert_eq!(field_of(workspace, LOWER, "source_external_id"), None);
+            assert_eq!(
+                field_of(workspace, LOWER, "duplicate_of"),
+                text_value(HIGHER)
+            );
+        }
+    }
+}
+
+/// F53: the ticket that keeps the source may be in Trash. It still keeps it,
+/// and the other ticket becomes its Duplicate like any other.
+#[test]
+fn a_trashed_ticket_still_keeps_the_source_and_the_other_becomes_its_duplicate() {
+    for order in [[0, 1, 2], [1, 0, 2]] {
+        let mut devices = devices();
+        let trashed = ("trashed: false", "trashed: true");
+        import_issue(&mut devices.workspaces[0], LOWER, "T-ZZ7", trashed);
+        import_issue(&mut devices.workspaces[1], HIGHER, "T-YY8", ("", ""));
+
+        for _ in 0..3 {
+            for device in order {
+                assert_eq!(devices.sync(device).skipped, 0, "{order:?}");
+            }
+        }
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_notices().unwrap(), [], "{order:?}");
+            assert_eq!(workspace.sync_conflicts().unwrap(), [], "{order:?}");
+            assert_eq!(
+                field_of(workspace, LOWER, "source_external_id"),
+                text_value("I_42")
+            );
+            assert_eq!(
+                field_of(workspace, LOWER, "trashed"),
+                Some(SyncValue::Flag(true))
+            );
+            assert_eq!(
+                field_of(workspace, HIGHER, "status"),
+                text_value("Duplicate")
+            );
+            assert_eq!(
+                field_of(workspace, HIGHER, "duplicate_of"),
+                text_value(LOWER)
+            );
+        }
+    }
+}
+
+/// F53: two desktops each make the same ticket a Duplicate while it has a
+/// different status on each. The status to return to is settled the same way
+/// on both and is nothing to ask a person about.
+#[test]
+fn a_duplicate_made_on_two_devices_from_different_statuses_needs_no_review() {
+    let mut devices = devices();
+    import_issue(&mut devices.workspaces[1], HIGHER, "T-YY8", ("", ""));
+    devices.sync(1);
+    devices.sync(2);
+    devices.workspaces[2]
+        .change_ticket(
+            "T-YY8",
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    import_issue(&mut devices.workspaces[0], LOWER, "T-ZZ7", ("", ""));
+
+    devices.settle([0, 1, 2]);
+    devices.assert_converged();
+    for workspace in &devices.workspaces {
+        assert_eq!(workspace.sync_conflicts().unwrap(), []);
+        assert_eq!(
+            field_of(workspace, HIGHER, "status"),
+            text_value("Duplicate")
+        );
+        assert_eq!(
+            field_of(workspace, HIGHER, "duplicate_restore"),
+            text_value("Todo")
+        );
+    }
+}
+
 /// F45: a file too large to be a record, or one whose header nests without
 /// end, is skipped with the normal notice instead of being read into memory or
 /// overflowing the stack.
