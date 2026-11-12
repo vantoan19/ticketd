@@ -324,20 +324,23 @@ function Choose({
                 </span>
               </RadioGroup.Item>
             )}
-            <RadioGroup.Item
-              value={UPLOAD}
-              className="upload-destination-choice"
-            >
-              <span className="layout-choice-dot" aria-hidden="true" />
-              <span>
-                Upload this Workspace
-                <small>
-                  {plural(options.local.tickets, "ticket")} and{" "}
-                  {plural(options.local.documents, "Document")} go to a new
-                  folder in your Drive
-                </small>
-              </span>
-            </RadioGroup.Item>
+            {/* Upload would land in the folder Reconnect names, minus the merge. */}
+            {!options.reconnect && (
+              <RadioGroup.Item
+                value={UPLOAD}
+                className="upload-destination-choice"
+              >
+                <span className="layout-choice-dot" aria-hidden="true" />
+                <span>
+                  Upload this Workspace
+                  <small>
+                    {plural(options.local.tickets, "ticket")} and{" "}
+                    {plural(options.local.documents, "Document")} go to a new
+                    folder in your Drive
+                  </small>
+                </span>
+              </RadioGroup.Item>
+            )}
             {options.existing.map((workspace) => {
               const synced =
                 workspace.last_synced_at && ago(workspace.last_synced_at, now);

@@ -1175,8 +1175,8 @@ and upload queues. Workspace sync never publishes to an external tracker.
   upload or download again.
 - Disconnecting stops sync on that desktop and deletes nothing. When the same
   Google account is connected again and the folder the Workspace synced with is
-  still in Drive, setup offers Reconnect to that folder first, above upload and
-  download. Reconnecting merges like a return from a long time offline (20.4):
+  still in Drive, setup offers Reconnect to that folder first, above download, and
+  in place of upload (which would go to that same folder). Reconnecting merges like a return from a long time offline (20.4):
   nothing is replaced on either side, the desktop keeps its device code, and
   Attachments already downloaded stay downloaded. A restored Workspace is not
   offered Reconnect.

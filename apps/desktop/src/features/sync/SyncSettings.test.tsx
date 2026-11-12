@@ -152,7 +152,6 @@ test("a Workspace that synced with a folder of this account is offered that fold
   const choices = await screen.findAllByRole("radio");
   expect(choices.map((choice) => choice.textContent.split("”")[0])).toEqual([
     "Reconnect to “ticketd · web-app",
-    "Upload this Workspace0 tickets and 0 Documents go to a new folder in your Drive",
     "Download “ticketd · web-app",
   ]);
   expect(choices[0]?.getAttribute("aria-checked")).toBe("true");
