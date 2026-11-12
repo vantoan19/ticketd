@@ -34,6 +34,7 @@ import {
   type SyncSetupOptions,
   type SyncStatus,
 } from "@/lib/sync-api";
+import { syncReview } from "@/lib/sync-review-api";
 import { useNow } from "@/lib/use-now";
 import { recoveryCopy } from "./sync-recovery";
 import { useSyncStatus } from "./sync-status";
@@ -135,6 +136,34 @@ const plainPath = (path: string) =>
 /** Says where the Workspace a download replaced was kept: its file's name, and a way to it. */
 function Replaced({ safetyBackup }: { safetyBackup: string }) {
   const [failure, setFailure] = useState("");
+  const { status } = useSyncStatus();
+  // The confirmation counted every file in Drive; one that turned out
+  // unreadable did not arrive. The replaced Workspace started with no notices,
+  // so its unread ones of that kind are this download's.
+  const [skipped, setSkipped] = useState(0);
+  const downloading = !status || status.first_sync !== null;
+  const syncedAt = status?.last_synced_at;
+  useEffect(() => {
+    if (downloading) return;
+    let current = true;
+    syncReview
+      .notices()
+      .then((notices) => {
+        if (current)
+          setSkipped(
+            notices.filter(
+              (notice) => notice.kind === "unreadable_file" && !notice.read,
+            ).length,
+          );
+      })
+      .catch(() => {
+        // The Inbox still lists them; this line only points there.
+      });
+    return () => {
+      current = false;
+    };
+    // Read again after each sync run: a file that reads now takes its notice back.
+  }, [downloading, syncedAt]);
   return (
     <div className="sync-replaced">
       <Alert role="status">
@@ -144,6 +173,14 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
           <code aria-label="Safety backup file">
             {safetyBackup.split(/[\\/]/).pop()}
           </code>
+          {skipped > 0 && (
+            <span>
+              {skipped === 1
+                ? "1 file in Drive could not be read and was skipped."
+                : `${skipped} files in Drive could not be read and were skipped.`}{" "}
+              See Inbox.
+            </span>
+          )}
         </AlertDescription>
         <AlertActions>
           <Button

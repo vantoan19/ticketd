@@ -214,6 +214,43 @@ test("downloading an existing Workspace asks once before replacing this one", as
   );
 });
 
+test("a download that skipped an unreadable Drive file says so on the replaced card", async () => {
+  api.status.mockResolvedValue(choosing());
+  api.downloadWorkspace.mockResolvedValue({
+    ...syncStatus(),
+    safety_backup: "C:\\ticketd\\workspace.sqlite3.safety-1.sqlite3",
+  });
+  const notice = {
+    kind: "unreadable_file",
+    timestamp: new Date().toISOString(),
+    reason: "not a ticket",
+  };
+  vi.mocked(invoke).mockImplementation((command) =>
+    Promise.resolve(
+      command === "sync_notices"
+        ? [
+            { ...notice, id: "n1", path: "tickets/A.md", read: false },
+            // Already read in the Inbox: not counted again.
+            { ...notice, id: "n2", path: "tickets/B.md", read: true },
+          ]
+        : undefined,
+    ),
+  );
+  show();
+  fireEvent.click(
+    await screen.findByRole("radio", { name: /Download “ticketd · web-app”/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Download and replace" }),
+  );
+  expect(
+    await screen.findByText(
+      "1 file in Drive could not be read and was skipped. See Inbox.",
+    ),
+  ).toBeTruthy();
+});
+
 test("a connected Workspace shows its account, folder and that files are not encrypted", async () => {
   api.status.mockResolvedValue(syncStatus());
   show();
