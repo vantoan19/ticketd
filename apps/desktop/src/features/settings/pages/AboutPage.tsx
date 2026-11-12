@@ -157,10 +157,7 @@ export function AboutPage() {
         </SettingsList>
       </SettingsSection>
 
-      <SettingsSection
-        title="Privacy and notices"
-        caption="ticketd is free and open source."
-      >
+      <SettingsSection title="Privacy and notices">
         <SettingsList>
           <ExternalRow
             title="Privacy"

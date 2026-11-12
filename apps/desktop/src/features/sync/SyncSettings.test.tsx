@@ -84,6 +84,20 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+test("while the status is read, the page shows the setup track and a row-shaped skeleton", async () => {
+  api.status.mockReturnValue(new Promise(() => {}));
+  const { container } = show();
+  const track = screen.getByRole("list", { name: "Sync setup" });
+  expect(within(track).getAllByRole("listitem")).toHaveLength(4);
+  expect(
+    screen.getByRole("status", { name: "Reading Google Drive" }),
+  ).toBeTruthy();
+  expect(
+    container.querySelectorAll('[data-slot="skeleton"]').length,
+  ).toBeGreaterThanOrEqual(3);
+  expect(screen.queryByRole("button")).toBeNull();
+});
+
 test("before connecting, the card says files are not encrypted and offers Google sign-in", async () => {
   api.status.mockResolvedValue(notConnected());
   api.connect.mockResolvedValue(choosing());
@@ -546,9 +560,10 @@ test("an empty Workspace beside one in Drive preselects the download, and each f
   );
   show();
   // Drive takes a few seconds to answer: the card says what it waits for.
-  expect((await screen.findByRole("status")).textContent).toBe(
+  const waiting = await screen.findByText(
     "Looking for Workspaces in your Drive…",
   );
+  expect(waiting.closest('[role="status"]')).toBeTruthy();
   answer({
     local: { tickets: 0, documents: 0, attachments: 0 },
     existing: [

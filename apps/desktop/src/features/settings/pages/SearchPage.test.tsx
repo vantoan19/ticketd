@@ -99,7 +99,7 @@ test("an available source's settings are searchable and land on its page", () =>
   render(<Harness openPage={openPage} />);
   type("discovery");
   const group = screen.getByRole("region", { name: "GitHub" });
-  fireEvent.click(within(group).getByRole("link", { name: /Discovery rules/ }));
+  fireEvent.click(within(group).getByRole("link", { name: /^Discovery/ }));
   expect(openPage).toHaveBeenCalledWith("source-github");
 });
 
