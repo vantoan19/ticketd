@@ -128,6 +128,7 @@ impl Entry {
             name: self.name.clone(),
             version: self.head_revision_id.clone()?,
             size: self.size.as_deref()?.parse().ok()?,
+            file_id: self.id.clone(),
         })
     }
 }
@@ -839,6 +840,7 @@ impl RemoteStorage for DriveRemote<'_> {
             name: name.into(),
             version: uploaded.head_revision_id.ok_or_else(unreadable)?,
             size,
+            file_id: uploaded.id,
         })
     }
 

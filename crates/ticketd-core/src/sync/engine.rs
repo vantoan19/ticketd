@@ -182,6 +182,8 @@ fn name(kind: SyncKind) -> &'static str {
 /// What this device remembers of one record's file.
 #[derive(Default)]
 struct Stored {
+    /// The storage's identity of the file that version belongs to.
+    file: Option<String>,
     /// The remote version last merged or written.
     version: Option<String>,
     /// The file as last synced: the base of the next merge.
@@ -197,19 +199,19 @@ struct Stored {
 }
 
 fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, Error> {
-    let row: Option<([Option<String>; 4], bool)> = connection
+    let row: Option<([Option<String>; 5], bool)> = connection
         .query_row(
-            "SELECT version, content, wanted, applied, newer FROM sync_files WHERE kind = ?1 AND id = ?2",
+            "SELECT version, content, wanted, applied, file, newer FROM sync_files WHERE kind = ?1 AND id = ?2",
             params![name(kind), id],
             |row| {
                 Ok((
-                    [row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?],
-                    row.get(4)?,
+                    [row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?],
+                    row.get(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some(([version, base, wanted, applied], newer)) = row else {
+    let Some(([version, base, wanted, applied, file], newer)) = row else {
         return Ok(Stored::default());
     };
     // A copy this version cannot read is no copy: the record is then merged as
@@ -217,6 +219,7 @@ fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, E
     // being taken or sent silently.
     let parse = |text: Option<String>| text.and_then(|text| SyncRecord::parse(&text).ok());
     Ok(Stored {
+        file,
         version,
         base: parse(base),
         wanted: parse(wanted),
@@ -228,9 +231,9 @@ fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, E
 fn store(connection: &Connection, kind: SyncKind, id: &str, stored: &Stored) -> Result<(), Error> {
     let text = |record: &Option<SyncRecord>| record.as_ref().map(SyncRecord::to_markdown);
     connection.execute(
-        "INSERT INTO sync_files (kind, id, version, content, wanted, applied, newer) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(kind, id) DO UPDATE SET version = excluded.version, content = excluded.content, wanted = excluded.wanted, applied = excluded.applied, newer = excluded.newer",
-        params![name(kind), id, stored.version, text(&stored.base), text(&stored.wanted), text(&stored.applied), stored.newer],
+        "INSERT INTO sync_files (kind, id, version, content, wanted, applied, newer, file) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(kind, id) DO UPDATE SET version = excluded.version, content = excluded.content, wanted = excluded.wanted, applied = excluded.applied, newer = excluded.newer, file = excluded.file",
+        params![name(kind), id, stored.version, text(&stored.base), text(&stored.wanted), text(&stored.applied), stored.newer, stored.file],
     )?;
     Ok(())
 }
@@ -574,7 +577,7 @@ impl Workspace {
             }
             let text = String::from_utf8(bytes);
             let merged = match &text {
-                Ok(text) => self.merge_incoming(kind, id, &file.version, text),
+                Ok(text) => self.merge_incoming(kind, id, &file, text),
                 Err(_) => Err(Error::SyncFile("the file is not UTF-8 text".into())),
             };
             match merged {
@@ -700,6 +703,7 @@ impl Workspace {
         seen.newer = newer;
         if !newer {
             seen.version = Some(file.version.clone());
+            seen.file = Some(file.file_id.clone());
         }
         store(&transaction, kind, id, &seen)?;
         let reason = match error {
@@ -724,7 +728,7 @@ impl Workspace {
         &mut self,
         kind: SyncKind,
         id: &str,
-        version: &str,
+        from: &RemoteFile,
         file: &str,
     ) -> Result<usize, Error> {
         let mut remote = SyncRecord::parse(file)?;
@@ -739,6 +743,13 @@ impl Workspace {
             resolve_ticket_references(&workspace.connection, &mut remote)?;
             let mut stored = stored(&workspace.connection, kind, id)?;
             stored.newer = false;
+            // Another file than the one last synced (removed and written again, or
+            // an older one restored) shares no history with the copy kept here:
+            // it is merged as a record that never synced, so a value that
+            // differs waits for review instead of replacing a newer edit.
+            if stored.file.as_deref().is_some_and(|known| known != from.file_id) {
+                stored.base = None;
+            }
             let (merged, conflicts) = match local_view(&workspace.connection, kind, id, &stored)? {
                 Some(local) => merge_records(stored.base.as_ref(), &local, &remote),
                 None => (remote.clone(), Vec::new()),
@@ -776,7 +787,8 @@ impl Workspace {
                     withdrawn = true;
                 }
             }
-            stored.version = Some(version.to_owned());
+            stored.version = Some(from.version.clone());
+            stored.file = Some(from.file_id.clone());
             // What local changes remain shows as a difference from the remote copy.
             if merged != remote {
                 mark_dirty(connection, dirty_kind(kind), id)?;
@@ -1002,7 +1014,7 @@ impl Workspace {
                     if let Some(text) = replaced {
                         // Merged against the copy both changes started from, which is
                         // still the stored one. An unreadable revision is left alone.
-                        match self.merge_incoming(kind, &dirty.id, &file.version, &text) {
+                        match self.merge_incoming(kind, &dirty.id, &file, &text) {
                             Ok(conflicts) => {
                                 report.downloaded += 1;
                                 report.conflicts += conflicts;
@@ -1014,6 +1026,7 @@ impl Workspace {
                         // added differs from it and uploads on the next run.
                         let mut merged = self::stored(&self.connection, kind, &dirty.id)?;
                         merged.version = Some(file.version);
+                        merged.file = Some(file.file_id);
                         merged.base = Some(local);
                         store(&self.connection, kind, &dirty.id, &merged)?;
                         mark_dirty(&self.connection, dirty.kind, &dirty.id)?;
@@ -1021,6 +1034,7 @@ impl Workspace {
                         continue;
                     }
                     stored.version = Some(file.version);
+                    stored.file = Some(file.file_id);
                     stored.base = Some(local);
                     store(&self.connection, kind, &dirty.id, &stored)?;
                     // False when the record changed during the upload: it stays pending.

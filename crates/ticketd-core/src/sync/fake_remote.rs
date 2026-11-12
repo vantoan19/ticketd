@@ -36,6 +36,8 @@ struct FakeRevision {
 }
 
 struct FakeFile {
+    /// The storage's identity of this file; a key can be written again as another file.
+    id: String,
     name: String,
     revisions: Vec<FakeRevision>,
 }
@@ -55,6 +57,7 @@ struct FakeState {
     reversed: bool,
     omitted: Vec<RemoteKey>,
     unseen: Vec<(RemoteKey, Vec<u8>)>,
+    removed: Vec<(String, RemoteKey, FakeFile)>,
 }
 
 /// In-memory [`RemoteStorage`] for engine tests: one fake is one storage
@@ -73,6 +76,7 @@ impl Default for FakeRemote {
             reversed: false,
             omitted: Vec::new(),
             unseen: Vec::new(),
+            removed: Vec::new(),
         })))
     }
 }
@@ -127,12 +131,41 @@ impl FakeRemote {
         self.state().folders.remove(folder);
     }
 
-    /// One file disappears with its revisions. Returns whether it existed.
+    /// One file disappears with its revisions, as when it is moved to the
+    /// storage's trash. Returns whether it existed.
     pub fn remove_file(&self, folder: &str, key: &RemoteKey) -> bool {
-        self.state()
+        let mut state = self.state();
+        let removed = state
             .folders
             .get_mut(folder)
-            .is_some_and(|f| f.files.remove(key).is_some())
+            .and_then(|stored| stored.files.remove(key));
+        let existed = removed.is_some();
+        state
+            .removed
+            .extend(removed.map(|file| (folder.to_owned(), key.clone(), file)));
+        existed
+    }
+
+    /// A removed file comes back, as when it is restored from the storage's
+    /// trash. It is older than a file written for the key meanwhile, so it is
+    /// the one listed from now on. Returns whether a removed file existed.
+    pub fn restore_file(&self, folder: &str, key: &RemoteKey) -> bool {
+        let mut state = self.state();
+        let Some(index) = state
+            .removed
+            .iter()
+            .position(|(f, k, _)| f == folder && k == key)
+        else {
+            return false;
+        };
+        let (_, _, file) = state.removed.remove(index);
+        match state.folders.get_mut(folder) {
+            Some(stored) => {
+                stored.files.insert(key.clone(), file);
+                true
+            }
+            None => false,
+        }
     }
 
     /// The time stamped on revisions written from now on (RFC 3339).
@@ -182,6 +215,7 @@ fn check(folder: &str, key: Option<&RemoteKey>) -> Result<(), RemoteError> {
 
 fn fake_file(key: &RemoteKey, file: &FakeFile) -> Option<RemoteFile> {
     file.revisions.last().map(|revision| RemoteFile {
+        file_id: file.id.clone(),
         key: key.clone(),
         name: file.name.clone(),
         version: revision.version.clone(),
@@ -293,7 +327,9 @@ impl RemoteStorage for FakeRemote {
             return Err(RemoteError::PreconditionFailed { current });
         } else {
             state.versions += 1;
+            let id = format!("file-{}", state.versions);
             let file = stored.files.entry(key.clone()).or_insert_with(|| FakeFile {
+                id,
                 name: String::new(),
                 revisions: Vec::new(),
             });

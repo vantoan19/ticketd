@@ -814,9 +814,18 @@ fn a_missing_or_emptied_storage_never_removes_local_content() {
     assert_eq!(devices.sync(1).uploaded, 1);
     devices.settle([0, 2, 1]);
     devices.assert_converged();
+    // The other desktops meet a file that is not the one they synced: its
+    // content shares no history with theirs, so the difference waits for review.
+    let waiting = devices.workspaces[0]
+        .sync_conflict(SyncKind::Ticket, &id)
+        .unwrap();
+    assert_eq!(
+        waiting.fields[0].remote,
+        Some(SyncValue::Text("Still here".into()))
+    );
     assert_eq!(
         devices.workspaces[0].show_ticket(&reference).unwrap().title,
-        "Still here"
+        "Login"
     );
 
     // The whole folder is gone: the run reports it and local content stays.
@@ -1293,5 +1302,50 @@ fn source_fields_refreshed_on_two_devices_take_the_later_refresh_without_review(
             assert_eq!(field("source_state"), Some(SyncValue::Text("open".into())));
             assert_eq!(field("source_closure_reason"), None, "{order:?}");
         }
+    }
+}
+
+/// F41: a record's file is removed in the storage and written again, then the
+/// first file comes back. It is another file than the one last synced, so its
+/// older content must not replace newer edits without review.
+#[test]
+fn a_restored_older_file_for_a_record_goes_to_review_instead_of_reverting_edits() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let key = RemoteKey::new(RemoteKind::Ticket, id.clone());
+    let original = devices.remote.list(FOLDER).unwrap()[0].file_id.clone();
+
+    assert!(devices.remote.remove_file(FOLDER, &key));
+    assert_eq!(devices.sync(0).uploaded, 1);
+    assert_ne!(devices.remote.list(FOLDER).unwrap()[0].file_id, original);
+    devices.workspaces[0]
+        .change_ticket(&reference, title("Newer"))
+        .unwrap();
+    assert_eq!(devices.sync(0).uploaded, 1);
+    assert!(devices.remote.restore_file(FOLDER, &key));
+    assert_eq!(devices.remote.list(FOLDER).unwrap()[0].file_id, original);
+
+    let report = devices.sync(0);
+    assert_eq!(report.conflicts, 1);
+    assert_eq!(
+        devices.workspaces[0].show_ticket(&reference).unwrap().title,
+        "Newer"
+    );
+    let conflict = devices.workspaces[0]
+        .sync_conflict(SyncKind::Ticket, &id)
+        .unwrap();
+    assert_eq!(conflict.fields.len(), 1);
+    assert_eq!(conflict.fields[0].field, "title");
+    assert_eq!(
+        conflict.fields[0].remote,
+        Some(SyncValue::Text("Login".into()))
+    );
+    // Repeated runs neither revert nor report it again.
+    assert_eq!(devices.sync(0).conflicts, 0);
+    devices.settle([1, 2, 0]);
+    devices.assert_converged();
+    for workspace in &devices.workspaces {
+        assert_eq!(workspace.show_ticket(&reference).unwrap().title, "Newer");
     }
 }

@@ -84,6 +84,12 @@ pub(crate) fn migrate_download_attempts(connection: &Connection) -> Result<(), E
     )
 }
 
+/// Format version 63: the storage's identity of the file each record was last
+/// synced with, so another file for the same record is recognised.
+pub(crate) fn migrate_file_identity(connection: &Connection) -> Result<(), Error> {
+    add_columns(connection, &[("sync_files", "file", "TEXT")])
+}
+
 fn add_columns(connection: &Connection, columns: &[(&str, &str, &str)]) -> Result<(), Error> {
     for (table, column, definition) in columns {
         let present: bool = connection.query_row(
