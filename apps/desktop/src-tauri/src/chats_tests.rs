@@ -211,8 +211,8 @@ async fn requests_are_checked_before_anything_is_stored() {
 
     let statuses = f.chats.harnesses().await.unwrap();
     let status = |id: &str| statuses.iter().find(|s| s.id == id).unwrap().status;
-    assert_eq!(status("claude-code"), "incompatible");
-    assert_ne!(status("codex"), "incompatible");
+    assert_eq!(status("claude-code"), "unavailable");
+    assert_ne!(status("codex"), "unavailable");
 }
 
 #[tokio::test(start_paused = true)]
@@ -1465,4 +1465,24 @@ async fn a_folder_that_comes_back_clears_the_missing_folder_state() {
     let settled = f.chats.digest();
     f.chats.recheck_folders().await.unwrap();
     assert_eq!(f.chats.digest(), settled);
+}
+
+#[test]
+fn an_incompatible_harness_says_what_was_found_and_needed_once() {
+    let status = harness_status(
+        "codex",
+        "Codex",
+        Inspection::Incompatible {
+            executable: PathBuf::from("/opt/bin/codex"),
+            version: Some("codex-cli 0.150.0".to_owned()),
+            requirement: "Codex 0.162.1 or newer".to_owned(),
+        },
+    );
+    assert_eq!(status.status, "incompatible");
+    assert_eq!(
+        status.message.as_deref(),
+        Some("Found Codex 0.150.0 at `/opt/bin/codex`. ticketd needs Codex 0.162.1 or newer.")
+    );
+    assert_eq!(status.path.as_deref(), Some("/opt/bin/codex"));
+    assert_eq!(version_number("2.1.322 (Claude Code)"), "2.1.322");
 }

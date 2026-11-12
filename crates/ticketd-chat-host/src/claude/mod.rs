@@ -187,10 +187,7 @@ fn verdict(executable: &Path, inspection: &Value) -> Inspection {
         return Inspection::Incompatible {
             executable: executable.to_owned(),
             version: version.map(str::to_owned),
-            requirement: format!(
-                "Claude Code {built_for_text} or newer, the version ticketd's bridge (Agent \
-                 SDK {sdk}) was built for. Update Claude Code, then recheck."
-            ),
+            requirement: format!("Claude Code {built_for_text} or newer"),
         };
     }
     let pairing = if installed == built_for {

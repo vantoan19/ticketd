@@ -311,7 +311,7 @@ impl Connection {
         .unwrap_or(None);
         let lost = EventKind::RuntimeLost {
             exit_code,
-            diagnostics: self.stderr.snapshot(),
+            diagnostics: self.stderr.readable(),
         };
         let _ = events.send(self.event(lost)).await;
     }

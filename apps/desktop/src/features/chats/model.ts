@@ -9,6 +9,7 @@ import type {
   RecordChange,
   Step,
 } from "@/features/chats/client";
+import { plainText } from "@/features/documents/graph-text";
 
 /**
  * Applies one change-log entry to the snapshot it follows. Returns "resync"
@@ -89,6 +90,7 @@ export function changeLine(change: RecordChange) {
 const PROBLEM_LINES: Record<ProblemKind, string> = {
   not_installed: "Not sent",
   incompatible: "Not sent",
+  unavailable: "Not sent",
   probe_failed: "Not sent",
   not_signed_in: "Not sent",
   not_subscription: "Not on a subscription",
@@ -128,7 +130,8 @@ export function summaryLine(chat: ChatSummary): string {
           ? "Stop not confirmed"
           : "Interrupted";
   if (chat.last_change) return changeLine(chat.last_change);
-  return chat.preview || "Idle";
+  // The preview is the raw last response, which is Markdown.
+  return (chat.preview && plainText(chat.preview)) || "Idle";
 }
 
 /**
@@ -138,6 +141,7 @@ export function summaryLine(chat: ChatSummary): string {
 const BLOCKING: ProblemKind[] = [
   "not_installed",
   "incompatible",
+  "unavailable",
   "not_signed_in",
   "usage_limit",
   "sandbox_unavailable",
@@ -175,6 +179,7 @@ export function harnessUsable(status: HarnessStatus["status"]) {
 const SETUP: ProblemKind[] = [
   "not_installed",
   "incompatible",
+  "unavailable",
   "probe_failed",
   "not_signed_in",
   "not_subscription",
@@ -308,6 +313,13 @@ export function problemNotice(problem: Problem, harness: string): Notice {
         body: `${problem.message ?? `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Update guide",
+      };
+    case "unavailable":
+      return {
+        tone: "neutral",
+        title: `${harness} isn't available`,
+        body: `${problem.message ?? `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
+        actions: ["check"],
       };
     case "probe_failed":
       return {
