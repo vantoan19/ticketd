@@ -51,13 +51,15 @@ export function ChoiceTiles({
  * One choice in `ChoiceTiles`. `preview` is drawn above the title (a small
  * picture of the result); `children` sit under the description for extra
  * detail and must not be interactive. Without a preview the tile is plain and
- * padded evenly. The chosen tile wears a 2px interactive ring.
+ * padded evenly; a plain tile may carry an `icon`, drawn in a small tile at
+ * the start of a top row with the radio at its end. The chosen tile wears a 2px interactive ring.
  */
 export function ChoiceTile({
   value,
   title,
   description,
   preview,
+  icon,
   disabled = false,
   className,
   children,
@@ -66,10 +68,19 @@ export function ChoiceTile({
   title: ReactNode;
   description?: ReactNode;
   preview?: ReactNode;
+  /** A glyph for plain tiles, decorative; the title names the tile. */
+  icon?: ReactNode;
   disabled?: boolean;
   className?: string;
   children?: ReactNode;
 }) {
+  const radio = (
+    <span
+      aria-hidden="true"
+      data-slot="choice-tile-radio"
+      className="mt-0.5 size-4 shrink-0 rounded-full bg-(--surface)"
+    />
+  );
   return (
     <RadioGroup.Item
       data-slot="choice-tile"
@@ -77,19 +88,31 @@ export function ChoiceTile({
       disabled={disabled}
       className={cn(
         "group flex flex-col gap-3 rounded-(--radius-panel) bg-(--surface) text-left text-sm text-foreground shadow-(--shadow-border) outline-none",
-        preview ? "px-2 pt-2 pb-3" : "px-4 py-3.5",
+        preview
+          ? "px-2 pt-2 pb-3"
+          : icon
+            ? "px-4 py-3.5 gap-3.5"
+            : "px-4 py-3.5",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ring)",
         "disabled:cursor-not-allowed disabled:bg-(--recessed) disabled:text-(--disabled-foreground)",
         className,
       )}
     >
       {preview}
+      {icon && (
+        <span className="flex items-start justify-between gap-3">
+          <span
+            aria-hidden="true"
+            data-slot="choice-tile-icon"
+            className="flex size-9 items-center justify-center rounded-md bg-(--recessed) text-foreground shadow-(--shadow-border-base) group-disabled:text-(--disabled-foreground)"
+          >
+            {icon}
+          </span>
+          {radio}
+        </span>
+      )}
       <span className={cn("flex items-start gap-2.5", preview && "px-1")}>
-        <span
-          aria-hidden="true"
-          data-slot="choice-tile-radio"
-          className="mt-0.5 size-4 shrink-0 rounded-full bg-(--surface)"
-        />
+        {!icon && radio}
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="font-medium">{title}</span>
           {description && (

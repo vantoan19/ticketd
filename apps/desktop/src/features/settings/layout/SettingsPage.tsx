@@ -19,6 +19,7 @@ export function SettingsPage({
   hidden = false,
   focusTitle = true,
   wordmark = false,
+  header = true,
   children,
 }: {
   /** Breadcrumb group, muted: "Workspace". */
@@ -42,6 +43,8 @@ export function SettingsPage({
   focusTitle?: boolean;
   /** About: the title is the product wordmark (32/40) and the header has no icon tile. */
   wordmark?: boolean;
+  /** Search has no page header: its labelled input opens the page. */
+  header?: boolean;
   children: ReactNode;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -61,25 +64,27 @@ export function SettingsPage({
         {endSlot && <div className="settings-panel-bar-end">{endSlot}</div>}
       </div>
       <div className="settings-page-column">
-        <header
-          className="settings-page-header"
-          data-wordmark={wordmark || undefined}
-        >
-          {!wordmark && (
-            <span className="settings-page-icon" aria-hidden="true">
-              <Icon size={20} />
-            </span>
-          )}
-          <div className="settings-page-heading">
-            <div className="settings-page-title-line">
-              <h1 ref={heading} tabIndex={-1}>
-                {title}
-              </h1>
-              {titleAccessory}
+        {header ? (
+          <header
+            className="settings-page-header"
+            data-wordmark={wordmark || undefined}
+          >
+            {!wordmark && (
+              <span className="settings-page-icon" aria-hidden="true">
+                <Icon size={20} />
+              </span>
+            )}
+            <div className="settings-page-heading">
+              <div className="settings-page-title-line">
+                <h1 ref={heading} tabIndex={-1}>
+                  {title}
+                </h1>
+                {titleAccessory}
+              </div>
+              {lede && <p className="settings-page-lede">{lede}</p>}
             </div>
-            {lede && <p className="settings-page-lede">{lede}</p>}
-          </div>
-        </header>
+          </header>
+        ) : null}
         {children}
       </div>
       {footer}

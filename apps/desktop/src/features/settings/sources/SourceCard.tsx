@@ -205,6 +205,8 @@ export function SourceCard({
   const [busy, setBusy] = useState<Busy>(null);
   const [failure, setFailure] = useState<SourceFailure | null>(null);
   const [connection, setConnection] = useState("");
+  // Known once a check succeeds or a configuration was saved.
+  const [connected, setConnected] = useState(entry.saved !== null);
   const [previewed, setPreviewed] = useState<{
     key: string;
     preview: DiscoveryPreview;
@@ -222,6 +224,11 @@ export function SourceCard({
   const preview = previewed?.key === key ? previewed.preview : null;
   const stale = previewed !== null && previewed.key !== key;
   const working = busy !== null;
+  const repositories = config.repositories;
+  const hasTarget = fields.some((field) => field.key === "repositories")
+    ? Array.isArray(repositories) && repositories.length > 0
+    : Object.keys(config).length > 0;
+  const canPreview = !working && hasTarget && (connected || saved !== null);
   const canSave = preview !== null && !working && (dirty || saved === null);
 
   const loadOptions: LoadOptions = (field, query) =>
@@ -256,7 +263,10 @@ export function SourceCard({
     run(
       "checking",
       () => sourcesClient.checkConnection(connector.provider, config),
-      (info) => setConnection(`Connected as ${info.account}.`),
+      (info) => {
+        setConnected(true);
+        setConnection(`Connected as ${info.account}.`);
+      },
     );
   const previewMatches = () => {
     setConnection("");
@@ -295,6 +305,15 @@ export function SourceCard({
       : status === "saved"
         ? { tone: savedTone, text: "Saved configuration" }
         : { tone: "neutral" as const, text: "Not configured" };
+  // The save bar already says to preview first; the form only explains the rest.
+  const hint =
+    preview || working
+      ? null
+      : saved && !dirty
+        ? "These rules are the saved configuration."
+        : stale
+          ? "The rules changed. Preview matches again before saving."
+          : null;
   const barText = ready
     ? "Preview is current. Saving turns discovery on; matching issues are imported on the next refresh."
     : status === "unsaved"
@@ -329,7 +348,7 @@ export function SourceCard({
         <Button
           variant="outline"
           size="sm"
-          disabled={working}
+          disabled={!canPreview}
           onClick={previewMatches}
         >
           {busy === "previewing" ? "Previewing…" : "Preview matches"}
@@ -438,15 +457,7 @@ export function SourceCard({
               loadOptions={loadOptions}
               onChange={edit}
             />
-            {!preview && !working && (
-              <p className="settings-hint">
-                {saved && !dirty
-                  ? "These rules are the saved configuration."
-                  : stale
-                    ? "The rules changed. Preview matches again before saving."
-                    : "Preview the matching issues before saving."}
-              </p>
-            )}
+            {hint && <p className="settings-hint">{hint}</p>}
             {failure && (
               <p role="alert" className="settings-failure">
                 {failure.fields.length > 0
@@ -482,7 +493,7 @@ export function SourceCard({
           <Button
             variant="ghost"
             size="sm"
-            disabled={schedule.refreshing}
+            disabled={schedule.refreshing || saved === null}
             onClick={() => void schedule.refreshAll()}
           >
             <RefreshCw aria-hidden="true" />

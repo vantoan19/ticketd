@@ -209,6 +209,9 @@ test("the Replace review shows the folder, and the footnote opens Command line",
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).getByText("~/.claude/skills/ticketd")).toBeTruthy();
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(
+    screen.getByRole("button", { name: "Check the command line" }).dataset.slot,
+  ).toBe("settings-link");
   fireEvent.click(
     screen.getByRole("button", { name: "Check the command line" }),
   );

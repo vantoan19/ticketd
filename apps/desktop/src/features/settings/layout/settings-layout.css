@@ -105,10 +105,9 @@
   letter-spacing: -0.48px;
   color: var(--foreground);
 }
-.settings-page-title-line h1:focus-visible {
+/* The title takes focus when a page opens; that is not a keyboard stop. */
+.settings-page-title-line h1:focus {
   outline: none;
-  box-shadow: var(--focus-ring);
-  border-radius: var(--radius-segment);
 }
 .settings-page-header[data-wordmark] .settings-page-title-line h1 {
   font-size: var(--text-section);
@@ -137,8 +136,11 @@
 .settings-section > [data-slot="section-header"] {
   margin-bottom: 12px;
 }
+/* The caption takes the whole line under the title; a max-width would let it
+   share the title row, so the 520px measure is padding instead. */
 .settings-section [data-slot="section-header-caption"] {
-  max-width: 520px;
+  box-sizing: border-box;
+  padding-inline-end: max(0px, calc(100% - 520px));
   margin-top: -6px;
 }
 .settings-page-header + .settings-section {
@@ -251,4 +253,26 @@
   .settings-list-row:not([data-variant="stacked"]) {
     flex-wrap: wrap;
   }
+}
+
+/* In-text link: inherits the surrounding size, link color, underline on hover. */
+.settings-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--link-foreground);
+  text-decoration: none;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.settings-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.settings-link:focus-visible {
+  border-radius: var(--radius-segment);
+}
+.settings-link:disabled {
+  color: var(--disabled-foreground);
+  cursor: not-allowed;
 }

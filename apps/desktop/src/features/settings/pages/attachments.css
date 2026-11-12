@@ -58,24 +58,3 @@
 .attachments-limit-note:empty {
   display: none;
 }
-/* A text-looking button: the "Set up Google Drive" and "Use the default" links. */
-.attachments-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: var(--text-caption);
-  line-height: 16px;
-  color: var(--link-foreground);
-  cursor: pointer;
-}
-.attachments-link:hover:not(:disabled) {
-  text-decoration: underline;
-}
-.attachments-link:focus-visible {
-  border-radius: var(--radius-segment);
-}
-.attachments-link:disabled {
-  color: var(--disabled-foreground);
-  cursor: not-allowed;
-}

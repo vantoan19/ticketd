@@ -165,6 +165,9 @@ test("Drive is disabled with a way to set it up when Drive is not configured", a
   const tile = await screen.findByRole("radio", { name: /Google Drive/ });
   await waitFor(() => expect((tile as HTMLButtonElement).disabled).toBe(true));
   expect(tile.textContent).toContain("Connect Google Drive to choose this");
+  expect(
+    screen.getByRole("button", { name: "Set up Google Drive" }).dataset.slot,
+  ).toBe("settings-link");
   fireEvent.click(screen.getByRole("button", { name: "Set up Google Drive" }));
   expect(openPage).toHaveBeenCalledWith("google-drive");
 });

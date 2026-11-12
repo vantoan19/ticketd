@@ -196,6 +196,9 @@ test("the footer sends people to Agent skills", async () => {
       <CommandLineCard />
     </SettingsStateContext.Provider>,
   );
+  expect(
+    screen.getByRole("button", { name: "Set up Agent skills" }).dataset.slot,
+  ).toBe("settings-link");
   fireEvent.click(screen.getByRole("button", { name: "Set up Agent skills" }));
   expect(openPage).toHaveBeenCalledWith("agent-skills");
 });

@@ -160,10 +160,14 @@ function LastBackupRow({
         </span>
       }
       description={
-        <>
+        <span className="backups-last-path">
           <code className="backups-file">{name}</code>
-          {folder ? ` · in ${folder}` : ""}
-        </>
+          {folder && (
+            <span className="backups-last-folder" title={folder}>
+              {` · in ${folder}`}
+            </span>
+          )}
+        </span>
       }
       trailing={
         <>

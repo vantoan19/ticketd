@@ -143,6 +143,9 @@ test("each command can be copied with its placeholders in place", async () => {
 
 test("Backups in the lede opens the Backups page", () => {
   const openPage = renderPage();
+  expect(screen.getByRole("button", { name: "Backups" }).dataset.slot).toBe(
+    "settings-link",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Backups" }));
   expect(openPage).toHaveBeenCalledWith("backups");
 });

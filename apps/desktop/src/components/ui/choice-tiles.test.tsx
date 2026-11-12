@@ -58,3 +58,26 @@ test("a disabled tile cannot be chosen", () => {
   expect(tile("Full width").getAttribute("aria-checked")).toBe("false");
   expect((tile("Full width") as HTMLButtonElement).disabled).toBe(true);
 });
+
+test("a plain tile can lead with an icon tile, the radio sitting at the end of that row", () => {
+  render(
+    <ChoiceTiles aria-label="Where" value="a" onValueChange={() => {}}>
+      <ChoiceTile
+        value="a"
+        title="Local"
+        icon={<i data-testid="icon" />}
+        description="Here."
+      />
+      <ChoiceTile value="b" title="Remote" />
+    </ChoiceTiles>,
+  );
+  const local = tile("Local");
+  const icon = local.querySelector('[data-slot="choice-tile-icon"]');
+  const radio = local.querySelector('[data-slot="choice-tile-radio"]');
+  expect(icon?.contains(screen.getByTestId("icon"))).toBe(true);
+  expect(icon?.parentElement).toBe(radio?.parentElement);
+  expect(local.getAttribute("aria-checked")).toBe("true");
+  expect(tile("Remote").querySelector('[data-slot="choice-tile-icon"]')).toBe(
+    null,
+  );
+});
