@@ -188,6 +188,8 @@ pub(crate) struct Supervisor {
     queue_started: bool,
     /// The runtime is being closed on purpose; its connection ending is not a loss.
     closing: bool,
+    /// Something may have been written since views were last brought up to date.
+    unpublished: bool,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -251,6 +253,7 @@ impl Supervisor {
             shutting_down: false,
             queue_started: false,
             closing: false,
+            unpublished: true,
         };
         tokio::spawn(supervisor.run());
         sender
@@ -316,6 +319,7 @@ impl Supervisor {
         &mut self,
         call: impl FnOnce(&mut Workspace) -> Result<T, Error>,
     ) -> Result<T, Error> {
+        self.unpublished = true;
         let result = self.core(call);
         if let Err(error) = &result
             && !is_refusal(error)
@@ -375,6 +379,8 @@ impl Supervisor {
     // ------------------------------------------------------------------
 
     async fn on_command(&mut self, command: Command) {
+        // A command may follow a write made outside this task (links, folder, retention).
+        self.unpublished = true;
         match command {
             Command::Attach(reply) => {
                 let _ = reply.send(self.attach());
@@ -850,6 +856,12 @@ impl Supervisor {
         {
             return;
         }
+        let idle = self.active.is_none();
+        if !idle && self.direct.is_empty() {
+            // During a turn only steering input can go out, so the workspace is not
+            // read for every event of a streaming turn.
+            return;
+        }
         let chat_id = self.chat_id.clone();
         let Ok(chat) = self.core(|core| core.chat(&chat_id)) else {
             return;
@@ -859,7 +871,6 @@ impl Supervisor {
             self.resend = None;
             return;
         }
-        let idle = self.active.is_none();
         // What the person asked to send again goes alone, as a new turn.
         let resend = self.resend.clone().filter(|_| idle);
         let message_id = loop {
@@ -1643,7 +1654,8 @@ impl Supervisor {
             return;
         }
         let chat = self.chat_id.clone();
-        loop {
+        // Streamed text between checkpoints writes nothing, so there is nothing to read.
+        while std::mem::take(&mut self.unpublished) {
             let cursor = self.cursor;
             match self.core(|core| core.chat_changes(&chat, cursor, 500)) {
                 Ok(ticketd_core::ChatCatchUp::Changes {
@@ -1657,9 +1669,7 @@ impl Supervisor {
                             subscriber.push(ChatUpdate::Changes(changes.clone()));
                         }
                     }
-                    if !more {
-                        break;
-                    }
+                    self.unpublished = more;
                 }
                 Ok(ticketd_core::ChatCatchUp::Resync) => {
                     for subscriber in self.subscribers.drain(..) {
@@ -1668,7 +1678,10 @@ impl Supervisor {
                     return;
                 }
                 // Storage trouble is reported by the write that hits it.
-                Err(_) => break,
+                Err(_) => {
+                    self.unpublished = true;
+                    break;
+                }
             }
         }
         let live = self.live();

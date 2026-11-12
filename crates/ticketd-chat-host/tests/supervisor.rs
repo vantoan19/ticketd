@@ -1323,3 +1323,48 @@ async fn a_message_sent_while_older_input_waits_in_a_running_queue_goes_after_it
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     assert_eq!(texts(&f), ["older", "newer"]);
 }
+
+/// L8: streamed text is shown without reading the workspace for every fragment, so a
+/// fast harness does not leave the view seconds behind it.
+#[tokio::test(start_paused = true)]
+async fn streamed_text_does_not_read_the_workspace_for_every_fragment() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let chat = new_chat(&mut Workspace::open(&path).unwrap(), "codex");
+    let fake = FakeAdapter::codex();
+    let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = opens.clone();
+    let host = ChatHost::new(
+        Arc::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Workspace::open(&path)
+        }),
+        vec![Arc::new(fake.clone()) as Arc<dyn HarnessAdapter>],
+    )
+    .unwrap();
+    host.send(&chat.id, None, "first", SendMode::Auto)
+        .await
+        .unwrap();
+    settle().await;
+    let (_view, mut subscription) = host.attach(&chat.id).await.unwrap();
+    assert!(fake.emit(text_delta("start ")).await);
+    settle().await;
+
+    let before = opens.load(Ordering::SeqCst);
+    for _ in 0..200 {
+        assert!(fake.emit(text_delta("word ")).await);
+    }
+    tokio::time::sleep(TEXT_UPDATE_INTERVAL * 2).await;
+
+    let reads = opens.load(Ordering::SeqCst) - before;
+    assert!(reads < 10, "{reads} workspace opens for 200 fragments");
+    let shown: String = drain(&mut subscription)
+        .await
+        .into_iter()
+        .filter_map(|update| match update {
+            ChatUpdate::Text { delta, .. } => Some(delta),
+            _ => None,
+        })
+        .collect();
+    assert!(shown.ends_with(&"word ".repeat(200)), "{shown}");
+}
