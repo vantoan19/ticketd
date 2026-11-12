@@ -343,7 +343,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: "This Chat's folder is missing",
-        body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found after the restore. Nothing was re-run.`,
+        body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Pick another folder to keep going here.`,
         actions: ["pick-folder"],
       };
     case "history_lost":

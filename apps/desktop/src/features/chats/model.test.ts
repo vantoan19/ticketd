@@ -291,3 +291,13 @@ test("an uncertain delivery is worded without assuming why, and a set-aside harn
   expect(harnessUsable("sign_in_unknown")).toBe(true);
   expect(harnessUsable("not_signed_in")).toBe(false);
 });
+
+test("a missing folder is told without claiming a restore happened", () => {
+  const notice = problemNotice(
+    { kind: "folder_missing", path: "/work/app" },
+    "Codex",
+  );
+  expect(notice.body).toBe(
+    "`/work/app` wasn't found. Nothing was re-run. Pick another folder to keep going here.",
+  );
+});
