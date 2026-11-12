@@ -1766,3 +1766,44 @@ fn an_oversized_or_endlessly_nested_file_is_skipped_with_a_notice() {
     assert_eq!(files(&devices.workspaces[1]), before);
     assert_eq!(devices.sync(1).skipped, 0);
 }
+
+/// F49: a record too large for the other desktops to read is not written to
+/// the storage. It stays here, waiting, with a notice that names it, until it
+/// is short enough.
+#[test]
+fn a_record_larger_than_a_file_may_be_is_not_uploaded_and_is_reported() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let (_, stored) = devices.remote_text(RemoteKind::Ticket, &id);
+    let body = |text: String| TicketPatch {
+        body: Some(text),
+        ..Default::default()
+    };
+    devices.workspaces[0]
+        .change_ticket(&reference, body("x".repeat(8 * 1024 * 1024)))
+        .unwrap();
+
+    for _ in 0..2 {
+        let report = devices.sync(0);
+        assert_eq!((report.uploaded, report.pending), (0, 1));
+    }
+    assert_eq!(devices.remote_text(RemoteKind::Ticket, &id).1, stored);
+    let notices = devices.workspaces[0].sync_notices().unwrap();
+    assert_eq!(notices.len(), 1);
+    assert!(
+        matches!(&notices[0].notice, SyncNoticeKind::UnreadableFile { path, reason } if path.contains(&reference) && reason.contains("8 MiB")),
+        "{notices:?}"
+    );
+
+    devices.workspaces[0]
+        .change_ticket(&reference, body("Short again".into()))
+        .unwrap();
+    devices.settle([0, 1, 2]);
+    devices.assert_converged();
+    assert_eq!(devices.workspaces[0].sync_notices().unwrap(), []);
+    assert_eq!(
+        devices.workspaces[2].show_ticket(&reference).unwrap().body,
+        "Short again"
+    );
+}

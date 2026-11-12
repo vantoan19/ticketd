@@ -1234,6 +1234,23 @@ impl Workspace {
                 continue;
             }
             let text = with_device(&self.sync_file_text(&local)?, device);
+            // A file the other desktops would skip is not written: the record
+            // waits here, and the person is told, until it is short enough.
+            let oversized = format!("oversized:{}:{}", name(kind), dirty.id);
+            if text.len() as u64 > MAX_FILE_BYTES {
+                notify(
+                    &self.connection,
+                    &oversized,
+                    &SyncNoticeKind::UnreadableFile {
+                        path: format!("{}/{}", kind.table(), local.display_name()),
+                        reason: format!(
+                            "this record is larger than {} MiB, the most a record's file may be, and was not uploaded; shorten it to sync it",
+                            MAX_FILE_BYTES / (1024 * 1024)
+                        ),
+                    },
+                )?;
+                continue;
+            }
             let key = RemoteKey::new(remote_kind(kind), dirty.id.clone());
             let write = |expected: Option<&str>| {
                 remote.write(
@@ -1251,6 +1268,13 @@ impl Workspace {
             };
             match written {
                 Ok(file) => {
+                    if self
+                        .connection
+                        .execute("DELETE FROM sync_notices WHERE cause = ?1", [&oversized])?
+                        > 0
+                    {
+                        touch(&self.connection)?;
+                    }
                     let replaced = match stored.version.as_deref() {
                         Some(expected) if expected != file.version => {
                             replaced_revision(remote, folder, &key, expected, &file.version)?

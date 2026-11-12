@@ -17,8 +17,8 @@ use ticketd_core::{
         DesktopOAuthClient, DriveRemote, GoogleTransport, PickerSession, PlatformCredentialStore,
     },
     sync::{
-        AttachmentAvailability, AttachmentDownload, SetupOptions, SyncChoice, SyncConflict,
-        SyncItem, SyncNotice, SyncRecovery, SyncResolution, SyncSettings, SyncStatus,
+        AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, SetupOptions, SyncChoice,
+        SyncConflict, SyncItem, SyncNotice, SyncRecovery, SyncResolution, SyncSettings, SyncStatus,
         remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
     },
 };
@@ -573,15 +573,31 @@ fn version_content(
             if version.is_empty() || version.len() > 256 {
                 return missing();
             }
+            let unloaded = |error: RemoteError| {
+                BridgeFailure::plain(&format!(
+                    "Could not load this version from Google Drive: {error}"
+                ))
+            };
+            let key = remote_key(kind, id);
+            // Drive says how large a version is before any of it is read.
+            let revisions = bound
+                .remote
+                .revisions(&bound.folder, &key)
+                .map_err(unloaded)?;
+            let Some(revision) = revisions.iter().find(|known| known.version == version) else {
+                return missing();
+            };
+            if revision.size > MAX_FILE_BYTES {
+                return rejected(&format!(
+                    "This version is larger than {} MiB, the most a record's file may be, and cannot be shown",
+                    MAX_FILE_BYTES / (1024 * 1024)
+                ));
+            }
             let mut bytes = Vec::new();
             bound
                 .remote
-                .download(&bound.folder, &remote_key(kind, id), version, &mut bytes)
-                .map_err(|error| {
-                    BridgeFailure::plain(&format!(
-                        "Could not load this version from Google Drive: {error}"
-                    ))
-                })?;
+                .download(&bound.folder, &key, version, &mut bytes)
+                .map_err(unloaded)?;
             let record = String::from_utf8(bytes)
                 .map_err(|_| Error::SyncFile("the file is not UTF-8 text".into()))
                 .and_then(|file| SyncRecord::parse(&file))?;
@@ -1394,6 +1410,51 @@ mod tests {
                 current: "One".into()
             }]
         );
+    }
+
+    /// F49: a Drive version larger than a record may be is listed, and is not
+    /// read into memory when it is opened or restored.
+    #[test]
+    fn drive_history_does_not_read_a_version_larger_than_a_record_may_be() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.sync_there();
+        desks.sync_here();
+        let key = RemoteKey::new(RemoteKind::Ticket, ticket.id.clone());
+        let current = desks.remote.list(FOLDER).unwrap();
+        let current = current.iter().find(|file| file.key == key).unwrap();
+        let huge = vec![b'x'; 8 * 1024 * 1024 + 1];
+        desks
+            .remote
+            .write(
+                FOLDER,
+                &key,
+                "T.md",
+                Some(&current.version),
+                &mut Cursor::new(huge),
+            )
+            .unwrap();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+        let calls = desks.remote.calls().len();
+
+        let list = versions(&desks.here, bound, kind, id, Source::Drive).unwrap();
+        assert_eq!(list.len(), 2);
+        let refused =
+            version_detail(&desks.here, bound, kind, id, Source::Drive, &list[0].id).unwrap_err();
+        assert!(refused.message.contains("8 MiB"), "{}", refused.message);
+        let refused = restore(
+            &mut desks.here,
+            bound,
+            kind,
+            id,
+            Source::Drive,
+            &list[0].id,
+            "r",
+        )
+        .unwrap_err();
+        assert!(refused.message.contains("8 MiB"), "{}", refused.message);
+        assert!(!desks.remote.calls()[calls..].contains(&RemoteOp::Download));
     }
 
     #[test]

@@ -19,9 +19,9 @@ use super::{
     RecordKind,
     attachments::{AttachmentDownloads, MANIFEST},
     engine::{dirty_kind, touch},
-    remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
+    remote::{RemoteError, RemoteFile, RemoteKey, RemoteKind, RemoteStorage},
 };
-use crate::{Error, SyncKind, Workspace};
+use crate::{Error, SyncKind, Workspace, sync_files::MAX_FILE_BYTES};
 
 /// The shortest time between two polls of the storage.
 pub const MIN_POLL_INTERVAL_SECS: u64 = 30;
@@ -314,6 +314,19 @@ struct Registry {
     retired: BTreeSet<String>,
     #[serde(flatten)]
     other: BTreeMap<String, serde_json::Value>,
+}
+
+/// The version of a listed shared JSON file, to read it by. The device list
+/// and the Attachment list are far smaller than the most a record may be: one
+/// that is larger is not read into memory, and not replaced either.
+fn fits(id: &str, file: &RemoteFile) -> Result<String, Error> {
+    if file.size > MAX_FILE_BYTES {
+        return Err(Error::Sync(format!(
+            "{id}.json in the sync folder is larger than {} MiB and was not read; remove it in Google Drive to let ticketd write it again",
+            MAX_FILE_BYTES / (1024 * 1024)
+        )));
+    }
+    Ok(file.version.clone())
 }
 
 /// Read a shared JSON file. One that is not JSON at all is replaced by the
@@ -723,6 +736,7 @@ impl Workspace {
             let registry: Registry = listing
                 .iter()
                 .find(|file| file.key == RemoteKey::new(RemoteKind::Devices, REGISTRY))
+                .filter(|file| file.size <= MAX_FILE_BYTES)
                 .and_then(|file| {
                     let mut bytes = Vec::new();
                     remote
@@ -941,12 +955,12 @@ impl Workspace {
             touch(&self.connection)?;
         }
         let version = |id: &str| {
-            listing
+            let listed = listing
                 .iter()
-                .find(|file| file.key == RemoteKey::new(RemoteKind::Devices, id))
-                .map(|file| file.version.clone())
+                .find(|file| file.key == RemoteKey::new(RemoteKind::Devices, id));
+            listed.map(|file| fits(id, file)).transpose()
         };
-        let (registry, manifest) = (version(REGISTRY), version(MANIFEST));
+        let (registry, manifest) = (version(REGISTRY)?, version(MANIFEST)?);
         let (device_id, device_name) =
             self.register(remote, &folder, registry.as_deref(), &state)?;
         // Bytes go up before any record that names them.
@@ -1175,7 +1189,7 @@ impl Workspace {
                     Ok(file) => version = Some(file.version),
                     Err(RemoteError::PreconditionFailed { current }) => {
                         let read = match &current {
-                            Some(file) => fetch(&file.version)?,
+                            Some(file) => fetch(&fits(id, file)?)?,
                             None => None,
                         };
                         version = current.map(|file| file.version).filter(|_| read.is_some());

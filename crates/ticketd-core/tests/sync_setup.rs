@@ -1111,6 +1111,40 @@ fn a_shared_file_from_a_newer_ticketd_stops_the_run_and_is_not_rewritten() {
     assert_eq!(desks.file(&registry).0, version);
 }
 
+/// F49: the device list and the Attachment list are small files. One that is
+/// larger than any record may be is not read into memory, and not replaced:
+/// the run stops and says which file it is.
+#[test]
+fn a_shared_file_larger_than_a_record_may_be_stops_the_run_unread() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let registry = RemoteKey::new(RemoteKind::Devices, "devices");
+    let (version, _) = desks.file(&registry);
+    let huge = desks
+        .remote
+        .write(
+            &desks.folder(),
+            &registry,
+            "devices.json",
+            Some(&version),
+            &mut Cursor::new(vec![b' '; 8 * 1024 * 1024 + 1]),
+        )
+        .unwrap()
+        .version;
+    let calls = desks.remote.calls().len();
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(
+        recovered(&status),
+        (Some(SyncRecovery::Error), SyncState::NeedsAttention)
+    );
+    let message = status.recovery_message.unwrap();
+    assert!(message.contains("devices.json"), "{message}");
+    assert!(!desks.remote.calls()[calls..].contains(&RemoteOp::Download));
+    assert_eq!(desks.file(&registry).0, huge);
+}
+
 #[test]
 fn an_attachment_upload_whose_answer_is_lost_repeats_without_a_second_copy() {
     let desks = desks();

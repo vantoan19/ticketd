@@ -53,8 +53,9 @@ impl SyncKind {
     }
 }
 
-/// The largest file read as a record. Larger ones are skipped unread.
-pub(crate) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// The largest file read or written as a record. A larger one in the storage
+/// is skipped unread, and a larger record is not uploaded.
+pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// How far into a header line list and key markers may reach. Every nested
 /// list starts further right, so this bounds how deep a header nests; the
 /// YAML reader bounds `[`-style nesting itself. ticketd writes two columns.

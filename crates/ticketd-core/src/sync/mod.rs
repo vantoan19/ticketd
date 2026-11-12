@@ -11,6 +11,7 @@ pub mod merge;
 pub mod remote;
 mod setup;
 
+pub use crate::sync_files::MAX_FILE_BYTES;
 pub use attachments::{AttachmentAvailability, AttachmentAvailabilityState, AttachmentDownloads};
 pub use capture::{DirtyRecord, RecordKind};
 pub(crate) use capture::{TRIGGER_EVENTS, captured_tables};
