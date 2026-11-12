@@ -87,7 +87,7 @@ fn a_repeated_create_never_duplicates(a: &dyn RemoteStorage, b: &dyn RemoteStora
     assert_eq!(
         put(b, &folder, &key, "T-KQ1.md", None, b"different"),
         Err(RemoteError::PreconditionFailed {
-            current: Some(created.clone())
+            current: Some(Box::new(created.clone()))
         })
     );
     assert_eq!(a.list(&folder).unwrap(), [created]);
@@ -118,7 +118,7 @@ fn an_update_applies_only_to_the_version_last_synced(a: &dyn RemoteStorage, b: &
             b"three"
         ),
         Err(RemoteError::PreconditionFailed {
-            current: Some(second.clone())
+            current: Some(Box::new(second.clone()))
         })
     );
     // A write repeated after its response was lost has already been applied.

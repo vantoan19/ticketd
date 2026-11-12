@@ -99,7 +99,7 @@ fn two_devices_exchange_files_through_a_disposable_drive_folder() {
             b"# stale\n"
         ),
         Err(RemoteError::PreconditionFailed {
-            current: Some(updated.clone())
+            current: Some(Box::new(updated.clone()))
         })
     );
     assert_eq!(first.list(&folder).unwrap(), std::slice::from_ref(&updated));

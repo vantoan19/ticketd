@@ -262,7 +262,7 @@ impl Workspace {
                     // Already there, from an interrupted run or another device.
                     Err(RemoteError::PreconditionFailed {
                         current: Some(stored),
-                    }) => stored,
+                    }) => *stored,
                     Err(error) => return Err(error.into()),
                 };
             self.connection.execute(

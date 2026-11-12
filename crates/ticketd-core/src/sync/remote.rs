@@ -118,7 +118,7 @@ pub enum RemoteError {
     /// The write was not applied: the file is not at the expected version.
     /// `current` is the file as stored now, or `None` when it is missing.
     #[error("the remote file changed since it was last synced")]
-    PreconditionFailed { current: Option<RemoteFile> },
+    PreconditionFailed { current: Option<Box<RemoteFile>> },
     /// The requested file or version is not in the storage.
     #[error("the remote file or version was not found")]
     NotFound,

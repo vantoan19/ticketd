@@ -836,7 +836,11 @@ impl RemoteStorage for DriveRemote<'_> {
                     }
                 }
             }
-            _ => return Err(RemoteError::PreconditionFailed { current: stored }),
+            _ => {
+                return Err(RemoteError::PreconditionFailed {
+                    current: stored.map(Box::new),
+                });
+            }
         };
         lock(&self.files).insert((folder.to_owned(), key.clone()), uploaded.id.clone());
         Ok(RemoteFile {

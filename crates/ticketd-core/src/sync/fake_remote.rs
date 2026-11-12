@@ -327,7 +327,9 @@ impl RemoteStorage for FakeRemote {
         let result = if unchanged {
             current.ok_or(RemoteError::NotFound)?
         } else if current.as_ref().map(|file| file.version.as_str()) != expected {
-            return Err(RemoteError::PreconditionFailed { current });
+            return Err(RemoteError::PreconditionFailed {
+                current: current.map(Box::new),
+            });
         } else {
             state.versions += 1;
             let id = format!("file-{}", state.versions);

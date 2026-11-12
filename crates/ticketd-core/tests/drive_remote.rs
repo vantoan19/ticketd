@@ -325,7 +325,7 @@ fn duplicate_files_of_one_record_resolve_to_the_oldest_on_every_device() {
     assert_eq!(
         put(&other_device, &ticket, None, b"mine"),
         Err(RemoteError::PreconditionFailed {
-            current: Some(oldest.clone())
+            current: Some(Box::new(oldest.clone()))
         })
     );
     let updated = put(&other_device, &ticket, Some(&oldest.version), b"merged").unwrap();
