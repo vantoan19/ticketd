@@ -1375,18 +1375,23 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(calls).toContain("check_cli");
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { level: 1, name: "Appearance" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Location" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
   expect(
     screen.getByRole("region", { name: "Location" }).textContent,
   ).toContain("Tickets1");
-  expect(document.activeElement).toBe(
-    screen.getByRole("heading", { name: "Settings" }),
-  );
   fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Settings" }),
   );
   tickets = 7;
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Location" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });

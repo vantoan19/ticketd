@@ -109,7 +109,7 @@
       "count": 1
     }
   },
-  "src/features/settings/SettingsView.tsx": {
+  "src/features/settings/pages/BackupsPage.tsx": {
     "shadcn/no-restyle": {
       "count": 1
     }

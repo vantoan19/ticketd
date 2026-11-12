@@ -275,49 +275,27 @@ test("the section list offers a source only when its connector is available", as
   vi.mocked(sourcesClient.list).mockResolvedValue([]);
   const { unmount } = render(<SettingsNav onBack={() => {}} />);
   await act(async () => {});
-  expect(screen.queryByRole("group", { name: "Sources" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "GitHub" })).toBeNull();
   unmount();
 
   vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
   render(<SettingsNav onBack={() => {}} />);
-  const group = await screen.findByRole("group", { name: "Sources" });
+  const group = await screen.findByRole("group", { name: "Connections" });
+  expect(group.textContent).toContain("Google Drive");
   expect(group.textContent).toContain("GitHub");
 });
 
-test("opening a source keeps its page heading visible and focuses it for keyboard navigation", async () => {
+test("opening a source focuses its page title, named for the source", async () => {
   vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
-  const frame = vi
-    .spyOn(window, "requestAnimationFrame")
-    .mockImplementation((callback) => {
-      callback(0);
-      return 0;
-    });
-  try {
-    const { container } = render(
-      <>
-        <SettingsNav onBack={() => {}} onSelect={() => {}} />
-        <div className="settings-page">
-          <h1 id="settings-heading" tabIndex={-1}>
-            GitHub settings
-          </h1>
-          <div id="settings-source-github">Connection card</div>
-        </div>
-      </>,
-    );
-    const page = container.querySelector(".settings-page")!;
-    page.scrollTop = 200;
-    const scrollCard = vi.fn();
-    document.getElementById("settings-source-github")!.scrollIntoView =
-      scrollCard;
-    fireEvent.click(await screen.findByRole("button", { name: "GitHub" }));
-    expect(page.scrollTop).toBe(0);
-    expect(document.activeElement).toBe(
-      screen.getByRole("heading", { name: "GitHub settings" }),
-    );
-    expect(scrollCard).not.toHaveBeenCalled();
-  } finally {
-    frame.mockRestore();
-  }
+  const props = { onRestore: async () => {}, onOpenInbox: () => {} };
+  const { rerender } = render(
+    <SettingsView {...props} selected="appearance" />,
+  );
+  await screen.findByRole("heading", { level: 1, name: "Appearance" });
+  rerender(<SettingsView {...props} selected="source-github" />);
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { level: 1, name: "GitHub" }),
+  );
 });
 
 test("switching settings sections retains the source draft and its preview", async () => {
@@ -564,12 +542,18 @@ test("optional fields show grey examples and an Optional marker, not saved-looki
   expect(screen.getAllByText("Optional").length).toBeGreaterThan(0);
 });
 
-test("the section list groups Sources after Workspace and before Help", async () => {
+test("the section list puts Connections after Agents and before Help", async () => {
   vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
   render(<SettingsNav onBack={() => {}} />);
-  await screen.findByRole("group", { name: "Sources" });
+  await screen.findByRole("group", { name: "Connections" });
   const groups = screen
     .getAllByRole("group")
     .map((group) => group.getAttribute("aria-label"));
-  expect(groups).toEqual(["Preferences", "Workspace", "Sources", "Help"]);
+  expect(groups).toEqual([
+    "Preferences",
+    "Workspace",
+    "Agents",
+    "Connections",
+    "Help",
+  ]);
 });
