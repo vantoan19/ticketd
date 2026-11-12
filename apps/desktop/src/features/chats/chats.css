@@ -605,6 +605,7 @@
   font-weight: inherit;
 }
 .chat-pop small {
+  overflow-wrap: anywhere;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
