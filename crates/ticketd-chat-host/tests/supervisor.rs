@@ -1586,3 +1586,26 @@ async fn queued_input_is_kept_in_history_where_it_was_sent() {
         .collect();
     assert_eq!(texts, ["first", "one", "queued"]);
 }
+
+/// U21: a harness process alone is not a session that is working yet.
+#[tokio::test(start_paused = true)]
+async fn work_is_its_session_opening_until_the_sessions_first_turn_starts() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let reply = f.fake.hold_next_submit();
+    f.send("first").await;
+
+    let live = f.live().await;
+    assert!(live.running);
+    assert_eq!(live.opening, Some(ChatSessionOrigin::New));
+
+    reply.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+    assert_eq!(f.live().await.opening, None);
+
+    // The next turn of the same session is not its session opening.
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let _reply = f.fake.hold_next_submit();
+    f.send("second").await;
+    assert_eq!(f.live().await.activity, Activity::Working);
+    assert_eq!(f.live().await.opening, None);
+}

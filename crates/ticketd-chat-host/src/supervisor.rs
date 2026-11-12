@@ -1777,6 +1777,13 @@ impl Supervisor {
                 Activity::Idle
             },
             running: self.runtime.is_some(),
+            // Until the session's first turn starts, whatever the process is doing.
+            opening: match (&self.opening, &self.runtime) {
+                _ if !working => None,
+                (Some(opening), _) => Some(opening.origin),
+                (None, Some(runtime)) if runtime.turns.is_empty() => Some(runtime.origin),
+                _ => None,
+            },
             steering: self.active.as_ref().and_then(|_| self.steering()),
             delivery_unconfirmed: self.unconfirmed_start.is_some(),
             sending: self.direct.iter().cloned().collect(),
