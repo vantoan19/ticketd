@@ -242,6 +242,50 @@ const chats: MockChat[] = [
     ],
   },
   {
+    // As seen on a real machine: a managed folder named by an id under the
+    // verbatim path form, notices from ticketd, and replies one item per line.
+    updated_at: minutesAgo(3),
+    chat: chatState({
+      id: "managed",
+      title:
+        "Reply with exactly the single word: pong, then list three numbers",
+      activity: "interrupted",
+      folder: {
+        path: "\\\\?\\C:\\Users\\me\\ticketd\\workspace.sqlite3.chats\\f4f684bc-abfa-4335-a59d-4700c27c520e",
+        name: "f4f684bc-abfa-4335-a59d-4700c27c520e",
+        managed: true,
+      },
+    }),
+    items: [
+      {
+        id: "m0",
+        at,
+        kind: "marker",
+        reason: "note",
+        message:
+          "Codex could not start the MCP server grafana: The grafana MCP server requires OAuth reauthentication.",
+      },
+      you(
+        "m1",
+        "Write 1 to 3, one per line, with a short sentence after each.",
+      ),
+      reply("m2", "1 - One is the first.\n2 - Two is even.\n3 - Three is odd."),
+      {
+        id: "m3",
+        at,
+        kind: "request",
+        request: "approval",
+        title: "Codex asked for approval",
+        subject: "Remove-Item hello.txt",
+        options: [],
+        free_text: false,
+        state: "answered",
+        outcome: "You denied this",
+      },
+      { id: "m4", at, kind: "marker", reason: "stopped" },
+    ],
+  },
+  {
     updated_at: minutesAgo(60 * 26),
     chat: chatState({
       id: "folder",
