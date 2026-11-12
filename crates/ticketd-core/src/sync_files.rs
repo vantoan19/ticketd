@@ -451,6 +451,12 @@ fn edge_time(item: &str) -> Option<(&str, &str)> {
         .filter(|(id, time)| is_guid(id) && chrono::DateTime::parse_from_rfc3339(time).is_ok())
 }
 
+/// A removed parent link that was removed before: `<GUID> <which removal>`.
+fn removal_number(item: &str) -> bool {
+    item.split_once(' ')
+        .is_some_and(|(id, number)| is_guid(id) && number.parse::<u32>().is_ok())
+}
+
 fn expected(kind: Type) -> String {
     match kind {
         Type::Text => "text; put the value in quotes".into(),
@@ -485,7 +491,7 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
         (Type::Edges, SyncValue::Set(edges)) => edges.iter().all(|edge| edge_time(edge).is_some()),
         (Type::Removed, SyncValue::Set(items)) => items
             .iter()
-            .all(|item| is_guid(item) || edge_time(item).is_some()),
+            .all(|item| is_guid(item) || edge_time(item).is_some() || removal_number(item)),
         (Type::Flag | Type::Ids | Type::Tickets | Type::Tags | Type::Edges | Type::Removed, _)
         | (_, SyncValue::Flag(_) | SyncValue::Set(_)) => false,
         (Type::Text, SyncValue::Text(_)) => true,

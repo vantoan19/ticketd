@@ -593,6 +593,49 @@ fn parent_loop_is_broken_the_same_way_everywhere(order: [usize; 3]) {
     assert_eq!(recorded, 6);
 }
 
+/// F52: the parent links are cleared and made again on purpose, on two devices
+/// as before, so the same link is removed a second time. That is a new
+/// removal: every device says so again, once.
+#[test]
+fn a_parent_loop_made_again_on_purpose_is_reported_again() {
+    let mut devices = devices();
+    let one = devices.workspaces[0].create_ticket("One").unwrap();
+    let two = devices.workspaces[0].create_ticket("Two").unwrap();
+    devices.settle([0, 1, 2]);
+    for removals in [1, 2] {
+        devices.workspaces[0]
+            .set_parent(&one.reference, Some(&two.reference), None)
+            .unwrap();
+        devices.workspaces[1]
+            .set_parent(&two.reference, Some(&one.reference), None)
+            .unwrap();
+        devices.settle([0, 1, 2]);
+        // Further runs add nothing.
+        devices.settle([2, 0, 1]);
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            let notices = workspace.sync_notices().unwrap();
+            assert_eq!(notices.len(), removals);
+            let SyncNoticeKind::ParentRemoved { reference, .. } = &notices[0].notice else {
+                unreachable!("unexpected notice {:?}", notices[0]);
+            };
+            let feed = workspace.activity_feed(reference, 50, 0).unwrap();
+            assert_eq!(
+                feed.iter()
+                    .filter(|entry| matches!(entry, ActivityFeedEntry::Automatic { event, .. } if event.kind == "sync_parent_removed"))
+                    .count(),
+                removals
+            );
+        }
+        for reference in [&one.reference, &two.reference] {
+            devices.workspaces[0]
+                .set_parent(reference, None, None)
+                .unwrap();
+        }
+        devices.settle([0, 1, 2]);
+    }
+}
+
 #[test]
 fn an_upload_that_replaced_an_unseen_change_from_another_device_merges_it_back() {
     let mut devices = devices();

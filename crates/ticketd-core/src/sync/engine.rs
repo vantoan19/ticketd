@@ -389,7 +389,10 @@ fn note_removed(
         )
     } else {
         (
-            format!("parent:{ticket}:{other_id}"),
+            // `time` is the number of a removal after the first of this link.
+            format!("parent:{ticket}:{other_id}:{time}")
+                .trim_end_matches(':')
+                .to_owned(),
             "sync_parent_removed",
             ["parent", "child"],
             SyncNoticeKind::ParentRemoved {
@@ -1138,13 +1141,21 @@ impl Workspace {
                 "DELETE FROM ticket_parents WHERE child_id = ?1",
                 [&edge.blocked],
             )?;
-            note_removed(
-                &transaction,
-                "parent_removed",
-                &edge.blocked,
-                &edge.blocker,
-                false,
+            // Nothing in a parent link tells this removal from an earlier one of
+            // the same link, made again on purpose since. A later one is
+            // numbered: every desktop knows the earlier ones before it meets
+            // the loop, so all of them give it the same number.
+            let cause = format!("parent:{}:{}", edge.blocked, edge.blocker);
+            let earlier: i64 = transaction.query_row(
+                "SELECT COUNT(*) FROM sync_notices WHERE cause = ?1 OR cause LIKE ?1 || ':%'",
+                [&cause],
+                |row| row.get(0),
             )?;
+            let item = match earlier {
+                0 => edge.blocker.clone(),
+                earlier => format!("{} {}", edge.blocker, earlier + 1),
+            };
+            note_removed(&transaction, "parent_removed", &edge.blocked, &item, false)?;
         }
         transaction.commit()?;
         Ok(())
