@@ -223,10 +223,27 @@ export function TicketProperties({
         propertiesRef.current?.contains(document.activeElement));
     function restoreFocus() {
       if (!returnFocus) return;
-      requestAnimationFrame(() => {
-        if (document.activeElement !== document.body) return;
+      // Focus is "lost" on the page body or on a list that is closing (still in
+      // the DOM, or already detached); anywhere else the user moved it on.
+      const lost = () => {
+        const active = document.activeElement;
+        return (
+          !(active instanceof HTMLElement) ||
+          active === document.body ||
+          !active.isConnected ||
+          active.closest('[role="listbox"], [role="menu"]') !== null
+        );
+      };
+      const restore = () => {
+        if (!lost()) return;
         const selector = `[aria-label^="${key}:"]`;
         propertiesRef.current?.querySelector<HTMLElement>(selector)?.focus();
+      };
+      // A closing list can still hold focus on the first frame and drop it to
+      // the page on the next, so check on both.
+      requestAnimationFrame(() => {
+        restore();
+        requestAnimationFrame(restore);
       });
     }
     setPending(key);
