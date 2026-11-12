@@ -1614,3 +1614,34 @@ fn an_attachment_download_that_keeps_failing_becomes_a_notice_and_runs_succeed_a
     );
     assert_eq!(unreadable(&b).len(), 1);
 }
+
+/// F40: format 61 was in use before `sync_attachments.attempts` joined it, so a
+/// Workspace at 61 can lack the column. Format 62 adds it.
+#[test]
+fn a_format_61_workspace_without_download_attempts_gains_the_column() {
+    let desks = desks();
+    let (desk, _, _) = desks.uploaded("a");
+    drop(desk);
+    let path = desks.directory.path().join("a");
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture
+        .execute_batch(
+            "ALTER TABLE sync_attachments DROP COLUMN attempts; PRAGMA user_version = 61;",
+        )
+        .unwrap();
+    drop(fixture);
+
+    let mut desk = Workspace::open(&path).unwrap();
+    desk.sync_now(&desks.remote).unwrap();
+    drop(desk);
+    let migrated = rusqlite::Connection::open(&path).unwrap();
+    let attempts: i64 = migrated
+        .query_row(
+            "SELECT COALESCE(SUM(attempts), 0) FROM sync_attachments",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attempts, 0);
+    assert!(ticketd_core::FORMAT_VERSION >= 62);
+}

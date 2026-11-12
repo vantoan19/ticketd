@@ -62,8 +62,7 @@ pub(crate) fn migrate_recovery(connection: &Connection) -> Result<(), Error> {
 }
 
 /// Format version 61: the run token this desktop last wrote into its entry of
-/// the device registry and the one before it, and how often in a row the
-/// download of an Attachment failed.
+/// the device registry and the one before it.
 pub(crate) fn migrate_run_token(connection: &Connection) -> Result<(), Error> {
     add_columns(
         connection,
@@ -72,9 +71,16 @@ pub(crate) fn migrate_run_token(connection: &Connection) -> Result<(), Error> {
             ("sync_state", "run_previous", "TEXT"),
             // Whether the next run writes a fresh token: once per app session.
             ("sync_state", "run_due", "INTEGER NOT NULL DEFAULT 1"),
-            // Downloads of the current version that the storage failed in a row.
-            ("sync_attachments", "attempts", "INTEGER NOT NULL DEFAULT 0"),
         ],
+    )
+}
+
+/// Format version 62: how often in a row the download of an Attachment's
+/// current version failed. Format 61 was in use before this column existed.
+pub(crate) fn migrate_download_attempts(connection: &Connection) -> Result<(), Error> {
+    add_columns(
+        connection,
+        &[("sync_attachments", "attempts", "INTEGER NOT NULL DEFAULT 0")],
     )
 }
 

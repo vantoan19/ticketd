@@ -49,3 +49,10 @@ pub(crate) fn migrate_recovery(connection: &rusqlite::Connection) -> Result<(), 
 pub(crate) fn migrate_run_token(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_run_token(connection)
 }
+
+/// Format version 62.
+pub(crate) fn migrate_download_attempts(
+    connection: &rusqlite::Connection,
+) -> Result<(), crate::Error> {
+    setup::migrate_download_attempts(connection)
+}
