@@ -106,7 +106,7 @@ test("closing while uploads are pending says work is saved, lists them and quits
     name: "Finishing upload",
   });
   expect(dialog.textContent).toContain(
-    "Everything is saved on this computer. ticketd closes when the upload is done, or in 10 seconds.",
+    "Everything is saved on this computer. ticketd closes when the upload is done. If uploads are left after 10 seconds, it asks before closing.",
   );
   expect(within(dialog).getByRole("status").textContent).toBe(
     "0 of 3 uploaded",

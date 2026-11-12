@@ -9,7 +9,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { syncApi } from "@/lib/sync-api";
+import { revealFile } from "@/lib/reveal";
+import { syncApi, type SyncSetupOptions } from "@/lib/sync-api";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
 import {
@@ -37,6 +38,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     flushOnExit: vi.fn(),
   },
 }));
+vi.mock("@/lib/reveal", () => ({ revealFile: vi.fn() }));
 const api = vi.mocked(syncApi);
 /** The api as shipped, over the mocked bridge. */
 const real = (
@@ -139,14 +141,15 @@ test("downloading an existing Workspace asks once before replacing this one", as
   api.status.mockResolvedValue(choosing());
   api.downloadWorkspace.mockResolvedValue({
     ...syncStatus(),
-    safety_backup: "/data/ticketd/backups/before-download.sqlite3",
+    // As Windows reports it: with the prefix only the system uses.
+    safety_backup: "\\\\?\\C:\\ticketd\\workspace.sqlite3.safety-1.sqlite3",
   });
   show();
   const download = await screen.findByRole("radio", {
-    name: /Download an existing Workspace/,
+    name: /Download “ticketd · web-app”/,
   });
   expect(download.textContent).toContain(
-    "“ticketd · web-app”, last synced from Studio desktop 2 h ago",
+    "42 tickets and 9 Documents, last synced from Studio desktop 2 h ago",
   );
   fireEvent.click(download);
   fireEvent.click(screen.getByRole("button", { name: "Download…" }));
@@ -171,8 +174,13 @@ test("downloading an existing Workspace asks once before replacing this one", as
     await screen.findByRole("heading", { name: "This desktop" }),
   ).toBeTruthy();
   // What was replaced can be found again.
-  expect(screen.getByLabelText("Safety backup path").textContent).toBe(
-    "/data/ticketd/backups/before-download.sqlite3",
+  expect(screen.getByLabelText("Safety backup file").textContent).toBe(
+    "workspace.sqlite3.safety-1.sqlite3",
+  );
+  vi.mocked(revealFile).mockResolvedValue(null);
+  fireEvent.click(screen.getByRole("button", { name: /^Show in / }));
+  expect(revealFile).toHaveBeenCalledWith(
+    "C:\\ticketd\\workspace.sqlite3.safety-1.sqlite3",
   );
 });
 
@@ -392,4 +400,53 @@ test("a first sync that stopped shows why, with its action and Disconnect", asyn
   expect(screen.getByRole("button", { name: "Disconnect…" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(api.recover).toHaveBeenCalled();
+});
+
+test("an empty Workspace beside one in Drive preselects the download, and each folder is named", async () => {
+  api.status.mockResolvedValue(choosing());
+  let answer: (read: SyncSetupOptions) => void = () => {};
+  api.setupOptions.mockReturnValue(
+    new Promise((resolve) => {
+      answer = resolve;
+    }),
+  );
+  show();
+  // Drive takes a few seconds to answer: the card says what it waits for.
+  expect((await screen.findByRole("status")).textContent).toBe(
+    "Looking for Workspaces in your Drive…",
+  );
+  answer({
+    local: { tickets: 0, documents: 0, attachments: 0 },
+    existing: [
+      ...options.existing,
+      {
+        folder_id: "folder-2",
+        folder_name: "ticketd · notes",
+        last_synced_by: null,
+        last_synced_at: null,
+        counts: { tickets: 1, documents: 0, attachments: 0 },
+      },
+    ],
+  });
+  const first = await screen.findByRole("radio", {
+    name: /Download “ticketd · web-app”/,
+  });
+  expect(first.getAttribute("aria-checked")).toBe("true");
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(
+    screen.getByRole("radio", { name: /Download “ticketd · notes”/ })
+      .textContent,
+  ).toContain("1 ticket and 0 Documents, last sync not recorded");
+  expect(screen.getByRole("button", { name: "Download…" })).toBeTruthy();
+});
+
+test("a first download that has not counted its files yet says Preparing", async () => {
+  api.status.mockResolvedValue(
+    syncStatus({ first_sync: { direction: "download", done: 0, total: 0 } }),
+  );
+  show();
+  expect((await screen.findByText("Preparing…")).textContent).toBe(
+    "Preparing…",
+  );
+  expect(screen.queryByText(/0 of 0/)).toBeNull();
 });

@@ -253,3 +253,25 @@ test("a conflict waiting while offline: the line offers Review, and the popover 
   fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
   expect(api.recover).toHaveBeenCalled();
 });
+
+test("offline with something else to look at: the line says Offline and counts what waits, once", async () => {
+  const status = syncStatus({
+    state: "needs_attention",
+    recovery: "offline",
+    pending_uploads: [change("A"), change("B"), change("C")],
+  });
+  await footer(status);
+  expect((await line()).textContent).toBe(
+    "Sync needs attentionOffline · 3 changes waiting",
+  );
+  // Offline mends itself, so Retry is in the popover only.
+  expect(screen.getAllByRole("button")).toHaveLength(1);
+  const dialog = await popover();
+  expect(dialog.textContent).toContain(
+    "Offline · The Inbox says what happened",
+  );
+  expect(within(dialog).getByRole("listitem").textContent).toBe(
+    "3 changes waiting to upload",
+  );
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+});

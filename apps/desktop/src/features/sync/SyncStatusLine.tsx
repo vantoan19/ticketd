@@ -71,6 +71,13 @@ function describe(status: SyncStatus, now: number): Line {
         ? "Drive is busy"
         : null;
   const recovery = recoveryCopy(status);
+  // "Offline · 3 changes waiting": why nothing uploads, and how much waits.
+  const held = [paused, waiting && `${changes(waiting)} waiting`]
+    .filter(Boolean)
+    .join(" · ");
+  const heldItems = waiting
+    ? [{ icon: <CloudOff />, text: `${changes(waiting)} waiting to upload` }]
+    : [];
   switch (status.state) {
     case "uploaded":
       return {
@@ -96,20 +103,10 @@ function describe(status: SyncStatus, now: number): Line {
       return {
         tone: "neutral",
         label: "Saved on this computer",
-        detail:
-          [paused, waiting && `${changes(waiting)} waiting`]
-            .filter(Boolean)
-            .join(" · ") || "Not uploaded yet",
+        detail: held || "Not uploaded yet",
         title: paused ?? "Saved on this computer",
         description: safe,
-        items: waiting
-          ? [
-              {
-                icon: <CloudOff />,
-                text: `${changes(waiting)} waiting to upload`,
-              },
-            ]
-          : [],
+        items: heldItems,
       };
     case "attachment_download_pending": {
       const { count, bytes_left } = status.attachment_downloads;
@@ -128,8 +125,9 @@ function describe(status: SyncStatus, now: number): Line {
       };
     }
     case "needs_attention":
-      // A conflict waits for the person; being offline or slowed down mends itself.
-      if (recovery && !(paused && status.needs_review.length))
+      // Being offline or slowed down mends itself, so it never takes the line
+      // from what waits for the person: it is named beside it.
+      if (recovery && !paused)
         return {
           tone: "attention",
           label: recovery.label,
@@ -143,15 +141,23 @@ function describe(status: SyncStatus, now: number): Line {
         label: status.needs_review.length
           ? needsReview(status.needs_review)
           : "Sync needs attention",
-        detail: paused ?? (synced ? `Synced ${synced}` : "Not synced yet"),
+        detail: paused ? held : synced ? `Synced ${synced}` : "Not synced yet",
         title: status.needs_review.length ? "Needs review" : "Needs attention",
-        description: status.needs_review.length
-          ? "Changed on two desktops"
-          : "The Inbox says what happened",
-        items: status.needs_review.map((item) => ({
-          icon: <GitCompareArrows />,
-          text: item.title,
-        })),
+        description: [
+          paused,
+          status.needs_review.length
+            ? "Changed on two desktops"
+            : "The Inbox says what happened",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        items: [
+          ...status.needs_review.map((item) => ({
+            icon: <GitCompareArrows />,
+            text: item.title,
+          })),
+          ...(paused ? heldItems : []),
+        ],
       };
   }
 }
@@ -206,9 +212,11 @@ export function SyncStatusLine() {
           <button type="button" className="sidebar-source-line">
             <span className="sidebar-source-label">
               {line.tone && <StatusDot tone={line.tone} size={10} />}
-              {line.label}
+              <span className="sync-line-text" title={line.label}>
+                {line.label}
+              </span>
             </span>
-            <small>{line.detail}</small>
+            <small className="sync-line-text">{line.detail}</small>
           </button>
         </PopoverTrigger>
         <PopoverContent side="top" align="start" aria-label="Google Drive sync">
@@ -284,7 +292,8 @@ export function SyncStatusLine() {
           Review
         </Button>
       ) : (
-        corrective && (
+        corrective &&
+        !selfMending && (
           <Button variant="ghost" size="sm" disabled={busy} onClick={recover}>
             {corrective}
           </Button>

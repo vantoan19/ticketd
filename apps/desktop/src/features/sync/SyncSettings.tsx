@@ -5,7 +5,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, FolderOpen } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import {
   Alert,
@@ -23,6 +23,8 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { ago } from "@/features/tickets/ticket-source";
 import { toFailure } from "@/lib/api/bridge-failure";
+import { fileManagerName } from "@/lib/platform";
+import { revealFile } from "@/lib/reveal";
 import {
   SYNC_MIN_POLL_SECS,
   syncApi,
@@ -110,15 +112,7 @@ export function SyncSettings({
         Keeps this Workspace the same on your desktops, through your own Google
         Drive.
       </p>
-      {safetyBackup && (
-        <Alert role="status">
-          <AlertTitle>This Workspace was replaced</AlertTitle>
-          <AlertDescription>
-            A safety backup of the Workspace this desktop had before is kept at{" "}
-            <code aria-label="Safety backup path">{safetyBackup}</code>
-          </AlertDescription>
-        </Alert>
-      )}
+      {safetyBackup && <Replaced safetyBackup={plainPath(safetyBackup)} />}
       {status &&
         (status.connection === "not_connected" ? (
           <Connect />
@@ -130,6 +124,43 @@ export function SyncSettings({
         ) : (
           <Connected status={status} />
         ))}
+    </div>
+  );
+}
+
+/** A path without Windows' internal `\\?\` prefix, which no person or file manager uses. */
+const plainPath = (path: string) =>
+  path.replace(/^\\\\\?\\(UNC\\)?/, (_, unc?: string) => (unc ? "\\\\" : ""));
+
+/** Says where the Workspace a download replaced was kept: its file's name, and a way to it. */
+function Replaced({ safetyBackup }: { safetyBackup: string }) {
+  const [failure, setFailure] = useState("");
+  return (
+    <div className="sync-replaced">
+      <Alert role="status">
+        <AlertTitle>This Workspace was replaced</AlertTitle>
+        <AlertDescription>
+          A safety backup of the Workspace this desktop had before is kept as
+          <code aria-label="Safety backup file">
+            {safetyBackup.split(/[\\/]/).pop()}
+          </code>
+        </AlertDescription>
+        <AlertActions>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              void revealFile(safetyBackup).then((failed) =>
+                setFailure(failed ?? ""),
+              )
+            }
+          >
+            <FolderOpen aria-hidden="true" />
+            Show in {fileManagerName()}
+          </Button>
+        </AlertActions>
+        <Failure>{failure}</Failure>
+      </Alert>
     </div>
   );
 }
@@ -193,7 +224,12 @@ function Choose({
     syncApi
       .setupOptions()
       .then((read) => {
-        if (current) setOptions(read);
+        if (!current) return;
+        setOptions(read);
+        // Nothing here to upload and a Workspace in Drive: that one is what the person came for.
+        const [first] = read.existing;
+        if (first && Object.values(read.local).every((count) => count === 0))
+          setChoice(first.folder_id);
       })
       .catch((reason: unknown) => {
         if (current)
@@ -238,6 +274,11 @@ function Choose({
       }
     >
       <ConnectedAs account={status.account} />
+      {!options && !readFailure && (
+        <p role="status" className="settings-hint">
+          Looking for Workspaces in your Drive…
+        </p>
+      )}
       {options && (
         <div className="settings-row settings-row-stacked">
           <div>
@@ -277,11 +318,13 @@ function Choose({
                 >
                   <span className="layout-choice-dot" aria-hidden="true" />
                   <span>
-                    Download an existing Workspace
+                    Download “{workspace.folder_name}”
                     <small>
-                      “{workspace.folder_name}”
-                      {synced &&
-                        `, last synced ${workspace.last_synced_by ? `from ${workspace.last_synced_by} ` : ""}${synced}`}
+                      {plural(workspace.counts.tickets, "ticket")} and{" "}
+                      {plural(workspace.counts.documents, "Document")},{" "}
+                      {synced
+                        ? `last synced ${workspace.last_synced_by ? `from ${workspace.last_synced_by} ` : ""}${synced}`
+                        : "last sync not recorded"}
                     </small>
                   </span>
                 </RadioGroup.Item>
@@ -346,14 +389,16 @@ function FirstSync({
     >
       <ConnectedAs account={status.account} />
       <div className="sync-progress-row" role="status">
+        {/* Until the files are counted there is no share to show. */}
         <Progress
           aria-label={upload ? "First upload" : "First download"}
-          value={progress.done}
+          value={progress.total ? progress.done : null}
           max={Math.max(progress.total, 1)}
         />
         <span>
-          {upload ? "Uploading" : "Downloading"} {progress.done} of{" "}
-          {progress.total} files
+          {progress.total
+            ? `${upload ? "Uploading" : "Downloading"} ${progress.done} of ${progress.total} files`
+            : "Preparing…"}
         </span>
       </div>
     </SettingsCard>
