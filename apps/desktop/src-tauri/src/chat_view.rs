@@ -812,7 +812,7 @@ pub fn chat_state(
 ) -> ChatState {
     let name = harness_name(&chat.harness);
     let activity = activity(live, tracker);
-    let opening = opening(activity, live.running, chat.native_session_id.is_some());
+    let opening = opening(activity, live.opening);
     ChatState {
         id: chat.id.clone(),
         title: title(chat),
@@ -855,13 +855,14 @@ pub fn chat_state(
     }
 }
 
-/// Work with no harness process behind it yet is its session opening: every turn,
-/// steer and dispatch needs the runtime. It resumes the Chat's native session when
-/// one is recorded.
-// ponytail: an explicit "Resume in a fresh session" also reads "resume" while it
-// opens; expose the host's session origin if that wording matters.
-fn opening(activity: &str, running: bool, resumes: bool) -> Option<&'static str> {
-    (activity == "working" && !running).then_some(if resumes { "resume" } else { "start" })
+/// Work the host reports as waiting on a session that has not started a turn yet is
+/// that session opening, until the turn runs. A fresh session for an existing Chat
+/// starts one, like a new Chat.
+fn opening(activity: &str, origin: Option<ChatSessionOrigin>) -> Option<&'static str> {
+    match origin.filter(|_| activity == "working")? {
+        ChatSessionOrigin::NativeResume => Some("resume"),
+        ChatSessionOrigin::New | ChatSessionOrigin::FreshSession => Some("start"),
+    }
 }
 
 /// Whether a Chat counts in the sidebar: it waits for an answer or a delivery decision
@@ -923,6 +924,7 @@ pub fn idle() -> ChatLive {
     ChatLive {
         activity: Activity::Idle,
         running: false,
+        opening: None,
         steering: None,
         delivery_unconfirmed: false,
         sending: Vec::new(),
@@ -938,15 +940,23 @@ mod tests {
         ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatTool, ChatToolState, Item,
         idle, needs_you, opening, request, step,
     };
+    use ticketd_core::ChatSessionOrigin;
 
-    /// U16: work before the harness process exists is the session opening.
+    /// U16, U21: work before the session's first turn runs is the session opening.
     #[test]
-    fn work_with_no_process_yet_is_the_session_opening() {
-        assert_eq!(opening("working", false, true), Some("resume"));
-        assert_eq!(opening("working", false, false), Some("start"));
-        assert_eq!(opening("working", true, true), None);
-        assert_eq!(opening("waiting", false, true), None);
-        assert_eq!(opening("idle", false, false), None);
+    fn work_before_the_sessions_first_turn_is_the_session_opening() {
+        let resume = Some(ChatSessionOrigin::NativeResume);
+        assert_eq!(opening("working", resume), Some("resume"));
+        assert_eq!(
+            opening("working", Some(ChatSessionOrigin::New)),
+            Some("start")
+        );
+        assert_eq!(
+            opening("working", Some(ChatSessionOrigin::FreshSession)),
+            Some("start")
+        );
+        assert_eq!(opening("working", None), None);
+        assert_eq!(opening("waiting", resume), None);
     }
 
     #[test]

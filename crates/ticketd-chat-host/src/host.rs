@@ -182,6 +182,10 @@ pub struct ChatLive {
     pub activity: Activity,
     /// A provider process is running for this Chat.
     pub running: bool,
+    /// Work waits on a harness session that has not started a turn yet, and how that
+    /// session opens. A process alone is not a working session: the harness can take
+    /// seconds after it starts before the first turn runs.
+    pub opening: Option<ticketd_core::ChatSessionOrigin>,
     /// What steering does when a send would steer; `None` means a send queues.
     pub steering: Option<SteeringBehavior>,
     /// A new turn was handed to the harness and nothing confirmed it yet.

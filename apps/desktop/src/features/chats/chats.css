@@ -102,8 +102,10 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
+/* A long title gives way before the harness and folder trigger, which keeps at
+   most 60% of the group; past that the trigger shortens too. */
 .chat-head-title {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
@@ -597,12 +599,6 @@
   max-width: 100%;
   line-height: inherit;
   font-weight: inherit;
-}
-.chat-pop .path-tail,
-.chat-dock .ui-notice-description .path-tail {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .chat-pop small {
   color: var(--muted-foreground);

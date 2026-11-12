@@ -18,8 +18,8 @@ use ticketd_chat_host::{
     harness_key, problem_kind,
 };
 use ticketd_core::{
-    Chat, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
-    ChatRecord, ChatRole, ChatTurnState, NewChat, Workspace,
+    BackupCheck, Chat, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter,
+    ChatMessage, ChatRecord, ChatRole, ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -171,7 +171,7 @@ pub struct Restored {
 /// What a restore reports. `restored` is the safety copy, or why nothing was replaced:
 /// only that is a failure. An unconfirmed stop or a failed check of the restored Chats
 /// happened around a restore that did take place, so they are warnings on a success.
-pub fn restore_outcome(
+fn restore_outcome(
     restored: Result<PathBuf, String>,
     reconciled: Outcome<()>,
     unconfirmed: usize,
@@ -192,6 +192,36 @@ pub fn restore_outcome(
     Ok(Restored {
         safety_path: safety.display().to_string(),
         warning: Some(warnings.join(" ")).filter(|warning| !warning.is_empty()),
+    })
+}
+
+/// Why `backup` cannot replace the workspace, in the words the restore review uses.
+/// `Ok` also when the workspace cannot be opened to inspect it: a restore is how a
+/// damaged workspace is replaced, and the restore checks the backup itself.
+fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
+    if !backup.is_file() {
+        return Err(format!("backup file not found: {}", backup.display()));
+    }
+    let Ok(inspection) = open().and_then(|workspace| workspace.inspect_backup(backup)) else {
+        return Ok(());
+    };
+    Err(match inspection.check {
+        BackupCheck::Valid { .. } => return Ok(()),
+        BackupCheck::NewerFormat {
+            backup_version,
+            supported_version,
+        } => format!(
+            "This backup can't be restored by this version. It was saved by a newer ticketd (workspace format {backup_version}; this app reads up to {supported_version})."
+        ),
+        BackupCheck::NotTicketd => "This isn't a ticketd backup.".to_owned(),
+        BackupCheck::MissingTables { tables } => format!(
+            "This backup is incomplete. It is missing tables ticketd needs: {}.",
+            tables.join(", ")
+        ),
+        BackupCheck::CurrentWorkspace => "This is the current workspace.".to_owned(),
+        BackupCheck::Damaged { reason } => {
+            format!("This backup is damaged. It failed ticketd's checks: {reason}.")
+        }
     })
 }
 
@@ -624,6 +654,30 @@ impl Chats {
         }
         self.restoring.store(false, Ordering::SeqCst);
         reconciled
+    }
+
+    /// Replaces the workspace with a backup through `replace`, which returns the safety
+    /// copy. The backup is checked first, so one that cannot be restored stops nothing;
+    /// then running Chats are stopped and nothing restored is run.
+    pub async fn restore(
+        &self,
+        backup: PathBuf,
+        replace: impl FnOnce(PathBuf) -> Result<PathBuf, String> + Send + 'static,
+    ) -> Result<Restored, String> {
+        let open = self.open_workspace.clone();
+        let checked = backup.clone();
+        let check = tokio::task::spawn_blocking(move || restorable(&open, &checked)).await;
+        // A check that could not run is not a refusal: the restore checks the backup again.
+        if let Ok(Err(refused)) = check {
+            return Err(refused);
+        }
+        let unconfirmed = self.begin_restore().await;
+        let restored = tokio::task::spawn_blocking(move || replace(backup))
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|restored| restored);
+        let reconciled = self.finish_restore();
+        restore_outcome(restored, reconciled, unconfirmed.len())
     }
 
     /// Stops app-owned execution with bounded cleanup. The host accepts nothing afterwards.
@@ -1393,6 +1447,17 @@ pub fn quit_action(working: usize, confirmed: bool) -> QuitAction {
         QuitAction::Confirm(working)
     } else {
         QuitAction::Quit
+    }
+}
+
+/// The tray icon's tooltip while the window is hidden. A Chat that needs the person
+/// (an approval or question, a failure, uncertain delivery) is named before work.
+pub fn tray_tooltip(overview: &Overview) -> String {
+    match (overview.needs_you, overview.working) {
+        (0, 0) => "ticketd is running in the background".to_owned(),
+        (0, _) => "ticketd: Chats are still working".to_owned(),
+        (1, _) => "ticketd: 1 Chat needs you".to_owned(),
+        (needs_you, _) => format!("ticketd: {needs_you} Chats need you"),
     }
 }
 

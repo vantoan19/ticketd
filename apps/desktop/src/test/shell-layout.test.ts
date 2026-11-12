@@ -74,3 +74,38 @@ it("the window never scrolls and only the list rows scroll under a fixed header"
   expect(rule(".ticket-scroll")).toMatch(/overflow-y: auto;/);
   expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
 });
+
+it("a path shortens in its middle first, then at its end, always with an ellipsis", () => {
+  const paths = readFileSync(
+    join(__dirname, "..", "features/projects/projects.css"),
+    "utf8",
+  );
+  const block = (selector: string) =>
+    new RegExp(`\n${selector.replace(".", "[.]")} [{]([^}]*)[}]`).exec(
+      paths,
+    )?.[1] ?? "";
+  // U19: the folders between give way first and keep room for their ellipsis.
+  expect(block(".path-middle")).toMatch(/flex-shrink: \d{3,};/);
+  expect(block(".path-middle")).toMatch(/min-width: [1-9]/);
+  // Then the last folders, which the line's edge must never cut mid-character.
+  expect(block(".path-tail")).not.toMatch(/flex: none;/);
+  expect(block(".path-tail")).toMatch(/min-width: 0;/);
+  expect(block(".path-tail")).toMatch(/overflow: hidden;/);
+  expect(block(".path-tail")).toMatch(/text-overflow: ellipsis;/);
+});
+
+it("a long Chat title gives way before the harness and folder trigger", () => {
+  const chats = readFileSync(
+    join(__dirname, "..", "features/chats/chats.css"),
+    "utf8",
+  );
+  // U20: the title shrinks first; the trigger keeps at most a share of the header.
+  expect(chats).toMatch(/\n[.]chat-head-title [{][^}]*flex: 0 \d{3,} auto;/);
+  const detail = readFileSync(
+    join(__dirname, "..", "features/chats/ChatDetail.tsx"),
+    "utf8",
+  );
+  expect(detail).toMatch(
+    /className="[^"]*max-w-\d\/\d[^"]*"\s+aria-label="Harness and folder"/,
+  );
+});
