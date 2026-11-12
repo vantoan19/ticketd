@@ -1686,6 +1686,11 @@ ticket: ref title status project plan parent blocked_by blocked_since blocked_by
 <!-- ticketd:evidence -->: kind name value created_at updated_at agent
 ";
 
+    /// Pins field names and section markers only, not the forms their values
+    /// take. A new value form in an existing field (such as the `<GUID> <n>` item
+    /// of `parent_removed`) is rejected by a ticketd that does not
+    /// know it just the same, so it also requires raising FILE_FORMAT, with
+    /// nothing here failing to say so.
     #[test]
     fn the_fields_and_section_markers_of_the_current_format_are_pinned() {
         // A section kind added here must also join `parts` below.

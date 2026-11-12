@@ -1210,10 +1210,12 @@ with it.
   removal made at the same time. No review is needed.
 - When changes from two desktops together would form a dependency loop, every
   desktop drops the same dependency, the later one, and shows a notice naming it.
-- When two desktops each imported the same external issue before they synced,
-  the ticket with the lower GUID keeps the source and the other becomes a
-  Duplicate of it. What two desktops each refreshed from a tracker is not
-  reviewed: the later refresh wins.
+- When two desktops each made a ticket for the same external issue before they
+  synced, one keeps the source and the other becomes a Duplicate of it. A ticket
+  published from the Workspace keeps the source over an imported one; otherwise
+  the ticket with the lower GUID keeps it. What two desktops each refreshed from
+  a tracker is not reviewed: the later refresh wins. Who holds authority over
+  the ticket is not part of a refresh and merges like any other field.
 - No duplicate ticket and no conflict copy of a file is created.
 - Needs review appears as a badge on the record and as an entry in the Attention
   inbox that opens the comparison.
@@ -1231,7 +1233,10 @@ with it.
 - A file edited directly in Drive is treated as an edit from another desktop once
   it validates. An unreadable file is skipped with a Needs attention notice and
   changes nothing locally; the notice names the file and the reason, and goes once
-  the file reads again or the next local change to that record replaces it. A
+  the file reads again. The next local change to that record replaces the file:
+  on the desktop that replaced it the notice then stays in the Inbox as already
+  read, saying the file could not be read, why, and that the earlier file is in
+  Drive's version history. It no longer counts towards Needs attention. A
   file created by hand in the folder does not become a record, because ticketd
   sees only files it created.
 - A file written by a newer ticketd than this desktop runs (a higher format
