@@ -15,6 +15,7 @@ The file name is a readable label. It changes when the title does, may repeat, a
 
 A file is a YAML header between two `---` lines, then the record's Markdown text:
 
+<!-- prettier-ignore -->
 ```markdown
 ---
 # synced from: Studio desktop
@@ -35,18 +36,14 @@ tags:
 trashed: false
 following: true
 ---
-
 Users are logged out after 5 minutes.
 <!-- ticketd:activity -->
-
 ---
-
 id: "0e9d8c7b-6a5f-4e3d-9c2b-1a0f9e8d7c6b"
 reported_at: "2026-11-11T09:30:00.000Z"
 updated_at: "2026-11-11T09:30:00.000Z"
 agent: "codex"
 ---
-
 Reproduced with an expired session cookie.
 ```
 

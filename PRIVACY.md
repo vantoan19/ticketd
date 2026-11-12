@@ -31,6 +31,10 @@ authored Activities and Implementation evidence), Document, Plan and project,
 including tags, relationships, follows, reminders and external-source provenance,
 plus your managed Attachment files.
 
+The folder also holds the name of each desktop you sync from. The name is your
+computer's name unless you change it in the sync settings, and it is written to
+the folder's device list and into each file that desktop uploads.
+
 **These files are not encrypted by ticketd.** They are readable in Drive by you,
 by anyone you share the folder with, and by anyone or anything with access to
 your Google account. There is no sync password. Google stores them under its own
