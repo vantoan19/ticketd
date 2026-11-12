@@ -366,6 +366,31 @@ test("retrying recovery cleanup after creation does not create a duplicate ticke
   expect(create).toHaveBeenCalledTimes(1);
 });
 
+test("a failed creation scrolls its error into view so Retry safely is explained", async () => {
+  recoveryBridge({ failFirstRelease: false });
+  const scrolled = vi.fn();
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = scrolled;
+  try {
+    const create = vi.fn().mockRejectedValue(new Error("response lost"));
+    render(
+      <DraftRecoveryProvider>
+        <Harness create={create} />
+      </DraftRecoveryProvider>,
+    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+      target: { value: "Fails" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/Retry safely/);
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    expect(scrolled.mock.instances).toContain(alert);
+  } finally {
+    Element.prototype.scrollIntoView = original as typeof scrolled;
+  }
+});
+
 test("a lost-response submission reuses its request ID and follow choice after remount", async () => {
   const recovery = recoveryBridge({ failFirstRelease: false });
   const accepted = new Map<
