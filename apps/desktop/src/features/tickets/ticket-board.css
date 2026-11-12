@@ -197,7 +197,8 @@
   row-gap: 4px;
 }
 .list-header:has(.list-refresh) h1 {
-  flex: 1 1 8rem;
+  /* Basis is the full title, so the line wraps only when it would truncate. */
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
