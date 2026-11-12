@@ -15,7 +15,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-height: 40px;
   padding: 4px 76px 4px 4px;
   background: var(--background);
@@ -194,10 +194,20 @@
 .diagram-editor {
   padding: 0;
 }
+/* Stays a list item so the disclosure marker shows; the reset makes svg a block, which would
+   stack the icon on its own line, so the icon is inline again. */
 .diagram-editor summary {
   padding-top: 8px;
   cursor: pointer;
   color: var(--muted-foreground);
+}
+.diagram-editor summary > svg {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+.diagram-editor .diagram-summary-action {
+  margin-left: 12px;
 }
 .slash-menu {
   position: sticky;
