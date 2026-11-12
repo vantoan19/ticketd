@@ -1,11 +1,15 @@
-import { homeRelative, splitPathMiddle } from "@/features/projects/paths";
+import {
+  homeRelative,
+  splitPathMiddle,
+  withoutVerbatim,
+} from "@/features/projects/paths";
 import "./projects.css";
 
 /** A path on one line: "/private/…/8b654d0c/repo-api", with the full path on hover. */
 export function PathText({ path }: { path: string }) {
   const { lead, middle, tail } = splitPathMiddle(homeRelative(path));
   return (
-    <span className="path-text" title={path}>
+    <span className="path-text" title={withoutVerbatim(path)}>
       {lead && <span className="path-lead">{lead}</span>}
       {middle && (
         // Right-to-left puts the ellipsis at the start of the shrinking part;

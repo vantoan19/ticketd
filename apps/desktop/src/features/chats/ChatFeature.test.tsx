@@ -84,7 +84,7 @@ test("turning Chat off while Chats work asks first, and stops them only on confi
   fireEvent.click(chatSwitch());
   let dialog = await screen.findByRole("dialog", { name: "Turn off Chat?" });
   expect(dialog.textContent).toContain(
-    "1 Chat is working. Turning Chat off stops them first.",
+    "1 Chat is working. Turning Chat off stops it first.",
   );
   fireEvent.click(within(dialog).getByRole("button", { name: "Keep Chat on" }));
   expect(await client.getEnabled()).toBe(true);

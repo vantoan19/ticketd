@@ -104,7 +104,8 @@ export function LinkPicker({
   const [results, setResults] = useState<LinkedRecord[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (!open) return;
+    // Search is by name: nothing is listed until something is typed.
+    if (!open || !query.trim()) return;
     let current = true;
     client.searchRecords(query).then(
       (found) => {
@@ -118,7 +119,8 @@ export function LinkPicker({
       current = false;
     };
   }, [client, open, query]);
-  const shown = results.filter(
+  const typed = query.trim() !== "";
+  const shown = (typed ? results : []).filter(
     (record) =>
       !linked.some(
         (known) => known.kind === record.kind && known.id === record.id,
@@ -184,9 +186,11 @@ export function LinkPicker({
           </ul>
           {!error && shown.length === 0 && (
             <p className="chat-fine">
-              {query.trim()
-                ? "No ticket, Document or Project has that in its name."
-                : "Nothing left to link."}
+              {!typed
+                ? "Type part of a name to find it."
+                : results.length > 0
+                  ? "Everything with that name is already linked."
+                  : "No ticket, Document or Project has that in its name."}
             </p>
           )}
         </div>

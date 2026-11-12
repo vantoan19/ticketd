@@ -31,6 +31,8 @@ import {
 } from "@/components/ui/popover";
 import { useCopy } from "@/components/ui/use-copy";
 import { workspaceClient } from "@/lib/api/workspace";
+import { PathText } from "@/features/projects/PathText";
+import { withoutVerbatim } from "@/features/projects/paths";
 import {
   useChatClient,
   type ChatSnapshot,
@@ -87,7 +89,12 @@ export function ProblemNotice({
   harness: string;
   onAction: (action: Exclude<NoticeAction, "help" | "copy-command">) => void;
 }) {
-  const notice = problemNotice(problem, harness);
+  const notice = problemNotice(
+    problem.path
+      ? { ...problem, path: withoutVerbatim(problem.path) }
+      : problem,
+    harness,
+  );
   const { copied, error, copy } = useCopy();
   return (
     <Alert tone={notice.tone}>
@@ -139,12 +146,22 @@ export function ProblemNotice({
 }
 
 function HarnessAndFolder({ chat }: { chat: ChatState }) {
+  // A managed folder is named by an id; it reads as the folder ticketd keeps,
+  // as New Chat calls it.
+  const folder = chat.folder.managed ? "ticketd folder" : chat.folder.name;
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="xs" aria-label="Harness and folder">
-          {chat.harness.name}
-          {!chat.folder.missing && ` · ${chat.folder.name}`}
+        <Button
+          variant="ghost"
+          size="xs"
+          className="min-w-0 shrink"
+          aria-label="Harness and folder"
+        >
+          <span className="truncate">
+            {chat.harness.name}
+            {!chat.folder.missing && ` · ${folder}`}
+          </span>
           <ChevronDown aria-hidden />
         </Button>
       </PopoverTrigger>
@@ -163,7 +180,7 @@ function HarnessAndFolder({ chat }: { chat: ChatState }) {
           </section>
           <section>
             <h3>Folder</h3>
-            <p className="chat-mono">{chat.folder.path}</p>
+            <PathText path={chat.folder.path} />
             {chat.folder.missing && <small>Not found on this computer</small>}
             {chat.folder.managed && (
               <small>Kept by ticketd for this Chat</small>
