@@ -19,6 +19,8 @@ const UPLOAD_DELAY: Duration = Duration::from_secs(3);
 pub const EXIT_LIMIT: Duration = Duration::from_secs(10);
 /// How often the upkeep runs while the app stays open.
 const UPKEEP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long after a failed upkeep it is tried again.
+const UPKEEP_RETRY: Duration = Duration::from_secs(60);
 /// The longest the scheduler stays away from a storage that rate limited it,
 /// however long the storage asked for.
 const RETRY_LIMIT: Duration = Duration::from_secs(15 * 60);
@@ -60,8 +62,9 @@ pub struct Scheduler {
     open: Box<Open>,
     binding: Box<Bound>,
     upkeep: Box<Upkeep>,
-    /// When the upkeep runs next: at the first tick, then once a day.
-    upkeep_at: Mutex<Duration>,
+    /// When the upkeep runs next (at the first tick, then once a day), and
+    /// the failure last reported, if it is still failing.
+    upkeep_at: Mutex<(Duration, Option<String>)>,
     watch: Mutex<Watch>,
     /// Held for the length of a run, so two never overlap.
     running: Mutex<()>,
@@ -160,17 +163,25 @@ impl Scheduler {
             .map(Some)
     }
 
-    /// Runs the upkeep when it is due. A failure is tried again by the next
-    /// tick and never holds up sync.
+    /// Runs the upkeep when it is due. A failure is tried again after
+    /// [`UPKEEP_RETRY`] and never holds up sync.
     fn keep_up(&self, workspace: &mut Workspace, now: Duration) {
-        let mut at = lock(&self.upkeep_at);
+        let mut next = lock(&self.upkeep_at);
+        let (at, reported) = &mut *next;
         if now < *at {
             return;
         }
-        match (self.upkeep)(workspace) {
-            Ok(()) => *at = now + UPKEEP_INTERVAL,
-            Err(error) => eprintln!("Workspace upkeep could not run: {error}"),
+        let failed = (self.upkeep)(workspace)
+            .err()
+            .map(|error| error.to_string());
+        *at = now + failed.as_ref().map_or(UPKEEP_INTERVAL, |_| UPKEEP_RETRY);
+        // Said once on stderr, and again only if it changes or comes back.
+        if let Some(message) = &failed
+            && reported.as_ref() != Some(message)
+        {
+            eprintln!("Workspace upkeep could not run: {message}");
         }
+        *reported = failed;
     }
 
     /// Sync now: waits for a run in progress, then runs. `None` when not connected.
@@ -545,9 +556,10 @@ mod tests {
         assert_eq!(status.recovery, None);
     }
 
-    /// F54: an upkeep that failed is tried again by the next tick, not a day later.
+    /// F54: an upkeep that failed is tried again a minute later: not a day
+    /// later, and not by every tick.
     #[test]
-    fn a_failed_upkeep_runs_again_at_the_next_tick() {
+    fn a_failed_upkeep_runs_again_after_a_minute() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workspace.sqlite3");
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -561,10 +573,12 @@ mod tests {
             }),
         );
         scheduler.tick(Duration::ZERO).unwrap();
-        scheduler.tick(SECOND).unwrap();
+        scheduler.tick(MINUTE - SECOND).unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        scheduler.tick(MINUTE).unwrap();
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
         // Once it worked, the next one is a day away.
-        scheduler.tick(2 * SECOND).unwrap();
+        scheduler.tick(2 * MINUTE).unwrap();
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
     }
 
