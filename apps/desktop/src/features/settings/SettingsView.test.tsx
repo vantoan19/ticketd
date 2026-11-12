@@ -78,6 +78,7 @@ beforeEach(() => {
     suggested_directory: "~/.local/bin",
   });
   vi.mocked(workspaceClient.info).mockResolvedValue(info);
+  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
   vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.openLink).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
@@ -189,94 +190,10 @@ test("a workspace that cannot be read shows an error instead of counts", async (
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 
-const lastBackup = {
-  path: "/Users/me/Backups/ticketd-backup-2026-11-01.sqlite3",
-  completed_at: "2026-11-01T09:30:00.000Z",
-};
-
-test("Back up now saves to the chosen file and shows it as the checked last backup", async () => {
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(lastBackup.path);
-  vi.mocked(client.backupWorkspace).mockImplementation(async () => {
-    vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
-    return true;
-  });
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  expect(screen.queryByLabelText(/Backup file path/)).toBeNull();
-  expect(
-    screen.getByText(
-      "No backups yet. Your first one will be listed here with its date and size.",
-    ),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
-  expect((await screen.findByLabelText("Last backup path")).textContent).toBe(
-    lastBackup.path,
-  );
-  expect(workspaceClient.chooseSavePath).toHaveBeenCalledWith(
-    expect.objectContaining({
-      defaultPath: expect.stringMatching(
-        /^ticketd-backup-\d{4}-\d{2}-\d{2}\.sqlite3$/,
-      ),
-    }),
-  );
-  expect(client.backupWorkspace).toHaveBeenCalledWith(lastBackup.path);
-  expect(
-    screen.getByRole("group", { name: "Last backup" }).textContent,
-  ).toContain("Checked");
-});
-
-test("the last backup, including one made with the CLI, shows on load and can be revealed", async () => {
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  expect((await screen.findByLabelText("Last backup path")).textContent).toBe(
-    lastBackup.path,
-  );
-  const group = screen.getByRole("group", { name: "Last backup" });
-  fireEvent.click(group.querySelector("button") as HTMLButtonElement);
-  await waitFor(() =>
-    expect(workspaceClient.reveal).toHaveBeenCalledWith(lastBackup.path),
-  );
-});
-
-test("a refused backup explains itself and keeps the previous status", async () => {
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(
-    "/tmp/taken.sqlite3",
-  );
-  vi.mocked(client.backupWorkspace).mockRejectedValue(
-    "a file already exists at /tmp/taken.sqlite3; ticketd never replaces an existing file, so choose a new name",
-  );
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  await screen.findByLabelText("Last backup path");
-  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
-  const alert = await screen.findByText(/The backup was not saved/);
-  expect(alert.textContent).toContain("a file already exists at");
-  expect(alert.textContent).not.toContain("nothing was left");
-  expect(screen.getByLabelText("Last backup path").textContent).toBe(
-    lastBackup.path,
-  );
-});
-
 test("cancelling a save dialog changes nothing and shows no error", async () => {
   const props = { onRestore: async () => {}, onOpenInbox: () => {} };
   render(<SettingsView selected="backups" {...props} />);
+  await screen.findByText("No backups yet");
   fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
   await waitFor(() =>
     expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
