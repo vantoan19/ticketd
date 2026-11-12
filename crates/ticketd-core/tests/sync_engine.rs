@@ -1175,3 +1175,79 @@ fn a_hand_edit_may_name_a_ticket_by_its_reference_and_spell_a_status_loosely() {
         "{written}"
     );
 }
+
+/// F43: a field in review whose values later agree, or whose other value was
+/// replaced by a later change, no longer waits with a stale value.
+#[test]
+fn a_conflict_is_withdrawn_when_later_changes_settle_the_field() {
+    for case in [
+        "remote moved on",
+        "edited here to the other value",
+        "conflicts again",
+    ] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("Login");
+        let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+        devices.workspaces[0]
+            .change_ticket(&reference, title("From A"))
+            .unwrap();
+        devices.workspaces[1]
+            .change_ticket(&reference, title("From B"))
+            .unwrap();
+        devices.sync(0);
+        assert_eq!(devices.sync(1).conflicts, 1, "{case}");
+        match case {
+            "remote moved on" => {
+                // A takes B's value silently, then changes the title again.
+                devices.sync(0);
+                devices.workspaces[0]
+                    .change_ticket(&reference, title("Third"))
+                    .unwrap();
+                devices.sync(0);
+                devices.sync(1);
+                assert_eq!(
+                    devices.workspaces[1].sync_conflicts().unwrap(),
+                    [],
+                    "{case}"
+                );
+                assert_eq!(
+                    devices.workspaces[1].show_ticket(&reference).unwrap().title,
+                    "Third"
+                );
+            }
+            "edited here to the other value" => {
+                devices.workspaces[1]
+                    .change_ticket(&reference, title("From A"))
+                    .unwrap();
+                devices.sync(1);
+                assert_eq!(
+                    devices.workspaces[1].sync_conflicts().unwrap(),
+                    [],
+                    "{case}"
+                );
+            }
+            _ => {
+                // Both change the title again: one row, showing the newer other value.
+                devices.sync(0);
+                devices.workspaces[0]
+                    .change_ticket(&reference, title("A again"))
+                    .unwrap();
+                devices.workspaces[1]
+                    .change_ticket(&reference, title("B again"))
+                    .unwrap();
+                devices.sync(0);
+                devices.sync(1);
+                let conflict = devices.workspaces[1]
+                    .sync_conflict(SyncKind::Ticket, &id)
+                    .unwrap();
+                assert_eq!(conflict.fields.len(), 1, "{case}");
+                assert_eq!(
+                    conflict.fields[0].remote,
+                    Some(SyncValue::Text("A again".into()))
+                );
+            }
+        }
+        devices.settle([0, 1, 2]);
+        devices.assert_converged();
+    }
+}

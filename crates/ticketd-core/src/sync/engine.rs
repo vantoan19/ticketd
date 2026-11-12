@@ -486,6 +486,7 @@ impl Workspace {
     ) -> Result<SyncReport, Error> {
         let mut report = SyncReport::default();
         self.download(remote, folder, listing, &mut report)?;
+        self.withdraw_agreed_conflicts()?;
         self.retry_waiting()?;
         self.drop_loops()?;
         self.upload(remote, folder, device, &mut report)?;
@@ -549,6 +550,29 @@ impl Workspace {
                 }
                 Err(error) => return Err(error),
             }
+        }
+        Ok(())
+    }
+
+    /// Withdraw the fields in review that an edit on this device has since
+    /// given the other value: nothing is left to decide.
+    fn withdraw_agreed_conflicts(&mut self) -> Result<(), Error> {
+        let mut withdrawn = false;
+        for conflict in self.sync_conflicts()? {
+            for field in conflict
+                .fields
+                .iter()
+                .filter(|field| field.local == field.remote)
+            {
+                self.connection.execute(
+                    "DELETE FROM sync_conflicts WHERE kind = ?1 AND id = ?2 AND field = ?3",
+                    params![name(conflict.kind), conflict.id, field.field],
+                )?;
+                withdrawn = true;
+            }
+        }
+        if withdrawn {
+            touch(&self.connection)?;
         }
         Ok(())
     }
@@ -683,6 +707,32 @@ impl Workspace {
             } else {
                 (Some(merged.clone()), find_record(connection, kind, id)?)
             };
+            // A field already in review is settled when the other side changed it
+            // again without a new conflict, or when it now holds the other value.
+            let mut waiting = connection
+                .prepare("SELECT field, remote FROM sync_conflicts WHERE kind = ?1 AND id = ?2")?;
+            let waiting = waiting
+                .query_map(params![name(kind), id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut withdrawn = false;
+            for (field, other) in waiting {
+                if conflicts.iter().any(|conflict| conflict.field == field) {
+                    continue;
+                }
+                let moved = stored
+                    .base
+                    .as_ref()
+                    .is_some_and(|base| value_at(base, &field) != value_at(&remote, &field));
+                if moved || value_at(&merged, &field) == from_json(other)?.as_ref() {
+                    connection.execute(
+                        "DELETE FROM sync_conflicts WHERE kind = ?1 AND id = ?2 AND field = ?3",
+                        params![name(kind), id, field],
+                    )?;
+                    withdrawn = true;
+                }
+            }
             stored.version = Some(version.to_owned());
             // What local changes remain shows as a difference from the remote copy.
             if merged != remote {
@@ -706,7 +756,7 @@ impl Workspace {
                     ],
                 )?;
             }
-            if !conflicts.is_empty() {
+            if withdrawn || !conflicts.is_empty() {
                 touch(connection)?;
             }
             Ok(conflicts.len())
