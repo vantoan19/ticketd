@@ -49,17 +49,29 @@ export function applyChange(
 const count = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
-/** "Read 6 files, edited 2 files, ran 1 command" for a run of finished steps. */
-export function stepTally(steps: Pick<Step, "verb" | "target" | "more">[]) {
+/**
+ * "Read 6 files, edited 2 files, ran 1 command" for the finished steps; a step still
+ * running, or one that failed, was refused or lost, is never told as done.
+ */
+export function stepTally(
+  steps: Pick<Step, "verb" | "target" | "more" | "state">[],
+) {
+  const sum = (picked: typeof steps) =>
+    picked.reduce((total, step) => total + 1 + step.more, 0);
+  const done = steps.filter((step) => (step.state ?? "done") === "done");
   const total = (verb: Step["verb"]) =>
-    steps
-      .filter((step) => step.verb === verb)
-      .reduce((sum, step) => sum + 1 + step.more, 0);
+    sum(done.filter((step) => step.verb === verb));
+  const running = sum(steps.filter((step) => step.state === "running"));
+  const unfinished = sum(
+    steps.filter((step) => step.state === "failed" || step.state === "unknown"),
+  );
   const parts = [
     total("read") && `read ${count(total("read"), "file")}`,
     total("edited") && `edited ${count(total("edited"), "file")}`,
     total("ran") && `ran ${count(total("ran"), "command")}`,
     total("other") && count(total("other"), "other step"),
+    running && `${count(running, "step")} in progress`,
+    unfinished && `${count(unfinished, "step")} did not complete`,
   ].filter((part): part is string => Boolean(part));
   const text = parts.join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);

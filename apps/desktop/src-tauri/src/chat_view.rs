@@ -82,6 +82,8 @@ pub enum LinkedRecord {
 pub struct Step {
     pub verb: &'static str,
     pub target: String,
+    /// `running`, `done`, `failed` or `unknown`: a step not `done` is not told as done.
+    pub state: &'static str,
     pub result: Option<String>,
     pub output: Option<String>,
 }
@@ -477,6 +479,7 @@ fn step(tool: &ChatTool, harness: &str) -> Step {
         return Step {
             verb: "other",
             target: format!("ticketd gave {harness} this Chat's context"),
+            state: "done",
             result: None,
             output: Some(tool.input.clone()),
         };
@@ -507,6 +510,12 @@ fn step(tool: &ChatTool, harness: &str) -> Step {
     Step {
         verb,
         target: target.to_owned(),
+        state: match tool.state {
+            ChatToolState::Running => "running",
+            ChatToolState::Completed => "done",
+            ChatToolState::Failed => "failed",
+            ChatToolState::Unknown => "unknown",
+        },
         result: Some(result.join(", ")).filter(|result| !result.is_empty()),
         output: tool.output.clone(),
     }
@@ -919,6 +928,29 @@ mod tests {
         assert_eq!((read.verb, read.target.as_str()), ("read", "src/a.ts"));
         let other = step(&tool("WebSearch", r#"{"query":"x"}"#), "Claude Code");
         assert_eq!((other.verb, other.target.as_str()), ("other", "WebSearch"));
+    }
+
+    /// U4: a command that is waiting for approval, or was refused, is not told as run.
+    #[test]
+    fn a_step_says_whether_it_finished() {
+        let tool = |state| ChatTool {
+            id: "t".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            name: "touch hello.txt".to_owned(),
+            input: r#"{"type":"commandExecution"}"#.to_owned(),
+            state,
+            output: None,
+            output_truncated: false,
+        };
+        let states = [
+            ChatToolState::Running,
+            ChatToolState::Completed,
+            ChatToolState::Failed,
+            ChatToolState::Unknown,
+        ]
+        .map(|state| step(&tool(state), "Codex").state);
+        assert_eq!(states, ["running", "done", "failed", "unknown"]);
     }
 
     #[test]
