@@ -275,6 +275,11 @@ export function RestoreDialog({
       <DialogContent
         className="restore-dialog sm:max-w-160"
         showCloseButton={phase.name !== "restoring"}
+        // Land on the dialog, not the scroll region, so no ring shows on open.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          if (event.target instanceof HTMLElement) event.target.focus();
+        }}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <div className="restore-head">
@@ -300,14 +305,16 @@ export function RestoreDialog({
             <span className="restore-file-text">
               <code aria-label="Chosen backup file">{name}</code>
               <span>
-                <span aria-label="Backup folder">{folder}</span>
+                <span aria-label="Backup folder" title={folder}>
+                  {folder}
+                </span>
                 {valid && (
-                  <>
+                  <span className="restore-file-check">
                     {" · "}
                     <StatusLabel tone="checked" size="caption">
                       Integrity checked · format version {valid.format_version}
                     </StatusLabel>
-                  </>
+                  </span>
                 )}
               </span>
             </span>

@@ -108,15 +108,17 @@ export function SearchPage() {
   ];
 
   return (
-    <SettingsPage {...SEARCH_PAGE} title="Search settings" focusTitle={false}>
+    <SettingsPage {...SEARCH_PAGE} header={false} focusTitle={false}>
       <div className="settings-search">
+        <h1 className="settings-search-title">
+          <label htmlFor={SEARCH_INPUT_ID}>Search settings</label>
+        </h1>
         <div className="settings-search-field">
           <Search size={16} aria-hidden="true" />
           <Input
             ref={input}
             id={SEARCH_INPUT_ID}
             type="search"
-            aria-label="Search settings"
             aria-describedby={statusId}
             placeholder="Try theme, backup or keyboard"
             value={query}

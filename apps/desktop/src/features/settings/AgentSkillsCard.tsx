@@ -1,3 +1,4 @@
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, FileCheck, RefreshCw } from "lucide-react";
 import { Alert, AlertActions, AlertTitle } from "@/components/ui/alert";
@@ -384,14 +385,9 @@ export function AgentSkillsCard({
           <p className="mt-3 text-xs leading-4 text-muted-foreground">
             Agents call ticketd through the command line, so it needs to be
             installed too.{" "}
-            <Button
-              type="button"
-              variant="link"
-              size="xs"
-              onClick={() => openPage("command-line")}
-            >
+            <SettingsLink onClick={() => openPage("command-line")}>
               Check the command line
-            </Button>
+            </SettingsLink>
           </p>
         </SettingsSection>
       )}

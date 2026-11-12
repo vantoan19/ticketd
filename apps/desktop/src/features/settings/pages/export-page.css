@@ -17,20 +17,6 @@
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
-.export-inline-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: var(--link-foreground);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-.export-inline-link:hover {
-  text-decoration-thickness: 2px;
-}
-
 .export-comparison {
   width: 100%;
   border-collapse: separate;

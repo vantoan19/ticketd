@@ -1,3 +1,4 @@
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useState } from "react";
 import { Braces, FolderOpen } from "lucide-react";
 import { client } from "@/lib/api/client";
@@ -196,13 +197,9 @@ export function ExportPage() {
         <>
           Readable copies of your work for other tools. To keep a copy you can
           restore, use{" "}
-          <button
-            type="button"
-            className="export-inline-link"
-            onClick={() => openPage("backups")}
-          >
+          <SettingsLink onClick={() => openPage("backups")}>
             Backups
-          </button>
+          </SettingsLink>
           .
         </>
       }

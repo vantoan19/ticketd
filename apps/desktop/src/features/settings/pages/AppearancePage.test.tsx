@@ -33,6 +33,18 @@ test("System says what the operating system is doing right now", () => {
   );
 });
 
+test("System keeps reporting the operating system after Light or Dark is chosen", () => {
+  stubSystemTheme(true);
+  render(<AppearancePage />);
+  // Choosing a theme changes the native window theme, so the media query
+  // then reports the choice, not the operating system.
+  stubSystemTheme(false);
+  fireEvent.click(screen.getByRole("radio", { name: /^Light/ }));
+  expect(screen.getByRole("radio", { name: /^System/ }).textContent).toContain(
+    "Dark right now",
+  );
+});
+
 test("Light and Dark say they are always that theme", () => {
   render(<AppearancePage />);
   expect(screen.getByRole("radio", { name: /^Light/ }).textContent).toContain(

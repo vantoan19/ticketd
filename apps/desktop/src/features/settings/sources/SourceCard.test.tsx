@@ -42,7 +42,7 @@ const entry: SourceEntry = {
         {
           key: "repositories",
           label: "Repositories",
-          help: "Issues from these repositories are discovered.",
+          help: "Issues from these repositories are discovered. Type owner/name, then press Enter.",
           required: true,
           type: "multi_select",
           options: { source: "dynamic", depends_on: [] },
@@ -148,8 +148,30 @@ test("a new source is not configured and cannot be saved before a preview", asyn
   expect(discoveryStatus()).toBe("Unsaved changes");
   expect((save as HTMLButtonElement).disabled).toBe(true);
   expect(
-    screen.getByText("Preview the matching issues before saving."),
-  ).toBeTruthy();
+    screen.queryByText("Preview the matching issues before saving."),
+  ).toBeNull();
+});
+
+test("Preview matches needs a repository; Refresh now needs a saved configuration", async () => {
+  render(<SourceCard entry={entry} />);
+  const previewButton = () =>
+    screen.getByRole("button", {
+      name: "Preview matches",
+    }) as HTMLButtonElement;
+  const refresh = screen.getByRole("button", {
+    name: "Refresh now",
+  }) as HTMLButtonElement;
+  expect(previewButton().disabled).toBe(true);
+  expect(refresh.disabled).toBe(true);
+  await addRepository("o/r");
+  expect(previewButton().disabled).toBe(false);
+});
+
+test("the repository input invites another repository once one is added", async () => {
+  render(<SourceCard entry={entry} />);
+  await addRepository("o/r");
+  expect(screen.getByPlaceholderText("Add another repository")).toBeTruthy();
+  expect(screen.getByText(/Type owner\/name, then press Enter\./)).toBeTruthy();
 });
 
 test("preview lists matches, then Save turns discovery on without importing at once", async () => {

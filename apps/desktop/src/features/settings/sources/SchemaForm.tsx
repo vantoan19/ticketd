@@ -202,7 +202,9 @@ function MultiSelectField({
           disabled={disabled || full}
           placeholder={
             field.key === "repositories"
-              ? "e.g. acme/billing-api"
+              ? value.length > 0
+                ? "Add another repository"
+                : "e.g. acme/billing-api"
               : field.key === "labels"
                 ? "e.g. bug, payments"
                 : "Search or type, then press Enter"

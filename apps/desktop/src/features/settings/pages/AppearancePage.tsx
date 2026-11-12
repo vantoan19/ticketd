@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   setPreference,
   useDarkTheme,
+  useSystemDark,
   usePreferences,
   type OpenTicketsPreference,
 } from "@/lib/preferences";
@@ -144,6 +145,7 @@ export function AppearancePage() {
   const { theme, openTickets } = usePreferences();
   const dark = useDarkTheme();
   const resolved: Resolved = dark ? "dark" : "light";
+  const systemDark = useSystemDark();
   const [failure, setFailure] = useState("");
   const report = (saved: boolean, what: string) =>
     setFailure(saved ? "" : `Could not save ${what}.`);
@@ -171,7 +173,13 @@ export function AppearancePage() {
           <ChoiceTile
             value="system"
             title="System"
-            description={dark ? "Dark right now" : "Light right now"}
+            description={
+              systemDark === null
+                ? "Follows your operating system"
+                : systemDark
+                  ? "Dark right now"
+                  : "Light right now"
+            }
             preview={<ThemeMini theme="system" />}
           />
           <ChoiceTile

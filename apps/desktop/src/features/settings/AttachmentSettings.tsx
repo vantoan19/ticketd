@@ -1,5 +1,6 @@
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useEffect, useRef, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Cloud, HardDrive } from "lucide-react";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
@@ -112,9 +113,7 @@ function UploadLimitSettings() {
                 <span aria-hidden="true">MiB</span>
               </span>
               {saved !== null && !invalid && !isDefault && (
-                <button
-                  type="button"
-                  className="attachments-link"
+                <SettingsLink
                   disabled={saving}
                   onClick={() => {
                     setValue("100");
@@ -122,7 +121,7 @@ function UploadLimitSettings() {
                   }}
                 >
                   Use the default, 100 MiB
-                </button>
+                </SettingsLink>
               )}
               {saved !== null && !invalid && isDefault && (
                 <span className="attachments-limit-note">Default</span>
@@ -235,6 +234,7 @@ function UploadDestinationSettings() {
         <ChoiceTile
           value="local"
           title="Local workspace"
+          icon={<HardDrive size={18} />}
           description="Files are stored beside the workspace on this computer."
         >
           <span className="attachments-facts">
@@ -251,6 +251,7 @@ function UploadDestinationSettings() {
         <ChoiceTile
           value="google_drive"
           title="Google Drive"
+          icon={<Cloud size={18} />}
           description="Uploads a separate copy to a folder in your Drive."
           disabled={driveUnavailable}
         >
@@ -263,13 +264,9 @@ function UploadDestinationSettings() {
       </ChoiceTiles>
       {driveUnavailable && (
         <p className="attachments-note">
-          <button
-            type="button"
-            className="attachments-link"
-            onClick={() => openPage("google-drive")}
-          >
+          <SettingsLink onClick={() => openPage("google-drive")}>
             Set up Google Drive
-          </button>{" "}
+          </SettingsLink>{" "}
           to store new uploads there.
         </p>
       )}

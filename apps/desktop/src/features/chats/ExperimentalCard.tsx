@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -9,6 +8,7 @@ import {
   SettingsListFooter,
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { useChatClient } from "@/features/chats/client";
@@ -54,14 +54,9 @@ export function ExperimentalCard() {
         </AlertTitle>
         <AlertDescription>
           If something breaks, tell us from{" "}
-          <Button
-            type="button"
-            variant="link"
-            size="xs"
-            onClick={() => openPage("about")}
-          >
+          <SettingsLink onClick={() => openPage("about")}>
             About › Report an issue
-          </Button>
+          </SettingsLink>
           .
         </AlertDescription>
       </Alert>

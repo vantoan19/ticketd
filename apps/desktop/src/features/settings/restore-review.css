@@ -12,6 +12,21 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
+/* One line: the file name stays whole and the folder gives way with an ellipsis. */
+.backups-last-path {
+  display: flex;
+  min-width: 0;
+}
+.backups-last-path .backups-file {
+  flex: none;
+  max-width: 60%;
+}
+.backups-last-folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .backups-icon-error {
   color: var(--error-foreground);
 }
@@ -172,11 +187,25 @@
 .restore-file-text > span {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0 6px;
+  min-width: 0;
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   color: var(--muted-foreground);
+}
+/* The folder gives way with an ellipsis; the check result never wraps. */
+.restore-file-text > span > [aria-label="Backup folder"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.restore-file-check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: 6px;
+  white-space: nowrap;
 }
 .restore-file-text [data-slot="status-label"] {
   color: inherit;
@@ -218,6 +247,9 @@
 .restore-compare tbody th {
   font-weight: 400;
   color: var(--muted-foreground);
+}
+.restore-compare td {
+  white-space: nowrap;
 }
 .restore-compare td[data-differs="true"] {
   font-weight: 600;

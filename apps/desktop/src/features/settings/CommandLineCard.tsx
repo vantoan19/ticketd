@@ -1,3 +1,4 @@
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -296,14 +297,9 @@ export function CommandLineCard({
           ))}
           <SettingsListFooter
             actions={
-              <Button
-                type="button"
-                variant="link"
-                size="xs"
-                onClick={() => openPage("agent-skills")}
-              >
+              <SettingsLink onClick={() => openPage("agent-skills")}>
                 Set up Agent skills
-              </Button>
+              </SettingsLink>
             }
           >
             Agents learn these commands from the ticketd skill.
