@@ -165,13 +165,17 @@ function HarnessAndFolder({ chat }: { chat: ChatState }) {
         <Button
           variant="ghost"
           size="xs"
-          className="min-w-0 max-w-3/5 shrink"
+          className="min-w-0 shrink"
           aria-label="Harness and folder"
         >
           <span className="truncate">
             {chat.harness.name} · {folder}
-            {chat.folder.missing && " (missing)"}
           </span>
+          {/* The folder name shortens before the marker does. The leading space
+              keeps the text whole; the negative margin narrows the gap to one. */}
+          {chat.folder.missing && (
+            <span className="-ml-1 shrink-0"> (missing)</span>
+          )}
           <ChevronDown aria-hidden />
         </Button>
       </PopoverTrigger>
