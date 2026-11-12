@@ -13,6 +13,7 @@ import {
 } from "@/lib/sync-review-api";
 import { FieldValue } from "./FieldValue";
 import { conflictLabel, dayTime } from "./labels";
+import { useConflicts } from "./use-conflicts";
 import { useRequestIds } from "./use-request-ids";
 import "@/features/settings/settings.css";
 import "./sync-review.css";
@@ -62,6 +63,20 @@ export function ConflictReview({
       active = false;
     };
   }, [kind, id]);
+  // A newer change from another desktop can settle the record while this is
+  // open. The review then says so in place: it was listed and no longer is.
+  const { conflicts } = useConflicts();
+  const listed = conflicts.some((item) => item.kind === kind && item.id === id);
+  const [wasListed, setWasListed] = useState(false);
+  if (listed && !wasListed) setWasListed(true);
+  // Not while saving: the person's own save also takes it off the list.
+  const withdrawn = wasListed && !listed && !busy;
+  // The keyboard starts on the first choice, not on the footer.
+  const compare = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (conflict)
+      compare.current?.querySelector<HTMLElement>('[role="radio"]')?.focus();
+  }, [conflict]);
   const choiceOf = (field: string): Choice => choices[field] ?? "local";
   async function save() {
     if (!conflict || saving.current) return;
@@ -127,16 +142,26 @@ export function ConflictReview({
         .filter(Boolean)
         .join(" · ")}
       primaryLabel="Save"
-      cancelLabel="Later"
-      blockedReason={conflict ? null : error ? "" : "Loading both versions…"}
-      footerNote="This desktop’s version stays until you save."
+      cancelLabel={withdrawn ? "Close" : "Later"}
+      blockedReason={
+        withdrawn ? "" : conflict ? null : error ? "" : "Loading both versions…"
+      }
+      footerNote="This desktop’s version is used until you save or a newer change arrives."
       onSubmit={() => void save()}
       width={760}
       busy={busy}
+      primaryFirst
     >
-      {error && <p role="alert">{error}</p>}
-      {conflict && (
-        <div className="sync-compare">
+      {withdrawn ? (
+        <p role="status">
+          A newer change settled this while it was open, so nothing is left to
+          review.
+        </p>
+      ) : (
+        error && <p role="alert">{error}</p>
+      )}
+      {conflict && !withdrawn && (
+        <div className="sync-compare" ref={compare}>
           <span />
           <div className="sync-compare-head">
             <strong>This desktop</strong>

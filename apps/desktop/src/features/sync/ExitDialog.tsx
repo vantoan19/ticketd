@@ -38,8 +38,9 @@ type Exit =
 
 /**
  * Closing the window while changes are still uploading: the core gets up to 10
- * seconds to finish, then the app closes. If work is left when the time is up,
- * the dialog stays so that what did not upload is seen before quitting.
+ * seconds to finish, and the app closes once nothing is left. If work is left
+ * when the time is up, the dialog stays so that what did not upload is seen
+ * before quitting.
  */
 export function ExitDialog() {
   const { status, refresh } = useSyncStatus();
@@ -100,7 +101,7 @@ export function ExitDialog() {
       }
       description={
         finishing
-          ? "Everything is saved on this computer. ticketd closes when the upload is done, or in 10 seconds."
+          ? "Everything is saved on this computer. ticketd closes when the upload is done. If uploads are left after 10 seconds, it asks before closing."
           : count === 1
             ? "It is saved on this computer and uploads the next time ticketd is open."
             : "They are saved on this computer and upload the next time ticketd is open."

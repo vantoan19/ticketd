@@ -32,7 +32,14 @@ const versions: Version[] = [
     changed: ["status"],
   },
   { id: "v2", timestamp: hours(30), device: null, changed: ["body"] },
-  { id: "v1", timestamp: hours(24 * 9), device: null, changed: ["created"] },
+  // The oldest kept version: nothing records which desktop it came from.
+  {
+    id: "v1",
+    timestamp: hours(24 * 9),
+    device: null,
+    changed: ["title", "body"],
+    oldest: true,
+  },
 ];
 
 let stored: Record<VersionSource, Version[]>;
@@ -78,11 +85,15 @@ test("lists versions, compares the newest earlier one with now, and restores it"
   const list = within(
     await screen.findByRole("navigation", { name: "Versions" }),
   );
-  expect(list.getByRole("button", { name: /Current version/ })).toBeTruthy();
+  expect(
+    list.getByRole("button", { name: /Current version/ }).textContent,
+  ).toBe("Current versionOn this desktop now");
   const newest = list.getByRole("button", { name: /Studio desktop · Status/ });
   expect(newest.getAttribute("aria-current")).toBe("true");
   expect(
-    list.getByRole("button", { name: /This desktop · Created/ }),
+    list.getByRole("button", {
+      name: /Earliest version kept · Title · Description/,
+    }),
   ).toBeTruthy();
   expect(await screen.findByText("In progress")).toBeTruthy();
   expect(screen.getByText("In review")).toBeTruthy();
@@ -216,7 +227,7 @@ test("a synced record offers older versions from Drive below its own, loaded whe
   );
   const older = await list.findByRole("button", { name: /Google Drive$/ });
   expect(list.getAllByRole("button", { name: /This desktop ·/ })).toHaveLength(
-    2,
+    1,
   );
   expect(
     list.queryByRole("button", { name: "Older versions from Drive" }),

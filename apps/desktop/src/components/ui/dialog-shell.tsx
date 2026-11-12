@@ -33,6 +33,7 @@ export function DialogShell({
   primaryHint,
   showClose = true,
   focusPrimary = false,
+  primaryFirst = false,
   children,
   busy = false,
 }: {
@@ -61,6 +62,8 @@ export function DialogShell({
   showClose?: boolean;
   /** Opens with focus on the primary button, not the first control. */
   focusPrimary?: boolean;
+  /** Tab reaches the primary button before the dismissing one; both stay where they are drawn. */
+  primaryFirst?: boolean;
   children: ReactNode;
   /** A submitted write is still in flight, so dismissing must wait for its result. */
   busy?: boolean;
@@ -68,6 +71,38 @@ export function DialogShell({
   const reasonId = useId();
   const blocked = blockedReason !== null;
   const primary = useRef<HTMLButtonElement>(null);
+  const cancel = (
+    <DialogClose asChild key="cancel">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onCancel}
+        disabled={busy}
+      >
+        {cancelLabel}
+      </Button>
+    </DialogClose>
+  );
+  const submit = (
+    <Button
+      key="submit"
+      ref={primary}
+      type="submit"
+      size="sm"
+      // Ahead of Cancel in the tab order, it is still drawn after it.
+      {...(primaryFirst && { className: "order-1" })}
+      disabled={blocked}
+      {...(blocked && { "aria-describedby": reasonId })}
+    >
+      {primaryLabel}
+      {primaryHint && (
+        <span className="font-mono text-xs" aria-hidden="true">
+          {primaryHint}
+        </span>
+      )}
+    </Button>
+  );
   return (
     <Dialog
       open={open}
@@ -115,31 +150,7 @@ export function DialogShell({
             >
               {blockedReason ?? footerNote}
             </p>
-            <DialogClose asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={onCancel}
-                disabled={busy}
-              >
-                {cancelLabel}
-              </Button>
-            </DialogClose>
-            <Button
-              ref={primary}
-              type="submit"
-              size="sm"
-              disabled={blocked}
-              {...(blocked && { "aria-describedby": reasonId })}
-            >
-              {primaryLabel}
-              {primaryHint && (
-                <span className="font-mono text-xs" aria-hidden="true">
-                  {primaryHint}
-                </span>
-              )}
-            </Button>
+            {primaryFirst ? [submit, cancel] : [cancel, submit]}
           </div>
           {/* Last in the tab order, drawn in the header's corner. */}
           {showClose && (

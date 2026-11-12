@@ -28,6 +28,25 @@ const from = (source: VersionSource, versions: Version[]): Entry[] =>
 const same = (a: Chosen | null, b: Chosen | null) =>
   a?.source === b?.source && a?.id === b?.id;
 
+/**
+ * Where a version came from, then the fields in which it differs from the
+ * current one: what selecting it shows. Drive does not say which desktop wrote
+ * a revision, and nothing records where the oldest kept version came from.
+ */
+function versionLabel(kind: VersionedKind, entry: Entry): string {
+  const drive = entry.source === "drive";
+  const fields = entry.changed.map((field) => fieldLabel(kind, field));
+  return [
+    drive
+      ? "Google Drive"
+      : entry.oldest
+        ? "Earliest version kept"
+        : (entry.device ?? "This desktop"),
+    // Drive's versions are not read for the list, so theirs are not known.
+    ...(fields.length || drive ? fields : ["Same as now"]),
+  ].join(" · ");
+}
+
 function byDay(versions: Entry[], now: Date) {
   const days: { day: string; versions: Entry[] }[] = [];
   for (const version of versions) {
@@ -246,7 +265,7 @@ export function RecordHistory({
                     onClick={() => setSelected(null)}
                   >
                     <span>Current version</span>
-                    <small>This desktop</small>
+                    <small>On this desktop now</small>
                   </button>
                 </li>
               </ul>
@@ -265,17 +284,7 @@ export function RecordHistory({
                           }
                         >
                           <span>{formatTime(new Date(entry.timestamp))}</span>
-                          <small>
-                            {[
-                              // Drive does not say which desktop wrote a revision.
-                              entry.source === "drive"
-                                ? "Google Drive"
-                                : (entry.device ?? "This desktop"),
-                              ...entry.changed.map((field) =>
-                                fieldLabel(kind, field),
-                              ),
-                            ].join(" · ")}
-                          </small>
+                          <small>{versionLabel(kind, entry)}</small>
                         </button>
                       </li>
                     ))}

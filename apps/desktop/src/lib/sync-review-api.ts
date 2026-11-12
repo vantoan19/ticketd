@@ -111,10 +111,12 @@ export type VersionSource = "local" | "drive";
 const versionSchema = z.object({
   id: z.string(),
   timestamp: z.string(),
-  /** Name of the desktop that made the change; null for this desktop or unknown. */
+  /** Name of the other desktop that made the change; null for this desktop, Drive or `oldest`. */
   device: z.string().nullable(),
-  /** Keys of the fields this version changed; `created` for the first one. */
+  /** Keys of the fields in which this version differs from the current one; Drive's are not known. */
   changed: z.array(z.string()),
+  /** The oldest version kept on this desktop: where it came from was not recorded. */
+  oldest: z.boolean().optional(),
 });
 export type Version = z.infer<typeof versionSchema>;
 
