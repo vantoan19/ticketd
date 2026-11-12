@@ -33,6 +33,11 @@ pub const CHAT_EFFECTIVE_SETTINGS_LIMIT: usize = 16_000;
 /// (the end of year 9999). A value outside `0..=` this is not a time and is dropped.
 pub const CHAT_RESET_TIME_MAX: i64 = 253_402_300_799;
 
+/// The environment variable the Chat host sets on a harness process to the Chat's ID.
+/// Commands the harness runs inherit it, so the `ticketd` CLI can credit its writes to
+/// that Chat (`Workspace::act_for_chat`). It carries only the ID, never a credential.
+pub const CHAT_ID_VARIABLE: &str = "TICKETD_CHAT_ID";
+
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 /// Chat tables are deliberately left without workspace change-token triggers: they
@@ -58,6 +63,9 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE INDEX IF NOT EXISTS chat_tools_chat ON chat_tools(chat_id, position);
          CREATE INDEX IF NOT EXISTS chat_interactions_chat ON chat_interactions(chat_id, position);
          CREATE INDEX IF NOT EXISTS chat_notices_chat ON chat_notices(chat_id, position);
+         CREATE TABLE IF NOT EXISTS chat_record_writes (chat_id TEXT NOT NULL, activity_id TEXT, history_number INTEGER);
+         CREATE INDEX IF NOT EXISTS chat_record_writes_activity ON chat_record_writes(activity_id);
+         CREATE INDEX IF NOT EXISTS chat_record_writes_history ON chat_record_writes(history_number);
          PRAGMA user_version = 56;"
     ))?;
     Ok(())
@@ -1748,12 +1756,33 @@ impl Workspace {
         })
     }
 
+    /// Marks this connection as writing for the Chat `chat_id` (the CLI run by that
+    /// Chat's harness, see `CHAT_ID_VARIABLE`): the status moves and Activities it
+    /// records are credited to that Chat. Connection-scoped like `act_as_local_person`;
+    /// TEMP triggers keep every write path unchanged.
+    pub fn act_for_chat(&mut self, chat_id: &str) -> Result<(), Error> {
+        self.connection.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS acting_chat (id TEXT NOT NULL);
+             DELETE FROM acting_chat;
+             CREATE TEMP TRIGGER IF NOT EXISTS acting_chat_status AFTER INSERT ON main.ticket_history WHEN NEW.kind = 'status' BEGIN
+                 INSERT INTO chat_record_writes (chat_id, history_number) SELECT id, NEW.number FROM acting_chat;
+             END;
+             CREATE TEMP TRIGGER IF NOT EXISTS acting_chat_update AFTER INSERT ON main.activities BEGIN
+                 INSERT INTO chat_record_writes (chat_id, activity_id) SELECT id, NEW.id FROM acting_chat;
+             END;",
+        )?;
+        self.connection
+            .execute("INSERT INTO acting_chat (id) VALUES (?1)", [chat_id])?;
+        Ok(())
+    }
+
     /// What the Chat's agent changed in tickets while `turn_id` ran, oldest first: status
-    /// moves and Activities written under the Chat's harness as agent name. The agent
-    /// name is attribution only: another Chat on the same harness working at the same
-    /// time is not told apart.
-    // ponytail: attributed by agent name and the turn's time; give the agent a per-Chat
-    // name if concurrent Chats on one harness show each other's changes.
+    /// moves and Activities. A change written for this Chat (`act_for_chat`) is listed;
+    /// one written for another Chat never is. A change with no Chat identity (an older
+    /// CLI, or the variable stripped) is listed only when it carries the Chat's harness
+    /// as agent name and no other Chat of that harness had a turn running at that
+    /// moment: when one did, either could have made it, and showing nothing is better
+    /// than crediting the wrong Chat.
     // Documents carry no agent name yet, so a created Document is not listed.
     pub fn chat_turn_agent_changes(
         &self,
@@ -1771,18 +1800,29 @@ impl Workspace {
             .ok_or_else(|| invalid(format!("turn '{turn_id}' was not recorded for this Chat")))?;
         let mut statement = self.connection.prepare(
             "SELECT kind, reference, title, from_value, to_value FROM (
-                 SELECT 'status' AS kind, 'T-' || t.number AS reference, t.title, h.from_value, h.to_value, h.timestamp AS at, 0 AS source, h.number AS seq
+                 SELECT 'status' AS kind, 'T-' || t.number AS reference, t.title, h.from_value, h.to_value, h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent,
+                        (SELECT chat_id FROM chat_record_writes WHERE history_number = h.number) AS writer
                  FROM ticket_history h JOIN tickets t ON t.id = h.ticket_id
-                 WHERE h.kind = 'status' AND h.editing_agent = ?1 AND h.timestamp >= ?2 AND (?3 IS NULL OR h.timestamp <= ?3)
+                 WHERE h.kind = 'status' AND h.timestamp >= ?2 AND (?3 IS NULL OR h.timestamp <= ?3)
                  UNION ALL
-                 SELECT 'update', 'T-' || t.number, t.title, '', a.brief, a.reported_at, 1, a.number
+                 SELECT 'update', 'T-' || t.number, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent,
+                        (SELECT chat_id FROM chat_record_writes WHERE activity_id = a.id)
                  FROM activities a JOIN tickets t ON t.id = a.ticket_id
-                 WHERE a.editing_agent = ?1 AND a.reported_at >= ?2 AND (?3 IS NULL OR a.reported_at <= ?3))
+                 WHERE a.reported_at >= ?2 AND (?3 IS NULL OR a.reported_at <= ?3))
+             WHERE writer = ?5 OR (writer IS NULL AND agent = ?1 AND NOT EXISTS (
+                 SELECT 1 FROM chat_turns o JOIN chats oc ON oc.id = o.chat_id
+                 WHERE oc.harness = ?1 AND o.chat_id <> ?5 AND o.started_at <= at AND (o.ended_at IS NULL OR o.ended_at >= at)))
              ORDER BY at, source, seq LIMIT ?4",
         )?;
         let changes = statement
             .query_map(
-                params![agent, started, ended, CHAT_AGENT_CHANGES_LIMIT as i64],
+                params![
+                    agent,
+                    started,
+                    ended,
+                    CHAT_AGENT_CHANGES_LIMIT as i64,
+                    chat_id
+                ],
                 |row| {
                     let (kind, reference): (String, String) = (row.get(0)?, row.get(1)?);
                     Ok(if kind == "status" {

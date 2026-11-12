@@ -1167,6 +1167,13 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => Workspace::open(path)?,
         None => Workspace::open_default()?,
     };
+    // Run by a Chat's harness: what this command writes is credited to that Chat.
+    if let Some(chat) = std::env::var(ticketd_core::CHAT_ID_VARIABLE)
+        .ok()
+        .filter(|id| !id.trim().is_empty())
+    {
+        workspace.act_for_chat(chat.trim())?;
+    }
     let text = match command {
         Command::Attachment { command } => attachment_command(&mut workspace, command)?,
         Command::Document { command } => match command {

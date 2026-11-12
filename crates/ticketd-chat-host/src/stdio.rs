@@ -110,17 +110,15 @@ impl StderrTail {
 }
 
 /// Starts `executable` on piped stdio with the launch environment unchanged, so the
-/// harness finds its own configuration and sign-in.
-pub(crate) fn spawn(executable: &Path, arguments: &[&str]) -> io::Result<Io> {
-    let mut command = Command::new(executable);
-    command
-        .args(arguments)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    hide_console(&mut command);
-    let mut child = command.spawn()?;
+/// harness finds its own configuration and sign-in. A runtime for a Chat also gets
+/// that Chat's ID (and nothing else) in `CHAT_ID_VARIABLE`; the commands the harness
+/// runs inherit it.
+pub(crate) fn spawn(
+    executable: &Path,
+    arguments: &[&str],
+    chat_id: Option<&str>,
+) -> io::Result<Io> {
+    let mut child = command(executable, arguments, chat_id).spawn()?;
     let missing = || io::Error::other("the process has no standard streams");
     Ok(Io {
         stdin: Box::new(child.stdin.take().ok_or_else(missing)?),
@@ -128,6 +126,23 @@ pub(crate) fn spawn(executable: &Path, arguments: &[&str]) -> io::Result<Io> {
         stderr: child.stderr.take().map(|stderr| Box::new(stderr) as Reader),
         child: Box::new(Process(child)),
     })
+}
+
+fn command(executable: &Path, arguments: &[&str], chat_id: Option<&str>) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    match chat_id {
+        Some(id) => command.env(ticketd_core::CHAT_ID_VARIABLE, id),
+        // A probe serves no Chat; it must not pass on an ID ticketd itself inherited.
+        None => command.env_remove(ticketd_core::CHAT_ID_VARIABLE),
+    };
+    hide_console(&mut command);
+    command
 }
 
 /// What `<executable> --version` printed.
@@ -222,5 +237,26 @@ pub(crate) async fn close_process(
             child.lock().await.kill().await;
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    /// N2: a Chat's harness process carries the Chat's ID, so the ticketd CLI it runs
+    /// credits that Chat; a probe carries none.
+    #[test]
+    fn a_chat_runtime_is_started_with_its_chat_id_and_a_probe_without() {
+        let variable = |chat_id| {
+            command(Path::new("harness"), &[], chat_id)
+                .as_std()
+                .get_envs()
+                .find(|(name, _)| *name == OsStr::new(ticketd_core::CHAT_ID_VARIABLE))
+                .map(|(_, value)| value.map(OsStr::to_owned))
+        };
+        assert_eq!(variable(Some("chat-1")), Some(Some("chat-1".into())));
+        assert_eq!(variable(None), Some(None));
     }
 }

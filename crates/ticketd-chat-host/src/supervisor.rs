@@ -734,6 +734,7 @@ impl Supervisor {
         let generation = RuntimeGeneration(self.generations);
         let request = OpenRequest {
             generation,
+            chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
             session,
         };

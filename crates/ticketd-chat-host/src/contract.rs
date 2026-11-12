@@ -135,6 +135,9 @@ pub struct Capabilities {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenRequest {
     pub generation: RuntimeGeneration,
+    /// The Chat the runtime serves, given to the harness process as
+    /// `ticketd_core::CHAT_ID_VARIABLE` so the ticketd CLI it runs credits that Chat.
+    pub chat_id: String,
     pub working_directory: PathBuf,
     pub session: SessionStart,
 }

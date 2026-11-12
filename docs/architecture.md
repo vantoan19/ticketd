@@ -195,11 +195,16 @@ record content and the host writes nothing into harness settings, skills or hook
 When links change, the next new turn of a live session carries the context again,
 and a resumed native session gets it when it differs from what it was last given.
 Agents change records only by running the CLI. When the workspace change token moved
-during a turn, the host lists the status moves and Activities written under the
-Chat's harness as agent name in that turn's time and keeps them with the turn for
-the transcript; that name is attribution, so concurrent Chats on one harness are
-not told apart. Save as Document is the ordinary Document-creation workflow
-applied to a stored response.
+during a turn, the host lists the status moves and Activities written for that
+Chat in that turn's time and keeps them with the turn for the transcript. The host
+starts each harness process with the Chat's ID in `TICKETD_CHAT_ID` (only the ID);
+the CLI the harness runs inherits it and records which Chat each status move and
+Activity was written for (`chat_record_writes`). A write with no Chat ID (an older
+CLI, or a harness that strips the variable) counts for the Chat only when it
+carries the Chat's harness as agent name and no other Chat of that harness had a
+turn running at that moment; otherwise it is shown for no Chat rather than the
+wrong one. Save as Document is the ordinary Document-creation workflow applied to a
+stored response.
 
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process

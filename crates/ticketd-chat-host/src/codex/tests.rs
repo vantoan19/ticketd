@@ -41,6 +41,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
     peer.load(fixture);
     let request = OpenRequest {
         generation: GENERATION,
+        chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
     };
