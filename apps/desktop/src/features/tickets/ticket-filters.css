@@ -48,7 +48,11 @@
    space to its right. */
 .filters-content {
   width: 340px;
-  max-height: calc(100dvh - 44px - 16px);
+  /* Fit below the anchor so the footer stays reachable; the body scrolls. */
+  max-height: min(
+    calc(100dvh - 44px - 16px),
+    var(--radix-popover-content-available-height, 100dvh)
+  );
   box-shadow: var(--shadow-border-base);
   border-radius: var(--radius-panel);
   padding: 0;
