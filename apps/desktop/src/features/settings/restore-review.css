@@ -1,15 +1,4 @@
-/* Backups page: the recessed footer is shared with Export; the rest is this page's. */
-.backup-footer {
-  margin: 12px -24px -24px;
-  min-height: 48px;
-  padding: 10px 16px 10px 24px;
-  justify-content: center;
-  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
-  background: var(--recessed);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* Backups page. */
 .backups-title-line {
   display: flex;
   align-items: center;

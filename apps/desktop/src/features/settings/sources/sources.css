@@ -16,9 +16,6 @@
   font-weight: 400;
   color: var(--muted-foreground);
 }
-.source-status {
-  margin-top: 12px;
-}
 .source-chips {
   display: flex;
   flex-wrap: wrap;
@@ -102,19 +99,6 @@
   padding: 12px;
   border-radius: var(--radius-md);
   background: var(--recessed);
-}
-.source-preview-list {
-  display: grid;
-  gap: 4px;
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-ui);
-}
-.source-preview-list li {
-  display: flex;
-  gap: 12px;
-  min-width: 0;
 }
 .source-preview-ref {
   flex: none;

@@ -55,6 +55,14 @@
   gap: 6px;
 }
 
+/* The scroll container around the open page. */
+.settings-page {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+}
+
 /* Page column and header. */
 .settings-page-column {
   flex: 1;
