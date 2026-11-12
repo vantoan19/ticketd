@@ -396,15 +396,29 @@ const Item = memo(function Item({
   }
 });
 
-/** The live step and how long it has run. The clock is not read out every second. */
-function WorkingLine({ label, since }: { label: string; since?: string }) {
-  const [now, setNow] = useState(() => Date.now());
+/**
+ * The live step and how long it has run. The clock is not read out every second.
+ * `fromShown` counts from when the line appeared, for a phase the host gives no
+ * start time for.
+ */
+function WorkingLine({
+  label,
+  since,
+  fromShown = false,
+}: {
+  label: string;
+  since?: string;
+  fromShown?: boolean;
+}) {
+  const [shown] = useState(() => Date.now());
+  const [now, setNow] = useState(shown);
+  const timed = Boolean(since) || fromShown;
   useEffect(() => {
-    if (!since) return;
+    if (!timed) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [since]);
-  const started = since ? new Date(since).getTime() : NaN;
+  }, [timed]);
+  const started = since ? new Date(since).getTime() : fromShown ? shown : NaN;
   return (
     <div className="chat-working" role="status">
       <LoaderCircle size={14} className="chat-spin" aria-hidden />
@@ -492,6 +506,16 @@ export function Transcript({
       )}
       {chat.catching_up ? (
         <WorkingLine label="Catching up…" />
+      ) : working && chat.opening ? (
+        <WorkingLine
+          key="opening"
+          label={
+            chat.opening === "resume"
+              ? `Resuming the ${harness} session…`
+              : `Starting ${harness}…`
+          }
+          fromShown
+        />
       ) : (
         working && (
           <WorkingLine
