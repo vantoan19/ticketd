@@ -53,7 +53,7 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
   });
   render(
     <Activity
-      reference="T-1"
+      reference="T-KQ1"
       status="Todo"
       revision={0}
       projects={[]}
@@ -91,7 +91,7 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
   );
   expect(composer).toHaveProperty("value", "A **draft**");
   expect(
-    JSON.parse(localStorage.getItem("ticketd:activity-draft:T-1") ?? "{}"),
+    JSON.parse(localStorage.getItem("ticketd:activity-draft:T-KQ1") ?? "{}"),
   ).toMatchObject({ brief: "A **draft**" });
   expect(composer).toHaveProperty("readOnly", false);
   expect(
@@ -118,7 +118,7 @@ test("opens the selected note even when it is outside the loaded page", async ()
   });
   render(
     <Activity
-      reference="T-1"
+      reference="T-KQ1"
       status="Todo"
       revision={0}
       projects={[]}
@@ -170,7 +170,7 @@ test("reveals the existing chronological note without scrolling the workspace", 
   );
   render(
     <Activity
-      reference="T-1"
+      reference="T-KQ1"
       status="In progress"
       revision={0}
       projects={[]}
@@ -222,7 +222,7 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
   );
   render(
     <Activity
-      reference="T-1"
+      reference="T-KQ1"
       status="Todo"
       revision={0}
       projects={[]}
@@ -238,7 +238,7 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("activity_feed", {
-      reference: "T-1",
+      reference: "T-KQ1",
       limit: 50,
       offset: 50,
     }),
@@ -281,7 +281,7 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
     },
   );
   const targetProps = {
-    reference: "T-1",
+    reference: "T-KQ1",
     status: "Todo",
     revision: 0,
     projects: [],
@@ -355,7 +355,7 @@ test("finishing a note edit does not discard a newer note navigation", async () 
     },
   );
   const targetProps = {
-    reference: "T-1",
+    reference: "T-KQ1",
     status: "Todo",
     revision: 0,
     projects: [],
@@ -377,7 +377,7 @@ test("finishing a note edit does not discard a newer note navigation", async () 
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("get_activity", {
-      reference: "T-1",
+      reference: "T-KQ1",
       id: "second",
     }),
   );
@@ -388,7 +388,7 @@ test("finishing a note edit does not discard a newer note navigation", async () 
 });
 
 const props = {
-  reference: "T-1",
+  reference: "T-KQ1",
   status: "Todo",
   revision: 0,
   projects: [],
@@ -405,7 +405,7 @@ const original = {
 };
 
 test("rejects blank notes and adds canonical Markdown only on explicit submission", async () => {
-  const scoped = { ...props, reference: "T-10" };
+  const scoped = { ...props, reference: "T-KQ10" };
   let saved: (typeof original)[] = [];
   bridge.invoke.mockImplementation(
     async (command: string, args?: { brief: string }) => {
@@ -462,7 +462,7 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
 });
 
 test("preserves new and edited drafts across hidden navigation, external refresh and failed edits, then cancels back to the new draft", async () => {
-  const scoped = { ...props, reference: "T-11" };
+  const scoped = { ...props, reference: "T-KQ11" };
   let saved = { ...original };
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "activity_feed")
@@ -524,7 +524,7 @@ test("preserves new and edited drafts across hidden navigation, external refresh
 });
 
 test("explicitly saves an edited note and returns to the untouched new draft", async () => {
-  const scoped = { ...props, reference: "T-12" };
+  const scoped = { ...props, reference: "T-KQ12" };
   let saved = { ...original };
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch: { brief: string } }) => {
@@ -562,11 +562,14 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
 });
 
 test("recovers an unpublished brief after the desktop restarts", async () => {
-  localStorage.setItem("ticketd:activity-draft:T-987", "A recovered **brief**");
+  localStorage.setItem(
+    "ticketd:activity-draft:T-KQ987",
+    "A recovered **brief**",
+  );
   bridge.invoke.mockResolvedValue([]);
   render(
     <Activity
-      reference="T-987"
+      reference="T-KQ987"
       status="Todo"
       revision={0}
       projects={[]}
@@ -585,7 +588,7 @@ test("recovers an unpublished brief after the desktop restarts", async () => {
       ([command]) => command === "add_activity_with_details",
     ),
   ).toBe(false);
-  localStorage.removeItem("ticketd:activity-draft:T-987");
+  localStorage.removeItem("ticketd:activity-draft:T-KQ987");
 });
 
 test("reports when a brief cannot be saved locally", async () => {
@@ -593,7 +596,7 @@ test("reports when a brief cannot be saved locally", async () => {
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new Error("Storage unavailable");
   });
-  render(<Activity {...props} reference="T-988" />);
+  render(<Activity {...props} reference="T-KQ988" />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
@@ -612,7 +615,7 @@ test("reports when a brief cannot be saved locally", async () => {
 test("restores unpublished details after remount", async () => {
   bridge.invoke.mockResolvedValue([]);
   const props = {
-    reference: "T-990",
+    reference: "T-KQ990",
     status: "Todo",
     revision: 0,
     projects: [],
@@ -652,11 +655,11 @@ test("retries a failed details post with the same request identity and draft", a
     }
     return Promise.resolve([]);
   });
-  localStorage.setItem("ticketd:activity-draft:T-991", "Brief");
-  localStorage.setItem("ticketd:activity-details:T-991", "Evidence");
+  localStorage.setItem("ticketd:activity-draft:T-KQ991", "Brief");
+  localStorage.setItem("ticketd:activity-details:T-KQ991", "Evidence");
   render(
     <Activity
-      reference="T-991"
+      reference="T-KQ991"
       status="Todo"
       revision={0}
       projects={[]}
@@ -673,7 +676,7 @@ test("retries a failed details post with the same request identity and draft", a
   );
   expect(calls[0]?.[1]).toMatchObject({ brief: "Brief", details: "Evidence" });
   expect(calls[1]?.[1]).toEqual(calls[0]?.[1]);
-  expect(localStorage.getItem("ticketd:activity-details:T-991")).toBe(
+  expect(localStorage.getItem("ticketd:activity-details:T-KQ991")).toBe(
     "Evidence",
   );
 });
@@ -684,10 +687,10 @@ test("retries a brief-only post with the same request identity", async () => {
       return Promise.reject(new Error("Connection lost"));
     return Promise.resolve([]);
   });
-  localStorage.setItem("ticketd:activity-draft:T-993", "Brief");
+  localStorage.setItem("ticketd:activity-draft:T-KQ993", "Brief");
   render(
     <Activity
-      reference="T-993"
+      reference="T-KQ993"
       status="Todo"
       revision={0}
       projects={[]}
@@ -732,7 +735,7 @@ test("restores a selected supporting Document after navigation", async () => {
     return Promise.resolve([]);
   });
   const props = {
-    reference: "T-992",
+    reference: "T-KQ992",
     status: "Todo",
     revision: 0,
     projects: [],
@@ -754,7 +757,7 @@ test("restores a selected supporting Document after navigation", async () => {
 test("a brief of only whitespace entities cannot be posted", async () => {
   render(
     <Activity
-      reference="T-993"
+      reference="T-KQ993"
       status="Todo"
       revision={0}
       projects={[]}
@@ -802,7 +805,7 @@ test("opens the exact supporting Document from its update", async () => {
   render(
     <DocumentNavigation.Provider value={open}>
       <Activity
-        reference="T-993"
+        reference="T-KQ993"
         status="Todo"
         revision={0}
         projects={[]}
@@ -824,7 +827,7 @@ test("offers refresh when the requested update was removed", async () => {
   });
   render(
     <Activity
-      reference="T-1"
+      reference="T-KQ1"
       status="Todo"
       revision={0}
       projects={[]}
@@ -853,12 +856,12 @@ test("restores the whole draft, brief, details and attached Document, from one o
     return Promise.resolve([]);
   });
   localStorage.setItem(
-    "ticketd:activity-draft:T-994",
+    "ticketd:activity-draft:T-KQ994",
     JSON.stringify({ brief: "Brief", details: "More", support: "doc-1" }),
   );
   render(
     <Activity
-      reference="T-994"
+      reference="T-KQ994"
       status="Todo"
       revision={0}
       projects={[]}
@@ -875,7 +878,7 @@ test("opening the composer puts the caret in the update editor", async () => {
   bridge.invoke.mockImplementation(() => Promise.resolve([]));
   render(
     <Activity
-      reference="T-77"
+      reference="T-KQ77"
       status="Todo"
       revision={0}
       projects={[]}

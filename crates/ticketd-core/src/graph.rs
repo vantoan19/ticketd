@@ -290,7 +290,7 @@ fn graph_nodes(
 ) -> Result<(Vec<GraphNode>, HashMap<String, String>), Error> {
     let ids_json = serde_json::to_string(&ids)?;
     let sql = format!(
-        "SELECT t.id, t.number, t.title, t.status, t.trashed, {}, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = t.id AND {}), t.project_id FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
+        "SELECT t.id, t.reference, t.title, t.status, t.trashed, {}, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = t.id AND {}), t.project_id FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
         crate::source::held_sql("t.id"),
         crate::history::unresolved_blocker_sql("b")
     );
@@ -299,7 +299,7 @@ fn graph_nodes(
         .query_map([ids_json], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
+                row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, bool>(4)?,
@@ -311,7 +311,7 @@ fn graph_nodes(
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     let mut metadata = HashMap::new();
-    for (id, number, title, status, trashed, held, blocked, project_id) in rows {
+    for (id, reference, title, status, trashed, held, blocked, project_id) in rows {
         let status: Status = status.parse().map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
         })?;
@@ -327,7 +327,7 @@ fn graph_nodes(
             GraphNode {
                 id,
                 trashed,
-                reference: format!("T-{number}"),
+                reference,
                 title,
                 status,
                 availability,

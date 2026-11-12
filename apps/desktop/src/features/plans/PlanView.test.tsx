@@ -61,9 +61,9 @@ const ticket = (item: Fake) => ({
 beforeEach(() => {
   plans = [{ id: "e1", name: "Launch", archived: false, purpose: "" }];
   tickets = [
-    { id: "1", reference: "T-1", status: "Todo", plan: "e1" },
-    { id: "2", reference: "T-2", status: "Done", plan: "e1" },
-    { id: "3", reference: "T-3", status: "Todo", plan: "" },
+    { id: "1", reference: "T-KQ1", status: "Todo", plan: "e1" },
+    { id: "2", reference: "T-KQ2", status: "Done", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "Todo", plan: "" },
   ];
   calls.length = 0;
   bridge.invoke.mockImplementation(async (command: string, args: never) => {
@@ -149,7 +149,7 @@ async function openLaunch() {
 test("shows status counts and members for the Plan, and updates both when a member is removed", async () => {
   tickets.push({
     id: "4",
-    reference: "T-4",
+    reference: "T-KQ4",
     status: "Duplicate",
     plan: "e1",
   });
@@ -165,13 +165,16 @@ test("shows status counts and members for the Plan, and updates both when a memb
   expect(screen.getByText("Active Plan")).toBeTruthy();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove T-1 from Launch" }),
+    screen.getByRole("button", { name: "Remove T-KQ1 from Launch" }),
   );
   await waitFor(() =>
-    expect(screen.queryByRole("button", { name: /^T-1/ })).toBeNull(),
+    expect(screen.queryByRole("button", { name: /^T-KQ1/ })).toBeNull(),
   );
   await waitFor(() => expect(screen.getByText("1 of 1 done")).toBeTruthy());
-  expect(calls).toContainEqual(["set_plan", { reference: "T-1", plan: null }]);
+  expect(calls).toContainEqual([
+    "set_plan",
+    { reference: "T-KQ1", plan: null },
+  ]);
   expect(screen.getByLabelText("Tickets by status").textContent).toContain(
     "Todo0",
   );
@@ -179,9 +182,9 @@ test("shows status counts and members for the Plan, and updates both when a memb
 
 test("progress leaves out Canceled and Duplicate tickets", async () => {
   tickets = [
-    { id: "1", reference: "T-1", status: "Done", plan: "e1" },
-    { id: "2", reference: "T-2", status: "Canceled", plan: "e1" },
-    { id: "3", reference: "T-3", status: "Duplicate", plan: "e1" },
+    { id: "1", reference: "T-KQ1", status: "Done", plan: "e1" },
+    { id: "2", reference: "T-KQ2", status: "Canceled", plan: "e1" },
+    { id: "3", reference: "T-KQ3", status: "Duplicate", plan: "e1" },
   ];
   await openLaunch();
   expect(await screen.findByText("1 of 1 done")).toBeTruthy();
@@ -235,7 +238,9 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
   expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Add purpose" })).toBeNull();
   // Neither the row removal nor the per-group Add survive in an archived Plan.
-  expect(screen.queryByRole("button", { name: /^Remove T-1 from/ })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /^Remove T-KQ1 from/ }),
+  ).toBeNull();
   expect(screen.queryByRole("button", { name: /^Add .* ticket$/ })).toBeNull();
   await waitFor(() =>
     expect(
@@ -263,17 +268,17 @@ test("adds an existing ticket from search", async () => {
   await openLaunch();
   fireEvent.click(screen.getByRole("button", { name: "Add tickets" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Add T-3 to Launch" }),
+    await screen.findByRole("button", { name: "Add T-KQ3 to Launch" }),
   );
   await waitFor(() =>
     expect(calls).toContainEqual([
       "set_plan",
-      { reference: "T-3", plan: "e1" },
+      { reference: "T-KQ3", plan: "e1" },
     ]),
   );
   await waitFor(() =>
     expect(
-      screen.queryByRole("button", { name: "Add T-3 to Launch" }),
+      screen.queryByRole("button", { name: "Add T-KQ3 to Launch" }),
     ).toBeNull(),
   );
 });

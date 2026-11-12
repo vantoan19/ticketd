@@ -1173,7 +1173,7 @@ fn lost_completion_and_failed_reference_save_keep_the_completed_item_discoverabl
         .unwrap();
     assert!(
         workspace
-            .set_ticket_attachment("T-404", &file.id, true)
+            .set_ticket_attachment("T-KQ404", &file.id, true)
             .is_err()
     );
     assert_eq!(

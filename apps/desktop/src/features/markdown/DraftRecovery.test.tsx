@@ -171,7 +171,7 @@ test("description autosave releases the current draft while source Undo retains 
   const body = "[Authored trace label](ticketd://attachment/workspace/file)";
   let canonical: Ticket = {
     id: "t1",
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "Keep Undo",
     body,
     status: "Todo",
@@ -412,9 +412,9 @@ test("an Activity edit recovers independently of an unpublished brief and detail
   const records = bridge(
     new Map([
       [
-        "activity:T-1",
+        "activity:T-KQ1",
         {
-          owner: "activity:T-1",
+          owner: "activity:T-KQ1",
           kind: "draft",
           revision: 1,
           payload: {
@@ -426,9 +426,9 @@ test("an Activity edit recovers independently of an unpublished brief and detail
         },
       ],
       [
-        "activity-edit:T-1",
+        "activity-edit:T-KQ1",
         {
-          owner: "activity-edit:T-1",
+          owner: "activity-edit:T-KQ1",
           kind: "draft",
           revision: 1,
           payload: {
@@ -445,7 +445,7 @@ test("an Activity edit recovers independently of an unpublished brief and detail
     return (
       <DraftRecoveryProvider>
         <Activity
-          reference="T-1"
+          reference="T-KQ1"
           status="Todo"
           revision={0}
           projects={[]}
@@ -475,9 +475,9 @@ test("an Activity edit recovers independently of an unpublished brief and detail
     screen.getByRole("textbox", { name: "Details rich text" }).textContent,
   ).toContain("Detail");
   await waitFor(() =>
-    expect(records.get("activity-edit:T-1")?.payload).toBeNull(),
+    expect(records.get("activity-edit:T-KQ1")?.payload).toBeNull(),
   );
-  expect(records.get("activity:T-1")?.payload).toMatchObject({
+  expect(records.get("activity:T-KQ1")?.payload).toMatchObject({
     brief: "Unpublished brief",
   });
 });
@@ -563,9 +563,9 @@ test("distinct legacy profile drafts survive a primary recovery tombstone", asyn
   const records = bridge(
     new Map([
       [
-        "activity:T-1",
+        "activity:T-KQ1",
         {
-          owner: "activity:T-1",
+          owner: "activity:T-KQ1",
           kind: "draft",
           revision: 3,
           payload: null,
@@ -575,7 +575,7 @@ test("distinct legacy profile drafts survive a primary recovery tombstone", asyn
     ]),
   );
   localStorage.setItem(
-    "ticketd:activity-draft:T-1",
+    "ticketd:activity-draft:T-KQ1",
     JSON.stringify({
       brief: "Other profile",
       details: "[Trace](ticketd://attachment/workspace/file)",
@@ -588,7 +588,7 @@ test("distinct legacy profile drafts survive a primary recovery tombstone", asyn
     </DraftRecoveryProvider>,
   );
   await screen.findByText("Workspace ready");
-  expect(records.get("activity:T-1")?.payload).toBeNull();
+  expect(records.get("activity:T-KQ1")?.payload).toBeNull();
   const legacy = [...records.values()].find((record) =>
     String(record.owner).startsWith("legacy:"),
   );
@@ -596,7 +596,7 @@ test("distinct legacy profile drafts survive a primary recovery tombstone", asyn
   expect(legacy?.markdown).toContain(
     "[Trace](ticketd://attachment/workspace/file)",
   );
-  expect(localStorage.getItem("ticketd:activity-draft:T-1")).toBeNull();
+  expect(localStorage.getItem("ticketd:activity-draft:T-KQ1")).toBeNull();
 });
 
 test("failed draft protection is visible and blocks publication until explicit retry succeeds", async () => {
@@ -611,7 +611,7 @@ test("failed draft protection is visible and blocks publication until explicit r
     }
     return [];
   });
-  const create = vi.fn().mockResolvedValue("T-1");
+  const create = vi.fn().mockResolvedValue("T-KQ1");
   render(
     <DraftRecoveryProvider>
       <CreateTicketDialog
@@ -712,6 +712,6 @@ test("late retention completion cannot publish or replace newer typing before it
   );
   expect(records.get("new-ticket")?.payload).toMatchObject({ title: "Newer" });
   await act(async () => {
-    finishCreate("T-1");
+    finishCreate("T-KQ1");
   });
 });

@@ -66,7 +66,7 @@ fn the_commands_a_chat_offers_return_records_as_they_are_now() {
     let project = workspace.create_project("App", "/work/app").unwrap();
     workspace
         .change_ticket(
-            "T-1",
+            "T-KQ1",
             TicketPatch {
                 project_id: Some(Some(project.id.clone())),
                 ..Default::default()
@@ -110,7 +110,7 @@ fn the_commands_a_chat_offers_return_records_as_they_are_now() {
     // A person changes the linked records after the Chat was created.
     workspace
         .change_ticket(
-            "T-1",
+            "T-KQ1",
             TicketPatch {
                 body: Some("Now with reproduction steps".into()),
                 ..Default::default()
@@ -141,7 +141,7 @@ fn the_commands_a_chat_offers_return_records_as_they_are_now() {
     assert_eq!(shown["body"], "Now with reproduction steps");
     assert_eq!(read["body"], "Second draft");
     assert_eq!(shown_project["name"], "App");
-    assert_eq!(listed[0]["reference"], "T-1");
+    assert_eq!(listed[0]["reference"], "T-KQ1");
 
     // The guide the block names is bundled with this same executable.
     assert!(block.contains("`ticketd skills get chat`"));
@@ -171,12 +171,12 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
         body: Some(text.into()),
         ..Default::default()
     };
-    workspace.change_ticket("T-1", body("Original")).unwrap();
+    workspace.change_ticket("T-KQ1", body("Original")).unwrap();
 
     // The agent reads, then a person edits before the agent's replacement lands.
-    let read = data(path, &["show", "T-1"]);
+    let read = data(path, &["show", "T-KQ1"]);
     workspace
-        .change_ticket("T-1", body("A person's edit"))
+        .change_ticket("T-KQ1", body("A person's edit"))
         .unwrap();
     let write = |name: &str, request: Value| {
         let file = path.join(name);
@@ -185,7 +185,7 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
     };
     let stale = write(
         "stale.json",
-        json!({"operation": "change_ticket", "reference": "T-1",
+        json!({"operation": "change_ticket", "reference": "T-KQ1",
                "patch": {"body": "The agent's rewrite", "expected_body": read["body"], "editing_agent": "codex"}}),
     );
     let stderr = refused(path, &["write", &stale, "--request-id", "rewrite-1"]);
@@ -194,7 +194,7 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
     // Status and an Activity in one retryable write; the replay writes nothing more.
     let progress = write(
         "progress.json",
-        json!({"operation": "ticket_change", "reference": "T-1",
+        json!({"operation": "ticket_change", "reference": "T-KQ1",
                "change": {"status": "In progress", "activities": ["Started on the cache"], "editing_agent": "codex"}}),
     );
     let first = data(path, &["write", &progress, "--request-id", "progress-1"]);
@@ -222,7 +222,7 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
         &[
             "activity",
             "add",
-            "T-1",
+            "T-KQ1",
             "--brief",
             "Found the cause",
             "--document",
@@ -237,7 +237,7 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
         &[
             "evidence",
             "add",
-            "T-1",
+            "T-KQ1",
             "--kind",
             "verification",
             "--name",
@@ -252,7 +252,7 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
     // The person keeps editing; neither side's work is lost.
     workspace
         .change_ticket(
-            "T-1",
+            "T-KQ1",
             TicketPatch {
                 title: Some("Fix the stale cache".into()),
                 ..Default::default()
@@ -260,11 +260,11 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
         )
         .unwrap();
 
-    let shown = data(path, &["show", "T-1"]);
+    let shown = data(path, &["show", "T-KQ1"]);
     assert_eq!(shown["title"], "Fix the stale cache");
     assert_eq!(shown["body"], "A person's edit");
     assert_eq!(shown["status"], "In progress");
-    let context = data(path, &["context", "T-1", "--activities", "--evidence"]);
+    let context = data(path, &["context", "T-KQ1", "--activities", "--evidence"]);
     let activities = context["activities"]["items"].as_array().unwrap();
     assert_eq!(activities.len(), 2, "{context}");
     assert!(
@@ -281,7 +281,7 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
     );
     assert_eq!(context["evidence"]["items"].as_array().unwrap().len(), 1);
     // Attribution describes the writer on each change the agent made.
-    let history = data(path, &["history", "T-1"]);
+    let history = data(path, &["history", "T-KQ1"]);
     let agents: Vec<&Value> = history
         .as_array()
         .unwrap()
@@ -342,7 +342,7 @@ fn writes_made_with_a_chat_id_are_credited_to_that_chat() {
     }
     let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
         .args([
-            "activity", "add", "T-1", "--brief", "From A", "--agent", "codex",
+            "activity", "add", "T-KQ1", "--brief", "From A", "--agent", "codex",
         ])
         .current_dir(path)
         .env("TICKETD_TEST_WORKSPACE", workspace_path(path))

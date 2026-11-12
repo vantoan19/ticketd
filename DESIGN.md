@@ -4,7 +4,7 @@
 
 This document defines the target visual and interaction design for ticketd's desktop application and the design system it is built from (section 11). It is a specification for design work and review; the current interface is not evidence that these rules have been implemented. Dimensions are logical CSS pixels at 100% zoom. Minimum heights must grow for wrapped text and accessibility settings.
 
-Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, or a board. The experimental native Chat screens (product specification section 20) are off by default and follow this guide’s tokens and components; their layout is not yet specified here. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
+Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, or a board. The experimental native Chat screens (product specification section 21) are off by default and follow this guide’s tokens and components; their layout is not yet specified here. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
 
 ### Reference and adaptation
 
@@ -88,18 +88,18 @@ Normal text must meet 4.5:1 contrast against its actual surface; large text and 
 
 Use a 16px Lucide status icon plus text. Keep icons neutral; shape and label provide the distinction. Where color adds meaning (Ready, Blocked, unread, checked), use a small status dot (about 10px or less) placed beside a word. A dot never appears alone, and it is the only place status color is used.
 
-| Meaning            | Icon treatment                                          | Visible label      |
-| ------------------ | ------------------------------------------------------- | ------------------ |
-| Todo               | Empty circle                                            | Todo               |
-| In progress        | Circle with center mark                                 | In progress        |
-| In review          | Dashed circle                                           | In review          |
-| Done               | Circle with check                                       | Done               |
-| Canceled           | Circle with slash                                       | Canceled           |
-| Ready              | Status dot beside the word, on Todo tickets             | Ready              |
-| Blocked            | Status dot beside the word, with the reason             | Blocked by T-18    |
-| Duplicate          | Circle with equals sign, beside a canonical-ticket link | Duplicate of T-10  |
-| Source unavailable | Status dot beside the words                             | Source unavailable |
-| Unread             | Status dot plus accessible unread state                 | Unread             |
+| Meaning            | Icon treatment                                          | Visible label       |
+| ------------------ | ------------------------------------------------------- | ------------------- |
+| Todo               | Empty circle                                            | Todo                |
+| In progress        | Circle with center mark                                 | In progress         |
+| In review          | Dashed circle                                           | In review           |
+| Done               | Circle with check                                       | Done                |
+| Canceled           | Circle with slash                                       | Canceled            |
+| Ready              | Status dot beside the word, on Todo tickets             | Ready               |
+| Blocked            | Status dot beside the word, with the reason             | Blocked by T-KQ18   |
+| Duplicate          | Circle with equals sign, beside a canonical-ticket link | Duplicate of T-KQ10 |
+| Source unavailable | Status dot beside the words                             | Source unavailable  |
+| Unread             | Status dot plus accessible unread state                 | Unread              |
 
 Ready and Blocked are availability indicators, not extra statuses. Canceled and Duplicate must never look completed. Duplicate is a status of its own: it never looks Canceled or Done, and it always names its canonical ticket, or the source’s reference when that ticket is not in the workspace. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
 
@@ -219,16 +219,16 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 ```text
 ┌──────────────┬───────────────────────────────────────────────────────────────────────┐
 │ ticketd   +  │ ┌─────────────────────────┬─────────────────────────────────────────┐ │
-│              │ │ All tickets      ⟳ ⌕ ≡  │ T-42 ⧉ repo #98 ↗  2 of 11 ˄ ˅ … ⤢ ✕    │ │
+│              │ │ All tickets      ⟳ ⌕ ≡  │ T-KQ42 ⧉ repo #98 ↗  2 of 11 ˄ ˅ … ⤢ ✕  │ │
 │ Inbox     3  │ │ All 11 GitHub 7 Local 4 ├───────────────────────────┬─────────────┤ │
 │ All tickets  │ ├─────────────────────────┤ Ticket title              │ Status      │ │
 │ Ready     4  │ │ ◐ In progress  2     +  │ ● Open on GitHub · #98    │ Source      │ │
-│ In progress  │ │ ◐ T-42 Selected     #98 │ ┌ GitHub · Read-only ──┐  │ Project     │ │
-│              │ │ ◐ T-43 Ticket title     │ │ Description          │  │ Plan        │ │
+│ In progress  │ │ ◐ T-KQ42 Selected   #98 │ ┌ GitHub · Read-only ──┐  │ Project     │ │
+│              │ │ ◐ T-KQ43 Ticket title   │ │ Description          │  │ Plan        │ │
 │ Projects  ⚙  │ │ ◌ In review    1     +  │ └──────────────────────┘  │ Tags        │ │
-│ Plans     ⚙  │ │ ◌ T-44 Ticket title  #91│ Subtickets   ▬▬ 1 of 2    │ Relations   │ │
+│ Plans     ⚙  │ │ ◌ T-KQ44 Other title #91│ Subtickets   ▬▬ 1 of 2    │ Relations   │ │
 │ Archived …   │ │ ○ Todo         3     +  │ GitHub conversation       │ Attention   │ │
-│              │ │ ○ T-45 Ticket title     │ Activity                  │             │ │
+│              │ │ ○ T-KQ45 Ticket title   │ Activity                  │             │ │
 │ ● GitHub     │ └─────────────────────────┴───────────────────────────┴─────────────┘ │
 │ Trash        │                                                                       │
 │ Settings     │                                                                       │
@@ -301,7 +301,7 @@ Use stable columns: selection, status, reference, title, then the source pill of
 - Once an external source is configured, a source filter below the list header offers All, GitHub, and Local with counts. It narrows the groups; it does not regroup the list by source.
 - Checkbox hit areas occupy a reserved 32px column. With a mouse, reveal unchecked controls on row hover or keyboard focus; show all controls during bulk selection. On touch devices keep them visible. Selection never shifts the row or creates an extra row of controls inside it.
 - The list header's Display button opens a menu that holds the layout choices: Layout (List or Board) and Rows (Detailed or Simple). Layout choices never sit in the header as a row of toggles.
-- Detailed rows, the default, have two lines. Simple rows keep only line one, ending with the Ready or Blocked dot and the updated time. Line one: 16px status icon (with an accessible name), monospace ticket reference, the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-n", "Source unavailable" when the source cannot be reached, or "Duplicate of T-n"; then one context item (parent, project, or Plan relevant to the current view), tag pills, and the 12px updated time. In a single-status view the Todo row keeps its Ready or Blocked word and dot; only the Ready view, where every row is Ready, omits the per-row Ready dot. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.
+- Detailed rows, the default, have two lines. Simple rows keep only line one, ending with the Ready or Blocked dot and the updated time. Line one: 16px status icon (with an accessible name), monospace ticket reference in a 64px column (wide enough for a device reference such as T-KQ1043), the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-KQ18", "Source unavailable" when the source cannot be reached, or "Duplicate of T-KQ10"; then one context item (parent, project, or Plan relevant to the current view), tag pills, and the 12px updated time. In a single-status view the Todo row keeps its Ready or Blocked word and dot; only the Ready view, where every row is Ready, omits the per-row Ready dot. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.
 - Status color appears only as the small dot beside a word, never as an icon tint or fill.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
 - An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.

@@ -11,7 +11,7 @@ fn populated(path: &std::path::Path) -> Workspace {
     let first = workspace.create_ticket("First").unwrap();
     let second = workspace.create_ticket("Second").unwrap();
     workspace.create_ticket("Trashed").unwrap();
-    workspace.set_trashed("T-3", true, None).unwrap();
+    workspace.set_trashed("T-KQ3", true, None).unwrap();
     workspace
         .add_activity(&first.reference, "A note", None)
         .unwrap();
@@ -411,5 +411,10 @@ fn restore_names_a_missing_backup_and_creates_a_missing_workspace() {
     let error = Workspace::restore(&target, &missing).unwrap_err();
     assert!(error.to_string().contains("nope.sqlite3"), "{error}");
     Workspace::restore(&target, &backup).unwrap();
-    assert!(Workspace::open(&target).unwrap().show_ticket("T-1").is_ok());
+    assert!(
+        Workspace::open(&target)
+            .unwrap()
+            .show_ticket("T-KQ1")
+            .is_ok()
+    );
 }

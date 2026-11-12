@@ -1,4 +1,5 @@
-//! Google Drive references and blob uploads, without overwrites, deletion or sharing changes.
+//! Google Drive references, blob uploads and Workspace sync storage. Only sync rewrites
+//! files, and only ones it created; nothing here deletes or changes sharing.
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -15,6 +16,8 @@ mod upload_provider;
 pub use copies::*;
 mod copy_provider;
 pub use copy_provider::GoogleDriveCopies;
+mod remote;
+pub use remote::DriveRemote;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

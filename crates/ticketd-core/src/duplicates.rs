@@ -140,7 +140,7 @@ pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
             conn.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'status', 'Canceled', 'Duplicate')", [&source])?;
         } else {
             let reference: String = conn.query_row(
-                "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+                "SELECT reference FROM tickets WHERE id = ?1",
                 [&canonical],
                 |r| r.get(0),
             )?;
@@ -176,7 +176,7 @@ pub(crate) fn clear(conn: &Connection, id: &str, agent: Option<&str>) -> Result<
         "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
         [id],
     )?;
-    let canonical: Option<String> = conn.query_row("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [id], |r| r.get(0)).optional()?;
+    let canonical: Option<String> = conn.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [id], |r| r.get(0)).optional()?;
     if let Some(canonical) = canonical {
         conn.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [id])?;
         history::record(conn, id, "relationship:duplicate", &canonical, "", agent)?;
@@ -218,7 +218,7 @@ fn final_canonical(conn: &Connection, canonical_id: &str) -> Result<String, Erro
         } => relationships::id(conn, &reference),
         _ => {
             let reference: String = conn.query_row(
-                "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+                "SELECT reference FROM tickets WHERE id = ?1",
                 [canonical_id],
                 |r| r.get(0),
             )?;
@@ -241,13 +241,13 @@ pub(crate) fn populate(conn: &Connection, ticket: &mut Ticket) -> Result<(), Err
         && resolved != direct
     {
         ticket.duplicate_redirect = Some(conn.query_row(
-            "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+            "SELECT reference FROM tickets WHERE id = ?1",
             [&resolved],
             |r| r.get(0),
         )?);
     }
-    ticket.duplicate_of = conn.query_row("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&ticket.id], |r| r.get(0)).optional()?;
-    let mut stmt = conn.prepare("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1 ORDER BY t.number")?;
+    ticket.duplicate_of = conn.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&ticket.id], |r| r.get(0)).optional()?;
+    let mut stmt = conn.prepare("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1 ORDER BY t.number")?;
     ticket.duplicates = stmt
         .query_map([&ticket.id], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
@@ -296,14 +296,14 @@ impl Workspace {
             [&source_id],
             |r| r.get(0),
         )?;
-        let previous: Option<String> = tx.query_row("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&source_id], |r| r.get(0)).optional()?;
+        let previous: Option<String> = tx.query_row("SELECT t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&source_id], |r| r.get(0)).optional()?;
         let target: String = tx.query_row(
-            "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+            "SELECT reference FROM tickets WHERE id = ?1",
             [&destination],
             |r| r.get(0),
         )?;
         if previous.as_deref() != Some(&target) {
-            let mut stmt = tx.prepare("SELECT t.id, 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1")?;
+            let mut stmt = tx.prepare("SELECT t.id, t.reference FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1")?;
             let children = stmt
                 .query_map([&source_id], |r| {
                     Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
@@ -344,7 +344,7 @@ impl Workspace {
         let id = relationships::id(&tx, source)?;
         crate::ensure_editable(&tx, &id)?;
         crate::source::guard_duplicate(&tx, &id, source)?;
-        let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, 'T-' || c.number, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+        let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, c.reference, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
         if let Some((restore, canonical, status)) = existing {
             tx.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [&id])?;
             history::record(&tx, &id, "relationship:duplicate", &canonical, "", agent)?;
@@ -379,16 +379,18 @@ struct Facts {
     trashed: bool,
 }
 
-fn number(reference: &str) -> i64 {
-    reference
-        .strip_prefix("T-")
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(i64::MAX)
+/// Orders references by device code, then by counter (`T-KQ9` before `T-KQ10`).
+fn number(reference: &str) -> (&str, i64) {
+    let counter = reference.trim_start_matches(|c: char| !c.is_ascii_digit());
+    (
+        &reference[..reference.len() - counter.len()],
+        counter.parse().unwrap_or(i64::MAX),
+    )
 }
 
 fn by_number(references: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut sorted: Vec<_> = references.into_iter().collect();
-    sorted.sort_by_key(|r| number(r));
+    sorted.sort_by(|a, b| number(a).cmp(&number(b)));
     sorted
 }
 
@@ -413,13 +415,13 @@ impl Snapshot {
             return Err(Error::ReviewSameTicket);
         }
         let source: String = connection.query_row(
-            "SELECT 'T-' || number FROM tickets WHERE id=?1",
+            "SELECT reference FROM tickets WHERE id=?1",
             [&source_id],
             |r| r.get(0),
         )?;
         let destination_id = final_canonical(connection, &canonical_id)?;
         let destination: String = connection.query_row(
-            "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+            "SELECT reference FROM tickets WHERE id = ?1",
             [&destination_id],
             |r| r.get(0),
         )?;
@@ -433,7 +435,7 @@ impl Snapshot {
             }
         }
         // The cap is checked before any further work, so a huge review is cheap to refuse.
-        let mut stmt = connection.prepare("SELECT 'T-' || b.number, 'T-' || d.number FROM dependencies e JOIN tickets b ON b.id=e.blocker_id JOIN tickets d ON d.id=e.dependent_id WHERE e.blocker_id=?1 OR e.dependent_id=?1 ORDER BY b.number,d.number LIMIT 1001")?;
+        let mut stmt = connection.prepare("SELECT b.reference, d.reference FROM dependencies e JOIN tickets b ON b.id=e.blocker_id JOIN tickets d ON d.id=e.dependent_id WHERE e.blocker_id=?1 OR e.dependent_id=?1 ORDER BY b.number,d.number LIMIT 1001")?;
         let pairs: Vec<(String, String)> = stmt
             .query_map([&source_id], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<Result<_, _>>()?;
@@ -476,10 +478,10 @@ impl Snapshot {
                 .or_default();
             needed.insert(edge.replacement_blocker.clone());
         }
-        let mut blocker_stmt = connection.prepare("SELECT 'T-' || b.number, b.status, b.trashed FROM dependencies d JOIN tickets b ON b.id = d.blocker_id JOIN tickets w ON w.id = d.dependent_id WHERE w.number = ?1")?;
+        let mut blocker_stmt = connection.prepare("SELECT b.reference, b.status, b.trashed FROM dependencies d JOIN tickets b ON b.id = d.blocker_id JOIN tickets w ON w.id = d.dependent_id WHERE w.reference = ?1")?;
         for (waiting, set) in &mut blockers {
             let rows = blocker_stmt
-                .query_map([number(waiting)], |r| {
+                .query_map([waiting], |r| {
                     Ok((
                         r.get::<_, String>(0)?,
                         r.get::<_, String>(1)?,
@@ -500,13 +502,13 @@ impl Snapshot {
         }
         drop(blocker_stmt);
         let mut fact_stmt =
-            connection.prepare("SELECT status, trashed FROM tickets WHERE number = ?1")?;
+            connection.prepare("SELECT status, trashed FROM tickets WHERE reference = ?1")?;
         for reference in needed.iter().chain(blockers.keys()) {
             if facts.contains_key(reference) {
                 continue;
             }
             let (status, trashed): (String, bool) = fact_stmt
-                .query_row([number(reference)], |r| Ok((r.get(0)?, r.get(1)?)))
+                .query_row([reference], |r| Ok((r.get(0)?, r.get(1)?)))
                 .optional()?
                 .ok_or_else(|| Error::NotFound(reference.clone()))?;
             facts.insert(

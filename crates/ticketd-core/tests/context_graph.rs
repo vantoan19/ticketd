@@ -30,7 +30,10 @@ fn graph_finds_visible_references_to_tickets_created_later() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let doc = workspace
-        .create_document(Some("Early"), "Read [T-1](https://example.com) for context")
+        .create_document(
+            Some("Early"),
+            "Read [T-KQ1](https://example.com) for context",
+        )
         .unwrap();
     let ticket = workspace.create_ticket("Later").unwrap();
     let graph = workspace.context_graph(&ticket.reference, false).unwrap();
@@ -41,7 +44,7 @@ fn graph_finds_visible_references_to_tickets_created_later() {
                 .explanation
                 .as_deref()
                 .unwrap_or_default()
-                .contains("T-1")
+                .contains("T-KQ1")
     }));
 }
 
@@ -142,7 +145,7 @@ fn activity_graph_mentions_follow_edits_and_deletion() {
     let activity = workspace
         .add_activity(
             &ticket.reference,
-            &format!("See [target](ticketd://document/{}) and T-2", doc.id),
+            &format!("See [target](ticketd://document/{}) and T-KQ2", doc.id),
             None,
         )
         .unwrap();

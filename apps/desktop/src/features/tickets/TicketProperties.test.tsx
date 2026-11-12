@@ -26,7 +26,7 @@ test("keeps the saved project and reports a failed change", async () => {
     <TicketProperties
       ticket={{
         id: "1",
-        reference: "T-1",
+        reference: "T-KQ1",
         title: "Ticket",
         body: "",
         status: "Todo",
@@ -71,7 +71,7 @@ test("a duplicate links to its canonical ticket beside the status, even in trash
     <TicketProperties
       ticket={{
         id: "1",
-        reference: "T-1",
+        reference: "T-KQ1",
         title: "Ticket",
         body: "",
         status: "Duplicate",
@@ -83,7 +83,7 @@ test("a duplicate links to its canonical ticket beside the status, even in trash
         parent: null,
         children: [],
         prerequisites: [],
-        duplicate_of: "T-9",
+        duplicate_of: "T-KQ9",
       }}
       projects={[]}
       plans={[]}
@@ -92,8 +92,8 @@ test("a duplicate links to its canonical ticket beside the status, even in trash
       onOpenTicket={open}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Duplicate of T-9" }));
-  expect(open).toHaveBeenCalledWith("T-9");
+  fireEvent.click(screen.getByRole("button", { name: "Duplicate of T-KQ9" }));
+  expect(open).toHaveBeenCalledWith("T-KQ9");
 });
 
 test("choosing Duplicate from the status menu opens the duplicate review instead of saving", async () => {
@@ -107,7 +107,7 @@ test("choosing Duplicate from the status menu opens the duplicate review instead
     <TicketProperties
       ticket={{
         id: "1",
-        reference: "T-1",
+        reference: "T-KQ1",
         title: "Ticket",
         body: "",
         status: "Todo",
@@ -133,7 +133,7 @@ test("choosing Duplicate from the status menu opens the duplicate review instead
     await screen.findByRole("option", { name: "Mark as duplicate…" }),
   );
   expect(
-    await screen.findByRole("heading", { name: "Mark T-1 as a duplicate" }),
+    await screen.findByRole("heading", { name: "Mark T-KQ1 as a duplicate" }),
   ).toBeTruthy();
   expect(bridge.invoke).not.toHaveBeenCalledWith(
     "change_ticket",
@@ -152,7 +152,7 @@ test("changing the status of a duplicate asks before removing its link", async (
     <TicketProperties
       ticket={{
         id: "1",
-        reference: "T-1",
+        reference: "T-KQ1",
         title: "Ticket",
         body: "",
         status: "Duplicate",
@@ -164,7 +164,7 @@ test("changing the status of a duplicate asks before removing its link", async (
         parent: null,
         children: [],
         prerequisites: [],
-        duplicate_of: "T-8",
+        duplicate_of: "T-KQ8",
       }}
       projects={[]}
       plans={[]}
@@ -178,7 +178,7 @@ test("changing the status of a duplicate asks before removing its link", async (
   );
   fireEvent.click(await screen.findByRole("option", { name: "Todo" }));
   expect(
-    await screen.findByText(/removes the duplicate link to T-8/),
+    await screen.findByText(/removes the duplicate link to T-KQ8/),
   ).toBeTruthy();
   expect(bridge.invoke).not.toHaveBeenCalledWith(
     "change_ticket",
@@ -201,7 +201,7 @@ test("a trashed ticket's rail says it is locked", () => {
     <TicketProperties
       ticket={{
         id: "1",
-        reference: "T-1",
+        reference: "T-KQ1",
         title: "Ticket",
         body: "",
         status: "Todo",

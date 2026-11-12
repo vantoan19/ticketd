@@ -233,7 +233,7 @@ impl Fixture {
     }
     fn source(&self, number: u32) -> TicketSource {
         self.workspace
-            .show_ticket(&format!("T-{number}"))
+            .show_ticket(&format!("T-KQ{number}"))
             .unwrap()
             .source
             .unwrap()
@@ -286,7 +286,7 @@ fn provider_checked_count_tracks_accepted_runs_and_survives_failures_and_reopen(
         .refresh_sources(
             &f.engine,
             &RefreshOptions {
-                ticket: Some("T-1".into()),
+                ticket: Some("T-KQ1".into()),
                 now: Some(T2.into()),
             },
         )
@@ -299,7 +299,7 @@ fn provider_checked_count_tracks_accepted_runs_and_survives_failures_and_reopen(
         ),
         (Some(3), Some(T1))
     );
-    f.workspace.take_ownership("T-2", None).unwrap();
+    f.workspace.take_ownership("T-KQ2", None).unwrap();
     let status = f.workspace.source_statuses().unwrap().remove(0);
     assert_eq!(
         (status.last_checked_tickets, status.tracked_tickets),
@@ -371,7 +371,7 @@ fn an_outage_marks_tickets_unavailable_since_the_first_failure_and_keeps_everyth
     // Nothing is deleted, completed, or presented as refreshed.
     assert_eq!(source.last_refreshed_at.as_deref(), Some(T0));
     assert_eq!(source.last_attempt_at.as_deref(), Some(T1));
-    let ticket = f.workspace.show_ticket("T-1").unwrap();
+    let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.status, Status::Todo);
     assert_eq!(ticket.title, "Issue 1");
 
@@ -457,7 +457,7 @@ fn a_deleted_or_revoked_issue_is_unavailable_alone_and_others_keep_refreshing() 
     });
     f.refresh_at(T1);
     assert_eq!(
-        f.workspace.show_ticket("T-1").unwrap().title,
+        f.workspace.show_ticket("T-KQ1").unwrap().title,
         "Moved out of scope"
     );
     assert!(f.source(1).unavailable.is_none());
@@ -478,7 +478,10 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     };
     f.publish(closed);
     f.refresh_at(T2);
-    assert_eq!(f.workspace.show_ticket("T-1").unwrap().status, Status::Done);
+    assert_eq!(
+        f.workspace.show_ticket("T-KQ1").unwrap().status,
+        Status::Done
+    );
 
     // A slower overlapping run delivers what it saw before the closure.
     f.remote(|r| {
@@ -488,7 +491,7 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
         stale.title = "Stale title".into();
     });
     f.refresh_at(T3);
-    let ticket = f.workspace.show_ticket("T-1").unwrap();
+    let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.status, Status::Done);
     assert_eq!(ticket.title, "Issue 1");
 }
@@ -540,7 +543,10 @@ fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
         closed.updated_at = T1.into();
     });
     let report = f.refresh_at(T1);
-    assert_eq!(f.workspace.show_ticket("T-2").unwrap().status, Status::Done);
+    assert_eq!(
+        f.workspace.show_ticket("T-KQ2").unwrap().status,
+        Status::Done
+    );
     assert!(f.source(2).unavailable.is_none() && f.source(3).unavailable.is_none());
     let own = f.source(1).unavailable.unwrap();
     assert_eq!(own.code, "protocol");
@@ -558,7 +564,7 @@ fn an_unreadable_repository_is_skipped_visibly_without_stopping_discovery() {
     f.publish(issue(1, T0));
     f.remote(|r| r.skipped = Some("o/gone".into()));
     let report = f.refresh_at(T0);
-    assert_eq!(report.imported, vec!["T-1".to_owned()]);
+    assert_eq!(report.imported, vec!["T-KQ1".to_owned()]);
     assert_eq!(report.failures.len(), 1);
     assert_eq!(report.failures[0].scope, FailureScope::Partition);
     assert!(!report.interrupted_by_source());
@@ -637,7 +643,7 @@ fn retrying_one_ticket_does_not_reset_the_schedule_of_the_full_refresh() {
     // The source recovers and the person retries one ticket.
     f.remote(|r| r.outage = None);
     coordinator
-        .refresh_now(&f.engine, &open, Some("T-1"))
+        .refresh_now(&f.engine, &open, Some("T-KQ1"))
         .unwrap();
     assert_eq!(
         not_due_in(coordinator.tick(&f.engine, &open).unwrap()),
@@ -700,7 +706,7 @@ fn startup_runs_immediately_then_waits_one_interval() {
     let open = || f.open_workspace();
 
     let report = ran(coordinator.tick(&f.engine, &open).unwrap());
-    assert_eq!(report.imported, vec!["T-1".to_owned()]);
+    assert_eq!(report.imported, vec!["T-KQ1".to_owned()]);
     let before = f.fake.0.lock().unwrap().discover_calls;
     assert_eq!(not_due_in(coordinator.tick(&f.engine, &open).unwrap()), 300);
     clock.advance(299);

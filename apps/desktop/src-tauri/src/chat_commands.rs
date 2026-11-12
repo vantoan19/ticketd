@@ -338,11 +338,15 @@ pub async fn chat_save_as_document(
 pub async fn restore_workspace(
     app: AppHandle,
     bridge: State<'_, ChatBridge>,
+    sync: State<'_, crate::sync_commands::SyncHost>,
     path: String,
 ) -> Result<Restored, String> {
     let chats = bridge.chats.clone();
     let unconfirmed = chats.begin_restore().await;
+    let scheduler = std::sync::Arc::clone(&sync.scheduler);
     let restored = tauri::async_runtime::spawn_blocking(move || {
+        // Sync is held off while the Workspace file is replaced.
+        let _no_run = scheduler.hold();
         ticketd_core::Workspace::restore_default(path)
     })
     .await;
@@ -367,7 +371,7 @@ pub fn chat_answer_quit(app: AppHandle, bridge: State<'_, ChatBridge>, quit: boo
 }
 
 // ---------------------------------------------------------------------------
-// Window close, reopen and Quit (spec 20.3)
+// Window close, reopen and Quit (spec 21.3)
 // ---------------------------------------------------------------------------
 
 /// Brings the window back. The page was never unloaded, so its views are still attached
@@ -381,17 +385,38 @@ pub fn show_window(app: &AppHandle) {
     app.remove_tray_by_id(TRAY_ID);
 }
 
-/// Quit was asked for: confirm in the window while Chats are working, otherwise exit.
-fn request_quit(app: &AppHandle) {
+/// Whether closing the window now hides it and keeps Chats working, instead of quitting.
+/// The page asks before it starts its own way out.
+#[tauri::command]
+pub fn close_keeps_running(bridge: State<'_, ChatBridge>) -> bool {
+    keeps_running(&bridge)
+}
+
+fn keeps_running(bridge: &ChatBridge) -> bool {
+    !bridge.quit_confirmed.load(Ordering::SeqCst)
+        && close_action(bridge.chats.enabled(), bridge.chats.working()) == CloseAction::KeepRunning
+}
+
+/// Quit was asked for while Chats are working and the person has not confirmed: shows
+/// the window and asks there. `false` when the quit may go ahead.
+pub fn confirms_quit(app: &AppHandle) -> bool {
     let bridge = app.state::<ChatBridge>();
     let confirmed = bridge.quit_confirmed.load(Ordering::SeqCst);
     match quit_action(bridge.chats.working(), confirmed) {
         QuitAction::Confirm(working) => {
             show_window(app);
             let _ = app.emit(QUIT_EVENT, working);
+            true
         }
-        QuitAction::Quit => app.exit(0),
+        QuitAction::Quit => false,
     }
+}
+
+/// Quit from the tray: the window comes back so that what the way out has to show
+/// (the Chat confirmation, uploads still running) is seen.
+fn request_quit(app: &AppHandle) {
+    show_window(app);
+    app.exit(0);
 }
 
 /// While the window is hidden with Chats working, the tray icon is the way back to the
@@ -438,17 +463,14 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
             event: WindowEvent::CloseRequested { api, .. },
             ..
         } if label == "main" => {
-            match close_action(bridge.chats.enabled(), bridge.chats.working()) {
-                // Exactly as before Chat existed.
-                CloseAction::Exit => {}
-                CloseAction::KeepRunning => {
-                    api.prevent_close();
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.hide();
-                    }
-                    // Without a tray icon, starting ticketd again brings the window back.
-                    let _ = show_tray(app);
+            // Otherwise the window closes exactly as before Chat existed.
+            if keeps_running(&bridge) {
+                api.prevent_close();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
                 }
+                // Without a tray icon, starting ticketd again brings the window back.
+                let _ = show_tray(app);
             }
         }
         // Coming back to ticketd, perhaps after moving a Chat's folder back into place.
@@ -463,14 +485,12 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
             });
         }
         // The system's own Quit (for example Cmd+Q) rather than ticketd's confirmed exit.
+        // With the window already gone there is nowhere to ask, so the exit goes ahead.
         RunEvent::ExitRequested {
             code: None, api, ..
-        } => {
-            let confirmed = bridge.quit_confirmed.load(Ordering::SeqCst);
-            if let QuitAction::Confirm(working) = quit_action(bridge.chats.working(), confirmed) {
+        } if app.get_webview_window("main").is_some() => {
+            if confirms_quit(app) {
                 api.prevent_exit();
-                show_window(app);
-                let _ = app.emit(QUIT_EVENT, working);
             }
         }
         #[cfg(target_os = "macos")]

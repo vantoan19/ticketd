@@ -38,6 +38,9 @@ export function bridgeDefault(
     case "safety_backups":
     case "search_tags":
     case "source_conversation":
+    case "sync_conflicts": // without sync: nothing to review, every file local
+    case "sync_notices":
+    case "attachment_availability":
     case "list_sources": // no built-in connector unless a test supplies one
       return [];
     case "count_tickets":
@@ -49,6 +52,20 @@ export function bridgeDefault(
         done: 0,
         canceled: 0,
         duplicate: 0,
+      };
+    case "sync_status":
+      // This Workspace does not sync unless a test says so.
+      return {
+        connection: "not_connected",
+        account: null,
+        folder: null,
+        state: "saved_locally",
+        last_synced_at: null,
+        pending_uploads: [],
+        attachment_downloads: { count: 0, bytes_left: 0 },
+        needs_review: [],
+        recovery: null,
+        first_sync: null,
       };
     case "source_health":
       return { refreshing: false, sources: [] };

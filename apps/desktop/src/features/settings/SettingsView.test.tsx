@@ -122,6 +122,7 @@ test("the section list only offers sections that have cards", () => {
     "Attention",
     "Experimental",
     "Location",
+    "Sync",
     "Attachments",
     "Backups",
     "Export",
@@ -130,8 +131,21 @@ test("the section list only offers sections that have cards", () => {
     "Keyboard shortcuts",
     "About",
   ]);
-  for (const label of labels)
+  // Sync opens as a page of its own, so it has no card in the column.
+  for (const label of labels.filter((label) => label !== "Sync"))
     expect(screen.getByRole("region", { name: label })).toBeTruthy();
+});
+
+test("Sync opens as its own page in place of the cards", () => {
+  render(
+    <SettingsView
+      selected="sync"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  expect(screen.getByRole("heading", { level: 1, name: "Sync" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Appearance" })).toBeNull();
 });
 
 test("the Location card shows the path, counts, size, and format version", async () => {

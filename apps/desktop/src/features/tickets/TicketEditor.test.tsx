@@ -29,7 +29,7 @@ afterEach(() => {
 
 const initial: Ticket = {
   id: "1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "First",
   body: "Old",
   status: "Todo",
@@ -91,7 +91,7 @@ test("a title-only save should not overwrite an externally updated body", async 
   await autosave();
   expect(stored.body).toBe("External agent body");
   expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
-    reference: "T-1",
+    reference: "T-KQ1",
     patch: { title: "Renamed", expected_title: "First" },
   });
 });
@@ -177,7 +177,7 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await autosave();
   expect(bridge.invoke).toHaveBeenLastCalledWith("change_ticket", {
-    reference: "T-1",
+    reference: "T-KQ1",
     patch: {
       body: "# Xin chào\n\n- [x] Second line 🌿",
       expected_body: "# Xin chào\n\n- [ ] Second line 🌿",
@@ -231,7 +231,7 @@ test("external description changes pause a rich draft until reload or overwrite 
   fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
   await autosave();
   expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
-    reference: "T-1",
+    reference: "T-KQ1",
     patch: {
       body: "- [x] External content",
       expected_body: "Another external edit",
@@ -272,33 +272,33 @@ test("focuses the description on entry and reentry for rich and source documents
 
 test("navigates references in Markdown text while leaving code and links alone", async () => {
   const select = vi.fn();
-  bridge.invoke.mockResolvedValue({ ...initial, reference: "T-2" });
+  bridge.invoke.mockResolvedValue({ ...initial, reference: "T-KQ2" });
   render(
     <TicketEditor
       ticket={
         {
           ...initial,
-          body: "See T-2 and `T-3` and [website](https://example.com/T-4)",
+          body: "See T-KQ2 and `T-KQ3` and [website](https://example.com/T-KQ4)",
         } as never
       }
       onSaved={vi.fn()}
       select={select}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "T-2" }));
-  expect(select).toHaveBeenCalledWith("T-2");
-  expect(screen.queryByRole("button", { name: "T-3" })).toBeNull();
+  fireEvent.click(await screen.findByRole("button", { name: "T-KQ2" }));
+  expect(select).toHaveBeenCalledWith("T-KQ2");
+  expect(screen.queryByRole("button", { name: "T-KQ3" })).toBeNull();
   expect(
     screen.getByRole("link", { name: "website" }).getAttribute("href"),
-  ).toBe("https://example.com/T-4");
+  ).toBe("https://example.com/T-KQ4");
 });
 
 // A backlink as the core reports it: the source line, and where the reference sits in it.
 function at(body: string, line: string, nth = 0, key = 1) {
   let from = -1;
   for (let i = 0; i <= nth; i++) from = body.indexOf(line, from + 1);
-  const start = from + line.indexOf("T-1");
-  return { passage: line, mentioned: "T-1", start, end: start + 3, key };
+  const start = from + line.indexOf("T-KQ1");
+  return { passage: line, mentioned: "T-KQ1", start, end: start + 3, key };
 }
 const marked = () => document.querySelector("[data-mention-target]");
 function renderMention(body: string, line: string, nth = 0) {
@@ -318,7 +318,7 @@ function renderMention(body: string, line: string, nth = 0) {
       return new DOMRect();
     },
   );
-  const ticket = { ...initial, id: "9", reference: "T-9", body };
+  const ticket = { ...initial, id: "9", reference: "T-KQ9", body };
   const view = render(
     <TicketEditor
       ticket={ticket}
@@ -332,14 +332,14 @@ function renderMention(body: string, line: string, nth = 0) {
 
 test("a description mention is scrolled to, highlighted and focused in place, then cleared", async () => {
   const body =
-    "Intro paragraph.\n\n- Blocked on **T-1** until Friday.\n- Unrelated.";
+    "Intro paragraph.\n\n- Blocked on **T-KQ1** until Friday.\n- Unrelated.";
   const { ticket, view, scroller, workspace } = renderMention(
     body,
-    "- Blocked on **T-1** until Friday.",
+    "- Blocked on **T-KQ1** until Friday.",
   );
   const item = marked();
   expect(item?.tagName).toBe("LI");
-  expect(item?.textContent).toBe("Blocked on T-1 until Friday.");
+  expect(item?.textContent).toBe("Blocked on T-KQ1 until Friday.");
   expect(document.activeElement).toBe(item);
   expect(item?.getAttribute("tabindex")).toBe("-1");
   expect(scroller.scrollTop).toBe(300);
@@ -347,7 +347,7 @@ test("a description mention is scrolled to, highlighted and focused in place, th
   expect(
     document.getElementById(item?.getAttribute("aria-describedby") ?? "")
       ?.textContent,
-  ).toBe("Mentions T-1");
+  ).toBe("Mentions T-KQ1");
   view.rerender(
     <TicketEditor ticket={ticket} onSaved={vi.fn()} mention={null} />,
   );
@@ -362,30 +362,33 @@ test("a description mention is scrolled to, highlighted and focused in place, th
 
 test("a line with a link marks its own paragraph, not an earlier mention", () => {
   renderMention(
-    "Intro: T-1 is the parent.\n\nBlocked on T-1 with [the spec](https://example.com/spec).",
-    "Blocked on T-1 with [the spec](https://example.com/spec).",
+    "Intro: T-KQ1 is the parent.\n\nBlocked on T-KQ1 with [the spec](https://example.com/spec).",
+    "Blocked on T-KQ1 with [the spec](https://example.com/spec).",
   );
-  expect(marked()?.textContent).toBe("Blocked on T-1 with the spec.");
+  expect(marked()?.textContent).toBe("Blocked on T-KQ1 with the spec.");
 });
 
 test("a table row mention marks its cell", () => {
-  renderMention("| Ref | State |\n|---|---|\n| T-1 | Done |", "| T-1 | Done |");
+  renderMention(
+    "| Ref | State |\n|---|---|\n| T-KQ1 | Done |",
+    "| T-KQ1 | Done |",
+  );
   expect(marked()?.tagName).toBe("TD");
-  expect(marked()?.textContent).toBe("T-1");
+  expect(marked()?.textContent).toBe("T-KQ1");
 });
 
 test("a later paragraph that contains the passage does not win over the real item", () => {
   renderMention(
-    "Note: the blocker T-1 is still open.\n\n- T-1 is still open.",
-    "- T-1 is still open.",
+    "Note: the blocker T-KQ1 is still open.\n\n- T-KQ1 is still open.",
+    "- T-KQ1 is still open.",
   );
   expect(marked()?.tagName).toBe("LI");
 });
 
 test("identical lines are told apart by position", () => {
   renderMention(
-    "Blocked on T-1.\n\nOther.\n\nBlocked on T-1.",
-    "Blocked on T-1.",
+    "Blocked on T-KQ1.\n\nOther.\n\nBlocked on T-KQ1.",
+    "Blocked on T-KQ1.",
     1,
   );
   const paragraphs = [...document.querySelectorAll(".description-document p")];
@@ -393,8 +396,8 @@ test("identical lines are told apart by position", () => {
 });
 
 test("a code block above the mention keeps its tab stop and is never marked", () => {
-  const body = "Run:\n\n```sh\n./check T-1\n```\n\nBlocked on T-1 here.";
-  const { ticket, view } = renderMention(body, "Blocked on T-1 here.");
+  const body = "Run:\n\n```sh\n./check T-KQ1\n```\n\nBlocked on T-KQ1 here.";
+  const { ticket, view } = renderMention(body, "Blocked on T-KQ1 here.");
   const pre = document.querySelector("pre");
   expect(marked()?.tagName).toBe("P");
   expect(pre?.getAttribute("tabindex")).toBe("0");
@@ -406,8 +409,8 @@ test("a code block above the mention keeps its tab stop and is never marked", ()
 
 test("leaving edit mode does not bring the highlight back or scroll again", async () => {
   const { scroller } = renderMention(
-    "Intro.\n\nBlocked on T-1 today.",
-    "Blocked on T-1 today.",
+    "Intro.\n\nBlocked on T-KQ1 today.",
+    "Blocked on T-KQ1 today.",
   );
   expect(marked()).not.toBeNull();
   expect(scroller.scrollTop).toBe(300);
@@ -423,25 +426,25 @@ test("leaving edit mode does not bring the highlight back or scroll again", asyn
 
 test("an external change to the description drops the highlight", () => {
   const { view, ticket } = renderMention(
-    "Intro.\n\nBlocked on T-1 today.",
-    "Blocked on T-1 today.",
+    "Intro.\n\nBlocked on T-KQ1 today.",
+    "Blocked on T-KQ1 today.",
   );
   expect(marked()).not.toBeNull();
   view.rerender(
     <TicketEditor
       ticket={{
         ...ticket,
-        body: "Added first.\n\nIntro.\n\nBlocked on T-1 today.",
+        body: "Added first.\n\nIntro.\n\nBlocked on T-KQ1 today.",
       }}
       onSaved={vi.fn()}
-      mention={at(ticket.body, "Blocked on T-1 today.")}
+      mention={at(ticket.body, "Blocked on T-KQ1 today.")}
     />,
   );
   expect(marked()).toBeNull();
 });
 
 test("spans count chars from a body without its byte order mark, past astral characters", () => {
-  const body = "\uFEFF😀 Émoji first.\n\nSee T-1 here.\n\nAlso T-1 there.";
+  const body = "\uFEFF😀 Émoji first.\n\nSee T-KQ1 here.\n\nAlso T-KQ1 there.";
   const text = [...body.slice(1)];
   const start = text.indexOf("S") + "See ".length;
   render(
@@ -449,27 +452,27 @@ test("spans count chars from a body without its byte order mark, past astral cha
       ticket={{ ...initial, id: "9", body }}
       onSaved={vi.fn()}
       mention={{
-        passage: "See T-1 here.",
-        mentioned: "T-1",
+        passage: "See T-KQ1 here.",
+        mentioned: "T-KQ1",
         start,
         end: start + 3,
         key: 1,
       }}
     />,
   );
-  expect(marked()?.textContent).toBe("See T-1 here.");
+  expect(marked()?.textContent).toBe("See T-KQ1 here.");
 });
 
 test("a passage that is gone says so and lands on the description without guessing", async () => {
-  const stale = at("Blocked on T-1 today.", "Blocked on T-1 today.");
+  const stale = at("Blocked on T-KQ1 today.", "Blocked on T-KQ1 today.");
   render(
     <TicketEditor
-      ticket={{ ...initial, id: "9", body: "Intro: T-1 is the parent." }}
+      ticket={{ ...initial, id: "9", body: "Intro: T-KQ1 is the parent." }}
       onSaved={vi.fn()}
       mention={stale}
     />,
   );
-  const note = await screen.findByText(/Couldn't find the mention of T-1/);
+  const note = await screen.findByText(/Couldn't find the mention of T-KQ1/);
   expect(note.getAttribute("aria-live")).toBe("polite");
   expect(document.activeElement).toBe(
     screen.getByRole("group", { name: "Description" }),
@@ -502,7 +505,7 @@ test("a save the core refuses as stale keeps the draft and offers the choice", a
   const agent = { ...initial, title: "Agent title", body: "Agent wrote this" };
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "change_ticket")
-      throw "ticket 'T-1' was changed elsewhere since it was loaded";
+      throw "ticket 'T-KQ1' was changed elsewhere since it was loaded";
     return agent;
   });
   render(<Harness />);

@@ -118,7 +118,7 @@ test("Back with no history names the source item and returns it", async () => {
     id: "id-1",
     kind: "ticket" as const,
     label: "Source work",
-    ticket_reference: "T-15",
+    ticket_reference: "T-KQ15",
     state: null,
     trashed: false,
     activity_detail: false,
@@ -136,8 +136,10 @@ test("Back with no history names the source item and returns it", async () => {
     max_work: 1000,
   });
   const onBack = vi.fn();
-  render(<ContextGraph origin="T-15" onBack={onBack} onOpen={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Back to T-15" }));
+  render(<ContextGraph origin="T-KQ15" onBack={onBack} onOpen={vi.fn()} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Back to T-KQ15" }),
+  );
   expect(onBack).toHaveBeenCalledWith(node);
 });
 

@@ -198,7 +198,7 @@ fn related(
                 )
             })?;
             Ok(ContextRelated {
-                reference: format!("T-{}", r.get::<_, i64>(0)?),
+                reference: r.get::<_, String>(0)?,
                 title: text(r.get(1)?, LABEL),
                 status,
                 trashed: r.get(3)?,
@@ -216,7 +216,7 @@ impl Workspace {
     ) -> Result<TicketContext, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let id = relationships::id(&tx, reference)?;
-        let ticket = tx.query_row("SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
+        let ticket = tx.query_row("SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
         let availability = crate::history::availability(&tx, &id, ticket.status, ticket.trashed)?;
         let tags = {
             let mut stmt = tx.prepare("SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name LIMIT ?2 OFFSET ?3")?;
@@ -272,15 +272,15 @@ impl Workspace {
             if missing {
                 return Err(Error::MissingRelatedTicket);
             }
-            let parent = related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.parent_id WHERE p.child_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next();
+            let parent = related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.parent_id WHERE p.child_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next();
             Some(ContextRelationships {
                 parent,
-                related: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=CASE WHEN r.source_id=?1 THEN r.target_id ELSE r.source_id END WHERE r.kind='related' AND (r.source_id=?1 OR r.target_id=?1) ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
-                discovered_while: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
-                discoveries: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
-                duplicate_of: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
+                related: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=CASE WHEN r.source_id=?1 THEN r.target_id ELSE r.source_id END WHERE r.kind='related' AND (r.source_id=?1 OR r.target_id=?1) ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discovered_while: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discoveries: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                duplicate_of: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
                 external_duplicate_of: crate::source::duplicate_target(&tx, &id)?,
-                duplicates: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                duplicates: related(&tx, "SELECT t.reference,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 children_progress: {
                     let (total, done) = tx.query_row(
                         "SELECT COUNT(*), COALESCE(SUM(t.status = 'Done'), 0) FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1",
@@ -291,19 +291,19 @@ impl Workspace {
                 },
                 children: related(
                     &tx,
-                    "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.child_id WHERE p.parent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
+                    "SELECT t.reference,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.child_id WHERE p.parent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
                     &id,
                     options.offset,
                 )?,
                 prerequisites: related(
                     &tx,
-                    "SELECT t.number,t.title,t.status,t.trashed FROM dependencies d JOIN tickets t ON t.id=d.blocker_id WHERE d.dependent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
+                    "SELECT t.reference,t.title,t.status,t.trashed FROM dependencies d JOIN tickets t ON t.id=d.blocker_id WHERE d.dependent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
                     &id,
                     options.offset,
                 )?,
                 blocking: related(
                     &tx,
-                    "SELECT t.number,t.title,t.status,t.trashed FROM dependencies d JOIN tickets t ON t.id=d.dependent_id WHERE d.blocker_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
+                    "SELECT t.reference,t.title,t.status,t.trashed FROM dependencies d JOIN tickets t ON t.id=d.dependent_id WHERE d.blocker_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
                     &id,
                     options.offset,
                 )?,

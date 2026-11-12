@@ -96,7 +96,7 @@ test("expands omitted connections while retaining the selected item", async () =
       {
         id: "one",
         kind: "ticket",
-        label: "T-1 · First",
+        label: "T-KQ1 · First",
         state: "Todo",
         trashed: false,
         activity_detail: false,
@@ -117,7 +117,7 @@ test("expands omitted connections while retaining the selected item", async () =
     />,
   );
   fireEvent.click(
-    (await screen.findAllByRole("button", { name: "T-1 · First" })).at(-1)!,
+    (await screen.findAllByRole("button", { name: "T-KQ1 · First" })).at(-1)!,
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Show more connections" }),
@@ -136,7 +136,7 @@ test("connects visible items across candidate pages", async () => {
   const first = {
     id: "one",
     kind: "ticket" as const,
-    label: "T-1 · First",
+    label: "T-KQ1 · First",
     state: null,
     trashed: false,
     activity_detail: false,
@@ -144,7 +144,7 @@ test("connects visible items across candidate pages", async () => {
   const second = {
     id: "two",
     kind: "ticket" as const,
-    label: "T-2 · Second",
+    label: "T-KQ2 · Second",
     state: null,
     trashed: false,
     activity_detail: false,
@@ -238,8 +238,8 @@ const graphOf = (
 });
 
 test("a slow refresh does not erase pages loaded after it started", async () => {
-  const first = nodeOf("one", "T-1 · First");
-  const second = nodeOf("two", "T-2 · Second");
+  const first = nodeOf("one", "T-KQ1 · First");
+  const second = nodeOf("two", "T-KQ2 · Second");
   let releaseHydrate: (value: ReturnType<typeof graphOf>) => void = () => {};
   vi.mocked(client.workspaceGraph)
     .mockReset()
@@ -261,10 +261,10 @@ test("a slow refresh does not erase pages loaded after it started", async () => 
     onOpen: vi.fn(),
   };
   const { rerender } = render(<WorkspaceGraph {...props} revision={0} />);
-  (await screen.findAllByRole("button", { name: "T-1 · First" })).at(-1)!;
+  (await screen.findAllByRole("button", { name: "T-KQ1 · First" })).at(-1)!;
   rerender(<WorkspaceGraph {...props} revision={1} />);
   fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-  await screen.findAllByRole("button", { name: "T-2 · Second" });
+  await screen.findAllByRole("button", { name: "T-KQ2 · Second" });
   releaseHydrate(graphOf([first], "cursor"));
   await waitFor(() =>
     expect(client.workspaceGraph).toHaveBeenCalledWith(
@@ -275,7 +275,7 @@ test("a slow refresh does not erase pages loaded after it started", async () => 
     ),
   );
   expect(
-    screen.getAllByRole("button", { name: "T-2 · Second" }).length,
+    screen.getAllByRole("button", { name: "T-KQ2 · Second" }).length,
   ).toBeGreaterThan(0);
   expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
 });
@@ -283,7 +283,7 @@ test("a slow refresh does not erase pages loaded after it started", async () => 
 test("marks items in the Trash", async () => {
   vi.mocked(client.workspaceGraph)
     .mockReset()
-    .mockResolvedValue(graphOf([nodeOf("one", "T-1 · Old", true)], null));
+    .mockResolvedValue(graphOf([nodeOf("one", "T-KQ1 · Old", true)], null));
   render(
     <WorkspaceGraph
       active
@@ -294,7 +294,7 @@ test("marks items in the Trash", async () => {
     />,
   );
   expect(
-    await screen.findByRole("button", { name: "T-1 · Old (Trash)" }),
+    await screen.findByRole("button", { name: "T-KQ1 · Old (Trash)" }),
   ).toBeTruthy();
 });
 
@@ -337,9 +337,9 @@ test("items with no relationship leave the canvas for a Not connected list", asy
     .mockResolvedValue({
       ...graphOf(
         [
-          nodeOf("one", "T-1 · First"),
-          nodeOf("two", "T-2 · Second"),
-          nodeOf("lone", "T-4 · Dark mode"),
+          nodeOf("one", "T-KQ1 · First"),
+          nodeOf("two", "T-KQ2 · Second"),
+          nodeOf("lone", "T-KQ4 · Dark mode"),
         ],
         null,
       ),
@@ -363,7 +363,7 @@ test("items with no relationship leave the canvas for a Not connected list", asy
   const group = screen.getByRole("group", { name: "Not connected" });
   expect(group.textContent).toContain("Not connected · 1");
   fireEvent.click(
-    within(group).getByRole("button", { name: "T-4 · Dark mode" }),
+    within(group).getByRole("button", { name: "T-KQ4 · Dark mode" }),
   );
   expect(
     await screen.findByRole("button", { name: "Open ticket" }),
@@ -371,7 +371,7 @@ test("items with no relationship leave the canvas for a Not connected list", asy
 });
 
 test("an item created while the graph is open is added, not left counted but unseen", async () => {
-  const first = nodeOf("one", "T-1 · First");
+  const first = nodeOf("one", "T-KQ1 · First");
   const created = nodeOf("new", "Untitled");
   vi.mocked(client.workspaceGraph)
     .mockReset()
@@ -410,7 +410,7 @@ test("a selected ticket offers Open ticket and Show only its neighbors", async (
       {
         id: "one",
         kind: "ticket",
-        label: "T-1 · First",
+        label: "T-KQ1 · First",
         state: "Todo",
         trashed: false,
         activity_detail: false,
@@ -433,7 +433,7 @@ test("a selected ticket offers Open ticket and Show only its neighbors", async (
     />,
   );
   fireEvent.click(
-    (await screen.findAllByRole("button", { name: "T-1 · First" })).at(-1)!,
+    (await screen.findAllByRole("button", { name: "T-KQ1 · First" })).at(-1)!,
   );
   fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "one" }));

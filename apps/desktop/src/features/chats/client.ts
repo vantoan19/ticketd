@@ -11,7 +11,7 @@ import { z } from "zod";
 export const retentionSchema = z.enum(["active", "archived", "trashed"]);
 export type Retention = z.infer<typeof retentionSchema>;
 
-/** Observed activity (spec 20.3). Saved history never implies `working`. */
+/** Observed activity (spec 21.3). Saved history never implies `working`. */
 export const activitySchema = z.enum([
   "idle",
   "working",

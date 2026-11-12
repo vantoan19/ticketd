@@ -256,7 +256,7 @@ export type Notice = {
 
 /**
  * The notice for a problem. Wording for the states the design drew is the
- * design's; the rest (spec table 20.6) say what was observed as plainly.
+ * design's; the rest (spec table 21.6) say what was observed as plainly.
  */
 export function problemNotice(problem: Problem, harness: string): Notice {
   const said = problem.message ? ` ${problem.message}` : "";

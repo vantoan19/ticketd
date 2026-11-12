@@ -138,7 +138,7 @@ impl Workspace {
             } else if let Some(ticket_id) = &protection.ticket_id {
                 self.connection
                     .query_row(
-                        "SELECT 'T-' || number FROM tickets WHERE id=?1",
+                        "SELECT reference FROM tickets WHERE id=?1",
                         [ticket_id],
                         |row| row.get(0),
                     )
@@ -148,7 +148,14 @@ impl Workspace {
                 None
             };
             let label = if let Some(ticket_id) = &protection.ticket_id {
-                self.connection.query_row("SELECT 'T-' || number || ' · ' || substr(title,1,200) FROM tickets WHERE id=?1", [ticket_id], |row| row.get::<_, String>(0)).optional()?.unwrap_or_else(|| "Ticket context".into())
+                self.connection
+                    .query_row(
+                        "SELECT reference || ' · ' || substr(title,1,200) FROM tickets WHERE id=?1",
+                        [ticket_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+                    .unwrap_or_else(|| "Ticket context".into())
             } else if protection.kind == "document_body" {
                 self.connection
                     .query_row(

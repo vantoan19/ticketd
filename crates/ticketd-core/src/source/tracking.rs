@@ -646,7 +646,7 @@ fn resolve_target(
     }
     let reference = match last {
         Some(id) => Some(connection.query_row(
-            "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+            "SELECT reference FROM tickets WHERE id = ?1",
             [&id],
             |row| row.get(0),
         )?),
@@ -1033,26 +1033,17 @@ impl Workspace {
     }
 
     fn tracked(&self, only: Option<&str>) -> Result<Vec<Tracked>, Error> {
-        let number = match only {
-            Some(reference) => Some(
-                reference
-                    .strip_prefix("T-")
-                    .and_then(|n| n.parse::<i64>().ok())
-                    .ok_or_else(|| Error::NotFound(reference.to_owned()))?,
-            ),
-            None => None,
-        };
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.number, i.provider, i.external_id, i.locator FROM external_identities i \
+            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
              JOIN tickets t ON t.id = i.ticket_id \
-             WHERE (?1 IS NULL OR t.number = ?1) ORDER BY t.number",
+             WHERE (?1 IS NULL OR t.reference = ?1) ORDER BY t.number",
         )?;
         let rows = statement
-            .query_map([number], |row| {
+            .query_map([only], |row| {
                 Ok(Tracked {
                     ticket_id: row.get(0)?,
-                    reference: format!("T-{}", row.get::<_, i64>(1)?),
+                    reference: row.get::<_, String>(1)?,
                     provider: row.get(2)?,
                     external_id: row.get(3)?,
                     locator: row.get(4)?,
@@ -1061,8 +1052,8 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         if let (Some(reference), true) = (only, rows.is_empty()) {
             let exists: bool = self.connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tickets WHERE number = ?1)",
-                [number],
+                "SELECT EXISTS(SELECT 1 FROM tickets WHERE reference = ?1)",
+                [reference],
                 |row| row.get(0),
             )?;
             return Err(if exists {
@@ -1219,7 +1210,7 @@ impl Workspace {
 /// A tracked ticket as the refresh write reads it back.
 struct Existing {
     id: String,
-    number: i64,
+    reference: String,
     title: String,
     body: String,
     status: Status,
@@ -1244,7 +1235,7 @@ fn apply_issue(
     let identity = &issue.reference.identity;
     let existing: Option<Existing> = connection
         .query_row(
-            "SELECT t.id, t.number, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
+            "SELECT t.id, t.reference, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
                     COALESCE(s.external_state || ':' || COALESCE(s.closure_reason, ''), ''), \
                     COALESCE(s.external_updated_at, '') \
              FROM external_identities i \
@@ -1257,7 +1248,7 @@ fn apply_issue(
                 let status: String = row.get(4)?;
                 Ok(Existing {
                     id: row.get(0)?,
-                    number: row.get(1)?,
+                    reference: row.get(1)?,
                     title: row.get(2)?,
                     body: row.get(3)?,
                     status: status.parse().map_err(|e| {
@@ -1289,11 +1280,11 @@ fn apply_issue(
             }
             let status = status_for(None, issue.state, Status::Todo);
             let id = Uuid::new_v4().to_string();
+            let reference = crate::device::issue_reference(connection)?;
             connection.execute(
-                "INSERT INTO tickets (id, title, status, body) VALUES (?1, ?2, ?3, ?4)",
-                params![id, title, status.to_string(), issue.body],
+                "INSERT INTO tickets (id, reference, title, status, body) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, reference, title, status.to_string(), issue.body],
             )?;
-            let number = connection.last_insert_rowid();
             crate::document_links::index_external_body(connection, &id, &issue.body)?;
             link(connection, &id, issue, Origin::Imported, now)?;
             history::record(
@@ -1310,14 +1301,14 @@ fn apply_issue(
             if let Some(read) = read {
                 conversation::store(connection, &id, read, &issue.updated_at)?;
             }
-            applied.imported.push(format!("T-{number}"));
+            applied.imported.push(reference);
         }
         // Taken over (or otherwise local): the identity is remembered so discovery
         // neither creates another ticket nor resumes synchronization.
         Some(Existing { authority, .. }) if authority.as_deref() != Some("external") => {}
         Some(Existing {
             id,
-            number,
+            reference,
             title: old_title,
             body: old_body,
             status,
@@ -1395,7 +1386,7 @@ fn apply_issue(
                 )?;
             }
             if changed {
-                applied.updated.push(format!("T-{number}"));
+                applied.updated.push(reference);
             } else {
                 applied.unchanged += 1;
             }

@@ -20,7 +20,7 @@ window.ResizeObserver = class {
 
 const ticket: Ticket = {
   id: "1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Source",
   body: "",
   status: "Todo",
@@ -40,19 +40,23 @@ const edge = (
 ) => ({
   blocker,
   dependent,
-  replacement_blocker: blocker === "T-1" ? "T-2" : blocker,
-  replacement_dependent: dependent === "T-1" ? "T-2" : dependent,
+  replacement_blocker: blocker === "T-KQ1" ? "T-KQ2" : blocker,
+  replacement_dependent: dependent === "T-KQ1" ? "T-KQ2" : dependent,
   mode: "duplicate",
   basis: "0123456789abcdef",
   replacement_basis: "fedcba9876543210",
   ...overrides,
 });
 const preview = {
-  source: "T-1",
+  source: "T-KQ1",
   mode: "duplicate",
   waiting: [],
-  canonical: "T-2",
-  edges: [edge("T-1", "T-3"), edge("T-1", "T-4"), edge("T-5", "T-1")],
+  canonical: "T-KQ2",
+  edges: [
+    edge("T-KQ1", "T-KQ3"),
+    edge("T-KQ1", "T-KQ4"),
+    edge("T-KQ5", "T-KQ1"),
+  ],
   replacement_issues: [null, "already_exists", null],
 };
 let reviewError: unknown = null;
@@ -72,9 +76,9 @@ beforeEach(() => {
       return outcomes;
     }
     if (command === "show_ticket")
-      return { ...ticket, id: "2", reference: "T-2", title: "Canonical" };
+      return { ...ticket, id: "2", reference: "T-KQ2", title: "Canonical" };
     if (reviewError) throw reviewError;
-    return { ...ticket, status: "Duplicate", duplicate_of: "T-2" };
+    return { ...ticket, status: "Duplicate", duplicate_of: "T-KQ2" };
   });
 });
 afterEach(() => {
@@ -92,7 +96,7 @@ function renderReview(
       refresh={refresh}
       open
       onOpenChange={() => {}}
-      title="Mark T-2 as a duplicate"
+      title="Mark T-KQ2 as a duplicate"
       description="Choose the canonical ticket and review its dependencies."
       {...props}
     />,
@@ -109,7 +113,7 @@ function submitReview() {
 async function openReview(refresh = vi.fn(async () => {})) {
   renderReview(refresh);
   fireEvent.change(screen.getByLabelText("Canonical ticket reference"), {
-    target: { value: "T-2" },
+    target: { value: "T-KQ2" },
   });
   submitReview();
   await screen.findByText("Dependencies to review");
@@ -131,16 +135,16 @@ const choose = (edgeName: string, label: string) =>
 test("disables an invalid Replace with the reason", async () => {
   await openReview();
   const group = screen.getByRole("radiogroup", {
-    name: "Choice for T-1 blocks T-4",
+    name: "Choice for T-KQ1 blocks T-KQ4",
   });
   expect(
     (group.querySelector('[value="replace"]') as HTMLButtonElement).disabled,
   ).toBe(true);
   expect(
-    screen.getByText("Replace unavailable: T-2 already blocks T-4."),
+    screen.getByText("Replace unavailable: T-KQ2 already blocks T-KQ4."),
   ).toBeTruthy();
   const open = screen.getByRole("radiogroup", {
-    name: "Choice for T-1 blocks T-3",
+    name: "Choice for T-KQ1 blocks T-KQ3",
   });
   expect(
     (open.querySelector('[value="replace"]') as HTMLButtonElement).disabled,
@@ -148,16 +152,16 @@ test("disables an invalid Replace with the reason", async () => {
 });
 
 test("a waiting ticket that is itself a Duplicate does not break the review", async () => {
-  // T-2 was marked a duplicate earlier and kept its dependency, which is a supported state.
+  // T-KQ2 was marked a duplicate earlier and kept its dependency, which is a supported state.
   current = {
     ...preview,
     waiting: [
       {
-        ticket: "T-3",
+        ticket: "T-KQ3",
         status: "Duplicate",
         trashed: false,
         readiness: "no_ready_state",
-        unresolved: ["T-1"],
+        unresolved: ["T-KQ1"],
       },
     ],
   };
@@ -173,34 +177,34 @@ test("the summary and the apply label follow the choices", async () => {
       name: /^Mark duplicate/,
     }) as HTMLButtonElement;
   expect(apply().disabled).toBe(true);
-  choose("T-1 blocks T-3", "replace");
-  choose("T-1 blocks T-4", "retain");
-  choose("T-5 blocks T-1", "remove");
+  choose("T-KQ1 blocks T-KQ3", "replace");
+  choose("T-KQ1 blocks T-KQ4", "retain");
+  choose("T-KQ5 blocks T-KQ1", "remove");
   expect(apply().textContent).toBe("Mark duplicate and apply 2 changes");
   await waitFor(() => expect(apply().disabled).toBe(false));
   expect(
     screen.getByText(
-      /Mark T-1 as a duplicate of T-2, replace 1 dependency, remove 1 dependency, keep 1 dependency/,
+      /Mark T-KQ1 as a duplicate of T-KQ2, replace 1 dependency, remove 1 dependency, keep 1 dependency/,
     ),
   ).toBeTruthy();
-  expect(screen.getByText("T-3 now waits on T-2")).toBeTruthy();
+  expect(screen.getByText("T-KQ3 now waits on T-KQ2")).toBeTruthy();
   expect(
-    screen.getByText("T-4 keeps waiting on a duplicate ticket"),
+    screen.getByText("T-KQ4 keeps waiting on a duplicate ticket"),
   ).toBeTruthy();
 });
 
 test("applies the duplicate and the chosen changes together", async () => {
   const refresh = await openReview();
-  choose("T-1 blocks T-3", "replace");
-  choose("T-1 blocks T-4", "retain");
-  choose("T-5 blocks T-1", "remove");
+  choose("T-KQ1 blocks T-KQ3", "replace");
+  choose("T-KQ1 blocks T-KQ4", "retain");
+  choose("T-KQ5 blocks T-KQ1", "remove");
   fireEvent.click(await enabled("Mark duplicate and apply 2 changes"));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(invoke).toHaveBeenCalledWith(
     "mark_duplicate_reviewed",
     expect.objectContaining({
-      source: "T-1",
-      canonical: "T-2",
+      source: "T-KQ1",
+      canonical: "T-KQ2",
       decisions: [
         expect.objectContaining({ choice: "replace" }),
         expect.objectContaining({ choice: "retain" }),
@@ -212,9 +216,9 @@ test("applies the duplicate and the chosen changes together", async () => {
 
 test("a stale preview keeps the review open, applies nothing, and refreshes on request", async () => {
   const refresh = await openReview();
-  choose("T-1 blocks T-3", "replace");
-  choose("T-1 blocks T-4", "retain");
-  choose("T-5 blocks T-1", "remove");
+  choose("T-KQ1 blocks T-KQ3", "replace");
+  choose("T-KQ1 blocks T-KQ4", "retain");
+  choose("T-KQ5 blocks T-KQ1", "remove");
   reviewError = {
     code: "review_changed",
     index: null,
@@ -233,33 +237,35 @@ test("a stale preview keeps the review open, applies nothing, and refreshes on r
     ).disabled,
   ).toBe(true);
   current = {
-    source: "T-1",
+    source: "T-KQ1",
     mode: "duplicate",
     waiting: [],
-    canonical: "T-2",
-    edges: [edge("T-1", "T-3"), edge("T-6", "T-1")],
+    canonical: "T-KQ2",
+    edges: [edge("T-KQ1", "T-KQ3"), edge("T-KQ6", "T-KQ1")],
     replacement_issues: [null, null],
   };
   fireEvent.click(screen.getByRole("button", { name: "Refresh preview" }));
-  await screen.findByRole("radiogroup", { name: "Choice for T-6 blocks T-1" });
+  await screen.findByRole("radiogroup", {
+    name: "Choice for T-KQ6 blocks T-KQ1",
+  });
   expect(screen.queryByText(/Dependencies changed after/)).toBeNull();
   expect(
-    screen.queryByRole("radiogroup", { name: "Choice for T-5 blocks T-1" }),
+    screen.queryByRole("radiogroup", { name: "Choice for T-KQ5 blocks T-KQ1" }),
   ).toBeNull();
 });
 
 test("a ticket with no dependencies can be marked directly", async () => {
   current = {
-    source: "T-1",
+    source: "T-KQ1",
     mode: "duplicate",
     waiting: [],
-    canonical: "T-2",
+    canonical: "T-KQ2",
     edges: [],
     replacement_issues: [],
   };
   renderReview(async () => {});
   fireEvent.change(screen.getByLabelText("Canonical ticket reference"), {
-    target: { value: "T-2" },
+    target: { value: "T-KQ2" },
   });
   submitReview();
   const apply = await screen.findByRole("button", { name: "Mark duplicate" });
@@ -268,25 +274,25 @@ test("a ticket with no dependencies can be marked directly", async () => {
 
 test("reviews separate dependency changes for an existing endpoint", async () => {
   current = {
-    source: "T-9",
+    source: "T-KQ9",
     mode: "separate",
     waiting: [],
-    canonical: "T-1",
-    edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
+    canonical: "T-KQ1",
+    edges: [{ ...edge("T-KQ9", "T-KQ3"), replacement_blocker: "T-KQ1" }],
     replacement_issues: [null],
   };
   renderReview(async () => {}, { startSeparate: true });
   fireEvent.change(screen.getByLabelText("Existing endpoint to replace"), {
-    target: { value: "T-9" },
+    target: { value: "T-KQ9" },
   });
   submitReview();
   await screen.findByText("Dependencies to review");
-  choose("T-9 blocks T-3", "replace");
+  choose("T-KQ9 blocks T-KQ3", "replace");
   fireEvent.click(await enabled("Apply dependency changes"));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith(
       "edit_dependencies_reviewed",
-      expect.objectContaining({ source: "T-9", canonical: "T-1" }),
+      expect.objectContaining({ source: "T-KQ9", canonical: "T-KQ1" }),
     ),
   );
 });
@@ -295,29 +301,29 @@ test("shows both tickets with their statuses, and the duplicate's status change"
   await openReview();
   const duplicate = screen.getByRole("group", { name: "Duplicate" });
   expect(duplicate.textContent).toContain(
-    "Result: T-1 becomes Duplicate of T-2",
+    "Result: T-KQ1 becomes Duplicate of T-KQ2",
   );
   const canonical = screen.getByRole("group", { name: "Canonical ticket" });
-  expect(canonical.textContent).toContain("T-2");
+  expect(canonical.textContent).toContain("T-KQ2");
 });
 
 test("a separate review does not claim the kept endpoint is a duplicate", async () => {
   current = {
-    source: "T-9",
+    source: "T-KQ9",
     mode: "separate",
     waiting: [],
-    canonical: "T-1",
-    edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
+    canonical: "T-KQ1",
+    edges: [{ ...edge("T-KQ9", "T-KQ3"), replacement_blocker: "T-KQ1" }],
     replacement_issues: [null],
   };
   renderReview(async () => {}, { startSeparate: true });
   fireEvent.change(screen.getByLabelText("Existing endpoint to replace"), {
-    target: { value: "T-9" },
+    target: { value: "T-KQ9" },
   });
   submitReview();
   await screen.findByText("Dependencies to review");
-  choose("T-9 blocks T-3", "retain");
-  expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
+  choose("T-KQ9 blocks T-KQ3", "retain");
+  expect(screen.getByText("T-KQ3 keeps waiting on T-KQ9")).toBeTruthy();
   expect(screen.queryByText(/duplicate ticket/)).toBeNull();
 });
 
@@ -333,96 +339,96 @@ const outcome = (ticket: string, overrides: Record<string, unknown> = {}) => ({
 
 test("each choice words the core's outcome for the whole set of choices", async () => {
   current = {
-    source: "T-1",
+    source: "T-KQ1",
     mode: "duplicate",
     waiting: [],
-    canonical: "T-2",
+    canonical: "T-KQ2",
     edges: [
-      edge("T-1", "T-3"),
-      edge("T-1", "T-4"),
-      edge("T-1", "T-6"),
-      edge("T-1", "T-7"),
+      edge("T-KQ1", "T-KQ3"),
+      edge("T-KQ1", "T-KQ4"),
+      edge("T-KQ1", "T-KQ6"),
+      edge("T-KQ1", "T-KQ7"),
     ],
     replacement_issues: [null, null, null, null],
   };
   outcomes = [
-    outcome("T-3", { after: "ready" }),
-    outcome("T-4", { unresolved_after: ["T-8", "T-2"] }),
-    outcome("T-6", {
+    outcome("T-KQ3", { after: "ready" }),
+    outcome("T-KQ4", { unresolved_after: ["T-KQ8", "T-KQ2"] }),
+    outcome("T-KQ6", {
       status: "In progress",
       before: "no_ready_state",
       after: "no_ready_state",
     }),
-    outcome("T-7", {
+    outcome("T-KQ7", {
       trashed: true,
       before: "no_ready_state",
       after: "no_ready_state",
     }),
   ];
   await openReview();
-  choose("T-1 blocks T-3", "replace");
+  choose("T-KQ1 blocks T-KQ3", "replace");
   expect(
     await screen.findByText(
-      "T-3 becomes Ready; it now waits on T-2, which is Done",
+      "T-KQ3 becomes Ready; it now waits on T-KQ2, which is Done",
     ),
   ).toBeTruthy();
-  choose("T-1 blocks T-4", "replace");
+  choose("T-KQ1 blocks T-KQ4", "replace");
   expect(
-    await screen.findByText("T-4 stays Blocked, waiting on T-8, T-2"),
+    await screen.findByText("T-KQ4 stays Blocked, waiting on T-KQ8, T-KQ2"),
   ).toBeTruthy();
-  choose("T-1 blocks T-6", "remove");
+  choose("T-KQ1 blocks T-KQ6", "remove");
   expect(
     await screen.findByText(
-      "T-6 is In progress and has no Ready state; it no longer waits on T-1",
+      "T-KQ6 is In progress and has no Ready state; it no longer waits on T-KQ1",
     ),
   ).toBeTruthy();
-  choose("T-1 blocks T-7", "retain");
+  choose("T-KQ1 blocks T-KQ7", "retain");
   expect(
     await screen.findByText(
-      "T-7 is in the trash and has no Ready state; it keeps waiting on a duplicate ticket",
+      "T-KQ7 is in the trash and has no Ready state; it keeps waiting on a duplicate ticket",
     ),
   ).toBeTruthy();
 });
 
 test("the canonical's readiness is shown when the duplicate is the dependent", async () => {
   current = {
-    source: "T-1",
+    source: "T-KQ1",
     mode: "duplicate",
     waiting: [],
-    canonical: "T-2",
-    edges: [edge("T-5", "T-1")],
+    canonical: "T-KQ2",
+    edges: [edge("T-KQ5", "T-KQ1")],
     replacement_issues: [null],
   };
   outcomes = [
-    outcome("T-1", { after: "no_ready_state" }),
-    outcome("T-2", { before: "ready", unresolved_after: ["T-5"] }),
+    outcome("T-KQ1", { after: "no_ready_state" }),
+    outcome("T-KQ2", { before: "ready", unresolved_after: ["T-KQ5"] }),
   ];
   await openReview();
-  choose("T-5 blocks T-1", "replace");
+  choose("T-KQ5 blocks T-KQ1", "replace");
   expect(
-    await screen.findByText("T-2 becomes Blocked until T-5 is Done"),
+    await screen.findByText("T-KQ2 becomes Blocked until T-KQ5 is Done"),
   ).toBeTruthy();
-  choose("T-5 blocks T-1", "retain");
+  choose("T-KQ5 blocks T-KQ1", "retain");
   expect(
     await screen.findByText(
-      "T-1 is Duplicate and has no Ready state; it keeps its dependency on T-5",
+      "T-KQ1 is Duplicate and has no Ready state; it keeps its dependency on T-KQ5",
     ),
   ).toBeTruthy();
-  choose("T-5 blocks T-1", "remove");
+  choose("T-KQ5 blocks T-KQ1", "remove");
   expect(
     await screen.findByText(
-      "T-1 is Duplicate and has no Ready state; T-5 no longer blocks T-1",
+      "T-KQ1 is Duplicate and has no Ready state; T-KQ5 no longer blocks T-KQ1",
     ),
   ).toBeTruthy();
 });
 
 test("the review evaluates every choice together, with unchosen ones kept", async () => {
   await openReview();
-  choose("T-1 blocks T-3", "replace");
+  choose("T-KQ1 blocks T-KQ3", "replace");
   await waitFor(() =>
     expect(invoke).toHaveBeenLastCalledWith("evaluate_dependency_review", {
-      source: "T-1",
-      canonical: "T-2",
+      source: "T-KQ1",
+      canonical: "T-KQ2",
       separate: false,
       decisions: [
         expect.objectContaining({ choice: "replace" }),
@@ -440,7 +446,7 @@ test("a review the core calls changed while choosing is stale", async () => {
     index: null,
     message: "dependency review has changed; preview and choose again",
   };
-  choose("T-1 blocks T-3", "remove");
+  choose("T-KQ1 blocks T-KQ3", "remove");
   expect(
     await screen.findByText(/Dependencies changed after this preview/),
   ).toBeTruthy();
@@ -448,12 +454,16 @@ test("a review the core calls changed while choosing is stale", async () => {
 
 test("a separate review compares against the preview's normalized source", async () => {
   current = {
-    source: "T-9",
+    source: "T-KQ9",
     mode: "separate",
     waiting: [],
-    canonical: "T-1",
+    canonical: "T-KQ1",
     edges: [
-      { ...edge("T-9", "T-3"), mode: "separate", replacement_blocker: "T-1" },
+      {
+        ...edge("T-KQ9", "T-KQ3"),
+        mode: "separate",
+        replacement_blocker: "T-KQ1",
+      },
     ],
     replacement_issues: [null],
   };
@@ -463,35 +473,35 @@ test("a separate review compares against the preview's normalized source", async
   });
   submitReview();
   await screen.findByText("Dependencies to review");
-  choose("T-9 blocks T-3", "retain");
-  expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
+  choose("T-KQ9 blocks T-KQ3", "retain");
+  expect(screen.getByText("T-KQ3 keeps waiting on T-KQ9")).toBeTruthy();
 });
 
 test("names the replacement once, in the form of the issue's example", async () => {
   current = {
     ...preview,
-    edges: [edge("T-1", "T-63"), edge("T-1", "T-64")],
+    edges: [edge("T-KQ1", "T-KQ63"), edge("T-KQ1", "T-KQ64")],
     replacement_issues: [null, null],
   };
   outcomes = [
-    outcome("T-63", { unresolved_after: ["T-2"] }),
-    outcome("T-64", { before: "ready", unresolved_after: ["T-2"] }),
+    outcome("T-KQ63", { unresolved_after: ["T-KQ2"] }),
+    outcome("T-KQ64", { before: "ready", unresolved_after: ["T-KQ2"] }),
   ];
   await openReview();
-  choose("T-1 blocks T-63", "replace");
-  choose("T-1 blocks T-64", "replace");
+  choose("T-KQ1 blocks T-KQ63", "replace");
+  choose("T-KQ1 blocks T-KQ64", "replace");
   expect(
-    await screen.findByText("T-63 becomes Ready once T-2 is Done"),
+    await screen.findByText("T-KQ63 becomes Ready once T-KQ2 is Done"),
   ).toBeTruthy();
   expect(
-    screen.getByText("T-64 becomes Blocked until T-2 is Done"),
+    screen.getByText("T-KQ64 becomes Blocked until T-KQ2 is Done"),
   ).toBeTruthy();
 });
 
 test("a late answer for earlier choices never replaces the answer for the latest", async () => {
   current = {
     ...preview,
-    edges: [edge("T-1", "T-3")],
+    edges: [edge("T-KQ1", "T-KQ3")],
     replacement_issues: [null],
   };
   const pending: { replace: boolean; resolve: (value: unknown) => void }[] = [];
@@ -504,33 +514,35 @@ test("a late answer for earlier choices never replaces the answer for the latest
     );
   });
   await openReview();
-  choose("T-1 blocks T-3", "replace");
+  choose("T-KQ1 blocks T-KQ3", "replace");
   await waitFor(() => expect(pending.length).toBe(2));
-  choose("T-1 blocks T-3", "remove");
+  choose("T-KQ1 blocks T-KQ3", "remove");
   await waitFor(() => expect(pending.length).toBe(3));
-  pending[2]?.resolve([outcome("T-3", { unresolved_after: ["T-9"] })]);
+  pending[2]?.resolve([outcome("T-KQ3", { unresolved_after: ["T-KQ9"] })]);
   expect(
     await screen.findByText(
-      "T-3 stays Blocked, waiting on T-9; it no longer waits on T-1",
+      "T-KQ3 stays Blocked, waiting on T-KQ9; it no longer waits on T-KQ1",
     ),
   ).toBeTruthy();
-  pending[1]?.resolve([outcome("T-3", { after: "ready" })]);
+  pending[1]?.resolve([outcome("T-KQ3", { after: "ready" })]);
   await new Promise((done) => setTimeout(done, 20));
-  expect(screen.queryByText(/T-3 becomes Ready/)).toBeNull();
-  expect(screen.getByText(/T-3 stays Blocked, waiting on T-9/)).toBeTruthy();
+  expect(screen.queryByText(/T-KQ3 becomes Ready/)).toBeNull();
+  expect(
+    screen.getByText(/T-KQ3 stays Blocked, waiting on T-KQ9/),
+  ).toBeTruthy();
 });
 
 test("a failed evaluate clears the earlier lines and Apply waits for each answer", async () => {
   current = {
     ...preview,
-    edges: [edge("T-1", "T-3")],
+    edges: [edge("T-KQ1", "T-KQ3")],
     replacement_issues: [null],
   };
-  outcomes = [outcome("T-3", { after: "ready" })];
+  outcomes = [outcome("T-KQ3", { after: "ready" })];
   await openReview();
-  choose("T-1 blocks T-3", "remove");
+  choose("T-KQ1 blocks T-KQ3", "remove");
   expect(
-    await screen.findByText("T-3 becomes Ready; it no longer waits on T-1"),
+    await screen.findByText("T-KQ3 becomes Ready; it no longer waits on T-KQ1"),
   ).toBeTruthy();
   const apply = () =>
     screen.getByRole("button", {
@@ -542,18 +554,18 @@ test("a failed evaluate clears the earlier lines and Apply waits for each answer
     index: null,
     message: "database is locked",
   };
-  choose("T-1 blocks T-3", "retain");
+  choose("T-KQ1 blocks T-KQ3", "retain");
   expect(await screen.findByText("database is locked")).toBeTruthy();
   expect(screen.queryByText(/becomes Ready/)).toBeNull();
   expect(
-    screen.getByText("T-3 keeps waiting on a duplicate ticket"),
+    screen.getByText("T-KQ3 keeps waiting on a duplicate ticket"),
   ).toBeTruthy();
 });
 
 test("Apply is disabled while the answer for the choices is on its way", async () => {
   current = {
     ...preview,
-    edges: [edge("T-1", "T-3")],
+    edges: [edge("T-KQ1", "T-KQ3")],
     replacement_issues: [null],
   };
   let release: (value: unknown) => void = () => {};
@@ -564,12 +576,12 @@ test("Apply is disabled while the answer for the choices is on its way", async (
       : base(command, args),
   );
   await openReview();
-  choose("T-1 blocks T-3", "remove");
+  choose("T-KQ1 blocks T-KQ3", "remove");
   const apply = screen.getByRole("button", {
     name: /^Mark duplicate/,
   }) as HTMLButtonElement;
   expect(apply.disabled).toBe(true);
-  release([outcome("T-3")]);
+  release([outcome("T-KQ3")]);
   await waitFor(() => expect(apply.disabled).toBe(false));
 });
 
@@ -580,7 +592,7 @@ test("a preview for the other kind of review offers a refresh with its own messa
     index: null,
     message: "this review was previewed for a different kind of review",
   };
-  choose("T-1 blocks T-3", "remove");
+  choose("T-KQ1 blocks T-KQ3", "remove");
   expect(
     await screen.findByText(/made for a different kind of review/),
   ).toBeTruthy();
@@ -590,19 +602,19 @@ test("a preview for the other kind of review offers a refresh with its own messa
 test("a trashed endpoint explains why Replace is unavailable", async () => {
   current = {
     ...preview,
-    edges: [edge("T-1", "T-3")],
+    edges: [edge("T-KQ1", "T-KQ3")],
     replacement_issues: ["trashed"],
   };
   await openReview();
   expect(
-    screen.getByText("Replace unavailable: T-2 or T-3 is in the trash."),
+    screen.getByText("Replace unavailable: T-KQ2 or T-KQ3 is in the trash."),
   ).toBeTruthy();
 });
 
 test("one flow in the dialog shell: Cancel, and a primary that waits for a canonical ticket", async () => {
   renderReview(async () => {});
   expect(
-    screen.getByRole("dialog", { name: "Mark T-2 as a duplicate" }),
+    screen.getByRole("dialog", { name: "Mark T-KQ2 as a duplicate" }),
   ).toBeTruthy();
   expect(
     screen.queryByRole("button", { name: "Review dependencies" }),
@@ -627,7 +639,7 @@ test("the primary names what it applies and waits for every dependency choice", 
       "Choose Replace, Keep or Remove for each dependency",
     ),
   ).toBeTruthy();
-  choose("T-1 blocks T-3", "remove");
+  choose("T-KQ1 blocks T-KQ3", "remove");
   expect(
     await screen.findByRole("button", {
       name: "Mark duplicate and apply 1 change",

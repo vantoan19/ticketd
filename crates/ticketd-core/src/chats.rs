@@ -66,7 +66,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE TABLE IF NOT EXISTS chat_record_writes (chat_id TEXT NOT NULL, activity_id TEXT, history_number INTEGER);
          CREATE INDEX IF NOT EXISTS chat_record_writes_activity ON chat_record_writes(activity_id);
          CREATE INDEX IF NOT EXISTS chat_record_writes_history ON chat_record_writes(history_number);
-         PRAGMA user_version = 56;"
+         PRAGMA user_version = 66;"
     ))?;
     Ok(())
 }
@@ -92,7 +92,7 @@ pub struct ChatLink {
 pub struct ChatLinkedRecord {
     pub kind: ChatLinkKind,
     pub id: String,
-    /// The `T-n` reference; only tickets have one.
+    /// The Ticket reference (`T-KQ43`); only tickets have one.
     pub reference: Option<String>,
     /// A ticket title, Document heading or project name, cut to 200 characters.
     pub title: String,
@@ -1374,7 +1374,7 @@ impl Workspace {
                     "SELECT NULL, substr(name, 1, 200), 0 FROM projects WHERE id = ?1".to_owned()
                 }
                 ChatLinkKind::Ticket => {
-                    "SELECT 'T-' || number, substr(title, 1, 200), trashed FROM tickets WHERE id = ?1"
+                    "SELECT reference, substr(title, 1, 200), trashed FROM tickets WHERE id = ?1"
                         .to_owned()
                 }
                 ChatLinkKind::Document => {
@@ -1838,12 +1838,12 @@ impl Workspace {
             .ok_or_else(|| invalid(format!("turn '{turn_id}' was not recorded for this Chat")))?;
         let mut statement = self.connection.prepare(
             "SELECT kind, reference, title, from_value, to_value FROM (
-                 SELECT 'status' AS kind, 'T-' || t.number AS reference, t.title, h.from_value, h.to_value, h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent,
+                 SELECT 'status' AS kind, t.reference AS reference, t.title, h.from_value, h.to_value, h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent,
                         (SELECT chat_id FROM chat_record_writes WHERE history_number = h.number) AS writer
                  FROM ticket_history h JOIN tickets t ON t.id = h.ticket_id
                  WHERE h.kind = 'status' AND h.timestamp >= ?2 AND (?3 IS NULL OR h.timestamp <= ?3)
                  UNION ALL
-                 SELECT 'update', 'T-' || t.number, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent,
+                 SELECT 'update', t.reference, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent,
                         (SELECT chat_id FROM chat_record_writes WHERE activity_id = a.id)
                  FROM activities a JOIN tickets t ON t.id = a.ticket_id
                  WHERE a.reported_at >= ?2 AND (?3 IS NULL OR a.reported_at <= ?3))

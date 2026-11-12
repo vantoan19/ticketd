@@ -105,7 +105,7 @@ it("includes Activity details on request and keeps a selected detail", async () 
   vi.mocked(documents.tags).mockResolvedValue([]);
   vi.mocked(documents.trash).mockResolvedValue([]);
   vi.mocked(documents.recent).mockImplementation(async (_offset, include) =>
-    include ? [{ id: doc.id, heading: "Update", origin_ticket: "T-1" }] : [],
+    include ? [{ id: doc.id, heading: "Update", origin_ticket: "T-KQ1" }] : [],
   );
   vi.mocked(documents.open).mockResolvedValue(doc);
   vi.mocked(documents.keep).mockResolvedValue({ ...doc, kept: true });
@@ -122,7 +122,7 @@ it("includes Activity details on request and keeps a selected detail", async () 
   );
   fireEvent.click(screen.getByLabelText("Include update details"));
   fireEvent.click(await screen.findByRole("button", { name: "Update" }));
-  expect(screen.getByText("Update details · T-1")).toBeTruthy();
+  expect(screen.getByText("Update details · T-KQ1")).toBeTruthy();
   fireEvent.click(
     await screen.findByRole("button", { name: "Keep in Documents" }),
   );

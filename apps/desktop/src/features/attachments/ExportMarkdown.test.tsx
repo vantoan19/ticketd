@@ -55,7 +55,7 @@ test("mixed export distinguishes verified uploaded copies from changed omissions
     ],
   });
   render(
-    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-1" }} />,
+    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-KQ1" }} />,
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Export Markdown with files" }),
@@ -116,7 +116,7 @@ test("exports selected content and reports partial omissions without changing it
 test("cancelling the output folder does not export anything", async () => {
   vi.mocked(open).mockResolvedValue(null);
   render(
-    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-1" }} />,
+    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-KQ1" }} />,
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Export Markdown with files" }),
@@ -148,7 +148,7 @@ test("complete external-link exports explain remote bytes and recipient access",
     ],
   });
   render(
-    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-1" }} />,
+    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-KQ1" }} />,
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Export Markdown with files" }),

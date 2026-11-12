@@ -25,7 +25,7 @@ Backup preserves workspace data and retained retry outcomes.
 `restore-workspace BACKUP_PATH` replaces the workspace after closing the desktop
 and other ticketd operations. It retains a safety backup and prints its path;
 keep that result. This operation affects the entire workspace, unlike `restore
-T-1` or `document restore DOCUMENT_ID`, which restore items from trash.
+T-KQ1` or `document restore DOCUMENT_ID`, which restore items from trash.
 
 ## Personal data
 

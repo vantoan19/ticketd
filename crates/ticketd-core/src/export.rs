@@ -34,7 +34,10 @@ impl Workspace {
                 "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept",
             ),
             ("context_mentions", "source_id, target_id, passage"),
-            ("numeric_mentions", "source_id, activity, number, passage"),
+            (
+                "numeric_mentions",
+                "source_id, activity, reference, passage",
+            ),
             ("activity_mentions", "activity_id, target_id, passage"),
             ("document_opens", "sequence, document_id"),
             ("document_pins", "document_id"),
@@ -46,7 +49,7 @@ impl Workspace {
             ("ticket_documents", "ticket_id, document_id"),
             (
                 "tickets",
-                "number, id, title, status, body, project_id, plan_id, trashed, updated_at",
+                "number, id, reference, title, status, body, project_id, plan_id, trashed, updated_at",
             ),
             (
                 "activities",

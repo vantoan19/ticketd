@@ -927,7 +927,7 @@ fn linked_records_are_read_as_they_are_now_not_as_they_were_when_linked() {
     assert_eq!(
         summary(&workspace),
         [
-            (Some("T-1".into()), "First title".into(), false),
+            (Some("T-KQ1".into()), "First title".into(), false),
             (None, "Notes".into(), false),
             (None, "App".into(), false),
         ]
@@ -935,7 +935,7 @@ fn linked_records_are_read_as_they_are_now_not_as_they_were_when_linked() {
 
     workspace
         .change_ticket(
-            "T-1",
+            "T-KQ1",
             ticketd_core::TicketPatch {
                 title: Some("Second title".into()),
                 ..Default::default()

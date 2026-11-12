@@ -50,14 +50,9 @@ fn preview_names_shared_usage_without_flattening_documents_drafts_or_trash() {
             |entry| entry["target"] == serde_json::json!({"kind":"document", "id":document.id})
         )
     );
-    assert!(
-        preview
-            .usage
-            .entries
-            .iter()
-            .any(|usage| usage.label == "T-1 · Investigate screenshot"
-                && usage.kind == "ticket_body")
-    );
+    assert!(preview.usage.entries.iter().any(|usage| usage.label
+        == "T-KQ1 · Investigate screenshot"
+        && usage.kind == "ticket_body"));
     assert!(
         preview
             .usage

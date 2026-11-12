@@ -12,7 +12,7 @@ export function EmphasizedPassage({
   let from = 0;
   for (let at = text.indexOf(reference); at !== -1;) {
     const end = at + reference.length;
-    // Only whole references count, so T-1 does not highlight inside T-12.
+    // Only whole references count, so T-KQ1 does not highlight inside T-KQ12.
     const word = /[\p{L}\p{N}_-]/u;
     if (!word.test(text[at - 1] ?? "") && !word.test(text[end] ?? "")) {
       parts.push(text.slice(from, at), <mark key={at}>{reference}</mark>);

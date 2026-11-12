@@ -52,18 +52,18 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 65] = [
-    ("chat_record_writes", 56),
-    ("chat_notices", 56),
-    ("chats", 56),
-    ("chat_links", 56),
-    ("chat_sessions", 56),
-    ("chat_turns", 56),
-    ("chat_messages", 56),
-    ("chat_submission_attempts", 56),
-    ("chat_tools", 56),
-    ("chat_interactions", 56),
-    ("chat_changes", 56),
+const TABLES: [(&str, i64); 74] = [
+    ("chat_record_writes", 66),
+    ("chat_notices", 66),
+    ("chats", 66),
+    ("chat_links", 66),
+    ("chat_sessions", 66),
+    ("chat_turns", 66),
+    ("chat_messages", 66),
+    ("chat_submission_attempts", 66),
+    ("chat_tools", 66),
+    ("chat_interactions", 66),
+    ("chat_changes", 66),
     ("attachment_upload_destinations", 55),
     ("attachment_upload_destination", 55),
     ("drive_upload_operations", 52),
@@ -118,6 +118,15 @@ const TABLES: [(&str, i64); 65] = [
     ("publication_attempts", 26),
     ("workspace_changes", 45),
     ("ticket_documents", 46),
+    ("device", 56),
+    ("record_versions", 57),
+    ("sync_dirty", 58),
+    ("sync_capture", 58),
+    ("sync_files", 58),
+    ("sync_conflicts", 58),
+    ("sync_notices", 58),
+    ("sync_state", 59),
+    ("sync_attachments", 59),
 ];
 
 pub(crate) fn table_exists(connection: &Connection, table: &str) -> Result<bool, Error> {
@@ -187,6 +196,8 @@ pub(crate) fn missing_tables(
         ("embedded_activity_delete", 48),
         ("drive_upload_request_namespace", 52),
         ("write_drive_request_namespace", 52),
+        ("record_version_ticket", 57),
+        ("record_version_document", 57),
     ] {
         let exists: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
@@ -195,6 +206,23 @@ pub(crate) fn missing_tables(
         )?;
         if version >= introduced && !exists {
             missing.push(trigger);
+        }
+    }
+    // Without its capture triggers a restored Workspace would silently stop uploading edits.
+    if version >= 58 {
+        let triggers = crate::sync::captured_tables().flat_map(|table| {
+            crate::sync::TRIGGER_EVENTS.map(|event| format!("sync_capture_{table}_{event}"))
+        });
+        for trigger in triggers {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
+                [trigger],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                missing.push("sync capture triggers");
+                break;
+            }
         }
     }
     if version >= 32 && !table_exists(connection, "activities")? {

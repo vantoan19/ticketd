@@ -25,7 +25,7 @@
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 16px 36px minmax(0, 1fr) auto;
+  grid-template-columns: 16px 64px minmax(0, 1fr) auto;
   column-gap: 4px;
   row-gap: 2px;
   width: 100%;
@@ -525,7 +525,7 @@
 }
 .ticket-row[data-rows="simple"] [data-slot="reference"] {
   flex: none;
-  min-width: 36px;
+  min-width: 64px;
 }
 .ticket-row[data-rows="simple"] > [data-slot="badge"] {
   flex: none;

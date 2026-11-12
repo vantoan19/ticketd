@@ -1471,7 +1471,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     .await;
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
 
-    *context.lock().unwrap() = "links: T-1".to_owned();
+    *context.lock().unwrap() = "links: T-KQ1".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("second").await;
     f.emit(turn_ended(
@@ -1489,7 +1489,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
     assert_eq!(
         texts(&f),
-        ["links: none\n\nfirst", "links: T-1\n\nsecond", "third"]
+        ["links: none\n\nfirst", "links: T-KQ1\n\nsecond", "third"]
     );
     let kept: Vec<_> = f
         .items()
@@ -1499,7 +1499,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
             _ => None,
         })
         .collect();
-    assert_eq!(kept, ["links: none", "links: T-1"]);
+    assert_eq!(kept, ["links: none", "links: T-KQ1"]);
 
     // A resumed native session already has what it was given ...
     f.host.stop_all().await;
@@ -1512,10 +1512,10 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     .await;
     // ... and is told when the links changed while no session was live.
     f.host.stop_all().await;
-    *context.lock().unwrap() = "links: T-2".to_owned();
+    *context.lock().unwrap() = "links: T-KQ2".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("fifth").await;
-    assert_eq!(texts(&f)[4], "links: T-2\n\nfifth");
+    assert_eq!(texts(&f)[4], "links: T-KQ2\n\nfifth");
 }
 
 /// L3: what the agent changed in ticketd during a turn is kept with the turn when it

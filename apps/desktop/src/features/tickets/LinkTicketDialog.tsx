@@ -159,7 +159,7 @@ export function LinkTicketDialog({
               <Input
                 id={`link-search-${ticket.id}`}
                 value={query}
-                placeholder="Search by title, text or T-number"
+                placeholder="Search by title, text or reference"
                 autoComplete="off"
                 onChange={(event) => setQuery(event.target.value)}
               />

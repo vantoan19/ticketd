@@ -14,6 +14,7 @@ pub use backup_review::{
 };
 mod context;
 mod context_graph;
+mod device;
 pub use context_graph::{
     ContextGraph, ContextGraphContinuation, ContextGraphEdge, ContextGraphNode, ContextGraphPage,
     WorkspaceGraph, WorkspaceGraphRequest,
@@ -41,6 +42,7 @@ pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspa
 mod plans;
 mod retry;
 pub mod source;
+pub mod sync;
 pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
@@ -50,6 +52,8 @@ mod relationships;
 pub use relationships::RelationshipKind;
 mod search;
 pub use search::{Availability, TicketFilter, TicketOrder};
+mod sync_files;
+pub use sync_files::{MissingTarget, SyncKind, SyncPart, SyncPartKind, SyncRecord, SyncValue};
 mod tags;
 mod ticket_documents;
 pub use plans::{Plan, PlanCounts, PlanView};
@@ -79,10 +83,12 @@ mod attachment_retention;
 pub use attachment_library::{AttachmentQuery, AttachmentSearchResult, AttachmentState};
 mod attachments;
 mod upload_destination;
+mod versions;
 pub use attachment_previews::{
     AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
 };
 pub use upload_destination::AttachmentUploadDestination;
+pub use versions::{RecordKind, Version, VersionSummary};
 pub mod drive;
 mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
@@ -110,7 +116,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 56;
+pub const FORMAT_VERSION: i64 = 66;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -210,6 +216,8 @@ pub enum Error {
     RelationshipSelfLink,
     #[error("dependency review has changed; preview and choose again")]
     DependencyReviewChanged,
+    #[error("the values to review changed; check them and choose again")]
+    SyncReviewChanged,
     #[error(
         "this review was previewed for a different kind of review; preview again for a {0} review"
     )]
@@ -284,6 +292,12 @@ pub enum Error {
     Directory(#[from] std::io::Error),
     #[error("workspace database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("sync storage: {0}")]
+    Remote(#[from] sync::remote::RemoteError),
+    #[error("unreadable sync file: {0}")]
+    SyncFile(String),
+    #[error("sync: {0}")]
+    Sync(String),
     #[error("workspace schema version {0} is newer than this application supports")]
     NewerSchema(i64),
 }
@@ -382,6 +396,14 @@ fn external_status_message(
     }
 }
 
+/// How long an open waits for exclusive use while others merely have the
+/// Workspace open: they may keep it open for as long as they run.
+const OPEN_WORKSPACES_WAIT: Duration = Duration::from_secs(10);
+/// How long an open waits for a migration or restore under way. Its holder is
+/// at work and will finish (the lock is freed if its process dies), and a
+/// migration on a busy machine has taken longer than ten seconds.
+const MIGRATION_WAIT: Duration = Duration::from_secs(600);
+
 fn wait_for_migration_lock(deadline: Instant) -> Result<(), Error> {
     if Instant::now() >= deadline {
         return Err(Error::Backup(
@@ -404,22 +426,45 @@ impl Workspace {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::open_within(path.as_ref(), OPEN_WORKSPACES_WAIT, MIGRATION_WAIT)
+    }
+
+    /// [`Workspace::open`] with other bounds on its two waits, so a test of
+    /// which wait applies does not have to sit one out.
+    #[cfg(feature = "test-lock-waits")]
+    pub fn open_with_lock_waits(
+        path: impl AsRef<Path>,
+        open_workspaces: Duration,
+        migration: Duration,
+    ) -> Result<Self, Error> {
+        Self::open_within(path.as_ref(), open_workspaces, migration)
+    }
+
+    fn open_within(
+        path: &Path,
+        open_workspaces_wait: Duration,
+        migration_wait: Duration,
+    ) -> Result<Self, Error> {
         use fs2::FileExt;
-        let path = path.as_ref();
         let resolved = if path.exists() {
             Some(path.canonicalize()?)
         } else {
             None
         };
         let path = resolved.as_deref().unwrap_or(path);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let migrating = Instant::now() + migration_wait;
+        // Starts when exclusive use is first refused, and anew after each
+        // wait for a migration: that one was not an open Workspace.
+        let mut open_elsewhere: Option<Instant> = None;
         loop {
             let lock = backup::lock_file(path)?;
             if let Err(error) = FileExt::try_lock_shared(&lock) {
                 if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                     return Err(error.into());
                 }
-                wait_for_migration_lock(deadline)?;
+                // Only a migration or a restore holds the lock exclusively.
+                open_elsewhere = None;
+                wait_for_migration_lock(migrating)?;
                 continue;
             }
             if restore::pending(path) {
@@ -429,7 +474,10 @@ impl Workspace {
                     if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                         return Err(error.into());
                     }
-                    wait_for_migration_lock(deadline)?;
+                    wait_for_migration_lock(
+                        *open_elsewhere
+                            .get_or_insert_with(|| Instant::now() + open_workspaces_wait),
+                    )?;
                     continue;
                 }
                 restore::recover(path)?;
@@ -469,7 +517,9 @@ impl Workspace {
                 if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
                     return Err(error.into());
                 }
-                wait_for_migration_lock(deadline)?;
+                wait_for_migration_lock(
+                    *open_elsewhere.get_or_insert_with(|| Instant::now() + open_workspaces_wait),
+                )?;
                 continue;
             }
             let mut connection = Connection::open(path)?;
@@ -633,7 +683,7 @@ impl Workspace {
             transaction.execute_batch("PRAGMA user_version = 34;")?;
         }
         if version < 41 {
-            transaction.execute_batch("CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, number, passage)); CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(number, activity, source_id, passage);")?;
+            transaction.execute_batch(document_links::MENTION_INDEX_SCHEMA)?;
         }
         if version < 35 {
             document_links::migrate(&transaction)?;
@@ -733,15 +783,11 @@ impl Workspace {
         if version < 42 {
             // Rebuildable, ordered projections let graph reads stop after a bounded
             // number of Activity mentions without walking unrelated Activities.
-            transaction.execute_batch("                CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, number, passage));
-                CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
-                INSERT OR IGNORE INTO activity_graph_numbers SELECT a.ticket_id, m.source_id, m.number, m.passage FROM numeric_mentions m JOIN activities a ON a.id=m.source_id WHERE m.activity=1;
+            transaction.execute_batch("                CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
+                INSERT OR IGNORE INTO activity_graph_numbers SELECT a.ticket_id, m.source_id, m.reference, m.passage FROM numeric_mentions m JOIN activities a ON a.id=m.source_id WHERE m.activity=1;
                 INSERT OR IGNORE INTO activity_graph_targets SELECT a.ticket_id, m.activity_id, m.target_id, m.passage FROM activity_mentions m JOIN activities a ON a.id=m.activity_id;
-                CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_insert AFTER INSERT ON numeric_mentions WHEN NEW.activity=1 BEGIN INSERT OR IGNORE INTO activity_graph_numbers SELECT ticket_id, NEW.source_id, NEW.number, NEW.passage FROM activities WHERE id=NEW.source_id; END;
-                CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_delete AFTER DELETE ON numeric_mentions WHEN OLD.activity=1 BEGIN DELETE FROM activity_graph_numbers WHERE activity_id=OLD.source_id AND number=OLD.number AND passage=OLD.passage; END;
                 CREATE TRIGGER IF NOT EXISTS activity_graph_targets_insert AFTER INSERT ON activity_mentions BEGIN INSERT OR IGNORE INTO activity_graph_targets SELECT ticket_id, NEW.activity_id, NEW.target_id, NEW.passage FROM activities WHERE id=NEW.activity_id; END;
                 CREATE TRIGGER IF NOT EXISTS activity_graph_targets_delete AFTER DELETE ON activity_mentions BEGIN DELETE FROM activity_graph_targets WHERE activity_id=OLD.activity_id AND target_id=OLD.target_id AND passage=OLD.passage; END;
-                CREATE INDEX IF NOT EXISTS activity_graph_numbers_source ON activity_graph_numbers(activity_id, number, passage);
                 CREATE INDEX IF NOT EXISTS activity_graph_targets_source ON activity_graph_targets(activity_id, target_id, passage);
                 CREATE INDEX IF NOT EXISTS context_mentions_reverse_full ON context_mentions(target_id, source_id, passage);
                 CREATE INDEX IF NOT EXISTS activity_mentions_reverse_full ON activity_mentions(target_id, activity_id, passage);
@@ -805,6 +851,44 @@ impl Workspace {
             upload_destination::migrate(&transaction)?;
         }
         if version < 56 {
+            device::migrate(&transaction)?;
+        }
+        if version < 57 {
+            versions::migrate(&transaction)?;
+        }
+        if version < 58 {
+            sync::migrate(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 58;")?;
+        }
+        if version < 59 {
+            sync::migrate_setup(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 59;")?;
+        }
+        if version < 60 {
+            sync::migrate_recovery(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 60;")?;
+        }
+        if version < 61 {
+            sync::migrate_run_token(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 61;")?;
+        }
+        if version < 62 {
+            sync::migrate_download_attempts(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 62;")?;
+        }
+        if version < 63 {
+            sync::migrate_file_identity(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 63;")?;
+        }
+        if version < 64 {
+            sync::migrate_file_created(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 64;")?;
+        }
+        if version < 65 {
+            sync::migrate_last_folder(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 65;")?;
+        }
+        if version < 66 {
             chats::migrate(&transaction)?;
         }
         let violations: i64 =
@@ -853,11 +937,11 @@ impl Workspace {
             plans::ensure_active(&transaction, id)?;
         }
         let id = Uuid::new_v4().to_string();
+        let reference = device::issue_reference(&transaction)?;
         transaction.execute(
-            "INSERT INTO tickets (id, title, status, project_id, plan_id) VALUES (?1, ?2, 'Todo', ?3, ?4)",
-            params![id, title, project_id, plan_id],
+            "INSERT INTO tickets (id, reference, title, status, project_id, plan_id) VALUES (?1, ?2, ?3, 'Todo', ?4, ?5)",
+            params![id, reference, title, project_id, plan_id],
         )?;
-        let number = transaction.last_insert_rowid();
         if let Some(project_id) = project_id {
             history::record(&transaction, &id, "project", "", project_id, None)?;
         }
@@ -865,7 +949,7 @@ impl Workspace {
             history::record(&transaction, &id, "plan", "", plan_id, None)?;
         }
         transaction.commit()?;
-        self.show_ticket(&format!("T-{number}"))
+        self.show_ticket(&reference)
     }
 
     pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
@@ -873,15 +957,12 @@ impl Workspace {
         if title == Some("") {
             return Err(Error::EmptyTitle);
         }
-        let number = reference
-            .strip_prefix("T-")
-            .and_then(|value| value.parse::<i64>().ok());
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
         let ticket = transaction
             .query_row(
-                "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
-                [number],
+                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+                [reference],
                 ticket_from_row,
             )
             .optional()?
@@ -916,8 +997,8 @@ impl Workspace {
             }
             if *plan_id != ticket.plan_id {
                 transaction.execute(
-                    "UPDATE tickets SET plan_id = ?1 WHERE number = ?2",
-                    params![plan_id, number],
+                    "UPDATE tickets SET plan_id = ?1 WHERE id = ?2",
+                    params![plan_id, ticket.id],
                 )?;
                 history::record(
                     &transaction,
@@ -935,8 +1016,8 @@ impl Workspace {
             }
             if *project_id != ticket.project_id {
                 transaction.execute(
-                    "UPDATE tickets SET project_id = ?1 WHERE number = ?2",
-                    params![project_id, number],
+                    "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
+                    params![project_id, ticket.id],
                 )?;
                 history::record(
                     &transaction,
@@ -957,7 +1038,7 @@ impl Workspace {
                 duplicates::clear(&transaction, &ticket.id, patch.editing_agent.as_deref())?;
             }
         }
-        transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
+        transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE id = ?4", params![title, patch.body, status.to_string(), ticket.id])?;
         if let Some(body) = patch.body.as_deref() {
             document_links::index_body(&transaction, &ticket.id, body)?;
         }
@@ -972,8 +1053,8 @@ impl Workspace {
             )?;
         }
         let mut updated = transaction.query_row(
-            "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
-            [number],
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1",
+            [&ticket.id],
             ticket_from_row,
         )?;
         updated.tags = tags::for_ticket(&transaction, &updated.id)?;
@@ -1156,7 +1237,7 @@ impl Workspace {
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
+            "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
         )?;
         let mut tickets = statement
             .query_map([trashed], ticket_from_row)?
@@ -1173,14 +1254,11 @@ impl Workspace {
     }
 
     pub fn show_ticket(&self, reference: &str) -> Result<Ticket, Error> {
-        let number = reference
-            .strip_prefix("T-")
-            .and_then(|value| value.parse::<i64>().ok());
         let ticket = self
             .connection
             .query_row(
-                "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
-                [number],
+                "SELECT id, reference, title, status, body, project_id, plan_id, trashed FROM tickets WHERE reference = ?1",
+                [reference],
                 ticket_from_row,
             )
             .optional()?;
@@ -1199,7 +1277,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
     Ok(Ticket {
         id: row.get(0)?,
         trashed: row.get(7)?,
-        reference: format!("T-{}", row.get::<_, i64>(1)?),
+        reference: row.get::<_, String>(1)?,
         title: row.get(2)?,
         status: row.get::<_, String>(3)?.parse().map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
@@ -1228,13 +1306,13 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
 
 // All ticket mutations must check this inside the same write transaction.
 pub(crate) fn ensure_editable(connection: &Connection, id: &str) -> Result<(), Error> {
-    let (trashed, number): (bool, i64) = connection.query_row(
-        "SELECT trashed, number FROM tickets WHERE id = ?1",
+    let (trashed, reference): (bool, String) = connection.query_row(
+        "SELECT trashed, reference FROM tickets WHERE id = ?1",
         [id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     if trashed {
-        return Err(Error::Trashed(format!("T-{number}")));
+        return Err(Error::Trashed(reference));
     }
     Ok(())
 }

@@ -148,7 +148,7 @@ impl Workspace {
     pub fn find_tickets(&self, filter: &TicketFilter) -> Result<Vec<Ticket>, Error> {
         let (conditions, mut values) = self.filter_conditions(filter)?;
         let mut sql = format!(
-            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0{conditions}"
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0{conditions}"
         );
         match filter.order {
             TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
@@ -240,7 +240,7 @@ impl Workspace {
             self.show_project(id)?;
         }
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY t.number DESC LIMIT ?4 OFFSET ?5"
+            "SELECT t.id, t.reference, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY t.number DESC LIMIT ?4 OFFSET ?5"
         )?;
         let mut tickets = statement
             .query_map(

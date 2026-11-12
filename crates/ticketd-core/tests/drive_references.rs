@@ -55,6 +55,7 @@ fn access_checks_preserve_authored_references_and_recover_only_the_original_file
         (uuid::Uuid::new_v4().to_string(), "selected-doc"),
     ] {
         let selection = ticketd_core::drive::DriveSelection {
+            account: None,
             connection_id: account,
             file_ids: vec![selected.into()],
         };
@@ -66,6 +67,7 @@ fn access_checks_preserve_authored_references_and_recover_only_the_original_file
         assert_eq!(workspace.attachments(10, 0).unwrap().len(), 1);
     }
     let selection = ticketd_core::drive::DriveSelection {
+        account: None,
         connection_id: connection,
         file_ids: vec!["selected-doc".into()],
     };

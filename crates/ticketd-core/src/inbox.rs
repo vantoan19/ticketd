@@ -121,13 +121,10 @@ impl Workspace {
     pub fn set_following(&mut self, reference: &str, following: bool) -> Result<(), Error> {
         let tx = self.connection.savepoint()?;
         super::transaction_write_lock(&tx)?;
-        let number = reference
-            .strip_prefix("T-")
-            .and_then(|s| s.parse::<i64>().ok());
         let id: String = tx
             .query_row(
-                "SELECT id FROM tickets WHERE number = ?1",
-                [number],
+                "SELECT id FROM tickets WHERE reference = ?1",
+                [reference],
                 |row| row.get(0),
             )
             .map_err(|e| {
@@ -175,14 +172,14 @@ impl Workspace {
         unread_only: bool,
     ) -> Result<Vec<InboxEntry>, Error> {
         self.deliver_due_reminders()?;
-        let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent, (i.kind = 'activity' AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = i.from_value)) FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
+        let mut stmt = self.connection.prepare("SELECT i.id, t.reference, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent, (i.kind = 'activity' AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = i.from_value)) FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
         let entries = stmt
             .query_map(
                 params![LOCAL_PERSON, limit.min(100), offset, unread_only],
                 |row| {
                     Ok(InboxEntry {
                         id: row.get(0)?,
-                        reference: format!("T-{}", row.get::<_, i64>(1)?),
+                        reference: row.get::<_, String>(1)?,
                         title: row.get(2)?,
                         kind: row.get(3)?,
                         from_value: row.get(4)?,

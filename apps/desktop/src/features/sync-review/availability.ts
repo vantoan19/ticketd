@@ -1,0 +1,75 @@
+import { useCallback, useEffect, useState } from "react";
+import { syncReview, type Availability } from "@/lib/sync-review-api";
+import { useWorkspaceChange } from "@/lib/workspace-change";
+
+const POLL_MS = 2000;
+
+/** The Storage wording of a managed Attachment; without sync every file is local. */
+export function storageWord(availability: Availability | undefined): string {
+  if (availability?.state === "downloading") return "Downloading…";
+  if (availability?.state === "not_downloaded") return "Not downloaded";
+  return "Local snapshot";
+}
+
+/**
+ * Whether the bytes of the named managed Attachments are on this desktop,
+ * keyed by id, and the action that fetches one. It follows Workspace changes
+ * and, while a file is downloading, asks again every two seconds.
+ */
+export function useAvailability(ids: string[]): {
+  of: (id: string) => Availability | undefined;
+  download: (id: string) => Promise<void>;
+} {
+  const key = ids.join("\n");
+  const [found, setFound] = useState<Availability[]>([]);
+  // Downloads this view asked for that have not answered yet.
+  const [requested, setRequested] = useState<string[]>([]);
+  const [tick, setTick] = useState(0);
+  const change = useWorkspaceChange();
+  const waiting = requested.length > 0;
+  useEffect(() => {
+    if (!key) return;
+    let active = true;
+    let timer: number | undefined;
+    const again = () => {
+      timer = window.setTimeout(() => setTick((v) => v + 1), POLL_MS);
+    };
+    syncReview.availability(key.split("\n")).then(
+      (next) => {
+        if (!active) return;
+        setFound(next);
+        if (waiting || next.some((item) => item.state === "downloading"))
+          again();
+      },
+      // A failed read says nothing about the files: what was last known stays.
+      // (A Workspace without sync answers with no entries, not a failure.)
+      () => {
+        if (active && waiting) again();
+      },
+    );
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [key, change, tick, waiting]);
+  const download = useCallback(async (id: string) => {
+    setRequested((ids) => [...ids, id]);
+    try {
+      // Answers when the file is here; progress is read meanwhile.
+      await syncReview.download(id);
+    } finally {
+      setRequested((ids) => ids.filter((other) => other !== id));
+      setTick((value) => value + 1);
+    }
+  }, []);
+  return {
+    of: (id) => {
+      const item = found.find((item) => item.id === id);
+      // The host marks the file as downloading a moment after it was asked to.
+      return item?.state === "not_downloaded" && requested.includes(id)
+        ? { ...item, state: "downloading" }
+        : item;
+    },
+    download,
+  };
+}

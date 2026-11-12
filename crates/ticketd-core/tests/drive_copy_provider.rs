@@ -21,6 +21,13 @@ struct Http {
 #[allow(clippy::unwrap_used)]
 impl DriveTransport for Http {
     fn send(&self, r: DriveRequest) -> Result<DriveResponse, DriveError> {
+        // The real transport refuses anything outside its allow-list.
+        assert!(
+            ticketd_core::drive::request_allowed(r.method, &r.url),
+            "GoogleTransport refuses {} {}",
+            r.method,
+            r.url
+        );
         self.requests.lock().unwrap().push(r);
         Ok(self.responses.lock().unwrap().remove(0))
     }

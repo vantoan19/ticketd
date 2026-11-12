@@ -31,7 +31,7 @@ test("previews a connection and focuses it only on request", async () => {
       {
         id: "one",
         kind: "ticket",
-        label: "T-1 · First",
+        label: "T-KQ1 · First",
         state: "Todo",
         trashed: false,
         activity_detail: false,
@@ -62,7 +62,7 @@ test("previews a connection and focuses it only on request", async () => {
     max_work: 800,
   });
   const open = vi.fn();
-  render(<ContextGraph origin="T-1" onBack={vi.fn()} onOpen={open} />);
+  render(<ContextGraph origin="T-KQ1" onBack={vi.fn()} onOpen={open} />);
   fireEvent.click(await screen.findByRole("button", { name: "Discovery" }));
   expect(screen.getByText("Read this", { exact: false })).toBeTruthy();
   expect(client.contextGraphExpanded).toHaveBeenCalledTimes(1);
@@ -75,10 +75,12 @@ test("previews a connection and focuses it only on request", async () => {
       [],
     ),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Back to T-1 · First" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Back to T-KQ1 · First" }),
+  );
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
-      "T-1",
+      "T-KQ1",
       false,
       [],
       [],
@@ -108,15 +110,17 @@ test("drops an expansion whose item is no longer shown", async () => {
     max_edges: 300,
     max_work: 800,
   });
-  const first = node("one", "T-1 · First");
-  const second = node("two", "T-2 · Second");
+  const first = node("one", "T-KQ1 · First");
+  const second = node("two", "T-KQ2 · Second");
   vi.mocked(client.contextGraphExpanded)
     .mockReset()
     .mockImplementation(async (_center, _details, expanded) =>
       expanded.includes("two") ? graph([first]) : graph([first, second]),
     );
   render(<ContextGraph origin="one" onBack={vi.fn()} onOpen={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "T-2 · Second" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "T-KQ2 · Second" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
@@ -132,7 +136,7 @@ test("a crowded neighbourhood opens as a grouped list with a map toggle", async 
   const nodes = Array.from({ length: 14 }, (_, index) => ({
     id: `n${index}`,
     kind: "ticket" as const,
-    label: `T-${index} · Item`,
+    label: `T-KQ${index} · Item`,
     state: "Todo",
     trashed: false,
     activity_detail: false,
@@ -170,7 +174,7 @@ test("expanding a map that grows past the list-first size keeps the map", async 
   const node = (id: string) => ({
     id,
     kind: "ticket" as const,
-    label: `T-${id} · Item`,
+    label: `T-KQ${id} · Item`,
     state: "Todo",
     trashed: false,
     activity_detail: false,
@@ -193,7 +197,7 @@ test("expanding a map that grows past the list-first size keeps the map", async 
       graph(expanded.length ? 20 : 3),
     );
   render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "T-n1 · Item" }));
+  fireEvent.click(await screen.findByRole("button", { name: "T-KQn1 · Item" }));
   fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenCalledTimes(2),
@@ -212,7 +216,10 @@ test("one 48px toolbar, with Open item in the panel beside the map", async () =>
   });
   vi.mocked(client.contextGraphExpanded).mockResolvedValue({
     center: "one",
-    nodes: [node("one", "ticket", "T-1 · First"), node("two", "document", "D")],
+    nodes: [
+      node("one", "ticket", "T-KQ1 · First"),
+      node("two", "document", "D"),
+    ],
     edges: [
       { source: "one", target: "two", kind: "mention", explanation: "x" },
     ],
@@ -226,7 +233,7 @@ test("one 48px toolbar, with Open item in the panel beside the map", async () =>
   });
   const open = vi.fn();
   const { container } = render(
-    <ContextGraph origin="T-1" onBack={vi.fn()} onOpen={open} />,
+    <ContextGraph origin="T-KQ1" onBack={vi.fn()} onOpen={open} />,
   );
   const header = (await screen.findByRole("heading", { name: "Context graph" }))
     .parentElement!;

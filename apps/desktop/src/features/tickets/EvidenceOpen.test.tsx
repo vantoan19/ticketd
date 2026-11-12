@@ -36,7 +36,7 @@ vi.mock("@tauri-apps/api/core", () => {
 test("a URL evidence item can be opened; other values cannot", async () => {
   render(
     <Evidence
-      reference="T-1"
+      reference="T-KQ1"
       revision={0}
       trashed={false}
       refresh={async () => {}}

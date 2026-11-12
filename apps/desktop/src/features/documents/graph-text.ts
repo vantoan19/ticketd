@@ -186,7 +186,7 @@ export function cardParts(node: GraphNode): {
   title: string;
   caption: string;
 } {
-  const match = /^(\S+-\d+) · (.*)$/.exec(node.label);
+  const match = /^(\S+-[A-Z]*\d+) · (.*)$/.exec(node.label);
   const ref = node.ticket_reference ?? match?.[1] ?? "";
   const title = match && match[1] === ref ? match[2]! : node.label;
   return {

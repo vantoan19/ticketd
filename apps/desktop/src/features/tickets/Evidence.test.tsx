@@ -38,7 +38,7 @@ vi.mock("@tauri-apps/api/core", () => {
 test("adds and removes a verification result", async () => {
   const view = render(
     <Evidence
-      reference="T-1"
+      reference="T-KQ1"
       revision={0}
       trashed={false}
       refresh={async () => {}}
@@ -95,7 +95,7 @@ test("retries a lost response with the same request ID and uses a new ID for a d
   });
   const view = render(
     <Evidence
-      reference="T-2"
+      reference="T-KQ2"
       revision={0}
       trashed={false}
       refresh={async () => {}}
@@ -156,7 +156,7 @@ test("disables evidence controls while a write is pending", async () => {
   });
   const view = render(
     <Evidence
-      reference="T-3"
+      reference="T-KQ3"
       revision={0}
       trashed={false}
       refresh={async () => {}}
@@ -210,7 +210,7 @@ test("copies any evidence value on explicit request", async () => {
   });
   const view = render(
     <Evidence
-      reference="T-4"
+      reference="T-KQ4"
       revision={0}
       trashed={false}
       refresh={async () => {}}
@@ -243,7 +243,7 @@ test("a full commit hash is shown short, with the whole value on hover", async (
   );
   render(
     <Evidence
-      reference="T-2"
+      reference="T-KQ2"
       revision={0}
       trashed={false}
       refresh={async () => {}}
@@ -256,7 +256,7 @@ test("a full commit hash is shown short, with the whole value on hover", async (
 test("Add evidence stays disabled with its reason until name and evidence are filled", () => {
   render(
     <Evidence
-      reference="T-1"
+      reference="T-KQ1"
       revision={0}
       trashed={false}
       refresh={async () => {}}
@@ -277,7 +277,7 @@ test("Add evidence stays disabled with its reason until name and evidence are fi
 test("Cancel discards the draft but Escape keeps it", async () => {
   render(
     <Evidence
-      reference="T-1"
+      reference="T-KQ1"
       revision={0}
       trashed={false}
       refresh={async () => {}}

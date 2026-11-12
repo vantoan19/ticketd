@@ -318,16 +318,16 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     let cli = Cli::new();
     cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
     let report = cli.run(&["source", "refresh"]);
-    assert_eq!(report["imported"], json!(["T-1"]));
+    assert_eq!(report["imported"], json!(["T-KQ1"]));
     assert_eq!(report["failures"], json!([]));
-    let shown = cli.run(&["show", "T-1"]);
+    let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["title"], "Real issue");
     assert_eq!(shown["source"]["display"], "o/r#1");
     assert_eq!(shown["source"]["ownership"], "external");
     assert_eq!(shown["source"]["content_locked"], true);
     // The source conversation is available to agents, apart from local notes.
-    cli.run(&["activity", "add", "T-1", "--brief", "my own observation"]);
-    let context = cli.run(&["context", "T-1", "--conversation", "--activities"]);
+    cli.run(&["activity", "add", "T-KQ1", "--brief", "my own observation"]);
+    let context = cli.run(&["context", "T-KQ1", "--conversation", "--activities"]);
     let first = &context["source_conversation"]["items"][0];
     assert_eq!(
         (first["type"].as_str(), first["author"].as_str()),
@@ -340,14 +340,14 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     );
     assert_eq!(context["activities"]["items"].as_array().unwrap().len(), 1);
     assert!(
-        cli.run(&["context", "T-1"])
+        cli.run(&["context", "T-KQ1"])
             .get("source_conversation")
             .is_none()
     );
     // External content is read-only; local progress is allowed.
-    let stderr = cli.fail(&["change", "T-1", "--title", "Mine"], None);
+    let stderr = cli.fail(&["change", "T-KQ1", "--title", "Mine"], None);
     assert!(stderr.contains("owned by GitHub"), "{stderr}");
-    cli.run(&["change", "T-1", "--status", "In progress"]);
+    cli.run(&["change", "T-KQ1", "--status", "In progress"]);
     assert_eq!(
         cli.run(&["list", "--source", "github"])
             .as_array()
@@ -360,19 +360,19 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     let stderr = cli.fail(&["list", "--source", "githb"], None);
     assert!(stderr.contains("unknown source 'githb'"), "{stderr}");
     // Refreshing the single ticket observes that the issue closed.
-    let report = cli.run(&["source", "refresh", "--ticket", "T-1"]);
-    assert_eq!(report["updated"], json!(["T-1"]));
-    let shown = cli.run(&["show", "T-1"]);
+    let report = cli.run(&["source", "refresh", "--ticket", "T-KQ1"]);
+    assert_eq!(report["updated"], json!(["T-KQ1"]));
+    let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["status"], "Done");
     assert_eq!(shown["title"], "Real issue, renamed");
     // A failed refresh reports and fails, and leaves the saved content alone.
-    let output = cli.command(&["source", "refresh", "--ticket", "T-1"], Some("wrong"));
+    let output = cli.command(&["source", "refresh", "--ticket", "T-KQ1"], Some("wrong"));
     assert_eq!(output.status.code(), Some(1));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["failures"][0]["code"], "unauthenticated");
     assert!(!String::from_utf8_lossy(&output.stdout).contains("wrong"));
-    assert_eq!(cli.run(&["show", "T-1"])["title"], "Real issue, renamed");
-    assert!(cli.run(&["show", "T-1"])["source"]["last_error"]["code"] == "unauthenticated");
+    assert_eq!(cli.run(&["show", "T-KQ1"])["title"], "Real issue, renamed");
+    assert!(cli.run(&["show", "T-KQ1"])["source"]["last_error"]["code"] == "unauthenticated");
 }
 
 /// Naming an agent changes attribution only: a hosted agent meets the same source
@@ -385,14 +385,14 @@ fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_it
     let agent = ["--agent", "codex"];
 
     let stderr = cli.fail(
-        &[&["change", "T-1", "--title", "Mine"], &agent[..]].concat(),
+        &[&["change", "T-KQ1", "--title", "Mine"], &agent[..]].concat(),
         None,
     );
     assert!(stderr.contains("owned by GitHub"), "{stderr}");
     let request = cli.dir.path().join("rewrite.json");
     std::fs::write(
         &request,
-        json!({"operation": "change_ticket", "reference": "T-1",
+        json!({"operation": "change_ticket", "reference": "T-KQ1",
                "patch": {"body": "Mine", "editing_agent": "codex"}})
         .to_string(),
     )
@@ -408,16 +408,16 @@ fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_it
     );
     assert!(stderr.contains("owned by GitHub"), "{stderr}");
     let stderr = cli.fail(
-        &[&["change", "T-1", "--status", "Done"], &agent[..]].concat(),
+        &[&["change", "T-KQ1", "--status", "Done"], &agent[..]].concat(),
         None,
     );
     assert!(stderr.contains("GitHub"), "{stderr}");
 
-    let changed = cli.run(&[&["change", "T-1", "--status", "In progress"], &agent[..]].concat());
+    let changed = cli.run(&[&["change", "T-KQ1", "--status", "In progress"], &agent[..]].concat());
     assert_eq!(changed["status"], "In progress");
     let activity = cli.run(
         &[
-            &["activity", "add", "T-1", "--brief", "Started"],
+            &["activity", "add", "T-KQ1", "--brief", "Started"],
             &agent[..],
         ]
         .concat(),
@@ -431,14 +431,15 @@ fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_it
             "document",
             "link-ticket",
             document["id"].as_str().unwrap(),
-            "T-1",
+            "T-KQ1",
         ],
         None,
     );
     let evidence = cli.run(
         &[
             &[
-                "evidence", "add", "T-1", "--kind", "commit", "--name", "fix", "--value", "abc123",
+                "evidence", "add", "T-KQ1", "--kind", "commit", "--name", "fix", "--value",
+                "abc123",
             ],
             &agent[..],
         ]
@@ -446,11 +447,11 @@ fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_it
     );
     assert_eq!(evidence["editing_agent"], "codex");
 
-    let shown = cli.run(&["show", "T-1"]);
+    let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["title"], "Real issue");
     assert_eq!(shown["body"], "secret description");
     assert_eq!(shown["source"]["ownership"], "external");
-    let linked = cli.run(&["context", "T-1", "--documents"]);
+    let linked = cli.run(&["context", "T-KQ1", "--documents"]);
     assert_eq!(linked["documents"]["items"][0]["id"], document["id"]);
 }
 
@@ -654,7 +655,7 @@ fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
     assert_eq!(status[0]["error"]["code"], "unauthenticated");
     assert!(status[0]["failing_since"].is_string());
     assert_eq!(status[0]["unavailable_tickets"], 1);
-    let shown = cli.run(&["show", "T-1"]);
+    let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["title"], "Real issue");
     assert_eq!(shown["source"]["unavailable"]["code"], "unauthenticated");
     assert!(
@@ -669,11 +670,11 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
     cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
     cli.run(&["source", "refresh"]);
     // Reachable tickets are not taken over.
-    let stderr = cli.fail(&["source", "take-ownership", "T-1"], None);
+    let stderr = cli.fail(&["source", "take-ownership", "T-KQ1"], None);
     assert!(stderr.contains("can still be read"), "{stderr}");
     cli.command(&["source", "refresh"], Some("wrong"));
-    let taken = cli.run(&["source", "take-ownership", "T-1", "--agent", "tester"]);
-    assert_eq!(taken["reference"], "T-1");
+    let taken = cli.run(&["source", "take-ownership", "T-KQ1", "--agent", "tester"]);
+    assert_eq!(taken["reference"], "T-KQ1");
     assert_eq!(taken["title"], "Real issue");
     assert_eq!(taken["source"]["ownership"], "local");
     assert_eq!(taken["source"]["display"], "o/r#1");
@@ -686,18 +687,18 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
             .len(),
         1
     );
-    cli.run(&["change", "T-1", "--title", "Mine"]);
+    cli.run(&["change", "T-KQ1", "--title", "Mine"]);
     // A later refresh with working access neither resumes nor re-imports it.
     let report = cli.run(&["source", "refresh"]);
     assert_eq!(report["imported"], json!([]));
-    assert_eq!(cli.run(&["show", "T-1"])["title"], "Mine");
-    let stderr = cli.fail(&["source", "refresh", "--ticket", "T-1"], None);
+    assert_eq!(cli.run(&["show", "T-KQ1"])["title"], "Mine");
+    let stderr = cli.fail(&["source", "refresh", "--ticket", "T-KQ1"], None);
     assert!(
         stderr.contains("not owned by an external source"),
         "{stderr}"
     );
     assert!(
-        cli.run(&["history", "T-1"])
+        cli.run(&["history", "T-KQ1"])
             .to_string()
             .contains("ownership")
     );

@@ -545,7 +545,7 @@ own entry id. It has no write workflow: refresh replaces it in the same short
 write as the ticket, only when the issue changed since it was last read, and a
 failed read keeps what was retrieved. Authors are the source's identities, never
 an editing agent, and the rows survive takeover as provenance. Agents read it
-with `ticketd context T-n --conversation`.
+with `ticketd context T-KQ1 --conversation`.
 
 Freshness and availability are persisted, not inferred: `source_sync` records the
 start of each ticket's failure streak and `source_status` records each source's
@@ -593,7 +593,7 @@ as provenance until it leaves Duplicate.
 
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 
-A future server may call the same core workflow interface. Cloud synchronization, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.
+A future server may call the same core workflow interface. Personal sync between one person's desktops is described under [Workspace sync](#workspace-sync). A cloud service, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.
 
 ## Related documents
 
@@ -602,6 +602,8 @@ A future server may call the same core workflow interface. Cloud synchronization
 - [Atomic writes and retries](adr/0002-atomic-writes-and-retries.md)
 - [Deferred record versioning](adr/0003-defer-record-versioning.md)
 - [Shared core and local workspace](adr/0004-shared-core-local-workspace.md)
+- [Workspace sync through Google Drive](adr/0011-markdown-file-sync-through-google-drive.md)
+- [Sync file format](sync-file-format.md)
 
 A caller that needs retries uses the core `write` workflow with a typed write request and optional request ID. The CLI exposes the same workflow as `ticketd write --request-id ID FILE` (use `-` for standard input). For example, `{"operation":"create_ticket","title":"Investigate","project_id":null}` creates a ticket, and `{"operation":"batch","operations":[...]}` applies a batch. Results contain a `kind` and `value` (the delete result has no value). Existing individual commands remain available without retry IDs.
 
@@ -629,7 +631,7 @@ workflow: `set_following` takes a ticket `reference` and `following` boolean;
 IDs actually displayed avoids marking later arrivals read.
 
 To review duplicate dependencies through the CLI, run `ticketd preview-duplicate
-T-1 T-2`. Submit the returned `canonical` as `expected_canonical` and each edge
+T-KQ1 T-KQ2`. Submit the returned `canonical` as `expected_canonical` and each edge
 with an explicit `replace`, `remove`, or `retain` choice using `ticketd write`
 with operation `mark_duplicate_reviewed`, source, canonical, decisions, and an
 optional agent. The preview records its `mode` (`duplicate`, or `separate` with
@@ -875,3 +877,66 @@ uploaded-copy entries, retaining old manifest compatibility. Omissions make the
 result partial without changing canonical Markdown or current-source links.
 Local inputs are copied from the existing protected snapshot before network
 reads; no provider call holds a SQLite transaction or attachment file barrier.
+
+## Workspace sync
+
+Workspace sync keeps one person's desktops in step through that person's Google
+Drive. See [ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md) for
+the decision and the [sync file format](sync-file-format.md) for the files.
+
+```text
+Desktop / CLI
+      |
+Shared Rust core
+      |
+Local SQLite + Attachment files
+      |
+Markdown converter + sync engine
+      |
+Remote file storage interface
+      |
+Google Drive adapter
+```
+
+Each device keeps its own SQLite Workspace and Attachment files, which remain the
+working copy. The live database is never placed in Drive. All sync logic lives in
+the core; the desktop only schedules it and shows its state.
+
+| Part                     | Responsibility                                                                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Device identity          | `device.rs` holds the device code and issues Ticket references. A ticket arriving by sync keeps the reference in its file.                                                                 |
+| Change capture           | `sync/capture.rs` marks the owning record of every synced change in the writing transaction, so writes from the CLI and the desktop are captured alike with no caller involvement.         |
+| Markdown converter       | `sync_files.rs` turns a record into its file and back, validates incoming files, and applies a record to the Workspace. It knows nothing about storage.                                    |
+| Merge rules              | `sync/merge.rs` is pure: the three-way field merge against the last-synced copy, set merging, and the choice of which dependency to drop from a loop.                                      |
+| Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests. |
+| Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                         |
+| Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.   |
+
+A captured mark names a record, not a change. The file is produced from current
+state at upload time and compared with the last-synced copy, so a mark for a
+record that did not really change uploads nothing. Applying an incoming file runs
+with capture switched off inside one savepoint; the switch exists only in that
+uncommitted transaction, so another process is never affected and a crash cannot
+leave it set. Version history is still recorded for applied files.
+
+A record is identified by its GUID everywhere: in its file, in storage keys and in
+relationships between files. The file name shown in Drive is a readable label
+only. Listing a folder is never taken as the complete truth: a file absent from a
+listing is not a deletion (its record is written again by that run, which finds
+the file in place if the listing only left it out), and a missing folder, an
+empty listing or a failed authorization is reported as a recovery state. Any
+other failure of a run is saved as a recovery state too, with its message.
+
+Drive has no conditional update. The adapter checks a file's version immediately
+before uploading, and repeating a write whose bytes are already stored creates no
+new version, so a retry after a lost response is safe. A write from another device
+inside that short window is replaced as the current file and stays in Drive's
+revisions.
+
+Sync runs only in the desktop process, while the app is open. The CLI stays
+independent: it writes locally, its changes are captured with the write, and they
+upload when the desktop next runs. No background service is involved.
+
+[ADR 0003](adr/0003-defer-record-versioning.md) continues to govern local edits.
+The last-synced copy is internal to sync and is not a record version in the
+workflow interface.

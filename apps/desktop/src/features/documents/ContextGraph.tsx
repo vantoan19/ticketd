@@ -443,8 +443,8 @@ export function ContextGraph({
         <h2>Connected items</h2>
         {graph && kindGroups.length === 0 && (
           <p role="status">
-            Nothing is connected to this item yet. Mention it with T-n or attach
-            it to a ticket to connect it.
+            Nothing is connected to this item yet. Mention it by its reference
+            or attach it to a ticket to connect it.
           </p>
         )}
         {kindGroups.map((group) => {
