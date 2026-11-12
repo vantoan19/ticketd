@@ -32,6 +32,7 @@
   min-height: 0;
   min-width: 0;
   overflow: auto;
+  container: attachment-library / inline-size;
 }
 .attachment-library header,
 .attachment-library-tools,
@@ -153,9 +154,10 @@
   border-top: 1px solid var(--border);
   padding-top: 16px;
 }
-/* Narrow windows: each file becomes a block, so no column or action hides
-   behind a sideways scroll. */
-@media (max-width: 840px) {
+/* Narrow library (window or sidebar): once the 720px table no longer fits,
+   each file becomes a block, so no column or action hides behind a sideways
+   scroll. */
+@container attachment-library (max-width: 719px) {
   .attachment-library table,
   .attachment-library tbody {
     display: block;
