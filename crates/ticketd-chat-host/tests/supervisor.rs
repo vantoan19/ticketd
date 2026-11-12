@@ -10,14 +10,14 @@ use std::time::Duration;
 
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities, Capability, ChatHost,
-    ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT, DeliveryEvidence,
-    EventKind, Harness, HarnessAdapter, HostError, INTERRUPT_TIMEOUT, InteractionAnswer,
-    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode, RuntimeGeneration,
-    SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission, SubmissionId,
-    SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus,
-    TurnOutcome, UnconfirmedCleanup, WorkspaceOpener, problem_kind,
+    AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities,
+    Capability, ChatHost, ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT,
+    DeliveryEvidence, EventKind, Harness, HarnessAdapter, HostError, INTERRUPT_TIMEOUT,
+    InteractionAnswer, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId,
+    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode,
+    RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission,
+    SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL,
+    ToolStatus, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener, problem_kind,
 };
 use ticketd_core::{
     Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
@@ -284,14 +284,14 @@ async fn a_crash_between_recording_and_writing_is_uncertain_after_restart_and_no
     assert_eq!(f.fake.opens(), vec![]);
     assert_eq!(f.fake.written(), vec![]);
 
-    // Later work on a live runtime carries the new and the queued input, never the
-    // input whose delivery is uncertain.
+    // Later work carries the queued and the new input, in the order they were saved,
+    // never the input whose delivery is uncertain.
     let after = restarted.send(&f.chat.id, None, "after the restart", SendMode::Auto);
     after.await.unwrap();
     settle().await;
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     let sent: Vec<_> = f.submits().into_iter().map(|sent| sent.text).collect();
-    assert_eq!(sent, ["after the restart", "queued before the crash"]);
+    assert_eq!(sent, ["queued before the crash", "after the restart"]);
     let attempts = f.message(&input.id).attempts;
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].delivery, ChatDelivery::Uncertain);
@@ -1054,10 +1054,10 @@ async fn a_resend_is_a_new_submission_of_that_input_alone_and_only_when_asked() 
     let f = Fixture::new(FakeAdapter::codex());
     f.fake.script_submit(SubmitReply::LoseProcess);
     let input = f.send("first").await;
-    f.queue("later").await;
     f.host.resume_queue(&f.chat.id).await.unwrap();
     tokio::time::sleep(Duration::from_secs(3_600)).await;
     assert_eq!(f.submits().len(), 1, "nothing is resent by itself");
+    f.queue("later").await;
 
     f.host.resend(&f.chat.id, &input.id).await.unwrap();
     settle().await;
@@ -1251,4 +1251,274 @@ async fn a_host_handle_taken_before_a_restore_can_start_nothing_during_it() {
     );
     f.host.turn_on();
     assert!(held.attach(&f.chat.id).await.is_ok());
+}
+
+/// L7: an idle harness that exits ended its session; no turn failed.
+#[tokio::test(start_paused = true)]
+async fn a_harness_that_exits_while_idle_is_not_a_failed_turn() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    f.fake.lose_process().await;
+    settle().await;
+
+    let live = f.live().await;
+    assert_eq!(live.problem, None);
+    assert_eq!(live.activity, Activity::Idle);
+    assert!(!live.running);
+    assert!(!f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.turns()[0].state, ChatTurnState::Completed);
+    // The next message opens the session again.
+    f.send("second").await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 2);
+}
+
+/// L7: ticketd closing an idle runtime itself (trash) is not a lost harness either.
+#[tokio::test(start_paused = true)]
+async fn closing_an_idle_runtime_leaves_no_problem_behind() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    assert_eq!(f.host.trash(&f.chat.id).await.unwrap(), None);
+    f.core().set_chat_trashed(&f.chat.id, false).unwrap();
+    f.host.notify_changed(&f.chat.id).await.unwrap();
+    settle().await;
+
+    assert_eq!(f.live().await.problem, None);
+}
+
+/// L6: Resume on a paused queue opens a session when none is live, and the queue goes
+/// out in the order it was saved.
+#[tokio::test(start_paused = true)]
+async fn resuming_the_queue_with_no_session_opens_one_and_sends_in_queue_order() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.queue("older").await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    f.queue("old").await;
+    settle().await;
+    assert!(f.fake.opens().is_empty(), "queueing starts nothing");
+
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(texts(&f), ["older"]);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(texts(&f), ["older", "old"]);
+}
+
+/// L6: a message sent while older input waits in a queue that is not paused goes after
+/// it, and the queue runs.
+#[tokio::test(start_paused = true)]
+async fn a_message_sent_while_older_input_waits_in_a_running_queue_goes_after_it() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.queue("older").await;
+    f.send("newer").await;
+
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(texts(&f), ["older"], "queue order is kept");
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(texts(&f), ["older", "newer"]);
+}
+
+/// L8: streamed text is shown without reading the workspace for every fragment, so a
+/// fast harness does not leave the view seconds behind it.
+#[tokio::test(start_paused = true)]
+async fn streamed_text_does_not_read_the_workspace_for_every_fragment() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let chat = new_chat(&mut Workspace::open(&path).unwrap(), "codex");
+    let fake = FakeAdapter::codex();
+    let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = opens.clone();
+    let host = ChatHost::new(
+        Arc::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Workspace::open(&path)
+        }),
+        vec![Arc::new(fake.clone()) as Arc<dyn HarnessAdapter>],
+    )
+    .unwrap();
+    host.send(&chat.id, None, "first", SendMode::Auto)
+        .await
+        .unwrap();
+    settle().await;
+    let (_view, mut subscription) = host.attach(&chat.id).await.unwrap();
+    assert!(fake.emit(text_delta("start ")).await);
+    settle().await;
+
+    let before = opens.load(Ordering::SeqCst);
+    for _ in 0..200 {
+        assert!(fake.emit(text_delta("word ")).await);
+    }
+    tokio::time::sleep(TEXT_UPDATE_INTERVAL * 2).await;
+
+    let reads = opens.load(Ordering::SeqCst) - before;
+    assert!(reads < 10, "{reads} workspace opens for 200 fragments");
+    let shown: String = drain(&mut subscription)
+        .await
+        .into_iter()
+        .filter_map(|update| match update {
+            ChatUpdate::Text { delta, .. } => Some(delta),
+            _ => None,
+        })
+        .collect();
+    assert!(shown.ends_with(&"word ".repeat(200)), "{shown}");
+}
+
+/// L5: a notice the harness repeats word for word is kept once per session.
+#[tokio::test(start_paused = true)]
+async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let repeated = || {
+        [
+            EventKind::Notice {
+                turn: None,
+                kind: NoticeKind::Warning,
+                message: "Codex reported a warning".to_owned(),
+                detail: None,
+            },
+            EventKind::Unknown {
+                summary: "Unrecognized Codex message: thread/new".to_owned(),
+                detail: ProviderDetail::new("thread/new", "{}"),
+            },
+        ]
+    };
+    for _ in 0..3 {
+        for event in repeated() {
+            f.emit(event).await;
+        }
+    }
+    assert_eq!(
+        notices(&f),
+        [
+            "Codex reported a warning",
+            "Unrecognized Codex message: thread/new"
+        ]
+    );
+
+    // A new session says it again, once.
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host.stop_all().await;
+    f.send("second").await;
+    for _ in 0..2 {
+        for event in repeated() {
+            f.emit(event).await;
+        }
+    }
+    assert_eq!(notices(&f).len(), 4);
+}
+
+/// L4: links changed after the session started reach the agent with the next new turn,
+/// kept as context like the first delivery; a resumed native session is told only
+/// when its context differs from what it was given.
+#[tokio::test(start_paused = true)]
+async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_message() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let context = Arc::new(std::sync::Mutex::new("links: none".to_owned()));
+    let source = context.clone();
+    f.host = ChatHost::with_context(
+        Arc::new(move || Workspace::open(&path)),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |_| Ok(Some(source.lock().unwrap().clone())))),
+    )
+    .unwrap();
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("session-1"),
+    })
+    .await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    *context.lock().unwrap() = "links: T-1".to_owned();
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    f.send("second").await;
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    f.send("third").await;
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-3"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(
+        texts(&f),
+        ["links: none\n\nfirst", "links: T-1\n\nsecond", "third"]
+    );
+    let kept: Vec<_> = f
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == CONTEXT_RECORD_NAME => Some(tool.input),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kept, ["links: none", "links: T-1"]);
+
+    // A resumed native session already has what it was given ...
+    f.host.stop_all().await;
+    f.send("fourth").await;
+    assert_eq!(texts(&f)[3], "fourth");
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-4"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    // ... and is told when the links changed while no session was live.
+    f.host.stop_all().await;
+    *context.lock().unwrap() = "links: T-2".to_owned();
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    f.send("fifth").await;
+    assert_eq!(texts(&f)[4], "links: T-2\n\nfifth");
+}
+
+/// L3: what the agent changed in ticketd during a turn is kept with the turn when it
+/// ends, as one record the Chat view shows.
+#[tokio::test(start_paused = true)]
+async fn what_the_agent_changed_in_ticketd_is_kept_with_its_turn() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    f.send("first").await;
+    // As the agent does, through the CLI under its agent name.
+    f.core()
+        .add_activity(&ticket.reference, "Drafted the copy", Some("codex"))
+        .unwrap();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    // A turn that changed nothing gets no record.
+    f.send("second").await;
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+
+    let kept: Vec<_> = f
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == AGENT_CHANGES_RECORD_NAME => Some(tool.input),
+            _ => None,
+        })
+        .collect();
+    let [changes] = kept.as_slice() else {
+        panic!("one record, got {kept:?}");
+    };
+    let changes: Vec<ticketd_core::ChatAgentChange> = serde_json::from_str(changes).unwrap();
+    assert_eq!(
+        changes,
+        [ticketd_core::ChatAgentChange::Update {
+            reference: ticket.reference,
+            excerpt: "Drafted the copy".to_owned(),
+        }]
+    );
 }

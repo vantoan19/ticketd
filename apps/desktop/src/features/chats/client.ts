@@ -150,6 +150,8 @@ const stepSchema = z.object({
   target: z.string(),
   /** Further targets merged into this row ("and 5 more"). */
   more: z.number().int().nonnegative().default(0),
+  /** Whether the step has finished. Absent from older records: read as `done`. */
+  state: z.enum(["running", "done", "failed", "unknown"]).optional(),
   /** Diffstat or outcome, already readable: "+12 −3", "passed", "1 failed". */
   result: z.string().nullish(),
   output: z.string().nullish(),

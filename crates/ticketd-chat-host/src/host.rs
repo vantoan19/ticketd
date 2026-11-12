@@ -47,6 +47,10 @@ pub type ContextSource = Arc<dyn Fn(&str) -> Result<Option<String>, String> + Se
 /// so the transcript shows what the agent was given apart from the person's words.
 pub const CONTEXT_RECORD_NAME: &str = "ticketd context";
 
+/// The name of the tool record that keeps, as JSON, what the agent changed in ticketd
+/// during a turn (`ChatAgentChange`s), so the transcript can show it after the turn.
+pub const AGENT_CHANGES_RECORD_NAME: &str = "ticketd changes";
+
 /// The detail recorded on a turn ticketd itself stopped, on Quit or when Chat is turned off.
 pub const STOPPED_BY_TICKETD: &str = "ticketd stopped this Chat";
 
@@ -374,6 +378,16 @@ impl ChatHost {
     pub async fn notify_changed(&self, chat_id: &str) -> Result<(), HostError> {
         self.sender(chat_id)?
             .send(Command::Changed)
+            .await
+            .map_err(|_| HostError::Quitting)
+    }
+
+    /// After the Chat's links were changed through the core: a live session is given the
+    /// new context with its next new turn, and a resumed one when it differs from what it
+    /// was given. Views are told as for `notify_changed`.
+    pub async fn links_changed(&self, chat_id: &str) -> Result<(), HostError> {
+        self.sender(chat_id)?
+            .send(Command::LinksChanged)
             .await
             .map_err(|_| HostError::Quitting)
     }

@@ -534,7 +534,6 @@ async fn resending_an_uncertain_message_sends_that_message_alone_as_a_new_submis
     let id = f.chats.create(f.input("first")).await.unwrap().chat_id;
     settle().await;
     f.chats.send(&id, "later", SendMode::Queue).await.unwrap();
-    f.chats.resume_queue(&id).await.unwrap();
     let (opened, _) = f.open(&id).await;
     let message_id = opened.snapshot.chat.problem.unwrap().message_id.unwrap();
 
@@ -1136,4 +1135,119 @@ fn a_restore_that_replaced_the_data_is_a_success_whatever_followed_it() {
     // Only a restore that did not happen is a failure.
     let refused = restore_outcome(Err("not a ticketd backup".to_owned()), Ok(()), 3);
     assert_eq!(refused.unwrap_err(), "not a ticketd backup");
+}
+
+fn responses<'a>(changes: &'a [Value], item: &str) -> Vec<&'a str> {
+    changes
+        .iter()
+        .filter(|change| {
+            change["item"]["kind"] == "response"
+                && change["item"]["id"]
+                    .as_str()
+                    .is_some_and(|id| id.ends_with(item))
+        })
+        .map(|change| change["item"]["state"].as_str().unwrap())
+        .collect()
+}
+
+/// L1, L2: a turn that starts after the view attached streams as streaming, its
+/// working line counts from its own start, and a turn that ended leaves no response
+/// reading as cut off.
+#[tokio::test(start_paused = true)]
+async fn a_turn_started_after_the_view_attached_streams_and_times_from_its_own_start() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    // A Chat change while turn-1 is active, so the view holds the Chat with that turn.
+    f.chats
+        .set_retention(&id, Retention::Archive)
+        .await
+        .unwrap();
+    settle().await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    f.chats.send(&id, "second", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(EventKind::TextDelta {
+        turn: NativeTurnId::new("turn-2"),
+        item: NativeItemId::new("m2"),
+        text: "Hel".to_owned(),
+    })
+    .await;
+    // Past a checkpoint: the stored, unfinished text reaches the view as a record.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let changes = seen.lock().unwrap().clone();
+    let current = f.core().chat(&id).unwrap().active_turn.unwrap();
+    let chat = changes.iter().rev().find(|c| c["kind"] == "chat").unwrap();
+    assert_eq!(chat["chat"]["doing"]["since"], json!(current.started_at));
+    let states = responses(&changes, ":m2");
+    assert!(states.len() >= 2, "streamed and checkpointed: {states:?}");
+    assert!(
+        states.iter().all(|state| *state == "streaming"),
+        "{states:?}"
+    );
+
+    // The harness ended the turn without a final text: nothing was lost, so it is
+    // complete, not "Incomplete".
+    f.emit(EventKind::TurnEnded {
+        turn: NativeTurnId::new("turn-2"),
+        outcome: TurnOutcome::Interrupted,
+        submissions: Vec::new(),
+    })
+    .await;
+    let changes = seen.lock().unwrap().clone();
+    assert_eq!(responses(&changes, ":m2").last(), Some(&"complete"));
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Response { state: "complete", text, .. } if text == "Hel"
+    )));
+}
+
+/// L3: what the agent changed in ticketd during a turn is a records row after the turn
+/// and the list row's latest change.
+#[tokio::test(start_paused = true)]
+async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_list() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    let moved = ticketd_core::TicketPatch {
+        status: Some(ticketd_core::Status::InProgress),
+        editing_agent: Some("codex".into()),
+        ..Default::default()
+    };
+    f.core().change_ticket(&ticket.reference, moved).unwrap();
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+
+    let status = json!({
+        "kind": "status",
+        "reference": ticket.reference,
+        "title": "Reset email",
+        "from": "Todo",
+        "to": "In progress",
+    });
+    let changes = seen.lock().unwrap().clone();
+    let records = changes
+        .iter()
+        .find(|change| change["item"]["kind"] == "records")
+        .expect("a records row");
+    assert_eq!(records["item"]["changes"], json!([status]));
+    let rows = f.chats.list(ChatListFilter::Active).unwrap();
+    assert_eq!(
+        serde_json::to_value(&rows[0]).unwrap()["last_change"],
+        status
+    );
 }

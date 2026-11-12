@@ -3,7 +3,7 @@
 //!
 //! Everything here is synchronous and runs on the protocol reader in arrival order.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::{Value, json};
 
@@ -42,6 +42,8 @@ const IGNORED_NOTIFICATIONS: &[&str] = &[
     "remoteControl/status/changed",
     "skills/changed",
     "thread/compacted",
+    "thread/goal/cleared",
+    "thread/goal/updated",
     "thread/name/updated",
     "thread/settings/updated",
     "thread/started",
@@ -107,6 +109,8 @@ pub(super) struct Session {
     /// The last non-retried error per turn, for a failed turn that carries none.
     turn_errors: HashMap<String, Value>,
     rate_limits: Option<Value>,
+    /// MCP servers whose failed start was already reported in this session.
+    failed_servers: HashSet<String>,
 }
 
 impl Session {
@@ -292,21 +296,33 @@ impl Session {
                 )])
             }
             // The model that was asked for is not the one answering.
-            "model/rerouted" => Some(vec![notice(
-                NoticeKind::CapabilityUnavailable,
-                method,
-                params,
-                "Codex rerouted this turn to a different model",
-            )]),
+            "model/rerouted" => Some(vec![EventKind::Notice {
+                turn: text(params, &["turnId"]).map(NativeTurnId::new),
+                kind: NoticeKind::CapabilityUnavailable,
+                message: match (text(params, &["fromModel"]), text(params, &["toModel"])) {
+                    (Some(from), Some(to)) => {
+                        format!("Codex rerouted this turn from {from} to {to}.")
+                    }
+                    (_, Some(to)) => format!("Codex rerouted this turn to {to}."),
+                    _ => "Codex rerouted this turn to a different model".to_owned(),
+                },
+                detail: Some(detail(method, params)),
+            }]),
             // ponytail: the field names come from the app-server schema and were not
             // seen in a live session; any other shape stays ignored, as before.
             "mcpServer/startupStatus/updated" if text(params, &["status"]) == Some("failed") => {
                 let server = text(params, &["name"]).unwrap_or("an MCP server");
+                // Codex reports a server for the session and again for a thread: one line.
+                if !self.failed_servers.insert(server.to_owned()) {
+                    return Vec::new();
+                }
                 let reason = text(params, &["error"]).unwrap_or("no reason given");
                 Some(vec![EventKind::Notice {
                     turn: None,
                     kind: NoticeKind::CapabilityUnavailable,
-                    message: format!("Codex could not start the MCP server {server}: {reason}"),
+                    message: format!(
+                        "Codex could not start the MCP server {server}: {reason}. Work that does not need it continues; the server is set up in Codex's own MCP settings."
+                    ),
                     detail: Some(detail(method, params)),
                 }])
             }

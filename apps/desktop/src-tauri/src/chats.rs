@@ -19,7 +19,7 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{
     Chat, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
-    NewChat, Workspace,
+    ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -880,6 +880,17 @@ impl Chats {
                         match change.record {
                             ChatRecord::Chat(chat) => view.chat = chat,
                             ChatRecord::Item(item) => {
+                                // A turn starting or ending changes no Chat record, so the
+                                // Chat's active turn is followed from the turn itself.
+                                if let ChatItem::Turn(turn) = &item {
+                                    let ends_active = view.chat.active_turn.as_ref().map(|t| &t.id)
+                                        == Some(&turn.id);
+                                    if turn.state == ChatTurnState::Active {
+                                        view.chat.active_turn = Some(turn.clone());
+                                    } else if ends_active {
+                                        view.chat.active_turn = None;
+                                    }
+                                }
                                 view.tracker.note(&item);
                                 records.push(item);
                             }
@@ -1153,7 +1164,8 @@ impl Chats {
         let host = self.host()?;
         self.workspace()?
             .set_chat_link(chat_id, link.into(), present)?;
-        Ok(host.notify_changed(chat_id).await?)
+        // A running session is told with its next message.
+        Ok(host.links_changed(chat_id).await?)
     }
 
     /// Continues the same Chat in a fresh harness session started with the history the

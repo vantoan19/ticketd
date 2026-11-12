@@ -5,11 +5,11 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 use ticketd_chat_host::{
-    Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, InteractionKind,
-    ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
+    AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
+    ChatProblem, InteractionKind, ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
 };
 use ticketd_core::{
-    Chat, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
+    Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatTool,
     ChatToolState, ChatTurn, ChatTurnState,
 };
@@ -82,6 +82,8 @@ pub enum LinkedRecord {
 pub struct Step {
     pub verb: &'static str,
     pub target: String,
+    /// `running`, `done`, `failed` or `unknown`: a step not `done` is not told as done.
+    pub state: &'static str,
     pub result: Option<String>,
     pub output: Option<String>,
 }
@@ -111,6 +113,12 @@ pub enum Item {
         id: String,
         at: String,
         steps: Vec<Step>,
+    },
+    /// What the agent changed in ticketd during a turn.
+    Records {
+        id: String,
+        at: String,
+        changes: Vec<ChatAgentChange>,
     },
     Request {
         id: String,
@@ -202,6 +210,8 @@ pub struct Summary {
     /// `problem` is why the last turn stopped, not a condition observed now.
     pub problem_past: bool,
     pub interruption: Option<&'static str>,
+    /// The latest change the agent made in ticketd.
+    pub last_change: Option<ChatAgentChange>,
     pub preview: Option<String>,
     pub updated_at: String,
 }
@@ -242,6 +252,7 @@ pub struct Tracker {
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
     open: HashMap<String, ChatMessage>,
     last_response: Option<String>,
+    last_change: Option<ChatAgentChange>,
     updated_at: Option<String>,
 }
 
@@ -317,7 +328,12 @@ impl Tracker {
                     self.pending.remove(&interaction.id);
                 }
             }
-            ChatItem::Session(_) | ChatItem::Tool(_) | ChatItem::Notice(_) => {}
+            ChatItem::Tool(tool) => {
+                if let Some(changes) = agent_changes(tool) {
+                    self.last_change = changes.last().cloned().or(self.last_change.take());
+                }
+            }
+            ChatItem::Session(_) | ChatItem::Notice(_) => {}
         }
     }
 
@@ -451,11 +467,19 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
     }
 }
 
+/// The changes kept by the host's record of what the agent changed, if `tool` is one.
+fn agent_changes(tool: &ChatTool) -> Option<Vec<ChatAgentChange>> {
+    (tool.name == AGENT_CHANGES_RECORD_NAME)
+        .then(|| serde_json::from_str(&tool.input).ok())
+        .flatten()
+}
+
 fn step(tool: &ChatTool, harness: &str) -> Step {
     if tool.name == CONTEXT_RECORD_NAME {
         return Step {
             verb: "other",
             target: format!("ticketd gave {harness} this Chat's context"),
+            state: "done",
             result: None,
             output: Some(tool.input.clone()),
         };
@@ -486,6 +510,12 @@ fn step(tool: &ChatTool, harness: &str) -> Step {
     Step {
         verb,
         target: target.to_owned(),
+        state: match tool.state {
+            ChatToolState::Running => "running",
+            ChatToolState::Completed => "done",
+            ChatToolState::Failed => "failed",
+            ChatToolState::Unknown => "unknown",
+        },
         result: Some(result.join(", ")).filter(|result| !result.is_empty()),
         output: tool.output.clone(),
     }
@@ -568,6 +598,11 @@ pub fn item(
                 message,
             }
         }
+        ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => Item::Records {
+            id: tool.id.clone(),
+            at: String::new(),
+            changes,
+        },
         ChatItem::Tool(tool) => Item::Steps {
             id: tool.id.clone(),
             at: String::new(),
@@ -840,6 +875,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,
+        last_change: tracker.last_change.clone(),
         preview: tracker
             .last_response
             .as_ref()
@@ -892,6 +928,29 @@ mod tests {
         assert_eq!((read.verb, read.target.as_str()), ("read", "src/a.ts"));
         let other = step(&tool("WebSearch", r#"{"query":"x"}"#), "Claude Code");
         assert_eq!((other.verb, other.target.as_str()), ("other", "WebSearch"));
+    }
+
+    /// U4: a command that is waiting for approval, or was refused, is not told as run.
+    #[test]
+    fn a_step_says_whether_it_finished() {
+        let tool = |state| ChatTool {
+            id: "t".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            name: "touch hello.txt".to_owned(),
+            input: r#"{"type":"commandExecution"}"#.to_owned(),
+            state,
+            output: None,
+            output_truncated: false,
+        };
+        let states = [
+            ChatToolState::Running,
+            ChatToolState::Completed,
+            ChatToolState::Failed,
+            ChatToolState::Unknown,
+        ]
+        .map(|state| step(&tool(state), "Codex").state);
+        assert_eq!(states, ["running", "done", "failed", "unknown"]);
     }
 
     #[test]

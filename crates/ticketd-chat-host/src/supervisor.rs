@@ -20,10 +20,11 @@ use tokio::time::{Instant, sleep_until, timeout, timeout_at};
 use uuid::Uuid;
 
 use crate::host::{
-    Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, ChatView,
-    ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError, INTERRUPT_TIMEOUT, LiveInteraction,
-    ResumeMode, SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode, StopState, TEXT_CHECKPOINT_INTERVAL,
-    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal, problem_key,
+    AGENT_CHANGES_RECORD_NAME, Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive,
+    ChatProblem, ChatView, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
+    INTERRUPT_TIMEOUT, LiveInteraction, ResumeMode, SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode,
+    StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
+    problem_key,
 };
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::{
@@ -63,6 +64,8 @@ pub(crate) enum Command {
     },
     Trash(Reply<Option<String>>),
     Changed,
+    /// The Chat's links were changed; the session is given the new context.
+    LinksChanged,
     /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
     Shutdown(oneshot::Sender<Option<String>>),
 }
@@ -77,6 +80,11 @@ enum Done {
     },
     Dispatched {
         outcome: DispatchOutcome,
+    },
+    /// The ticketd context read again for the live session after its links changed.
+    Context {
+        generation: RuntimeGeneration,
+        context: Result<Option<String>, String>,
     },
     Interrupted {
         generation: RuntimeGeneration,
@@ -101,6 +109,8 @@ struct Runtime {
     origin: ChatSessionOrigin,
     turns: HashSet<String>,
     tools: HashSet<String>,
+    /// Harness notices already kept for this session.
+    said: HashSet<String>,
 }
 
 struct Opening {
@@ -121,6 +131,9 @@ struct Dispatch {
 struct ActiveTurn {
     turn_id: String,
     native: NativeTurnId,
+    /// The workspace change token when the turn started; unchanged means nothing in
+    /// the workspace changed, so the agent changed no record.
+    token: Option<i64>,
 }
 
 struct LiveRequest {
@@ -183,6 +196,16 @@ pub(crate) struct Supervisor {
     checkpoint_at: Option<Instant>,
     stop_deadline: Option<Instant>,
     shutting_down: bool,
+    /// The person resumed the queue or sent into it, so it may open a session. Without
+    /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
+    queue_started: bool,
+    /// The runtime is being closed on purpose; its connection ending is not a loss.
+    closing: bool,
+    /// Something may have been written since views were last brought up to date.
+    unpublished: bool,
+    /// The context of the live session is being read again; nothing is dispatched until
+    /// it is, so the next message carries it.
+    refreshing: Option<RuntimeGeneration>,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -244,6 +267,10 @@ impl Supervisor {
             checkpoint_at: None,
             stop_deadline: None,
             shutting_down: false,
+            queue_started: false,
+            closing: false,
+            unpublished: true,
+            refreshing: None,
         };
         tokio::spawn(supervisor.run());
         sender
@@ -309,6 +336,7 @@ impl Supervisor {
         &mut self,
         call: impl FnOnce(&mut Workspace) -> Result<T, Error>,
     ) -> Result<T, Error> {
+        self.unpublished = true;
         let result = self.core(call);
         if let Err(error) = &result
             && !is_refusal(error)
@@ -368,6 +396,8 @@ impl Supervisor {
     // ------------------------------------------------------------------
 
     async fn on_command(&mut self, command: Command) {
+        // A command may follow a write made outside this task (links, folder, retention).
+        self.unpublished = true;
         match command {
             Command::Attach(reply) => {
                 let _ = reply.send(self.attach());
@@ -386,10 +416,13 @@ impl Supervisor {
             Command::ResumeQueue(reply) => {
                 let chat = self.chat_id.clone();
                 let result = self.write(|core| core.set_chat_queue_paused(&chat, false));
-                if result.is_ok()
-                    && matches!(self.problem, Some(ChatProblem::DispatchRefused { .. }))
-                {
-                    self.problem = None;
+                if result.is_ok() {
+                    // The person asked for the queue to run: it opens a session when
+                    // none is live.
+                    self.queue_started = true;
+                    if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
+                        self.problem = None;
+                    }
                 }
                 let _ = reply.send(result.map(|_| ()).map_err(HostError::from));
             }
@@ -410,8 +443,42 @@ impl Supervisor {
                 };
                 let _ = reply.send(result);
             }
+            Command::LinksChanged => self.refresh_context(),
             Command::Changed | Command::Shutdown(_) => {}
         }
+    }
+
+    /// Reads the ticketd context again for the live session. Without one there is nothing
+    /// to tell: the next session reads the context when it opens.
+    fn refresh_context(&mut self) {
+        let (Some(runtime), Some(source)) = (&self.runtime, self.context.clone()) else {
+            return;
+        };
+        let (done, chat_id, generation) =
+            (self.done.clone(), self.chat_id.clone(), runtime.generation);
+        self.refreshing = Some(generation);
+        tokio::spawn(async move {
+            // It runs the CLI and can take seconds: off the async threads.
+            let context = tokio::task::spawn_blocking(move || source(&chat_id))
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()));
+            let _ = done.send(Done::Context {
+                generation,
+                context,
+            });
+        });
+    }
+
+    /// The context this Chat's sessions were last given or are about to be given.
+    fn context_given(&self) -> Option<String> {
+        if let Some(context) = self.session_context.as_ref().or(self.context_sent.as_ref()) {
+            return Some(context.clone());
+        }
+        let chat = self.chat_id.clone();
+        // Unreadable: treated as never given, so the context is sent rather than lost.
+        self.core(|core| core.chat_latest_tool_input(&chat, CONTEXT_RECORD_NAME))
+            .ok()
+            .flatten()
     }
 
     fn attach(&mut self) -> Result<(ChatView, Subscription), HostError> {
@@ -450,9 +517,29 @@ impl Supervisor {
             && message.queued
             && !self.direct.contains(&message.id)
         {
-            self.direct.push_back(message.id.clone());
+            if self.active.is_none() && self.older_input_waits(&message.id) {
+                // Older input waits in a queue that is not paused: this goes after
+                // it, and the queue runs.
+                self.queue_started = true;
+            } else {
+                self.direct.push_back(message.id.clone());
+            }
         }
         Ok(message)
+    }
+
+    /// Whether the queue, not paused, holds input saved before `message_id`.
+    fn older_input_waits(&self, message_id: &str) -> bool {
+        let chat = self.chat_id.clone();
+        self.core(|core| {
+            Ok(!core.chat(&chat)?.queue_paused
+                && core
+                    .chat_queue(&chat)?
+                    .first()
+                    .is_some_and(|first| first.id != message_id))
+        })
+        // Unreadable now: sent directly, as before; the dispatch reads storage again.
+        .unwrap_or(false)
     }
 
     /// Stop pauses the queue first, so nothing unsent is dispatched whatever the
@@ -640,11 +727,9 @@ impl Supervisor {
             }
             return;
         };
-        // A resumed native session already has it; a new one starts without it.
-        let source = self
-            .context
-            .clone()
-            .filter(|_| origin != ChatSessionOrigin::NativeResume);
+        // Read for every session. A resumed native session is given it only when it
+        // differs from what the Chat's sessions were last given (see `on_opened`).
+        let source = self.context.clone();
         self.generations += 1;
         let generation = RuntimeGeneration(self.generations);
         let request = OpenRequest {
@@ -679,6 +764,13 @@ impl Supervisor {
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
     /// Returns why cleanup could not be confirmed, if it could not.
     async fn stop_runtime(&mut self, detail: &str) -> Option<String> {
+        self.closing = true;
+        let unconfirmed = self.close_runtime(detail).await;
+        self.closing = false;
+        unconfirmed
+    }
+
+    async fn close_runtime(&mut self, detail: &str) -> Option<String> {
         self.record(Vec::new());
         let deadline = Instant::now() + CLOSE_TIMEOUT;
         while self.opening.is_some() {
@@ -757,6 +849,9 @@ impl Supervisor {
     /// Nothing more will be observed from the runtime: settle what it left open.
     fn runtime_gone(&mut self, detail: &str) {
         let chat = self.chat_id.clone();
+        if let Some(changes) = self.agent_changes() {
+            let _ = self.write(|core| core.record_chat_observations(&chat, vec![changes]));
+        }
         let _ = self.write(|core| core.mark_chat_contact_lost(Some(&chat), detail));
         self.active = None;
         self.unconfirmed_start = None;
@@ -772,10 +867,23 @@ impl Supervisor {
     }
 
     fn on_loss(&mut self, detail: String) {
+        // With nothing in flight, or while ticketd itself closes the runtime, the
+        // session simply ended: no turn failed, and the next message opens it again.
+        let quiet = self.closing
+            || (self.active.is_none()
+                && self.dispatching.is_none()
+                && self.unconfirmed_start.is_none()
+                && self.interactions.is_empty());
         self.record(Vec::new());
         self.runtime = None;
+        if self.closing {
+            // `stop_runtime` settles what was open, with its own reason.
+            return;
+        }
         self.runtime_gone(&detail);
-        self.pause(ChatProblem::RuntimeLost { detail });
+        if !quiet {
+            self.pause(ChatProblem::RuntimeLost { detail });
+        }
     }
 
     // ------------------------------------------------------------------
@@ -796,8 +904,15 @@ impl Supervisor {
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
+            || self.refreshing.is_some()
             || self.unconfirmed_start.is_some()
         {
+            return;
+        }
+        let idle = self.active.is_none();
+        if !idle && self.direct.is_empty() {
+            // During a turn only steering input can go out, so the workspace is not
+            // read for every event of a streaming turn.
             return;
         }
         let chat_id = self.chat_id.clone();
@@ -809,7 +924,6 @@ impl Supervisor {
             self.resend = None;
             return;
         }
-        let idle = self.active.is_none();
         // What the person asked to send again goes alone, as a new turn.
         let resend = self.resend.clone().filter(|_| idle);
         let message_id = loop {
@@ -822,16 +936,27 @@ impl Supervisor {
                 Some(_) => {
                     self.direct.pop_front();
                 }
-                None if idle && !chat.queue_paused && self.runtime.is_some() => {
+                None if idle
+                    && !chat.queue_paused
+                    && (self.runtime.is_some() || self.queue_started) =>
+                {
                     match self.core(|core| core.chat_queue(&chat_id)) {
                         Ok(queue) => match queue.into_iter().next() {
                             Some(message) => break message.id,
-                            None => return,
+                            None => {
+                                self.queue_started = false;
+                                return;
+                            }
                         },
                         Err(_) => return,
                     }
                 }
-                None => return,
+                None => {
+                    if chat.queue_paused {
+                        self.queue_started = false;
+                    }
+                    return;
+                }
             }
         };
         if self.runtime.is_none() {
@@ -949,6 +1074,29 @@ impl Supervisor {
                 context,
             } => self.on_opened(generation, result, context),
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
+            Done::Context {
+                generation,
+                context,
+            } => {
+                if self.refreshing != Some(generation) {
+                    return;
+                }
+                self.refreshing = None;
+                let current = self.runtime.as_ref().map(|runtime| runtime.generation);
+                match context {
+                    // Told with the next new turn, and only when it is news to the session.
+                    Ok(Some(context))
+                        if current == Some(generation)
+                            && self.context_given().as_ref() != Some(&context) =>
+                    {
+                        self.session_context = Some(context);
+                    }
+                    Ok(_) => {}
+                    Err(error) => self.notice(format!(
+                        "ticketd could not read this Chat's changed links, so the session was not told about them: {error}"
+                    )),
+                }
+            }
             Done::Interrupted {
                 generation,
                 outcome,
@@ -1017,11 +1165,16 @@ impl Supervisor {
                     origin: opening.origin,
                     turns: HashSet::new(),
                     tools: HashSet::new(),
+                    said: HashSet::new(),
                 });
                 if opening.preamble.is_some() {
                     self.preamble = opening.preamble;
                 }
                 match context {
+                    // A resumed native session remembers what it was given.
+                    Ok(Some(context))
+                        if opening.origin == ChatSessionOrigin::NativeResume
+                            && self.context_given().as_ref() == Some(&context) => {}
                     Ok(Some(context)) => self.session_context = Some(context),
                     Ok(None) => {}
                     Err(error) => self.notice(format!(
@@ -1092,10 +1245,16 @@ impl Supervisor {
                 self.record(observations);
             }
             DispatchOutcome::UnknownAfterLoss => {
+                let detail = "contact was lost before the harness replied".to_owned();
                 self.record(vec![ChatObservation::SubmissionUncertain {
                     attempt_id,
-                    detail: Some("contact was lost before the harness replied".to_owned()),
+                    detail: Some(detail.clone()),
                 }]);
+                // The loss may have been seen first, with nothing else in flight: it
+                // was not a quiet end, since this input may have reached the harness.
+                if self.problem.is_none() {
+                    self.pause(ChatProblem::RuntimeLost { detail });
+                }
             }
         }
     }
@@ -1155,9 +1314,11 @@ impl Supervisor {
                 output: None,
             });
         }
+        let token = self.core(|core| core.change_token()).ok();
         self.active = Some(ActiveTurn {
             turn_id: turn_id.clone(),
             native: native.clone(),
+            token,
         });
         self.unconfirmed_start = None;
         if self.stop_when_turn_known {
@@ -1342,6 +1503,24 @@ impl Supervisor {
                         turn_id: turn_id.clone(),
                     });
                 }
+                // The harness ended the turn, so text it streamed without a final copy
+                // is all there is: it is kept whole. Only lost contact leaves a response
+                // cut off.
+                let (ended, streaming) = std::mem::take(&mut self.text)
+                    .into_iter()
+                    .partition(|buffer| buffer.turn_id == turn_id);
+                self.text = streaming;
+                observations.extend(ended.into_iter().map(|buffer: TextBuffer| {
+                    ChatObservation::AssistantText {
+                        message_id: buffer.message_id,
+                        turn_id: buffer.turn_id,
+                        text: buffer.text,
+                        complete: true,
+                    }
+                }));
+                if self.active.as_ref().is_some_and(|a| a.turn_id == turn_id) {
+                    observations.extend(self.agent_changes());
+                }
                 let (state, detail, problem, problem_resets_at) = match outcome {
                     TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
                     TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None, None),
@@ -1392,7 +1571,7 @@ impl Supervisor {
                 // An unavailable capability stops nothing, so it is a stored notice like
                 // the others and never the Chat's problem.
                 NoticeKind::Retrying | NoticeKind::Warning | NoticeKind::CapabilityUnavailable => {
-                    self.notice(message);
+                    self.harness_notice(message);
                 }
                 NoticeKind::EffectiveSettings => {
                     let settings = detail.map_or(message, |detail| detail.payload().to_owned());
@@ -1400,8 +1579,40 @@ impl Supervisor {
                     let _ = self.write(|core| core.set_chat_effective_settings(&chat, &settings));
                 }
             },
-            EventKind::Unknown { summary, .. } => self.notice(summary),
+            EventKind::Unknown { summary, .. } => self.harness_notice(summary),
         }
+    }
+
+    /// What the agent changed in ticketd during the active turn, as the record that keeps
+    /// it for the transcript; `None` when nothing in the workspace moved or none of it
+    /// was the agent's.
+    fn agent_changes(&mut self) -> Option<ChatObservation> {
+        let active = self.active.as_ref()?;
+        let (turn_id, started) = (active.turn_id.clone(), active.token);
+        let now = self.core(|core| core.change_token()).ok();
+        if now.is_some() && now == started {
+            return None;
+        }
+        let chat = self.chat_id.clone();
+        let changes = match self.core(|core| core.chat_turn_agent_changes(&chat, &turn_id)) {
+            Ok(changes) if changes.is_empty() => return None,
+            Ok(changes) => changes,
+            Err(error) => {
+                // The changes are in the workspace either way; only their row is missing.
+                self.notice(format!(
+                    "ticketd could not list what the agent changed in this turn: {error}"
+                ));
+                return None;
+            }
+        };
+        Some(ChatObservation::Tool {
+            tool_id: format!("{turn_id}:ticketd-changes"),
+            turn_id,
+            name: AGENT_CHANGES_RECORD_NAME.to_owned(),
+            input: serde_json::to_string(&changes).ok()?,
+            state: ChatToolState::Completed,
+            output: None,
+        })
     }
 
     fn record_if_any(&mut self, observations: Vec<ChatObservation>) {
@@ -1505,9 +1716,21 @@ impl Supervisor {
         }
     }
 
+    /// A notice from the harness. One it repeats word for word (the same unknown
+    /// message every turn, a warning on every start) is kept once per session, so the
+    /// conversation is not buried under it.
+    fn harness_notice(&mut self, text: String) {
+        let first = self
+            .runtime
+            .as_mut()
+            .is_none_or(|runtime| runtime.said.insert(text.clone()));
+        if first {
+            self.notice(text);
+        }
+    }
+
     /// Keeps something worth telling the person that belongs to no other record. It is
     /// stored, so it is there for a view that attaches later.
-    // ponytail: one record per notice; coalesce repeats if a harness proves noisy.
     fn notice(&mut self, text: String) {
         let chat = self.chat_id.clone();
         let notice = ChatObservation::Notice {
@@ -1561,7 +1784,8 @@ impl Supervisor {
             return;
         }
         let chat = self.chat_id.clone();
-        loop {
+        // Streamed text between checkpoints writes nothing, so there is nothing to read.
+        while std::mem::take(&mut self.unpublished) {
             let cursor = self.cursor;
             match self.core(|core| core.chat_changes(&chat, cursor, 500)) {
                 Ok(ticketd_core::ChatCatchUp::Changes {
@@ -1575,9 +1799,7 @@ impl Supervisor {
                             subscriber.push(ChatUpdate::Changes(changes.clone()));
                         }
                     }
-                    if !more {
-                        break;
-                    }
+                    self.unpublished = more;
                 }
                 Ok(ticketd_core::ChatCatchUp::Resync) => {
                     for subscriber in self.subscribers.drain(..) {
@@ -1586,7 +1808,10 @@ impl Supervisor {
                     return;
                 }
                 // Storage trouble is reported by the write that hits it.
-                Err(_) => break,
+                Err(_) => {
+                    self.unpublished = true;
+                    break;
+                }
             }
         }
         let live = self.live();

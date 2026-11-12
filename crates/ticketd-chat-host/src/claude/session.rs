@@ -163,16 +163,11 @@ impl Session {
                     .then(|| reset_time(&info["resetsAt"]))
                     .flatten();
             }
-            "sdk_message_unmapped" => {
-                let kind = match (text(event, "sdk_type"), text(event, "sdk_subtype")) {
-                    (Some(kind), Some(subtype)) => format!("{kind}/{subtype}"),
-                    (kind, _) => kind.unwrap_or("unknown").to_owned(),
-                };
-                events.push(EventKind::Unknown {
-                    summary: format!("Claude Code sent a message ticketd does not show: {kind}"),
-                    detail: ProviderDetail::new(kind, text(event, "json").unwrap_or_default()),
-                });
-            }
+            // Frames with no event of their own are session housekeeping (status, hook
+            // and command lifecycle), "safe to ignore" by the bridge protocol. Requests
+            // that need an answer always arrive as events of their own, so nothing
+            // the person must act on is dropped here.
+            "sdk_message_unmapped" => {}
             _ => return None,
         }
         Some((events, decline))

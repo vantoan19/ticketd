@@ -371,6 +371,26 @@ pub struct ChatInteraction {
     pub response: Option<String>,
 }
 
+/// Changes listed for one turn at most; a turn that made more shows the first ones.
+pub const CHAT_AGENT_CHANGES_LIMIT: usize = 50;
+/// Characters of an Activity shown as its excerpt.
+const CHAT_AGENT_EXCERPT_LIMIT: usize = 140;
+
+/// A change the Chat's agent made in ticketd, through the CLI under its agent name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChatAgentChange {
+    /// A ticket moved from one status to another.
+    Status {
+        reference: String,
+        title: String,
+        from: String,
+        to: String,
+    },
+    /// An Activity posted on a ticket.
+    Update { reference: String, excerpt: String },
+}
+
 /// Something the host observed that belongs to no other record: a harness warning, a
 /// retry, traffic it could not interpret. Text is cut to `CHAT_NOTICE_LIMIT` characters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1704,6 +1724,80 @@ impl Workspace {
             }
             Ok(affected)
         })
+    }
+
+    /// What the Chat's agent changed in tickets while `turn_id` ran, oldest first: status
+    /// moves and Activities written under the Chat's harness as agent name. The agent
+    /// name is attribution only: another Chat on the same harness working at the same
+    /// time is not told apart.
+    // ponytail: attributed by agent name and the turn's time; give the agent a per-Chat
+    // name if concurrent Chats on one harness show each other's changes.
+    // Documents carry no agent name yet, so a created Document is not listed.
+    pub fn chat_turn_agent_changes(
+        &self,
+        chat_id: &str,
+        turn_id: &str,
+    ) -> Result<Vec<ChatAgentChange>, Error> {
+        let (agent, started, ended): (String, String, Option<String>) = self
+            .connection
+            .query_row(
+                "SELECT c.harness, t.started_at, t.ended_at FROM chat_turns t JOIN chats c ON c.id = t.chat_id WHERE t.id = ?1 AND t.chat_id = ?2",
+                params![turn_id, chat_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?
+            .ok_or_else(|| invalid(format!("turn '{turn_id}' was not recorded for this Chat")))?;
+        let mut statement = self.connection.prepare(
+            "SELECT kind, reference, title, from_value, to_value FROM (
+                 SELECT 'status' AS kind, 'T-' || t.number AS reference, t.title, h.from_value, h.to_value, h.timestamp AS at, 0 AS source, h.number AS seq
+                 FROM ticket_history h JOIN tickets t ON t.id = h.ticket_id
+                 WHERE h.kind = 'status' AND h.editing_agent = ?1 AND h.timestamp >= ?2 AND (?3 IS NULL OR h.timestamp <= ?3)
+                 UNION ALL
+                 SELECT 'update', 'T-' || t.number, t.title, '', a.brief, a.reported_at, 1, a.number
+                 FROM activities a JOIN tickets t ON t.id = a.ticket_id
+                 WHERE a.editing_agent = ?1 AND a.reported_at >= ?2 AND (?3 IS NULL OR a.reported_at <= ?3))
+             ORDER BY at, source, seq LIMIT ?4",
+        )?;
+        let changes = statement
+            .query_map(
+                params![agent, started, ended, CHAT_AGENT_CHANGES_LIMIT as i64],
+                |row| {
+                    let (kind, reference): (String, String) = (row.get(0)?, row.get(1)?);
+                    Ok(if kind == "status" {
+                        ChatAgentChange::Status {
+                            reference,
+                            title: row.get(2)?,
+                            from: row.get(3)?,
+                            to: row.get(4)?,
+                        }
+                    } else {
+                        let brief: String = row.get(4)?;
+                        ChatAgentChange::Update {
+                            reference,
+                            excerpt: brief.chars().take(CHAT_AGENT_EXCERPT_LIMIT).collect(),
+                        }
+                    })
+                },
+            )?
+            .collect::<Result<_, _>>()?;
+        Ok(changes)
+    }
+
+    /// The input of the Chat's latest tool record named `name`, such as the context a
+    /// session was last given.
+    pub fn chat_latest_tool_input(
+        &self,
+        chat_id: &str,
+        name: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT input FROM chat_tools WHERE chat_id = ?1 AND name = ?2 ORDER BY position DESC LIMIT 1",
+                params![chat_id, name],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     /// The Chat and its latest `limit` history items, with the change sequence to follow from.

@@ -291,3 +291,26 @@ test("an uncertain delivery is worded without assuming why, and a set-aside harn
   expect(harnessUsable("sign_in_unknown")).toBe(true);
   expect(harnessUsable("not_signed_in")).toBe(false);
 });
+
+test("a missing folder is told without claiming a restore happened", () => {
+  const notice = problemNotice(
+    { kind: "folder_missing", path: "/work/app" },
+    "Codex",
+  );
+  expect(notice.body).toBe(
+    "`/work/app` wasn't found. Nothing was re-run. Pick another folder to keep going here.",
+  );
+});
+
+test("a step that has not run, or did not complete, is not counted as run", () => {
+  expect(
+    stepTally([
+      { verb: "ran", target: "npm test", more: 0, state: "done" },
+      { verb: "ran", target: "rm -rf dist", more: 0, state: "running" },
+      { verb: "ran", target: "touch hello.txt", more: 0, state: "failed" },
+    ]),
+  ).toBe("Ran 1 command, 1 step in progress, 1 step did not complete");
+  expect(
+    stepTally([{ verb: "ran", target: "touch a", more: 0, state: "running" }]),
+  ).toBe("1 step in progress");
+});

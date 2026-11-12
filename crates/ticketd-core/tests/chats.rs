@@ -1350,3 +1350,56 @@ fn every_combination_of_delivery_decision_and_later_observation_has_one_standing
         }
     }
 }
+
+/// L3: what the Chat's agent changed in ticketd during a turn, oldest first: status
+/// moves and Activities written under the harness's agent name, not others' changes
+/// and nothing from before the turn.
+#[test]
+fn the_ticket_changes_a_chats_agent_made_during_a_turn_are_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let ticket = workspace.create_ticket("Reset email").unwrap();
+    let reference = ticket.reference.clone();
+    let moved = |status| ticketd_core::TicketPatch {
+        status: Some(status),
+        editing_agent: Some("claude-code".into()),
+        ..Default::default()
+    };
+    workspace
+        .add_activity(&reference, "Before the turn", Some("claude-code"))
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    start_turn(&mut workspace, &chat, "go", "turn-1");
+
+    workspace
+        .change_ticket(&reference, moved(ticketd_core::Status::InProgress))
+        .unwrap();
+    workspace
+        .add_activity(&reference, "Drafted the copy", Some("claude-code"))
+        .unwrap();
+    workspace
+        .add_activity(&reference, "Someone else", Some("codex"))
+        .unwrap();
+    workspace
+        .add_activity(&reference, "A person", None)
+        .unwrap();
+
+    let changes = workspace
+        .chat_turn_agent_changes(&chat.id, "turn-1")
+        .unwrap();
+    assert_eq!(
+        changes,
+        [
+            ticketd_core::ChatAgentChange::Status {
+                reference: reference.clone(),
+                title: "Reset email".into(),
+                from: "Todo".into(),
+                to: "In progress".into(),
+            },
+            ticketd_core::ChatAgentChange::Update {
+                reference,
+                excerpt: "Drafted the copy".into(),
+            },
+        ]
+    );
+}

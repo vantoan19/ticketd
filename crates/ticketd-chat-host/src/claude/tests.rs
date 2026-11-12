@@ -413,6 +413,8 @@ async fn a_refusal_after_the_wait_ran_out_is_late_evidence() {
 }
 
 #[tokio::test(start_paused = true)]
+/// Unmapped SDK frames (L5: status, hook lifecycle) are routine and not reported;
+/// unknown bridge events and requests still are.
 async fn unknown_traffic_is_reported_declined_and_never_ends_a_turn() {
     let (mut peer, runtime, mut events) = open().await;
     peer.load(fixture!("unknown_frames"));
@@ -427,7 +429,6 @@ async fn unknown_traffic_is_reported_declined_and_never_ends_a_turn() {
             "unknown malformed",
             "unknown malformed",
             "unknown from_the_future",
-            "unknown system/status",
             "unknown delta",
             "unknown command_rejected",
             "unknown server_tool_use",
