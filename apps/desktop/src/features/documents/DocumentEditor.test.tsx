@@ -18,6 +18,8 @@ vi.mock("@/lib/sync-review-api", () => ({
   syncReview: {
     conflicts: vi.fn(async () => []),
     versions: vi.fn(async () => []),
+    version: vi.fn(),
+    restore: vi.fn(),
   },
 }));
 const renderEditor = (ui: ReactElement) =>
@@ -1042,4 +1044,35 @@ it("opens the Document's History from its actions, and says when it Needs review
     source: "local",
   });
   expect(await screen.findByText("No earlier versions")).toBeTruthy();
+});
+
+it("shows the restored text at once after a History restore", async () => {
+  vi.mocked(syncReview.versions).mockResolvedValue([
+    {
+      id: "7",
+      timestamp: new Date(Date.now() - 3_600_000).toISOString(),
+      device: null,
+      changed: ["body"],
+    },
+  ]);
+  vi.mocked(syncReview.version).mockResolvedValue({
+    fields: [{ field: "body", value: "Earlier text", current: "Original" }],
+  });
+  vi.mocked(syncReview.restore).mockResolvedValue();
+  // No workspace change is reported: the restore itself must refresh the editor.
+  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Document actions" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "History…" }));
+  await screen.findByText("Earlier text");
+  outside({ ...stored, body: "Earlier text", updated_at: "later" });
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await waitFor(() =>
+    expect(
+      screen.getByLabelText<HTMLTextAreaElement>("Your thought").value,
+    ).toBe("Earlier text"),
+  );
 });

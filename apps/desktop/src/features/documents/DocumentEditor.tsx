@@ -585,9 +585,8 @@ export function DocumentEditor({
   useEffect(() => {
     reconcileRef.current = reconcile;
   });
-  // Another writer may have changed this Document or its links: look only when
-  // the workspace says something changed.
-  useOnWorkspaceChange(() => {
+  /** Reads the stored Document again and folds it in when it changed. */
+  const refreshStored = () => {
     if (!id.current || saving.current) return;
     // Links change when other Documents or tickets are edited, not only this one.
     refreshLinksRef.current();
@@ -604,7 +603,10 @@ export function DocumentEditor({
           lastVersion.current = version.join("|");
       })
       .catch(() => {});
-  }, active);
+  };
+  // Another writer may have changed this Document or its links: look only when
+  // the workspace says something changed.
+  useOnWorkspaceChange(refreshStored, active);
   // While the conflict notice is up, clicks that would leave or Trash the Document are
   // ignored (not queued), so they cannot fire later after the person resolves it.
   const noticeRef = useRef<HTMLDivElement>(null);
@@ -879,6 +881,7 @@ export function DocumentEditor({
           id={initial.id}
           subtitle={heading}
           onClose={() => setHistoryOpen(false)}
+          onRestored={refreshStored}
         />
       )}
       <div className="document-main">
