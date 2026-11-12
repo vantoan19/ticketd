@@ -1,0 +1,76 @@
+/* About page: promise tiles and link rows, from tokens. */
+.about-promises {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.about-promise {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.about-promise svg {
+  margin-bottom: 8px;
+  color: var(--foreground);
+}
+.about-link-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  color: var(--foreground);
+}
+.about-link-description {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+.about-link-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.about-link-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 60px;
+  padding: 12px 20px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--foreground);
+  text-decoration: none;
+  cursor: pointer;
+}
+.about-link-row + .about-link-row {
+  box-shadow: inset 0 1px 0 var(--group-hairline);
+}
+.about-link-row:hover {
+  background: var(--recessed);
+}
+.about-link-row > svg {
+  flex: none;
+  color: var(--disabled-foreground);
+}
+.about-link-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+@media (max-width: 639px) {
+  .about-promises {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

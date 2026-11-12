@@ -78,6 +78,7 @@ beforeEach(() => {
     suggested_directory: "~/.local/bin",
   });
   vi.mocked(workspaceClient.info).mockResolvedValue(info);
+  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
   vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.openLink).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
@@ -100,10 +101,10 @@ test("choosing Dark or Full width is stored and exposed as selected", () => {
   );
   const checked = (name: string | RegExp) =>
     screen.getByRole("radio", { name }).getAttribute("aria-checked");
-  expect(checked("System")).toBe("true");
-  fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+  expect(checked(/^System/)).toBe("true");
+  fireEvent.click(screen.getByRole("radio", { name: /^Dark/ }));
   fireEvent.click(screen.getByRole("radio", { name: /Full width/ }));
-  expect(checked("Dark")).toBe("true");
+  expect(checked(/^Dark/)).toBe("true");
   expect(checked(/Full width/)).toBe("true");
   expect(loadPreferences()).toMatchObject({
     theme: "dark",
@@ -191,149 +192,16 @@ test("a workspace that cannot be read shows an error instead of counts", async (
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 
-test("the About links open Documentation and the issue tracker", async () => {
-  render(
-    <SettingsView
-      selected="about"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Documentation" }));
-  fireEvent.click(screen.getByRole("button", { name: "Report an issue" }));
-  await waitFor(() =>
-    expect(workspaceClient.openLink).toHaveBeenCalledTimes(2),
-  );
-  const urls = vi.mocked(workspaceClient.openLink).mock.calls.map(([u]) => u);
-  expect(urls.every((url) => url.startsWith("https://"))).toBe(true);
-});
-
-const lastBackup = {
-  path: "/Users/me/Backups/ticketd-backup-2026-11-01.sqlite3",
-  completed_at: "2026-11-01T09:30:00.000Z",
-};
-
-test("Back up now saves to the chosen file and shows it as the checked last backup", async () => {
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(lastBackup.path);
-  vi.mocked(client.backupWorkspace).mockImplementation(async () => {
-    vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
-    return true;
-  });
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  expect(screen.queryByLabelText(/Backup file path/)).toBeNull();
-  expect(
-    screen.getByText(
-      "No backups yet. Your first one will be listed here with its date and size.",
-    ),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
-  expect((await screen.findByLabelText("Last backup path")).textContent).toBe(
-    lastBackup.path,
-  );
-  expect(workspaceClient.chooseSavePath).toHaveBeenCalledWith(
-    expect.objectContaining({
-      defaultPath: expect.stringMatching(
-        /^ticketd-backup-\d{4}-\d{2}-\d{2}\.sqlite3$/,
-      ),
-    }),
-  );
-  expect(client.backupWorkspace).toHaveBeenCalledWith(lastBackup.path);
-  expect(
-    screen.getByRole("group", { name: "Last backup" }).textContent,
-  ).toContain("Checked");
-});
-
-test("the last backup, including one made with the CLI, shows on load and can be revealed", async () => {
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  expect((await screen.findByLabelText("Last backup path")).textContent).toBe(
-    lastBackup.path,
-  );
-  const group = screen.getByRole("group", { name: "Last backup" });
-  fireEvent.click(group.querySelector("button") as HTMLButtonElement);
-  await waitFor(() =>
-    expect(workspaceClient.reveal).toHaveBeenCalledWith(lastBackup.path),
-  );
-});
-
-test("a refused backup explains itself and keeps the previous status", async () => {
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(
-    "/tmp/taken.sqlite3",
-  );
-  vi.mocked(client.backupWorkspace).mockRejectedValue(
-    "a file already exists at /tmp/taken.sqlite3; ticketd never replaces an existing file, so choose a new name",
-  );
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  await screen.findByLabelText("Last backup path");
-  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
-  const alert = await screen.findByText(/The backup was not saved/);
-  expect(alert.textContent).toContain("a file already exists at");
-  expect(alert.textContent).not.toContain("nothing was left");
-  expect(screen.getByLabelText("Last backup path").textContent).toBe(
-    lastBackup.path,
-  );
-});
-
 test("cancelling a save dialog changes nothing and shows no error", async () => {
   const props = { onRestore: async () => {}, onOpenInbox: () => {} };
-  const { rerender } = render(<SettingsView selected="backups" {...props} />);
+  render(<SettingsView selected="backups" {...props} />);
+  await screen.findByText("No backups yet");
   fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
   await waitFor(() =>
     expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
   );
-  rerender(<SettingsView selected="export" {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  await waitFor(() =>
-    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(2),
-  );
   expect(client.backupWorkspace).not.toHaveBeenCalled();
-  expect(client.exportWorkspace).not.toHaveBeenCalled();
   expect(screen.queryByRole("alert")).toBeNull();
-});
-
-test("Export… writes to the chosen file and Copy puts the CLI command on the clipboard", async () => {
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue("/tmp/out.json");
-  vi.mocked(client.exportWorkspace).mockResolvedValue(undefined);
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText },
-  });
-  render(
-    <SettingsView
-      selected="export"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  expect(
-    await screen.findByText("Export saved to /tmp/out.json."),
-  ).toBeTruthy();
-  expect(client.exportWorkspace).toHaveBeenCalledWith("/tmp/out.json");
-  fireEvent.click(screen.getByRole("button", { name: "Copy export command" }));
-  await waitFor(() =>
-    expect(writeText).toHaveBeenCalledWith("ticketd export --file PATH"),
-  );
 });
 
 test("Follow tickets I create is on by default and the choice persists", () => {

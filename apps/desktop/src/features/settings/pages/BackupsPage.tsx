@@ -1,50 +1,210 @@
-import { useEffect, useState } from "react";
-import { ChevronDown, FolderOpen, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Archive,
+  Check,
+  CircleAlert,
+  FolderOpen,
+  Loader2,
+  Minus,
+} from "lucide-react";
 import { client } from "@/lib/api/client";
 import { workspaceClient, type BackupRecord } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
-import { StatusDot } from "@/components/ui/status-dot";
+import { IconButton } from "@/components/ui/icon-button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatusLabel } from "@/components/ui/status-label";
 import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { revealFile } from "@/lib/reveal";
-import { localDate } from "@/features/settings/settings-format";
-import { SettingsCard } from "@/features/settings/SettingsCard";
+import { localDate, splitPath } from "@/features/settings/settings-format";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
+import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import {
+  SettingsList,
+  SettingsListFooter,
+  SettingsRow,
+  SettingsRowTile,
+} from "@/features/settings/layout/SettingsList";
+import "@/features/settings/restore-review.css";
 
-function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
-  const [last, setLast] = useState<BackupRecord | null>(null);
+type LastBackup =
+  | { status: "loading" }
+  | { status: "failed" }
+  | { status: "ready"; record: BackupRecord | null };
+
+const CONTAINS = [
+  {
+    title: "The whole workspace",
+    detail: "Tickets, Documents, Plans, Projects, activity and evidence",
+    included: true,
+  },
+  {
+    title: "Local attachment files",
+    detail: "Every retained file stored on this computer",
+    included: true,
+  },
+  {
+    title: "Files in Google Drive",
+    detail: "Kept as references and metadata, not copied",
+    included: false,
+  },
+  {
+    title: "An integrity check",
+    detail: "Run on the saved copy before it is marked Checked",
+    included: true,
+  },
+] as const;
+
+function LastBackupRow({
+  last,
+  busy,
+  onBackUp,
+  onRetry,
+  onReveal,
+}: {
+  last: LastBackup;
+  busy: boolean;
+  onBackUp: () => void;
+  onRetry: () => void;
+  onReveal: (path: string) => void;
+}) {
+  const backUp = (
+    <Button
+      type="button"
+      disabled={busy || last.status === "loading"}
+      onClick={onBackUp}
+    >
+      {busy ? "Backing up…" : "Back up now…"}
+    </Button>
+  );
+  if (busy)
+    return (
+      <div role="status">
+        <SettingsRow
+          leading={
+            <SettingsRowTile>
+              <Loader2 size={20} className="animate-spin" />
+            </SettingsRowTile>
+          }
+          title="Backing up…"
+          description="Copying the workspace and its local attachment files, then checking the copy."
+          trailing={backUp}
+        />
+      </div>
+    );
+  if (last.status === "loading")
+    return (
+      <div role="status" aria-label="Checking for the last backup">
+        <SettingsRow
+          leading={<SettingsRowTile>{null}</SettingsRowTile>}
+          trailing={backUp}
+        >
+          <Skeleton className="h-2.5 w-45" />
+          <Skeleton className="mt-2 h-2 w-70" />
+        </SettingsRow>
+      </div>
+    );
+  if (last.status === "failed")
+    return (
+      <div role="alert">
+        <SettingsRow
+          leading={
+            <SettingsRowTile>
+              <CircleAlert size={20} className="backups-icon-error" />
+            </SettingsRowTile>
+          }
+          title="Could not read the last backup"
+          description="This does not affect the backups themselves. Try again, or back up now."
+          trailing={
+            <>
+              <Button type="button" variant="ghost" onClick={onRetry}>
+                Try again
+              </Button>
+              {backUp}
+            </>
+          }
+        />
+      </div>
+    );
+  if (!last.record)
+    return (
+      <SettingsRow
+        leading={
+          <SettingsRowTile>
+            <Archive size={20} className="backups-icon-muted" />
+          </SettingsRowTile>
+        }
+        title="No backups yet"
+        description="Your first backup will be listed here with its date."
+        trailing={backUp}
+      />
+    );
+  const { record } = last;
+  const { folder, name } = splitPath(record.path);
+  return (
+    <SettingsRow
+      leading={
+        <SettingsRowTile>
+          <Archive size={20} />
+        </SettingsRowTile>
+      }
+      title={
+        <span className="backups-title-line">
+          {formatDateTime(record.completed_at)}
+          <StatusLabel tone="checked" size="caption">
+            Checked
+          </StatusLabel>
+        </span>
+      }
+      description={
+        <>
+          <code className="backups-file">{name}</code>
+          {folder ? ` · in ${folder}` : ""}
+        </>
+      }
+      trailing={
+        <>
+          <IconButton
+            label={`Show in ${fileManagerName()}`}
+            onClick={() => onReveal(record.path)}
+          >
+            <FolderOpen aria-hidden="true" />
+          </IconButton>
+          {backUp}
+        </>
+      }
+    />
+  );
+}
+
+function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
+  const [last, setLast] = useState<LastBackup>({ status: "loading" });
   const [failure, setFailure] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
-  const [showSafety, setShowSafety] = useState(false);
   const [restoredCount, setRestoredCount] = useState(0);
-  const [safetyCount, setSafetyCount] = useState(0);
+  const loadLast = useCallback(async () => {
+    setLast({ status: "loading" });
+    try {
+      setLast({ status: "ready", record: await workspaceClient.lastBackup() });
+    } catch {
+      setLast({ status: "failed" });
+    }
+  }, []);
   useEffect(() => {
-    let current = true;
-    void Promise.resolve(workspaceClient.safetyBackups())
-      .then((value) => {
-        if (current && Array.isArray(value)) setSafetyCount(value.length);
-      })
-      .catch(() => {
-        // The count is informational; the list reports its own failure.
-      });
-    return () => {
-      current = false;
-    };
-  }, [restoredCount]);
-  useEffect(() => {
+    // The initial read: state starts as "loading", so only the result is set.
     let current = true;
     workspaceClient
       .lastBackup()
-      .then((value) => {
-        if (current) setLast(value);
+      .then((record) => {
+        if (current) setLast({ status: "ready", record });
       })
       .catch(() => {
-        // The status is informational; backing up still works without it.
+        if (current) setLast({ status: "failed" });
       });
     return () => {
       current = false;
@@ -76,7 +236,10 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
           : "Backup saved and checked, but the Last backup status could not be updated.",
       );
       try {
-        setLast(await workspaceClient.lastBackup());
+        setLast({
+          status: "ready",
+          record: await workspaceClient.lastBackup(),
+        });
       } catch {
         // Keep the previous status; the backup itself succeeded.
       }
@@ -102,124 +265,87 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
     }
   }
   return (
-    <SettingsCard
-      id="backups"
-      title="Backups"
-      description="A complete copy of the workspace and every retained local attachment file, checked for integrity after it is saved. Remote files remain references and metadata. It never replaces an existing file."
-      actions={
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          onClick={() => void backUp()}
-        >
-          {busy ? (
-            <>
-              <Loader2 aria-hidden="true" className="animate-spin" />
-              Backing up…
-            </>
-          ) : (
-            "Back up now…"
-          )}
-        </Button>
-      }
-    >
-      <div className="backup-status" role="group" aria-label="Last backup">
-        {last ? (
-          <>
-            <p className="settings-label">
-              Last backup{" "}
-              <span className="settings-hint">
-                {formatDateTime(last.completed_at)}
-              </span>
+    <>
+      <SettingsSection title="Last backup">
+        <SettingsList>
+          <LastBackupRow
+            last={last}
+            busy={busy}
+            onBackUp={() => void backUp()}
+            onRetry={() => void loadLast()}
+            onReveal={(path) => void reveal(path)}
+          />
+          <SettingsListFooter>
+            Each backup goes to a new file you choose. A backup never replaces
+            an existing file.
+            {failure && (
+              <p role="alert" className="backups-failure">
+                {failure}
+              </p>
+            )}
+            <p role="status" className="backups-message">
+              {message}
             </p>
-            <p className="workspace-path" aria-label="Last backup path">
-              {last.path}
-            </p>
-            <div className="settings-actions">
-              <span className="status-word">
-                <StatusDot tone="checked" />
-                Checked
-              </span>
+          </SettingsListFooter>
+        </SettingsList>
+      </SettingsSection>
+
+      <SettingsSection title="What a backup contains">
+        <SettingsList>
+          <ul className="backups-contains">
+            {CONTAINS.map((item) => (
+              <li key={item.title}>
+                {item.included ? (
+                  <Check size={16} aria-hidden="true" className="included" />
+                ) : (
+                  <Minus size={16} aria-hidden="true" className="excluded" />
+                )}
+                <span>
+                  <span className="backups-contains-title">{item.title}</span>
+                  <span className="backups-contains-detail">{item.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </SettingsList>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Restore"
+        caption="Replaces this workspace with a backup. You review what it contains first, and a safety backup of the current workspace is saved before anything changes."
+      >
+        <SettingsList>
+          <SettingsRow
+            title="Restore from a backup"
+            description="Choose a backup file saved by this version of ticketd or an earlier one."
+            trailing={
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
-                onClick={() => void reveal(last.path)}
+                disabled={busy}
+                onClick={() => void chooseBackup()}
               >
-                <FolderOpen aria-hidden="true" />
-                Show in {fileManagerName()}
+                Choose backup…
               </Button>
-            </div>
-          </>
-        ) : (
-          <p className="settings-hint">
-            No backups yet. Your first one will be listed here with its date and
-            size.
-          </p>
-        )}
-      </div>
-      {failure && (
-        <p role="alert" className="settings-failure">
-          {failure}
-        </p>
-      )}
-      <p role="status" className="settings-hint">
-        {message}
-      </p>
-      <div className="backup-restore-row">
-        <div>
-          <p className="settings-label">Restore from a backup</p>
-          <p className="settings-hint">
-            You review what the backup contains before anything changes.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          onClick={() => void chooseBackup()}
-        >
-          Restore from backup…
-        </Button>
-      </div>
-      <div className="backup-footer">
-        <div className="backup-footer-row">
-          <p className="settings-hint">
-            Restoring saves a safety backup of the current workspace first.
-          </p>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="safety-toggle"
-            aria-expanded={showSafety}
-            onClick={() => setShowSafety((shown) => !shown)}
-          >
-            Safety backups · {safetyCount}
-            <ChevronDown aria-hidden="true" data-open={showSafety} />
-          </Button>
-        </div>
-        {showSafety && <SafetyBackups key={restoredCount} />}
-      </div>
+            }
+          />
+        </SettingsList>
+      </SettingsSection>
+
+      <SafetyBackups key={restoredCount} />
+
       {restoring !== null && (
         <RestoreDialog
           path={restoring}
           onClose={() => setRestoring(null)}
           onRestored={async () => {
             setRestoredCount((count) => count + 1);
-            try {
-              setLast(await workspaceClient.lastBackup());
-            } catch {
-              // The status is informational.
-            }
+            await loadLast();
             await onRestore();
           }}
         />
       )}
-    </SettingsCard>
+    </>
   );
 }
 
@@ -229,7 +355,7 @@ export function BackupsPage({ onRestore }: { onRestore: () => Promise<void> }) {
       {...sectionMeta("backups")}
       lede="Complete copies of this workspace, checked after they are saved, that you can restore later."
     >
-      <BackupsCard onRestore={onRestore} />
+      <BackupsContent onRestore={onRestore} />
     </SettingsPage>
   );
 }

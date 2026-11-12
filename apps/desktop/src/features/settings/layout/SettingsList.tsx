@@ -29,6 +29,8 @@ export function SettingsRow({
   descriptionId,
   trailing,
   variant = "center",
+  role,
+  tight = false,
   children,
 }: {
   leading?: ReactNode;
@@ -39,11 +41,20 @@ export function SettingsRow({
   descriptionId?: string;
   trailing?: ReactNode;
   variant?: "center" | "top" | "stacked";
+  /** `listitem` when the parent `SettingsList` is a labelled `role="list"`. */
+  role?: "listitem";
+  /** A 48px row for short one-line items such as a shortcut. */
+  tight?: boolean;
   /** Content under the text; with `stacked` it spans the row. */
   children?: ReactNode;
 }) {
   return (
-    <div className="settings-list-row" data-variant={variant}>
+    <div
+      className="settings-list-row"
+      data-variant={variant}
+      data-tight={tight || undefined}
+      role={role}
+    >
       {leading}
       <div className="settings-list-row-main">
         {title && (

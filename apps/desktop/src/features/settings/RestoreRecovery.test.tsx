@@ -158,7 +158,7 @@ test.each([false, true])(
         />
       </DraftRecoveryProvider>,
     );
-    await screen.findByText("Backup checked.");
+    await screen.findByText(/Integrity checked/);
     fireEvent.click(
       screen.getByRole("button", { name: "Replace workspace with backup" }),
     );
@@ -259,7 +259,7 @@ test("restoring remounts a retained New Ticket draft from the backup", async () 
       />
     </DraftRecoveryProvider>,
   );
-  await screen.findByText("Backup checked.");
+  await screen.findByText(/Integrity checked/);
   fireEvent.click(
     screen.getByRole("button", { name: "Replace workspace with backup" }),
   );
@@ -347,7 +347,7 @@ test("the replaced store rejects stale undo cleanup and flush without touching t
       />
     </DraftRecoveryProvider>,
   );
-  await screen.findByText("Backup checked.");
+  await screen.findByText(/Integrity checked/);
   await waitFor(() => expect(staleStore).not.toBeNull());
   fireEvent.click(
     screen.getByRole("button", { name: "Replace workspace with backup" }),
@@ -442,7 +442,7 @@ test.each(["draft_retentions", "draft_cutover_pending"] as const)(
         />
       </DraftRecoveryProvider>,
     );
-    await screen.findByText("Backup checked.");
+    await screen.findByText(/Integrity checked/);
     await waitFor(() => expect(oldStore).not.toBeNull());
     fireEvent.click(
       screen.getByRole("button", { name: "Replace workspace with backup" }),

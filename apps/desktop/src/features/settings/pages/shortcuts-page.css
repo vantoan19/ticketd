@@ -1,0 +1,36 @@
+/* Keyboard shortcuts page: the filter and the right-aligned key column. */
+.shortcut-filter {
+  position: relative;
+  margin-top: 32px;
+}
+.shortcut-filter svg {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.shortcut-filter input {
+  padding-left: 36px;
+}
+.shortcut-none {
+  margin-top: 32px;
+}
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 140px;
+}
+.shortcut-chord {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.shortcut-or {
+  padding: 0 4px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}

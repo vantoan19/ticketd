@@ -1,7 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
+import {
+  SettingsStateContext,
+  type SettingsState,
+} from "@/features/settings/use-settings-state";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -120,4 +130,72 @@ test("a different workspace is named, and a version mismatch links the guide", a
   expect(
     screen.getByRole("button", { name: "Installation guide" }),
   ).toBeTruthy();
+});
+
+const missing = {
+  ...base,
+  found: false,
+  path: null,
+  version: null,
+  version_matches: null,
+  workspace_path: null,
+  workspace_matches: null,
+};
+
+test("a missing CLI walks through three steps with the suggested folder", async () => {
+  invoke.mockResolvedValueOnce(missing);
+  render(<CommandLineCard />);
+  await screen.findByText("Not found");
+  const steps = screen.getByRole("list");
+  expect(
+    within(steps)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual([
+    expect.stringContaining("Get the ticketd executable"),
+    expect.stringContaining("~/.local/bin"),
+    expect.stringContaining("Choose Check again"),
+  ]);
+});
+
+test("Check again sits in the Status section and is disabled while checking", async () => {
+  invoke.mockResolvedValueOnce(base);
+  render(<CommandLineCard />);
+  const status = screen.getByRole("region", { name: "Status" });
+  const button = within(status).getByRole("button", { name: "Check again" });
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(within(status).getByRole("status")).toBeTruthy();
+  await screen.findByText("Installed");
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("details name a version difference and the workspace as a status", async () => {
+  invoke.mockResolvedValueOnce({
+    ...base,
+    version: "0.0.9",
+    version_matches: false,
+  });
+  render(<CommandLineCard />);
+  await screen.findByText("Installed, needs attention");
+  expect(screen.getByText("differs from this app")).toBeTruthy();
+  expect(screen.getByText("Uses this workspace")).toBeTruthy();
+});
+
+test("the footer sends people to Agent skills", async () => {
+  invoke.mockResolvedValue(base);
+  const openPage = vi.fn();
+  const state: SettingsState = {
+    query: "",
+    setQuery: () => {},
+    openPage,
+    needsSetup: {},
+    refreshIndicators: () => {},
+  };
+  render(
+    <SettingsStateContext.Provider value={state}>
+      <CommandLineCard />
+    </SettingsStateContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Set up Agent skills" }));
+  expect(openPage).toHaveBeenCalledWith("agent-skills");
 });

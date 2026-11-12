@@ -102,6 +102,18 @@
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-segment);
 }
+.settings-page-header[data-wordmark] .settings-page-title-line h1 {
+  font-size: var(--text-section);
+  line-height: 40px;
+  letter-spacing: -1.28px;
+}
+.settings-page-header[data-wordmark] .settings-page-lede {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
 .settings-page-lede {
   max-width: 560px;
   margin: 4px 0 0;
@@ -142,6 +154,10 @@
 .settings-list-row + .settings-list-row,
 .settings-list-row + .settings-list-footer {
   box-shadow: inset 0 1px 0 var(--group-hairline);
+}
+.settings-list-row[data-tight] {
+  min-height: 48px;
+  padding-block: 12px;
 }
 .settings-list-row[data-variant="top"] {
   align-items: flex-start;
