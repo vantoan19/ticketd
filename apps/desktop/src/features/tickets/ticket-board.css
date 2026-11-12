@@ -188,7 +188,16 @@
 .ticket-workspace.board-layout.board-unselected .split-handle {
   display: none !important;
 }
+.list-header:has(.list-refresh) {
+  /* The controls drop to a second line before the title loses its text. */
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 48px;
+  padding-block: 8px;
+  row-gap: 4px;
+}
 .list-header:has(.list-refresh) h1 {
+  flex: 1 1 8rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
