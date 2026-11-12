@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ExternalLink, FolderOpen } from "lucide-react";
-import { RadioGroup } from "radix-ui";
+import { useEffect, useRef, useState } from "react";
+import {
+  Cloud,
+  Download,
+  ExternalLink,
+  FolderOpen,
+  Upload,
+} from "lucide-react";
 import {
   Alert,
   AlertActions,
@@ -11,10 +16,18 @@ import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { Progress } from "@/components/ui/progress";
 import { Reference } from "@/components/ui/reference";
-import { StatusDot } from "@/components/ui/status-dot";
-import { SettingsCard } from "@/features/settings/SettingsCard";
+import { StatusLabel } from "@/components/ui/status-label";
+import { Step, Steps } from "@/components/ui/steps";
+import {
+  SettingsList,
+  SettingsListFooter,
+  SettingsRow,
+  SettingsRowTile,
+} from "@/features/settings/layout/SettingsList";
+import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { ago } from "@/features/tickets/ticket-source";
 import { toFailure } from "@/lib/api/bridge-failure";
 import { fileManagerName } from "@/lib/platform";
@@ -74,18 +87,51 @@ function useCommand() {
 
 function Failure({ children }: { children: string }) {
   return children ? (
-    <p role="alert" className="settings-failure">
+    <p role="alert" className="settings-failure sync-failure">
       {children}
     </p>
   ) : null;
 }
 
-function ConnectedAs({ account }: { account: string | null }) {
+function ConnectedAs({
+  account,
+  size,
+}: {
+  account: string | null;
+  size?: "ui" | "caption";
+}) {
   return (
-    <p className="settings-label sync-account">
-      <StatusDot tone="positive" size={10} />
+    <StatusLabel tone="positive" {...(size ? { size } : {})}>
       {account ? `Connected as ${account}` : "Connected"}
-    </p>
+    </StatusLabel>
+  );
+}
+
+const TRACK = ["Connect", "Choose a workspace", "First sync", "In sync"];
+
+/** The four stages of setup; the page shows the one this Workspace is at. */
+function Track({ status }: { status: SyncStatus }) {
+  const at =
+    status.connection === "not_connected"
+      ? 0
+      : status.connection === "choosing"
+        ? 1
+        : status.first_sync
+          ? 2
+          : 3;
+  const synced = status.connection === "connected" && !status.first_sync;
+  return (
+    <ol className="sync-track" aria-label="Sync setup">
+      {TRACK.map((label, index) => (
+        <li
+          key={label}
+          data-state={index < at || synced ? "done" : index === at ? "now" : ""}
+          aria-current={index === at ? "step" : undefined}
+        >
+          {label}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -96,6 +142,7 @@ export function SyncSettings() {
   const [safetyBackup, setSafetyBackup] = useState("");
   return (
     <div className="settings-sync">
+      {status && <Track status={status} />}
       {safetyBackup && <Replaced safetyBackup={plainPath(safetyBackup)} />}
       {status &&
         (status.connection === "not_connected" ? (
@@ -148,7 +195,7 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
     // Read again after each sync run: a file that reads now takes its notice back.
   }, [downloading, syncedAt]);
   return (
-    <div className="sync-replaced">
+    <div className="sync-block">
       <Alert role="status">
         <AlertTitle>This Workspace was replaced</AlertTitle>
         <AlertDescription>
@@ -188,38 +235,71 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
 function Connect() {
   const { busy, failure, run } = useCommand();
   return (
-    <SettingsCard
-      id="sync"
-      title="Google Drive"
-      footer={
-        <p className="settings-hint">
-          Sign-in opens in your browser. ticketd only sees the files it creates.
-        </p>
-      }
-    >
-      <Alert role="note">
-        <AlertTitle>Files are not encrypted</AlertTitle>
-        <AlertDescription>
-          Each ticket and Document is saved in your Drive as a readable Markdown
-          file. Anyone who can open that folder can read them.
-        </AlertDescription>
-      </Alert>
-      <div className="sync-inline">
-        <Button
-          disabled={busy}
-          onClick={() =>
-            void run(syncApi.connect, "Could not connect Google Drive")
-          }
-        >
-          Connect Google Drive
-          <ExternalLink aria-hidden="true" />
-        </Button>
-        {busy && (
-          <span role="status">Waiting for sign-in in your browser…</span>
-        )}
+    <>
+      <div className="sync-block">
+        <SettingsList>
+          <SettingsRow
+            leading={
+              <SettingsRowTile>
+                <Cloud size={20} />
+              </SettingsRowTile>
+            }
+            title={
+              <span role="status">
+                <StatusLabel tone={busy ? "attention" : "neutral"}>
+                  {busy
+                    ? "Waiting for sign-in in your browser…"
+                    : "Not connected"}
+                </StatusLabel>
+              </span>
+            }
+            description="Sign-in opens in your browser. ticketd only sees the files it creates."
+            trailing={
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  void run(syncApi.connect, "Could not connect Google Drive")
+                }
+              >
+                Connect Google Drive
+                <ExternalLink aria-hidden="true" />
+              </Button>
+            }
+          />
+        </SettingsList>
+        <Failure>{failure}</Failure>
       </div>
-      <Failure>{failure}</Failure>
-    </SettingsCard>
+      <SettingsSection title="How sync works">
+        <SettingsList>
+          <SettingsRow variant="top">
+            <Steps>
+              <Step
+                title="Connect your Google account"
+                description="You sign in with Google in your browser, then come back here."
+              />
+              <Step
+                title="Choose a workspace"
+                description="Upload this one to a new folder, or download one your other desktop already put in Drive."
+              />
+              <Step
+                title="Keep working"
+                description="Your own changes upload right after each save. Each desktop checks Drive for the others’ changes."
+              />
+            </Steps>
+          </SettingsRow>
+        </SettingsList>
+      </SettingsSection>
+      <div className="sync-block">
+        <Alert role="note">
+          <AlertTitle>Files are not encrypted</AlertTitle>
+          <AlertDescription>
+            Each ticket and Document is saved in your Drive as a readable
+            Markdown file. Anyone who can open that folder can read them.
+          </AlertDescription>
+        </Alert>
+      </div>
+    </>
   );
 }
 
@@ -240,6 +320,7 @@ function Choose({
   const [readFailure, setReadFailure] = useState("");
   const [choice, setChoice] = useState(UPLOAD);
   const [confirming, setConfirming] = useState(false);
+  const [switching, setSwitching] = useState(false);
   useEffect(() => {
     let current = true;
     syncApi
@@ -271,124 +352,123 @@ function Choose({
   const download = options?.existing.find(
     (workspace) => workspace.folder_id === choice,
   );
+  const account = status.account ?? "this account";
   return (
-    <SettingsCard
-      id="sync"
-      title="Google Drive"
-      footer={
-        <>
-          <p className="settings-hint">Files in Drive are not encrypted.</p>
-          <div className="settings-actions">
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => void run(syncApi.disconnect, "Still connected")}
-            >
-              Use another account
-            </Button>
-            <Button
-              disabled={!options || busy}
-              onClick={() =>
-                download
-                  ? setConfirming(true)
-                  : void run(
-                      choice === RECONNECT
-                        ? syncApi.reconnect
-                        : syncApi.uploadWorkspace,
-                      "Sync did not start",
-                    )
-              }
-            >
-              {download
-                ? "Download…"
-                : choice === RECONNECT
-                  ? "Reconnect"
-                  : "Start sync"}
-            </Button>
-          </div>
-        </>
-      }
+    <SettingsSection
+      title="This Workspace"
+      caption={<ConnectedAs account={status.account} size="caption" />}
     >
-      <ConnectedAs account={status.account} />
       {!options && !readFailure && (
         <p role="status" className="settings-hint">
           Looking for Workspaces in your Drive…
         </p>
       )}
       {options && (
-        <div className="settings-row settings-row-stacked">
-          <div>
-            <p id="sync-choice-label" className="settings-label">
-              This Workspace
-            </p>
-          </div>
-          <RadioGroup.Root
-            aria-labelledby="sync-choice-label"
-            value={choice}
-            disabled={busy}
-            onValueChange={setChoice}
-            className="upload-destination-choices"
-          >
-            {options.reconnect && (
-              <RadioGroup.Item
-                value={RECONNECT}
-                className="upload-destination-choice"
-              >
-                <span className="layout-choice-dot" aria-hidden="true" />
-                <span>
-                  Reconnect to “{options.reconnect.name}”
-                  <small>
-                    Changes made here and in Drive are merged, and nothing is
-                    replaced
-                  </small>
-                </span>
-              </RadioGroup.Item>
-            )}
-            {/* Upload would land in the folder Reconnect names, minus the merge. */}
-            {!options.reconnect && (
-              <RadioGroup.Item
-                value={UPLOAD}
-                className="upload-destination-choice"
-              >
-                <span className="layout-choice-dot" aria-hidden="true" />
-                <span>
-                  Upload this Workspace
-                  <small>
-                    {plural(options.local.tickets, "ticket")} and{" "}
-                    {plural(options.local.documents, "Document")} go to a new
-                    folder in your Drive
-                  </small>
-                </span>
-              </RadioGroup.Item>
-            )}
-            {options.existing.map((workspace) => {
-              const synced =
-                workspace.last_synced_at && ago(workspace.last_synced_at, now);
-              return (
-                <RadioGroup.Item
-                  key={workspace.folder_id}
-                  value={workspace.folder_id}
-                  className="upload-destination-choice"
-                >
-                  <span className="layout-choice-dot" aria-hidden="true" />
-                  <span>
-                    Download “{workspace.folder_name}”
-                    <small>
-                      {plural(workspace.counts.tickets, "ticket")} and{" "}
-                      {plural(workspace.counts.documents, "Document")},{" "}
-                      {synced
-                        ? `last synced ${workspace.last_synced_by ? `from ${workspace.last_synced_by} ` : ""}${synced}`
-                        : "last sync not recorded"}
-                    </small>
-                  </span>
-                </RadioGroup.Item>
-              );
-            })}
-          </RadioGroup.Root>
-        </div>
+        <ChoiceTiles
+          aria-label="This Workspace"
+          value={choice}
+          disabled={busy}
+          onValueChange={setChoice}
+        >
+          {options.reconnect && (
+            <ChoiceTile
+              value={RECONNECT}
+              title={<>Reconnect to “{options.reconnect.name}”</>}
+              description="Changes made here and in Drive are merged, and nothing is replaced"
+            />
+          )}
+          {/* Upload would land in the folder Reconnect names, minus the merge. */}
+          {!options.reconnect && (
+            <ChoiceTile
+              value={UPLOAD}
+              title="Upload this Workspace"
+              description={`${plural(options.local.tickets, "ticket")} and ${plural(options.local.documents, "Document")} go to a new folder in your Drive`}
+            />
+          )}
+          {options.existing.map((workspace) => {
+            const synced =
+              workspace.last_synced_at && ago(workspace.last_synced_at, now);
+            return (
+              <ChoiceTile
+                key={workspace.folder_id}
+                value={workspace.folder_id}
+                title={<>Download “{workspace.folder_name}”</>}
+                description={`${plural(workspace.counts.tickets, "ticket")} and ${plural(workspace.counts.documents, "Document")}, ${
+                  synced
+                    ? `last synced ${workspace.last_synced_by ? `from ${workspace.last_synced_by} ` : ""}${synced}`
+                    : "last sync not recorded"
+                }`}
+              />
+            );
+          })}
+        </ChoiceTiles>
       )}
-      {busy && <p role="status">Starting sync…</p>}
+      <div className="sync-footer">
+        <SettingsList>
+          <SettingsListFooter
+            actions={
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setSwitching(true)}
+                >
+                  Use another account…
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!options || busy}
+                  onClick={() =>
+                    download
+                      ? setConfirming(true)
+                      : void run(
+                          choice === RECONNECT
+                            ? syncApi.reconnect
+                            : syncApi.uploadWorkspace,
+                          "Sync did not start",
+                        )
+                  }
+                >
+                  {download
+                    ? "Download…"
+                    : choice === RECONNECT
+                      ? "Reconnect"
+                      : "Start sync"}
+                </Button>
+              </>
+            }
+          >
+            Files in Drive are not encrypted.
+          </SettingsListFooter>
+        </SettingsList>
+      </div>
+      {busy && (
+        <p role="status" className="sync-status-line">
+          Starting sync…
+        </p>
+      )}
       <Failure>{readFailure || failure}</Failure>
+      <DialogShell
+        open={switching}
+        onOpenChange={setSwitching}
+        title="Use another Google account?"
+        description={`ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`}
+        primaryLabel="Use another account"
+        blockedReason={null}
+        width={480}
+        onSubmit={() => {
+          setSwitching(false);
+          void run(syncApi.disconnect, "Still connected");
+        }}
+      >
+        <dl className="sync-summary">
+          <dt>On this computer</dt>
+          <dd>This Workspace stays as it is</dd>
+          <dt>In Google Drive</dt>
+          <dd>Your files stay, for your other desktops</dd>
+        </dl>
+      </DialogShell>
       {options && download && (
         <DialogShell
           open={confirming}
@@ -417,7 +497,7 @@ function Choose({
           </dl>
         </DialogShell>
       )}
-    </SettingsCard>
+    </SettingsSection>
   );
 }
 
@@ -429,33 +509,43 @@ function FirstSync({
   progress: NonNullable<SyncStatus["first_sync"]>;
 }) {
   const upload = progress.direction === "upload";
+  const Icon = upload ? Upload : Download;
   return (
-    <SettingsCard
-      id="sync"
-      title="Google Drive"
-      footer={
-        <p className="settings-hint">
+    <div className="sync-block">
+      <SettingsList>
+        <SettingsRow
+          variant="top"
+          leading={
+            <SettingsRowTile>
+              <Icon size={20} />
+            </SettingsRowTile>
+          }
+          title={
+            <span role="status">
+              {progress.total
+                ? `${upload ? "Uploading" : "Downloading"} ${progress.done} of ${progress.total} files`
+                : "Preparing…"}
+            </span>
+          }
+          description={status.account}
+          trailing={null}
+        >
+          <div className="sync-progress">
+            {/* Until the files are counted there is no share to show. */}
+            <Progress
+              aria-label={upload ? "First upload" : "First download"}
+              value={progress.total ? progress.done : null}
+              max={Math.max(progress.total, 1)}
+            />
+          </div>
+        </SettingsRow>
+        <SettingsListFooter>
           {upload
             ? "You can keep working. Everything is already saved on this computer."
             : "A safety backup of the Workspace that was here is in Settings › Backups."}
-        </p>
-      }
-    >
-      <ConnectedAs account={status.account} />
-      <div className="sync-progress-row" role="status">
-        {/* Until the files are counted there is no share to show. */}
-        <Progress
-          aria-label={upload ? "First upload" : "First download"}
-          value={progress.total ? progress.done : null}
-          max={Math.max(progress.total, 1)}
-        />
-        <span>
-          {progress.total
-            ? `${upload ? "Uploading" : "Downloading"} ${progress.done} of ${progress.total} files`
-            : "Preparing…"}
-        </span>
-      </div>
-    </SettingsCard>
+        </SettingsListFooter>
+      </SettingsList>
+    </div>
   );
 }
 
@@ -465,7 +555,7 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
   const copy = recoveryCopy(status);
   if (!copy) return null;
   return (
-    <>
+    <div className="sync-block">
       <Alert tone="attention">
         <AlertTitle>{copy.title}</AlertTitle>
         <AlertDescription>{copy.description}</AlertDescription>
@@ -488,114 +578,106 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
         </AlertActions>
       </Alert>
       <Failure>{failure}</Failure>
-    </>
-  );
-}
-
-function Row({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="settings-row">
-      <div>
-        <p className="settings-label">{label}</p>
-        <p className="settings-hint">{hint}</p>
-      </div>
-      {children}
     </div>
   );
 }
 
 function Connected({ status }: { status: SyncStatus }) {
-  const { busy, failure, run } = useCommand();
-  const [disconnecting, setDisconnecting] = useState(false);
   const [openFailure, setOpenFailure] = useState("");
   const folder = status.folder?.name;
   return (
     <>
-      <SettingsCard
-        id="sync"
-        title="Google Drive"
-        footer={
-          <p className="settings-hint">
+      {status.recovery && <RecoveryNotice status={status} />}
+      <div className="sync-block">
+        <SettingsList>
+          <SettingsRow
+            leading={
+              <SettingsRowTile>
+                <Cloud size={20} />
+              </SettingsRowTile>
+            }
+            title={<ConnectedAs account={status.account} />}
+            description={folder ? `“${folder}” in My Drive` : "Not created yet"}
+            trailing={
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!folder}
+                onClick={() => {
+                  setOpenFailure("");
+                  syncApi
+                    .openFolder()
+                    .catch((reason: unknown) =>
+                      setOpenFailure(
+                        `Could not open Drive: ${toFailure(reason).message}`,
+                      ),
+                    );
+                }}
+              >
+                Open in Drive
+                <ExternalLink aria-hidden="true" />
+              </Button>
+            }
+          />
+          <SettingsListFooter>
             Files in Drive are not encrypted. ticketd only sees the files it
             creates there.
-          </p>
-        }
-      >
-        {status.recovery ? (
-          <RecoveryNotice status={status} />
-        ) : (
-          <ConnectedAs account={status.account} />
-        )}
-        <Row
-          label="Folder"
-          hint={folder ? `“${folder}” in My Drive` : "Not created yet"}
-        >
-          <Button
-            variant="ghost"
-            disabled={!folder}
-            onClick={() => {
-              setOpenFailure("");
-              syncApi
-                .openFolder()
-                .catch((reason: unknown) =>
-                  setOpenFailure(
-                    `Could not open Drive: ${toFailure(reason).message}`,
-                  ),
-                );
-            }}
-          >
-            Open in Drive
-            <ExternalLink aria-hidden="true" />
-          </Button>
-        </Row>
-        <Row
-          label="Disconnect this desktop"
-          hint="Stops syncing here. Your files stay in Drive and on this computer."
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() => setDisconnecting(true)}
-          >
-            Disconnect…
-          </Button>
-        </Row>
-        <Failure>{openFailure || failure}</Failure>
-        <DialogShell
-          open={disconnecting}
-          onOpenChange={setDisconnecting}
-          title="Disconnect this desktop?"
-          description="Sync stops on this desktop. Nothing is deleted."
-          primaryLabel="Disconnect"
-          blockedReason={null}
-          width={480}
-          onSubmit={() => {
-            setDisconnecting(false);
-            void run(syncApi.disconnect, "Still connected");
-          }}
-        >
-          <dl className="sync-summary">
-            <dt>On this computer</dt>
-            <dd>This Workspace stays as it is</dd>
-            <dt>In Google Drive</dt>
-            <dd>
-              {folder ? `“${folder}” stays` : "Your files stay"}, for your other
-              desktops
-            </dd>
-          </dl>
-        </DialogShell>
-      </SettingsCard>
+          </SettingsListFooter>
+        </SettingsList>
+        <Failure>{openFailure}</Failure>
+      </div>
       <DesktopSettings />
+      <Disconnect folder={folder} />
     </>
+  );
+}
+
+function Disconnect({ folder }: { folder: string | undefined }) {
+  const { busy, failure, run } = useCommand();
+  const [disconnecting, setDisconnecting] = useState(false);
+  return (
+    <SettingsSection title="Disconnect">
+      <SettingsList>
+        <SettingsRow
+          title="Disconnect this desktop"
+          description="Stops syncing here. Your files stay in Drive and on this computer."
+          trailing={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setDisconnecting(true)}
+            >
+              Disconnect…
+            </Button>
+          }
+        />
+      </SettingsList>
+      <Failure>{failure}</Failure>
+      <DialogShell
+        open={disconnecting}
+        onOpenChange={setDisconnecting}
+        title="Disconnect this desktop?"
+        description="Sync stops on this desktop. Nothing is deleted."
+        primaryLabel="Disconnect"
+        blockedReason={null}
+        width={480}
+        onSubmit={() => {
+          setDisconnecting(false);
+          void run(syncApi.disconnect, "Still connected");
+        }}
+      >
+        <dl className="sync-summary">
+          <dt>On this computer</dt>
+          <dd>This Workspace stays as it is</dd>
+          <dt>In Google Drive</dt>
+          <dd>
+            {folder ? `“${folder}” stays` : "Your files stay"}, for your other
+            desktops
+          </dd>
+        </dl>
+      </DialogShell>
+    </SettingsSection>
   );
 }
 
@@ -605,7 +687,7 @@ function DesktopSettings() {
   const [name, setName] = useState("");
   const [seconds, setSeconds] = useState("");
   const [failure, setFailureText] = useState("");
-  // The message belongs to the card whose control caused it.
+  // The message belongs to the section whose control caused it.
   const [failedName, setFailedName] = useState(false);
   const setFailure = (text: string, name = false) => {
     setFailureText(text);
@@ -678,95 +760,95 @@ function DesktopSettings() {
   const disabled = !saved || saving;
   return (
     <>
-      <SettingsCard id="sync-desktop" title="This desktop">
-        <div className="settings-row">
-          <div>
-            <Label htmlFor="sync-name">Name</Label>
-            <p className="settings-hint">
-              Ticket code <Reference>{saved?.device_code}</Reference> · new
-              tickets here are numbered T-{saved?.device_code}1, T-
-              {saved?.device_code}2 and so on.
-            </p>
-          </div>
-          <Input
-            id="sync-name"
-            className="w-60"
-            value={name}
-            disabled={disabled}
-            onChange={(event) => setName(event.target.value)}
-            onBlur={saveName}
-            onKeyDown={blurOnEnter}
-          />
-        </div>
-        <Failure>{failedName ? failure : ""}</Failure>
-      </SettingsCard>
-      <SettingsCard id="sync-options" title="Options">
-        <div className="settings-row">
-          <div>
-            <Label htmlFor="sync-interval">Check for changes every</Label>
-            <p className="settings-hint">
-              Minimum {SYNC_MIN_POLL_SECS} seconds. Your own changes upload
-              right after each save.
-            </p>
-          </div>
-          <span className="sync-interval">
-            <Input
-              id="sync-interval"
-              type="number"
-              min={SYNC_MIN_POLL_SECS}
-              step={1}
-              value={seconds}
-              disabled={disabled}
-              aria-describedby="sync-interval-unit"
-              onChange={(event) => setSeconds(event.target.value)}
-              onBlur={saveInterval}
-              onKeyDown={blurOnEnter}
-            />
-            <span id="sync-interval-unit" className="settings-hint">
-              seconds
-            </span>
-          </span>
-        </div>
-        <div className="settings-row settings-row-stacked">
-          <div>
-            <p id="sync-attachments-label" className="settings-label">
-              Attachments
-            </p>
-          </div>
-          <RadioGroup.Root
-            aria-labelledby="sync-attachments-label"
-            value={saved?.attachment_download ?? ""}
-            disabled={disabled}
-            onValueChange={(value) =>
-              void save({
-                attachment_download: value as Settings["attachment_download"],
-              })
+      <SettingsSection title="This desktop">
+        <SettingsList>
+          <SettingsRow
+            title={<Label htmlFor="sync-name">Name</Label>}
+            description={
+              <>
+                Ticket code <Reference>{saved?.device_code}</Reference> · new
+                tickets here are numbered T-{saved?.device_code}1, T-
+                {saved?.device_code}2 and so on.
+              </>
             }
-            className="upload-destination-choices"
+            trailing={
+              <Input
+                id="sync-name"
+                className="w-60"
+                value={name}
+                disabled={disabled}
+                onChange={(event) => setName(event.target.value)}
+                onBlur={saveName}
+                onKeyDown={blurOnEnter}
+              />
+            }
+          />
+        </SettingsList>
+        <Failure>{failedName ? failure : ""}</Failure>
+      </SettingsSection>
+      <SettingsSection title="Options">
+        <SettingsList>
+          <SettingsRow
+            title={
+              <Label htmlFor="sync-interval">Check for changes every</Label>
+            }
+            description={`Minimum ${SYNC_MIN_POLL_SECS} seconds. Your own changes upload right after each save.`}
+            trailing={
+              <>
+                <Input
+                  id="sync-interval"
+                  className="w-24 text-right"
+                  type="number"
+                  min={SYNC_MIN_POLL_SECS}
+                  step={1}
+                  value={seconds}
+                  disabled={disabled}
+                  aria-describedby="sync-interval-unit"
+                  onChange={(event) => setSeconds(event.target.value)}
+                  onBlur={saveInterval}
+                  onKeyDown={blurOnEnter}
+                />
+                <span id="sync-interval-unit" className="settings-hint">
+                  seconds
+                </span>
+              </>
+            }
+          />
+          <SettingsRow
+            variant="stacked"
+            title="Attachments"
+            titleId="sync-attachments-label"
           >
-            <RadioGroup.Item
-              value="automatic"
-              className="upload-destination-choice"
+            <ChoiceTiles
+              aria-labelledby="sync-attachments-label"
+              value={saved?.attachment_download ?? ""}
+              disabled={disabled}
+              onValueChange={(value) =>
+                void save({
+                  attachment_download: value as Settings["attachment_download"],
+                })
+              }
             >
-              <span className="layout-choice-dot" aria-hidden="true" />
-              <span>
-                Download automatically<small>Every file works offline</small>
-              </span>
-            </RadioGroup.Item>
-            <RadioGroup.Item
-              value="on_open"
-              className="upload-destination-choice"
-            >
-              <span className="layout-choice-dot" aria-hidden="true" />
-              <span>
-                Download when opened<small>Saves disk space</small>
-              </span>
-            </RadioGroup.Item>
-          </RadioGroup.Root>
-        </div>
-        {saving && <p role="status">Saving…</p>}
+              <ChoiceTile
+                value="automatic"
+                title="Download automatically"
+                description="Every file works offline"
+              />
+              <ChoiceTile
+                value="on_open"
+                title="Download when opened"
+                description="Saves disk space"
+              />
+            </ChoiceTiles>
+          </SettingsRow>
+        </SettingsList>
+        {saving && (
+          <p role="status" className="sync-status-line">
+            Saving…
+          </p>
+        )}
         <Failure>{failedName ? "" : failure}</Failure>
-      </SettingsCard>
+      </SettingsSection>
     </>
   );
 }
