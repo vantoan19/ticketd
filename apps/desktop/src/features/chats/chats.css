@@ -600,8 +600,14 @@
 }
 /* A path inside a notice's sentence: the popover's path, kept in the line and
    in the sentence's weight; a long one shortens in the middle, then the tail. */
+.ui-notice-description .notice-path {
+  display: inline-flex;
+  max-width: 100%;
+  vertical-align: bottom;
+}
 .ui-notice-description .path-text {
   display: inline-flex;
+  min-width: 0;
   max-width: 100%;
   vertical-align: bottom;
   line-height: inherit;

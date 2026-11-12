@@ -1571,8 +1571,7 @@ impl Supervisor {
                 exit_code,
                 diagnostics,
             } => {
-                let exit =
-                    exit_code.map_or_else(String::new, |code| format!(" (exit code {code})"));
+                let exit = exit_code.map_or_else(String::new, |code| format!(", exit code {code}"));
                 let reason = if diagnostics.is_empty() {
                     String::new()
                 } else {
