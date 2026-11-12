@@ -115,9 +115,6 @@
 .detail-header h2.chat-head-title {
   font-weight: 500;
 }
-.chat-head-trigger {
-  max-width: 60%;
-}
 /* The title group takes the free room and gives it up first, so the actions
    stay on the header's one 48px line, as on a ticket. */
 .chat-pane > .detail-header > .detail-title-group {

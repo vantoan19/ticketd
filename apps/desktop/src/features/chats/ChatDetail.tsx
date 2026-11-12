@@ -165,7 +165,7 @@ function HarnessAndFolder({ chat }: { chat: ChatState }) {
         <Button
           variant="ghost"
           size="xs"
-          className="chat-head-trigger min-w-0 shrink"
+          className="min-w-0 max-w-3/5 shrink"
           aria-label="Harness and folder"
         >
           <span className="truncate">

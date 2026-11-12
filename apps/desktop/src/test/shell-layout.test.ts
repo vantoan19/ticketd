@@ -101,5 +101,11 @@ it("a long Chat title gives way before the harness and folder trigger", () => {
   );
   // U20: the title shrinks first; the trigger keeps at most a share of the header.
   expect(chats).toMatch(/\n[.]chat-head-title [{][^}]*flex: 0 \d{3,} auto;/);
-  expect(chats).toMatch(/\n[.]chat-head-trigger [{][^}]*max-width: \d+%;/);
+  const detail = readFileSync(
+    join(__dirname, "..", "features/chats/ChatDetail.tsx"),
+    "utf8",
+  );
+  expect(detail).toMatch(
+    /className="[^"]*max-w-\d\/\d[^"]*"\s+aria-label="Harness and folder"/,
+  );
 });
