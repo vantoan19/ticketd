@@ -14,6 +14,7 @@ import {
   DraftRecoveryNoticeContext as NoticeContext,
   DraftRecoveryErrorContext as ErrorContext,
   DraftRecoveryGenerationContext as GenerationContext,
+  DraftRecoveryNoticesContext as NoticesContext,
   type DraftRecovery,
 } from "./draft-recovery-context";
 
@@ -344,51 +345,53 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
         )}
       </div>
     );
+  // The notices sit in the flow at the top of the main content (see
+  // useDraftRecoveryNotices) so they push the page down instead of covering it.
+  const notices = (cutoverPending || (error && inlineNotices === 0)) && (
+    <div className="mx-auto flex max-h-1/2 w-full max-w-xl flex-none flex-col gap-2 overflow-y-auto p-2">
+      {error && inlineNotices === 0 && (
+        <Alert tone="error">
+          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
+          <AlertDescription>Keep this window open. {error}</AlertDescription>
+          <AlertActions>
+            <Button type="button" onClick={retryRecovery}>
+              Retry draft recovery
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+      {cutoverPending && (
+        <Alert role="status">
+          <AlertDescription>
+            Files are protected while legacy drafts are reviewed. Open each
+            desktop profile to import its drafts before allowing cleanup.
+          </AlertDescription>
+          <AlertActions>
+            <Button
+              type="button"
+              onClick={() =>
+                void draftRetention
+                  .completeCutover()
+                  .then(() => setCutoverPending(false))
+                  .catch((reason) => setError(String(reason)))
+              }
+            >
+              All desktop profiles reviewed
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+    </div>
+  );
   return (
     <>
-      {(cutoverPending || (error && inlineNotices === 0)) && (
-        <div className="fixed inset-x-4 bottom-4 z-40 mx-auto flex max-w-xl flex-col gap-2">
-          {error && inlineNotices === 0 && (
-            <Alert tone="error">
-              <AlertTitle>Could not protect recoverable drafts</AlertTitle>
-              <AlertDescription>
-                Keep this window open. {error}
-              </AlertDescription>
-              <AlertActions>
-                <Button type="button" onClick={retryRecovery}>
-                  Retry draft recovery
-                </Button>
-              </AlertActions>
-            </Alert>
-          )}
-          {cutoverPending && (
-            <Alert role="status">
-              <AlertDescription>
-                Files are protected while legacy drafts are reviewed. Open each
-                desktop profile to import its drafts before allowing cleanup.
-              </AlertDescription>
-              <AlertActions>
-                <Button
-                  type="button"
-                  onClick={() =>
-                    void draftRetention
-                      .completeCutover()
-                      .then(() => setCutoverPending(false))
-                      .catch((reason) => setError(String(reason)))
-                  }
-                >
-                  All desktop profiles reviewed
-                </Button>
-              </AlertActions>
-            </Alert>
-          )}
-        </div>
-      )}
       <GenerationContext.Provider value={recovery.generation}>
         <ErrorContext.Provider value={error}>
           <NoticeContext.Provider value={claimNotice}>
             <Context.Provider value={recovery.store}>
-              {children}
+              <NoticesContext.Provider value={notices}>
+                {children}
+              </NoticesContext.Provider>
             </Context.Provider>
           </NoticeContext.Provider>
         </ErrorContext.Provider>

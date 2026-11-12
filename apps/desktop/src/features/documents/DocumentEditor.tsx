@@ -423,6 +423,9 @@ export function DocumentEditor({
     setFailed(false);
     const slow = window.setTimeout(() => setStatus("Still saving…"), 2000);
     try {
+      // Flush first: an explicit save clears a latched recovery failure, so the
+      // put below is not rejected with the stale error after access returns.
+      await recovery.flush();
       await persistRecovery();
       await recovery.flush();
       const result = await documents.save(
