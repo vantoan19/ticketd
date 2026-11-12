@@ -258,11 +258,15 @@ pub struct Tracker {
     updated_at: Option<String>,
 }
 
-/// How user input that was submitted at least once reads. The core decides where it
-/// stands, from every attempt and the person's decisions together.
-fn delivery(message: &ChatMessage) -> Option<&'static str> {
-    message.attempts.last()?;
-    Some(match message.standing() {
+/// How user input that was submitted at least once, or that the host holds to send,
+/// reads. The core decides where it stands, from every attempt, the person's decisions
+/// and the host's hold together. Input only in the queue has no row.
+fn delivery(message: &ChatMessage, live: &ChatLive) -> Option<&'static str> {
+    let held = live.sending.contains(&message.id);
+    if message.attempts.is_empty() && !held {
+        return None;
+    }
+    Some(match message.standing_while(held) {
         ChatInputStanding::Sending => "sending",
         ChatInputStanding::Delivered => "delivered",
         // The person set it aside; whether it arrived is still unknown.
@@ -561,7 +565,7 @@ pub fn item(
             id: message.id.clone(),
             at: message.created_at.clone(),
             text: message.text.clone(),
-            delivery: delivery(message)?,
+            delivery: delivery(message, live)?,
         },
         ChatItem::Message(message) => {
             let active = chat.active_turn.as_ref().map(|turn| &turn.id);
@@ -900,6 +904,7 @@ pub fn idle() -> ChatLive {
         running: false,
         steering: None,
         delivery_unconfirmed: false,
+        sending: Vec::new(),
         interactions: Vec::new(),
         stop: None,
         problem: None,

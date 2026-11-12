@@ -1362,6 +1362,15 @@ fn every_combination_of_delivery_decision_and_later_observation_has_one_standing
         let after = message(&workspace, &chat, &input.id);
         let case = format!("row {row}: {steps:?}");
         assert_eq!(after.standing(), expected, "standing, {case}");
+        // U15: input the host holds to send as soon as its session opens is being sent,
+        // not in the queue; held or not changes nothing else.
+        let held = if expected == Queued {
+            Sending
+        } else {
+            expected
+        };
+        assert_eq!(after.standing_while(false), expected, "not held, {case}");
+        assert_eq!(after.standing_while(true), held, "held, {case}");
         assert_eq!(after.queued, expected == Queued, "queued, {case}");
         assert_eq!(
             after.awaits_decision(),

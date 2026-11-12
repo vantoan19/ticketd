@@ -1252,3 +1252,99 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
         status
     );
 }
+
+fn user_items(changes: &[Value]) -> Vec<(String, String)> {
+    changes
+        .iter()
+        .filter(|change| change["kind"] == "item" && change["item"]["kind"] == "user")
+        .map(|change| {
+            let item = &change["item"];
+            (
+                item["text"].as_str().unwrap().to_owned(),
+                item["delivery"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn last_queue(changes: &[Value]) -> Option<Value> {
+    let chat = changes
+        .iter()
+        .rev()
+        .find(|change| change["kind"] == "chat")?;
+    Some(chat["chat"]["queue"].clone())
+}
+
+/// U15: a message sent into a failed Chat waits only for its session to open; it reads
+/// as being sent, not as an item of the person's queue, and the queue stays paused.
+#[tokio::test(start_paused = true)]
+async fn a_message_waiting_for_its_session_to_open_reads_as_sending_not_queued() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.fake.lose_process().await;
+    settle().await;
+    f.chats.send(&id, "kept", SendMode::Queue).await.unwrap();
+    settle().await;
+    let (_, seen) = f.open(&id).await;
+
+    let opening = f.fake.hold_next_open();
+    f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+    settle().await;
+
+    let changes = seen.lock().unwrap().clone();
+    assert_eq!(
+        user_items(&changes),
+        [("again".to_owned(), "sending".to_owned())]
+    );
+    let queue = last_queue(&changes).unwrap();
+    let texts: Vec<_> = queue
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|q| q["text"].clone())
+        .collect();
+    assert_eq!(texts, [json!("kept")], "explicit queue items stay queued");
+    let (opened, _) = f.open(&id).await;
+    assert!(
+        opened.snapshot.chat.queue_paused,
+        "the paused queue stays paused"
+    );
+    assert_eq!(opened.snapshot.chat.queue.len(), 1);
+    assert_eq!(user_deliveries(&opened).last(), Some(&"sending"));
+
+    opening.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.submitted(), ["first", "again"], "nothing else is sent");
+}
+
+/// U15: when the session does not open, the message is back in the visible queue and
+/// is no longer told as being sent; nothing resends it.
+#[tokio::test(start_paused = true)]
+async fn a_message_whose_session_did_not_open_is_back_in_the_queue() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.fake.lose_process().await;
+    settle().await;
+    let (_, seen) = f.open(&id).await;
+
+    let opening = f.fake.hold_next_open();
+    f.fake.fail_next_open(failure(ProblemKind::Other));
+    f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+    settle().await;
+    opening.send(()).unwrap();
+    settle().await;
+
+    assert_eq!(seen.lock().unwrap().last().unwrap()["kind"], "resync");
+    let (opened, _) = f.open(&id).await;
+    let texts: Vec<_> = opened
+        .snapshot
+        .chat
+        .queue
+        .iter()
+        .map(|q| q.text.as_str())
+        .collect();
+    assert_eq!(texts, ["again"]);
+    assert!(!user_deliveries(&opened).contains(&"sending"));
+    tokio::time::sleep(Duration::from_secs(3_600)).await;
+    assert_eq!(f.submitted(), ["first"], "nothing is resent automatically");
+}

@@ -246,7 +246,19 @@ pub enum ChatInputStanding {
 }
 
 impl ChatMessage {
-    /// Where this input stands. Meaningful for user input only.
+    /// Where this input stands, given whether the host holds it to send as soon as its
+    /// session opens (`held`): input the person sent that waits only for that is being
+    /// sent, not in their queue. Holding it changes no other standing, so a decision
+    /// or a delivery is never hidden, and storage still keeps it queued until a
+    /// submission is recorded.
+    pub fn standing_while(&self, held: bool) -> ChatInputStanding {
+        match self.standing() {
+            ChatInputStanding::Queued if held => ChatInputStanding::Sending,
+            standing => standing,
+        }
+    }
+
+    /// Where this input stands in storage. Meaningful for user input only.
     pub fn standing(&self) -> ChatInputStanding {
         let attempts = &self.attempts;
         if attempts.iter().any(ChatSubmissionAttempt::received) {

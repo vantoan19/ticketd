@@ -18,8 +18,8 @@ use ticketd_chat_host::{
     harness_key, problem_kind,
 };
 use ticketd_core::{
-    Chat, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
-    ChatTurnState, NewChat, Workspace,
+    Chat, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
+    ChatRecord, ChatRole, ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -365,6 +365,7 @@ fn surroundings(
     chat: &Chat,
     folder_users: &[Chat],
     checked_turn: Option<String>,
+    live: &ChatLive,
 ) -> Result<Surroundings, ticketd_core::Error> {
     let shared_with = folder_users
         .iter()
@@ -376,9 +377,14 @@ fn surroundings(
         folder_missing: !Path::new(&chat.execution_folder).is_dir(),
         shared_with,
         links: links(workspace, &chat.id)?,
+        // Input the host holds to send is being sent, not in the person's queue.
         queue: workspace
             .chat_queue(&chat.id)?
             .into_iter()
+            .filter(|message| {
+                message.standing_while(live.sending.contains(&message.id))
+                    == ChatInputStanding::Queued
+            })
             .map(|message| Queued {
                 id: message.id,
                 text: message.text,
@@ -633,7 +639,13 @@ impl Chats {
                 &chat,
                 &live,
                 &Tracker::from_items(&items),
-                &surroundings(&workspace, &chat, &folder_users, self.checked(&chat.id))?,
+                &surroundings(
+                    &workspace,
+                    &chat,
+                    &folder_users,
+                    self.checked(&chat.id),
+                    &live,
+                )?,
             ));
         }
         Ok(summaries)
@@ -777,7 +789,7 @@ impl Chats {
         let workspace = self.workspace()?;
         let users = folder_users(&workspace)?;
         let checked = self.checked(&view.chat.id);
-        let around = surroundings(&workspace, &view.chat, &users, checked)?;
+        let around = surroundings(&workspace, &view.chat, &users, checked, &view.live)?;
         Ok(chat_view::chat_state(
             &view.chat,
             &view.live,
@@ -802,6 +814,7 @@ impl Chats {
                 &chat,
                 &folder_users(&workspace)?,
                 self.checked(chat_id),
+                &attached.live,
             )?,
         );
         let fresh = self.fresh(chat_id);
@@ -924,9 +937,37 @@ impl Chats {
                     continue;
                 }
                 Some(ChatUpdate::Live(live)) => {
-                    view.live = live;
+                    let held_before = std::mem::replace(&mut view.live, live).sending;
                     // Whether a stored request can still be answered is live state.
-                    view.tracker.dependents()
+                    let mut records = view.tracker.dependents();
+                    // Input the host began or stopped holding to send reads differently.
+                    let sending = &view.live.sending;
+                    let moved: Vec<&String> = held_before
+                        .iter()
+                        .filter(|id| !sending.contains(id))
+                        .chain(sending.iter().filter(|id| !held_before.contains(id)))
+                        .collect();
+                    if !moved.is_empty() {
+                        let Ok(stored) = self
+                            .workspace()
+                            .and_then(|workspace| Ok(messages(&workspace, &view.chat.id)?))
+                        else {
+                            break;
+                        };
+                        let moved: Vec<ChatMessage> = stored
+                            .into_iter()
+                            .filter(|message| moved.contains(&&message.id))
+                            .collect();
+                        // Back in the queue, it has no row; a change cannot remove one.
+                        if moved.iter().any(|message| {
+                            !sending.contains(&message.id)
+                                && message.standing() == ChatInputStanding::Queued
+                        }) {
+                            break;
+                        }
+                        records.extend(moved.into_iter().map(ChatItem::Message));
+                    }
+                    records
                 }
                 Some(ChatUpdate::Resync) | None => break,
             };

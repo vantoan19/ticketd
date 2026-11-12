@@ -52,6 +52,7 @@ struct State {
     inspection: Inspection,
     capabilities: Capabilities,
     open_failures: VecDeque<Problem>,
+    open_holds: VecDeque<oneshot::Receiver<()>>,
     submit_replies: VecDeque<ScriptedReply>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
@@ -107,6 +108,7 @@ impl FakeAdapter {
                 inspection,
                 capabilities,
                 open_failures: VecDeque::new(),
+                open_holds: VecDeque::new(),
                 submit_replies: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
@@ -149,6 +151,13 @@ impl FakeAdapter {
 
     pub fn set_inspection(&self, inspection: Inspection) {
         self.state().inspection = inspection;
+    }
+
+    /// The next `open` waits for the returned sender before it opens or fails.
+    pub fn hold_next_open(&self) -> oneshot::Sender<()> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().open_holds.push_back(receiver);
+        sender
     }
 
     /// The next `open` fails with this problem.
@@ -268,6 +277,10 @@ impl HarnessAdapter for FakeAdapter {
 
     /// Opening replaces any live runtime, whose stream then ends.
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
+        let hold = self.state().open_holds.pop_front();
+        if let Some(hold) = hold {
+            let _ = hold.await;
+        }
         let mut state = self.state();
         if let Some(problem) = state.open_failures.pop_front() {
             return Err(problem);

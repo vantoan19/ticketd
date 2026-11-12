@@ -1765,6 +1765,7 @@ impl Supervisor {
             running: self.runtime.is_some(),
             steering: self.active.as_ref().and_then(|_| self.steering()),
             delivery_unconfirmed: self.unconfirmed_start.is_some(),
+            sending: self.direct.iter().cloned().collect(),
             interactions: self
                 .interactions
                 .iter()

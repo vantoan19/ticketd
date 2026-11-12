@@ -186,6 +186,9 @@ pub struct ChatLive {
     pub steering: Option<SteeringBehavior>,
     /// A new turn was handed to the harness and nothing confirmed it yet.
     pub delivery_unconfirmed: bool,
+    /// Input the person sent that is held to go out as soon as the session can take it,
+    /// in order. It waits for no queue; see `ChatMessage::standing_while`.
+    pub sending: Vec<String>,
     pub interactions: Vec<LiveInteraction>,
     pub stop: Option<StopState>,
     pub problem: Option<ChatProblem>,
