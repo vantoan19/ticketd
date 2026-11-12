@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   CloudDownload,
   CloudOff,
@@ -128,7 +128,8 @@ function describe(status: SyncStatus, now: number): Line {
       };
     }
     case "needs_attention":
-      if (recovery)
+      // A conflict waits for the person; being offline or slowed down mends itself.
+      if (recovery && !(paused && status.needs_review.length))
         return {
           tone: "attention",
           label: recovery.label,
@@ -142,7 +143,7 @@ function describe(status: SyncStatus, now: number): Line {
         label: status.needs_review.length
           ? needsReview(status.needs_review)
           : "Sync needs attention",
-        detail: synced ? `Synced ${synced}` : "Not synced yet",
+        detail: paused ?? (synced ? `Synced ${synced}` : "Not synced yet"),
         title: status.needs_review.length ? "Needs review" : "Needs attention",
         description: status.needs_review.length
           ? "Changed on two desktops"
@@ -161,6 +162,8 @@ export function SyncStatusLine() {
   const { status, apply, openSettings, openReview } = useSyncStatus();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Set at once, where `busy` waits for a render.
+  const running = useRef(false);
   const [failure, setFailure] = useState("");
   if (!status) return null;
   const line = describe(status, now);
@@ -168,8 +171,19 @@ export function SyncStatusLine() {
   // Offline mends itself, so it asks for nothing on the line; its popover still offers a retry.
   const corrective =
     status.state === "needs_attention" && recovery ? recovery.action : null;
-  const review = status.state === "needs_attention" && !recovery;
+  const selfMending =
+    status.recovery === "offline" || status.recovery === "rate_limited";
+  // A waiting conflict is reviewed whatever else holds sync up, unless that needs the person first.
+  const review =
+    status.state === "needs_attention" &&
+    (!recovery || (selfMending && status.needs_review.length > 0));
+  const reviewNow = () => {
+    setOpen(false);
+    openReview();
+  };
   async function run(command: () => Promise<SyncStatus>, failed: string) {
+    if (running.current) return;
+    running.current = true;
     setBusy(true);
     setFailure("");
     try {
@@ -179,6 +193,7 @@ export function SyncStatusLine() {
       // The failure is read in the popover, also when the line's own button caused it.
       setOpen(true);
     } finally {
+      running.current = false;
       setBusy(false);
     }
   }
@@ -221,15 +236,21 @@ export function SyncStatusLine() {
             )}
             <div className="sync-popover-actions">
               {review ? (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setOpen(false);
-                    openReview();
-                  }}
-                >
-                  Review
-                </Button>
+                <>
+                  <Button size="sm" onClick={reviewNow}>
+                    Review
+                  </Button>
+                  {corrective && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={recover}
+                    >
+                      {corrective}
+                    </Button>
+                  )}
+                </>
               ) : corrective ? (
                 <Button size="sm" disabled={busy} onClick={recover}>
                   {corrective}
@@ -241,10 +262,7 @@ export function SyncStatusLine() {
                   onClick={() => void run(syncApi.syncNow, "Sync did not run")}
                 >
                   <RefreshCw aria-hidden="true" />
-                  {status.recovery === "offline" ||
-                  status.recovery === "rate_limited"
-                    ? "Try now"
-                    : "Sync now"}
+                  {selfMending ? "Try now" : "Sync now"}
                 </Button>
               )}
               <Button
@@ -261,10 +279,16 @@ export function SyncStatusLine() {
           </div>
         </PopoverContent>
       </Popover>
-      {corrective && (
-        <Button variant="ghost" size="sm" disabled={busy} onClick={recover}>
-          {corrective}
+      {review && corrective ? (
+        <Button variant="ghost" size="sm" onClick={reviewNow}>
+          Review
         </Button>
+      ) : (
+        corrective && (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={recover}>
+            {corrective}
+          </Button>
+        )
       )}
     </div>
   );

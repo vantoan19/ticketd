@@ -236,3 +236,20 @@ test("a sync failure with no state of its own needs attention and offers Retry",
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect((await popover()).textContent).toContain("disk I/O error");
 });
+
+test("a conflict waiting while offline: the line offers Review, and the popover keeps Retry", async () => {
+  const status = syncStatus({
+    state: "needs_attention",
+    recovery: "offline",
+    needs_review: [change("Rate-limit failed login attempts")],
+  });
+  await footer(status);
+  expect((await line()).textContent).toBe("1 ticket needs reviewOffline");
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
+  expect(openReview).toHaveBeenCalledTimes(1);
+  const dialog = await popover();
+  expect(within(dialog).getByRole("button", { name: "Review" })).toBeTruthy();
+  api.recover.mockResolvedValue(status);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
+  expect(api.recover).toHaveBeenCalled();
+});
