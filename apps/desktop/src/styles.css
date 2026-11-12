@@ -2063,6 +2063,25 @@ html[data-theme="dark"][data-input="pointer"]
   cursor: default;
 }
 
+/* Every dialog shell keeps its footer inside the viewport: a tall body
+   (an alert, a long review) scrolls instead of pushing the footer out. */
+.ui-dialog:has(.dialog-shell-form) {
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ui-dialog:has(.dialog-shell-form) .dialog-shell-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.ui-dialog:has(.dialog-shell-form) .dialog-shell-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* The New ticket dialog grows by the docked editor toolbar on focus. Its top
    edge is anchored at a fixed offset so it never moves (board D: 112px in the frame, 84px in the webview under the 28px title bar), and the body scrolls
    inside a viewport-bound dialog so the growth never pushes the footer off. */
