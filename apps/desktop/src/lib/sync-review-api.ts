@@ -55,16 +55,22 @@ const conflictSchema = conflictSummarySchema.extend({
       remote_changed_at: z.string().nullable(),
       /** Name of the desktop the other value came from. */
       remote_device: z.string(),
+      /** Names the other value shown; a choice is sent back with it. */
+      detected_at: z.string(),
     }),
   ),
 });
 export type Conflict = z.infer<typeof conflictSchema>;
 export type ConflictField = Conflict["fields"][number];
 
-/** `edited` carries the person's own text in `value`; only `body` accepts it. */
-export type Resolution =
-  | { field: string; choice: "local" | "remote" }
-  | { field: string; choice: "edited"; value: string };
+/**
+ * `edited` carries the person's own text in `value`; only `body` accepts it.
+ * `detected_at` is the field's, as shown: a choice made on a value that has
+ * changed since is refused with `review_changed`.
+ */
+export type Resolution = { field: string; detected_at: string } & (
+  { choice: "local" | "remote" } | { choice: "edited"; value: string }
+);
 
 const noticeBase = { id: z.string(), timestamp: z.string(), read: z.boolean() };
 const noticeSchema = z.discriminatedUnion("kind", [

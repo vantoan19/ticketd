@@ -50,6 +50,11 @@ impl From<ticketd_core::Error> for BridgeFailure {
                 index: None,
                 message: ticketd_core::Error::DependencyReviewChanged.to_string(),
             },
+            ticketd_core::Error::SyncReviewChanged => Self {
+                code: "review_changed",
+                index: None,
+                message: ticketd_core::Error::SyncReviewChanged.to_string(),
+            },
             ticketd_core::Error::DependencyReviewMode(mode) => Self {
                 code: "review_mode",
                 index: None,

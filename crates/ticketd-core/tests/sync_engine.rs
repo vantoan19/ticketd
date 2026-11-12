@@ -151,6 +151,28 @@ fn title(text: &str) -> TicketPatch {
     }
 }
 
+/// A choice for a field in review, made on the value that is shown now.
+fn choose(
+    workspace: &Workspace,
+    kind: SyncKind,
+    id: &str,
+    field: &str,
+    choice: SyncChoice,
+) -> SyncResolution {
+    let shown = workspace.sync_conflict(kind, id).unwrap();
+    let detected_at = shown
+        .fields
+        .iter()
+        .find(|shown| shown.field == field)
+        .map(|shown| shown.detected_at.clone())
+        .unwrap_or_default();
+    SyncResolution {
+        field: field.into(),
+        choice,
+        detected_at,
+    }
+}
+
 const ORDERS: [[usize; 3]; 3] = [[0, 1, 2], [2, 1, 0], [1, 2, 0]];
 
 #[test]
@@ -322,15 +344,15 @@ fn the_same_field_changed_on_two_devices_keeps_local_and_waits_for_review() {
     assert!(devices.workspaces[1].sync_conflicts().unwrap()[0].read);
 
     // Taking the other device's value is an ordinary edit that syncs.
+    let taken = choose(
+        &devices.workspaces[1],
+        SyncKind::Ticket,
+        &id,
+        "title",
+        SyncChoice::Remote,
+    );
     devices.workspaces[1]
-        .resolve_sync_conflict(
-            SyncKind::Ticket,
-            &id,
-            &[SyncResolution {
-                field: "title".into(),
-                choice: SyncChoice::Remote,
-            }],
-        )
+        .resolve_sync_conflict(SyncKind::Ticket, &id, &[taken])
         .unwrap();
     assert_eq!(devices.workspaces[1].sync_conflicts().unwrap(), []);
     devices.settle([1, 0, 2]);
@@ -368,23 +390,26 @@ fn a_conflicting_body_can_be_settled_with_an_edited_value() {
         a.resolve_sync_conflict(
             SyncKind::Document,
             &document.id,
-            &[SyncResolution {
-                field: "title".into(),
-                choice: SyncChoice::Local
-            }]
+            &[choose(
+                a,
+                SyncKind::Document,
+                &document.id,
+                "title",
+                SyncChoice::Local
+            )]
         ),
-        Err(Error::NotFound(_))
+        Err(Error::SyncReviewChanged)
     ));
 
-    a.resolve_sync_conflict(
+    let edited = choose(
+        a,
         SyncKind::Document,
         &document.id,
-        &[SyncResolution {
-            field: "body".into(),
-            choice: SyncChoice::Edited("Both texts".into()),
-        }],
-    )
-    .unwrap();
+        "body",
+        SyncChoice::Edited("Both texts".into()),
+    );
+    a.resolve_sync_conflict(SyncKind::Document, &document.id, &[edited])
+        .unwrap();
 
     devices.settle([0, 1, 2]);
     devices.assert_converged();
@@ -1140,15 +1165,15 @@ fn taking_the_other_value_of_a_relationship_waits_for_a_record_that_has_not_arri
         .omit_from_next_listing(&[RemoteKey::new(RemoteKind::Ticket, theirs.id.clone())]);
     devices.sync(1);
 
+    let taken = choose(
+        &devices.workspaces[1],
+        SyncKind::Ticket,
+        &id,
+        "parent",
+        SyncChoice::Remote,
+    );
     devices.workspaces[1]
-        .resolve_sync_conflict(
-            SyncKind::Ticket,
-            &id,
-            &[SyncResolution {
-                field: "parent".into(),
-                choice: SyncChoice::Remote,
-            }],
-        )
+        .resolve_sync_conflict(SyncKind::Ticket, &id, &[taken])
         .unwrap();
     devices.settle([1, 0, 2]);
 
@@ -1299,6 +1324,64 @@ fn a_conflict_is_withdrawn_when_later_changes_settle_the_field() {
         }
         devices.settle([0, 1, 2]);
         devices.assert_converged();
+    }
+}
+
+/// F51: a choice is made on the value the review showed. When the other side
+/// changed that value meanwhile, or the field left review, the choice is
+/// refused and nothing is applied.
+#[test]
+fn a_choice_made_on_a_value_that_is_no_longer_the_one_in_review_is_refused() {
+    for case in ["the other value changed", "the field left review"] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("Login");
+        let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+        devices.workspaces[0]
+            .change_ticket(&reference, title("From A"))
+            .unwrap();
+        devices.workspaces[1]
+            .change_ticket(&reference, title("From B"))
+            .unwrap();
+        devices.sync(0);
+        devices.sync(1);
+        let shown = choose(
+            &devices.workspaces[1],
+            SyncKind::Ticket,
+            &id,
+            "title",
+            SyncChoice::Remote,
+        );
+        if case == "the other value changed" {
+            devices.sync(0);
+            devices.workspaces[0]
+                .change_ticket(&reference, title("A again"))
+                .unwrap();
+            devices.workspaces[1]
+                .change_ticket(&reference, title("B again"))
+                .unwrap();
+            devices.sync(0);
+        } else {
+            devices.workspaces[1]
+                .change_ticket(&reference, title("From A"))
+                .unwrap();
+        }
+        devices.sync(1);
+        let before = devices.workspaces[1].show_ticket(&reference).unwrap().title;
+
+        let refused = devices.workspaces[1].resolve_sync_conflict(
+            SyncKind::Ticket,
+            &id,
+            std::slice::from_ref(&shown),
+        );
+        assert!(
+            matches!(refused, Err(Error::SyncReviewChanged)),
+            "{case}: {refused:?}"
+        );
+        assert_eq!(
+            devices.workspaces[1].show_ticket(&reference).unwrap().title,
+            before,
+            "{case}"
+        );
     }
 }
 

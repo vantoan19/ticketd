@@ -120,6 +120,10 @@ pub enum SyncChoice {
 pub struct SyncResolution {
     pub field: String,
     pub choice: SyncChoice,
+    /// The `detected_at` of the field as the person saw it. It moves whenever
+    /// the other value does, so a choice is never applied to a value that was
+    /// not shown.
+    pub detected_at: String,
 }
 
 /// Something sync did that needs no decision.
@@ -1382,14 +1386,19 @@ impl Workspace {
 
     /// Settle conflicting fields of a record: keep the local value, take the
     /// remote one, or save an edited value. The result is an ordinary change
-    /// that uploads on the next run; fields not named stay in review.
+    /// that uploads on the next run; fields not named stay in review. Nothing
+    /// is applied, and [`Error::SyncReviewChanged`] returned, when a field is
+    /// no longer in review or its other value is not the one that was shown.
     pub fn resolve_sync_conflict(
         &mut self,
         kind: SyncKind,
         id: &str,
         resolutions: &[SyncResolution],
     ) -> Result<(), Error> {
-        let conflict = self.sync_conflict(kind, id)?;
+        let conflict = match self.sync_conflict(kind, id) {
+            Err(Error::NotFound(_)) => return Err(Error::SyncReviewChanged),
+            conflict => conflict?,
+        };
         let mut stored = stored(&self.connection, kind, id)?;
         let mut record = local_view(&self.connection, kind, id, &stored)?
             .ok_or_else(|| Error::NotFound(format!("{} {id}", name(kind))))?;
@@ -1398,9 +1407,8 @@ impl Workspace {
                 .fields
                 .iter()
                 .find(|field| field.field == resolution.field)
-                .ok_or_else(|| {
-                    Error::NotFound(format!("conflict on field '{}'", resolution.field))
-                })?;
+                .filter(|field| field.detected_at == resolution.detected_at)
+                .ok_or(Error::SyncReviewChanged)?;
             match &resolution.choice {
                 SyncChoice::Local => {}
                 SyncChoice::Remote => set_at(&mut record, &field.field, field.remote.clone()),

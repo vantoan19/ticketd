@@ -195,6 +195,8 @@ pub enum Error {
     RelationshipSelfLink,
     #[error("dependency review has changed; preview and choose again")]
     DependencyReviewChanged,
+    #[error("the values to review changed; check them and choose again")]
+    SyncReviewChanged,
     #[error(
         "this review was previewed for a different kind of review; preview again for a {0} review"
     )]

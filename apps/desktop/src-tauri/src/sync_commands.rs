@@ -222,6 +222,8 @@ pub struct ConflictField {
     remote: String,
     remote_changed_at: Option<String>,
     remote_device: String,
+    /// Names the other value shown; sent back with the choice made on it.
+    detected_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -317,6 +319,7 @@ fn conflict(
                 remote_device: field
                     .remote_device
                     .unwrap_or_else(|| "Another desktop".into()),
+                detected_at: field.detected_at,
                 field: field.field,
             })
             .collect(),
@@ -337,6 +340,8 @@ pub struct Resolution {
     field: String,
     choice: Choice,
     value: Option<String>,
+    /// The `detected_at` of the field as the review showed it.
+    detected_at: String,
 }
 
 fn resolve(
@@ -367,6 +372,7 @@ fn resolve(
             Ok(SyncResolution {
                 field: resolution.field,
                 choice,
+                detected_at: resolution.detected_at,
             })
         })
         .collect::<Outcome<Vec<_>>>()?;
@@ -1076,22 +1082,43 @@ mod tests {
         assert!(project.remote_changed_at.is_some());
     }
 
+    /// A choice made without having seen the field in review.
     fn choose(field: &str, choice: Choice, value: Option<&str>) -> Resolution {
         Resolution {
             field: field.into(),
             choice,
             value: value.map(str::to_owned),
+            detected_at: String::new(),
         }
+    }
+
+    #[test]
+    fn a_choice_on_a_value_the_review_did_not_show_is_refused_as_changed() {
+        let mut desks = desks();
+        let id = conflicted(&mut desks);
+        let unseen = vec![choose("status", Choice::Remote, None)];
+        let refused = resolve(&mut desks.here, SyncKind::Ticket, id, unseen, "r").unwrap_err();
+        assert_eq!(refused.code, "review_changed");
+        assert_eq!(conflicts(&desks.here).unwrap().len(), 1);
     }
 
     #[test]
     fn resolving_applies_the_choices_once_per_request() {
         let mut desks = desks();
         let id = conflicted(&mut desks);
+        // As the review sends them: each made on the value it showed.
+        let shown = conflict(&desks.here, SyncKind::Ticket, &id, None).unwrap();
+        let on_shown = |field: &str, choice| {
+            let seen = shown.fields.iter().find(|seen| seen.field == field);
+            Resolution {
+                detected_at: seen.unwrap().detected_at.clone(),
+                ..choose(field, choice, None)
+            }
+        };
         let choices = || {
             vec![
-                choose("status", Choice::Remote, None),
-                choose("project", Choice::Local, None),
+                on_shown("status", Choice::Remote),
+                on_shown("project", Choice::Local),
             ]
         };
         resolve(

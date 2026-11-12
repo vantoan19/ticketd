@@ -68,12 +68,14 @@ export function ConflictReview({
     saving.current = true;
     setBusy(true);
     setError("");
-    const resolutions = conflict.fields.map(({ field }): Resolution => {
-      const choice = choiceOf(field);
-      return choice === "edited"
-        ? { field, choice, value: drafts[field] ?? "" }
-        : { field, choice };
-    });
+    const resolutions = conflict.fields.map(
+      ({ field, detected_at }): Resolution => {
+        const choice = choiceOf(field);
+        return choice === "edited"
+          ? { field, choice, value: drafts[field] ?? "", detected_at }
+          : { field, choice, detected_at };
+      },
+    );
     try {
       await syncReview.resolve(
         { kind, id },
@@ -83,9 +85,32 @@ export function ConflictReview({
       onResolved?.();
       onClose();
     } catch (reason) {
-      setError(toFailure(reason).message);
+      const failure = toFailure(reason);
+      if (failure.code === "review_changed") await reload();
+      else setError(failure.message);
       saving.current = false;
       setBusy(false);
+    }
+  }
+  /** Shows the values as they are now, after a save found them changed. */
+  async function reload() {
+    try {
+      setConflict(await syncReview.conflict({ kind, id }));
+      // A side was picked on a value that is no longer the one shown.
+      setChoices((made) =>
+        Object.fromEntries(
+          Object.entries(made).filter(([, choice]) => choice === "edited"),
+        ),
+      );
+      setError(
+        "The values changed while you were reviewing. Check them and save again.",
+      );
+    } catch {
+      setConflict(null);
+      setError(
+        "Nothing is left to review here: the values were settled meanwhile.",
+      );
+      onResolved?.();
     }
   }
   const now = new Date();

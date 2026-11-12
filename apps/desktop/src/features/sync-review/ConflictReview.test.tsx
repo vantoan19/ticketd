@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { BridgeFailure } from "@/lib/api/bridge-failure";
 import { syncReview, type Conflict } from "@/lib/sync-review-api";
 import { ConflictReview } from "./ConflictReview";
 import { dayTime } from "./labels";
@@ -39,6 +40,7 @@ const conflict: Conflict = {
       remote: "Done",
       remote_changed_at: "2026-11-11T18:28:00Z",
       remote_device: "Studio desktop",
+      detected_at: "2026-11-11T18:41:00Z",
     },
     {
       field: "body",
@@ -48,10 +50,12 @@ const conflict: Conflict = {
       remote: "Allow 10 failed attempts",
       remote_changed_at: "2026-11-11T18:28:00Z",
       remote_device: "Studio desktop",
+      detected_at: "2026-11-11T18:41:00Z",
     },
   ],
 };
 const summary = { ...conflict, fields: ["status", "body"] };
+const shown = conflict.fields[0]!.detected_at;
 
 const onClose = vi.fn();
 const onResolved = vi.fn();
@@ -94,8 +98,8 @@ test("this desktop's value is preselected and saving keeps it", async () => {
   expect(syncReview.resolve).toHaveBeenCalledWith(
     { kind: "ticket", id: "guid-12" },
     [
-      { field: "status", choice: "local" },
-      { field: "body", choice: "local" },
+      { field: "status", choice: "local", detected_at: shown },
+      { field: "body", choice: "local", detected_at: shown },
     ],
     expect.any(String),
   );
@@ -126,8 +130,13 @@ test("a side is picked per field and the Description can be edited instead", asy
     expect(syncReview.resolve).toHaveBeenCalledWith(
       { kind: "ticket", id: "guid-12" },
       [
-        { field: "status", choice: "remote" },
-        { field: "body", choice: "edited", value: "Allow 7 failed attempts" },
+        { field: "status", choice: "remote", detected_at: shown },
+        {
+          field: "body",
+          choice: "edited",
+          value: "Allow 7 failed attempts",
+          detected_at: shown,
+        },
       ],
       expect.any(String),
     ),
@@ -237,8 +246,18 @@ test("each edited text keeps its own words when two are edited and saved", async
     expect(syncReview.resolve).toHaveBeenCalledWith(
       { kind: "ticket", id: "guid-12" },
       [
-        { field: "body", choice: "edited", value: "Allow 7" },
-        { field: activity, choice: "edited", value: "Started everywhere" },
+        {
+          field: "body",
+          choice: "edited",
+          value: "Allow 7",
+          detected_at: shown,
+        },
+        {
+          field: activity,
+          choice: "edited",
+          value: "Started everywhere",
+          detected_at: shown,
+        },
       ],
       expect.any(String),
     ),
@@ -261,4 +280,62 @@ test("Save cannot be submitted twice, and saving the same choices again is the s
   const [first, second] = vi.mocked(syncReview.resolve).mock.calls;
   expect(first?.[2]).toBeTruthy();
   expect(second?.[2]).toBe(first?.[2]);
+});
+
+test("values that changed during the review are loaded again and nothing is saved", async () => {
+  vi.mocked(syncReview.resolve).mockRejectedValueOnce(
+    new BridgeFailure("review_changed", "the values to review changed"),
+  );
+  open();
+  fireEvent.click(
+    await screen.findByRole("radio", {
+      name: "Status from Studio desktop: Done",
+    }),
+  );
+  const later = "2026-11-11T19:02:00Z";
+  vi.mocked(syncReview.conflict).mockResolvedValue({
+    ...conflict,
+    fields: [
+      { ...conflict.fields[0]!, remote: "Canceled", detected_at: later },
+    ],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "changed while you were reviewing",
+  );
+  // The other side's new value is shown, and the choice made on the old one is gone.
+  const local = await screen.findByRole("radio", {
+    name: "Status from this desktop: In review",
+  });
+  expect(local.getAttribute("aria-checked")).toBe("true");
+  expect(
+    screen.getByRole("radio", { name: "Status from Studio desktop: Canceled" }),
+  ).toBeTruthy();
+  expect(onResolved).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(onResolved).toHaveBeenCalled());
+  expect(syncReview.resolve).toHaveBeenLastCalledWith(
+    { kind: "ticket", id: "guid-12" },
+    [{ field: "status", choice: "local", detected_at: later }],
+    expect.any(String),
+  );
+});
+
+test("a review whose values were all settled meanwhile says so and offers nothing to save", async () => {
+  vi.mocked(syncReview.resolve).mockRejectedValueOnce(
+    new BridgeFailure("review_changed", "the values to review changed"),
+  );
+  open();
+  await screen.findByRole("radio", { name: /Status from this desktop/ });
+  vi.mocked(syncReview.conflict).mockRejectedValue(new Error("not found"));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Nothing is left to review",
+  );
+  expect(screen.queryByRole("radio")).toBeNull();
+  expect(onResolved).toHaveBeenCalled();
 });
