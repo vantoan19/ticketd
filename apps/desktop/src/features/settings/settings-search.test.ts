@@ -26,11 +26,11 @@ test("every section has at least one entry and entries are complete", () => {
   }
 });
 
-test("an available source adds Connection, Discovery rules and Sync entries in its own section", () => {
+test("an available source adds Connection, Discovery and Sync entries in its own section", () => {
   const entries = sourceEntries("github", "GitHub");
   expect(entries.map((entry) => entry.title)).toEqual([
     "GitHub connection",
-    "Discovery rules",
+    "Discovery",
     "Sync",
   ]);
   const { id } = sourceSection("github", "GitHub");
@@ -66,4 +66,22 @@ test("splitMatch cuts text around the first match, keeping its original case", (
   expect(splitMatch("Back up now", "up")).toEqual(["Back ", "up", " now"]);
   expect(splitMatch("Theme", "UP")).toEqual(["Theme", "", ""]);
   expect(splitMatch("Theme", "")).toEqual(["Theme", "", ""]);
+});
+
+test("search finds a row by the title its page shows", () => {
+  const first = (query: string) => searchSettings(query, SETTINGS_ENTRIES)[0];
+  expect(first("Largest file")?.section).toBe("attachments");
+  expect(first("upload limit")?.section).toBe("attachments");
+  expect(first("Check for changes every")?.section).toBe("google-drive");
+  expect(first("Third-party notices")?.section).toBe("about");
+  expect(first("Dialogs and menus")?.section).toBe("keyboard-shortcuts");
+});
+
+test("no two rows on one page share a title", () => {
+  const seen = new Set<string>();
+  for (const { section, title } of SETTINGS_ENTRIES) {
+    const key = `${section}:${title}`;
+    expect(seen.has(key), key).toBe(false);
+    seen.add(key);
+  }
 });

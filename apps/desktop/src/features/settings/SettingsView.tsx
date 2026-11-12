@@ -1,3 +1,4 @@
+import { modifierKeyLabel } from "@/lib/platform";
 import { useEffect, useState } from "react";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { useSources } from "@/features/settings/sources/use-sources";
@@ -20,10 +21,11 @@ import {
 import { SourcePage } from "@/features/settings/pages/SourcePage";
 import "@/features/settings/settings.css";
 
-/** True for ⌘F on macOS and Ctrl+F elsewhere (either works on both). */
+/** True for the platform's find chord: ⌘F on macOS, Ctrl+F elsewhere. */
 function isFindShortcut(event: KeyboardEvent) {
+  const mac = modifierKeyLabel() === "⌘";
   return (
-    (event.metaKey || event.ctrlKey) &&
+    (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
     !event.altKey &&
     !event.shiftKey &&
     event.key.toLowerCase() === "f"

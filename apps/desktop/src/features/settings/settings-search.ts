@@ -87,9 +87,9 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "attachments",
   },
   {
-    title: "Upload limit",
+    title: "Largest file",
     description: "Per file, for future uploads. Default: 100 MiB.",
-    keywords: "largest file size mib maximum default",
+    keywords: "upload limit size mib maximum default",
     section: "attachments",
   },
   {
@@ -141,10 +141,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "export",
   },
   {
-    title: "Command-line tool",
+    title: "Status",
     description:
       "Whether the ticketd executable is found on your PATH, with its version and workspace.",
-    keywords: "path terminal install cli check status executable",
+    keywords:
+      "command-line tool path terminal install cli check again executable",
     section: "command-line",
   },
   {
@@ -182,33 +183,75 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "google-drive",
   },
   {
-    title: "Check interval",
-    description: "How often this desktop checks Drive for changes.",
-    keywords: "sync minutes frequency options",
+    title: "Name",
+    description:
+      "Names this desktop in Drive. Its ticket code numbers the tickets created here.",
+    keywords: "this desktop device ticket code",
     section: "google-drive",
   },
   {
-    title: "Disconnect Google Drive",
+    title: "Check for changes every",
+    description:
+      "How often this desktop checks Drive. Your own changes upload right after each save.",
+    keywords: "check interval seconds poll sync frequency options",
+    section: "google-drive",
+  },
+  {
+    title: "Attachments",
+    description: "Download every file automatically, or only when you open it.",
+    keywords: "download automatically when opened offline disk space files",
+    section: "google-drive",
+  },
+  {
+    title: "Disconnect this desktop",
     description: "Stops syncing this workspace through Drive.",
-    keywords: "sign out account remove unlink",
+    keywords: "disconnect google drive sign out account remove unlink",
     section: "google-drive",
   },
   {
-    title: "Keyboard shortcuts",
-    description: "Keys that work across ticketd.",
-    keywords: "keys hotkeys filter capture resize close escape",
+    title: "Lists",
+    description:
+      "Move between tickets, open the focused ticket and resize the list from the divider.",
+    keywords: "keyboard shortcuts keys hotkeys arrows enter divider resize",
     section: "keyboard-shortcuts",
   },
   {
-    title: "Version",
-    description: "The ticketd version, with documentation and issue reports.",
-    keywords: "about documentation issue help report bug",
+    title: "Creating",
+    description:
+      "Create from the New ticket dialog, and capture a thought from anywhere.",
+    keywords: "keyboard shortcuts keys hotkeys new ticket capture",
+    section: "keyboard-shortcuts",
+  },
+  {
+    title: "Dialogs and menus",
+    description: "Close the top surface without throwing away a draft.",
+    keywords: "keyboard shortcuts keys hotkeys escape esc close",
+    section: "keyboard-shortcuts",
+  },
+  {
+    title: "Documentation",
+    description: "Guides for the desktop app and the command line.",
+    keywords: "about version help docs guides",
     section: "about",
   },
   {
-    title: "Privacy and notices",
-    description: "How ticketd treats your data, and third-party notices.",
-    keywords: "privacy licenses third-party analytics offline account",
+    title: "Report an issue",
+    description:
+      "Opens the issue tracker in your browser. Include the version above.",
+    keywords: "about version bug feedback tracker help",
+    section: "about",
+  },
+  {
+    title: "Privacy",
+    description:
+      "What stays on this computer, and what each integration sends.",
+    keywords: "analytics offline account data",
+    section: "about",
+  },
+  {
+    title: "Third-party notices",
+    description: "Licenses for the libraries and fonts ticketd ships with.",
+    keywords: "licenses open source libraries fonts",
     section: "about",
   },
 ];
@@ -224,9 +267,9 @@ export function sourceEntries(provider: string, name: string): SettingsEntry[] {
       section,
     },
     {
-      title: "Discovery rules",
+      title: "Discovery",
       description: `Which ${name} issues are imported into this workspace.`,
-      keywords: `repositories labels assignee import issues preview save ${provider}`,
+      keywords: `rules repositories labels assignee import issues preview save ${provider}`,
       section,
     },
     {

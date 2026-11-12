@@ -104,6 +104,7 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 /** Settings as the app mounts it: one state, a nav and the page it selects. */
@@ -210,7 +211,32 @@ test("a source with a saved configuration shows an On dot under Connections", as
   ).toBeTruthy();
 });
 
+function onPlatform(platform: string) {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+}
+
+test("on macOS only Cmd+F opens Search; Ctrl+F stays the terminal's forward-one-character", async () => {
+  onPlatform("MacIntel");
+  render(<Settings initial="about" />);
+  await act(async () => {});
+  fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+  expect(navItem(/Search settings/).getAttribute("aria-current")).toBeNull();
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  expect(navItem(/Search settings/).getAttribute("aria-current")).toBe("page");
+});
+
+test("elsewhere only Ctrl+F opens Search; the Windows key does not", async () => {
+  onPlatform("Win32");
+  render(<Settings initial="about" />);
+  await act(async () => {});
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  expect(navItem(/Search settings/).getAttribute("aria-current")).toBeNull();
+  fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+  expect(navItem(/Search settings/).getAttribute("aria-current")).toBe("page");
+});
+
 test("Search settings shows the query and Ctrl+F opens it from any page", async () => {
+  onPlatform("Linux x86_64");
   render(<Settings initial="about" />);
   await act(async () => {});
   expect(navItem(/Search settings/)).toBeTruthy();

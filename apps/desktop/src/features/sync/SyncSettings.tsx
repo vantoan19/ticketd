@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { Progress } from "@/components/ui/progress";
 import { Reference } from "@/components/ui/reference";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
 import { Step, Steps } from "@/components/ui/steps";
 import {
@@ -110,16 +111,17 @@ function ConnectedAs({
 const TRACK = ["Connect", "Choose a workspace", "First sync", "In sync"];
 
 /** The four stages of setup; the page shows the one this Workspace is at. */
-function Track({ status }: { status: SyncStatus }) {
-  const at =
-    status.connection === "not_connected"
+function Track({ status }: { status: SyncStatus | null }) {
+  const at = !status
+    ? -1
+    : status.connection === "not_connected"
       ? 0
       : status.connection === "choosing"
         ? 1
         : status.first_sync
           ? 2
           : 3;
-  const synced = status.connection === "connected" && !status.first_sync;
+  const synced = status?.connection === "connected" && !status.first_sync;
   return (
     <ol className="sync-track" aria-label="Sync setup">
       {TRACK.map((label, index) => (
@@ -135,6 +137,22 @@ function Track({ status }: { status: SyncStatus }) {
   );
 }
 
+/** One row in the shape of the Connect and Connected rows, while the status is read. */
+function StatusSkeleton() {
+  return (
+    <div className="sync-block" role="status" aria-label="Reading Google Drive">
+      <SettingsList>
+        <SettingsRow
+          leading={<Skeleton className="size-10" />}
+          title={<Skeleton className="h-5 w-40" />}
+          description={<Skeleton className="mt-1 h-4 w-72 max-w-full" />}
+          trailing={<Skeleton className="h-8 w-40" />}
+        />
+      </SettingsList>
+    </div>
+  );
+}
+
 /** Settings › Google Drive: setup until this Workspace syncs, then its settings. The page shell supplies the title. */
 export function SyncSettings() {
   const { status } = useSyncStatus();
@@ -142,8 +160,9 @@ export function SyncSettings() {
   const [safetyBackup, setSafetyBackup] = useState("");
   return (
     <div className="settings-sync">
-      {status && <Track status={status} />}
+      <Track status={status} />
       {safetyBackup && <Replaced safetyBackup={plainPath(safetyBackup)} />}
+      {!status && <StatusSkeleton />}
       {status &&
         (status.connection === "not_connected" ? (
           <Connect />
