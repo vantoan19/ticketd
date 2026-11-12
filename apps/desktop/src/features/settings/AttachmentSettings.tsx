@@ -1,19 +1,37 @@
 import { useEffect, useRef, useState } from "react";
-import { RadioGroup } from "radix-ui";
+import { Check } from "lucide-react";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StatusLabel } from "@/components/ui/status-label";
 import {
   attachments,
   type AttachmentUploadDestination,
-  type DriveConfiguration,
 } from "@/lib/api/attachments";
-import { DriveSetupNotice } from "@/features/attachments/DriveSetupNotice";
-import { SettingsCard } from "./SettingsCard";
+import { SettingsSection } from "./layout/SettingsSection";
+import { SettingsList, SettingsRow } from "./layout/SettingsList";
+import { useSettingsState } from "./use-settings-state";
+import "./pages/attachments.css";
 
+const MIB = 1048576;
+const DEFAULT_LIMIT_BYTES = 100 * MIB;
+
+/** The Attachments page's content: where new uploads go, and the largest file. */
 export function AttachmentSettings() {
+  return (
+    <>
+      <UploadDestinationSettings />
+      <UploadLimitSettings />
+    </>
+  );
+}
+
+function UploadLimitSettings() {
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState<number | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
   const [failure, setFailure] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -22,7 +40,7 @@ export function AttachmentSettings() {
       .uploadLimit()
       .then((bytes) => {
         if (current) {
-          setValue(String(bytes / 1048576));
+          setValue(String(bytes / MIB));
           setSaved(bytes);
         }
       })
@@ -34,71 +52,107 @@ export function AttachmentSettings() {
       current = false;
     };
   }, []);
-  async function save() {
-    const bytes = Number(value) * 1048576;
+  async function save(text: string) {
+    const bytes = Number(text) * MIB;
     if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+      setConfirmed(false);
       setFailure("Enter a positive upload limit in MiB.");
       return;
     }
     if (bytes === saved) return;
     setSaving(true);
+    setConfirmed(false);
     setFailure("");
     try {
       await attachments.setUploadLimit(bytes);
       setSaved(bytes);
+      setConfirmed(true);
     } catch (reason) {
       setFailure(`Could not save the upload limit: ${String(reason)}`);
     } finally {
       setSaving(false);
     }
   }
+  const isDefault = Number(value) * MIB === DEFAULT_LIMIT_BYTES;
+  const invalid = failure === "Enter a positive upload limit in MiB.";
   return (
-    <SettingsCard
-      id="attachments"
-      title="Attachments"
-      description="Choose where new uploads are stored. Existing attachments stay where they are."
-    >
-      <UploadDestinationSettings />
-      <div className="settings-row">
-        <div>
-          <Label htmlFor="attachment-upload-limit">Upload limit (MiB)</Label>
-          <p className="settings-hint">
-            Per file, for future uploads. Default: 100 MiB. All file types are
-            accepted.
-          </p>
-        </div>
-        <Input
-          id="attachment-upload-limit"
-          type="number"
-          min={1 / 1048576}
-          step="any"
-          value={value}
-          disabled={saved === null || saving}
-          onChange={(event) => setValue(event.target.value)}
-          onBlur={() => void save()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-          }}
-        />
-      </div>
-      {saving && <p role="status">Saving upload limit…</p>}
-      {failure && (
-        <p role="alert" className="settings-failure">
-          {failure}
-        </p>
-      )}
-    </SettingsCard>
+    <SettingsSection title="Upload limit">
+      <SettingsList>
+        <SettingsRow
+          variant="top"
+          title={
+            <Label htmlFor="attachment-upload-limit">
+              Largest file<span className="sr-only"> in MiB</span>
+            </Label>
+          }
+          description="Per file, for future uploads. All file types are accepted."
+          descriptionId="attachment-upload-limit-description"
+          trailing={
+            <div className="attachments-limit">
+              <span className="attachments-limit-field">
+                <Input
+                  id="attachment-upload-limit"
+                  className="w-24 text-right"
+                  type="number"
+                  min={1 / MIB}
+                  step="any"
+                  value={value}
+                  disabled={saved === null || saving}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby="attachment-upload-limit-description"
+                  onChange={(event) => {
+                    setValue(event.target.value);
+                    setConfirmed(false);
+                  }}
+                  onBlur={() => void save(value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+                <span aria-hidden="true">MiB</span>
+              </span>
+              {saved !== null && !invalid && !isDefault && (
+                <button
+                  type="button"
+                  className="attachments-link"
+                  disabled={saving}
+                  onClick={() => {
+                    setValue("100");
+                    void save("100");
+                  }}
+                >
+                  Use the default, 100 MiB
+                </button>
+              )}
+              {saved !== null && !invalid && isDefault && (
+                <span className="attachments-limit-note">Default</span>
+              )}
+              <span role="status" className="attachments-limit-note">
+                {saving ? "Saving upload limit…" : confirmed ? "Saved" : ""}
+              </span>
+            </div>
+          }
+        >
+          {failure && (
+            <span role="alert" className="settings-failure attachments-error">
+              {failure}
+            </span>
+          )}
+        </SettingsRow>
+      </SettingsList>
+    </SettingsSection>
   );
 }
 
 function UploadDestinationSettings() {
+  const { openPage } = useSettingsState();
   const [destination, setDestination] =
     useState<AttachmentUploadDestination | null>(null);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
-  const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
-    null,
-  );
+  // Unknown (null) until Drive's configuration is read; only a definite "no"
+  // disables the Drive tile.
+  const [configured, setConfigured] = useState<boolean | null>(null);
   const selection = useRef<string | null>(null);
   const active = useRef(true);
   const [reload, setReload] = useState(0);
@@ -128,6 +182,18 @@ function UploadDestinationSettings() {
           .catch(() => {});
     };
   }, [reload]);
+  useEffect(() => {
+    let current = true;
+    void attachments
+      .driveConfiguration()
+      .then((config) => {
+        if (current) setConfigured(config.configured);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, []);
   async function choose(kind: string) {
     setFailure("");
     setBusy(true);
@@ -136,7 +202,7 @@ function UploadDestinationSettings() {
       if (kind === "google_drive") {
         const config = await attachments.driveConfiguration();
         if (!active.current) return;
-        setConfiguration(config);
+        setConfigured(config.configured);
         if (!config.configured) return;
         const operation = crypto.randomUUID();
         selection.current = operation;
@@ -153,77 +219,116 @@ function UploadDestinationSettings() {
       if (active.current) setBusy(false);
     }
   }
+  const driveUnavailable =
+    configured === false && destination?.kind !== "google_drive";
   return (
-    <>
-      <div className="settings-row settings-row-stacked">
-        <div>
-          <p id="upload-destination-label" className="settings-label">
-            Upload destination
-          </p>
-          <p className="settings-hint">
-            Applies to new uploads only. Queued uploads and retries keep their
-            original destination.
-          </p>
-        </div>
-        <RadioGroup.Root
-          aria-labelledby="upload-destination-label"
-          value={destination?.kind ?? ""}
-          disabled={!destination || busy}
-          onValueChange={(kind) => void choose(kind)}
-          className="upload-destination-choices"
+    <SettingsSection
+      title="Upload destination"
+      caption="Applies to new uploads only. Queued uploads and retries keep their original destination."
+    >
+      <ChoiceTiles
+        aria-label="Upload destination"
+        value={destination?.kind ?? ""}
+        disabled={!destination || busy}
+        onValueChange={(kind) => void choose(kind)}
+      >
+        <ChoiceTile
+          value="local"
+          title="Local workspace"
+          description="Files are stored beside the workspace on this computer."
         >
-          <RadioGroup.Item value="local" className="upload-destination-choice">
-            <span className="layout-choice-dot" aria-hidden="true" />
+          <span className="attachments-facts">
             <span>
-              Local workspace
-              <small>Available offline · Included in backups</small>
+              <Check size={12} aria-hidden="true" />
+              Available offline
             </span>
-          </RadioGroup.Item>
-          <RadioGroup.Item
-            value="google_drive"
-            className="upload-destination-choice"
-          >
-            <span className="layout-choice-dot" aria-hidden="true" />
             <span>
-              Google Drive<small>Uploads a separate copy to Drive</small>
+              <Check size={12} aria-hidden="true" />
+              Included in backups
             </span>
-          </RadioGroup.Item>
-        </RadioGroup.Root>
-      </div>
-      {destination?.kind === "google_drive" && (
-        <div className="settings-row">
-          <div>
-            <p className="settings-label">Upload folder</p>
-            <p className="settings-hint">{destination.folder_name}</p>
-            <p className="settings-hint">
-              Writable when selected. Checked again before upload.
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            disabled={busy}
-            onClick={() => void choose("google_drive")}
+          </span>
+        </ChoiceTile>
+        <ChoiceTile
+          value="google_drive"
+          title="Google Drive"
+          description="Uploads a separate copy to a folder in your Drive."
+          disabled={driveUnavailable}
+        >
+          {driveUnavailable && (
+            <StatusLabel tone="neutral" size="caption">
+              Connect Google Drive to choose this
+            </StatusLabel>
+          )}
+        </ChoiceTile>
+      </ChoiceTiles>
+      {driveUnavailable && (
+        <p className="attachments-note">
+          <button
+            type="button"
+            className="attachments-link"
+            onClick={() => openPage("google-drive")}
           >
-            Change folder
-          </Button>
-        </div>
-      )}
-      {busy && <p role="status">Updating upload destination…</p>}
-      {configuration && <DriveSetupNotice configuration={configuration} />}
-      {failure && (
-        <p role="alert" className="settings-failure">
-          {failure}
+            Set up Google Drive
+          </button>{" "}
+          to store new uploads there.
         </p>
       )}
-      {!destination && failure && (
-        <Button variant="ghost" onClick={() => setReload((value) => value + 1)}>
-          Retry destination
-        </Button>
+      {destination?.kind === "google_drive" && (
+        <div className="attachments-folder">
+          <SettingsList>
+            <SettingsRow
+              title="Upload folder"
+              description={
+                <>
+                  <span className="attachments-mono">
+                    {destination.folder_name}
+                  </span>{" "}
+                  · Writable when selected. Checked again before each upload.
+                </>
+              }
+              trailing={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void choose("google_drive")}
+                >
+                  Change folder…
+                </Button>
+              }
+            />
+          </SettingsList>
+        </div>
       )}
-      <p className="settings-hint">
+      {busy && (
+        <p role="status" className="attachments-note">
+          Updating upload destination…
+        </p>
+      )}
+      {failure && (
+        <div className="attachments-folder">
+          <Alert tone="error" size="compact">
+            <AlertDescription>{failure}</AlertDescription>
+            {!destination && (
+              <AlertActions>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setReload((value) => value + 1)}
+                >
+                  Retry destination
+                </Button>
+              </AlertActions>
+            )}
+          </Alert>
+        </div>
+      )}
+      <p className="attachments-note">
         Drive failures never switch storage automatically. Sharing stays
         unchanged; removing an attachment keeps its file in Drive.
       </p>
-    </>
+    </SettingsSection>
   );
 }

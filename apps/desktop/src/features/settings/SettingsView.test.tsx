@@ -126,7 +126,7 @@ test("Google Drive opens as its own page in the shell", () => {
   expect(screen.queryByRole("region", { name: "Appearance" })).toBeNull();
 });
 
-test("the Location card shows the path, counts, size, and format version", async () => {
+test("the Location page shows the path, counts, size, and format version", async () => {
   render(
     <SettingsView
       selected="location"
@@ -134,10 +134,12 @@ test("the Location card shows the path, counts, size, and format version", async
       onOpenInbox={() => {}}
     />,
   );
-  expect((await screen.findByLabelText("Workspace path")).textContent).toBe(
-    "~/Library/Application Support/ticketd/workspace.sqlite3",
+  const folder = await screen.findByTitle(
+    "/Users/me/Library/Application Support/ticketd",
   );
-  const text = screen.getByRole("region", { name: "Location" }).textContent;
+  expect(screen.getAllByText("workspace.sqlite3").length).toBeGreaterThan(0);
+  expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
+  const text = screen.getByRole("region", { name: "Contents" }).textContent;
   expect(text).toContain("Tickets42");
   expect(text).toContain("Projects3");
   expect(text).toContain("Active Plans2");
@@ -280,8 +282,8 @@ test("workspace stats use short one-line labels", async () => {
       onOpenInbox={() => {}}
     />,
   );
-  await screen.findByLabelText("Workspace path");
-  const location = screen.getByRole("region", { name: "Location" });
-  expect(location.textContent).toContain("Documents");
-  expect(location.textContent).not.toContain("including details and Trash");
+  await screen.findByText("Documents");
+  const contents = screen.getByRole("region", { name: "Contents" });
+  expect(contents.textContent).toContain("Documents");
+  expect(contents.textContent).not.toContain("including details and Trash");
 });
