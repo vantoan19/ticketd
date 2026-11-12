@@ -11,6 +11,7 @@ import { KindIcon } from "./GraphLegend";
 import {
   cardParts,
   nodeAriaLabel,
+  nodeName,
   connectionRows,
   edgeLabels,
   flowEdges,
@@ -450,7 +451,7 @@ export function ContextGraph({
         {kindGroups.map((group) => {
           const limit = shownPerKind[group.key] ?? GROUP_PAGE;
           return (
-            <div key={group.key}>
+            <div key={group.key} className="context-graph-group">
               <h3>
                 {group.title}{" "}
                 <span className="context-graph-count">
@@ -465,12 +466,12 @@ export function ContextGraph({
                       type="button"
                       {...keepScroll(() => setSelected(node.id))}
                     >
-                      {node.label}
+                      {nodeName(node)}
                     </button>
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Center on ${node.label}`}
+                      aria-label={`Center on ${nodeName(node)}`}
                       title="Center on this item"
                       onClick={() => focus(node.id)}
                     >
