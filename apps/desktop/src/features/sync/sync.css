@@ -1,30 +1,56 @@
 /* Sync: layout only. Colours, radii and type sizes are tokens from styles.css. */
 
-/* Settings › Sync. */
-.sync-inline {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.sync-account {
-  display: flex;
-  align-items: center;
+/* Settings › Google Drive. */
+.sync-track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+  margin: 32px 0 0;
+  padding: 0;
+  list-style: none;
 }
-.sync-interval {
+.sync-track li {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
 }
-.sync-interval input {
-  width: 96px;
+.sync-track li::before {
+  content: "";
+  display: block;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
 }
-.sync-progress-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.sync-track li[data-state="done"]::before {
+  background: var(--status-ready);
+}
+.sync-track li[data-state="now"]::before {
+  background: var(--primary);
+}
+.sync-track li[data-state="now"],
+.sync-track li[data-state="done"] {
+  color: var(--foreground);
+}
+.sync-block {
+  margin-top: 24px;
+}
+.sync-footer {
+  margin-top: 16px;
+}
+.sync-failure,
+.sync-status-line {
+  margin: 12px 0 0;
   font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.sync-progress {
+  margin-top: 8px;
+}
+.sync-progress [data-slot="progress"] {
+  width: 100%;
 }
 .sync-summary {
   display: grid;
@@ -99,11 +125,8 @@
   white-space: nowrap;
 }
 
-/* Settings › Sync: the notice between the page subtitle and the first card. */
-.sync-replaced {
-  margin-top: 32px;
-}
-.sync-replaced code {
+/* The notice for a replaced Workspace. */
+.sync-block code {
   display: block;
   overflow-wrap: anywhere;
 }

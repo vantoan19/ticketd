@@ -4,46 +4,84 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 12px;
+  padding: 8px 12px 12px;
   overflow-y: auto;
   background: var(--background);
   color: var(--foreground);
 }
 .settings-back,
+.settings-search-entry,
 .settings-nav li button {
   display: flex;
   align-items: center;
-  gap: 8px;
   width: 100%;
   height: 32px;
   min-height: 32px;
   flex: none;
-  padding: 0 12px;
   border-radius: var(--radius);
   text-align: left;
   color: var(--muted-foreground);
 }
+.settings-back {
+  gap: 8px;
+  padding: 0 8px;
+}
+.settings-nav li button {
+  gap: 10px;
+  padding: 0 8px;
+}
 .settings-back:hover,
-.settings-nav li button:hover {
+.settings-nav li button:hover,
+.settings-nav li button[aria-current="page"] {
   background: var(--accent);
   color: var(--foreground);
 }
+.settings-search-entry {
+  gap: 8px;
+  margin: 8px 0 6px;
+  padding: 0 6px 0 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--disabled-foreground);
+}
+.settings-search-entry:hover {
+  box-shadow: 0 0 0 1px var(--control-boundary);
+}
+.settings-search-entry[aria-current="page"] {
+  box-shadow: 0 0 0 1px var(--input-focus);
+  color: var(--foreground);
+}
 .settings-back:focus-visible,
+.settings-search-entry:focus-visible,
 .settings-nav li button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+.settings-nav svg {
+  flex: none;
+}
+.settings-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-nav-dot {
+  flex: none;
+  display: inline-flex;
+}
 .settings-nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.settings-nav [role="group"] + [role="group"] {
-  margin-top: 20px;
-}
 .settings-nav-heading {
-  margin: 0 12px 4px;
+  margin: 16px 0 4px;
+  padding: 0 8px;
   font-size: var(--text-caption);
   font-weight: 400;
   line-height: 16px;
@@ -72,19 +110,16 @@
   .settings-nav [role="group"] {
     display: contents;
   }
-  .settings-nav [role="group"] + [role="group"] {
-    margin-top: 0;
-  }
   .settings-nav-heading {
     display: none;
   }
   .settings-nav ul {
-    display: flex;
+    flex-direction: row;
     flex-wrap: wrap;
     gap: 4px;
   }
-  .settings-nav ul li + li {
-    margin-top: 0;
+  .settings-search-entry {
+    margin: 0;
   }
   .settings-nav li button {
     width: auto;
@@ -92,66 +127,6 @@
   }
 }
 
-/* Settings page: one centered column of cards. */
-.settings-page {
-  max-width: none;
-}
-.settings-column {
-  width: 100%;
-  max-width: 720px;
-  margin-inline: auto;
-}
-.settings-column > p {
-  margin: 4px 0 0;
-}
-.settings-page [data-slot="card"] {
-  margin-top: 32px;
-}
-.settings-page [data-slot="card"]:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-border-base), var(--focus-ring);
-}
-.settings-page [data-slot="card-body"] {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px 24px;
-}
-.settings-page [data-slot="card-body"] section {
-  border: 0;
-  padding: 0;
-}
-.settings-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-/* The text yields width to the control, which stays on the right and only
-   wraps below when the card is too narrow for both. */
-.settings-row:not(.settings-row-stacked) > :first-child {
-  flex: 1 1 16rem;
-  min-width: 0;
-}
-.settings-row:has(> [role="switch"]) {
-  align-items: flex-start;
-  gap: 24px;
-}
-.settings-row > [role="switch"] {
-  margin-top: 2px;
-}
-.settings-row-stacked {
-  align-items: stretch;
-  flex-direction: column;
-}
-.settings-label {
-  margin: 0;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  color: var(--foreground);
-}
 .settings-hint {
   margin: 0;
   font-size: var(--text-caption);
@@ -165,16 +140,7 @@
   line-height: var(--text-ui-line);
 }
 
-.upload-destination-choices {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-@media (max-width: 600px) {
-  .upload-destination-choices {
-    grid-template-columns: 1fr;
-  }
-}
+/* Destination choice, still used by the sync conflict review. */
 .upload-destination-choice {
   display: flex;
   align-items: center;
@@ -200,116 +166,6 @@
   font-size: var(--text-caption);
   color: var(--muted-foreground);
 }
-
-/* Attention footer */
-.settings-footer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 4px;
-}
-.settings-footer-row p {
-  flex: 1;
-}
-
-/* Command line card: detection summary and the agent quick reference. */
-.cli-summary {
-  flex: 1 1 320px;
-  min-width: 0;
-}
-.cli-summary .settings-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.cli-details {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 16px;
-  margin: 8px 0 0;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.cli-details dt {
-  color: var(--muted-foreground);
-}
-.cli-details dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.cli-reference-heading {
-  margin: 24px 0 8px;
-  font-size: var(--text-ui);
-  font-weight: 500;
-}
-.cli-reference {
-  display: grid;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.cli-command {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.cli-command code {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  padding: 6px 8px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  font-size: var(--text-code);
-  font-weight: 500;
-}
-.command-part {
-  white-space: nowrap;
-}
-
-/* Open tickets: two selectable cards with small layout previews. */
-.layout-choices {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-.layout-choice {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 12px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  text-align: left;
-  color: var(--foreground);
-}
-.layout-choice:hover {
-  background: var(--recessed);
-}
-.layout-choice:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-border-base), var(--focus-ring);
-}
-.layout-choice[data-state="checked"] {
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-.layout-choice[data-state="checked"]:focus-visible {
-  box-shadow:
-    inset 0 0 0 2px var(--ring),
-    var(--focus-ring);
-}
-.layout-choice-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-}
 /* The radio indicator: a ring, filled with the selection blue when chosen. */
 .layout-choice-dot {
   flex: none;
@@ -318,283 +174,44 @@
   border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 1.5px var(--control-boundary);
 }
-.layout-choice[data-state="checked"] .layout-choice-dot,
 .upload-destination-choice[data-state="checked"] .layout-choice-dot {
   box-shadow: inset 0 0 0 4px var(--ring);
 }
-.layout-preview {
-  display: flex;
-  gap: 4px;
-  width: 100%;
-  height: 56px;
-  padding: 6px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
-}
-.layout-preview-list,
-.layout-preview-detail {
-  border-radius: var(--radius-segment);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-}
-.layout-preview-list {
-  flex: 0 0 38%;
-}
-.layout-preview-detail {
-  flex: 1;
-}
 
-/* Keyboard shortcuts */
-.shortcut-list {
+/* Command line page: the details list under the status row. */
+.cli-details {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
   margin: 0;
-}
-.shortcut-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 36px;
   font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
-.shortcut-row + .shortcut-row {
-  box-shadow: 0 -1px 0 var(--border);
-}
-.shortcut-row dt {
-  color: var(--foreground);
-}
-.shortcut-row dd {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.cli-details dt,
+.cli-details dd {
   margin: 0;
+  padding: 12px 20px;
+  box-shadow: inset 0 1px 0 var(--group-hairline);
 }
-.shortcut-keys {
-  display: inline-flex;
+.cli-details dt {
+  color: var(--muted-foreground);
+}
+.cli-details dd {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 4px 8px;
+  min-width: 0;
+  padding-left: 0;
+}
+.command-part {
+  white-space: nowrap;
 }
 
-/* Location and About actions */
 .settings-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.settings-actions-center {
-  align-items: center;
-}
-.workspace-path {
-  margin: 12px 0;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 500;
-  line-height: 20px;
-  overflow-wrap: anywhere;
-  user-select: text;
-}
-.backup-status {
-  margin-top: 16px;
-}
-.backup-status .workspace-path {
-  margin: 8px 0;
-}
-.status-word {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-ui);
-  color: var(--foreground);
-  line-height: var(--text-ui-line);
-}
-.workspace-facts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px 24px;
-  margin: 16px 0 0;
-}
-/* A label that wraps keeps its value on the same line as the others. */
-.workspace-fact {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-.workspace-fact dt {
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
-  color: var(--muted-foreground);
-}
-.workspace-fact dd {
-  margin: 0;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: var(--text-ui-line);
-  font-variant-numeric: tabular-nums;
-  color: var(--foreground);
-  letter-spacing: -0.28px;
-}
-
-.settings-column > h1:focus,
-.settings-page [data-slot="card"]:focus:not(:focus-visible) {
-  outline: none;
-}
-.settings-column > p {
-  font-size: var(--text-ui);
-  line-height: 20px;
-  color: var(--muted-foreground);
-}
-.settings-nav li + li {
-  margin-top: 2px;
-}
-.settings-nav button[aria-current="page"] {
-  background: var(--accent);
-  color: var(--foreground);
-}
-.settings-source-on {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  font-size: var(--text-caption);
-}
-.settings-page [data-slot="card-footer"] {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-inline: 24px;
-}
-.settings-page [data-slot="card-footer"] > p {
-  flex: 1 1 280px;
-}
-.settings-page [data-slot="card-footer"] .settings-actions {
-  margin: 0;
-}
-
-.source-settings-column {
-  max-width: 760px;
-}
-.settings-page[data-source-active] {
-  padding: 40px 24px 64px;
-}
-.source-connection-health {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.source-connection-health > p {
-  font-weight: 400;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
 .source-preview-heading > .settings-hint {
   margin-left: auto;
-}
-
-.settings-page [data-slot="segmented-control"] [role="radio"] {
-  min-height: 32px;
-}
-
-.workspace-location {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 12px 0;
-}
-.workspace-location .workspace-path {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-card-description {
-  margin: 0;
-  font-size: var(--text-ui);
-  line-height: 20px;
-  color: var(--muted-foreground);
-}
-
-/* Location row, per board I: 40px path box, 40px copy and reveal controls. */
-.workspace-location .workspace-path {
-  box-sizing: border-box;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-}
-.workspace-location > button {
-  height: 40px;
-  box-shadow: var(--shadow-border-base);
-}
-.workspace-location > button[aria-label="Copy path"] {
-  width: 40px;
-  border-radius: var(--radius);
-}
-
-/* Agent skills card: the skill, its one action, then one line per harness. */
-.agent-skill {
-  display: grid;
-  gap: 12px;
-}
-.agent-skill-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.agent-skill-status,
-.agent-skill-target-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  color: var(--muted-foreground);
-}
-.agent-skill-targets {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.agent-skill-targets > li {
-  display: grid;
-  grid-template-columns: 8rem 10rem minmax(0, 1fr);
-  align-items: baseline;
-  gap: 4px 16px;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.agent-skill-target-path {
-  overflow-wrap: anywhere;
-  color: var(--muted-foreground);
-  font-size: var(--text-code);
-}
-.agent-skill-target-note {
-  grid-column: 2 / -1;
-}
-.agent-skill-conflict {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 8px;
-}
-@media (max-width: 720px) {
-  .agent-skill-targets > li {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .agent-skill-target-note {
-    grid-column: 1;
-  }
 }

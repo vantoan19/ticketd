@@ -80,7 +80,7 @@ impl GithubConnector {
                 SchemaField {
                     key: "repositories".into(),
                     label: "Repositories".into(),
-                    help: Some("Issues from these repositories are discovered.".into()),
+                    help: Some("Issues from these repositories are discovered. Type owner/name, then press Enter.".into()),
                     required: true,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic { depends_on: vec![] },

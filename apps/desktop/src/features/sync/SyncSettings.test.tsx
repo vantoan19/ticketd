@@ -84,6 +84,20 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+test("while the status is read, the page shows the setup track and a row-shaped skeleton", async () => {
+  api.status.mockReturnValue(new Promise(() => {}));
+  const { container } = show();
+  const track = screen.getByRole("list", { name: "Sync setup" });
+  expect(within(track).getAllByRole("listitem")).toHaveLength(4);
+  expect(
+    screen.getByRole("status", { name: "Reading Google Drive" }),
+  ).toBeTruthy();
+  expect(
+    container.querySelectorAll('[data-slot="skeleton"]').length,
+  ).toBeGreaterThanOrEqual(3);
+  expect(screen.queryByRole("button")).toBeNull();
+});
+
 test("before connecting, the card says files are not encrypted and offers Google sign-in", async () => {
   api.status.mockResolvedValue(notConnected());
   api.connect.mockResolvedValue(choosing());
@@ -445,11 +459,78 @@ test("the setup choice has a way back, also when Drive cannot be read", async ()
   expect((await screen.findByRole("alert")).textContent).toBe(
     "Could not read your Drive: Drive did not answer",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Use another account" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use another account…" }));
+  // Nothing is disconnected until the person confirms.
+  const dialog = await screen.findByRole("dialog", {
+    name: "Use another Google account?",
+  });
+  expect(dialog.textContent).toContain("you@example.com");
+  expect(dialog.textContent).toContain(
+    "Nothing in Drive or on this computer is deleted.",
+  );
+  expect(api.disconnect).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Use another account" }),
+  );
   expect(
     await screen.findByRole("button", { name: "Connect Google Drive" }),
   ).toBeTruthy();
   expect(api.disconnect).toHaveBeenCalledTimes(1);
+});
+
+test("cancelling Use another account keeps the account", async () => {
+  api.status.mockResolvedValue(choosing());
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Use another account…" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(api.disconnect).not.toHaveBeenCalled();
+  expect(screen.getByText("Connected as you@example.com")).toBeTruthy();
+});
+
+const stage = () =>
+  screen
+    .getByRole("list", { name: "Sync setup" })
+    .querySelector('[aria-current="step"]')?.textContent;
+
+test("the step track follows setup from sign-in to in sync", async () => {
+  api.status.mockResolvedValue(notConnected());
+  api.connect.mockImplementation(() => new Promise(() => {}));
+  const view = show();
+  expect(await screen.findByText("Not connected")).toBeTruthy();
+  expect(stage()).toBe("Connect");
+  fireEvent.click(screen.getByRole("button", { name: "Connect Google Drive" }));
+  expect((await screen.findByRole("status")).textContent).toBe(
+    "Waiting for sign-in in your browser…",
+  );
+  expect(
+    screen.getByRole("button", { name: "Connect Google Drive" }),
+  ).toHaveProperty("disabled", true);
+  view.unmount();
+
+  api.status.mockResolvedValue(choosing());
+  show();
+  await screen.findByRole("radiogroup", { name: "This Workspace" });
+  expect(stage()).toBe("Choose a workspace");
+  cleanup();
+
+  api.status.mockResolvedValue(
+    syncStatus({
+      state: "upload_pending",
+      first_sync: { direction: "upload", done: 1, total: 4 },
+    }),
+  );
+  show();
+  await screen.findByText("Uploading 1 of 4 files");
+  expect(stage()).toBe("First sync");
+  cleanup();
+
+  api.status.mockResolvedValue(syncStatus());
+  show();
+  await screen.findByRole("heading", { name: "Disconnect" });
+  expect(stage()).toBe("In sync");
 });
 
 test("a first sync that stopped shows why, with its action and Disconnect", async () => {
@@ -479,9 +560,10 @@ test("an empty Workspace beside one in Drive preselects the download, and each f
   );
   show();
   // Drive takes a few seconds to answer: the card says what it waits for.
-  expect((await screen.findByRole("status")).textContent).toBe(
+  const waiting = await screen.findByText(
     "Looking for Workspaces in your Drive…",
   );
+  expect(waiting.closest('[role="status"]')).toBeTruthy();
   answer({
     local: { tickets: 0, documents: 0, attachments: 0 },
     existing: [
