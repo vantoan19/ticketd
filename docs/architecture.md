@@ -192,8 +192,14 @@ rules. Agent attribution never substitutes for Chat identity or permission.
 (`context`) and finds the CLI the same way Settings does (`cli`). The text names
 each record, the command that returns it, and the bundled `chat` guide; it holds no
 record content and the host writes nothing into harness settings, skills or hooks.
-Agents change records only by running the CLI. Save as Document is the ordinary
-Document-creation workflow applied to a stored response.
+When links change, the next new turn of a live session carries the context again,
+and a resumed native session gets it when it differs from what it was last given.
+Agents change records only by running the CLI. When the workspace change token moved
+during a turn, the host lists the status moves and Activities written under the
+Chat's harness as agent name in that turn's time and keeps them with the turn for
+the transcript; that name is attribution, so concurrent Chats on one harness are
+not told apart. Save as Document is the ordinary Document-creation workflow
+applied to a stored response.
 
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process

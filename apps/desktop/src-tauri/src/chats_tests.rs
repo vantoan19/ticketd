@@ -1210,3 +1210,44 @@ async fn a_turn_started_after_the_view_attached_streams_and_times_from_its_own_s
         Item::Response { state: "complete", text, .. } if text == "Hel"
     )));
 }
+
+/// L3: what the agent changed in ticketd during a turn is a records row after the turn
+/// and the list row's latest change.
+#[tokio::test(start_paused = true)]
+async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_list() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    let moved = ticketd_core::TicketPatch {
+        status: Some(ticketd_core::Status::InProgress),
+        editing_agent: Some("codex".into()),
+        ..Default::default()
+    };
+    f.core().change_ticket(&ticket.reference, moved).unwrap();
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+
+    let status = json!({
+        "kind": "status",
+        "reference": ticket.reference,
+        "title": "Reset email",
+        "from": "Todo",
+        "to": "In progress",
+    });
+    let changes = seen.lock().unwrap().clone();
+    let records = changes
+        .iter()
+        .find(|change| change["item"]["kind"] == "records")
+        .expect("a records row");
+    assert_eq!(records["item"]["changes"], json!([status]));
+    let rows = f.chats.list(ChatListFilter::Active).unwrap();
+    assert_eq!(
+        serde_json::to_value(&rows[0]).unwrap()["last_change"],
+        status
+    );
+}

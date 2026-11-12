@@ -10,14 +10,14 @@ use std::time::Duration;
 
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities, Capability, ChatHost,
-    ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT, DeliveryEvidence,
-    EventKind, Harness, HarnessAdapter, HostError, INTERRUPT_TIMEOUT, InteractionAnswer,
-    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode, RuntimeGeneration,
-    SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission, SubmissionId,
-    SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus,
-    TurnOutcome, UnconfirmedCleanup, WorkspaceOpener, problem_kind,
+    AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities,
+    Capability, ChatHost, ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT,
+    DeliveryEvidence, EventKind, Harness, HarnessAdapter, HostError, INTERRUPT_TIMEOUT,
+    InteractionAnswer, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId,
+    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode,
+    RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission,
+    SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL,
+    ToolStatus, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener, problem_kind,
 };
 use ticketd_core::{
     Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
@@ -1480,4 +1480,45 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("fifth").await;
     assert_eq!(texts(&f)[4], "links: T-2\n\nfifth");
+}
+
+/// L3: what the agent changed in ticketd during a turn is kept with the turn when it
+/// ends, as one record the Chat view shows.
+#[tokio::test(start_paused = true)]
+async fn what_the_agent_changed_in_ticketd_is_kept_with_its_turn() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    f.send("first").await;
+    // As the agent does, through the CLI under its agent name.
+    f.core()
+        .add_activity(&ticket.reference, "Drafted the copy", Some("codex"))
+        .unwrap();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    // A turn that changed nothing gets no record.
+    f.send("second").await;
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+
+    let kept: Vec<_> = f
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == AGENT_CHANGES_RECORD_NAME => Some(tool.input),
+            _ => None,
+        })
+        .collect();
+    let [changes] = kept.as_slice() else {
+        panic!("one record, got {kept:?}");
+    };
+    let changes: Vec<ticketd_core::ChatAgentChange> = serde_json::from_str(changes).unwrap();
+    assert_eq!(
+        changes,
+        [ticketd_core::ChatAgentChange::Update {
+            reference: ticket.reference,
+            excerpt: "Drafted the copy".to_owned(),
+        }]
+    );
 }
