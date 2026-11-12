@@ -10,6 +10,8 @@ import {
   panToInclude,
   plainText,
   stateLine,
+  countNotFullyShown,
+  isUserMove,
 } from "./graph-text";
 
 const nodes = [
@@ -266,4 +268,34 @@ test("a selection lists its connections under labelled rows, each item once", ()
     { label: "Parent of", items: [{ id: "c", text: "T-KQ8 Jitter" }] },
     { label: "Mentioned by", items: [{ id: "b", text: "T-KQ3 Pricing" }] },
   ]);
+});
+
+describe("countNotFullyShown", () => {
+  const card = { width: 100, height: 50 };
+  const view = { x: 0, y: 0, zoom: 1 };
+  const size = { width: 400, height: 300 };
+  it("counts wholly outside and partly clipped cards, not whole ones", () => {
+    const cards = [
+      { ...card, x: 10, y: 10 },
+      { ...card, x: 350, y: 10 },
+      { ...card, x: 500, y: 10 },
+      { ...card, x: 10, y: 280 },
+      { ...card, x: -20, y: 10 },
+    ];
+    expect(countNotFullyShown(cards, view, size)).toBe(4);
+  });
+  it("accounts for zoom and pan, and ignores an unsized canvas", () => {
+    const cards = [{ ...card, x: 300, y: 0 }];
+    expect(countNotFullyShown(cards, { x: 0, y: 0, zoom: 0.5 }, size)).toBe(0);
+    expect(countNotFullyShown(cards, { x: -50, y: 0, zoom: 1 }, size)).toBe(0);
+    expect(countNotFullyShown(cards, view, { width: 0, height: 0 })).toBe(0);
+  });
+});
+
+describe("isUserMove", () => {
+  it("is true only for a real DOM event", () => {
+    expect(isUserMove(new Event("mousedown"))).toBe(true);
+    expect(isUserMove({ sync: true })).toBe(false);
+    expect(isUserMove(null)).toBe(false);
+  });
 });
