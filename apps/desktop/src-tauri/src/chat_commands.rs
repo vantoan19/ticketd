@@ -471,7 +471,11 @@ fn show_tray(app: &AppHandle, overview: &Overview) -> tauri::Result<()> {
 
 /// Handles the application events that decide whether Chats keep running.
 pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
-    let bridge = app.state::<ChatBridge>();
+    // On Linux the event loop delivers events before `setup` manages the bridge.
+    // No Chat can exist yet, so there is nothing to decide.
+    let Some(bridge) = app.try_state::<ChatBridge>() else {
+        return;
+    };
     match event {
         RunEvent::WindowEvent {
             label,
