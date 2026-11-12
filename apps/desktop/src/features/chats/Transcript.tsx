@@ -246,6 +246,8 @@ function RequestCard({
         ) : (
           <pre className="chat-code">{item.subject}</pre>
         ))}
+      {/* Why the harness asks is prose, apart from what would run. */}
+      {item.reason && <p className="chat-card-text">{item.reason}</p>}
       {pending && item.request === "approval" && (
         <div className="chat-card-actions">
           {item.options.map((option, index) => (

@@ -1639,10 +1639,16 @@ impl Supervisor {
             return;
         };
         let interaction_id = format!("{run}:request:{}", request.request.0);
-        let (kind, prompt) = match &request.kind {
-            InteractionKind::Approval { description, .. } => {
-                (ChatInteractionKind::Approval, description.clone())
-            }
+        let (kind, prompt, reason) = match &request.kind {
+            InteractionKind::Approval {
+                description,
+                reason,
+                ..
+            } => (
+                ChatInteractionKind::Approval,
+                description.clone(),
+                reason.clone(),
+            ),
             InteractionKind::Question { questions } => (
                 ChatInteractionKind::Question,
                 questions
@@ -1650,6 +1656,7 @@ impl Supervisor {
                     .map(|question| question.prompt.as_str())
                     .collect::<Vec<_>>()
                     .join("\n"),
+                None,
             ),
         };
         observations.push(ChatObservation::InteractionRequested {
@@ -1658,6 +1665,7 @@ impl Supervisor {
             kind,
             native_request_id: Some(request.request.0.clone()),
             prompt,
+            reason,
         });
         self.record(observations);
         self.interactions.insert(

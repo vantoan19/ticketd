@@ -48,7 +48,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          CREATE TABLE IF NOT EXISTS chat_submission_attempts (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), message_id TEXT NOT NULL REFERENCES chat_messages(id), intent TEXT NOT NULL, delivery TEXT NOT NULL, turn_id TEXT REFERENCES chat_turns(id), detail TEXT, decision TEXT, recorded_at TEXT NOT NULL DEFAULT ({NOW}));
          CREATE INDEX IF NOT EXISTS chat_submission_attempts_message ON chat_submission_attempts(message_id);
          CREATE TABLE IF NOT EXISTS chat_tools (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT NOT NULL REFERENCES chat_turns(id), name TEXT NOT NULL, input TEXT NOT NULL, state TEXT NOT NULL, output TEXT, output_truncated INTEGER NOT NULL DEFAULT 0);
-         CREATE TABLE IF NOT EXISTS chat_interactions (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT NOT NULL REFERENCES chat_turns(id), kind TEXT NOT NULL, native_request_id TEXT, prompt TEXT NOT NULL, state TEXT NOT NULL, response TEXT);
+         CREATE TABLE IF NOT EXISTS chat_interactions (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, turn_id TEXT NOT NULL REFERENCES chat_turns(id), kind TEXT NOT NULL, native_request_id TEXT, prompt TEXT NOT NULL, reason TEXT, state TEXT NOT NULL, response TEXT);
          CREATE TABLE IF NOT EXISTS chat_notices (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id), position INTEGER NOT NULL UNIQUE, text TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT ({NOW}));
          CREATE TABLE IF NOT EXISTS chat_changes (sequence INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL REFERENCES chats(id), kind TEXT NOT NULL, subject_id TEXT NOT NULL);
          CREATE INDEX IF NOT EXISTS chat_changes_chat ON chat_changes(chat_id, sequence);
@@ -366,7 +366,11 @@ pub struct ChatInteraction {
     pub turn_id: String,
     pub kind: ChatInteractionKind,
     pub native_request_id: Option<String>,
+    /// For an approval, what would run or change; for a question, its text.
     pub prompt: String,
+    /// Why the harness asks for an approval, apart from `prompt`. Cut to
+    /// `CHAT_NOTICE_LIMIT` characters.
+    pub reason: Option<String>,
     pub state: ChatInteractionState,
     pub response: Option<String>,
 }
@@ -477,6 +481,8 @@ pub enum ChatObservation {
         kind: ChatInteractionKind,
         native_request_id: Option<String>,
         prompt: String,
+        /// Cut to `CHAT_NOTICE_LIMIT` characters when stored.
+        reason: Option<String>,
     },
     /// `state` is `Answered` or `Expired`.
     InteractionResolved {
@@ -745,7 +751,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Tool),
         "interaction" => connection
             .query_row(
-                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response FROM chat_interactions WHERE id = ?1",
+                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason FROM chat_interactions WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatInteraction {
@@ -757,6 +763,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         prompt: row.get(5)?,
                         state: named(row, 6)?,
                         response: row.get(7)?,
+                        reason: row.get(8)?,
                     })
                 },
             )
@@ -1143,15 +1150,18 @@ fn observe(
             kind,
             native_request_id,
             prompt,
+            reason,
         } => {
             require_turn(connection, chat_id, &turn_id)?;
             if owned(connection, "chat_interactions", chat_id, &interaction_id)? {
                 return Ok(());
             }
             let position = log(connection, chat_id, "interaction", &interaction_id)?;
+            let reason: Option<String> =
+                reason.map(|reason| reason.chars().take(CHAT_NOTICE_LIMIT).collect());
             connection.execute(
-                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending')",
-                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt],
+                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')",
+                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason],
             )?;
             Ok(())
         }

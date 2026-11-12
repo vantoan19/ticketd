@@ -185,6 +185,22 @@ test("Stop marks the turn, pauses the queue and waits for Resume", async () => {
   );
 });
 
+test("an approval sets its command in code and its reason as prose", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...approval, reason: "Allow installing the PagerDuty client?" },
+    ]),
+  );
+  const card = screen.getByRole("region", { name: "Approval request" });
+  const command = within(card).getByText("npm install @pagerduty/pdjs");
+  const reason = within(card).getByText(
+    "Allow installing the PagerDuty client?",
+  );
+  expect(command.tagName).toBe("PRE");
+  expect(reason.tagName).toBe("P");
+  expect(command.contains(reason)).toBe(false);
+});
+
 test("an approval is answered once and becomes a receipt without buttons", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),

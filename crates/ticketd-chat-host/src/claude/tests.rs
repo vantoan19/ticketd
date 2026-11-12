@@ -171,6 +171,24 @@ async fn handing_input_to_the_sdk_is_a_write_and_later_evidence_arrives_as_event
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_permission_names_the_command_apart_from_why_it_is_asked() {
+    let (mut peer, runtime, mut events) = open().await;
+    peer.load(fixture!("permission_command"));
+    submit(&mut peer, &runtime, start_turn("sub-1", "Run the tests")).await;
+
+    assert_eq!(
+        seen(&mut events).await,
+        [
+            "turn-started local-turn-1",
+            &processing("sub-1", "local-turn-1"),
+            "approval 7-1 \"npm test\" Some(\"Runs the project's tests\") [Allow, Deny]",
+            // With only a reason given, it is the request's one description.
+            "approval 7-2 \"Fetching is not allowed by your settings\" None [Allow, Deny]",
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn output_keeps_flowing_while_a_permission_or_question_waits_for_its_answer() {
     let (mut peer, runtime, mut events) = open().await;
     peer.load(fixture!("permission_wait"));
@@ -182,7 +200,7 @@ async fn output_keeps_flowing_while_a_permission_or_question_waits_for_its_answe
             "turn-started local-turn-1",
             &processing("sub-1", "local-turn-1"),
             "tool toolu_1 \"Write\" Running None",
-            "approval 7-1 \"Write to a.txt\" [Allow, Deny]",
+            "approval 7-1 \"Write to a.txt\" None [Allow, Deny]",
             "delta text-1 \"Waiting\"",
         ]
     );

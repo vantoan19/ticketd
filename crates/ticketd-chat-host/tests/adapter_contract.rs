@@ -219,6 +219,7 @@ async fn a_live_request_accepts_one_answer_from_its_own_generation() {
         turn: None,
         kind: InteractionKind::Approval {
             description: "Run cargo test".to_owned(),
+            reason: None,
             decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
         },
         detail: None,

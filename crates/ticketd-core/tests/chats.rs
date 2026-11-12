@@ -275,6 +275,7 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                     kind: ChatInteractionKind::Approval,
                     native_request_id: Some("req-1".into()),
                     prompt: "Allow Bash?".into(),
+                    reason: None,
                 },
                 ChatObservation::InteractionResolved {
                     interaction_id: "ask-1".into(),
@@ -436,6 +437,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
                     kind: ChatInteractionKind::Question,
                     native_request_id: None,
                     prompt: "Which branch?".into(),
+                    reason: None,
                 },
             ],
         )
@@ -1122,6 +1124,35 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
         _ => None,
     });
     assert_eq!(notice.unwrap().text.chars().count(), CHAT_NOTICE_LIMIT);
+}
+
+#[test]
+fn an_approval_keeps_why_it_was_asked_apart_from_what_would_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "go", "t1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::InteractionRequested {
+                interaction_id: "ask-1".into(),
+                turn_id: "t1".into(),
+                kind: ChatInteractionKind::Approval,
+                native_request_id: Some("req-1".into()),
+                prompt: "npm install".into(),
+                reason: Some("x".repeat(CHAT_NOTICE_LIMIT + 10)),
+            }],
+        )
+        .unwrap();
+
+    let items = workspace.chat_snapshot(&chat.id, 50).unwrap().items;
+    let asked = items.iter().find_map(|item| match item {
+        ChatItem::Interaction(interaction) => Some(interaction),
+        _ => None,
+    });
+    assert_eq!(asked.unwrap().prompt, "npm install");
+    let reason = asked.unwrap().reason.as_deref().unwrap();
+    assert_eq!(reason.chars().count(), CHAT_NOTICE_LIMIT);
 }
 
 #[test]

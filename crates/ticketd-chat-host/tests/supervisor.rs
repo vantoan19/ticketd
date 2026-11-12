@@ -142,6 +142,7 @@ impl Fixture {
             turn: None,
             kind: InteractionKind::Approval {
                 description: "Run cargo test".to_owned(),
+                reason: None,
                 decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
             },
             detail: None,

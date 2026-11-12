@@ -234,6 +234,7 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
         turn: Some(turn()),
         kind: InteractionKind::Approval {
             description: "Run cargo test".to_owned(),
+            reason: None,
             decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
         },
         detail: None,

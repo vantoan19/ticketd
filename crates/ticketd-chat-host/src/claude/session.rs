@@ -317,9 +317,12 @@ impl Session {
         let tool = text(event, "display_name")
             .or_else(|| text(event, "tool_name"))
             .unwrap_or("a tool");
-        let description = text(event, "title")
-            .or_else(|| text(event, "description"))
-            .map_or_else(|| format!("Claude wants to use {tool}"), str::to_owned);
+        // What would run: a shell tool's command, else Claude Code's own summary.
+        let subject = event
+            .get("input")
+            .and_then(|input| text(input, "command"))
+            .or_else(|| text(event, "title"));
+        let reason = text(event, "description").or_else(|| text(event, "decision_reason"));
         let detail = json!({
             "tool_name": event.get("tool_name"),
             "input": event.get("input"),
@@ -338,13 +341,15 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
-            kind: InteractionKind::Approval {
-                description,
+            kind: InteractionKind::approval(
+                subject,
+                reason,
+                &format!("Claude wants to use {tool}"),
                 // ponytail: no AllowForSession. The bridge's `remember` applies
                 // whatever rule Claude Code suggested, which may be saved to the
                 // user's settings; offer it once the bridge reports the rule's scope.
-                decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
-            },
+                vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+            ),
             detail: Some(ProviderDetail::new(
                 "permission_request",
                 &detail.to_string(),

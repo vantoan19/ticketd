@@ -277,6 +277,7 @@ const chats: MockChat[] = [
         request: "approval",
         title: "Codex asked for approval",
         subject: "Remove-Item hello.txt",
+        reason: "Allow removing hello.txt from the current directory?",
         options: [],
         free_text: false,
         state: "answered",

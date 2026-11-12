@@ -131,7 +131,7 @@ impl Workspace {
             ),
             (
                 "chat_interactions",
-                "id, chat_id, position, turn_id, kind, native_request_id, prompt, state, response",
+                "id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, response",
             ),
             ("chat_notices", "id, chat_id, position, text, created_at"),
         ] {

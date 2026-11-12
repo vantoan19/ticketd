@@ -159,7 +159,7 @@ async fn a_turn_keeps_provider_order_while_its_start_reply_is_outstanding() {
             "evidence sub-1 Processing { turn: NativeTurnId(\"turn_1\") }",
             "delta item_1 \"Looking\"",
             "tool item_2 \"ls\" Running None",
-            "approval 0 \"ls\\nNeeds approval\" [Allow, AllowForSession, Deny]",
+            "approval 0 \"ls\" Some(\"Needs approval\") [Allow, AllowForSession, Deny]",
         ]
     );
 
@@ -315,10 +315,10 @@ async fn a_withdrawn_or_answered_request_refuses_later_answers() {
         seen(&mut events).await,
         [
             "turn-started turn_1",
-            "approval 20 \"Write outside the workspace\" [Allow, AllowForSession, Deny]",
+            "approval 20 \"Write outside the workspace\" None [Allow, AllowForSession, Deny]",
             "resolved 20 Withdrawn",
             "question 21 q1 \"Which scope?\" [\"Small\", \"Large\"]",
-            "approval 22 \"Fetch the changelog\" [Allow, AllowForSession, Deny]",
+            "approval 22 \"Fetch the changelog\" None [Allow, AllowForSession, Deny]",
         ]
     );
     let small = InteractionAnswer::Answers(vec![QuestionAnswer {

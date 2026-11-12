@@ -204,6 +204,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** Worded by the host for the current state ("wants to" / "wanted to"). */
     title: z.string(),
     subject: z.string().nullish(),
+    /** For an approval: why the harness asks, apart from what would run. */
+    reason: z.string().nullish(),
     options: z.array(requestOptionSchema),
     free_text: z.boolean().default(false),
     state: z.enum(["pending", "answered", "expired"]),

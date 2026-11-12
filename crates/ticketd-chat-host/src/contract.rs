@@ -379,13 +379,39 @@ pub struct InteractionRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InteractionKind {
     Approval {
+        /// What would run or change: the command, or a summary of the action. When the
+        /// harness gave only its reason, that reason.
         description: String,
+        /// Why the harness asks, kept apart from `description`.
+        reason: Option<String>,
         /// The decisions this harness accepts for this request.
         decisions: Vec<ApprovalDecision>,
     },
     Question {
         questions: Vec<Question>,
     },
+}
+
+impl InteractionKind {
+    /// An approval of `subject` asked for `reason`. With only a reason, the reason is the
+    /// description, so it is never dropped; with neither, `fallback` is.
+    pub fn approval(
+        subject: Option<&str>,
+        reason: Option<&str>,
+        fallback: &str,
+        decisions: Vec<ApprovalDecision>,
+    ) -> Self {
+        let (description, reason) = match (subject, reason) {
+            (Some(subject), reason) => (subject, reason),
+            (None, Some(reason)) => (reason, None),
+            (None, None) => (fallback, None),
+        };
+        Self::Approval {
+            description: description.to_owned(),
+            reason: reason.map(str::to_owned),
+            decisions,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

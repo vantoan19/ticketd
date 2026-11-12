@@ -565,19 +565,16 @@ impl Session {
         let (kind, shown) = match method {
             "item/commandExecution/requestApproval" => {
                 let decisions = offered_decisions(params);
-                let description = match (text(params, &["command"]), reason) {
-                    (Some(command), Some(reason)) => format!("{command}\n{reason}"),
-                    (Some(text), None) | (None, Some(text)) => text.to_owned(),
-                    (None, None) => "Run a command".to_owned(),
-                };
                 (
                     RequestKind::Approval {
                         decisions: decisions.clone(),
                     },
-                    InteractionKind::Approval {
-                        description,
+                    InteractionKind::approval(
+                        text(params, &["command"]),
+                        reason,
+                        "Run a command",
                         decisions,
-                    },
+                    ),
                 )
             }
             "item/fileChange/requestApproval" => {
@@ -586,20 +583,19 @@ impl Session {
                     RequestKind::Approval {
                         decisions: decisions.clone(),
                     },
-                    InteractionKind::Approval {
-                        description: reason.unwrap_or("Apply file changes").to_owned(),
-                        decisions,
-                    },
+                    InteractionKind::approval(None, reason, "Apply file changes", decisions),
                 )
             }
             "item/permissions/requestApproval" => (
                 RequestKind::Permissions {
                     requested: params.get("permissions").cloned().unwrap_or(json!({})),
                 },
-                InteractionKind::Approval {
-                    description: reason.unwrap_or("Grant additional permissions").to_owned(),
-                    decisions: ALL_DECISIONS.to_vec(),
-                },
+                InteractionKind::approval(
+                    None,
+                    reason,
+                    "Grant additional permissions",
+                    ALL_DECISIONS.to_vec(),
+                ),
             ),
             "item/tool/requestUserInput" => match questions(params) {
                 Some(questions) => (

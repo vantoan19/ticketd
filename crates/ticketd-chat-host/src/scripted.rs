@@ -145,9 +145,10 @@ pub(crate) fn brief(kind: &EventKind) -> String {
         EventKind::InteractionRequested(request) => match &request.kind {
             InteractionKind::Approval {
                 description,
+                reason,
                 decisions,
             } => format!(
-                "approval {} {description:?} {decisions:?}",
+                "approval {} {description:?} {reason:?} {decisions:?}",
                 request.request.0
             ),
             InteractionKind::Question { questions } => {

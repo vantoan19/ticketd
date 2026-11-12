@@ -126,6 +126,8 @@ pub enum Item {
         request: &'static str,
         title: String,
         subject: Option<String>,
+        /// Why the harness asks, apart from what would run.
+        reason: Option<String>,
         options: Vec<RequestOption>,
         free_text: bool,
         state: &'static str,
@@ -460,6 +462,10 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         request: if approval { "approval" } else { "question" },
         title,
         subject: Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty()),
+        reason: interaction
+            .reason
+            .clone()
+            .filter(|reason| !reason.is_empty()),
         options,
         free_text,
         state,
@@ -902,7 +908,10 @@ pub fn idle() -> ChatLive {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChatTool, ChatToolState, needs_you, step};
+    use super::{
+        ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatTool, ChatToolState, Item,
+        idle, needs_you, request, step,
+    };
 
     #[test]
     fn a_claude_command_step_names_the_command_it_ran() {
@@ -951,6 +960,30 @@ mod tests {
         ]
         .map(|state| step(&tool(state), "Codex").state);
         assert_eq!(states, ["running", "done", "failed", "unknown"]);
+    }
+
+    /// U4: the card shows what would run apart from why the harness asks.
+    #[test]
+    fn an_approval_shows_its_command_apart_from_its_reason() {
+        let interaction = ChatInteraction {
+            id: "ask-1".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: Some("0".to_owned()),
+            prompt: "touch hello.txt".to_owned(),
+            reason: Some("Allow creating hello.txt?".to_owned()),
+            state: ChatInteractionState::Answered,
+            response: Some("deny".to_owned()),
+        };
+        let Item::Request {
+            subject, reason, ..
+        } = request(&interaction, &idle(), "Codex")
+        else {
+            panic!("an interaction is a request");
+        };
+        assert_eq!(subject.as_deref(), Some("touch hello.txt"));
+        assert_eq!(reason.as_deref(), Some("Allow creating hello.txt?"));
     }
 
     #[test]
