@@ -92,6 +92,7 @@ test("lists versions, compares the newest earlier one with now, and restores it"
   expect(syncReview.restore).toHaveBeenCalledWith(
     { kind: "ticket", id: "guid-12", source: "local" },
     "v3",
+    expect.any(String),
   );
   expect(onClose).toHaveBeenCalled();
 });
@@ -141,6 +142,7 @@ test("a desktop without local versions loads them from Google Drive and says so"
     expect(syncReview.restore).toHaveBeenCalledWith(
       { kind: "ticket", id: "guid-12", source: "drive" },
       "v2",
+      expect.any(String),
     ),
   );
 });
@@ -232,6 +234,7 @@ test("a synced record offers older versions from Drive below its own, loaded whe
     expect(syncReview.restore).toHaveBeenCalledWith(
       { kind: "ticket", id: "guid-12", source: "drive" },
       "v2",
+      expect.any(String),
     ),
   );
 });
@@ -278,4 +281,22 @@ test("Drive versions are placed by time among this desktop's, one heading per da
     .map((heading) => heading.textContent);
   expect(days).toHaveLength(3);
   expect(new Set(days).size).toBe(3);
+});
+
+test("Restore cannot be submitted twice, and restoring the same version again is the same request", async () => {
+  vi.mocked(syncReview.restore).mockRejectedValueOnce(
+    new Error("the answer was lost"),
+  );
+  open();
+  await screen.findByText("In progress");
+  const restore = screen.getByRole("button", { name: "Restore" });
+  fireEvent.submit(restore);
+  fireEvent.submit(restore);
+  await screen.findByRole("alert");
+  expect(syncReview.restore).toHaveBeenCalledTimes(1);
+  fireEvent.click(restore);
+  await waitFor(() => expect(onRestored).toHaveBeenCalled());
+  const [first, second] = vi.mocked(syncReview.restore).mock.calls;
+  expect(first?.[2]).toBeTruthy();
+  expect(second?.[2]).toBe(first?.[2]);
 });

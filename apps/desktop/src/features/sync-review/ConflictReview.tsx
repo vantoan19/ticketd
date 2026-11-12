@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/sync-review-api";
 import { FieldValue } from "./FieldValue";
 import { conflictLabel, dayTime } from "./labels";
+import { useRequestIds } from "./use-request-ids";
 import "@/features/settings/settings.css";
 import "./sync-review.css";
 
@@ -44,6 +45,9 @@ export function ConflictReview({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Set at once, where `busy` waits for a render: a second submit finds it.
+  const saving = useRef(false);
+  const requestId = useRequestIds();
   useEffect(() => {
     let active = true;
     syncReview.conflict({ kind, id }).then(
@@ -60,23 +64,27 @@ export function ConflictReview({
   }, [kind, id]);
   const choiceOf = (field: string): Choice => choices[field] ?? "local";
   async function save() {
-    if (!conflict) return;
+    if (!conflict || saving.current) return;
+    saving.current = true;
     setBusy(true);
     setError("");
+    const resolutions = conflict.fields.map(({ field }): Resolution => {
+      const choice = choiceOf(field);
+      return choice === "edited"
+        ? { field, choice, value: drafts[field] ?? "" }
+        : { field, choice };
+    });
     try {
       await syncReview.resolve(
         { kind, id },
-        conflict.fields.map(({ field }): Resolution => {
-          const choice = choiceOf(field);
-          return choice === "edited"
-            ? { field, choice, value: drafts[field] ?? "" }
-            : { field, choice };
-        }),
+        resolutions,
+        requestId(resolutions),
       );
       onResolved?.();
       onClose();
     } catch (reason) {
       setError(toFailure(reason).message);
+      saving.current = false;
       setBusy(false);
     }
   }

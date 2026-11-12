@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
@@ -16,6 +16,7 @@ import {
 } from "@/lib/sync-review-api";
 import { FieldValue } from "./FieldValue";
 import { dayLabel, dayTime, fieldLabel } from "./labels";
+import { useRequestIds } from "./use-request-ids";
 import "./sync-review.css";
 
 /** A version and where it is kept; the two sources name versions separately. */
@@ -71,6 +72,9 @@ export function RecordHistory({
   } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Set at once, where `busy` waits for a render: a second submit finds it.
+  const restoring = useRef(false);
+  const requestId = useRequestIds();
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -137,18 +141,21 @@ export function RecordHistory({
     };
   }, [kind, id, source, version]);
   async function restore() {
-    if (!selected) return;
+    if (!selected || restoring.current) return;
+    restoring.current = true;
     setBusy(true);
     setError("");
     try {
       await syncReview.restore(
         { kind, id, source: selected.source },
         selected.id,
+        requestId([selected.source, selected.id]),
       );
       onRestored?.();
       onClose();
     } catch (reason) {
       setError(toFailure(reason).message);
+      restoring.current = false;
       setBusy(false);
     }
   }

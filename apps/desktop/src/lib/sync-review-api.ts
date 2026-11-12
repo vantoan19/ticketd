@@ -151,13 +151,14 @@ export const syncReview = {
     return conflictSchema.parse(await structured(invoke("sync_conflict", key)));
   },
   /** Settles every conflicting field of the record; it then syncs as a normal edit. */
-  async resolve(key: RecordKey, resolutions: Resolution[]): Promise<void> {
+  async resolve(
+    key: RecordKey,
+    resolutions: Resolution[],
+    /** The same id for the same resolutions, so a repeat is applied once. */
+    requestId: string,
+  ): Promise<void> {
     await structured(
-      invoke("resolve_sync_conflict", {
-        ...key,
-        resolutions,
-        requestId: crypto.randomUUID(),
-      }),
+      invoke("resolve_sync_conflict", { ...key, resolutions, requestId }),
     );
   },
   /** Things sync did that need no decision, newest first. */
@@ -180,13 +181,14 @@ export const syncReview = {
     );
   },
   /** Writes the version's content as a normal new edit. */
-  async restore(key: VersionKey, version: string): Promise<void> {
+  async restore(
+    key: VersionKey,
+    version: string,
+    /** The same id for the same version, so a repeat is applied once. */
+    requestId: string,
+  ): Promise<void> {
     await structured(
-      invoke("restore_record_version", {
-        ...key,
-        version,
-        requestId: crypto.randomUUID(),
-      }),
+      invoke("restore_record_version", { ...key, version, requestId }),
     );
   },
   /** Availability of the named managed Attachments; ids it does not know are left out. */

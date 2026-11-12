@@ -97,6 +97,7 @@ test("this desktop's value is preselected and saving keeps it", async () => {
       { field: "status", choice: "local" },
       { field: "body", choice: "local" },
     ],
+    expect.any(String),
   );
   expect(onClose).toHaveBeenCalled();
 });
@@ -128,6 +129,7 @@ test("a side is picked per field and the Description can be edited instead", asy
         { field: "status", choice: "remote" },
         { field: "body", choice: "edited", value: "Allow 7 failed attempts" },
       ],
+      expect.any(String),
     ),
   );
 });
@@ -238,6 +240,25 @@ test("each edited text keeps its own words when two are edited and saved", async
         { field: "body", choice: "edited", value: "Allow 7" },
         { field: activity, choice: "edited", value: "Started everywhere" },
       ],
+      expect.any(String),
     ),
   );
+});
+
+test("Save cannot be submitted twice, and saving the same choices again is the same request", async () => {
+  vi.mocked(syncReview.resolve).mockRejectedValueOnce(
+    new Error("the answer was lost"),
+  );
+  open();
+  await screen.findByRole("radio", { name: /Status from this desktop/ });
+  const save = screen.getByRole("button", { name: "Save" });
+  fireEvent.submit(save);
+  fireEvent.submit(save);
+  await screen.findByRole("alert");
+  expect(syncReview.resolve).toHaveBeenCalledTimes(1);
+  fireEvent.click(save);
+  await waitFor(() => expect(onResolved).toHaveBeenCalled());
+  const [first, second] = vi.mocked(syncReview.resolve).mock.calls;
+  expect(first?.[2]).toBeTruthy();
+  expect(second?.[2]).toBe(first?.[2]);
 });

@@ -91,7 +91,8 @@ export function DialogShell({
           className="dialog-shell-form relative"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!blocked) onSubmit();
+            // The write already submitted is still in flight.
+            if (!blocked && !busy) onSubmit();
           }}
         >
           <div className="flex items-start gap-3 pt-5 pr-15 pl-6">
