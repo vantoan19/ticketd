@@ -3,6 +3,7 @@ import {
   CircleDot,
   CirclePlay,
   ListTodo,
+  MessagesSquare,
   Trash2,
   Settings,
   Ellipsis,
@@ -48,6 +49,7 @@ import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { setPreference, usePreferences } from "@/lib/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
+import { useChatFeature } from "@/features/chats/use-chats";
 
 /** A secondary, trailing count; it is part of the row's name for assistive technology. */
 function SidebarCount({ value }: { value: number }) {
@@ -150,11 +152,13 @@ type View =
   | "settings"
   | "inbox"
   | "documents"
-  | "attachments";
+  | "attachments"
+  | "chats";
 export function WorkspaceSidebar({
   view: viewName,
   workspaceGraphOpen = false,
   onCapture,
+  onNewChat,
   counts,
   activePlanCount,
   setView,
@@ -175,6 +179,8 @@ export function WorkspaceSidebar({
   /** The workspace graph covers the current view; only its entry is active. */
   workspaceGraphOpen?: boolean;
   onCapture: (from: HTMLElement | null) => void;
+  /** Opens New Chat; only offered while Chat is turned on. */
+  onNewChat?: () => void;
   counts: SidebarCounts | null;
   /** The open Plan's ticket count; Plans carry no counts of their own. */
   activePlanCount?: number | undefined;
@@ -201,6 +207,13 @@ export function WorkspaceSidebar({
   const chose = useRef(false);
   const openGraph = useContext(ContextGraphNavigation);
   const unread = (counts?.unread_inbox ?? 0) > 0;
+  const chat = useChatFeature();
+  // Waiting for an answer, uncertain delivery, or Failed.
+  const waiting = chat.overview.needs_you;
+  const chatsLabel =
+    waiting > 0
+      ? `Chats · ${waiting} ${waiting === 1 ? "needs" : "need"} you`
+      : "Chats";
   const archivedPlans = plans.filter((e) => e.archived).length;
   return (
     <Sidebar
@@ -265,6 +278,16 @@ export function WorkspaceSidebar({
               >
                 Capture a thought
               </DropdownMenuItem>
+              {chat.enabled && onNewChat && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    chose.current = true;
+                    onNewChat();
+                  }}
+                >
+                  New Chat
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -329,10 +352,31 @@ export function WorkspaceSidebar({
                 {counts && <SidebarCount value={counts.in_progress} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
+            {chat.enabled && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={view === "chats"}
+                  tooltip={chatsLabel}
+                  aria-label={chatsLabel}
+                  onClick={() => setView("chats")}
+                >
+                  <MessagesSquare size={16} /> Chats
+                  {waiting > 0 && (
+                    <span className="sidebar-count" aria-hidden="true">
+                      <StatusDot tone="attention" />
+                      {waiting}
+                    </span>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </nav>
         <span role="status" className="sr-only">
           {unread ? "Unread inbox items" : ""}
+        </span>
+        <span role="status" className="sr-only">
+          {waiting > 0 ? chatsLabel : ""}
         </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">

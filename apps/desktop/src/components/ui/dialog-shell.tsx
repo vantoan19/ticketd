@@ -22,6 +22,7 @@ export function DialogShell({
   title,
   description,
   primaryLabel,
+  primaryVariant = "default",
   cancelLabel = "Cancel",
   blockedReason,
   onSubmit,
@@ -42,6 +43,8 @@ export function DialogShell({
   title: string;
   description?: string;
   primaryLabel: string;
+  /** `destructive` when confirming stops or removes something. */
+  primaryVariant?: "default" | "destructive";
   /** The dismissing button, when Cancel would mislead: Later, Close. */
   cancelLabel?: string;
   blockedReason: string | null;
@@ -89,6 +92,7 @@ export function DialogShell({
       key="submit"
       ref={primary}
       type="submit"
+      variant={primaryVariant}
       size="sm"
       // Ahead of Cancel in the tab order, it is still drawn after it.
       {...(primaryFirst && { className: "order-1" })}

@@ -137,7 +137,7 @@ test.each([false, true])(
         };
       if (command === "restore_workspace") {
         record = { ...record, revision: 2, payload: { body: "restored" } };
-        return "safety.sqlite3";
+        return { safety_path: "safety.sqlite3" };
       }
       if (command === "retain_draft") {
         const draft = (args as { draft: typeof record }).draft;
@@ -235,7 +235,7 @@ test("restoring remounts a retained New Ticket draft from the backup", async () 
         markdown: ["backup description"],
       };
       records.set(record.owner, record);
-      return "safety.sqlite3";
+      return { safety_path: "safety.sqlite3" };
     }
     if (command === "retain_draft") {
       const draft = (args as { draft: typeof record }).draft;
@@ -322,7 +322,7 @@ test("the replaced store rejects stale undo cleanup and flush without touching t
         markdown: ["backup description"],
       };
       records.set(record.owner, record);
-      return "safety.sqlite3";
+      return { safety_path: "safety.sqlite3" };
     }
     if (command === "retain_draft") {
       retainCalls += 1;
@@ -417,7 +417,7 @@ test.each(["draft_retentions", "draft_cutover_pending"] as const)(
       if (command === "restore_workspace") {
         record = { ...record, revision: 2, markdown: ["backup description"] };
         records.set(record.owner, record);
-        return "safety.sqlite3";
+        return { safety_path: "safety.sqlite3" };
       }
       if (command === "retain_draft") {
         retainCalls += 1;

@@ -37,6 +37,7 @@ import { CommandText } from "@/features/settings/CommandText";
 import { revealFile } from "@/lib/reveal";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { AttentionCard } from "@/features/settings/AttentionCard";
+import { ExperimentalCard } from "@/features/chats/ExperimentalCard";
 import { AgentSkillsCard } from "@/features/settings/AgentSkillsCard";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
@@ -722,6 +723,7 @@ export function SettingsView({
           <p>Changes apply right away, except source rules, which you save.</p>
           <AppearanceCard />
           <AttentionCard onOpenInbox={onOpenInbox} />
+          <ExperimentalCard />
           <LocationCard refreshKey={restores} />
           <AttachmentSettings key={restores} />
           <BackupsCard

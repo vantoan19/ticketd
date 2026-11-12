@@ -2,6 +2,9 @@
 mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
+mod chat_commands;
+mod chat_view;
+mod chats;
 mod cli_status;
 mod drive_commands;
 mod sync_commands;
@@ -1135,17 +1138,6 @@ fn workspace_info() -> Result<WorkspaceInfo, String> {
         .and_then(|w| w.workspace_info())
         .map_err(|e| e.to_string())
 }
-/// Sync is held off while the Workspace file is replaced.
-#[tauri::command(async)]
-fn restore_workspace(
-    host: tauri::State<'_, sync_commands::SyncHost>,
-    path: String,
-) -> Result<String, String> {
-    let _no_run = host.scheduler.hold();
-    Workspace::restore_default(path)
-        .map(|safety| safety.display().to_string())
-        .map_err(|e| e.to_string())
-}
 #[tauri::command(async)]
 fn inspect_backup(path: String) -> Result<BackupInspection, String> {
     open_workspace()
@@ -1414,6 +1406,10 @@ fn holds_exit(code: Option<i32>, window_open: bool) -> bool {
 /// Quits the way closing the window does, so every way out is guarded alike.
 fn request_quit(app: &tauri::AppHandle) {
     use tauri::Manager;
+    // Working Chats are asked about first; the answer comes back through here.
+    if chat_commands::confirms_quit(app) {
+        return;
+    }
     match app.get_webview_window("main") {
         Some(window) => {
             if let Err(error) = window.close() {
@@ -1458,6 +1454,11 @@ pub fn run() -> Result<(), tauri::Error> {
         ticketd_core::source::RefreshPolicy::default(),
     ));
     tauri::Builder::default()
+        // Must be the first plugin. One process owns Chat execution: starting ticketd
+        // again shows the running app's window instead of starting a second host.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            chat_commands::show_window(app);
+        }))
         .register_asynchronous_uri_scheme_protocol(
             "attachment-media",
             |context, request, responder| {
@@ -1475,6 +1476,8 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
+            let version = app.package_info().version.to_string();
+            tauri::Manager::manage(app, chat_commands::ChatBridge::new(version));
             start_periodic_refresh(coordinator);
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
@@ -1578,7 +1581,7 @@ pub fn run() -> Result<(), tauri::Error> {
             save_source,
             last_backup,
             workspace_info,
-            restore_workspace,
+            chat_commands::restore_workspace,
             inspect_backup,
             safety_backups,
             export_workspace,
@@ -1650,6 +1653,30 @@ pub fn run() -> Result<(), tauri::Error> {
             remove_dependency,
             set_parent,
             detach_child,
+            chat_commands::chat_enabled,
+            chat_commands::chat_set_enabled,
+            chat_commands::chat_overview,
+            chat_commands::chat_list,
+            chat_commands::chat_harnesses,
+            chat_commands::chat_folder_use,
+            chat_commands::chat_create,
+            chat_commands::chat_open,
+            chat_commands::chat_close,
+            chat_commands::chat_send,
+            chat_commands::chat_remove_queued,
+            chat_commands::chat_resume_queue,
+            chat_commands::chat_stop,
+            chat_commands::chat_answer,
+            chat_commands::chat_resolve_uncertain,
+            chat_commands::chat_check_again,
+            chat_commands::chat_set_folder,
+            chat_commands::chat_set_retention,
+            chat_commands::chat_search_records,
+            chat_commands::chat_set_link,
+            chat_commands::chat_resume,
+            chat_commands::chat_save_as_document,
+            chat_commands::chat_answer_quit,
+            chat_commands::close_keeps_running,
             sync_commands::sync_conflicts,
             sync_commands::sync_conflict,
             sync_commands::resolve_sync_conflict,
@@ -1677,12 +1704,14 @@ pub fn run() -> Result<(), tauri::Error> {
         .build(tauri::generate_context!())?
         .run(|app, event| {
             use tauri::Manager;
-            if let tauri::RunEvent::ExitRequested { code, api, .. } = event
-                && holds_exit(code, app.get_webview_window("main").is_some())
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event
+                && holds_exit(*code, app.get_webview_window("main").is_some())
             {
                 api.prevent_exit();
                 request_quit(app);
+                return;
             }
+            chat_commands::on_run_event(app, &event);
         });
     Ok(())
 }

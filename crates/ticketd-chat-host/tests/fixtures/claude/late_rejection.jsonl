@@ -1,0 +1,3 @@
+{"note":"Hand-built from apps/chat-bridge-claude/src/protocol.ts (protocol 1, Agent SDK 0.3.322). Not captured from a live session; every value is synthetic."}
+{"client":{"id":"c4","cmd":"submit","generation":7,"submission_id":"sub-1","text":"Hello"}}
+{"server":{"v":1,"event":"command_rejected","id":"c4","code":"duplicate_submission","message":"submission is unresolved"}}

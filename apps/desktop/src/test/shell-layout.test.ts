@@ -74,3 +74,46 @@ it("the window never scrolls and only the list rows scroll under a fixed header"
   expect(rule(".ticket-scroll")).toMatch(/overflow-y: auto;/);
   expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
 });
+
+it("a path shortens in its middle first, then at its end, always with an ellipsis", () => {
+  const paths = readFileSync(
+    join(__dirname, "..", "features/projects/projects.css"),
+    "utf8",
+  );
+  const block = (selector: string) =>
+    new RegExp(`\n${selector.replace(".", "[.]")} [{]([^}]*)[}]`).exec(
+      paths,
+    )?.[1] ?? "";
+  // U22: weighted shrinking still hands the end a fraction of a pixel, and its
+  // ellipsis then takes two characters. Only one part may flex at a time: the
+  // middle grows into the room the end leaves (never past its own text) and
+  // never shrinks below room for its ellipsis; the end only shrinks.
+  expect(block(".path-middle")).toMatch(/flex: 1 0 0;/);
+  expect(block(".path-middle")).toMatch(/min-width: [1-9]/);
+  expect(block(".path-middle")).toMatch(/max-width: max-content;/);
+  // Then the last folders, which the line's edge must never cut mid-character.
+  expect(block(".path-tail")).toMatch(/flex: 0 1 auto;/);
+  expect(block(".path-tail")).toMatch(/min-width: 0;/);
+  expect(block(".path-tail")).toMatch(/overflow: hidden;/);
+  expect(block(".path-tail")).toMatch(/text-overflow: ellipsis;/);
+});
+
+it("a long Chat title gives way before the harness and folder trigger", () => {
+  const chats = readFileSync(
+    join(__dirname, "..", "features/chats/chats.css"),
+    "utf8",
+  );
+  const title = /\n[.]chat-head-title [{]([^}]*)[}]/.exec(chats)?.[1] ?? "";
+  // U20, U23: only one of the two flexes at a time. The title fills what the
+  // trigger leaves, up to its text; it never shrinks below the lesser of its
+  // text and 40%, so the trigger is cut only when the title needs that room.
+  expect(title).toMatch(/flex: 1 0 40%;/);
+  expect(title).toMatch(/max-width: max-content;/);
+  const detail = readFileSync(
+    join(__dirname, "..", "features/chats/ChatDetail.tsx"),
+    "utf8",
+  );
+  expect(detail).not.toMatch(
+    /className="[^"]*max-w-[^"]*"\s+aria-label="Harness and folder"/,
+  );
+});

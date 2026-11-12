@@ -36,6 +36,8 @@ type Phase =
       name: "done";
       inspection: BackupInspection;
       safetyPath: string;
+      /** What could not be confirmed around a restore that did happen. */
+      warning: string;
       reloadFailure: string;
     };
 
@@ -226,9 +228,12 @@ export function RestoreDialog({
     setFailure("");
     setPhase({ name: "restoring", inspection });
     let safetyPath: string;
+    let warning: string;
     try {
       await recovery.flush();
-      safetyPath = await client.restoreWorkspace(file);
+      const restored = await client.restoreWorkspace(file);
+      safetyPath = restored.safety_path;
+      warning = restored.warning ?? "";
     } catch (reason) {
       setPhase({ name: "review", inspection });
       setFailure(`Restore failed: ${String(reason)}`);
@@ -241,7 +246,7 @@ export function RestoreDialog({
     } catch (reason) {
       reloadFailure = `The restore finished, but open views could not reload: ${String(reason)}. Restart ticketd to see the restored data.`;
     }
-    setPhase({ name: "done", inspection, safetyPath, reloadFailure });
+    setPhase({ name: "done", inspection, safetyPath, warning, reloadFailure });
   }
 
   async function copy(text: string) {
@@ -448,6 +453,11 @@ export function RestoreDialog({
                     </Button>
                   </div>
                 </div>
+                {phase.warning && (
+                  <p role="alert" className="restore-failure">
+                    {phase.warning}
+                  </p>
+                )}
                 {phase.reloadFailure ? (
                   <p role="alert" className="restore-failure">
                     {phase.reloadFailure}

@@ -1,0 +1,6 @@
+{"note":"Hand-built from apps/chat-bridge-claude/src/protocol.ts (protocol 1, Agent SDK 0.3.322). Not captured from a live session; every value is synthetic."}
+{"client":{"id":"c4","cmd":"submit","generation":7,"submission_id":"sub-1","text":"Run the tests"}}
+{"server":{"v":1,"event":"input_handed_to_sdk","generation":7,"submission_id":"sub-1"}}
+{"server":{"v":1,"event":"input_processing","generation":7,"submission_ids":["sub-1"]}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-1","tool_name":"Bash","tool_use_id":"toolu_1","input":{"command":"npm test","description":"Run the test suite"},"title":"Claude wants to run npm test","display_name":"Bash","description":"Runs the project's tests","decision_reason":null,"blocked_path":null,"agent_id":null,"default_to_no":false,"can_remember":true}}
+{"server":{"v":1,"event":"permission_request","generation":7,"request_id":"7-2","tool_name":"WebFetch","tool_use_id":"toolu_2","input":{"url":"https://example.com"},"title":null,"display_name":"Fetch","description":null,"decision_reason":"Fetching is not allowed by your settings","blocked_path":null,"agent_id":null,"default_to_no":false,"can_remember":false}}

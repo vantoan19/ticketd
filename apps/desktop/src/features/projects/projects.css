@@ -93,9 +93,16 @@
 .path-lead {
   flex: none;
 }
-/* The part between the root and the last folders gives way, ellipsis first. */
+/* The part between the root and the last folders gives way first, keeping room
+   for its ellipsis; only then do the last folders shorten, at their end. Only
+   one part flexes at a time: weighted shrinking would still take a fraction of
+   a pixel from the end, and its ellipsis would then eat two characters. So the
+   middle grows into the room the end leaves, up to its text, and never shrinks;
+   once it is down to 2ch the end alone shrinks. */
 .path-middle {
-  min-width: 0;
+  flex: 1 0 0;
+  min-width: 2ch;
+  max-width: max-content;
   overflow: hidden;
   direction: rtl;
   text-overflow: ellipsis;
@@ -115,7 +122,10 @@
   text-underline-offset: 3px;
 }
 .path-tail {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .register-checkout {
   align-self: flex-start;
