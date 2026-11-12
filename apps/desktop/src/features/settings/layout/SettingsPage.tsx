@@ -18,6 +18,7 @@ export function SettingsPage({
   footer,
   hidden = false,
   focusTitle = true,
+  wordmark = false,
   children,
 }: {
   /** Breadcrumb group, muted: "Workspace". */
@@ -39,6 +40,8 @@ export function SettingsPage({
   hidden?: boolean;
   /** Pages with a better first control, such as Search, take focus themselves. */
   focusTitle?: boolean;
+  /** About: the title is the product wordmark (32/40) and the header has no icon tile. */
+  wordmark?: boolean;
   children: ReactNode;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -58,10 +61,15 @@ export function SettingsPage({
         {endSlot && <div className="settings-panel-bar-end">{endSlot}</div>}
       </div>
       <div className="settings-page-column">
-        <header className="settings-page-header">
-          <span className="settings-page-icon" aria-hidden="true">
-            <Icon size={20} />
-          </span>
+        <header
+          className="settings-page-header"
+          data-wordmark={wordmark || undefined}
+        >
+          {!wordmark && (
+            <span className="settings-page-icon" aria-hidden="true">
+              <Icon size={20} />
+            </span>
+          )}
           <div className="settings-page-heading">
             <div className="settings-page-title-line">
               <h1 ref={heading} tabIndex={-1}>

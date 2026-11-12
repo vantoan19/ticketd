@@ -1,68 +1,184 @@
-import { useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import {
+  ChevronRight,
+  ExternalLink,
+  HardDrive,
+  UserRoundX,
+  WifiOff,
+} from "lucide-react";
 import { workspaceClient } from "@/lib/api/workspace";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { APP_VERSION } from "@/lib/app-version";
-import { SettingsCard } from "@/features/settings/SettingsCard";
 import { sectionMeta } from "@/features/settings/settings-sections";
+import { useSettingsState } from "@/features/settings/use-settings-state";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
+import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import { SettingsList } from "@/features/settings/layout/SettingsList";
+import "@/features/settings/pages/about-page.css";
 
-const DOCUMENTATION_URL = "https://github.com/vantoan19/ticketd#readme";
-const ISSUES_URL = "https://github.com/vantoan19/ticketd/issues";
+const REPOSITORY = "https://github.com/vantoan19/ticketd";
+const DOCUMENTATION_URL = `${REPOSITORY}#readme`;
+const ISSUES_URL = `${REPOSITORY}/issues`;
+const PRIVACY_URL = `${REPOSITORY}/blob/main/PRIVACY.md`;
+const NOTICES_URL = `${REPOSITORY}/blob/main/THIRD_PARTY_NOTICES.md`;
 
-function AboutCard() {
-  const [failure, setFailure] = useState("");
-  const open = (url: string, what: string) => {
-    setFailure("");
-    workspaceClient
-      .openLink(url)
-      .catch((reason: unknown) =>
-        setFailure(`Could not open ${what}: ${String(reason)}`),
-      );
-  };
+const PROMISES = [
+  {
+    icon: UserRoundX,
+    title: "No account",
+    description: "ticketd has no account to sign up for.",
+  },
+  {
+    icon: WifiOff,
+    title: "Works offline",
+    description: "Everything you do runs on this computer.",
+  },
+  {
+    icon: HardDrive,
+    title: "Stays on this computer",
+    description:
+      "No analytics or crash uploads. Only integrations you turn on, such as Google Drive and GitHub, go online.",
+  },
+];
+
+function LinkText({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
-    <SettingsCard id="about" title="About">
-      <p className="settings-label">ticketd {APP_VERSION}</p>
-      <p className="settings-hint">
-        Your workspace stays on this computer. ticketd has no account and works
-        offline.
-      </p>
-      <div className="settings-actions">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => open(DOCUMENTATION_URL, "the documentation")}
-        >
-          <ExternalLink aria-hidden="true" />
-          Documentation
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => open(ISSUES_URL, "the issue tracker")}
-        >
-          <ExternalLink aria-hidden="true" />
-          Report an issue
-        </Button>
-      </div>
-      {failure && (
-        <p role="alert" className="settings-failure">
-          {failure}
-        </p>
-      )}
-    </SettingsCard>
+    <span className="about-link-text">
+      <span className="about-link-title">{title}</span>
+      <span className="about-link-description">{description}</span>
+    </span>
   );
 }
 
+/** A link row that opens a web page through the app, never in this window. */
+function ExternalRow({
+  title,
+  description,
+  url,
+  what,
+  onFailure,
+}: {
+  title: string;
+  description: string;
+  url: string;
+  /** For the failure sentence: "the documentation". */
+  what: string;
+  onFailure: (message: string) => void;
+}) {
+  return (
+    <a
+      className="about-link-row"
+      href={url}
+      onClick={(event) => {
+        event.preventDefault();
+        onFailure("");
+        workspaceClient
+          .openLink(url)
+          .catch((reason: unknown) =>
+            onFailure(`Could not open ${what}: ${String(reason)}`),
+          );
+      }}
+    >
+      <LinkText title={title} description={description} />
+      <ExternalLink size={16} aria-hidden="true" />
+    </a>
+  );
+}
+
+function Failure({ message }: { message: string }): ReactNode {
+  return message ? (
+    <Alert tone="error" size="compact" className="mt-3">
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
+  ) : null;
+}
+
 export function AboutPage() {
+  const { openPage } = useSettingsState();
+  const [failure, setFailure] = useState("");
   return (
     <SettingsPage
       {...sectionMeta("about")}
-      lede="What ticketd is, which version this is, and where to get help."
+      title="ticketd"
+      wordmark
+      lede={
+        <>
+          <span className="font-mono">Version {APP_VERSION}</span>
+          <Badge>Desktop app and command line</Badge>
+        </>
+      }
     >
-      <AboutCard />
+      <section className="settings-section">
+        <ul className="about-promises" aria-label="How ticketd works">
+          {PROMISES.map(({ icon: Icon, title, description }) => (
+            <li key={title} className="about-promise">
+              <Icon size={20} aria-hidden="true" />
+              <span className="about-link-title">{title}</span>
+              <span className="about-link-description">{description}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <SettingsSection title="Help">
+        <SettingsList>
+          <ExternalRow
+            title="Documentation"
+            description="Guides for the desktop app and the command line."
+            url={DOCUMENTATION_URL}
+            what="the documentation"
+            onFailure={setFailure}
+          />
+          <ExternalRow
+            title="Report an issue"
+            description="Opens the issue tracker in your browser. Include the version above."
+            url={ISSUES_URL}
+            what="the issue tracker"
+            onFailure={setFailure}
+          />
+          <button
+            type="button"
+            className="about-link-row"
+            onClick={() => openPage("keyboard-shortcuts")}
+          >
+            <LinkText
+              title="Keyboard shortcuts"
+              description="Keys that work across ticketd."
+            />
+            <ChevronRight size={16} aria-hidden="true" />
+          </button>
+        </SettingsList>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Privacy and notices"
+        caption="ticketd is free and open source."
+      >
+        <SettingsList>
+          <ExternalRow
+            title="Privacy"
+            description="What stays on this computer, and what each integration sends."
+            url={PRIVACY_URL}
+            what="the privacy notice"
+            onFailure={setFailure}
+          />
+          <ExternalRow
+            title="Third-party notices"
+            description="Licenses for the libraries and fonts ticketd ships with."
+            url={NOTICES_URL}
+            what="the third-party notices"
+            onFailure={setFailure}
+          />
+        </SettingsList>
+      </SettingsSection>
+      <Failure message={failure} />
     </SettingsPage>
   );
 }
