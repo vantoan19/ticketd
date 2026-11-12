@@ -101,10 +101,10 @@ test("choosing Dark or Full width is stored and exposed as selected", () => {
   );
   const checked = (name: string | RegExp) =>
     screen.getByRole("radio", { name }).getAttribute("aria-checked");
-  expect(checked("System")).toBe("true");
-  fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+  expect(checked(/^System/)).toBe("true");
+  fireEvent.click(screen.getByRole("radio", { name: /^Dark/ }));
   fireEvent.click(screen.getByRole("radio", { name: /Full width/ }));
-  expect(checked("Dark")).toBe("true");
+  expect(checked(/^Dark/)).toBe("true");
   expect(checked(/Full width/)).toBe("true");
   expect(loadPreferences()).toMatchObject({
     theme: "dark",

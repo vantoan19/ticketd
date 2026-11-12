@@ -1,34 +1,194 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef } from "react";
+import { ChevronRight, Search, type LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { SEARCH_PAGE } from "@/features/settings/settings-sections";
+import {
+  SEARCH_PAGE,
+  SETTINGS_SECTIONS,
+  sourceSection,
+  type SettingsPageId,
+} from "@/features/settings/settings-sections";
+import {
+  SETTINGS_ENTRIES,
+  searchSettings,
+  sourceEntries,
+  splitMatch,
+  type SettingsEntry,
+} from "@/features/settings/settings-search";
+import { useSources } from "@/features/settings/sources/use-sources";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
+import { SettingsList } from "@/features/settings/layout/SettingsList";
+import "@/features/settings/pages/search-page.css";
 
 /** The id ⌘F and Ctrl+F focus when Settings is already on this page. */
 export const SEARCH_INPUT_ID = "settings-search-input";
 
-/** Search settings. A placeholder: the registry and results arrive with the Search page. */
+interface PageInfo {
+  id: SettingsPageId;
+  label: string;
+  group: string;
+  icon: LucideIcon;
+}
+
+const plural = (count: number, one: string, many: string) =>
+  `${count} ${count === 1 ? one : many}`;
+
+/** `text` with the match of `query` marked (semibold, attention underline). */
+function Highlighted({ text, query }: { text: string; query: string }) {
+  const [before, match, after] = splitMatch(text, query);
+  return (
+    <Fragment>
+      {before}
+      {match && <mark>{match}</mark>}
+      {after}
+    </Fragment>
+  );
+}
+
+/** Search every setting by name, description or related word. */
 export function SearchPage() {
-  const { query, setQuery } = useSettingsState();
+  const { query, setQuery, openPage } = useSettingsState();
+  const { entries: sources } = useSources();
   const input = useRef<HTMLInputElement>(null);
+  const statusId = useId();
   // Search opens to its input, not its title.
   useEffect(() => input.current?.focus({ preventScroll: true }), []);
+
+  const { pages, entries } = useMemo(() => {
+    const pages = new Map<SettingsPageId, PageInfo>(
+      SETTINGS_SECTIONS.map((section) => [section.id, section]),
+    );
+    const entries: SettingsEntry[] = [...SETTINGS_ENTRIES];
+    for (const { connector } of sources) {
+      const section = sourceSection(connector.provider, connector.name);
+      pages.set(section.id, section);
+      entries.push(...sourceEntries(connector.provider, connector.name));
+    }
+    return { pages, entries };
+  }, [sources]);
+
+  const hits = searchSettings(
+    query,
+    entries,
+    (entry) => pages.get(entry.section)?.label ?? "",
+  );
+  // Sections in the order of their best hit; rows keep their rank inside.
+  const groups: { page: PageInfo; hits: SettingsEntry[] }[] = [];
+  for (const hit of hits) {
+    const page = pages.get(hit.section);
+    if (!page) continue;
+    const group = groups.find((candidate) => candidate.page.id === page.id);
+    if (group) group.hits.push(hit);
+    else groups.push({ page, hits: [hit] });
+  }
+  const needle = query.trim();
+  const status = !needle
+    ? "Type to search every setting by name, description or related word."
+    : hits.length === 0
+      ? "No matches."
+      : `${plural(hits.length, "setting", "settings")} in ${plural(
+          groups.length,
+          "section",
+          "sections",
+        )}. Choose one to open its page.`;
+  const firstSource = sources[0]?.connector;
+  const shortcuts: { id: SettingsPageId; label: string }[] = [
+    { id: "appearance", label: "Appearance" },
+    { id: "backups", label: "Backups" },
+    ...(firstSource
+      ? [
+          {
+            id: `source-${firstSource.provider}` as const,
+            label: firstSource.name,
+          },
+        ]
+      : []),
+  ];
+
   return (
-    <SettingsPage
-      {...SEARCH_PAGE}
-      title="Search settings"
-      lede="Type to search every setting by name, description or related word."
-      focusTitle={false}
-    >
-      <Input
-        ref={input}
-        id={SEARCH_INPUT_ID}
-        type="search"
-        aria-label="Search settings"
-        placeholder="Search settings"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
+    <SettingsPage {...SEARCH_PAGE} title="Search settings" focusTitle={false}>
+      <div className="settings-search">
+        <div className="settings-search-field">
+          <Search size={16} aria-hidden="true" />
+          <Input
+            ref={input}
+            id={SEARCH_INPUT_ID}
+            type="search"
+            aria-label="Search settings"
+            aria-describedby={statusId}
+            placeholder="Try theme, backup or keyboard"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        <p className="settings-search-status" id={statusId} role="status">
+          {status}
+        </p>
+        {groups.map(({ page, hits: rows }) => {
+          const Icon = page.icon;
+          const headingId = `${statusId}-${page.id}`;
+          return (
+            <section
+              key={page.id}
+              className="settings-search-group"
+              aria-labelledby={headingId}
+            >
+              <div className="settings-search-group-label">
+                <Icon size={16} aria-hidden="true" />
+                <h2 id={headingId}>{page.label}</h2>
+                <span>
+                  {page.group} · {plural(rows.length, "setting", "settings")}
+                </span>
+              </div>
+              <SettingsList>
+                {rows.map((row) => (
+                  <a
+                    key={row.title}
+                    className="settings-search-result"
+                    href={`#settings-${page.id}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      openPage(page.id);
+                    }}
+                  >
+                    <span className="settings-search-result-text">
+                      <span className="settings-list-row-title">
+                        <Highlighted text={row.title} query={needle} />
+                      </span>
+                      <span className="settings-list-row-description">
+                        <Highlighted text={row.description} query={needle} />
+                      </span>
+                    </span>
+                    <ChevronRight size={16} aria-hidden="true" />
+                  </a>
+                ))}
+              </SettingsList>
+            </section>
+          );
+        })}
+        {needle && hits.length === 0 && (
+          <SettingsList>
+            <EmptyState
+              icon={<Search />}
+              title={`No settings match “${needle}”`}
+              description="Search looks at setting names, descriptions and related words."
+              action={shortcuts.map((shortcut) => (
+                <Button
+                  key={shortcut.id}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openPage(shortcut.id)}
+                >
+                  {shortcut.label}
+                </Button>
+              ))}
+            />
+          </SettingsList>
+        )}
+      </div>
     </SettingsPage>
   );
 }
