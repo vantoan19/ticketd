@@ -852,11 +852,12 @@ impl Workspace {
         })
     }
 
-    /// Give this Workspace a folder of its own in the storage, named `name`.
+    /// Give this Workspace a folder of its own in the storage, using `name`
+    /// with an available numbered suffix if another Workspace uses that name.
     /// The next [`Workspace::sync_now`] is the first upload.
     ///
     /// The folder is identified by this Workspace's own identity, so a
-    /// Workspace that was connected before returns to the same folder.
+    /// Workspace that was connected before returns to the same folder and name.
     pub fn sync_upload_workspace(
         &mut self,
         remote: &dyn RemoteStorage,
@@ -868,9 +869,22 @@ impl Workspace {
             ));
         }
         let folder = crate::embedded_attachments::workspace_id(&self.connection)?;
-        remote.ensure_folder(&folder, name)?;
+        let folders = remote.folders()?;
+        let name = if let Some(existing) = folders.iter().find(|existing| existing.id == folder) {
+            existing.name.clone()
+        } else {
+            let names: BTreeSet<_> = folders.iter().map(|folder| folder.name.as_str()).collect();
+            let mut available = name.to_owned();
+            let mut suffix = 2;
+            while names.contains(available.as_str()) {
+                available = format!("{name} ({suffix})");
+                suffix += 1;
+            }
+            available
+        };
+        remote.ensure_folder(&folder, &name)?;
         forget_synced(&self.connection)?;
-        bind(&self.connection, &folder, name, SyncDirection::Upload)?;
+        bind(&self.connection, &folder, &name, SyncDirection::Upload)?;
         self.sync_status()
     }
 

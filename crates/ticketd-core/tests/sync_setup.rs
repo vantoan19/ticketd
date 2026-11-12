@@ -131,6 +131,77 @@ fn titles(workspace: &Workspace) -> Vec<String> {
 }
 
 #[test]
+fn a_new_upload_has_a_distinct_name_from_existing_workspaces() {
+    let desks = desks();
+    let existing = [
+        ("existing-workspace", "ticketd Workspace"),
+        ("existing-workspace-2", "ticketd Workspace (2)"),
+        ("existing-workspace-4", "ticketd Workspace (4)"),
+    ];
+    for (id, name) in existing {
+        desks.remote.ensure_folder(id, name).unwrap();
+    }
+    let mut desk = desks.desk("Desk A");
+
+    let status = desk
+        .sync_upload_workspace(&desks.remote, "ticketd Workspace")
+        .unwrap();
+    let uploaded = status.folder.unwrap();
+    assert_eq!(uploaded.name, "ticketd Workspace (3)");
+    desk.sync_now(&desks.remote).unwrap();
+
+    let mut another = desks.desk("Desk B");
+    let next = another
+        .sync_upload_workspace(&desks.remote, "ticketd Workspace")
+        .unwrap()
+        .folder
+        .unwrap();
+    assert_eq!(next.name, "ticketd Workspace (5)");
+    assert_ne!(uploaded.id, next.id);
+    let folders = desks.remote.folders().unwrap();
+    assert_eq!(folders.len(), 5);
+    for (id, name) in existing {
+        assert_eq!(
+            folders.iter().find(|folder| folder.id == id).unwrap().name,
+            name
+        );
+    }
+    for uploaded in [uploaded, next] {
+        assert!(
+            folders
+                .iter()
+                .any(|folder| { folder.id == uploaded.id && folder.name == uploaded.name })
+        );
+    }
+    assert_eq!(
+        another
+            .sync_setup_options(&desks.remote)
+            .unwrap()
+            .existing
+            .len(),
+        5
+    );
+}
+
+#[test]
+fn uploading_again_keeps_the_existing_folder_identity_and_name() {
+    let desks = desks();
+    let (mut desk, reference, _) = desks.uploaded("Desk A");
+    let original = desk.sync_status().unwrap().folder.unwrap();
+    desk.sync_disconnect().unwrap();
+    desk.sync_connect("connection-1", "person@example.com")
+        .unwrap();
+
+    let status = desk
+        .sync_upload_workspace(&desks.remote, "A different requested name")
+        .unwrap();
+    assert_eq!(status.folder.unwrap(), original);
+    desk.sync_now(&desks.remote).unwrap();
+    assert_eq!(desks.remote.folders().unwrap().len(), 1);
+    assert_eq!(desk.show_ticket(&reference).unwrap().title, "Login");
+}
+
+#[test]
 fn a_workspace_is_uploaded_to_its_own_folder_and_another_desk_replaces_its_own_with_it() {
     let desks = desks();
     let a = desks.desk("Desk A");
