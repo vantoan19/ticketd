@@ -1,0 +1,81 @@
+/* Attachments page: layout for the tiles' facts, the folder row, the limit
+   control and the small notes. Colors and sizes are tokens from styles.css. */
+.attachments-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 4px;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.attachments-facts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.attachments-facts svg {
+  color: var(--status-ready);
+}
+.attachments-mono {
+  font-family: var(--font-mono);
+}
+.attachments-folder {
+  margin-top: 12px;
+}
+.attachments-note {
+  margin: 12px 0 0;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.attachments-error {
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.attachments-limit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.attachments-limit-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  color: var(--muted-foreground);
+}
+.attachments-limit-field input {
+  font-variant-numeric: tabular-nums;
+}
+.attachments-limit-note {
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.attachments-limit-note:empty {
+  display: none;
+}
+/* A text-looking button: the "Set up Google Drive" and "Use the default" links. */
+.attachments-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--link-foreground);
+  cursor: pointer;
+}
+.attachments-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.attachments-link:focus-visible {
+  border-radius: var(--radius-segment);
+}
+.attachments-link:disabled {
+  color: var(--disabled-foreground);
+  cursor: not-allowed;
+}
