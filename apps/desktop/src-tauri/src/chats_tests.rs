@@ -1117,6 +1117,36 @@ async fn a_refused_resend_asks_the_person_again_and_says_what_happened() {
     assert!(!said.unwrap_or_default().contains("back in the queue"));
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_backup_that_cannot_be_restored_stops_no_chat() {
+    let f = Fixture::new().await;
+    f.chat().await;
+    let not_a_backup = f.dir.path().join("notes.txt");
+    std::fs::write(&not_a_backup, "not a database").unwrap();
+    let backups = [
+        f.dir.path().join("missing.ticketd-backup"),
+        not_a_backup,
+        f.dir.path().join("workspace.sqlite3"),
+    ];
+
+    for backup in backups {
+        let refused = f
+            .chats
+            .restore(backup.clone(), |_| Err("replaced".to_owned()))
+            .await
+            .unwrap_err();
+
+        assert_ne!(refused, "replaced", "{backup:?} reached the replacement");
+        assert_eq!(f.chats.working(), 1, "{backup:?} stopped the Chat");
+    }
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|written| matches!(written, Written::Close(_)))
+    );
+}
+
 #[test]
 fn a_restore_that_replaced_the_data_is_a_success_whatever_followed_it() {
     let safety = || Ok(PathBuf::from("/backups/safety.sqlite3"));

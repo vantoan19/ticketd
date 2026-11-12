@@ -20,7 +20,7 @@ use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, ChatFailure, Chats, CloseAction, Created, HarnessStatus, HistorySelection, LinkRef,
     NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
-    close_action, quit_action, restore_outcome,
+    close_action, quit_action,
 };
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
@@ -331,9 +331,10 @@ pub async fn chat_save_as_document(
         .save_as_document(&chat_id, &response_id, &title)
 }
 
-/// Replaces the workspace with a backup. Running Chats are stopped first and nothing
-/// restored is run: what the backup held as in progress is recorded as lost contact and
-/// its queues stay paused until the person acts.
+/// Replaces the workspace with a backup. A backup that cannot be restored stops
+/// nothing; otherwise running Chats are stopped first and nothing restored is run: what
+/// the backup held as in progress is recorded as lost contact and its queues stay
+/// paused until the person acts.
 #[tauri::command]
 pub async fn restore_workspace(
     app: AppHandle,
@@ -342,23 +343,18 @@ pub async fn restore_workspace(
     path: String,
 ) -> Result<Restored, String> {
     let chats = bridge.chats.clone();
-    let unconfirmed = chats.begin_restore().await;
     let scheduler = std::sync::Arc::clone(&sync.scheduler);
-    let restored = tauri::async_runtime::spawn_blocking(move || {
-        // Sync is held off while the Workspace file is replaced.
-        let _no_run = scheduler.hold();
-        ticketd_core::Workspace::restore_default(path)
-    })
-    .await;
-    let reconciled = chats.finish_restore();
+    let restored = chats
+        .restore(PathBuf::from(path), move |backup| {
+            // Sync is held off while the Workspace file is replaced.
+            let _no_run = scheduler.hold();
+            ticketd_core::Workspace::restore_default(backup).map_err(|error| error.to_string())
+        })
+        .await;
     if let Ok(overview) = chats.overview() {
         let _ = app.emit(OVERVIEW_EVENT, overview);
     }
-    let restored = match restored {
-        Ok(restored) => restored.map_err(|error| error.to_string()),
-        Err(error) => Err(error.to_string()),
-    };
-    restore_outcome(restored, reconciled, unconfirmed.len())
+    restored
 }
 
 /// The person's answer to the Quit confirmation.
