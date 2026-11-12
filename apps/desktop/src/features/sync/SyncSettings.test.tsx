@@ -361,3 +361,35 @@ test("a sync failure with no state of its own is a notice with its message and R
   expect(await screen.findByText("Connected as you@example.com")).toBeTruthy();
   expect(api.recover).toHaveBeenCalled();
 });
+
+test("the setup choice has a way back, also when Drive cannot be read", async () => {
+  api.status.mockResolvedValue(choosing());
+  api.setupOptions.mockRejectedValue(new Error("Drive did not answer"));
+  api.disconnect.mockResolvedValue(notConnected());
+  show();
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not read your Drive: Drive did not answer",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Use another account" }));
+  expect(
+    await screen.findByRole("button", { name: "Connect Google Drive" }),
+  ).toBeTruthy();
+  expect(api.disconnect).toHaveBeenCalledTimes(1);
+});
+
+test("a first sync that stopped shows why, with its action and Disconnect", async () => {
+  api.status.mockResolvedValue(
+    syncStatus({
+      state: "needs_attention",
+      recovery: "storage_full",
+      first_sync: { direction: "upload", done: 3, total: 23 },
+    }),
+  );
+  api.recover.mockResolvedValue(syncStatus());
+  show();
+  expect(await screen.findByText("Google Drive is full")).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.getByRole("button", { name: "Disconnect…" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(api.recover).toHaveBeenCalled();
+});

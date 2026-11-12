@@ -1,4 +1,10 @@
-import { useEffect, useState, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { ExternalLink } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import {
@@ -47,7 +53,12 @@ function useCommand() {
   const { apply } = useSyncStatus();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
+  // Set at once, where `busy` waits for a render: a confirmation that is
+  // still closing cannot start its command a second time.
+  const running = useRef(false);
   async function run(command: () => Promise<SyncStatus>, failed: string) {
+    if (running.current) return false;
+    running.current = true;
     setBusy(true);
     setFailure("");
     try {
@@ -57,6 +68,7 @@ function useCommand() {
       setFailure(`${failed}: ${toFailure(reason).message}`);
       return false;
     } finally {
+      running.current = false;
       setBusy(false);
     }
   }
@@ -112,7 +124,8 @@ export function SyncSettings({
           <Connect />
         ) : status.connection === "choosing" ? (
           <Choose status={status} onDownloaded={setSafetyBackup} />
-        ) : status.first_sync ? (
+        ) : // What stopped a first sync is shown with its action, not as progress standing still.
+        status.first_sync && !status.recovery ? (
           <FirstSync status={status} progress={status.first_sync} />
         ) : (
           <Connected status={status} />
@@ -203,6 +216,13 @@ function Choose({
         <>
           <p className="settings-hint">Files in Drive are not encrypted.</p>
           <div className="settings-actions">
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void run(syncApi.disconnect, "Still connected")}
+            >
+              Use another account
+            </Button>
             <Button
               disabled={!options || busy}
               onClick={() =>
