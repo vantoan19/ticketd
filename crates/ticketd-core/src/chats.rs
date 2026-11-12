@@ -1607,6 +1607,30 @@ impl Workspace {
         attempt_id: &str,
         intent: ChatSubmissionIntent,
     ) -> Result<ChatMessage, Error> {
+        self.submit_input(chat_id, message_id, attempt_id, intent, false)
+    }
+
+    /// `record_chat_submission` for input sent from the queue. Queued input has no place
+    /// in the transcript until it is sent, so it is moved to the end of the history:
+    /// read again later, it stands before its own reply, as a live view showed it.
+    pub fn record_chat_queue_submission(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+        attempt_id: &str,
+        intent: ChatSubmissionIntent,
+    ) -> Result<ChatMessage, Error> {
+        self.submit_input(chat_id, message_id, attempt_id, intent, true)
+    }
+
+    fn submit_input(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+        attempt_id: &str,
+        intent: ChatSubmissionIntent,
+        from_queue: bool,
+    ) -> Result<ChatMessage, Error> {
         self.chat_write(|connection| {
             if read_chat(connection, chat_id)?.trashed {
                 return Err(Error::ChatTrashed(chat_id.to_owned()));
@@ -1631,7 +1655,14 @@ impl Workspace {
                 "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery) VALUES (?1, ?2, ?3, ?4, 'possible')",
                 params![attempt_id, chat_id, message_id, name(intent)?],
             )?;
-            log(connection, chat_id, "message", message_id)?;
+            let sequence = log(connection, chat_id, "message", message_id)?;
+            // Positions are change sequences, so this one is unused and the latest.
+            if from_queue && message.attempts.is_empty() {
+                connection.execute(
+                    "UPDATE chat_messages SET position = ?1 WHERE id = ?2",
+                    params![sequence, message_id],
+                )?;
+            }
             trim(connection, chat_id)?;
             read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
         })

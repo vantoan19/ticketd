@@ -1558,3 +1558,31 @@ async fn what_the_agent_changed_in_ticketd_is_kept_with_its_turn() {
         }]
     );
 }
+
+/// N1: input sent from the queue enters the conversation when it is sent, which is
+/// where a live view shows it; read again later it sits before its own reply, not
+/// where it was typed.
+#[tokio::test(start_paused = true)]
+async fn queued_input_is_kept_in_history_where_it_was_sent() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.queue("queued").await;
+    f.emit(EventKind::MessageCompleted {
+        turn: turn_1(),
+        item: NativeItemId::new("m1"),
+        text: "one".to_owned(),
+    })
+    .await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.submits().len(), 2, "the queued input was sent");
+
+    let texts: Vec<String> = f
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Message(message) => Some(message.text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["first", "one", "queued"]);
+}

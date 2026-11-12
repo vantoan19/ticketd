@@ -967,12 +967,15 @@ impl Supervisor {
             self.open(&chat, session, origin, preamble, None);
             return;
         }
+        let mut from_queue = false;
         if resend.is_some() {
             self.resend = None;
         } else if self.direct.front() == Some(&message_id) {
             self.direct.pop_front();
+        } else {
+            from_queue = true;
         }
-        self.dispatch(&message_id, resend.is_some());
+        self.dispatch(&message_id, resend.is_some(), from_queue);
     }
 
     /// Records the possible submission, then hands the input to the adapter. Nothing
@@ -980,8 +983,8 @@ impl Supervisor {
     /// generation and expected turn at its write.
     ///
     /// `resend` is set only for input the person asked to send again; it alone may
-    /// follow an uncertain attempt.
-    fn dispatch(&mut self, message_id: &str, resend: bool) {
+    /// follow an uncertain attempt. `from_queue` input had no row on screen until now.
+    fn dispatch(&mut self, message_id: &str, resend: bool, from_queue: bool) {
         let Some(runtime) = &self.runtime else {
             return;
         };
@@ -1001,6 +1004,8 @@ impl Supervisor {
         let recorded = self.write(|core| {
             if resend {
                 core.record_chat_resubmission(&chat, message_id, &attempt)
+            } else if from_queue {
+                core.record_chat_queue_submission(&chat, message_id, &attempt, intent)
             } else {
                 core.record_chat_submission(&chat, message_id, &attempt, intent)
             }
