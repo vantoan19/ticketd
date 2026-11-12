@@ -432,8 +432,9 @@ function AppContent() {
                       <AttachmentLibrary
                         onPreview={setAttachmentPreview}
                         onOpenSettings={() => {
-                          setSettingsSection("attachments");
+                          // openView resets the section, so choose it afterwards.
                           openView("settings");
+                          setSettingsSection("attachments");
                         }}
                       />
                     )}

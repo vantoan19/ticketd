@@ -1,4 +1,4 @@
-import type { SettingsCardKey } from "./settings-sections";
+import { settingsCardId, type SettingsCardKey } from "./settings-sections";
 import { AttachmentSettings } from "./AttachmentSettings";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
@@ -533,7 +533,7 @@ function ExportCard() {
           cannot be imported.
         </p>
         <p className="settings-hint">From the command line:</p>
-        <div className="settings-actions">
+        <div className="settings-actions settings-actions-center">
           <code className="workspace-path">
             <CommandText command={EXPORT_COMMAND} />
           </code>
@@ -709,6 +709,15 @@ export function SettingsView({
     () => heading.current?.focus({ preventScroll: true }),
     [selected, source?.connector.provider],
   );
+  // Opening Settings at a section (Storage settings in the Attachments library)
+  // must show that card, not only mark it in the navigation.
+  useEffect(() => {
+    if (!selected || selected === "sync" || selected.startsWith("source-"))
+      return;
+    document
+      .getElementById(settingsCardId(selected))
+      ?.scrollIntoView?.({ block: "start" });
+  }, [selected]);
   return (
     <div
       className="management settings-page"
