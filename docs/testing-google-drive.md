@@ -59,6 +59,36 @@ It covers storage only: folder discovery, listing, download, update at a current
 and a stale version, Drive revisions and chunked transfer. It does not exercise
 merging, conflict review or the desktop, and it leaves its folder in Drive.
 
+The deterministic suite runs on a controlled transport, and that script starts
+from a saved connection, so neither sends a sign-in through the app. The live
+sync check is therefore complete only when it includes **one real sign-in
+through the desktop app** (Settings, Connect Google Drive, system-browser
+consent, back to the app) on a build with the publisher's OAuth client, and
+records the result with the binary hash and source revision. The deterministic
+suite runs every request shape through the production transport's allow-list,
+but only Google can confirm what it answers. The live check must confirm:
+
+- sign-in and Reconnect succeed, the account's email is shown, and the granted
+  scope is `drive.file` alone;
+- the Workspace folder and its subfolders are created once, are visible in
+  Drive, and are found again by a second desktop signed in to the same account
+  (`appProperties` queries under `drive.file`);
+- a file created with a pre-generated ID is not duplicated by a repeated
+  creation (409), and `headRevisionId` changes with every content update;
+- a past revision is listed and downloads by its ID, including a ranged
+  download of more than one chunk, and Drive keeps the revision the version
+  history relies on;
+- an update at a stale version is refused by the adapter's check, and a file
+  moved to Drive's trash is reported as missing, written again as another file,
+  and seen as another file when the first one is restored;
+- a throttled request (403 or 429 with `Retry-After`) is retried and then
+  succeeds, and a full Drive reports as storage full;
+- whether `changes.list` reports this app's files under `drive.file` (the
+  adapter lists the folder instead until this is confirmed).
+
+Mark each item passed, failed, blocked or not run; an item nobody ran is not a
+pass.
+
 Sync behaviour that does not need Drive is tested in the core against temporary
 Workspaces: the file converter (`sync_files`), change capture (`sync_capture`),
 merge rules (`sync_merge`), version history (`versions`) and device codes
