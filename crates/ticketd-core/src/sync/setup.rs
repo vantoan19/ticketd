@@ -9,6 +9,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::Cursor,
     path::PathBuf,
+    time::Duration,
 };
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -250,6 +251,11 @@ pub struct SyncStatus {
     /// What went wrong, while `recovery` is [`SyncRecovery::Error`].
     pub recovery_message: Option<String>,
     pub first_sync: Option<FirstSync>,
+    /// How long the storage asked to be left alone, on the status a run
+    /// returns when it was rate limited. It is not stored: a status read
+    /// afterwards has none.
+    #[serde(skip)]
+    pub retry_after: Option<Duration>,
 }
 
 /// Where this Workspace syncs to and as whom: what a host needs to start a run.
@@ -709,6 +715,7 @@ impl Workspace {
                 .filter(|_| state.recovery == Some(SyncRecovery::Error)),
             recovery: state.recovery,
             first_sync,
+            retry_after: None,
         })
     }
 
@@ -893,6 +900,10 @@ impl Workspace {
 
     fn conclude(&mut self, outcome: Result<(), Error>) -> Result<SyncStatus, Error> {
         let before = state(&self.connection)?;
+        let retry_after = match &outcome {
+            Err(Error::Remote(RemoteError::RateLimited { retry_after })) => *retry_after,
+            _ => None,
+        };
         let (recovery, message) = match outcome {
             Ok(()) => (None, None),
             // Nothing ran, so there is nothing to recover from.
@@ -922,7 +933,10 @@ impl Workspace {
         if shown {
             touch(&self.connection)?;
         }
-        self.sync_status()
+        Ok(SyncStatus {
+            retry_after,
+            ..self.sync_status()?
+        })
     }
 
     fn run(&mut self, remote: &dyn RemoteStorage) -> Result<(), Error> {

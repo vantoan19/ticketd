@@ -461,3 +461,30 @@ fn a_long_retry_after_ends_the_call_instead_of_waiting() {
     );
     assert_eq!(remote.list(FOLDER), Ok(vec![]));
 }
+
+/// F54: the engine tells an older file that came back from one written after
+/// it by the file's identity and creation time, so the adapter must keep both
+/// through an update and give a file that is written again new ones.
+#[test]
+fn a_file_keeps_its_identity_through_an_update_and_one_written_again_is_another_made_later() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    let ticket = key("identity");
+    let first = put(&remote, &ticket, None, b"one").unwrap();
+    assert!(chrono::DateTime::parse_from_rfc3339(&first.created).is_ok());
+
+    let updated = put(&remote, &ticket, Some(&first.version), b"two").unwrap();
+    assert_ne!(updated.version, first.version);
+    assert_eq!(
+        (&updated.file_id, &updated.created),
+        (&first.file_id, &first.created)
+    );
+    assert_eq!(remote.list(FOLDER).unwrap(), std::slice::from_ref(&updated));
+
+    sim.trash(&first.file_id);
+    let again = put(&remote, &ticket, None, b"two").unwrap();
+    assert_ne!(again.file_id, first.file_id);
+    let made = |file: &RemoteFile| chrono::DateTime::parse_from_rfc3339(&file.created).unwrap();
+    assert!(made(&again) > made(&first));
+    assert_eq!(remote.list(FOLDER).unwrap(), [again]);
+}

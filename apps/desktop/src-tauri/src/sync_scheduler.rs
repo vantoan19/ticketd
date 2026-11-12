@@ -19,6 +19,9 @@ const UPLOAD_DELAY: Duration = Duration::from_secs(3);
 pub const EXIT_LIMIT: Duration = Duration::from_secs(10);
 /// How often the upkeep runs while the app stays open.
 const UPKEEP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+/// The longest the scheduler stays away from a storage that rate limited it,
+/// however long the storage asked for.
+const RETRY_LIMIT: Duration = Duration::from_secs(15 * 60);
 
 /// What this Workspace syncs with, read from the Workspace before every use.
 #[derive(Clone)]
@@ -48,6 +51,9 @@ struct Watch {
     upload_at: Option<Duration>,
     /// The newest local change already counted towards an upload.
     seen_mark: i64,
+    /// No run starts by itself before this: the storage rate limited the last
+    /// one and said how long to stay away.
+    not_before: Duration,
 }
 
 pub struct Scheduler {
@@ -111,7 +117,8 @@ impl Scheduler {
     /// Runs sync if one is due at `now` (time since the app started). `None`
     /// when nothing was due, the Workspace is not connected, or a run is
     /// already in progress. A run the storage refused is not repeated before
-    /// the next poll or local change.
+    /// the next poll or local change, nor before a rate limiting storage
+    /// asked to be tried again (at most [`RETRY_LIMIT`]).
     pub fn tick(&self, now: Duration) -> Result<Option<SyncStatus>, Error> {
         // Taken before anything opens the Workspace: whoever holds it may be
         // replacing the Workspace file, which an open handle would refuse.
@@ -141,7 +148,10 @@ impl Scheduler {
                 watch.seen_mark = latest;
                 watch.upload_at = Some(now + UPLOAD_DELAY);
             }
-            !watch.connected || now >= watch.poll_at || watch.upload_at.is_some_and(|at| now >= at)
+            let due = !watch.connected
+                || now >= watch.poll_at
+                || watch.upload_at.is_some_and(|at| now >= at);
+            due && now >= watch.not_before
         };
         if !due {
             return Ok(None);
@@ -150,16 +160,16 @@ impl Scheduler {
             .map(Some)
     }
 
-    /// Runs the upkeep when it is due. A failure waits for the next day or
-    /// launch and never holds up sync.
+    /// Runs the upkeep when it is due. A failure is tried again by the next
+    /// tick and never holds up sync.
     fn keep_up(&self, workspace: &mut Workspace, now: Duration) {
         let mut at = lock(&self.upkeep_at);
         if now < *at {
             return;
         }
-        *at = now + UPKEEP_INTERVAL;
-        if let Err(error) = (self.upkeep)(workspace) {
-            eprintln!("Workspace upkeep could not run: {error}");
+        match (self.upkeep)(workspace) {
+            Ok(()) => *at = now + UPKEEP_INTERVAL,
+            Err(error) => eprintln!("Workspace upkeep could not run: {error}"),
         }
     }
 
@@ -206,6 +216,8 @@ impl Scheduler {
         watch.upload_at = None;
         let least = Duration::from_secs(MIN_POLL_INTERVAL_SECS);
         watch.poll_at = now + binding.poll.max(least);
+        let asked = result.as_ref().ok().and_then(|status| status.retry_after);
+        watch.not_before = now + asked.unwrap_or_default().min(RETRY_LIMIT);
         result
     }
 
@@ -493,6 +505,67 @@ mod tests {
         assert_eq!(desk.scheduler.tick(10 * SECOND).unwrap(), None);
         let status = desk.scheduler.tick(60 * SECOND).unwrap().unwrap();
         assert_eq!((status.recovery, status.pending_uploads.len()), (None, 0));
+    }
+
+    /// F54: a storage that says how long to stay away is left alone that long
+    /// by the runs the scheduler starts itself, up to a quarter of an hour.
+    #[test]
+    fn a_rate_limited_run_waits_as_long_as_the_storage_asked_before_the_next_automatic_one() {
+        let desk = desk();
+        let limited = |wait: Duration| {
+            let retry_after = Some(wait);
+            let error = RemoteError::RateLimited { retry_after };
+            desk.remote.fail(RemoteOp::List, 1, error);
+        };
+        limited(5 * MINUTE);
+        let status = desk.scheduler.tick(Duration::ZERO).unwrap().unwrap();
+        assert_eq!(status.recovery, Some(SyncRecovery::RateLimited));
+        // Neither the poll nor a local change runs it sooner.
+        desk.workspace().create_ticket("Second").unwrap();
+        assert_eq!(desk.scheduler.tick(MINUTE).unwrap(), None);
+        assert_eq!(desk.scheduler.tick(5 * MINUTE - SECOND).unwrap(), None);
+        let status = desk.scheduler.tick(5 * MINUTE).unwrap().unwrap();
+        assert_eq!((status.recovery, status.pending_uploads.len()), (None, 0));
+
+        // An hour asked for is a quarter of an hour waited.
+        limited(60 * MINUTE);
+        let from = 10 * MINUTE;
+        assert!(desk.scheduler.tick(from).unwrap().is_some());
+        assert_eq!(
+            desk.scheduler.tick(from + 15 * MINUTE - SECOND).unwrap(),
+            None
+        );
+        assert!(desk.scheduler.tick(from + 15 * MINUTE).unwrap().is_some());
+
+        // Sync now is the person asking: it runs at once.
+        limited(60 * MINUTE);
+        let from = 40 * MINUTE;
+        assert!(desk.scheduler.tick(from).unwrap().is_some());
+        let status = desk.scheduler.sync_now(from + SECOND).unwrap().unwrap();
+        assert_eq!(status.recovery, None);
+    }
+
+    /// F54: an upkeep that failed is tried again by the next tick, not a day later.
+    #[test]
+    fn a_failed_upkeep_runs_again_at_the_next_tick() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.sqlite3");
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&attempts);
+        let scheduler = Scheduler::new(
+            Box::new(move || Workspace::open(&path)),
+            Box::new(|_| Ok(None)),
+            Box::new(move |_| match counted.fetch_add(1, Ordering::SeqCst) {
+                0 => Err(Error::NotFound("a busy Workspace".into())),
+                _ => Ok(()),
+            }),
+        );
+        scheduler.tick(Duration::ZERO).unwrap();
+        scheduler.tick(SECOND).unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        // Once it worked, the next one is a day away.
+        scheduler.tick(2 * SECOND).unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
     }
 
     #[test]
