@@ -1004,7 +1004,7 @@ async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_find
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_usage_limit_shows_its_reset_time_and_an_unavailable_capability_is_its_own_problem() {
+async fn a_usage_limit_shows_its_reset_time_when_the_provider_gave_one() {
     let f = Fixture::new().await;
     let id = f.chat().await;
     let mut limit = failure(ProblemKind::QuotaExhausted);
@@ -1023,26 +1023,52 @@ async fn a_usage_limit_shows_its_reset_time_and_an_unavailable_capability_is_its
     let (opened, _) = f.open(&id).await;
     let shown = opened.snapshot.chat.problem.unwrap();
     assert_eq!((shown.kind, shown.resets_at), ("usage_limit", None));
+}
 
-    // An optional capability the running session lacks is said as such, and the
-    // Chat keeps working.
-    f.chats.send(&id, "more", SendMode::Auto).await.unwrap();
-    settle().await;
+#[tokio::test(start_paused = true)]
+async fn an_unavailable_capability_is_a_notice_line_and_never_hides_why_a_turn_stopped() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
     f.emit(EventKind::Notice {
-        turn: Some(NativeTurnId::new("turn-3")),
+        turn: Some(NativeTurnId::new("turn-1")),
         kind: NoticeKind::CapabilityUnavailable,
-        message: "The MCP server github did not start".to_owned(),
+        message: "Codex could not start the MCP server github: exited with 1".to_owned(),
         detail: None,
     })
     .await;
+
+    // It is a line in the conversation that names what is unavailable; it is not the
+    // Chat's problem, and the Chat keeps working and is not counted.
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Marker { reason: "note", message: Some(said), .. }
+            if said == "Codex could not start the MCP server github: exited with 1"
+    )));
+    assert_eq!(opened.snapshot.chat.problem, None);
+    assert_eq!(opened.snapshot.chat.activity, "working");
+    assert_eq!(f.chats.overview().unwrap().needs_you, 0);
+
+    // A usage limit that then stops the turn is still told, with its reset time.
+    let mut limit = failure(ProblemKind::QuotaExhausted);
+    limit.resets_at = Some(1_730_948_100);
+    f.emit(failed_turn("turn-1", limit)).await;
     let (opened, _) = f.open(&id).await;
     let shown = opened.snapshot.chat.problem.unwrap();
-    assert_eq!((shown.kind, shown.past), ("capability_unavailable", false));
-    assert_eq!(
-        shown.message.as_deref(),
-        Some("The MCP server github did not start")
-    );
-    assert_eq!(opened.snapshot.chat.activity, "working");
+    assert_eq!((shown.kind, shown.past), ("usage_limit", true));
+    assert_eq!(shown.resets_at, Some(1_730_948_100));
+
+    // So is a sign-in failure, with its guidance, and it is shown, not counted.
+    f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(failed_turn("turn-2", failure(ProblemKind::LoginRequired)))
+        .await;
+    let (opened, _) = f.open(&id).await;
+    let shown = opened.snapshot.chat.problem.unwrap();
+    assert_eq!((shown.kind, shown.past), ("not_signed_in", true));
+    assert!(shown.command.is_some(), "the harness's own sign-in command");
+    let row = f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!((row.problem, row.needs_you), (Some("not_signed_in"), false));
     assert_eq!(f.chats.overview().unwrap().needs_you, 0);
 }
 

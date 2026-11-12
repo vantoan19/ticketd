@@ -683,11 +683,6 @@ fn problem(
         Some(ChatProblem::DispatchRefused { detail }) => Some(failed(format!(
             "The harness did not accept the message, so it is back in the queue: {detail}"
         ))),
-        Some(ChatProblem::CapabilityUnavailable { detail }) => Some(Problem {
-            kind: "capability_unavailable",
-            message: Some(detail.clone()),
-            ..Problem::default()
-        }),
         Some(ChatProblem::StorageFailed { detail }) => Some(failed(format!(
             "Chat storage failed, so no new work is accepted: {detail}"
         ))),

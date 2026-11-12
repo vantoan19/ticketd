@@ -769,13 +769,6 @@ impl Supervisor {
         self.stop = None;
         self.stop_deadline = None;
         self.stop_when_turn_known = false;
-        // It was about the session that just ended.
-        if matches!(
-            self.problem,
-            Some(ChatProblem::CapabilityUnavailable { .. })
-        ) {
-            self.problem = None;
-        }
     }
 
     fn on_loss(&mut self, detail: String) {
@@ -1396,17 +1389,10 @@ impl Supervisor {
                 detail,
                 ..
             } => match kind {
-                NoticeKind::Retrying | NoticeKind::Warning => self.notice(message),
-                NoticeKind::CapabilityUnavailable => {
-                    let detail: String = message.chars().take(CHAT_NOTICE_LIMIT).collect();
+                // An unavailable capability stops nothing, so it is a stored notice like
+                // the others and never the Chat's problem.
+                NoticeKind::Retrying | NoticeKind::Warning | NoticeKind::CapabilityUnavailable => {
                     self.notice(message);
-                    // It stops nothing, so it never replaces a problem that does.
-                    if matches!(
-                        self.problem,
-                        None | Some(ChatProblem::CapabilityUnavailable { .. })
-                    ) {
-                        self.problem = Some(ChatProblem::CapabilityUnavailable { detail });
-                    }
                 }
                 NoticeKind::EffectiveSettings => {
                     let settings = detail.map_or(message, |detail| detail.payload().to_owned());

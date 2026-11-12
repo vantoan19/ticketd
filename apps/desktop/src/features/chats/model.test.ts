@@ -178,10 +178,6 @@ test("only a problem observed now disables Send; why the last turn stopped does 
       kind: "send",
       enabled: true,
     });
-  expect(withProblem({ kind: "capability_unavailable" })).toEqual({
-    kind: "send",
-    enabled: true,
-  });
   const composer = (problem: Problem) =>
     hasComposer(chatState({ id: "c1", title: "x", problem }));
   expect(composer({ kind: "history_lost" })).toBe(false);
@@ -231,12 +227,6 @@ test("a row says a past sign-in failure as a stopped turn, not as unsent", () =>
   expect(line({ problem: "usage_limit", problem_past: true })).toBe(
     "Stopped: usage limit reached",
   );
-  const capability = problemNotice(
-    { kind: "capability_unavailable", message: "The MCP server x failed." },
-    "Codex",
-  );
-  expect(capability.actions).toEqual([]);
-  expect(capability.body).toContain("The MCP server x failed.");
 });
 
 test("a usage limit says when it resets, or says that the provider did not", () => {

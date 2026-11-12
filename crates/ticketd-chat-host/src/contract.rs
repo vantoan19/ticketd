@@ -346,8 +346,8 @@ pub enum NoticeKind {
     /// The settings the harness reports as in effect for this session, in `detail`.
     EffectiveSettings,
     /// An optional tool, MCP server or model the session asked for is unavailable.
-    /// `message` names it. The rest of the session can go on; nothing is substituted
-    /// by ticketd.
+    /// `message` names it and is kept as a notice in the conversation. It is never the
+    /// Chat's problem: the rest of the session goes on and ticketd substitutes nothing.
     CapabilityUnavailable,
 }
 

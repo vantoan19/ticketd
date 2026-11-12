@@ -83,7 +83,6 @@ const PROBLEM_LINES: Record<ProblemKind, string> = {
   sign_in_unknown: "Sign-in not checked",
   usage_limit: "Stopped: usage limit reached",
   sandbox_unavailable: "Stopped: sandbox unavailable",
-  capability_unavailable: "A capability is unavailable",
   uncertain_delivery: "Needs your decision",
   folder_missing: "Folder missing",
   history_lost: "Session unavailable",
@@ -329,14 +328,6 @@ export function problemNotice(problem: Problem, harness: string): Notice {
         body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
-      };
-    case "capability_unavailable":
-      return {
-        tone: "neutral",
-        title: `Something ${harness} uses isn't available`,
-        // Nothing ticketd can probe tells whether it is back, so no Check again.
-        body: `${problem.message ?? ""} ticketd won't substitute another model or provider. Other work can continue; fix it in ${harness}'s own settings, then start a fresh session.`.trim(),
-        actions: [],
       };
     case "uncertain_delivery":
       return {

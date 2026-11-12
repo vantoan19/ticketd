@@ -1168,7 +1168,7 @@ async fn a_refused_resend_returns_the_message_to_the_person_and_keeps_the_uncert
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_unavailable_optional_capability_is_a_typed_problem_that_blocks_nothing() {
+async fn an_unavailable_optional_capability_is_a_stored_notice_and_never_the_chats_problem() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
     f.emit(EventKind::Notice {
@@ -1179,15 +1179,12 @@ async fn an_unavailable_optional_capability_is_a_typed_problem_that_blocks_nothi
     })
     .await;
 
-    let unavailable = ChatProblem::CapabilityUnavailable {
-        detail: "The MCP server 'github' did not start".to_owned(),
-    };
     let live = f.live().await;
-    assert_eq!(live.problem, Some(unavailable));
+    assert_eq!(live.problem, None, "it is not what stops a Chat");
     assert_eq!(live.activity, Activity::Working, "the turn goes on");
     assert_eq!(notices(&f), ["The MCP server 'github' did not start"]);
 
-    // Other work stays available, and the problem ends with the runtime it was about.
+    // Other work stays available, and a real problem is reported as before.
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     f.send("second").await;
     assert_eq!(f.submits().len(), 2);

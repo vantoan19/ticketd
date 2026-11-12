@@ -164,11 +164,6 @@ pub enum ChatProblem {
     CleanupUnconfirmed {
         reason: String,
     },
-    /// An optional tool, MCP server or model of the running session is unavailable.
-    /// It stops nothing: the Chat still takes messages.
-    CapabilityUnavailable {
-        detail: String,
-    },
 }
 
 /// A request that can be answered right now. Stored interactions are history only.

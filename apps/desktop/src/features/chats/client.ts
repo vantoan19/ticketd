@@ -32,7 +32,6 @@ export const problemKindSchema = z.enum([
   "sign_in_unknown",
   "usage_limit",
   "sandbox_unavailable",
-  "capability_unavailable",
   "uncertain_delivery",
   "folder_missing",
   "history_lost",
