@@ -1,12 +1,9 @@
 import { SectionHeader } from "@/components/ui/section-header";
 import type { ReactNode } from "react";
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
-import {
-  settingsCardId,
-  type SettingsCardKey,
-} from "@/features/settings/settings-sections";
+import { settingsCardId } from "@/features/settings/settings-sections";
 
-/** One titled card on the Settings page, reachable from the section list. */
+/** One titled card on a Settings page. */
 export function SettingsCard({
   id,
   title,
@@ -15,7 +12,7 @@ export function SettingsCard({
   children,
   footer,
 }: {
-  id: SettingsCardKey;
+  id: string;
   title: string;
   /** A sentence at the top of the card body. */
   description?: ReactNode;

@@ -82,7 +82,13 @@ afterEach(() => {
 });
 
 async function openReview(onRestore: () => Promise<void> = async () => {}) {
-  render(<SettingsView onRestore={onRestore} onOpenInbox={() => {}} />);
+  render(
+    <SettingsView
+      selected="backups"
+      onRestore={onRestore}
+      onOpenInbox={() => {}}
+    />,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Restore from backup…" }));
   return screen.findByRole("dialog", { name: "Restore from backup" });
 }
@@ -138,7 +144,13 @@ test("the review scrolls from the keyboard: its body is a focusable region", asy
 
 test("cancelling the file picker opens nothing and restores nothing", async () => {
   vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValue(null);
-  render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
+  render(
+    <SettingsView
+      selected="backups"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Restore from backup…" }));
   await waitFor(() =>
     expect(workspaceClient.chooseBackupFile).toHaveBeenCalled(),
@@ -336,7 +348,13 @@ test("Show safety backups lists pre-migration and safety copies with their times
       size_bytes: 1,
     },
   ]);
-  render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
+  render(
+    <SettingsView
+      selected="backups"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
   fireEvent.click(screen.getByRole("button", { name: /^Safety backups/ }));
   const region = await screen.findByRole("region", { name: "Safety backups" });
   expect(await within(region).findByText("/w/a.safety-1.sqlite3")).toBeTruthy();

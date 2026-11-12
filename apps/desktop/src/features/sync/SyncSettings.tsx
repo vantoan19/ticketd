@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, FolderOpen } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import {
@@ -95,24 +89,13 @@ function ConnectedAs({ account }: { account: string | null }) {
   );
 }
 
-/** Settings › Sync: setup until this Workspace syncs, then its settings. */
-export function SyncSettings({
-  heading,
-}: {
-  heading?: RefObject<HTMLHeadingElement | null>;
-}) {
+/** Settings › Google Drive: setup until this Workspace syncs, then its settings. The page shell supplies the title. */
+export function SyncSettings() {
   const { status } = useSyncStatus();
   // Where the Workspace a download replaced was kept, while this page is open.
   const [safetyBackup, setSafetyBackup] = useState("");
   return (
-    <div className="settings-column source-settings-column">
-      <h1 id="settings-heading" ref={heading} tabIndex={-1}>
-        Sync
-      </h1>
-      <p>
-        Keeps this Workspace the same on your desktops, through your own Google
-        Drive.
-      </p>
+    <div className="settings-sync">
       {safetyBackup && <Replaced safetyBackup={plainPath(safetyBackup)} />}
       {status &&
         (status.connection === "not_connected" ? (

@@ -69,7 +69,12 @@ function message(error: unknown) {
 
 const STATUS_ID = "agent-skill-status";
 
-export function AgentSkillsCard() {
+export function AgentSkillsCard({
+  onChanged,
+}: {
+  /** Called after the folders are read again, so the nav indicator can follow. */
+  onChanged?: () => void;
+}) {
   const [load, setLoad] = useState<Load>({ phase: "loading" });
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<Record<string, string>>({});
@@ -81,11 +86,14 @@ export function AgentSkillsCard() {
   const refresh = useCallback(
     () =>
       agentSkillsClient.list().then(
-        (agents) => setLoad({ phase: "done", agents }),
+        (agents) => {
+          setLoad({ phase: "done", agents });
+          onChanged?.();
+        },
         (error: unknown) =>
           setLoad({ phase: "failed", message: message(error) }),
       ),
-    [],
+    [onChanged],
   );
   // Read the folders on first show; each action and Check again reads them again.
   useEffect(() => {

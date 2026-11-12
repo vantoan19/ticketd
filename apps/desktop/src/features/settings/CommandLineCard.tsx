@@ -153,14 +153,22 @@ function Summary({ check }: { check: Check }) {
   );
 }
 
-export function CommandLineCard() {
+export function CommandLineCard({
+  onChecked,
+}: {
+  /** Called after each check, so the nav indicator can follow the result. */
+  onChecked?: () => void;
+}) {
   const [check, setCheck] = useState<Check>({ phase: "checking" });
   const load = useCallback(() => {
     void cliClient.check().then(
-      (status) => setCheck({ phase: "done", status }),
+      (status) => {
+        setCheck({ phase: "done", status });
+        onChecked?.();
+      },
       () => setCheck({ phase: "failed" }),
     );
-  }, []);
+  }, [onChecked]);
   // Detect on first show; Check again picks up a later installation.
   useEffect(load, [load]);
   const run = () => {
