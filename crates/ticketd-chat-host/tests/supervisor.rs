@@ -13,11 +13,12 @@ use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities,
     Capability, ChatHost, ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT,
     DeliveryEvidence, EventKind, Harness, HarnessAdapter, HostError, INTERRUPT_TIMEOUT,
-    InteractionAnswer, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId,
-    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode,
-    RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopState, Submission,
-    SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL,
-    ToolStatus, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener, problem_kind,
+    InteractionAnswer, InteractionKind, InteractionRequest, InteractionResolution, NativeItemId,
+    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind,
+    ProviderDetail, ResumeMode, RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode,
+    SessionStart, StopState, Submission, SubmissionId, SubmissionKind, Subscription,
+    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus, TurnOutcome, UnconfirmedCleanup,
+    WorkspaceOpener, problem_kind,
 };
 use ticketd_core::{
     Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
@@ -428,6 +429,40 @@ async fn a_stop_the_harness_never_confirms_is_reported_as_unconfirmed() {
     tokio::time::sleep(INTERRUPT_TIMEOUT).await;
     assert_eq!(f.live().await.stop, Some(StopState::Unconfirmed));
     assert_eq!(f.turns()[0].state, ChatTurnState::Active);
+}
+
+/// N5: Codex confirms an answer (`serverRequest/resolved`) before the write of it
+/// returns. The card still says what the person chose, not a bare "Answered".
+#[tokio::test(start_paused = true)]
+async fn an_answer_the_harness_confirms_before_the_write_returns_keeps_the_choice() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let interaction = f.request_approval().await;
+    let release = f.fake.hold_next_respond();
+
+    let answering = f
+        .host
+        .respond(&f.chat.id, &interaction, approve(ApprovalDecision::Allow));
+    let confirm = async {
+        settle().await;
+        f.emit(EventKind::InteractionResolved {
+            request: NativeRequestId::new("approval-1"),
+            resolution: InteractionResolution::Answered,
+        })
+        .await;
+        release.send(()).unwrap();
+    };
+    let (answered, ()) = tokio::join!(answering, confirm);
+    settle().await;
+
+    assert!(answered.is_ok(), "{answered:?}");
+    let stored = f.items().into_iter().find_map(|item| match item {
+        ChatItem::Interaction(interaction) => Some(interaction),
+        _ => None,
+    });
+    let stored = stored.unwrap();
+    assert_eq!(stored.state, ChatInteractionState::Answered);
+    assert_eq!(stored.response.as_deref(), Some("allow"));
 }
 
 #[tokio::test(start_paused = true)]

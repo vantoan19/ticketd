@@ -53,6 +53,7 @@ struct State {
     capabilities: Capabilities,
     open_failures: VecDeque<Problem>,
     open_holds: VecDeque<oneshot::Receiver<()>>,
+    respond_holds: VecDeque<oneshot::Receiver<()>>,
     submit_replies: VecDeque<ScriptedReply>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
@@ -109,6 +110,7 @@ impl FakeAdapter {
                 capabilities,
                 open_failures: VecDeque::new(),
                 open_holds: VecDeque::new(),
+                respond_holds: VecDeque::new(),
                 submit_replies: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
@@ -171,6 +173,14 @@ impl FakeAdapter {
         self.state()
             .submit_replies
             .push_back(ScriptedReply::Now(reply));
+    }
+
+    /// The next answer is written, then waits for the returned sender before it
+    /// reports `Sent`, as a harness may confirm the answer before the write returns.
+    pub fn hold_next_respond(&self) -> oneshot::Sender<()> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().respond_holds.push_back(receiver);
+        sender
     }
 
     /// The next submission is written, then waits for the returned sender. Dropping
@@ -372,16 +382,22 @@ impl HarnessRuntime for FakeRuntime {
     }
 
     async fn respond(&self, response: InteractionResponse) -> RespondOutcome {
-        let mut state = self.fake.state();
-        state.respond_calls += 1;
-        let live = match state.live_for(self.generation, response.generation) {
-            Ok(live) => live,
-            Err(refusal) => return RespondOutcome::NotSent(refusal),
+        let hold = {
+            let mut state = self.fake.state();
+            state.respond_calls += 1;
+            let live = match state.live_for(self.generation, response.generation) {
+                Ok(live) => live,
+                Err(refusal) => return RespondOutcome::NotSent(refusal),
+            };
+            if !live.pending_requests.remove(&response.request) {
+                return RespondOutcome::NotSent(Refusal::UnknownRequest);
+            }
+            state.written.push(Written::Respond(response));
+            state.respond_holds.pop_front()
         };
-        if !live.pending_requests.remove(&response.request) {
-            return RespondOutcome::NotSent(Refusal::UnknownRequest);
+        if let Some(hold) = hold {
+            let _ = hold.await;
         }
-        state.written.push(Written::Respond(response));
         RespondOutcome::Sent
     }
 
