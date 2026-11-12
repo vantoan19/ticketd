@@ -233,6 +233,10 @@
     font-size: var(--text-ui);
     font-weight: 400;
   }
+  /* The native checkbox draws a bright white square on dark surfaces. */
+  input[type="checkbox"] {
+    accent-color: var(--primary);
+  }
   button:disabled {
     color: var(--disabled-foreground);
     cursor: default;
