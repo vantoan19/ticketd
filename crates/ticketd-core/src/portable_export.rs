@@ -121,7 +121,8 @@ impl Workspace {
         };
         let stage = tempfile::Builder::new()
             .prefix("ticketd-export-")
-            .tempdir_in(output)?;
+            .tempdir_in(output.as_ref())
+            .map_err(|e| crate::path_error("output folder", output.as_ref(), e))?;
         fs::create_dir(stage.path().join("files"))?;
         let workspace_id = crate::embedded_attachments::workspace_id(&tx)?;
         let mut uris = BTreeSet::new();

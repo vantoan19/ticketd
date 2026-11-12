@@ -153,7 +153,7 @@ impl Workspace {
             filename,
             display_name,
             || {
-                let input = File::open(source)?;
+                let input = File::open(source).map_err(|e| crate::path_error("file", source, e))?;
                 let metadata = input.metadata()?;
                 if !metadata.is_file() {
                     return Err(Error::Attachment("choose a regular file".into()));
@@ -560,7 +560,8 @@ impl Workspace {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        let mut output = tempfile::NamedTempFile::new_in(parent)?;
+        let mut output = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|e| crate::path_error("destination folder", parent, e))?;
         let copied = std::io::copy(&mut source, &mut output)?;
         if Some(copied) != attachment.size_bytes {
             return Err(Error::Attachment(

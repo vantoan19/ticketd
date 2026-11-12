@@ -191,7 +191,8 @@ impl Workspace {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+        let mut temp = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|e| crate::path_error("destination folder", parent, e))?;
         serde_json::to_writer_pretty(&mut temp, &data).map_err(std::io::Error::other)?;
         writeln!(temp)?;
         temp.as_file().sync_all()?;
