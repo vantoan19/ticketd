@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import {
+  Ban,
   Check,
   ChevronDown,
   ChevronRight,
@@ -7,6 +8,7 @@ import {
   Copy,
   FilePlus2,
   FileText,
+  Info,
   LoaderCircle,
   MessageSquareText,
   Square,
@@ -237,7 +239,13 @@ function RequestCard({
   return (
     <section className="chat-card" aria-label={label}>
       <h3 className="chat-card-title">{item.title}</h3>
-      {item.subject && <pre className="chat-code">{item.subject}</pre>}
+      {item.subject &&
+        (item.request === "question" ? (
+          // A question is prose; only a command or path is set in code.
+          <p className="chat-card-text">{item.subject}</p>
+        ) : (
+          <pre className="chat-code">{item.subject}</pre>
+        ))}
       {pending && item.request === "approval" && (
         <div className="chat-card-actions">
           {item.options.map((option, index) => (
@@ -276,7 +284,12 @@ function RequestCard({
       )}
       {item.state === "answered" && (
         <p className="chat-line">
-          <Check size={14} aria-hidden />
+          {/* The host words a denial "You denied this"; it gets no check mark. */}
+          {item.outcome?.startsWith("You denied") ? (
+            <Ban size={14} aria-hidden />
+          ) : (
+            <Check size={14} aria-hidden />
+          )}
           {item.outcome ?? "Answered"}
           {item.resolved_at && receiptTime(item.resolved_at)}
         </p>
@@ -356,9 +369,18 @@ const Item = memo(function Item({
     case "request":
       return <RequestCard item={item} harness={harness} actions={actions} />;
     case "marker":
-      return (
+      return item.reason === "note" ? (
+        <p className="chat-line chat-note">
+          <Info size={14} aria-hidden />
+          <span>
+            <span className="sr-only">ticketd: </span>
+            {item.message}
+          </span>
+        </p>
+      ) : (
         <p className="chat-line">
-          {item.reason !== "note" && <Square size={14} aria-hidden />}
+          {/* Filled, the stop sign does not read as an empty checkbox. */}
+          <Square size={12} fill="currentColor" aria-hidden />
           <span>{markerText(item, harness)}</span>
         </p>
       );

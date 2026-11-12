@@ -85,7 +85,7 @@ export function ExperimentalCard() {
           {confirming === null || confirming < 0
             ? "Chats may be working."
             : `${chatCount(confirming)} ${confirming === 1 ? "is" : "are"} working.`}{" "}
-          Turning Chat off stops them first.
+          Turning Chat off stops {confirming === 1 ? "it" : "them"} first.
         </p>
         <p className="chat-fine">
           Your Chats are kept. Turn Chat back on to see them again; nothing

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { splitPathMiddle } from "./paths";
+import { splitPathMiddle, withoutVerbatim } from "./paths";
 
 test("a POSIX path keeps its root and last two folders and shrinks the rest", () => {
   expect(splitPathMiddle("/var/lib/data/repos/api/src")).toEqual({
@@ -15,4 +15,11 @@ test("a Windows path shrinks between its drive and last two folders", () => {
     middle: "Windows\\Temp\\run\\",
     tail: "repos\\api",
   });
+});
+
+test("a shown path drops the Windows verbatim prefix", () => {
+  expect(withoutVerbatim(String.raw`\\?\C:\ws\chats\f4f6`)).toBe(
+    String.raw`C:\ws\chats\f4f6`,
+  );
+  expect(withoutVerbatim("/home/me/ws")).toBe("/home/me/ws");
 });

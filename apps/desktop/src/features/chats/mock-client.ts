@@ -150,7 +150,9 @@ export function createMockChatClient(
       id: chat.id,
       title: chat.title,
       harness_name: chat.harness.name,
-      folder_name: chat.folder.missing ? null : chat.folder.name,
+      // As the host: a managed folder's name is an id, so the row leaves it out.
+      folder_name:
+        chat.folder.missing || chat.folder.managed ? null : chat.folder.name,
       first_ticket: ticket?.kind === "ticket" ? ticket.reference : null,
       retention: chat.retention,
       activity: chat.activity,

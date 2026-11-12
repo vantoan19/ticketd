@@ -874,3 +874,52 @@ test("a Project is linked like a ticket or Document and has no page to open", as
   );
   await waitFor(() => expect(links.queryByText("Storefront")).toBeNull());
 });
+
+test("a managed folder reads as the ticketd folder, and its path has no verbatim prefix", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      folder: {
+        managed: true,
+        name: "f4f684bc-abfa-4335-a59d-4700c27c520e",
+        path: String.raw`\\?\C:\ws\workspace.sqlite3.chats\f4f684bc-abfa-4335-a59d-4700c27c520e`,
+      },
+    }),
+  );
+  expect(button("Harness and folder").textContent).toBe(
+    "Codex · ticketd folder",
+  );
+  expect(screen.getByRole("list", { name: "Chats" }).textContent).not.toContain(
+    "f4f684bc",
+  );
+  fireEvent.click(button("Harness and folder"));
+  const popover = await screen.findByRole("dialog", {
+    name: "Harness and folder",
+  });
+  expect(popover.textContent).toContain(String.raw`C:\ws`);
+  expect(popover.textContent).not.toContain("?");
+});
+
+test("the link picker asks for a name before it lists anything", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  fireEvent.click(button("Link a ticket, Document or Project"));
+  expect(
+    await screen.findByText("Type part of a name to find it."),
+  ).toBeTruthy();
+  expect(screen.queryByText("Nothing left to link.")).toBeNull();
+});
+
+test("New Chat says it is checking the harnesses until the probe answers", async () => {
+  await open([]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  expect(
+    screen.getByRole("button", {
+      name: "Harness: checking which are installed",
+    }).textContent,
+  ).toBe("Checking…");
+  expect(
+    (await screen.findByRole("button", { name: "Harness: Claude Code" }))
+      .textContent,
+  ).toBe("Claude Code");
+});
