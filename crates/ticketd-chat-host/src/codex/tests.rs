@@ -468,7 +468,7 @@ fn an_unavailable_model_or_mcp_server_is_reported_as_a_capability_not_a_warning(
     };
     assert_eq!(
         message,
-        "Codex could not start the MCP server github: exited with 1. Work that does not need it continues; the server is set up in Codex's own MCP settings."
+        "Codex could not start the MCP server github: exited with 1. Work that does not need it continues; MCP servers are set up in Codex's own MCP settings."
     );
     assert!(ready.is_empty(), "{ready:?}");
 }
@@ -709,7 +709,8 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
     let first = session.notification("mcpServer/startupStatus/updated", &failed);
     let again = json!({"threadId": "t1", "name": "grafana", "status": "failed", "error": "exited"});
     let again = session.notification("mcpServer/startupStatus/updated", &again);
-    let other = json!({"name": "postman", "status": "failed", "error": "exited"});
+    let other =
+        json!({"name": "postman", "status": "failed", "error": "Run `codex mcp login postman`."});
     let other = session.notification("mcpServer/startupStatus/updated", &other);
 
     let messages = |events: &[EventKind]| -> Vec<String> {
@@ -724,11 +725,16 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
     assert_eq!(
         messages(&first),
         [
-            "Codex could not start the MCP server grafana: timed out. Work that does not need it continues; the server is set up in Codex's own MCP settings."
+            "Codex could not start the MCP server grafana: timed out. Work that does not need it continues; MCP servers are set up in Codex's own MCP settings."
         ]
     );
     assert!(again.is_empty(), "{again:?}");
-    assert_eq!(messages(&other).len(), 1);
+    // N3, U18: the provider's own full stop is not doubled, and the shared sentence is
+    // said once per session, not after every server.
+    assert_eq!(
+        messages(&other),
+        ["Codex could not start the MCP server postman: Run `codex mcp login postman`."]
+    );
 
     let rerouted = json!({"turnId": "turn_1", "fromModel": "gpt-5", "toModel": "gpt-5-mini", "reason": "highRiskCyberActivity"});
     let rerouted = session.notification("model/rerouted", &rerouted);
