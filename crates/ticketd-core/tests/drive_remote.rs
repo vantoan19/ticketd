@@ -441,3 +441,23 @@ fn the_production_transport_allows_every_request_sync_sends() {
         assert!(!ticketd_core::drive::request_allowed(method, url));
     }
 }
+
+/// F44: the server's wait is honoured only up to a minute; beyond that the run
+/// ends rate limited instead of holding the app for as long as a header says.
+#[test]
+fn a_long_retry_after_ends_the_call_instead_of_waiting() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    sim.fault(Fault {
+        headers: vec![("Retry-After".into(), "86400".into())],
+        ..Fault::new("GET", "/drive/v3/files?", 429)
+    });
+    // `connected` panics on any wait.
+    assert_eq!(
+        remote.list(FOLDER),
+        Err(RemoteError::RateLimited {
+            retry_after: Some(Duration::from_secs(86400))
+        })
+    );
+    assert_eq!(remote.list(FOLDER), Ok(vec![]));
+}
