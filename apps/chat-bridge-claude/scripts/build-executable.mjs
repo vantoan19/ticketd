@@ -37,11 +37,12 @@ const outfile = path.join(
   "dist",
   `ticketd-chat-bridge-claude-${triple}${extension}`,
 );
-// The pinned Bun from devDependencies, not whichever Bun is on PATH.
+// The pinned Bun from devDependencies, not whichever Bun is on PATH. The npm
+// package installs its native binary as bin/bun.exe on every platform.
 const bun = path.join(
   path.dirname(createRequire(import.meta.url).resolve("bun/package.json")),
   "bin",
-  `bun${process.platform === "win32" ? ".exe" : ""}`,
+  "bun.exe",
 );
 
 execFileSync(
