@@ -30,7 +30,23 @@ A connector to an external ticket source, run by ticketd through a shared extens
 The identity of a ticket's corresponding record in an external tracker, retained as provenance even when ticketd takes ownership. Its presence alone does not imply external ownership or active synchronization.
 
 **Ticket reference**:
-A short, workspace-unique reference to a ticket that stays unchanged when its project or Plan links change.
+A short, workspace-unique label for a ticket: `T-`, the device code of the Workspace installation that created it, then that device's counter, with no dash between them (`T-KQ43`). It is stored with the ticket and never changes, including when project or Plan links change or the device later takes another code. The ticket's internal identifier, not the reference, is its identity. The one case in which two tickets can carry the same reference is a Workspace file copied by hand, until sync detects the copy ([ADR 0011](docs/adr/0011-markdown-file-sync-through-google-drive.md#identity)).
+
+**Device code**:
+Two uppercase letters identifying one Workspace installation in the Ticket references it issues, so desktops sharing a Workspace do not issue the same reference (a hand-copied Workspace file is the exception until sync detects it, see [ADR 0011](docs/adr/0011-markdown-file-sync-through-google-drive.md#identity)). It is random by default. A restored Workspace takes a fresh one, as does a desktop joining a sync folder where its code is held or was given up, and a file copy of a Workspace once sync detects that the original also syncs.
+
+**Version**:
+An earlier state of a ticket or Document (title, body, status, trash), saved locally on the device whenever a local edit or an incoming sync replaces it. Versions are kept 30 days; the record itself is the current version and is always kept. Restoring a version is an ordinary edit.
+
+**Workspace sync**:
+Keeping one person's Workspace the same on several desktops through that person's own Google Drive. Each device keeps its own local Workspace; every ticket, Document, Plan and project is also stored in Drive as one readable, unencrypted Markdown file. It is distinct from the inbound synchronization of an externally owned ticket and never publishes to a tracker.
+_Avoid_: Cloud sync, backup
+
+**Last-synced copy**:
+A device's own copy of a synced record as it was when that device last synchronized it. When a record changed both locally and in Drive, each side is compared with this copy to tell which fields each side changed. The copies are kept while a device is disconnected, so reconnecting to the same folder merges the same way.
+
+**Needs review**:
+The state of a synced record whose same field was changed on two devices. The local value is kept until the person chooses or edits the value in a comparison of the conflicting fields. Changes to different fields, and to tags and other sets, combine without review.
 
 **Parent ticket**:
 A ticket whose outcome is broken into subtickets. It may be Done while subtickets remain open, and completing all subtickets does not necessarily fulfill its own outcome.

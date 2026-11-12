@@ -27,7 +27,7 @@ fn completed_creation_replays_after_restart_without_duplicate_or_lost_fields() {
     let WriteResult::Ticket(ticket) = &first else {
         panic!("expected a created ticket")
     };
-    assert_eq!(ticket.reference, "T-1");
+    assert_eq!(ticket.reference, "T-KQ1");
     assert_eq!(ticket.body, "Original body");
     assert_eq!(ticket.tags, ["qa"]);
     assert_eq!(ticket.plan_id.as_deref(), Some(plan.id.as_str()));
@@ -50,7 +50,7 @@ fn completed_creation_replays_after_restart_without_duplicate_or_lost_fields() {
             .create_ticket("Next deliberate ticket")
             .unwrap()
             .reference,
-        "T-2"
+        "T-KQ2"
     );
 }
 
@@ -69,6 +69,6 @@ fn failed_complete_creation_rolls_back_ticket_and_receipt_before_retry() {
     else {
         panic!("expected a created ticket")
     };
-    assert_eq!(ticket.reference, "T-1");
+    assert_eq!(ticket.reference, "T-KQ1");
     assert!(workspace.is_following(&ticket.reference).unwrap());
 }

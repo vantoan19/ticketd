@@ -219,7 +219,7 @@ test.each(["ticket", "document"])(
                   trashed: false,
                   target: {
                     kind,
-                    id: kind === "ticket" ? "T-7" : "document-id",
+                    id: kind === "ticket" ? "T-KQ7" : "document-id",
                   },
                 },
               ],
@@ -237,7 +237,7 @@ test.each(["ticket", "document"])(
       await screen.findByRole("button", { name: "Saved context" }),
     );
     expect(kind === "ticket" ? openTicket : openDocument).toHaveBeenCalledWith(
-      kind === "ticket" ? "T-7" : "document-id",
+      kind === "ticket" ? "T-KQ7" : "document-id",
     );
     expect(close).toHaveBeenCalledOnce();
   },
@@ -397,7 +397,7 @@ test("usage distinguishes persisted context, recoverable trash and Undo alongsid
               {
                 kind: "ticket_body",
                 owner: "t1",
-                label: "T-1 · Checkout failure",
+                label: "T-KQ1 · Checkout failure",
                 trashed: false,
               },
               {
@@ -423,7 +423,7 @@ test("usage distinguishes persisted context, recoverable trash and Undo alongsid
     />,
   );
   await screen.findByRole("heading", { name: "Used in 3" });
-  expect(screen.getByText("T-1 · Checkout failure")).toBeTruthy();
+  expect(screen.getByText("T-KQ1 · Checkout failure")).toBeTruthy();
   expect(screen.getByText("Incident analysis")).toBeTruthy();
   expect(screen.getByText(/Document · Trash/)).toBeTruthy();
   expect(screen.getByText("Undo history")).toBeTruthy();

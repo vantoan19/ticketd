@@ -405,7 +405,7 @@ function TagChips({
   );
 }
 
-/** Finds a parent by title or T-number and sets its reference as the filter. */
+/** Finds a parent by title or reference and sets its reference as the filter. */
 function ParentSearch({
   value,
   onChange,
@@ -461,7 +461,7 @@ function ParentSearch({
       <Search aria-hidden="true" className="parent-search-icon" />
       <Input
         aria-label="Find a parent ticket"
-        placeholder="Find a parent by title or T-number"
+        placeholder="Find a parent by title or reference"
         value={text}
         onChange={(event) => setText(event.target.value)}
       />

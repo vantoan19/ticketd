@@ -206,10 +206,10 @@ fn version_one_workspace_upgrades_content_history_and_tags() {
     connection.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); INSERT INTO tickets (id, title, status) VALUES ('old-id', 'Existing', 'Todo'); PRAGMA user_version = 1;").unwrap();
     drop(connection);
     let mut workspace = Workspace::open(&path).unwrap();
-    workspace.add_tag("T-1", "Bug").unwrap();
+    workspace.add_tag("T-KQ1", "Bug").unwrap();
     let updated = workspace
         .change_ticket(
-            "T-1",
+            "T-KQ1",
             TicketPatch {
                 body: Some("Details".into()),
                 status: Some(Status::Done),
@@ -219,10 +219,10 @@ fn version_one_workspace_upgrades_content_history_and_tags() {
         .unwrap();
     assert_eq!(updated.body, "Details");
     assert_eq!(updated.tags, vec!["bug"]);
-    assert_eq!(workspace.ticket_history("T-1").unwrap().len(), 1);
+    assert_eq!(workspace.ticket_history("T-KQ1").unwrap().len(), 1);
     drop(workspace);
     let reopened = Workspace::open(&path).unwrap();
-    assert_eq!(reopened.show_ticket("T-1").unwrap(), updated);
+    assert_eq!(reopened.show_ticket("T-KQ1").unwrap(), updated);
 }
 
 #[test]
@@ -504,7 +504,7 @@ fn dependency_cycle_error_names_the_path() {
         .to_string();
     assert_eq!(
         message,
-        "T-3 can't block T-1: T-1 already reaches T-3 through T-2."
+        "T-KQ3 can't block T-KQ1: T-KQ1 already reaches T-KQ3 through T-KQ2."
     );
 }
 
@@ -1057,7 +1057,7 @@ fn failed_request_id_can_be_reused_and_clearing_is_distinct_from_omission() {
         .write(
             Some("patch"),
             WriteRequest::ChangeTicket {
-                reference: "T-1".into(),
+                reference: "T-KQ1".into(),
                 patch: TicketPatch::default(),
             },
         )
@@ -1067,7 +1067,7 @@ fn failed_request_id_can_be_reused_and_clearing_is_distinct_from_omission() {
             .write(
                 Some("patch"),
                 WriteRequest::ChangeTicket {
-                    reference: "T-1".into(),
+                    reference: "T-KQ1".into(),
                     patch: TicketPatch {
                         project_id: Some(None),
                         ..Default::default()
@@ -1250,7 +1250,7 @@ fn backup_restores_trash_relationships_and_request_replay() {
         blocker.reference
     );
     assert_eq!(w.list_trash().unwrap()[0].id, blocker.id);
-    assert!(w.show_ticket("T-4").is_err());
+    assert!(w.show_ticket("T-KQ4").is_err());
 }
 
 #[test]
@@ -1316,19 +1316,18 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
             let sender = sender.clone();
             std::thread::spawn(move || {
                 barrier.wait();
-                sender.send(Workspace::open(path).unwrap()).unwrap();
+                sender.send(Workspace::open(path)).unwrap();
             })
         })
         .collect();
+    // Only the openers send: a failed open arrives as its own error, and an
+    // opener that panicked closes the channel instead of leaving a wait.
+    drop(sender);
+    // Widens the window in which both openers see the old format; the test
+    // holds whether or not they do.
     std::thread::sleep(std::time::Duration::from_millis(200));
     drop(lock);
-    let mut workspaces: Vec<_> = (0..2)
-        .map(|_| {
-            receiver
-                .recv_timeout(std::time::Duration::from_secs(5))
-                .expect("concurrent workspace open timed out")
-        })
-        .collect();
+    let mut workspaces: Vec<_> = (0..2).map(|_| receiver.recv().unwrap().unwrap()).collect();
     for handle in handles {
         handle.join().unwrap();
     }
@@ -1365,6 +1364,40 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
         workspace.show_ticket(&reference).unwrap().tags,
         vec!["kept"]
     );
+}
+
+#[test]
+fn opening_waits_for_a_migration_or_restore_longer_than_for_workspaces_open_elsewhere() {
+    use std::time::Duration;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    drop(Workspace::open(&path).unwrap());
+    // What a migration or a restore holds while it works.
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("{}.lock", path.display()))
+        .unwrap();
+    fs2::FileExt::lock_exclusive(&lock).unwrap();
+    // Its wait is bounded.
+    assert!(matches!(
+        Workspace::open_with_lock_waits(&path, Duration::from_secs(600), Duration::ZERO),
+        Err(ticketd_core::Error::Backup(_))
+    ));
+    // And it is not the wait for Workspaces open elsewhere, which here is over at once.
+    let opener = std::thread::spawn({
+        let path = path.clone();
+        move || {
+            Workspace::open_with_lock_waits(path, Duration::ZERO, Duration::from_secs(600))
+                .map(|_| ())
+        }
+    });
+
+    // Lets the opener meet the lock; the test holds whether or not it does.
+    std::thread::sleep(Duration::from_millis(200));
+    drop(lock);
+
+    opener.join().unwrap().unwrap();
 }
 
 #[test]
@@ -1508,7 +1541,7 @@ fn batch_creates_and_follows_a_ticket_in_one_write() {
 
     let failing: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
         {"operation":"create", "name":"new", "title":"Rolled back"},
-        {"operation":"change", "ticket":"T-999", "change":{"status":"Done"}}
+        {"operation":"change", "ticket":"T-KQ999", "change":{"status":"Done"}}
     ]))
     .unwrap();
     assert!(workspace.apply_batch_following(failing, true).is_err());
@@ -1542,7 +1575,7 @@ fn inbox_writes_replay_and_failed_batches_leave_no_events() {
             }),
         },
         BatchOperation::Change {
-            ticket: "T-9999".into(),
+            ticket: "T-KQ9999".into(),
             change: Box::new(TicketChange::default()),
         },
     ];
@@ -1609,12 +1642,12 @@ fn backup_restore_preserves_personal_inbox_and_follows() {
     assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
 }
 
-/// The source text each backlink of T-1 in `body` covers.
+/// The source text each backlink of T-KQ1 in `body` covers.
 fn mention_spans(body: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3"))?;
     let target = workspace.create_ticket("Target")?;
-    assert_eq!(target.reference, "T-1");
+    assert_eq!(target.reference, "T-KQ1");
     let source = workspace.create_ticket("Source")?;
     workspace.change_ticket(
         &source.reference,
@@ -1634,27 +1667,27 @@ fn mention_spans(body: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> 
 
 #[test]
 fn backlink_spans_count_chars_not_utf16_units_or_bytes() {
-    let body = "Émoji 😀 first.\n\n| T-1 | Done |\n|---|---|\n\nSee T-1 here.";
-    assert_eq!(mention_spans(body).unwrap(), ["T-1", "T-1"]);
+    let body = "Émoji 😀 first.\n\n| T-KQ1 | Done |\n|---|---|\n\nSee T-KQ1 here.";
+    assert_eq!(mention_spans(body).unwrap(), ["T-KQ1", "T-KQ1"]);
 }
 
 #[test]
 fn backlink_spans_ignore_a_leading_byte_order_mark_and_survive_crlf() {
-    assert_eq!(mention_spans("\u{feff}See T-1 here.").unwrap(), ["T-1"]);
+    assert_eq!(mention_spans("\u{feff}See T-KQ1 here.").unwrap(), ["T-KQ1"]);
     assert_eq!(
-        mention_spans("\u{feff}First line.\r\n\r\nBlocked on T-1 now.\r\n").unwrap(),
-        ["T-1"]
+        mention_spans("\u{feff}First line.\r\n\r\nBlocked on T-KQ1 now.\r\n").unwrap(),
+        ["T-KQ1"]
     );
 }
 
 #[test]
 fn backlink_span_is_the_whole_run_when_the_source_uses_entities_or_escapes() {
     assert_eq!(
-        mention_spans("&#120;T-1 and T-1").unwrap(),
-        ["&#120;T-1 and T-1"],
+        mention_spans("&#120;T-KQ1 and T-KQ1").unwrap(),
+        ["&#120;T-KQ1 and T-KQ1"],
         "a decoded run is not searched in its raw source"
     );
-    assert_eq!(mention_spans("a \\* T-1").unwrap(), ["a \\* T-1"]);
+    assert_eq!(mention_spans("a \\* T-KQ1").unwrap(), ["a \\* T-KQ1"]);
 }
 
 #[test]
@@ -1685,7 +1718,7 @@ fn backlinks_follow_markdown_content_and_note_changes() {
     let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
     assert_eq!(links.len(), 2);
     assert_eq!(links[0].source_reference, source.reference);
-    assert_eq!(links[0].passage, "See T-1 here.");
+    assert_eq!(links[0].passage, "See T-KQ1 here.");
     assert_eq!(links[1].activity_id.as_deref(), Some(note.id.as_str()));
     workspace
         .delete_activity(&source.reference, &note.id)
@@ -1729,14 +1762,14 @@ fn backlink_pages_follow_edits_and_trash_visibility() {
     let target = workspace.create_ticket("Target").unwrap();
     let source = workspace.create_ticket("Source").unwrap();
     let first = workspace
-        .add_activity(&source.reference, "T-1 first", None)
+        .add_activity(&source.reference, "T-KQ1 first", None)
         .unwrap();
     workspace
-        .add_activity(&source.reference, "T-1 second", None)
+        .add_activity(&source.reference, "T-KQ1 second", None)
         .unwrap();
     assert_eq!(
         workspace.backlinks(&target.reference, 1, 1).unwrap()[0].passage,
-        "T-1 second"
+        "T-KQ1 second"
     );
     workspace
         .edit_activity(
@@ -1773,13 +1806,13 @@ fn long_backlink_passage_keeps_the_reference_visible() {
         .change_ticket(
             &source.reference,
             TicketPatch {
-                body: Some(format!("{} T-1 context", "x".repeat(600))),
+                body: Some(format!("{} T-KQ1 context", "x".repeat(600))),
                 ..Default::default()
             },
         )
         .unwrap();
     let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
-    assert!(links[0].passage.contains("T-1"));
+    assert!(links[0].passage.contains("T-KQ1"));
     assert!(links[0].passage.chars().count() <= 512);
 }
 
@@ -1793,7 +1826,7 @@ fn backlinks_recognize_escaped_markdown_references() {
         .change_ticket(
             &source.reference,
             TicketPatch {
-                body: Some("See T\\-1 and &#84;-1".into()),
+                body: Some("See T\\-KQ1 and &#84;-KQ1".into()),
                 ..Default::default()
             },
         )
@@ -1932,7 +1965,7 @@ fn followed_batch_notes_and_relationships_are_atomic_and_retry_safe() {
             }),
         },
         BatchOperation::Change {
-            ticket: "T-9999".into(),
+            ticket: "T-KQ9999".into(),
             change: Box::new(TicketChange::default()),
         },
     ];
@@ -3940,7 +3973,7 @@ mod duplicate_review_outcomes {
         (dir, ws)
     }
 
-    /// Creates T-1 (the duplicate), T-2 (the canonical) and `others` more tickets.
+    /// Creates T-KQ1 (the duplicate), T-KQ2 (the canonical) and `others` more tickets.
     fn tickets(ws: &mut Workspace, others: usize) {
         for title in ["Duplicate", "Canonical"] {
             ws.create_ticket(title).unwrap();
@@ -3992,7 +4025,7 @@ mod duplicate_review_outcomes {
         preview: &DuplicateDependencyPreview,
         decisions: &[DependencyDecision],
     ) -> Vec<WaitingOutcome> {
-        ws.evaluate_dependency_review("T-1", "T-2", preview.mode, decisions)
+        ws.evaluate_dependency_review("T-KQ1", "T-KQ2", preview.mode, decisions)
             .unwrap()
     }
 
@@ -4005,27 +4038,30 @@ mod duplicate_review_outcomes {
         use DependencyChoice::{Remove, Replace};
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        // T-1 (duplicate) blocks canonical T-2, and T-3 blocks T-1.
-        block(&mut ws, "T-1", "T-2");
-        block(&mut ws, "T-3", "T-1");
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        assert_eq!(preview.source, "T-1");
+        // T-KQ1 (duplicate) blocks canonical T-KQ2, and T-KQ3 blocks T-KQ1.
+        block(&mut ws, "T-KQ1", "T-KQ2");
+        block(&mut ws, "T-KQ3", "T-KQ1");
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        assert_eq!(preview.source, "T-KQ1");
         assert_eq!(preview.mode, ReviewMode::Duplicate);
-        let decisions = decide(&preview, &[("T-1", "T-2", Remove), ("T-3", "T-1", Replace)]);
+        let decisions = decide(
+            &preview,
+            &[("T-KQ1", "T-KQ2", Remove), ("T-KQ3", "T-KQ1", Replace)],
+        );
         let outcomes = evaluate(&ws, &preview, &decisions);
-        // Removing T-1's edge alone would make T-2 Ready, but Replace gives it T-3.
-        let canonical = outcome(&outcomes, "T-2");
+        // Removing T-KQ1's edge alone would make T-KQ2 Ready, but Replace gives it T-KQ3.
+        let canonical = outcome(&outcomes, "T-KQ2");
         assert_eq!(canonical.before, Readiness::Blocked);
         assert_eq!(canonical.after, Readiness::Blocked);
-        assert_eq!(canonical.unresolved_after, ["T-3"]);
-        assert_eq!(outcome(&outcomes, "T-1").after, Readiness::NoReadyState);
+        assert_eq!(canonical.unresolved_after, ["T-KQ3"]);
+        assert_eq!(outcome(&outcomes, "T-KQ1").after, Readiness::NoReadyState);
 
-        ws.mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, decisions, None)
+        ws.mark_duplicate_reviewed("T-KQ1", "T-KQ2", &preview.canonical, decisions, None)
             .unwrap();
-        assert_eq!(availability(&ws, "T-2").as_deref(), Some("Blocked"));
+        assert_eq!(availability(&ws, "T-KQ2").as_deref(), Some("Blocked"));
         // What is left to wait for is what the outcome said, not just the label.
         let applied: Vec<String> = ws
-            .show_ticket("T-2")
+            .show_ticket("T-KQ2")
             .unwrap()
             .prerequisites
             .into_iter()
@@ -4039,16 +4075,16 @@ mod duplicate_review_outcomes {
     fn canonical_readiness_is_reported_when_the_duplicate_is_the_dependent() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        block(&mut ws, "T-3", "T-1");
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        let replaced = decide(&preview, &[("T-3", "T-1", DependencyChoice::Replace)]);
-        let canonical = outcome(&evaluate(&ws, &preview, &replaced), "T-2");
+        block(&mut ws, "T-KQ3", "T-KQ1");
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        let replaced = decide(&preview, &[("T-KQ3", "T-KQ1", DependencyChoice::Replace)]);
+        let canonical = outcome(&evaluate(&ws, &preview, &replaced), "T-KQ2");
         assert_eq!(canonical.before, Readiness::Ready);
         assert_eq!(canonical.after, Readiness::Blocked);
-        assert_eq!(canonical.unresolved_after, ["T-3"]);
+        assert_eq!(canonical.unresolved_after, ["T-KQ3"]);
         let kept = decide(&preview, &[]);
         assert_eq!(
-            outcome(&evaluate(&ws, &preview, &kept), "T-2").after,
+            outcome(&evaluate(&ws, &preview, &kept), "T-KQ2").after,
             Readiness::Ready
         );
     }
@@ -4057,11 +4093,11 @@ mod duplicate_review_outcomes {
     fn a_replacement_that_is_already_done_leaves_the_dependent_ready() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        block(&mut ws, "T-1", "T-3");
-        set_status(&mut ws, "T-2", Status::Done);
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
-        let dependent = outcome(&evaluate(&ws, &preview, &decisions), "T-3");
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        set_status(&mut ws, "T-KQ2", Status::Done);
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        let decisions = decide(&preview, &[("T-KQ1", "T-KQ3", DependencyChoice::Replace)]);
+        let dependent = outcome(&evaluate(&ws, &preview, &decisions), "T-KQ3");
         assert_eq!(dependent.before, Readiness::Blocked);
         assert_eq!(dependent.after, Readiness::Ready);
         assert!(dependent.unresolved_after.is_empty());
@@ -4071,51 +4107,54 @@ mod duplicate_review_outcomes {
     fn other_blockers_stay_listed_and_a_started_or_trashed_dependent_has_no_ready_state() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 4);
-        block(&mut ws, "T-1", "T-3");
-        block(&mut ws, "T-4", "T-3");
-        block(&mut ws, "T-1", "T-5");
-        block(&mut ws, "T-1", "T-6");
-        set_status(&mut ws, "T-5", Status::InProgress);
-        ws.set_trashed("T-6", true, None).unwrap();
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        let remove = |dependent: &'static str| ("T-1", dependent, DependencyChoice::Remove);
-        let decisions = decide(&preview, &[remove("T-3"), remove("T-5"), remove("T-6")]);
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        block(&mut ws, "T-KQ4", "T-KQ3");
+        block(&mut ws, "T-KQ1", "T-KQ5");
+        block(&mut ws, "T-KQ1", "T-KQ6");
+        set_status(&mut ws, "T-KQ5", Status::InProgress);
+        ws.set_trashed("T-KQ6", true, None).unwrap();
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        let remove = |dependent: &'static str| ("T-KQ1", dependent, DependencyChoice::Remove);
+        let decisions = decide(
+            &preview,
+            &[remove("T-KQ3"), remove("T-KQ5"), remove("T-KQ6")],
+        );
         let outcomes = evaluate(&ws, &preview, &decisions);
-        let blocked = outcome(&outcomes, "T-3");
+        let blocked = outcome(&outcomes, "T-KQ3");
         assert_eq!(blocked.after, Readiness::Blocked);
-        assert_eq!(blocked.unresolved_after, ["T-4"]);
-        let started = outcome(&outcomes, "T-5");
+        assert_eq!(blocked.unresolved_after, ["T-KQ4"]);
+        let started = outcome(&outcomes, "T-KQ5");
         assert_eq!(
             (started.status, started.after),
             (Status::InProgress, Readiness::NoReadyState)
         );
-        let trashed = outcome(&outcomes, "T-6");
+        let trashed = outcome(&outcomes, "T-KQ6");
         assert!(trashed.trashed);
         assert_eq!(
             (trashed.before, trashed.after),
             (Readiness::NoReadyState, Readiness::NoReadyState)
         );
         // The detail view agrees: a trashed ticket has no Ready indicator either.
-        assert_eq!(availability(&ws, "T-6"), None);
+        assert_eq!(availability(&ws, "T-KQ6"), None);
     }
 
     #[test]
     fn a_separate_review_does_not_cancel_the_existing_endpoint() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        block(&mut ws, "T-1", "T-3");
-        set_status(&mut ws, "T-1", Status::Done);
-        let separate = ws.preview_dependency_move("T-1", "T-2").unwrap();
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        set_status(&mut ws, "T-KQ1", Status::Done);
+        let separate = ws.preview_dependency_move("T-KQ1", "T-KQ2").unwrap();
         assert_eq!(separate.mode, ReviewMode::Separate);
         let kept = decide(&separate, &[]);
         assert_eq!(
-            outcome(&evaluate(&ws, &separate, &kept), "T-3").after,
+            outcome(&evaluate(&ws, &separate, &kept), "T-KQ3").after,
             Readiness::Ready
         );
-        let duplicate = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let duplicate = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
         let kept = decide(&duplicate, &[]);
         assert_eq!(
-            outcome(&evaluate(&ws, &duplicate, &kept), "T-3").after,
+            outcome(&evaluate(&ws, &duplicate, &kept), "T-KQ3").after,
             Readiness::Blocked
         );
     }
@@ -4124,20 +4163,26 @@ mod duplicate_review_outcomes {
     fn a_preview_applied_in_the_other_mode_is_rejected_with_its_own_error() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        block(&mut ws, "T-1", "T-3");
-        let duplicate = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        let decisions = decide(&duplicate, &[("T-1", "T-3", DependencyChoice::Remove)]);
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        let duplicate = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        let decisions = decide(&duplicate, &[("T-KQ1", "T-KQ3", DependencyChoice::Remove)]);
         let error = ws
-            .edit_dependencies_reviewed("T-1", "T-2", &duplicate.canonical, decisions.clone(), None)
+            .edit_dependencies_reviewed(
+                "T-KQ1",
+                "T-KQ2",
+                &duplicate.canonical,
+                decisions.clone(),
+                None,
+            )
             .unwrap_err();
         assert!(matches!(error, Error::DependencyReviewMode(_)), "{error}");
         assert!(error.to_string().contains("different kind of review"));
         let error = ws
-            .evaluate_dependency_review("T-1", "T-2", ReviewMode::Separate, &decisions)
+            .evaluate_dependency_review("T-KQ1", "T-KQ2", ReviewMode::Separate, &decisions)
             .unwrap_err();
         assert!(matches!(error, Error::DependencyReviewMode(_)), "{error}");
         // Nothing was applied, and the matching mode still works.
-        ws.mark_duplicate_reviewed("T-1", "T-2", &duplicate.canonical, decisions, None)
+        ws.mark_duplicate_reviewed("T-KQ1", "T-KQ2", &duplicate.canonical, decisions, None)
             .unwrap();
     }
 
@@ -4146,32 +4191,34 @@ mod duplicate_review_outcomes {
         type Change = fn(&mut Workspace);
         let changes: [(&str, Change); 3] = [
             // The replacement is In progress when previewed and Done by apply time.
-            ("canonical status", |ws| set_status(ws, "T-2", Status::Done)),
+            ("canonical status", |ws| {
+                set_status(ws, "T-KQ2", Status::Done)
+            }),
             ("other blocker status", |ws| {
-                set_status(ws, "T-4", Status::Done)
+                set_status(ws, "T-KQ4", Status::Done)
             }),
             ("dependent status", |ws| {
-                set_status(ws, "T-3", Status::InProgress)
+                set_status(ws, "T-KQ3", Status::InProgress)
             }),
         ];
         for (name, change) in changes {
             let (_dir, mut ws) = workspace();
             tickets(&mut ws, 3);
-            block(&mut ws, "T-1", "T-3");
-            block(&mut ws, "T-4", "T-3");
-            set_status(&mut ws, "T-2", Status::InProgress);
-            let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-            let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
+            block(&mut ws, "T-KQ1", "T-KQ3");
+            block(&mut ws, "T-KQ4", "T-KQ3");
+            set_status(&mut ws, "T-KQ2", Status::InProgress);
+            let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+            let decisions = decide(&preview, &[("T-KQ1", "T-KQ3", DependencyChoice::Replace)]);
             change(&mut ws);
             let error = ws
-                .mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, decisions, None)
+                .mark_duplicate_reviewed("T-KQ1", "T-KQ2", &preview.canonical, decisions, None)
                 .unwrap_err();
             assert!(
                 matches!(error, Error::DependencyReviewChanged),
                 "{name}: {error}"
             );
             assert_eq!(
-                ws.show_ticket("T-1").unwrap().status,
+                ws.show_ticket("T-KQ1").unwrap().status,
                 Status::Todo,
                 "{name}"
             );
@@ -4179,12 +4226,12 @@ mod duplicate_review_outcomes {
 
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 3);
-        block(&mut ws, "T-1", "T-3");
-        block(&mut ws, "T-4", "T-3");
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Remove)]);
-        set_status(&mut ws, "T-5", Status::Done);
-        ws.mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, decisions, None)
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        block(&mut ws, "T-KQ4", "T-KQ3");
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        let decisions = decide(&preview, &[("T-KQ1", "T-KQ3", DependencyChoice::Remove)]);
+        set_status(&mut ws, "T-KQ5", Status::Done);
+        ws.mark_duplicate_reviewed("T-KQ1", "T-KQ2", &preview.canonical, decisions, None)
             .unwrap();
     }
 
@@ -4192,13 +4239,15 @@ mod duplicate_review_outcomes {
     fn the_preview_names_the_normalized_source_and_refuses_an_oversized_review() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        let preview = ws.preview_dependency_move("T-01", "T-2").unwrap();
-        assert_eq!(preview.source, "T-1");
+        let preview = ws.preview_dependency_move("T-KQ1", "T-KQ2").unwrap();
+        assert_eq!(preview.source, "T-KQ1");
         for n in 0..1001 {
             let dependent = ws.create_ticket(&format!("Dependent {n}")).unwrap();
-            block(&mut ws, "T-1", &dependent.reference);
+            block(&mut ws, "T-KQ1", &dependent.reference);
         }
-        let error = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap_err();
+        let error = ws
+            .preview_duplicate_dependencies("T-KQ1", "T-KQ2")
+            .unwrap_err();
         assert!(matches!(error, Error::InvalidBatch(_)), "{error}");
     }
 
@@ -4206,11 +4255,11 @@ mod duplicate_review_outcomes {
     fn the_preview_lists_each_dependent_with_its_current_status_and_readiness() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 3);
-        block(&mut ws, "T-1", "T-3");
-        block(&mut ws, "T-1", "T-4");
-        block(&mut ws, "T-5", "T-4");
-        set_status(&mut ws, "T-5", Status::Done);
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        block(&mut ws, "T-KQ1", "T-KQ4");
+        block(&mut ws, "T-KQ5", "T-KQ4");
+        set_status(&mut ws, "T-KQ5", Status::Done);
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
         let rows: Vec<_> = preview
             .waiting
             .iter()
@@ -4227,21 +4276,21 @@ mod duplicate_review_outcomes {
             rows,
             [
                 (
-                    "T-3",
+                    "T-KQ3",
                     Status::Todo,
                     Readiness::Blocked,
-                    vec!["T-1".to_string()]
+                    vec!["T-KQ1".to_string()]
                 ),
                 (
-                    "T-4",
+                    "T-KQ4",
                     Status::Todo,
                     Readiness::Blocked,
-                    vec!["T-1".to_string()]
+                    vec!["T-KQ1".to_string()]
                 ),
             ]
         );
         // The baseline is the detail view's answer.
-        assert_eq!(availability(&ws, "T-3").as_deref(), Some("Blocked"));
+        assert_eq!(availability(&ws, "T-KQ3").as_deref(), Some("Blocked"));
     }
 
     #[test]
@@ -4249,10 +4298,10 @@ mod duplicate_review_outcomes {
         use ticketd_core::ContextOptions;
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        block(&mut ws, "T-2", "T-3"); // a blocked, trashed Todo
-        ws.set_trashed("T-1", true, None).unwrap(); // an unblocked, trashed Todo
-        ws.set_trashed("T-3", true, None).unwrap();
-        for reference in ["T-1", "T-3"] {
+        block(&mut ws, "T-KQ2", "T-KQ3"); // a blocked, trashed Todo
+        ws.set_trashed("T-KQ1", true, None).unwrap(); // an unblocked, trashed Todo
+        ws.set_trashed("T-KQ3", true, None).unwrap();
+        for reference in ["T-KQ1", "T-KQ3"] {
             let detail = ws.show_ticket(reference).unwrap().availability;
             let context = ws
                 .ticket_context(reference, ContextOptions::default())
@@ -4269,8 +4318,8 @@ mod duplicate_review_outcomes {
                 .availability;
             assert_eq!((detail, context, graph), (None, None, None), "{reference}");
         }
-        ws.set_trashed("T-3", false, None).unwrap();
-        assert_eq!(availability(&ws, "T-3").as_deref(), Some("Blocked"));
+        ws.set_trashed("T-KQ3", false, None).unwrap();
+        assert_eq!(availability(&ws, "T-KQ3").as_deref(), Some("Blocked"));
     }
 
     #[test]
@@ -4278,28 +4327,32 @@ mod duplicate_review_outcomes {
         use ticketd_core::ReplacementIssue;
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 2);
-        block(&mut ws, "T-1", "T-3");
-        block(&mut ws, "T-4", "T-1");
-        ws.set_trashed("T-3", true, None).unwrap();
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        // Replace would add T-2 -> T-3, which cannot be done to a trashed ticket.
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        block(&mut ws, "T-KQ4", "T-KQ1");
+        ws.set_trashed("T-KQ3", true, None).unwrap();
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        // Replace would add T-KQ2 -> T-KQ3, which cannot be done to a trashed ticket.
         assert_eq!(
             preview.replacement_issues[0],
             Some(ReplacementIssue::Trashed)
         );
         assert_eq!(preview.replacement_issues[1], None);
 
-        let error = ws.preview_duplicate_dependencies("T-1", "T-1").unwrap_err();
+        let error = ws
+            .preview_duplicate_dependencies("T-KQ1", "T-KQ1")
+            .unwrap_err();
         assert!(matches!(error, Error::ReviewSameTicket), "{error}");
-        let error = ws.preview_dependency_move("T-01", "T-1").unwrap_err();
+        let error = ws.preview_dependency_move("T-KQ1", "T-KQ1").unwrap_err();
         assert!(matches!(error, Error::ReviewSameTicket), "{error}");
 
         // A trashed canonical fails whatever the choices, so a duplicate review says so now.
-        ws.set_trashed("T-2", true, None).unwrap();
-        let error = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap_err();
+        ws.set_trashed("T-KQ2", true, None).unwrap();
+        let error = ws
+            .preview_duplicate_dependencies("T-KQ1", "T-KQ2")
+            .unwrap_err();
         assert!(matches!(error, Error::Trashed(_)), "{error}");
         // A separate review only needs to add edges, so each Replace is marked instead.
-        let separate = ws.preview_dependency_move("T-1", "T-2").unwrap();
+        let separate = ws.preview_dependency_move("T-KQ1", "T-KQ2").unwrap();
         assert_eq!(
             separate.replacement_issues[1],
             Some(ReplacementIssue::Trashed)
@@ -4310,14 +4363,14 @@ mod duplicate_review_outcomes {
     fn a_replacement_that_became_impossible_is_a_changed_review_when_evaluating_too() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        block(&mut ws, "T-1", "T-3");
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        let decisions = decide(&preview, &[("T-KQ1", "T-KQ3", DependencyChoice::Replace)]);
         evaluate(&ws, &preview, &decisions);
-        // An unrelated edit makes T-2 -> T-3 circular; no readiness input changed.
-        block(&mut ws, "T-3", "T-2");
+        // An unrelated edit makes T-KQ2 -> T-KQ3 circular; no readiness input changed.
+        block(&mut ws, "T-KQ3", "T-KQ2");
         let error = ws
-            .evaluate_dependency_review("T-1", "T-2", preview.mode, &decisions)
+            .evaluate_dependency_review("T-KQ1", "T-KQ2", preview.mode, &decisions)
             .unwrap_err();
         assert!(matches!(error, Error::DependencyReviewChanged), "{error}");
     }
@@ -4326,16 +4379,16 @@ mod duplicate_review_outcomes {
     fn the_canonical_only_matters_to_the_review_when_a_replace_uses_it() {
         let (_dir, mut ws) = workspace();
         tickets(&mut ws, 1);
-        block(&mut ws, "T-1", "T-3");
-        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
-        let remove = decide(&preview, &[("T-1", "T-3", DependencyChoice::Remove)]);
-        let replace = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
-        set_status(&mut ws, "T-2", Status::Done);
+        block(&mut ws, "T-KQ1", "T-KQ3");
+        let preview = ws.preview_duplicate_dependencies("T-KQ1", "T-KQ2").unwrap();
+        let remove = decide(&preview, &[("T-KQ1", "T-KQ3", DependencyChoice::Remove)]);
+        let replace = decide(&preview, &[("T-KQ1", "T-KQ3", DependencyChoice::Replace)]);
+        set_status(&mut ws, "T-KQ2", Status::Done);
         let error = ws
-            .evaluate_dependency_review("T-1", "T-2", preview.mode, &replace)
+            .evaluate_dependency_review("T-KQ1", "T-KQ2", preview.mode, &replace)
             .unwrap_err();
         assert!(matches!(error, Error::DependencyReviewChanged), "{error}");
-        ws.mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, remove, None)
+        ws.mark_duplicate_reviewed("T-KQ1", "T-KQ2", &preview.canonical, remove, None)
             .unwrap();
     }
 }
@@ -4666,9 +4719,9 @@ fn a_ticket_is_not_mentioned_in_itself() {
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("Self").unwrap();
     workspace
-        .add_activity(&ticket.reference, "Relates to T-1 itself", None)
+        .add_activity(&ticket.reference, "Relates to T-KQ1 itself", None)
         .unwrap();
-    assert!(workspace.backlinks("T-1", 20, 0).unwrap().is_empty());
+    assert!(workspace.backlinks("T-KQ1", 20, 0).unwrap().is_empty());
 }
 
 #[test]

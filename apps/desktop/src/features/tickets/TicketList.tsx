@@ -34,6 +34,7 @@ import "./ticket-list.css";
 import { Badge } from "@/components/ui/badge";
 import { Count } from "@/components/ui/count";
 import { Reference } from "@/components/ui/reference";
+import { useConflicts } from "@/features/sync-review/use-conflicts";
 
 export function TicketList({
   tickets,
@@ -80,6 +81,10 @@ export function TicketList({
   /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
   simple?: boolean;
 }) {
+  const { conflicts } = useConflicts();
+  const needsReview = new Set(
+    conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
+  );
   const rows = useRef(new Map<string, HTMLButtonElement>());
   // Groups and rows share one list so a row that changes group keeps its
   // element and the list keeps its scroll position.
@@ -211,6 +216,7 @@ export function TicketList({
                   singleStatus={singleStatus}
                   readyView={readyView}
                   simple={simple}
+                  needsReview={needsReview.has(ticket.id)}
                 />
               </button>
               {rowAction && (
@@ -259,7 +265,10 @@ function RowDetails({
   singleStatus,
   readyView,
   simple,
+  needsReview,
 }: {
+  /** Changed on two desktops and waiting for a choice; said in place of readiness. */
+  needsReview: boolean;
   ticket: Ticket;
   scope: RowScope;
   grouped: boolean;
@@ -290,7 +299,14 @@ function RowDetails({
   return (
     <span className="ticket-row-meta">
       <span className="ticket-row-contextual">
-        {simple ? (
+        {needsReview ? (
+          <span className="ticket-row-state">
+            <StatusDot tone="attention" size={10} />
+            <span className={simple ? "sr-only" : "ticket-row-state-label"}>
+              Needs review
+            </span>
+          </span>
+        ) : simple ? (
           // One line: a dot says Ready or Blocked, or that the source is
           // unavailable. A dot never stands alone, so the words are its name and
           // its tooltip. The Ready view omits the per-row Ready dot.

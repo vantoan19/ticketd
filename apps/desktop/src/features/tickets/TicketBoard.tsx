@@ -21,6 +21,7 @@ import {
 import { ticketStatuses } from "@/lib/statuses";
 import { Duplicates } from "./Duplicates";
 import { ConfirmLeaveDuplicate } from "./ConfirmLeaveDuplicate";
+import { useConflicts } from "@/features/sync-review/use-conflicts";
 import { SourcePill } from "./TicketList";
 import { StatusIcon } from "./StatusIcon";
 import { readiness, readinessLabel } from "./ticket-row";
@@ -50,6 +51,10 @@ export function TicketBoard({
     workspace.availability,
   );
   const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
+  const { conflicts } = useConflicts();
+  const needsReview = new Set(
+    conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
+  );
   return (
     <>
       <div
@@ -195,7 +200,12 @@ export function TicketBoard({
                         <span className="board-card-title" title={ticket.title}>
                           {ticket.title}
                         </span>
-                        {source?.unavailable ? (
+                        {needsReview.has(ticket.id) ? (
+                          <span className="board-card-state">
+                            <StatusDot tone="attention" size={10} />
+                            Needs review
+                          </span>
+                        ) : source?.unavailable ? (
                           <span className="board-card-state">
                             <StatusDot tone="attention" size={10} />
                             Source unavailable

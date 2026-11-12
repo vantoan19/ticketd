@@ -2,7 +2,7 @@
 
 ## Portable Markdown with files
 
-`ticketd export-markdown --ticket T-1 --output FOLDER` exports a ticket's title,
+`ticketd export-markdown --ticket T-KQ1 --output FOLDER` exports a ticket's title,
 description and direct attachments. Use `--document ID` for a saved Document, or
 `--markdown-file PATH` for selected/current Markdown (`-` reads stdin). Exactly
 one source is required. The standalone CLI needs no desktop process.
@@ -82,7 +82,7 @@ IDs in the relevant array. `ticket_tags.tag_name` refers to `tags.name`.
 `plan_documents` associates Plan IDs with Document IDs; `ticket_documents` associates ticket IDs with the Document IDs a person attached to the ticket's context (as opposed to Documents its description mentions); `plans.spec_document_id` selects an associated primary spec.
 `document_tags.tag_name` also refers to `tags.name`; `document_pins` and
 `document_opens` refer to Document IDs. The full-text index is derived from
-Document titles and Markdown bodies and is not exported. Ticket `number` forms its stable reference as `T-` followed by the decimal number.
+Document titles and Markdown bodies and is not exported. Ticket `reference` is its stable Ticket reference (`T-KQ43`); `number` is only the local creation order.
 Optional values are null; `trashed` and `archived` are integers 0 or 1. History
 values are recorded strings, with their meaning determined by `kind`. Checkout
 paths describe the source machine and may need adjustment on another machine.

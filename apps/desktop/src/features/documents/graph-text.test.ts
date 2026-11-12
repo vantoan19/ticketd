@@ -16,14 +16,14 @@ const nodes = [
   {
     id: "a",
     kind: "ticket" as const,
-    label: "T-1 · A",
-    ticket_reference: "T-1",
+    label: "T-KQ1 · A",
+    ticket_reference: "T-KQ1",
   },
   {
     id: "b",
     kind: "ticket" as const,
-    label: "T-2 · B",
-    ticket_reference: "T-2",
+    label: "T-KQ2 · B",
+    ticket_reference: "T-KQ2",
   },
   { id: "p", kind: "plan" as const, label: "Launch", ticket_reference: null },
 ].map((node) => ({
@@ -35,8 +35,8 @@ const nodes = [
 
 test("passages show link text without Markdown or ticketd URLs", () => {
   expect(
-    plainText("See [capture context](ticketd://document/abc) and T-1."),
-  ).toBe("See capture context and T-1.");
+    plainText("See [capture context](ticketd://document/abc) and T-KQ1."),
+  ).toBe("See capture context and T-KQ1.");
 });
 
 test("edges state direction in plain language and rows are one per relationship", () => {
@@ -46,13 +46,13 @@ test("edges state direction in plain language and rows are one per relationship"
       { source: "a", target: "b", kind: "blocks", explanation: null },
       byId,
     ),
-  ).toBe("T-1 must be Done before T-2 is Ready");
+  ).toBe("T-KQ1 must be Done before T-KQ2 is Ready");
   expect(
     describeEdge(
       { source: "p", target: "a", kind: "membership", explanation: null },
       byId,
     ),
-  ).toBe("T-1 is in Plan Launch");
+  ).toBe("T-KQ1 is in Plan Launch");
   const rows = connectionRows("b", {
     nodes,
     edges: [
@@ -61,7 +61,7 @@ test("edges state direction in plain language and rows are one per relationship"
     ],
   });
   expect(rows).toHaveLength(1);
-  expect(rows[0]?.text).toBe("T-1 mentions T-2: “one” (+1 more)");
+  expect(rows[0]?.text).toBe("T-KQ1 mentions T-KQ2: “one” (+1 more)");
 });
 
 test("every relationship kind has a style and styles differ by dash and colour", async () => {
@@ -137,8 +137,8 @@ describe("map rules", () => {
         {
           id: "t",
           kind: "ticket",
-          label: "T-9 · A",
-          ticket_reference: "T-9",
+          label: "T-KQ9 · A",
+          ticket_reference: "T-KQ9",
           state: null,
           trashed: false,
           activity_detail: false,
@@ -161,7 +161,7 @@ describe("map rules", () => {
         { source: "t", target: "d", kind: "attached", explanation: null },
         nodes as never,
       ),
-    ).toBe("T-9 has Linked");
+    ).toBe("T-KQ9 has Linked");
     expect(
       stateLine({ state: null, trashed: false, activity_detail: true }),
     ).toBe("Update details");
@@ -223,13 +223,13 @@ test("every edge is labeled on the line and nodes have no all-caps type prefix",
     cardParts({
       id: "t",
       kind: "ticket",
-      label: "T-3 · Redesign pricing page",
+      label: "T-KQ3 · Redesign pricing page",
       state: "Todo",
       trashed: false,
       activity_detail: false,
     }),
   ).toEqual({
-    ref: "T-3",
+    ref: "T-KQ3",
     title: "Redesign pricing page",
     caption: "Ticket · Todo",
   });
@@ -250,9 +250,9 @@ test("a selection lists its connections under labelled rows, each item once", ()
     ({ kind, source, target, explanation: "" }) as never;
   const graph = {
     nodes: [
-      node("a", "T-1", "Add retries"),
-      node("b", "T-3", "Pricing"),
-      node("c", "T-8", "Jitter"),
+      node("a", "T-KQ1", "Add retries"),
+      node("b", "T-KQ3", "Pricing"),
+      node("c", "T-KQ8", "Jitter"),
     ],
     edges: [
       edge("blocks", "b", "a"),
@@ -262,8 +262,8 @@ test("a selection lists its connections under labelled rows, each item once", ()
     ],
   };
   expect(labelledConnections("a", graph)).toEqual([
-    { label: "Blocked by", items: [{ id: "b", text: "T-3 Pricing" }] },
-    { label: "Parent of", items: [{ id: "c", text: "T-8 Jitter" }] },
-    { label: "Mentioned by", items: [{ id: "b", text: "T-3 Pricing" }] },
+    { label: "Blocked by", items: [{ id: "b", text: "T-KQ3 Pricing" }] },
+    { label: "Parent of", items: [{ id: "c", text: "T-KQ8 Jitter" }] },
+    { label: "Mentioned by", items: [{ id: "b", text: "T-KQ3 Pricing" }] },
   ]);
 });

@@ -65,7 +65,7 @@ function RetainedNewTicket() {
         navigation={{ project: "all", plan: "" }}
         projects={[]}
         plans={[]}
-        create={async () => "T-1"}
+        create={async () => "T-KQ1"}
       />
     </>
   );

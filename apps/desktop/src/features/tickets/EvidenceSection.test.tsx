@@ -13,7 +13,7 @@ const props = { revision: 0, trashed: false, refresh: async () => {} };
 
 test("explains an empty evidence section with one Add evidence action", async () => {
   bridge.invoke.mockResolvedValue([]);
-  render(<Evidence reference="T-5" {...props} />);
+  render(<Evidence reference="T-KQ5" {...props} />);
   expect(screen.getByText(/Link a pull request/)).toBeTruthy();
   expect(screen.getAllByRole("button", { name: "Add evidence" })).toHaveLength(
     1,
@@ -38,7 +38,7 @@ test("copies any evidence value and keeps Edit and Delete in the row menu", asyn
       updated_at: "2026-10-31T10:00:00Z",
     },
   ]);
-  render(<Evidence reference="T-6" {...props} />);
+  render(<Evidence reference="T-KQ6" {...props} />);
   await screen.findByText("abc1234");
   fireEvent.click(screen.getByRole("button", { name: "Copy Fix" }));
   expect(copy).toHaveBeenCalledWith("abc1234");

@@ -42,7 +42,7 @@ test("shows outside blockers and edits dependencies through the shared workflow"
           nodes: [
             {
               id: "1",
-              reference: "T-1",
+              reference: "T-KQ1",
               title: "Member",
               status: "Todo",
               availability: "Blocked",
@@ -51,7 +51,7 @@ test("shows outside blockers and edits dependencies through the shared workflow"
             },
             {
               id: "2",
-              reference: "T-2",
+              reference: "T-KQ2",
               title: "Outside",
               status: "Todo",
               availability: "Ready",
@@ -59,7 +59,7 @@ test("shows outside blockers and edits dependencies through the shared workflow"
               boundary: true,
             },
           ],
-          edges: [{ blocker: "T-2", dependent: "T-1" }],
+          edges: [{ blocker: "T-KQ2", dependent: "T-KQ1" }],
           max_nodes: 50,
           max_depth: 1,
           max_edges: 300,
@@ -82,16 +82,16 @@ test("shows outside blockers and edits dependencies through the shared workflow"
     />,
   );
   fireEvent.click(
-    await screen.findByRole("button", { name: /^T-1: 1 open blocker/ }),
+    await screen.findByRole("button", { name: /^T-KQ1: 1 open blocker/ }),
   );
   expect(screen.getByText(/Todo, so it blocks until it is Done/)).toBeTruthy();
   fireEvent.click(
-    screen.getByRole("button", { name: "Remove blocker T-2 from T-1" }),
+    screen.getByRole("button", { name: "Remove blocker T-KQ2 from T-KQ1" }),
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("remove_dependency", {
-      blocker: "T-2",
-      dependent: "T-1",
+      blocker: "T-KQ2",
+      dependent: "T-KQ1",
     }),
   );
 });
@@ -103,7 +103,7 @@ test("a rejected blocker is explained next to the form", async () => {
         nodes: [
           {
             id: "1",
-            reference: "T-1",
+            reference: "T-KQ1",
             title: "Member",
             status: "Todo",
             availability: "Ready",
@@ -124,7 +124,7 @@ test("a rejected blocker is explained next to the form", async () => {
       return [
         {
           id: "3",
-          reference: "T-3",
+          reference: "T-KQ3",
           title: "Other",
           status: "Todo",
           body: "",
@@ -155,16 +155,16 @@ test("a rejected blocker is explained next to the form", async () => {
   expect(
     await screen.findByText("Nothing blocks anything in this Plan yet"),
   ).toBeTruthy();
-  expect(screen.getByText(/T-1 is its only ticket/)).toBeTruthy();
+  expect(screen.getByText(/T-KQ1 is its only ticket/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Add blocker…" }));
   fireEvent.change(await screen.findByLabelText("Add a blocker"), {
     target: { value: "Other" },
   });
-  fireEvent.click(await screen.findByRole("button", { name: /T-3/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /T-KQ3/ }));
   fireEvent.click(screen.getByRole("button", { name: "Add blocker" }));
-  expect((await screen.findByText(/already blocks T-3/)).textContent).toContain(
-    "T-1",
-  );
+  expect(
+    (await screen.findByText(/already blocks T-KQ3/)).textContent,
+  ).toContain("T-KQ1");
 });
 
 test("an archived Plan shows its blockers without add or remove controls", async () => {
@@ -174,7 +174,7 @@ test("an archived Plan shows its blockers without add or remove controls", async
           nodes: [
             {
               id: "1",
-              reference: "T-1",
+              reference: "T-KQ1",
               title: "Member",
               status: "Todo",
               availability: "Blocked",
@@ -183,7 +183,7 @@ test("an archived Plan shows its blockers without add or remove controls", async
             },
             {
               id: "2",
-              reference: "T-2",
+              reference: "T-KQ2",
               title: "Other",
               status: "Todo",
               availability: "Ready",
@@ -191,7 +191,7 @@ test("an archived Plan shows its blockers without add or remove controls", async
               boundary: false,
             },
           ],
-          edges: [{ blocker: "T-2", dependent: "T-1" }],
+          edges: [{ blocker: "T-KQ2", dependent: "T-KQ1" }],
           max_nodes: 50,
           max_depth: 1,
           max_edges: 300,
@@ -214,11 +214,11 @@ test("an archived Plan shows its blockers without add or remove controls", async
     />,
   );
   fireEvent.click(
-    await screen.findByRole("button", { name: /^T-1: 1 open blocker/ }),
+    await screen.findByRole("button", { name: /^T-KQ1: 1 open blocker/ }),
   );
-  expect(screen.getByLabelText("Blockers of T-1")).toBeTruthy();
+  expect(screen.getByLabelText("Blockers of T-KQ1")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^Remove blocker/ })).toBeNull();
   expect(screen.queryByLabelText("Add a blocker")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /^T-2: No blockers/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^T-KQ2: No blockers/ }));
   expect(screen.queryByLabelText("Add a blocker")).toBeNull();
 });

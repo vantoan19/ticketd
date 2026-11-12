@@ -1478,7 +1478,7 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
         .add_activity(&ticket.reference, "local work", None)
         .unwrap();
     // A teammate rewrote the title and the description, so discovery no longer
-    // recognizes the issue as this attempt's result and imports it as T-2.
+    // recognizes the issue as this attempt's result and imports it as T-KQ2.
     {
         let mut remote = f.fake.0.lock().unwrap();
         let issue = remote.issues.get_mut(&101).unwrap();
@@ -1508,8 +1508,8 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
         2
     );
     // The imported ticket is in the trash, not deleted, and the identity is unique.
-    assert!(f.workspace.show_ticket("T-2").unwrap().trashed);
-    assert!(f.workspace.show_ticket("T-2").unwrap().source.is_none());
+    assert!(f.workspace.show_ticket("T-KQ2").unwrap().trashed);
+    assert!(f.workspace.show_ticket("T-KQ2").unwrap().source.is_none());
 }
 
 #[test]

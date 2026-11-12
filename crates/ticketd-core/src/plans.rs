@@ -146,10 +146,10 @@ impl Workspace {
         let tx = self.connection.unchecked_transaction()?;
         let plan = get(&tx, id)?;
         let mut stmt = tx.prepare(
-            "SELECT number FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number",
+            "SELECT reference FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number",
         )?;
         let references = stmt
-            .query_map([id], |r| Ok(format!("T-{}", r.get::<_, i64>(0)?)))?
+            .query_map([id], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
         let mut counts = PlanCounts::default();
@@ -200,12 +200,12 @@ impl Workspace {
             }
         }
         let tickets = {
-            let mut stmt = tx.prepare("SELECT number, substr(title, 1, 256), status, length(title) > 256 FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT 21")?;
-            stmt.query_map([id], |r| Ok(serde_json::json!({"reference": format!("T-{}", r.get::<_, i64>(0)?), "title": r.get::<_, String>(1)?, "title_truncated": r.get::<_, bool>(3)?, "status": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?
+            let mut stmt = tx.prepare("SELECT reference, substr(title, 1, 256), status, length(title) > 256 FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT 21")?;
+            stmt.query_map([id], |r| Ok(serde_json::json!({"reference": r.get::<_, String>(0)?, "title": r.get::<_, String>(1)?, "title_truncated": r.get::<_, bool>(3)?, "status": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?
         };
         let dependencies = {
-            let mut stmt = tx.prepare("SELECT b.number, d.number FROM dependencies x JOIN tickets b ON b.id = x.blocker_id JOIN tickets d ON d.id = x.dependent_id WHERE (b.plan_id = ?1 OR d.plan_id = ?1) AND (b.trashed = 0 OR d.trashed = 0) ORDER BY b.number, d.number LIMIT 21")?;
-            stmt.query_map([id], |r| Ok(serde_json::json!({"blocker": format!("T-{}", r.get::<_, i64>(0)?), "dependent": format!("T-{}", r.get::<_, i64>(1)?)})))?.collect::<Result<Vec<_>, _>>()?
+            let mut stmt = tx.prepare("SELECT b.reference, d.reference FROM dependencies x JOIN tickets b ON b.id = x.blocker_id JOIN tickets d ON d.id = x.dependent_id WHERE (b.plan_id = ?1 OR d.plan_id = ?1) AND (b.trashed = 0 OR d.trashed = 0) ORDER BY b.number, d.number LIMIT 21")?;
+            stmt.query_map([id], |r| Ok(serde_json::json!({"blocker": r.get::<_, String>(0)?, "dependent": r.get::<_, String>(1)?})))?.collect::<Result<Vec<_>, _>>()?
         };
         let documents = {
             let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;

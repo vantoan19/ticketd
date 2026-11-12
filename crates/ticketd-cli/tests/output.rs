@@ -38,7 +38,7 @@ fn cli_restores_to_an_explicit_recovery_target_without_replacing_the_current_wor
     assert_eq!(
         ticketd_core::Workspace::open(current)
             .unwrap()
-            .show_ticket("T-1")
+            .show_ticket("T-KQ1")
             .unwrap()
             .title,
         "Keep original"
@@ -46,7 +46,7 @@ fn cli_restores_to_an_explicit_recovery_target_without_replacing_the_current_wor
     assert_eq!(
         ticketd_core::Workspace::open(target)
             .unwrap()
-            .show_ticket("T-1")
+            .show_ticket("T-KQ1")
             .unwrap()
             .title,
         "Recover separately"
@@ -175,17 +175,17 @@ fn cli_status_change_appears_in_followed_inbox() {
     run(&["create", "CLI status"], None);
     run(
         &["write", "-", "--request-id", "follow"],
-        Some(r#"{"operation":"set_following","reference":"T-1","following":true}"#),
+        Some(r#"{"operation":"set_following","reference":"T-KQ1","following":true}"#),
     );
-    run(&["change", "T-1", "--status", "Done"], None);
+    run(&["change", "T-KQ1", "--status", "Done"], None);
     let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"], None)).unwrap();
-    assert_eq!(inbox[0]["reference"], "T-1");
+    assert_eq!(inbox[0]["reference"], "T-KQ1");
     assert_eq!(inbox[0]["to_value"], "Done");
     assert_eq!(inbox[0]["read"], false);
     run(
         &["write", "-", "--request-id", "note"],
         Some(
-            r#"{"operation":"add_activity","reference":"T-1","brief":"CLI finding","agent":"runner"}"#,
+            r#"{"operation":"add_activity","reference":"T-KQ1","brief":"CLI finding","agent":"runner"}"#,
         ),
     );
     let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"], None)).unwrap();
@@ -220,7 +220,7 @@ fn cli_manages_and_reads_named_evidence() {
     let added = run(&[
         "evidence",
         "add",
-        "T-1",
+        "T-KQ1",
         "--kind",
         "verification",
         "--name",
@@ -232,14 +232,14 @@ fn cli_manages_and_reads_named_evidence() {
     ]);
     assert_eq!(added["editing_agent"], "bot");
     assert_eq!(
-        run(&["context", "T-1", "--evidence"])["evidence"]["items"][0]["value"]["text"],
+        run(&["context", "T-KQ1", "--evidence"])["evidence"]["items"][0]["value"]["text"],
         "Unit tests passed"
     );
     let id = added["id"].as_str().unwrap();
     run(&[
         "evidence",
         "edit",
-        "T-1",
+        "T-KQ1",
         id,
         "--kind",
         "branch",
@@ -249,12 +249,15 @@ fn cli_manages_and_reads_named_evidence() {
         "feature/full",
     ]);
     assert_eq!(
-        run(&["evidence", "list", "T-1"])[0]["value"],
+        run(&["evidence", "list", "T-KQ1"])[0]["value"],
         "feature/full"
     );
-    run(&["evidence", "delete", "T-1", id]);
+    run(&["evidence", "delete", "T-KQ1", id]);
     assert_eq!(
-        run(&["evidence", "list", "T-1"]).as_array().unwrap().len(),
+        run(&["evidence", "list", "T-KQ1"])
+            .as_array()
+            .unwrap()
+            .len(),
         0
     );
 }
@@ -283,12 +286,12 @@ fn backlinks_command_returns_source_and_passage() {
     };
     run(&["create", "Target"]);
     run(&["create", "Source"]);
-    run(&["change", "T-2", "--body", "See T-1 for context"]);
-    let result = run(&["backlinks", "T-1"]);
-    assert_eq!(result[0]["source_reference"], "T-2");
-    assert_eq!(result[0]["passage"], "See T-1 for context");
+    run(&["change", "T-KQ2", "--body", "See T-KQ1 for context"]);
+    let result = run(&["backlinks", "T-KQ1"]);
+    assert_eq!(result[0]["source_reference"], "T-KQ2");
+    assert_eq!(result[0]["passage"], "See T-KQ1 for context");
     assert_eq!(result[0]["mention_start"], 4);
-    assert_eq!(result[0]["mention_end"], 7);
+    assert_eq!(result[0]["mention_end"], 9);
 }
 
 #[test]
@@ -315,12 +318,12 @@ fn cli_marks_and_removes_duplicate_designation() {
     };
     run(&["create", "Source"]);
     run(&["create", "Canonical"]);
-    let marked = run(&["mark-duplicate", "T-1", "T-2"]);
+    let marked = run(&["mark-duplicate", "T-KQ1", "T-KQ2"]);
     assert_eq!(marked["status"], "Duplicate");
-    assert_eq!(marked["duplicate_of"], "T-2");
+    assert_eq!(marked["duplicate_of"], "T-KQ2");
     let found = run(&["search", "", "--status", "Duplicate"]);
-    assert_eq!(found[0]["reference"], "T-1");
-    let removed = run(&["remove-duplicate", "T-1"]);
+    assert_eq!(found[0]["reference"], "T-KQ1");
+    let removed = run(&["remove-duplicate", "T-KQ1"]);
     assert_eq!(removed["status"], "Todo");
     assert!(removed["duplicate_of"].is_null());
 }
@@ -363,21 +366,21 @@ fn cli_previews_and_applies_reviewed_duplicate_dependencies() {
     run(&["create", "Duplicate"], None);
     run(&["create", "Canonical"], None);
     run(&["create", "Dependent"], None);
-    run(&["add-dependency", "T-1", "T-3"], None);
-    let preview = run(&["preview-duplicate", "T-1", "T-2"], None);
-    assert_eq!(preview["edges"][0]["replacement_blocker"], "T-2");
-    assert_eq!(preview["source"], "T-1");
+    run(&["add-dependency", "T-KQ1", "T-KQ3"], None);
+    let preview = run(&["preview-duplicate", "T-KQ1", "T-KQ2"], None);
+    assert_eq!(preview["edges"][0]["replacement_blocker"], "T-KQ2");
+    assert_eq!(preview["source"], "T-KQ1");
     assert_eq!(preview["mode"], "duplicate");
-    let separate = run(&["preview-duplicate", "--separate", "T-1", "T-2"], None);
+    let separate = run(&["preview-duplicate", "--separate", "T-KQ1", "T-KQ2"], None);
     assert_eq!(separate["mode"], "separate");
     assert_eq!(separate["edges"][0]["mode"], "separate");
-    let request = serde_json::json!({ "operation": "mark_duplicate_reviewed", "source": "T-1", "canonical": "T-2", "expected_canonical": preview["canonical"], "decisions": [{"edge": preview["edges"][0], "choice": "replace"}], "agent": null });
+    let request = serde_json::json!({ "operation": "mark_duplicate_reviewed", "source": "T-KQ1", "canonical": "T-KQ2", "expected_canonical": preview["canonical"], "decisions": [{"edge": preview["edges"][0], "choice": "replace"}], "agent": null });
     run(
         &["write", "-", "--request-id", "review"],
         Some(&request.to_string()),
     );
-    let saved = run(&["show", "T-3"], None);
-    assert_eq!(saved["prerequisites"][0]["reference"], "T-2");
+    let saved = run(&["show", "T-KQ3"], None);
+    assert_eq!(saved["prerequisites"][0]["reference"], "T-KQ2");
 }
 
 #[test]
@@ -403,12 +406,12 @@ fn cli_schedules_and_dismisses_reminders() {
         String::from_utf8(output.stdout).unwrap()
     };
     run(&["create", "Remember"]);
-    run(&["reminder", "set", "T-1", "2020-01-01T00:00:00Z"]);
-    assert!(run(&["reminder", "show", "T-1"]).contains("2020"));
+    run(&["reminder", "set", "T-KQ1", "2020-01-01T00:00:00Z"]);
+    assert!(run(&["reminder", "show", "T-KQ1"]).contains("2020"));
     let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"])).unwrap();
     assert_eq!(inbox[0]["kind"], "reminder");
-    run(&["reminder", "dismiss", "T-1"]);
-    assert!(run(&["reminder", "show", "T-1"]).contains("No reminder"));
+    run(&["reminder", "dismiss", "T-KQ1"]);
+    assert!(run(&["reminder", "show", "T-KQ1"]).contains("No reminder"));
 }
 
 #[test]
@@ -435,14 +438,14 @@ fn cli_context_shows_discovery_direction() {
     };
     run(&["create", "Original"]);
     run(&["create", "Discovery"]);
-    run(&["add-relationship", "T-1", "T-2", "discovered"]);
-    let result = run(&["context", "T-2", "--relationships"]);
+    run(&["add-relationship", "T-KQ1", "T-KQ2", "discovered"]);
+    let result = run(&["context", "T-KQ2", "--relationships"]);
     assert_eq!(
         result["relationships"]["discovered_while"]["items"][0]["reference"],
-        "T-1"
+        "T-KQ1"
     );
-    run(&["remove-relationship", "T-1", "T-2", "discovered"]);
-    let result = run(&["context", "T-2", "--relationships"]);
+    run(&["remove-relationship", "T-KQ1", "T-KQ2", "discovered"]);
+    let result = run(&["context", "T-KQ2", "--relationships"]);
     assert_eq!(
         result["relationships"]["discovered_while"]["items"]
             .as_array()
@@ -492,13 +495,13 @@ fn cli_batch_organizes_mixed_tickets_without_replacing_tags() {
     run(
         &["write", "-"],
         Some(
-            r#"{"operation":"batch","operations":[{"operation":"change","ticket":"T-1","change":{"add_tags":["keep"]}},{"operation":"change","ticket":"T-2","change":{"add_tags":["remove"]}}]}"#,
+            r#"{"operation":"batch","operations":[{"operation":"change","ticket":"T-KQ1","change":{"add_tags":["keep"]}},{"operation":"change","ticket":"T-KQ2","change":{"add_tags":["remove"]}}]}"#,
         ),
     );
     let result = run(
         &["write", "-", "--request-id", "organize"],
         Some(
-            r#"{"operation":"batch","operations":[{"operation":"change","ticket":"T-1","change":{"add_tags":["new"],"remove_tags":["remove"]}},{"operation":"change","ticket":"T-2","change":{"add_tags":["new"],"remove_tags":["remove"]}}]}"#,
+            r#"{"operation":"batch","operations":[{"operation":"change","ticket":"T-KQ1","change":{"add_tags":["new"],"remove_tags":["remove"]}},{"operation":"change","ticket":"T-KQ2","change":{"add_tags":["new"],"remove_tags":["remove"]}}]}"#,
         ),
     );
     assert_eq!(
@@ -589,10 +592,10 @@ fn cli_requires_a_canonical_ticket_to_choose_duplicate() {
             .unwrap()
     };
     assert!(run(&["create", "Lonely"]).status.success());
-    let rejected = run(&["change", "T-1", "--status", "Duplicate"]);
+    let rejected = run(&["change", "T-KQ1", "--status", "Duplicate"]);
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("canonical ticket"));
-    let shown = run(&["show", "T-1"]);
+    let shown = run(&["show", "T-KQ1"]);
     let ticket: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
     assert_eq!(ticket["status"], "Todo");
 }
@@ -657,9 +660,9 @@ fn plan_graph_cli_displays_boundary_blockers() {
         String::from_utf8_lossy(&output.stderr)
     );
     let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(graph["nodes"][0]["reference"], "T-2");
+    assert_eq!(graph["nodes"][0]["reference"], "T-KQ2");
     assert_eq!(graph["nodes"][1]["boundary"], true);
-    assert_eq!(graph["edges"][0]["blocker"], "T-1");
+    assert_eq!(graph["edges"][0]["blocker"], "T-KQ1");
 }
 
 #[test]
@@ -676,7 +679,7 @@ fn graph_cli_reports_relationships_and_limits() {
             .unwrap();
     }
     let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
-        .args(["graph", "T-1"])
+        .args(["graph", "T-KQ1"])
         .env("TICKETD_TEST_WORKSPACE", path)
         .output()
         .unwrap();
@@ -686,8 +689,8 @@ fn graph_cli_reports_relationships_and_limits() {
         String::from_utf8_lossy(&output.stderr)
     );
     let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(graph["edges"][0]["blocker"], "T-1");
-    assert_eq!(graph["edges"][0]["dependent"], "T-2");
+    assert_eq!(graph["edges"][0]["blocker"], "T-KQ1");
+    assert_eq!(graph["edges"][0]["dependent"], "T-KQ2");
     assert_eq!(graph["omitted_neighbors"], false);
     assert_eq!(graph["omitted_edges"], false);
     assert_eq!(graph["max_edges"], 300);
@@ -729,22 +732,24 @@ fn activity_cli_posts_stdin_and_reads_a_bounded_feed_and_exact_update() {
         serde_json::from_slice(&output.stdout).unwrap()
     };
     run(&["create", "Outcome"], None);
-    assert!(run(&["context", "T-1", "--latest-update"], None)["latest_update"].is_null());
-    run(&["change", "T-1", "--status", "In progress"], None);
+    assert!(run(&["context", "T-KQ1", "--latest-update"], None)["latest_update"].is_null());
+    run(&["change", "T-KQ1", "--status", "In progress"], None);
     let posted = run(
-        &["activity", "add", "T-1", "--file", "-", "--agent", "runner"],
+        &[
+            "activity", "add", "T-KQ1", "--file", "-", "--agent", "runner",
+        ],
         Some("A **brief**"),
     );
     assert_eq!(posted["brief"], "A **brief**");
-    let request = r#"{"operation":"ticket_change","reference":"T-1","change":{"status":"In review","activities":["Ready for review"],"editing_agent":"runner"}}"#;
+    let request = r#"{"operation":"ticket_change","reference":"T-KQ1","change":{"status":"In review","activities":["Ready for review"],"editing_agent":"runner"}}"#;
     let first = run(&["write", "-", "--request-id", "progress-1"], Some(request));
     assert_eq!(
         run(&["write", "-", "--request-id", "progress-1"], Some(request)),
         first
     );
-    let latest = run(&["context", "T-1", "--latest-update"], None);
+    let latest = run(&["context", "T-KQ1", "--latest-update"], None);
     assert_eq!(latest["latest_update"]["brief"]["text"], "Ready for review");
-    let feed = run(&["activity", "list", "T-1"], None);
+    let feed = run(&["activity", "list", "T-KQ1"], None);
     assert_eq!(
         feed.as_array()
             .unwrap()
@@ -754,9 +759,9 @@ fn activity_cli_posts_stdin_and_reads_a_bounded_feed_and_exact_update() {
         1
     );
     let id = posted["id"].as_str().unwrap();
-    let omitted = run(&["context", "T-1"], None);
+    let omitted = run(&["context", "T-KQ1"], None);
     assert!(omitted.get("latest_update").is_none());
-    let context = run(&["context", "T-1", "--latest-update"], None);
+    let context = run(&["context", "T-KQ1", "--latest-update"], None);
     assert_eq!(
         context["latest_update"]["brief"]["text"],
         "Ready for review"
@@ -766,8 +771,8 @@ fn activity_cli_posts_stdin_and_reads_a_bounded_feed_and_exact_update() {
         list[0]["latest_update"]["brief"]["text"],
         "Ready for review"
     );
-    assert_eq!(run(&["activity", "show", "T-1", id], None), posted);
-    let feed = run(&["activity", "list", "T-1", "--limit", "1"], None);
+    assert_eq!(run(&["activity", "show", "T-KQ1", id], None), posted);
+    let feed = run(&["activity", "list", "T-KQ1", "--limit", "1"], None);
     assert_eq!(feed.as_array().unwrap().len(), 1);
     assert_eq!(feed[0]["activity"]["brief"], "Ready for review");
 }
@@ -835,9 +840,9 @@ fn context_graph_cli_reads_new_connections() {
     run(&["create", "First"]);
     run(&["create", "Second"]);
     run(&["create", "Third"]);
-    run(&["change", "T-2", "--body", "See T-3"]);
-    run(&["change", "T-1", "--body", "See T-2"]);
-    let graph = run(&["graph", "T-2", "--context"]);
+    run(&["change", "T-KQ2", "--body", "See T-KQ3"]);
+    run(&["change", "T-KQ1", "--body", "See T-KQ2"]);
+    let graph = run(&["graph", "T-KQ2", "--context"]);
     assert!(
         graph["nodes"]
             .as_array()
@@ -852,7 +857,7 @@ fn context_graph_cli_reads_new_connections() {
             .iter()
             .any(|e| e["kind"] == "mention")
     );
-    let center = run(&["graph", "T-1", "--context"]);
+    let center = run(&["graph", "T-KQ1", "--context"]);
     let second = center["nodes"]
         .as_array()
         .unwrap()
@@ -861,7 +866,7 @@ fn context_graph_cli_reads_new_connections() {
         .unwrap()["id"]
         .as_str()
         .unwrap();
-    let expanded = run(&["graph", "T-1", "--context", "--expand", second]);
+    let expanded = run(&["graph", "T-KQ1", "--context", "--expand", second]);
     assert!(
         expanded["nodes"]
             .as_array()
@@ -920,7 +925,7 @@ fn activity_and_document_commands_replay_by_request_id() {
     let add = [
         "activity",
         "add",
-        "T-1",
+        "T-KQ1",
         "--brief",
         "Once",
         "--request-id",
@@ -929,7 +934,7 @@ fn activity_and_document_commands_replay_by_request_id() {
     let first = run(&add);
     assert_eq!(run(&add), first);
     assert_eq!(first["brief"], "Once");
-    let feed = run(&["activity", "list", "T-1"]);
+    let feed = run(&["activity", "list", "T-KQ1"]);
     assert_eq!(
         feed.as_array()
             .unwrap()
@@ -942,7 +947,7 @@ fn activity_and_document_commands_replay_by_request_id() {
     let edit = [
         "activity",
         "edit",
-        "T-1",
+        "T-KQ1",
         id,
         "--brief",
         "Twice",
@@ -991,6 +996,6 @@ fn cli_document_keep_trash_restore_print_the_bare_document() {
         assert!(printed.get("value").is_none(), "{command}");
     }
     run(&["create", "Task"]);
-    let references = run(&["document", "references", "T-1"]);
+    let references = run(&["document", "references", "T-KQ1"]);
     assert!(references.as_array().unwrap().is_empty());
 }

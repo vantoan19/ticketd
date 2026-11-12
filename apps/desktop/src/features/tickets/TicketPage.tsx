@@ -19,6 +19,7 @@ import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
+import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import { externalSource, sourceState } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
@@ -217,6 +218,9 @@ export function TicketPage({
       data-trashed={ticket.trashed || undefined}
     >
       <div className="detail-document">
+        {active && (
+          <NeedsReviewNotice kind="ticket" id={ticket.id} className="mb-6" />
+        )}
         {active && (
           <SourceUnavailableNotice ticket={ticket} refresh={refresh} />
         )}

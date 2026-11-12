@@ -93,11 +93,11 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 - Use **tags** for categories such as bug, research, or feature. No mandatory issue-type system.
 - Only the title is mandatory user-entered content. Project and Plan links are optional.
 - A ticket describes an intended outcome, including when it has subtickets.
-- Short ticket references are unique across the workspace and remain unchanged when project or Plan links change.
+- Short ticket references are unique across the workspace and remain unchanged when project or Plan links change. The one exception to uniqueness is a Workspace file copied by hand, until sync detects the copy ([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md#identity)). A reference is `T-`, the creating installation's two-letter device code and that device's counter (`T-KQ43`); a plain number such as `T-42` is not a reference.
 - Support Markdown content and checklists. Checklist items have no independent statuses or dependencies; unchecked items do not prevent Done.
 - Acceptance criteria can be written in the body; no separate mandatory field is required.
 - Support editable, deletable, timestamped authored activities with required human-readable briefs and optional supporting Documents for progress and findings (section 16). Record the editing agent when supplied; do not store human names in the MVP. Attribution is descriptive, not verified identity or authorization.
-- Keep automatic ticket history separate from authored activities: record status, relationship, project/Plan membership, and trash/restore changes. Full body revision history is outside the MVP.
+- Keep automatic ticket history separate from authored activities: record status, relationship, project/Plan membership, and trash/restore changes. Full body revision history is outside the MVP; section 20.6 later adds a 30-day version history of tickets and Documents.
 - Tags use a shared workspace vocabulary; a ticket may have multiple tags independently of other relationships.
 - Priority, deadlines, and custom fields are not required for the MVP. File attachments extend the original MVP as described in section 17.
 
@@ -284,10 +284,10 @@ Do not return the entire workspace by default. Indicate truncation and how to fe
 ```bash
 ticketd create "Fix upload timeout" --project demo
 ticketd list --project demo --ready --json
-ticketd show T-42 --context dependencies,parent,activities --json
-ticketd update T-42 --status in-progress
-ticketd activity add T-42 --brief "Investigation complete" --details-file findings.md
-ticketd dependency add T-43 --blocked-by T-42
+ticketd show T-KQ42 --context dependencies,parent,activities --json
+ticketd update T-KQ42 --status in-progress
+ticketd activity add T-KQ42 --brief "Investigation complete" --details-file findings.md
+ticketd dependency add T-KQ43 --blocked-by T-KQ42
 ```
 
 Agents use the CLI/application core. They do not write SQL directly or treat Markdown exports as the system of record.
@@ -327,7 +327,7 @@ See [High-level architecture](architecture.md) for runtime structure, module res
 - Use short transactions, appropriate indexes, lock handling, and atomic updates.
 - Use globally unique identities and schema migrations to preserve future options.
 - Preserve workspace boundaries and necessary change metadata without building a universal database abstraction.
-- Future sync may retain SQLite locally and add a cloud database. Sync requires change propagation, conflict handling, deletion semantics, and authorization; it is not simply a database swap.
+- Personal desktop-to-desktop sync keeps SQLite locally and stores one Markdown file per record in the person's Google Drive (section 20). A later cloud service may add a cloud database; that requires change propagation, conflict handling, deletion semantics, and authorization, and is not simply a database swap.
 - Placing a live database in a file-sync folder is not the product synchronization strategy.
 
 ```mermaid
@@ -421,10 +421,12 @@ These are draft verification criteria for review, not individually approved requ
 - Roadmap, calendar, time tracking, reporting, and gamification.
 - Full web/mobile clients, cloud hosting, account/auth, collaboration, and multi-device sync.
 - Plugin system, custom workflow engine, vector database, and MCP server.
-- Project archiving, permanent ticket/project deletion, full ticket body revision history, and record-version conflict detection.
+- Project archiving, permanent ticket/project deletion, full ticket body revision history (added later by section 20.6), and record-version conflict detection.
 
 These exclusions apply to the initial MVP. Section 15 records agreed product
 extensions and future integration intent; it does not commit delivery dates.
+Section 20 later adds personal sync between one person's desktops and a 30-day
+version history of tickets and Documents.
 
 ## 14. Open decisions
 
@@ -478,13 +480,13 @@ workflow. The following extensions describe agreed product direction. Section 16
   canonical ticket. Marking a locally owned ticket Duplicate requires selecting
   its canonical ticket; status and relationship change together.
 - Marking a duplicate sets the dedicated Duplicate status and presents its
-  canonical relationship explicitly, for example, Duplicate of T-10. This
+  canonical relationship explicitly, for example, Duplicate of T-KQ10. This
   replaces the earlier representation as Canceled plus a duplicate relationship.
 - Review affected blocking dependencies when marking a duplicate. Show proposed
   replacements and apply the agreed changes atomically with cycle validation.
-- Cancellation alone never satisfies a prerequisite. For example, if T-30 is
-  blocked by T-20 and T-20 duplicates T-10, replacing T-20 with T-10 as the blocker
-  makes T-30's readiness depend on T-10's completion.
+- Cancellation alone never satisfies a prerequisite. For example, if T-KQ30 is
+  blocked by T-KQ20 and T-KQ20 duplicates T-KQ10, replacing T-KQ20 with T-KQ10 as the blocker
+  makes T-KQ30's readiness depend on T-KQ10's completion.
 - Preserve canonical identity alongside Duplicate status so integrations can
   retain the relationship across platforms with different closure conventions.
 - Removing the duplicate designation restores the status held before duplicate
@@ -761,7 +763,8 @@ Shared tags never implicitly expand the context payload.
 Keep canonical Markdown, field-level last-successful-write behavior, explicit
 relationship additions/removals, atomic writes, and retry deduplication. Concurrent
 writes to the same body may overwrite one another; conflict resolution and full
-body revision history remain outside this version. Technical storage and graph
+body revision history remain outside this version (section 20 adds both for
+sync between desktops). Technical storage and graph
 query decisions are recorded in ADR 0007.
 
 ## 17. Local file attachments
@@ -824,7 +827,7 @@ without download or native conversion. A `complete` result includes files or
 links for every requested identity, not a promise of offline provider access.
 Canonical Markdown and ordinary copy-as-Markdown remain unchanged. Shared editor
 export uses its current selection, or all current content when nothing is
-selected, independently of saving. `ticketd export-markdown --ticket T-1`,
+selected, independently of saving. `ticketd export-markdown --ticket T-KQ1`,
 `--document ID`, or `--markdown-file PATH` (`-` for stdin) plus `--output FOLDER`
 exposes the same workflow without a running desktop. See [export](export.md).
 
@@ -859,12 +862,12 @@ content retain source editing as their lossless fallback. Inline link removal
 changes only the reference. Saved body and brief references are derived in the
 same transaction as their content, separately from direct ticket associations.
 
-The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
-[--request-id ID]`, `attachment list [--ticket T-1]`, `attachment inspect <id>`,
+The standalone CLI exposes `attachment add <path> [--ticket T-KQ1] [--name NAME]
+[--request-id ID]`, `attachment list [--ticket T-KQ1]`, `attachment inspect <id>`,
 `attachment link <id> <ticket>`, `attachment detach <id> <ticket>`, and
 `attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
 `attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
-`attachment search [text] [--state all|in-use|unused] [--related-ticket T-1]
+`attachment search [text] [--state all|in-use|unused] [--related-ticket T-KQ1]
 [--limit N] [--offset N]` returns metadata with usage and related-file context.
 `attachment list` also accepts `--limit` and `--offset`, including with `--ticket`.
 `attachment rename <id> <display-name> [--request-id ID]` changes metadata only;
@@ -940,7 +943,7 @@ Publication checks the exact outgoing description in the core before creating a
 remote issue, including retries after a failed or resolved attempt. Workspace-only
 attachment links block publication, with affected URIs, known display names, and
 guidance to remove or replace the links with accessible URLs or share a separate
-export with files. Desktop publication and `source publish T-1 --preview` show the
+export with files. Desktop publication and `source publish T-KQ1 --preview` show the
 same preflight. No file upload or private-path rewrite is implied.
 
 Direct local attachment associations are not automatically published. They stay
@@ -1005,7 +1008,7 @@ remote references never weaken that guarantee.
 The independent CLI can inspect/reuse a stored reference with ordinary attachment
 commands. `attachment drive-info <id>` returns last-known metadata and its opaque
 connection handle. `attachment drive-resolve <id>` refreshes current metadata.
-`attachment drive-add <connection> <file-id> [--ticket T-n] [--resource-key KEY]`
+`attachment drive-add <connection> <file-id> [--ticket T-KQ1] [--resource-key KEY]`
 uses the OS user's existing authorization. An unselected file gets selection
 instructions, never broader scopes. Byte export refuses external references and
 instructs the caller to open current content in Drive; portable-link export is a
@@ -1092,7 +1095,7 @@ abandoning insertion never deletes a completed remote file. Upload locally inste
 is explicit and creates a separate local upload, preserving the Drive operation.
 
 `attachment drive-upload <path> --connection <handle> --folder <id> --request-id
-<id> [--resource-key KEY] [--ticket T-n]` uses the same workflows without a desktop
+<id> [--resource-key KEY] [--ticket T-KQ1]` uses the same workflows without a desktop
 process. `attachment drive-uploads` lists operation metadata; `attachment
 drive-upload-status <id> [--check]` inspects or reconciles a saved operation.
 Uploaded copies retain input SHA-256 and observed provider checksum/version;
@@ -1121,3 +1124,149 @@ overwritten, references and authored labels remain unchanged, and no download
 pins a revision, caches remote bytes automatically or changes the provider file.
 Version and other metadata must remain stable during the download; a version
 change since upload alone does not block verified export of matching bytes.
+
+## 20. Workspace sync
+
+A person using ticketd on several desktops gets the same Workspace content and
+managed Attachments on each, through their own Google Drive. Every desktop keeps
+its own local Workspace and remains fully usable offline. There is no ticketd
+account, server or subscription. The decision and its trade-offs are recorded in
+ADR 0011; the file convention is in `docs/sync-file-format.md`.
+
+### 20.1. What is stored in Drive
+
+- ticketd creates one visible folder in the person's Drive under the existing
+  `drive.file` scope. No broader scope is requested.
+- Every ticket, Document, Plan and project is one Markdown file: a header of
+  fields, then the Markdown text. A ticket's authored Activities and
+  Implementation evidence are sections of the ticket's own file.
+- Managed Attachments are ordinary files in an `attachments` folder. They download
+  automatically by default; an optional setting downloads each file when it is
+  first opened. Each Attachment shows whether it is downloaded.
+- Files are not encrypted, and there is no sync password. Setup states plainly
+  that synced content is stored unencrypted in the person's Drive.
+- The live SQLite database is never synchronized.
+
+Synced: tickets, Documents, authored Activities, Plans, projects, tags,
+relationships, Implementation evidence, follows, Ticket reminders and managed
+Attachments. An externally sourced ticket syncs with its provenance.
+
+Local to each desktop: Attention inbox read state, project checkout paths,
+credentials, source connection settings, window layout, unfinished editor drafts
+and upload queues. Workspace sync never publishes to an external tracker.
+
+### 20.2. Setup
+
+- Connect Google Drive, then choose one of two actions: upload this Workspace, or
+  download an existing one from Drive. A Workspace that was disconnected can
+  instead reconnect to its folder, as described below.
+- Downloading replaces the local Workspace after saving a safety backup. Two
+  Workspaces created independently are never merged automatically.
+- A Workspace has one storage destination.
+- A desktop joining sync takes another device code if another desktop already
+  holds its own or once held it, so Ticket references issued on different
+  desktops never clash. References already issued never change.
+- A Workspace file copied to another machine is detected once both copies have
+  synced: one of them joins as a new desktop with a fresh device code. Tickets
+  created on both copies before that can share a reference; a desktop that
+  holds one reports the other under Needs attention and does not merge it.
+- Restoring a backup disconnects the Workspace from its Drive folder. The
+  restored content is not overwritten by what Drive holds: the person chooses
+  upload or download again.
+- Disconnecting stops sync on that desktop and deletes nothing. When the same
+  Google account is connected again and the folder the Workspace synced with is
+  still in Drive, setup offers Reconnect to that folder first, above download, and
+  in place of upload (which would go to that same folder). Reconnecting merges like a return from a long time offline (20.4):
+  nothing is replaced on either side, the desktop keeps its device code, and
+  Attachments already downloaded stay downloaded. A restored Workspace is not
+  offered Reconnect.
+
+### 20.3. When sync runs
+
+- Sync runs while the desktop app is open: at launch and on reconnect, by polling
+  Drive every minute by default (30 seconds at the least), by uploading a few
+  seconds after a save, and on a Sync now action.
+- On normal exit the app makes a bounded attempt to upload pending changes and
+  reports what is still pending.
+- The CLI stays independent of the desktop and does not contact Drive. Its
+  changes are recorded with the write and upload when the desktop next runs.
+  A change received from Drive is not uploaded again.
+- Local saving continues during outages, exhausted storage or quota and expired
+  authorization. Each has a clear corrective action.
+- The status display distinguishes saved locally, upload pending, uploaded to
+  Drive, Attachment download pending and Needs attention.
+
+### 20.4. Changes made on two desktops
+
+Each desktop keeps a copy of every record as last synced and compares both sides
+with it.
+
+- Different fields changed: both changes are kept without asking.
+- The same field changed: the local value is kept and the record is marked Needs
+  review. A side-by-side comparison of the conflicting fields lets the person
+  choose a value or edit it. The Markdown text is one field; text is not merged
+  automatically.
+- Tags and other sets combine additions and removals. An addition wins over a
+  removal made at the same time. No review is needed.
+- When changes from two desktops together would form a dependency loop, every
+  desktop drops the same dependency, the later one, and shows a notice naming it.
+- When two desktops each made a ticket for the same external issue before they
+  synced, one keeps the source and the other becomes a Duplicate of it. A ticket
+  published from the Workspace keeps the source over an imported one; otherwise
+  the ticket with the lower GUID keeps it. What two desktops each refreshed from
+  a tracker is not reviewed: the later refresh wins. Who holds authority over
+  the ticket is not part of a refresh and merges like any other field.
+- No duplicate ticket and no conflict copy of a file is created.
+- Needs review appears as a badge on the record and as an entry in the Attention
+  inbox that opens the comparison.
+
+### 20.5. Trash, missing files and hand edits
+
+- Sync never deletes a record. Trash is a synced field: when one desktop trashes
+  a record that another edited, the record stays in Trash with the edit kept, and
+  restoring is explicit.
+- A file missing from Drive, an empty folder listing or failed authorization is
+  never a deletion and never removes local content. A single missing file is
+  uploaded again by the next sync run. A missing folder, or one that lists no
+  records where some were synced, is a recovery state whose action uploads the
+  Workspace again. Failed authorization asks to reconnect.
+- A file edited directly in Drive is treated as an edit from another desktop once
+  it validates. An unreadable file is skipped with a Needs attention notice and
+  changes nothing locally; the notice names the file and the reason, and goes once
+  the file reads again. The next local change to that record replaces the file:
+  on the desktop that replaced it the notice then stays in the Inbox as already
+  read, saying the file could not be read, why, and that the earlier file is in
+  Drive's version history. It no longer counts towards Needs attention. A
+  file created by hand in the folder does not become a record, because ticketd
+  sees only files it created.
+- A file written by a newer ticketd than this desktop runs (a higher format
+  number) is skipped with the same notice and is never replaced from this
+  desktop. Local changes to that record wait, and sync stays Needs attention,
+  until the desktop is updated. A field this version does not know, in a format
+  it reads, is an unreadable file like any other.
+- An Attachment whose bytes are missing or damaged on this desktop, or cannot be
+  saved here, is a Needs attention notice of its own. It does not stop records
+  or other Attachments from syncing. An Attachment that Drive fails to deliver
+  fails the run the first times, since that may pass; from the third failure in
+  a row it is such a notice too, runs succeed again, and Download still tries it.
+- Any other failure of a sync run shows as Needs attention with its message and
+  a Retry action, and clears when a run succeeds.
+
+### 20.6. Version history
+
+- Each desktop saves the previous version of a ticket or Document whenever a
+  local edit or an incoming sync changes it. Versions are kept for 30 days; the
+  current version is always kept.
+- A History view lists versions and compares one with the current record.
+  Restoring a version is an ordinary edit, which then syncs.
+- Versions stay on the desktop that saved them. On a newly added desktop, History
+  reads that record's earlier versions from Drive's own file revisions on request.
+
+### 20.7. Outside this version
+
+Encryption of synced content, sync passwords and key recovery; collaboration,
+team permissions, and mobile or web clients; ticketd-hosted accounts, servers or
+billing; other storage providers; a background service or CLI-run sync; automatic
+merging of Markdown text or of unrelated Workspaces; permanent deletion and
+automatic expiry of Trash; syncing Attention inbox read state. A later paid
+ticketd cloud may use a stronger protocol.

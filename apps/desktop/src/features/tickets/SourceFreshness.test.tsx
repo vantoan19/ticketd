@@ -106,7 +106,7 @@ const unavailableSource = (overrides: Partial<TicketSource> = {}) =>
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "1",
   trashed: false,
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Imported issue",
   status: "Todo",
   body: "Described on GitHub",
@@ -246,7 +246,7 @@ test("the unavailable notice says what failed, since when, that nothing was lost
           failures: [
             {
               provider: "github",
-              reference: "T-1",
+              reference: "T-KQ1",
               code: "unavailable",
               message: "Network is down.",
             },
@@ -274,7 +274,7 @@ test("the unavailable notice says what failed, since when, that nothing was lost
   fireEvent.click(within(notice).getByRole("button", { name: "Retry now" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
-    ticket: "T-1",
+    ticket: "T-KQ1",
   });
   // A failed retry does not claim success.
   expect(
@@ -483,7 +483,7 @@ test("a refresh failure about a ticket that was taken over no longer shows", () 
     failures: [
       {
         provider: "github",
-        reference: "T-1",
+        reference: "T-KQ1",
         code: "not_found",
         message: "gone",
       },

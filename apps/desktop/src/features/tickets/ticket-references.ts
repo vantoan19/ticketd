@@ -1,6 +1,9 @@
 import { visit } from "unist-util-visit";
 import type { Root, PhrasingContent } from "mdast";
 
+/** A whole Ticket reference as a person types it: T-, a two-letter device code, a counter. */
+export const typedReference = /^T-[A-Z]{2}[1-9]\d*$/i;
+
 export function references() {
   return (tree: Root) => {
     visit(tree, "text", (node, index, parent) => {
@@ -13,7 +16,7 @@ export function references() {
         return;
       const matches = [
         ...node.value.matchAll(
-          /(?<![\p{L}\p{N}_-])T-[1-9]\d*(?![\p{L}\p{N}_-])/gu,
+          /(?<![\p{L}\p{N}_-])T-[A-Z]{2}[1-9]\d*(?![\p{L}\p{N}_-])/gu,
         ),
       ];
       if (!matches.length) return;

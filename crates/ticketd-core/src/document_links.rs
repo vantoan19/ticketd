@@ -45,32 +45,49 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-/// Explicit-link mentions plus numeric `T-n` mentions resolved when read, so a reference to a
+/// Explicit-link mentions plus plain-text Ticket reference mentions resolved when read, so a reference to a
 /// ticket created later appears, and the context graph and link lists always agree.
 /// Explicit ticket-to-Document references (the `ticket_documents` table) join them with the
 /// an empty passage (there is no text to quote) and `explicit` set.
-const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0 UNION SELECT ticket_id, document_id, '', 1 FROM ticket_documents)";
+const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.reference = n.reference WHERE n.activity = 0 UNION SELECT ticket_id, document_id, '', 1 FROM ticket_documents)";
 
-/// Every standalone `T-n` ticket reference in plain text, as the byte offset and length of the
-/// token and its number. This is the one rule for what counts as a numeric mention.
-pub(crate) fn ticket_numbers(text: &str) -> Vec<(usize, usize, i64)> {
+/// The plain-text mention index and its per-ticket Activity projection. Both hold the
+/// reference as written, so a mention of a ticket that does not exist yet resolves later.
+pub(crate) const MENTION_INDEX_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, reference TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, reference, passage));
+    CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(reference, activity, source_id, passage);
+    CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, reference TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, reference, passage));
+    CREATE INDEX IF NOT EXISTS activity_graph_numbers_source ON activity_graph_numbers(activity_id, reference, passage);
+    CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_insert AFTER INSERT ON numeric_mentions WHEN NEW.activity=1 BEGIN INSERT OR IGNORE INTO activity_graph_numbers SELECT ticket_id, NEW.source_id, NEW.reference, NEW.passage FROM activities WHERE id=NEW.source_id; END;
+    CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_delete AFTER DELETE ON numeric_mentions WHEN OLD.activity=1 BEGIN DELETE FROM activity_graph_numbers WHERE activity_id=OLD.source_id AND reference=OLD.reference AND passage=OLD.passage; END;";
+
+/// Every standalone Ticket reference in plain text (`T-`, a two-letter device code, then a
+/// counter: `T-KQ43`), as the byte offset and length of the token. This is the one rule for
+/// what counts as a plain-text mention.
+pub(crate) fn ticket_references(text: &str) -> Vec<(usize, usize)> {
     let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
     let mut found = Vec::new();
     for (at, _) in text.match_indices("T-") {
         let rest = &text[at + 2..];
-        let digits = rest.chars().take_while(char::is_ascii_digit).count();
-        if digits == 0
-            || rest.starts_with('0')
-            || !text[..at].chars().next_back().is_none_or(boundary)
-            || !rest[digits..].chars().next().is_none_or(boundary)
+        let letters = rest.bytes().take_while(u8::is_ascii_uppercase).count();
+        let digits = rest[letters..]
+            .bytes()
+            .take_while(u8::is_ascii_digit)
+            .count();
+        if letters == 2
+            && digits > 0
+            && !rest[letters..].starts_with('0')
+            && text[..at].chars().next_back().is_none_or(boundary)
+            && rest[letters + digits..].chars().next().is_none_or(boundary)
         {
-            continue;
-        }
-        if let Ok(number) = rest[..digits].parse::<i64>() {
-            found.push((at, 2 + digits, number));
+            found.push((at, 2 + letters + digits));
         }
     }
     found
+}
+
+/// Whether `text` is exactly one well-formed Ticket reference.
+pub(crate) fn is_ticket_reference(text: &str) -> bool {
+    ticket_references(text) == [(0, text.len())]
 }
 
 fn passage(body: &str, at: usize) -> String {
@@ -98,16 +115,26 @@ pub(crate) fn index_external_body(tx: &Connection, id: &str, body: &str) -> Resu
 
 pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     crate::embedded_attachments::index(tx, id, body)?;
+    index_activity_mentions(tx, id, body)
+}
+
+/// A brief received from another device stays readable when its file links cannot resolve here.
+pub(crate) fn index_external_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
+    crate::embedded_attachments::index_external(tx, id, body)?;
+    index_activity_mentions(tx, id, body)
+}
+
+fn index_activity_mentions(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     index_numbers(tx, id, body, true)?;
     index_text(tx, id, body, true)?;
     // Backlinks recognize visible ticket references even in link text and
     // decoded Markdown runs; retain those established references here too.
     for (text, range) in crate::backlinks::text_runs(body) {
-        for (at, len, number) in ticket_numbers(&text) {
+        for (at, len) in ticket_references(&text) {
             let target: Option<String> = tx
                 .query_row(
-                    "SELECT id FROM tickets WHERE number = ?1",
-                    [number],
+                    "SELECT id FROM tickets WHERE reference = ?1",
+                    [&text[at..at + len]],
                     |row| row.get(0),
                 )
                 .optional()?;
@@ -128,21 +155,21 @@ fn index_numbers(tx: &Connection, id: &str, body: &str, activity: bool) -> Resul
         params![id, activity],
     )?;
     for (text, range) in crate::backlinks::text_runs(body) {
-        for (at, len, number) in ticket_numbers(&text) {
+        for (at, len) in ticket_references(&text) {
+            let reference = &text[at..at + len];
             let offset = body[range.clone()]
-                .find(&text[at..at + len])
+                .find(reference)
                 .map_or(range.start, |n| range.start + n);
-            tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, number, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, number, passage(body, offset)])?;
+            tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, reference, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, reference, passage(body, offset)])?;
         }
     }
     for (event, range) in Parser::new(body).into_offset_iter() {
         if let Event::Start(Tag::Link { dest_url, .. }) = event
-            && let Some(number) = dest_url
-                .strip_prefix("ticketd://ticket/T-")
-                .and_then(|value| value.parse::<i64>().ok())
-                .filter(|number| *number > 0)
+            && let Some(reference) = dest_url
+                .strip_prefix("ticketd://ticket/")
+                .filter(|reference| is_ticket_reference(reference))
         {
-            tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, number, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, number, passage(body, range.start)])?;
+            tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, reference, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, reference, passage(body, range.start)])?;
         }
     }
     Ok(())
@@ -170,11 +197,13 @@ fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(
             Event::Start(Tag::CodeBlock(_)) => in_code = true,
             Event::End(TagEnd::CodeBlock) => in_code = false,
             Event::Text(text) if activity && !in_link && !in_code => {
-                for (at, len, number) in ticket_numbers(text) {
+                for (at, len) in ticket_references(text) {
                     let target = tx
-                        .query_row("SELECT id FROM tickets WHERE number = ?1", [number], |r| {
-                            r.get::<_, String>(0)
-                        })
+                        .query_row(
+                            "SELECT id FROM tickets WHERE reference = ?1",
+                            [&text[at..at + len]],
+                            |r| r.get::<_, String>(0),
+                        )
                         .optional()?;
                     if let Some(target) = target {
                         let at = body[range.clone()]
@@ -193,12 +222,11 @@ fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(
                 })
                 .optional()?
             } else if let Some(reference) = dest_url.strip_prefix("ticketd://ticket/") {
-                let number = reference
-                    .strip_prefix("T-")
-                    .and_then(|n| n.parse::<i64>().ok());
-                tx.query_row("SELECT id FROM tickets WHERE number = ?1", [number], |r| {
-                    r.get::<_, String>(0)
-                })
+                tx.query_row(
+                    "SELECT id FROM tickets WHERE reference = ?1",
+                    [reference],
+                    |r| r.get::<_, String>(0),
+                )
                 .optional()?
             } else if let Some(plan) = dest_url.strip_prefix("ticketd://plan/") {
                 tx.query_row("SELECT id FROM plans WHERE id = ?1", [plan], |r| {
@@ -411,7 +439,7 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ContextLink>, Error> {
-        // Accept a ticket's T-n reference as well as an entity ID.
+        // Accept a Ticket reference as well as an entity ID.
         let id = &if id.starts_with("T-") {
             crate::relationships::id(&self.connection, id)?
         } else {
@@ -426,7 +454,7 @@ impl Workspace {
             return Err(Error::NotFound(id.to_owned()));
         }
         let column = if outgoing { "source_id" } else { "target_id" };
-        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT {h} FROM documents d WHERE d.id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT {h} FROM documents d WHERE d.id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id), m.activity_id , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0), m.explicit FROM (SELECT source_id, target_id, passage, NULL AS activity_id, explicit FROM {mentions} UNION ALL SELECT a.ticket_id, m.target_id, m.passage, m.activity_id, 0 FROM activity_mentions m JOIN activities a ON a.id = m.activity_id) m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3", h = crate::documents::HEADING, mentions = DOCUMENT_MENTIONS))?;
+        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT reference FROM tickets WHERE id = s.id), (SELECT {h} FROM documents d WHERE d.id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT reference FROM tickets WHERE id = t.id), (SELECT {h} FROM documents d WHERE d.id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id), m.activity_id , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0), m.explicit FROM (SELECT source_id, target_id, passage, NULL AS activity_id, explicit FROM {mentions} UNION ALL SELECT a.ticket_id, m.target_id, m.passage, m.activity_id, 0 FROM activity_mentions m JOIN activities a ON a.id = m.activity_id) m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3", h = crate::documents::HEADING, mentions = DOCUMENT_MENTIONS))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(ContextLink {
@@ -469,11 +497,11 @@ impl Workspace {
         offset: u32,
     ) -> Result<Vec<DocumentBacklink>, Error> {
         self.show_document(id)?;
-        let mut statement = self.connection.prepare(&format!("SELECT t.number, t.title, m.passage FROM {DOCUMENT_MENTIONS} m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3"))?;
+        let mut statement = self.connection.prepare(&format!("SELECT t.reference, t.title, m.passage FROM {DOCUMENT_MENTIONS} m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3"))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(DocumentBacklink {
-                    source_reference: format!("T-{}", r.get::<_, i64>(0)?),
+                    source_reference: r.get::<_, String>(0)?,
                     source_title: r.get(1)?,
                     passage: r.get(2)?,
                 })

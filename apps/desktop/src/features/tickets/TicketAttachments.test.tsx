@@ -76,7 +76,7 @@ test.each(["close", "navigate"])(
     );
   },
 );
-const ticket = { reference: "T-1", id: "t1", trashed: false } as Ticket;
+const ticket = { reference: "T-KQ1", id: "t1", trashed: false } as Ticket;
 const file = {
   id: "f1",
   display_name: "Trace",
@@ -150,7 +150,7 @@ test("a direct preview replaces only its selected ticket association through the
   fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await screen.findByRole("button", { name: "New trace" });
   expect(invoke).toHaveBeenCalledWith("replace_ticket_attachment", {
-    reference: "T-1",
+    reference: "T-KQ1",
     previousId: "f1",
     replacementId: "new-file",
     requestId: expect.any(String),
@@ -193,7 +193,7 @@ test("the rail uploads through the native picker, then associates the stored sna
     progress: expect.anything(),
   });
   expect(invoke).toHaveBeenCalledWith("set_ticket_attachment", {
-    reference: "T-1",
+    reference: "T-KQ1",
     attachmentId: "f1",
     present: true,
     requestId: expect.any(String),

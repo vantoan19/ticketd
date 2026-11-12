@@ -57,7 +57,7 @@ const uri = "ticketd://attachment/workspace-1/file-1";
 const link = `[Trace](${uri})`;
 const ticket: Ticket = {
   id: "ticket-1",
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Investigate",
   body: "",
   status: "Todo",
@@ -266,7 +266,7 @@ test("ticket descriptions autosave inserted links and retain the failed draft", 
     expect(invoke).toHaveBeenCalledWith(
       "change_ticket",
       expect.objectContaining({
-        reference: "T-1",
+        reference: "T-KQ1",
         patch: expect.objectContaining({ body: link }),
       }),
     ),
@@ -334,7 +334,7 @@ test("Activity brief and details insert links without posting until explicit sub
   bridge();
   render(
     <Activity
-      reference="T-1"
+      reference="T-KQ1"
       status="Todo"
       revision={0}
       projects={[]}
@@ -365,11 +365,15 @@ test("Activity brief and details insert links without posting until explicit sub
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith(
       "add_activity_with_details",
-      expect.objectContaining({ reference: "T-1", brief: link, details: link }),
+      expect.objectContaining({
+        reference: "T-KQ1",
+        brief: link,
+        details: link,
+      }),
     ),
   );
   await screen.findByRole("alert");
   expect(
-    JSON.parse(localStorage.getItem("ticketd:activity-draft:T-1") ?? "{}"),
+    JSON.parse(localStorage.getItem("ticketd:activity-draft:T-KQ1") ?? "{}"),
   ).toMatchObject({ brief: link, details: link });
 });

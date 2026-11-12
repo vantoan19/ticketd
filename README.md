@@ -33,7 +33,7 @@ cargo run -p ticketd-cli -- list
 ```
 
 Use the reference returned by `create` to inspect or update that ticket, for example
-`cargo run -p ticketd-cli -- show T-1` if its reference is `T-1`. Changes appear in
+`cargo run -p ticketd-cli -- show T-KQ1` if its reference is `T-KQ1`. Changes appear in
 the desktop workspace too. No agent subscription or Google account is needed
 for local ticket workflows.
 

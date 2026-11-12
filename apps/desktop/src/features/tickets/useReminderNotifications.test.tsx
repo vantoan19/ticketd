@@ -18,7 +18,7 @@ vi.mock("@/lib/api/notifications", () => ({
 
 const entry = (id: number, kind: string) => ({
   id,
-  reference: `T-${id}`,
+  reference: `T-KQ${id}`,
   title: `Ticket ${id}`,
   kind,
   from_value: "",
@@ -70,8 +70,8 @@ test("a reminder that becomes due while open notifies once; earlier ones stay in
   expect(notificationClient.notify).toHaveBeenCalledTimes(1);
   expect(notificationClient.notify).toHaveBeenCalledWith(
     "Ticket 7",
-    "T-7: reminder is due",
-    "T-7",
+    "T-KQ7: reminder is due",
+    "T-KQ7",
   );
 });
 
@@ -91,8 +91,8 @@ test("clicking a notification opens its ticket, and regaining focus does not", a
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10 * 60_000);
   });
-  act(() => click?.("T-7"));
-  expect(open).toHaveBeenCalledWith("T-7");
+  act(() => click?.("T-KQ7"));
+  expect(open).toHaveBeenCalledWith("T-KQ7");
 });
 
 test("the click listener exists before any notification and stops with the preference", async () => {
@@ -116,8 +116,8 @@ test("reminders still notify after a restore replaced the inbox with lower ids",
   expect(notificationClient.notify).toHaveBeenCalledTimes(1);
   expect(notificationClient.notify).toHaveBeenCalledWith(
     "Ticket 13",
-    "T-13: reminder is due",
-    "T-13",
+    "T-KQ13: reminder is due",
+    "T-KQ13",
   );
 });
 

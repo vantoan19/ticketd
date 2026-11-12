@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { typedReference } from "@/features/tickets/ticket-references";
 import { client, type Ticket } from "@/lib/api/client";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import type { PlanViewState } from "./usePlanView";
@@ -41,9 +42,9 @@ export function AddTicketsDialog({
     let active = true;
     const timer = window.setTimeout(() => {
       const text = query.trim();
-      // The core's search reads words, so a T-number is looked up directly.
-      const exact = /^t-?\d+$/i.test(text)
-        ? client.showTicket(`T-${text.replace(/\D+/g, "")}`).then(
+      // The core's search reads words, so a Ticket reference is looked up directly.
+      const exact = typedReference.test(text)
+        ? client.showTicket(text.toUpperCase()).then(
             (found) => [found],
             () => [],
           )
@@ -103,7 +104,7 @@ export function AddTicketsDialog({
           <span className="sr-only">Search tickets to add</span>
           <Input
             type="search"
-            placeholder="Search by title or T-number"
+            placeholder="Search by title or reference"
             autoComplete="off"
             value={query}
             onChange={(event) => {

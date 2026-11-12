@@ -47,7 +47,7 @@ between operations.
 
 ### Bounded ticket context
 
-`ticketd context T-1` returns JSON with the ticket, derived availability, and
+`ticketd context T-KQ1` returns JSON with the ticket, derived availability, and
 its tags. Add `--project`, `--plan`, `--relationships`, or `--activities` to
 select those scopes. An omitted scope is absent; a selected but unlinked project,
 Plan, or parent is `null`. Related tickets include status and `trashed`; only
@@ -61,8 +61,8 @@ the command with `--offset` set to that value; the offset applies independently
 to every list in the response. Each call reads one snapshot, but later pages can
 reflect intervening changes. Text objects contain `text` and `truncated`:
 ticket bodies and Activity briefs are limited to 4096 Unicode characters, other user text
-to 256. Use `ticketd show T-1` for full ticket content and `ticketd activity list
-T-1` for the full activity feed. The bounded body must not be used as an editable draft.
+to 256. Use `ticketd show T-KQ1` for full ticket content and `ticketd activity list
+T-KQ1` for the full activity feed. The bounded body must not be used as an editable draft.
 
 Search saved titles, bodies, and Activity briefs with `ticketd search QUERY`. The query is a
 literal substring (ASCII letters match without case); an empty query returns no
@@ -71,7 +71,7 @@ Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
 or `--unlinked` to restrict results. The desktop search uses the same matching
 and pages through 50 results at a time.
 
-`ticketd backlinks T-1` lists incoming references as JSON. Each entry has
+`ticketd backlinks T-KQ1` lists incoming references as JSON. Each entry has
 `source_reference`, `source_title`, `activity_id` (null for a description),
 `passage` (the source line, trimmed to 512 characters around the reference), and
 `mention_start` and `mention_end`, which locate the mention in the source ticket
@@ -81,8 +81,8 @@ mark, so a Python agent can slice `body[mention_start:mention_end]` after
 dropping that mark. The span is the reference itself unless its source uses
 escapes or entities, in which case it is the whole text run containing it.
 
-Contextual links can be added with `ticketd add-relationship T-1 T-2 related`
-or `ticketd add-relationship T-1 T-2 discovered`. For discovery, the first
+Contextual links can be added with `ticketd add-relationship T-KQ1 T-KQ2 related`
+or `ticketd add-relationship T-KQ1 T-KQ2 discovered`. For discovery, the first
 ticket is the work during which the second was discovered. Use
 `remove-relationship` with the same arguments to detach a link. Related links
 are symmetric; neither kind affects readiness. `context --relationships`
@@ -99,8 +99,8 @@ completion. Keep the brief readable; optional session context can go in its pros
 Activities do not change status or dependency readiness.
 
 ```sh
-ticketd activity add T-1 --file update.md --agent agent-name
-printf '%s\n' 'Investigating the failure' | ticketd activity add T-1 --file - --agent agent-name
+ticketd activity add T-KQ1 --file update.md --agent agent-name
+printf '%s\n' 'Investigating the failure' | ticketd activity add T-KQ1 --file - --agent agent-name
 ```
 
 For safe retries, put the following JSON in `report.json` (or pass `-` and pipe
@@ -111,7 +111,7 @@ new checkpoint. A status change may be included atomically:
 ```json
 {
   "operation": "ticket_change",
-  "reference": "T-1",
+  "reference": "T-KQ1",
   "change": {
     "status": "In progress",
     "activities": ["Investigating the failure"],
@@ -120,16 +120,16 @@ new checkpoint. A status change may be included atomically:
 }
 ```
 
-Read one latest report with `ticketd context T-1 --latest-update`; the field is
+Read one latest report with `ticketd context T-KQ1 --latest-update`; the field is
 absent unless selected and null when no authored Activity exists. Use `ticketd
 list --latest-update` or `ticketd search QUERY --latest-update` for filtered,
 paginated ticket summaries. Briefs are limited to 1024 Unicode characters and
 carry a `truncated` flag. Fetch the complete brief with `ticketd activity show
-T-1 ACTIVITY_ID`. Supporting Document references and detail fetching depend on
+T-KQ1 ACTIVITY_ID`. Supporting Document references and detail fetching depend on
 supporting-document functionality when available.
 
-Record optional execution evidence using `ticketd evidence add T-1 --kind
+Record optional execution evidence using `ticketd evidence add T-KQ1 --kind
 branch --name branch --value feature/example`; kinds also include `worktree`,
 `pull-request`, `commit`, and `verification`. For example, use `--kind
 verification --name checks --value './scripts/check passed'`. Read evidence
-with `ticketd evidence list T-1` or select it with `ticketd context T-1 --evidence`.
+with `ticketd evidence list T-KQ1` or select it with `ticketd context T-KQ1 --evidence`.

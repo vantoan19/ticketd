@@ -20,7 +20,7 @@ test("reads and validates one filtered page with its authored summaries", async 
   const ticket = {
     id: "1",
     trashed: false,
-    reference: "T-1",
+    reference: "T-KQ1",
     title: "Work",
     status: "In progress",
     body: "",

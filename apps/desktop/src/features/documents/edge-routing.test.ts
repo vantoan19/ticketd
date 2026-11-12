@@ -110,7 +110,7 @@ const touches = (at: { x: number; y: number }, text: string, rect: Rect) => {
 };
 
 test("a mention label stays off every card when a third card hugs the line", () => {
-  // Spec on the left, two tickets stacked right beside its path to T-3.
+  // Spec on the left, two tickets stacked right beside its path to T-KQ3.
   const cards = {
     spec: { x: 0, y: 100, width: 180, height: 72 },
     t3: { x: 300, y: 100, width: 180, height: 72 },

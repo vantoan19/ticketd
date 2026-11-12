@@ -13,10 +13,10 @@ test("a retry of the same bulk change reuses its request ID", async () => {
     .mockRejectedValueOnce(new Error("offline"))
     .mockResolvedValue(undefined as never);
   const { result } = renderHook(() => useBulkEdit(async () => {}));
-  act(() => result.current.toggle("T-1"));
+  act(() => result.current.toggle("T-KQ1"));
   await act(() => result.current.applyStatus("Done", "Updated"));
   expect(result.current.failure?.message).toContain("offline");
-  expect(result.current.selection).toEqual(["T-1"]);
+  expect(result.current.selection).toEqual(["T-KQ1"]);
   await act(async () => {
     await result.current.retry();
   });
@@ -31,16 +31,16 @@ test("a rejected batch names the ticket that prevented it and keeps the selectio
     new BridgeFailure("batch_operation", "invalid batch: ticket is trashed", 1),
   );
   const { result } = renderHook(() => useBulkEdit(async () => {}));
-  act(() => result.current.selectAll(["T-1", "T-2", "T-3"]));
+  act(() => result.current.selectAll(["T-KQ1", "T-KQ2", "T-KQ3"]));
   await act(() => result.current.applyOrganization({ plan_id: "e1" }, "ok"));
   expect(result.current.failure).toEqual({
-    reference: "T-2",
-    message: "T-2: ticket is trashed. Nothing changed.",
+    reference: "T-KQ2",
+    message: "T-KQ2: ticket is trashed. Nothing changed.",
     // The core refused the change itself, so sending it again cannot succeed.
     retryable: false,
   });
-  expect(result.current.selection).toEqual(["T-1", "T-2", "T-3"]);
-  act(() => result.current.toggle("T-3"));
+  expect(result.current.selection).toEqual(["T-KQ1", "T-KQ2", "T-KQ3"]);
+  act(() => result.current.toggle("T-KQ3"));
   expect(result.current.failure).toBeNull();
 });
 
@@ -50,9 +50,9 @@ test("changing the selection after a failure uses a new request ID", async () =>
     .mockRejectedValueOnce(new Error("offline"))
     .mockResolvedValue(undefined as never);
   const { result } = renderHook(() => useBulkEdit(async () => {}));
-  act(() => result.current.selectAll(["T-1", "T-2"]));
+  act(() => result.current.selectAll(["T-KQ1", "T-KQ2"]));
   await act(() => result.current.applyOrganization({ plan_id: null }, "ok"));
-  act(() => result.current.toggle("T-2"));
+  act(() => result.current.toggle("T-KQ2"));
   await act(() => result.current.applyOrganization({ plan_id: null }, "ok"));
   expect(bulkChange.mock.calls[1]?.[2]).not.toBe(bulkChange.mock.calls[0]?.[2]);
 });

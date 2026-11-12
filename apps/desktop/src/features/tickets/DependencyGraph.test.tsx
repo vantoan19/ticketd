@@ -30,7 +30,7 @@ const node = (
   id: reference,
   reference,
   title,
-  status: reference === "T-1" ? "Done" : "Todo",
+  status: reference === "T-KQ1" ? "Done" : "Todo",
   trashed: false,
   availability,
 });
@@ -38,13 +38,13 @@ let graph: Graph;
 beforeEach(() => {
   graph = {
     nodes: [
-      node("T-1", "Design", null),
-      node("T-2", "Build", "Ready"),
-      node("T-3", "Ship", "Blocked"),
+      node("T-KQ1", "Design", null),
+      node("T-KQ2", "Build", "Ready"),
+      node("T-KQ3", "Ship", "Blocked"),
     ],
     edges: [
-      { blocker: "T-1", dependent: "T-2" },
-      { blocker: "T-2", dependent: "T-3" },
+      { blocker: "T-KQ1", dependent: "T-KQ2" },
+      { blocker: "T-KQ2", dependent: "T-KQ3" },
     ],
     max_nodes: 50,
     max_depth: 5,
@@ -58,7 +58,7 @@ beforeEach(() => {
     if (command === "dependency_graph") return graph;
     if (command === "show_ticket")
       return {
-        ...node("T-3", "Ship", "Blocked"),
+        ...node("T-KQ3", "Ship", "Blocked"),
         body: "",
         tags: [],
         project_id: "p1",
@@ -68,14 +68,14 @@ beforeEach(() => {
         // Links beyond the drawn graph still show in the panel.
         prerequisites: [
           {
-            reference: "T-2",
+            reference: "T-KQ2",
             title: "Build",
             status: "Todo",
             trashed: false,
             unresolved: true,
           },
           {
-            reference: "T-40",
+            reference: "T-KQ40",
             title: "Offscreen",
             status: "Todo",
             trashed: false,
@@ -99,7 +99,7 @@ beforeEach(() => {
           children_progress: { total: 0, done: 0 },
           prerequisites: empty,
           blocking: {
-            items: [item("T-99", "Beyond the graph")],
+            items: [item("T-KQ99", "Beyond the graph")],
             next_offset: null,
           },
           related: empty,
@@ -121,7 +121,7 @@ afterEach(() => {
 function renderGraph(onBack = vi.fn(), onOpen = vi.fn()) {
   render(
     <DependencyGraph
-      reference="T-2"
+      reference="T-KQ2"
       revision={0}
       projects={[{ id: "p1", name: "Core", path: "/core", paths: [] }]}
       plans={[]}
@@ -134,47 +134,49 @@ function renderGraph(onBack = vi.fn(), onOpen = vi.fn()) {
 
 test("states the arrow direction and keeps a way back to the origin ticket", async () => {
   const { onBack } = renderGraph();
-  await screen.findByRole("button", { name: /^T-3\b/ });
+  await screen.findByRole("button", { name: /^T-KQ3\b/ });
   expect(screen.getByText("Arrows point to the work that waits.")).toBeTruthy();
   expect(
     screen.getByText(
       "A Todo ticket is Ready once every ticket with an arrow into it is Done.",
     ),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back to T-2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to T-KQ2" }));
   expect(onBack).toHaveBeenCalled();
 });
 
 test("selecting a node shows what it blocks, its project, and Open", async () => {
   const { onOpen } = renderGraph();
-  fireEvent.click(await screen.findByRole("button", { name: /^T-3\b/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^T-KQ3\b/ }));
   const panel = screen.getByRole("complementary", { name: "Selected ticket" });
   expect(within(panel).getByText("Blocked by")).toBeTruthy();
   expect(await within(panel).findByText("Core")).toBeTruthy();
   // The panel lists the ticket's own links, including ones the graph omits.
   expect(within(panel).getByText("Offscreen")).toBeTruthy();
   expect(await within(panel).findByText("Beyond the graph")).toBeTruthy();
-  fireEvent.click(within(panel).getByRole("button", { name: "Open T-3" }));
-  expect(onOpen).toHaveBeenCalledWith("T-3");
+  fireEvent.click(within(panel).getByRole("button", { name: "Open T-KQ3" }));
+  expect(onOpen).toHaveBeenCalledWith("T-KQ3");
 });
 
 test("marks the origin ticket and says when the graph is limited", async () => {
   graph = { ...graph, truncated: true };
   renderGraph();
-  const origin = await screen.findByRole("button", { name: /^T-2\b/ });
+  const origin = await screen.findByRole("button", { name: /^T-KQ2\b/ });
   expect(within(origin).getByText("Opened from")).toBeTruthy();
   expect(
-    screen.getByText(/up to 5 links from T-2 and at most 50 tickets/),
+    screen.getByText(/up to 5 links from T-KQ2 and at most 50 tickets/),
   ).toBeTruthy();
 });
 
 test("re-centers the graph on the selected ticket", async () => {
   renderGraph();
-  fireEvent.click(await screen.findByRole("button", { name: /^T-3\b/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Center graph on T-3" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^T-KQ3\b/ }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Center graph on T-KQ3" }),
+  );
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("dependency_graph", {
-      reference: "T-3",
+      reference: "T-KQ3",
     }),
   );
 });

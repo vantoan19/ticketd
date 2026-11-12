@@ -19,10 +19,10 @@ const node = (reference: string) => ({
   availability: null,
 });
 const graph: DependencyGraph = {
-  nodes: [node("T-1"), node("T-2"), node("T-3")],
+  nodes: [node("T-KQ1"), node("T-KQ2"), node("T-KQ3")],
   edges: [
-    { blocker: "T-1", dependent: "T-2" },
-    { blocker: "T-2", dependent: "T-3" },
+    { blocker: "T-KQ1", dependent: "T-KQ2" },
+    { blocker: "T-KQ2", dependent: "T-KQ3" },
   ],
   max_nodes: 50,
   max_depth: 5,
@@ -36,27 +36,27 @@ const graph: DependencyGraph = {
 test("blockers are laid out above the tickets they block", () => {
   const positions = layoutGraph(graph);
   const y = (reference: string) => positions.get(reference)?.y ?? NaN;
-  expect(y("T-1")).toBeLessThan(y("T-2"));
-  expect(y("T-2")).toBeLessThan(y("T-3"));
+  expect(y("T-KQ1")).toBeLessThan(y("T-KQ2"));
+  expect(y("T-KQ2")).toBeLessThan(y("T-KQ3"));
 });
 
 test("only a limited graph states how far it reaches", () => {
-  expect(scopeNotice(graph, "T-2")).toBeNull();
-  expect(scopeNotice({ ...graph, truncated: true }, "T-2")).toContain(
-    "up to 5 links from T-2 and at most 50 tickets",
+  expect(scopeNotice(graph, "T-KQ2")).toBeNull();
+  expect(scopeNotice({ ...graph, truncated: true }, "T-KQ2")).toContain(
+    "up to 5 links from T-KQ2 and at most 50 tickets",
   );
 });
 
 const dense: DependencyGraph = {
   ...graph,
-  nodes: Array.from({ length: 55 }, (_, index) => node(`T-${index + 1}`)),
+  nodes: Array.from({ length: 55 }, (_, index) => node(`T-KQ${index + 1}`)),
   edges: [
     ...Array.from({ length: 12 }, (_, index) => ({
-      blocker: "T-1",
-      dependent: `T-${index + 2}`,
+      blocker: "T-KQ1",
+      dependent: `T-KQ${index + 2}`,
     })),
-    { blocker: "T-2", dependent: "T-20" },
-    { blocker: "T-20", dependent: "T-21" },
+    { blocker: "T-KQ2", dependent: "T-KQ20" },
+    { blocker: "T-KQ20", dependent: "T-KQ21" },
   ],
 };
 
@@ -64,7 +64,7 @@ test("a hub with many dependents wraps into rows within a width budget", () => {
   const positions = layoutGraph(dense);
   const bounds = boundsOf(positions, positions.keys());
   expect(bounds!.width).toBeLessThanOrEqual(8 * (NODE_WIDTH + 32));
-  expect(positions.get("T-1")!.y).toBeLessThan(positions.get("T-2")!.y);
+  expect(positions.get("T-KQ1")!.y).toBeLessThan(positions.get("T-KQ2")!.y);
   const spots = new Set([...positions.values()].map((at) => `${at.x},${at.y}`));
   expect(spots.size).toBe(dense.nodes.length);
 });
@@ -82,7 +82,7 @@ test("Fit shows every ticket and the opening view keeps the hub in sight", () =>
   }
   const open = openViewport(dense, positions, null, size, 0.7)!;
   expect(open.zoom).toBeGreaterThanOrEqual(0.7);
-  const hub = positions.get("T-1")!;
+  const hub = positions.get("T-KQ1")!;
   const left = hub.x * open.zoom + open.x;
   expect(left).toBeGreaterThanOrEqual(0);
   expect(left + NODE_WIDTH * open.zoom).toBeLessThanOrEqual(900);
@@ -92,14 +92,14 @@ test("Fit shows every ticket and the opening view keeps the hub in sight", () =>
 test("a dense graph wraps to five per rank and opens readable on the selected ticket", () => {
   const big: DependencyGraph = {
     ...dense,
-    nodes: Array.from({ length: 50 }, (_, index) => node(`T-${index + 1}`)),
+    nodes: Array.from({ length: 50 }, (_, index) => node(`T-KQ${index + 1}`)),
     edges: [
       ...Array.from({ length: 24 }, (_, index) => ({
-        blocker: "T-1",
-        dependent: `T-${index + 2}`,
+        blocker: "T-KQ1",
+        dependent: `T-KQ${index + 2}`,
       })),
-      { blocker: "T-40", dependent: "T-41" },
-      { blocker: "T-41", dependent: "T-42" },
+      { blocker: "T-KQ40", dependent: "T-KQ41" },
+      { blocker: "T-KQ41", dependent: "T-KQ42" },
     ],
   };
   const positions = layoutGraph(big);
@@ -111,10 +111,10 @@ test("a dense graph wraps to five per rank and opens readable on the selected ti
     5,
   );
   const size = { width: 1000, height: 650 };
-  for (const focus of ["T-41", null]) {
+  for (const focus of ["T-KQ41", null]) {
     const open = openViewport(big, positions, focus, size, 0.7)!;
     expect(open.zoom).toBeGreaterThanOrEqual(0.7);
-    const target = positions.get(focus ?? "T-1")!;
+    const target = positions.get(focus ?? "T-KQ1")!;
     const left = target.x * open.zoom + open.x;
     const top = target.y * open.zoom + open.y;
     expect(left).toBeGreaterThanOrEqual(0);

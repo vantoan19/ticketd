@@ -4,6 +4,8 @@ mod attachment_commands;
 mod attachment_media;
 mod cli_status;
 mod drive_commands;
+mod sync_commands;
+mod sync_scheduler;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
@@ -47,6 +49,11 @@ impl From<ticketd_core::Error> for BridgeFailure {
                 code: "review_changed",
                 index: None,
                 message: ticketd_core::Error::DependencyReviewChanged.to_string(),
+            },
+            ticketd_core::Error::SyncReviewChanged => Self {
+                code: "review_changed",
+                index: None,
+                message: ticketd_core::Error::SyncReviewChanged.to_string(),
             },
             ticketd_core::Error::DependencyReviewMode(mode) => Self {
                 code: "review_mode",
@@ -319,7 +326,12 @@ fn workspace_change_token() -> Result<i64, String> {
 #[tauri::command]
 fn sidebar_counts() -> Result<SidebarCounts, String> {
     open_workspace()
-        .and_then(|w| w.sidebar_counts())
+        .and_then(|w| {
+            let mut counts = w.sidebar_counts()?;
+            // The Inbox lists what sync needs read beside its own entries.
+            counts.unread_inbox += sync_commands::unread(&w)?;
+            Ok(counts)
+        })
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -1123,8 +1135,13 @@ fn workspace_info() -> Result<WorkspaceInfo, String> {
         .and_then(|w| w.workspace_info())
         .map_err(|e| e.to_string())
 }
+/// Sync is held off while the Workspace file is replaced.
 #[tauri::command(async)]
-fn restore_workspace(path: String) -> Result<String, String> {
+fn restore_workspace(
+    host: tauri::State<'_, sync_commands::SyncHost>,
+    path: String,
+) -> Result<String, String> {
+    let _no_run = host.scheduler.hold();
     Workspace::restore_default(path)
         .map(|safety| safety.display().to_string())
         .map_err(|e| e.to_string())
@@ -1385,7 +1402,57 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
     }
 }
 
+const QUIT_MENU_ID: &str = "quit";
+
+/// Whether a request to exit the app must first go through the window's close
+/// guard, which finishes uploads and shows what did not upload. With no window
+/// left there is nobody to ask, and a restart is never held.
+fn holds_exit(code: Option<i32>, window_open: bool) -> bool {
+    window_open && code.is_some_and(|code| code != tauri::RESTART_EXIT_CODE)
+}
+
+/// Quits the way closing the window does, so every way out is guarded alike.
+fn request_quit(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    match app.get_webview_window("main") {
+        Some(window) => {
+            if let Err(error) = window.close() {
+                eprintln!("could not ask the window to close: {error}");
+            }
+        }
+        None => app.exit(0),
+    }
+}
+
+/// macOS quits from the application menu without asking any window, so its Quit
+/// item is replaced by one this app answers itself.
+fn guard_menu_quit(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind};
+    let menu = Menu::default(app)?;
+    // The default application menu comes first and ends with the native Quit.
+    if let Some(MenuItemKind::Submenu(application)) = menu.items()?.first() {
+        if let Some(MenuItemKind::Predefined(native_quit)) = application.items()?.last() {
+            application.remove(native_quit)?;
+        }
+        application.append(&MenuItem::with_id(
+            app,
+            QUIT_MENU_ID,
+            format!("Quit {}", app.package_info().name),
+            true,
+            Some("Cmd+Q"),
+        )?)?;
+    }
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 pub fn run() -> Result<(), tauri::Error> {
+    let started = std::time::Instant::now();
+    let sync = std::sync::Arc::new(sync_scheduler::Scheduler::new(
+        Box::new(open_workspace),
+        Box::new(sync_commands::binding),
+        Box::new(sync_commands::upkeep),
+    ));
     let coordinator = std::sync::Arc::new(ticketd_core::source::RefreshCoordinator::new(
         std::sync::Arc::new(ticketd_core::source::SystemClock),
         ticketd_core::source::RefreshPolicy::default(),
@@ -1403,9 +1470,22 @@ pub fn run() -> Result<(), tauri::Error> {
         )
         .manage(drive_commands::DrivePickerOperations::default())
         .manage(Refresher(std::sync::Arc::clone(&coordinator)))
-        .setup(move |_| {
+        .manage(sync_commands::SyncHost {
+            scheduler: std::sync::Arc::clone(&sync),
+            started,
+        })
+        .setup(move |app| {
             start_periodic_refresh(coordinator);
+            sync.start(started, sync_commands::at_launch);
+            if cfg!(target_os = "macos") {
+                guard_menu_quit(app.handle())?;
+            }
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == QUIT_MENU_ID {
+                request_quit(app);
+            }
         })
         .plugin(tauri_plugin_opener::init())
         // Tauri classifies registered schemes as local IPC origins. Media is never a document.
@@ -1569,7 +1649,54 @@ pub fn run() -> Result<(), tauri::Error> {
             add_dependency,
             remove_dependency,
             set_parent,
-            detach_child
+            detach_child,
+            sync_commands::sync_conflicts,
+            sync_commands::sync_conflict,
+            sync_commands::resolve_sync_conflict,
+            sync_commands::sync_notices,
+            sync_commands::set_sync_read,
+            sync_commands::record_versions,
+            sync_commands::record_version,
+            sync_commands::restore_record_version,
+            sync_commands::sync_flush_on_exit,
+            sync_commands::sync_status,
+            sync_commands::sync_connect,
+            sync_commands::sync_setup_options,
+            sync_commands::sync_upload_workspace,
+            sync_commands::sync_reconnect,
+            sync_commands::sync_download_workspace,
+            sync_commands::sync_now,
+            sync_commands::sync_recover,
+            sync_commands::sync_disconnect,
+            sync_commands::sync_open_folder,
+            sync_commands::sync_settings,
+            sync_commands::set_sync_settings,
+            sync_commands::attachment_availability,
+            sync_commands::download_attachment
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())?
+        .run(|app, event| {
+            use tauri::Manager;
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = event
+                && holds_exit(code, app.get_webview_window("main").is_some())
+            {
+                api.prevent_exit();
+                request_quit(app);
+            }
+        });
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::holds_exit;
+
+    #[test]
+    fn an_exit_request_goes_through_the_window_while_one_is_open() {
+        assert!(holds_exit(Some(0), true));
+        // The last window is gone, or the app restarts itself.
+        assert!(!holds_exit(Some(0), false));
+        assert!(!holds_exit(None, false));
+        assert!(!holds_exit(Some(tauri::RESTART_EXIT_CODE), true));
+    }
 }

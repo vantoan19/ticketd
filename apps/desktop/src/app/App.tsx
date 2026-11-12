@@ -36,13 +36,19 @@ import {
 } from "@/lib/workspace-change";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
+import { ExitDialog } from "@/features/sync/ExitDialog";
+import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
+import { useSyncNavigation } from "@/features/sync/sync-status";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { useDraftRecoveryGeneration } from "@/lib/draft-recovery-context";
 
 export function App() {
   return (
     <WorkspaceChangeProvider value={useWorkspaceChangePoll()}>
-      <AppContent />
+      <SyncStatusProvider>
+        <AppContent />
+        <ExitDialog />
+      </SyncStatusProvider>
     </WorkspaceChangeProvider>
   );
 }
@@ -93,6 +99,14 @@ function AppContent() {
     }
     setView(next);
   };
+  useSyncNavigation({
+    openSettings: () => {
+      openView("settings");
+      setSettingsSection("sync");
+    },
+    // A record that needs review has an Inbox entry that opens its comparison.
+    openReview: () => openView("inbox"),
+  });
   const [inboxTarget, setInboxTarget] = useState<{
     reference: string;
     id: string;

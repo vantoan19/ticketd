@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  CloudCheck,
   ArrowLeft,
   Check,
   FileText,
@@ -45,7 +46,12 @@ import {
 } from "@/lib/workspace-change";
 import { DocumentNavigation, PlanNavigation } from "./navigation";
 import { z } from "zod";
+import { StatusDot } from "@/components/ui/status-dot";
+import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
+import { RecordHistory } from "@/features/sync-review/RecordHistory";
+import { useConflicts } from "@/features/sync-review/use-conflicts";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
+import { useRecordSyncState } from "@/features/sync/record-sync";
 
 function DocumentSurface({
   capture,
@@ -180,6 +186,11 @@ export function DocumentEditor({
   backLabel?: string;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
+  const { conflicts } = useConflicts();
+  const needsReview = conflicts.some(
+    (item) => item.kind === "document" && item.id === initial?.id,
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
   const recovery = useDraftRecovery();
   const recoveryOwner = `document:${initial?.id ?? "capture"}`;
   const [recovered] = useState(() =>
@@ -574,9 +585,8 @@ export function DocumentEditor({
   useEffect(() => {
     reconcileRef.current = reconcile;
   });
-  // Another writer may have changed this Document or its links: look only when
-  // the workspace says something changed.
-  useOnWorkspaceChange(() => {
+  /** Reads the stored Document again and folds it in when it changed. */
+  const refreshStored = () => {
     if (!id.current || saving.current) return;
     // Links change when other Documents or tickets are edited, not only this one.
     refreshLinksRef.current();
@@ -593,7 +603,10 @@ export function DocumentEditor({
           lastVersion.current = version.join("|");
       })
       .catch(() => {});
-  }, active);
+  };
+  // Another writer may have changed this Document or its links: look only when
+  // the workspace says something changed.
+  useOnWorkspaceChange(refreshStored, active);
   // While the conflict notice is up, clicks that would leave or Trash the Document are
   // ignored (not queued), so they cannot fire later after the person resolves it.
   const noticeRef = useRef<HTMLDivElement>(null);
@@ -675,10 +688,26 @@ export function DocumentEditor({
     </FieldGroup>
   );
   const isSaved = status === "Saved on this computer";
+  const sync = useRecordSyncState(savedDocument?.id ?? null, isSaved);
   const statusLine = (
     <span role="status" className="document-status">
-      {isSaved && <Check aria-hidden="true" />}
-      {capture && isSaved ? "Saved to Documents as you type" : status}
+      {isSaved && (needsReview || sync === "needs_review") ? (
+        // Saved, but changed on two desktops: that is the state worth saying.
+        <>
+          <StatusDot tone="attention" size={10} />
+          Needs review
+        </>
+      ) : sync === "synced" ? (
+        <>
+          <CloudCheck aria-hidden="true" />
+          Synced to Drive
+        </>
+      ) : (
+        <>
+          {isSaved && <Check aria-hidden="true" />}
+          {capture && isSaved ? "Saved to Documents as you type" : status}
+        </>
+      )}
     </span>
   );
   const saveError = failed && (
@@ -713,7 +742,7 @@ export function DocumentEditor({
   // every other connection is a mention, listed once.
   const isAttachment = (item: (typeof connected)[number]) =>
     item.kind === "plan" && item.passages.length === 0;
-  // Reference order (T-1 before T-3), not the order the links were recorded in.
+  // Reference order (T-KQ1 before T-KQ3), not the order the links were recorded in.
   const mentions = connected
     .filter((item) => !isAttachment(item))
     .sort((a, b) =>
@@ -834,6 +863,9 @@ export function DocumentEditor({
                   </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" sideOffset={4}>
+                  <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                    History…
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={toggleTrash}>
                     Move to Trash
                   </DropdownMenuItem>
@@ -843,7 +875,17 @@ export function DocumentEditor({
           </div>
         </header>
       )}
+      {initial && historyOpen && (
+        <RecordHistory
+          kind="document"
+          id={initial.id}
+          subtitle={heading}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={refreshStored}
+        />
+      )}
       <div className="document-main">
+        {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
         {!initial && (
           <header>
             <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">

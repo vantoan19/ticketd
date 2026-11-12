@@ -1,0 +1,109 @@
+/* Sync: layout only. Colours, radii and type sizes are tokens from styles.css. */
+
+/* Settings › Sync. */
+.sync-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sync-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-interval {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-interval input {
+  width: 96px;
+}
+.sync-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--text-ui);
+}
+.sync-summary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.sync-summary dt {
+  color: var(--muted-foreground);
+}
+.sync-summary dd {
+  margin: 0;
+}
+
+/* Popover opened from the Drive line in the sidebar footer. */
+.sync-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sync-status-list,
+.sync-pending {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sync-status-list {
+  margin-inline: -8px;
+}
+.sync-status-list [data-slot="item"] {
+  padding: 0 8px;
+}
+.sync-status-list [data-slot="item"],
+.sync-pending [data-slot="item"] {
+  font-size: var(--text-ui);
+}
+.sync-status-list svg,
+.sync-pending svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.sync-status-list span,
+.sync-pending-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-popover-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* The Drive line in the sidebar footer: one line each, cut with an ellipsis. */
+.sidebar-sync .sidebar-source-label {
+  max-width: 100%;
+}
+.sync-line-text {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings › Sync: the notice between the page subtitle and the first card. */
+.sync-replaced {
+  margin-top: 32px;
+}
+.sync-replaced code {
+  display: block;
+  overflow-wrap: anywhere;
+}

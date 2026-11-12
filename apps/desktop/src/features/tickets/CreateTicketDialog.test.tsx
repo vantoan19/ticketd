@@ -229,7 +229,7 @@ test("opening from a project scope preselects that project", () => {
 });
 
 test("Ctrl+Enter in the title creates the ticket", async () => {
-  const create = vi.fn().mockResolvedValue("T-1");
+  const create = vi.fn().mockResolvedValue("T-KQ1");
   render(<Harness create={create} />);
   const title = screen.getByRole("textbox", { name: "Title" });
   fireEvent.change(title, { target: { value: "Quick" } });
@@ -248,7 +248,7 @@ async function focusedEditor() {
 }
 
 test("Ctrl or Cmd+Enter in the focused Description editor creates the ticket; other keys do not", async () => {
-  const create = vi.fn().mockResolvedValue("T-1");
+  const create = vi.fn().mockResolvedValue("T-KQ1");
   render(<Harness create={create} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "From editor" },
@@ -264,7 +264,7 @@ test("Ctrl or Cmd+Enter in the focused Description editor creates the ticket; ot
 });
 
 test("Ctrl+Enter in the Description editor creates the ticket", async () => {
-  const create = vi.fn().mockResolvedValue("T-1");
+  const create = vi.fn().mockResolvedValue("T-KQ1");
   render(<Harness create={create} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "From editor" },
@@ -274,7 +274,7 @@ test("Ctrl+Enter in the Description editor creates the ticket", async () => {
 });
 
 test("Ctrl+Enter chooses the highlighted slash menu block instead of creating", async () => {
-  const create = vi.fn().mockResolvedValue("T-1");
+  const create = vi.fn().mockResolvedValue("T-KQ1");
   render(<Harness create={create} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Slash" },
@@ -288,7 +288,7 @@ test("Ctrl+Enter chooses the highlighted slash menu block instead of creating", 
 });
 
 test("Ctrl+Enter in the Link URL field does not create", async () => {
-  const create = vi.fn().mockResolvedValue("T-1");
+  const create = vi.fn().mockResolvedValue("T-KQ1");
   render(<Harness create={create} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Link" },
@@ -304,8 +304,8 @@ test("Ctrl+Enter in the Link URL field does not create", async () => {
 test("Create more keeps the dialog open, clears text, keeps properties, refocuses Title, and announces the reference", async () => {
   const create = vi
     .fn()
-    .mockResolvedValueOnce("T-1")
-    .mockResolvedValueOnce("T-2");
+    .mockResolvedValueOnce("T-KQ1")
+    .mockResolvedValueOnce("T-KQ2");
   render(
     <Harness
       create={create}
@@ -319,7 +319,7 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   // Focus is on the button that submitted, as it is for a real click.
   screen.getByRole("button", { name: "Create ticket" }).focus();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-  await waitFor(() => expect(screen.getByText("Created T-1")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("Created T-KQ1")).toBeTruthy());
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(title).toHaveProperty("value", "");
   expect(document.activeElement).toBe(title);
@@ -339,7 +339,7 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
 
 test("retrying recovery cleanup after creation does not create a duplicate ticket", async () => {
   const recovery = recoveryBridge();
-  const create = vi.fn().mockResolvedValue("T-3");
+  const create = vi.fn().mockResolvedValue("T-KQ3");
   render(
     <DraftRecoveryProvider>
       <Harness create={create} />
@@ -350,7 +350,7 @@ test("retrying recovery cleanup after creation does not create a duplicate ticke
   });
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
-  expect(await screen.findByText(/T-3 was created/)).toBeTruthy();
+  expect(await screen.findByText(/T-KQ3 was created/)).toBeTruthy();
   expect(create).toHaveBeenCalledTimes(1);
 
   fireEvent.click(screen.getByRole("button", { name: "Finish cleanup" }));
@@ -396,7 +396,7 @@ test("a lost-response submission reuses its request ID and follow choice after r
           return previous.reference;
         }
       }
-      const reference = `T-${accepted.size + 1}`;
+      const reference = `T-KQ${accepted.size + 1}`;
       if (requestId) accepted.set(requestId, { fingerprint, reference });
       if (requestId && loseFirstResponse) {
         loseFirstResponse = false;
@@ -471,7 +471,7 @@ test.each([false, true])(
     const create = vi
       .fn()
       .mockRejectedValueOnce(new Error("The response was lost"))
-      .mockResolvedValueOnce("T-2");
+      .mockResolvedValueOnce("T-KQ2");
     render(
       <DraftRecoveryProvider>
         <Harness create={create} />

@@ -91,12 +91,25 @@ impl Workspace {
 
     /// Restore only when no workspace connection is open. Returns a complete
     /// safety backup, including all retained bytes of the previous workspace.
+    ///
+    /// The restored Workspace is not connected to a sync folder, whatever the
+    /// backup or the replaced Workspace was: a run against the folder would
+    /// bring back what the restore went back on, so the person chooses upload
+    /// or download again.
     pub fn restore(
         workspace: impl AsRef<Path>,
         backup: impl AsRef<Path>,
     ) -> Result<PathBuf, Error> {
-        let workspace = workspace.as_ref();
-        let backup = backup.as_ref();
+        Self::restore_from(workspace.as_ref(), backup.as_ref(), false)
+    }
+
+    /// [`Workspace::restore`], optionally keeping the backup's sync folder: for
+    /// the replacement Workspace that downloading a folder prepares.
+    pub(crate) fn restore_from(
+        workspace: &Path,
+        backup: &Path,
+        keep_sync_folder: bool,
+    ) -> Result<PathBuf, Error> {
         if !backup.is_file() {
             return Err(Error::Backup(format!(
                 "backup file not found: {}",
@@ -152,6 +165,19 @@ impl Workspace {
         let mut restored = Connection::open(staged.path())?;
         backup::copy(&source, &mut restored)?;
         backup_archive::unpack_database(&restored)?;
+        // The backup may be older than references this device has since issued, or come from
+        // another device: a fresh code keeps the restored counter from issuing one twice.
+        // A backup from before device codes gets its code when it is migrated on open.
+        if backup::table_exists(&restored, "device")? {
+            crate::device::renew_code(&restored)?;
+        }
+        // For the same reason it joins its sync folder as a device of its own.
+        if backup::table_exists(&restored, "sync_state")? {
+            restored.execute("UPDATE sync_state SET device_id = NULL", [])?;
+            if !keep_sync_folder {
+                crate::sync::forget_folder(&restored)?;
+            }
+        }
 
         // All potentially failing staging work happens before touching live data.
         let current = if workspace.exists() {

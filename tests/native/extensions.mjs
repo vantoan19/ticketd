@@ -373,7 +373,11 @@ try {
           ticket: source.reference,
           change: { status: "Done" },
         },
-        { operation: "change", ticket: "T-99999", change: { status: "Done" } },
+        {
+          operation: "change",
+          ticket: "T-KQ99999",
+          change: { status: "Done" },
+        },
       ]),
     ),
   );

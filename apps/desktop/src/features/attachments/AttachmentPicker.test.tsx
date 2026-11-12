@@ -673,7 +673,7 @@ test("existing files search keeps related usage distinct and inserts selected id
   render(
     <AttachmentPicker
       open
-      ticketReference="T-1"
+      ticketReference="T-KQ1"
       onOpenChange={closed}
       onPick={picked}
     />,
@@ -691,7 +691,7 @@ test("existing files search keeps related usage distinct and inserts selected id
     expect(invoke).toHaveBeenCalledWith("search_attachments", {
       query: expect.objectContaining({
         search: "log",
-        ticket: "T-1",
+        ticket: "T-KQ1",
         limit: 50,
       }),
     }),

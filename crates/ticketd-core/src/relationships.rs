@@ -24,7 +24,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 }
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    let mut statement = connection.prepare("SELECT number, title, status, trashed FROM tickets JOIN dependencies ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY number")?;
+    let mut statement = connection.prepare("SELECT reference, title, status, trashed FROM tickets JOIN dependencies ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY number")?;
     ticket.prerequisites = statement
         .query_map([&ticket.id], |row| {
             let status: String = row.get(2)?;
@@ -36,7 +36,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                 )
             })?;
             Ok(Prerequisite {
-                reference: format!("T-{}", row.get::<_, i64>(0)?),
+                reference: row.get::<_, String>(0)?,
                 title: row.get(1)?,
                 trashed: row.get(3)?,
                 unresolved: !status.satisfies_dependency(),
@@ -113,23 +113,19 @@ fn chain(connection: &Connection, from: &str, to: &str) -> Result<Vec<String>, E
     ids.into_iter()
         .map(|id| {
             connection
-                .query_row("SELECT number FROM tickets WHERE id = ?1", [id], |r| {
-                    r.get::<_, i64>(0)
+                .query_row("SELECT reference FROM tickets WHERE id = ?1", [id], |r| {
+                    r.get(0)
                 })
-                .map(|n| format!("T-{n}"))
                 .map_err(Error::from)
         })
         .collect()
 }
 
 pub(crate) fn id(connection: &Connection, reference: &str) -> Result<String, Error> {
-    let number = reference
-        .strip_prefix("T-")
-        .and_then(|n| n.parse::<i64>().ok());
     connection
         .query_row(
-            "SELECT id FROM tickets WHERE number = ?1",
-            [number],
+            "SELECT id FROM tickets WHERE reference = ?1",
+            [reference],
             |row| row.get(0),
         )
         .optional()?

@@ -13,7 +13,7 @@ test("a blocker in Trash is named as such", () => {
     availability: "Blocked",
     prerequisites: [
       {
-        reference: "T-7",
+        reference: "T-KQ7",
         title: "x",
         status: "Todo",
         trashed: true,
@@ -21,22 +21,22 @@ test("a blocker in Trash is named as such", () => {
       },
     ],
   } as unknown as Ticket;
-  expect(readinessLabel(readiness(ticket))).toBe("Blocked by T-7 (in Trash)");
+  expect(readinessLabel(readiness(ticket))).toBe("Blocked by T-KQ7 (in Trash)");
 });
 
 test("the visible label keeps the blocker count short", () => {
   const ticket = {
     status: "Todo",
     availability: "Blocked",
-    prerequisites: ["T-2", "T-3", "T-4"].map((reference) => ({
+    prerequisites: ["T-KQ2", "T-KQ3", "T-KQ4"].map((reference) => ({
       reference,
       title: "x",
       status: "Todo",
       unresolved: true,
     })),
   } as unknown as Ticket;
-  expect(readinessShortLabel(readiness(ticket))).toBe("Blocked by T-2 +2");
-  expect(readinessLabel(readiness(ticket))).toBe("Blocked by T-2 and 2 more");
+  expect(readinessShortLabel(readiness(ticket))).toBe("Blocked by T-KQ2 +2");
+  expect(readinessLabel(readiness(ticket))).toBe("Blocked by T-KQ2 and 2 more");
 });
 
 test("line two shows every tag that fits and counts the rest", () => {

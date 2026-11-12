@@ -1,4 +1,4 @@
-import { useId, type ReactNode, type RefObject } from "react";
+import { useId, useRef, type ReactNode, type RefObject } from "react";
 import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +22,7 @@ export function DialogShell({
   title,
   description,
   primaryLabel,
+  cancelLabel = "Cancel",
   blockedReason,
   onSubmit,
   onCancel,
@@ -30,6 +31,9 @@ export function DialogShell({
   footerLeading,
   footerNote,
   primaryHint,
+  showClose = true,
+  focusPrimary = false,
+  primaryFirst = false,
   children,
   busy = false,
 }: {
@@ -38,6 +42,8 @@ export function DialogShell({
   title: string;
   description?: string;
   primaryLabel: string;
+  /** The dismissing button, when Cancel would mislead: Later, Close. */
+  cancelLabel?: string;
   blockedReason: string | null;
   onSubmit: () => void;
   /** Cancel only (not Escape or an outside click): discard the draft. */
@@ -52,12 +58,51 @@ export function DialogShell({
   footerNote?: string;
   /** A shortcut shown inside the primary button. */
   primaryHint?: string;
+  /** The corner Close button; off where the footer holds the only two ways out. */
+  showClose?: boolean;
+  /** Opens with focus on the primary button, not the first control. */
+  focusPrimary?: boolean;
+  /** Tab reaches the primary button before the dismissing one; both stay where they are drawn. */
+  primaryFirst?: boolean;
   children: ReactNode;
   /** A submitted write is still in flight, so dismissing must wait for its result. */
   busy?: boolean;
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
+  const primary = useRef<HTMLButtonElement>(null);
+  const cancel = (
+    <DialogClose asChild key="cancel">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onCancel}
+        disabled={busy}
+      >
+        {cancelLabel}
+      </Button>
+    </DialogClose>
+  );
+  const submit = (
+    <Button
+      key="submit"
+      ref={primary}
+      type="submit"
+      size="sm"
+      // Ahead of Cancel in the tab order, it is still drawn after it.
+      {...(primaryFirst && { className: "order-1" })}
+      disabled={blocked}
+      {...(blocked && { "aria-describedby": reasonId })}
+    >
+      {primaryLabel}
+      {primaryHint && (
+        <span className="font-mono text-xs" aria-hidden="true">
+          {primaryHint}
+        </span>
+      )}
+    </Button>
+  );
   return (
     <Dialog
       open={open}
@@ -70,6 +115,12 @@ export function DialogShell({
         style={{ maxWidth: `min(${width}px, calc(100vw - 32px))`, width }}
         showCloseButton={false}
         {...(returnFocus && { returnFocus })}
+        {...(focusPrimary && {
+          onOpenAutoFocus: (event: Event) => {
+            event.preventDefault();
+            primary.current?.focus();
+          },
+        })}
       >
         <form
           className="dialog-shell-form relative"
@@ -99,46 +150,25 @@ export function DialogShell({
             >
               {blockedReason ?? footerNote}
             </p>
-            <DialogClose asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={onCancel}
-                disabled={busy}
-              >
-                Cancel
-              </Button>
-            </DialogClose>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={blocked}
-              {...(blocked && { "aria-describedby": reasonId })}
-            >
-              {primaryLabel}
-              {primaryHint && (
-                <span className="font-mono text-xs" aria-hidden="true">
-                  {primaryHint}
-                </span>
-              )}
-            </Button>
+            {primaryFirst ? [submit, cancel] : [cancel, submit]}
           </div>
           {/* Last in the tab order, drawn in the header's corner. */}
-          <div className="absolute top-5 right-4">
-            <DialogClose asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                {...(onCancel && { onClick: onCancel })}
-                disabled={busy}
-              >
-                <XIcon />
-                <span className="sr-only">Close</span>
-              </Button>
-            </DialogClose>
-          </div>
+          {showClose && (
+            <div className="absolute top-5 right-4">
+              <DialogClose asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  {...(onCancel && { onClick: onCancel })}
+                  disabled={busy}
+                >
+                  <XIcon />
+                  <span className="sr-only">Close</span>
+                </Button>
+              </DialogClose>
+            </div>
+          )}
         </form>
       </DialogContent>
     </Dialog>

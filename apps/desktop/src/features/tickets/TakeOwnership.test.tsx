@@ -61,7 +61,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
 const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   id: "1",
   trashed: false,
-  reference: "T-1",
+  reference: "T-KQ1",
   title: "Imported issue",
   status: "Todo",
   body: "Described on GitHub",
@@ -105,7 +105,7 @@ test("Take ownership asks first, explains the consequences, then applies once an
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledTimes(1);
   expect(bridge.invoke).toHaveBeenCalledWith("take_ownership", {
-    reference: "T-1",
+    reference: "T-KQ1",
     requestId: expect.any(String),
   });
 });
@@ -127,7 +127,7 @@ test("opening the ownership explanation focuses Cancel without scrolling past it
     ),
   ).toBe(true);
   expect(
-    within(dialog).getByRole("heading", { name: "Take ownership of T-1?" }),
+    within(dialog).getByRole("heading", { name: "Take ownership of T-KQ1?" }),
   ).toBeTruthy();
 });
 
