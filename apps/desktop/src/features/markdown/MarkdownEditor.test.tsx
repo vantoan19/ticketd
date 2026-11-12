@@ -16,7 +16,10 @@ import { slashChoices, slashMayOpen } from "./slash-menu";
 vi.mock("./MermaidDiagram", () => ({
   MermaidDiagram: () => <div>Diagram preview</div>,
 }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Reflect.deleteProperty(HTMLElement.prototype, "isContentEditable");
+});
 describe("Markdown draft editor", () => {
   it("returns focus to the editor when a focus request is raised (D2)", async () => {
     const onChange = vi.fn();
@@ -210,6 +213,92 @@ describe("Markdown draft editor", () => {
       ),
     );
   });
+  /** Mounts a controlled editor with the caret at `offset` inside the text `text`. */
+  async function mountWithCaret(text: string, offset: number) {
+    const changes = vi.fn();
+    function Draft() {
+      const [value, setValue] = useState(text);
+      return (
+        <MarkdownEditor
+          value={value}
+          onChange={(next) => {
+            setValue(next);
+            changes(next);
+          }}
+        />
+      );
+    }
+    render(<Draft />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    // jsdom has no contenteditable support; Slate asks each node whether it is editable.
+    Object.defineProperty(HTMLElement.prototype, "isContentEditable", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.closest('[contenteditable="true"]') !== null;
+      },
+    });
+    editable.focus();
+    const range = document.createRange();
+    range.setStart(screen.getByText(text).firstChild!, offset);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent(document, new Event("selectionchange"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    return { editable, changes };
+  }
+  it("keeps the caret inside a Quote chosen from the slash menu", async () => {
+    const { editable } = await mountWithCaret("x y", 2);
+    fireEvent.keyDown(editable, { key: "/" });
+    fireEvent.click(screen.getByRole("option", { name: "Quote" }));
+    await waitFor(() => {
+      const quote = editable.querySelector("blockquote");
+      expect(quote).not.toBeNull();
+      const selection = window.getSelection();
+      expect(selection?.rangeCount).toBe(1);
+      expect(quote?.contains(selection?.anchorNode ?? null)).toBe(true);
+    });
+  });
+  it("keeps the leading whitespace of pasted plain text", async () => {
+    const { editable, changes } = await mountWithCaret("hello", 5);
+    const paste = (text: string) => {
+      const event = createEvent.paste(editable);
+      Object.defineProperty(event, "clipboardData", {
+        value: { getData: () => text },
+      });
+      fireEvent(editable, event);
+    };
+    paste(" world");
+    await waitFor(() =>
+      expect(changes).toHaveBeenLastCalledWith("hello world"),
+    );
+  });
+  it("keeps edge whitespace of a multi-paragraph paste", async () => {
+    const { editable, changes } = await mountWithCaret("hi", 2);
+    const event = createEvent.paste(editable);
+    Object.defineProperty(event, "clipboardData", {
+      value: { getData: () => " one\n\n two " },
+    });
+    fireEvent(editable, event);
+    await waitFor(() =>
+      expect(changes).toHaveBeenLastCalledWith("hi one\n\ntwo"),
+    );
+  });
+  it("does not let pasted edge whitespace inherit a mark", async () => {
+    const { editable, changes } = await mountWithCaret("pre", 3);
+    const event = createEvent.paste(editable);
+    Object.defineProperty(event, "clipboardData", {
+      value: { getData: () => " **b** and _i_ " },
+    });
+    fireEvent(editable, event);
+    await waitFor(() =>
+      expect(changes).toHaveBeenLastCalledWith("pre **b** and *i*"),
+    );
+  });
   it("enforces read-only content and hides editing controls", () => {
     render(<MarkdownEditor value="View only" onChange={vi.fn()} readOnly />);
     expect(
@@ -310,7 +399,17 @@ describe("Toolbar layout and links", () => {
     expect(container.querySelector(".rich-toolbar")).toBe(toolbar);
     expect(toolbar?.hasAttribute("hidden")).toBe(false);
     expect(toolbar?.getAttribute("data-visible")).toBe("false");
-    expect(toolbar?.hasAttribute("inert")).toBe(true);
+    expect(
+      toolbar?.querySelector(".rich-toolbar-tools")?.hasAttribute("inert"),
+    ).toBe(true);
+  });
+  it("makes the copy and source actions the toolbar row's last item, not an overlay", () => {
+    const { container } = render(
+      <MarkdownEditor value="text" onChange={vi.fn()} />,
+    );
+    const row = container.querySelector(".rich-toolbar");
+    expect(row?.lastElementChild?.classList.contains("editor-mode")).toBe(true);
+    expect(row?.firstElementChild?.getAttribute("role")).toBe("toolbar");
   });
   it("floats a focus-only toolbar above the frame but keeps a persistent one in it (L6)", () => {
     const idle = render(<MarkdownEditor value="text" onChange={vi.fn()} />);

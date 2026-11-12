@@ -20,6 +20,9 @@ export function bridgeDefault(
       return 104857600;
     case "attachment_workspace_id":
       return "workspace-test";
+    // Attachments settings reads it on open to gate the Google Drive tile.
+    case "drive_configuration":
+      return { configured: false, message: "" };
     case "latest_update":
       return null;
     case "document_context_links":

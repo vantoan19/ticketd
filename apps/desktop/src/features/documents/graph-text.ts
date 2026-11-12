@@ -361,3 +361,44 @@ export function stateLine(node: {
 export function nodeAriaLabel(node: GraphNode): string {
   return `${kindNames[node.kind]}: ${node.label}${node.trashed ? " (Trash)" : ""}`;
 }
+
+/** A node's name in a list: its label with a Trash suffix when it is trashed. */
+export function nodeName(node: { label: string; trashed: boolean }): string {
+  return `${node.label}${node.trashed ? " (Trash)" : ""}`;
+}
+
+/**
+ * Whether a React Flow move-start event is the person's own pan or zoom. A
+ * programmatic move (Fit, or the controlled viewport syncing back into the
+ * canvas) carries no DOM event, or a plain `{ sync: true }` marker object.
+ */
+export function isUserMove(event: unknown): boolean {
+  return typeof Event !== "undefined" && event instanceof Event;
+}
+
+/**
+ * How many cards are not entirely inside a view of this size: wholly outside
+ * or cut by an edge. `cards` are in flow units, `view` is the pan and zoom.
+ */
+export function countNotFullyShown(
+  cards: { x: number; y: number; width: number; height: number }[],
+  view: { x: number; y: number; zoom: number },
+  size: { width: number; height: number },
+): number {
+  if (!size.width || !size.height) return 0;
+  // Half a pixel of rounding is not a clipped card.
+  const slack = 0.5;
+  let count = 0;
+  for (const card of cards) {
+    const left = card.x * view.zoom + view.x;
+    const top = card.y * view.zoom + view.y;
+    if (
+      left < -slack ||
+      top < -slack ||
+      left + card.width * view.zoom > size.width + slack ||
+      top + card.height * view.zoom > size.height + slack
+    )
+      count++;
+  }
+  return count;
+}

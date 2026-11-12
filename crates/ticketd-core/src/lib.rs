@@ -290,6 +290,9 @@ pub enum Error {
     NoCheckoutFolder(String),
     #[error("could not access workspace directory: {0}")]
     Directory(#[from] std::io::Error),
+    /// A file or folder the person named is missing or is not the kind needed.
+    #[error("{0}")]
+    Path(String),
     #[error("workspace database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("sync storage: {0}")]
@@ -1343,4 +1346,23 @@ fn default_path() -> Result<std::path::PathBuf, Error> {
         std::fs::create_dir_all(directory)?;
     }
     Ok(path)
+}
+
+/// Name the file or folder a person supplied when it is missing or of the wrong
+/// kind. Other I/O failures keep the generic workspace wording.
+pub(crate) fn path_error(role: &str, path: &std::path::Path, error: std::io::Error) -> Error {
+    let shown = if path.as_os_str().is_empty() {
+        std::path::Path::new(".")
+    } else {
+        path
+    };
+    match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            Error::Path(format!("{role} not found: {}", shown.display()))
+        }
+        std::io::ErrorKind::NotADirectory => {
+            Error::Path(format!("{role} is not a folder: {}", shown.display()))
+        }
+        _ => Error::Directory(error),
+    }
 }

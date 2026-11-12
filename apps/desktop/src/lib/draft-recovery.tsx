@@ -1,11 +1,20 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { draftRetention, type DraftRetention } from "./api/attachments";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   DraftRecoveryContext as Context,
+  DraftRecoveryNoticeContext as NoticeContext,
   DraftRecoveryErrorContext as ErrorContext,
   DraftRecoveryGenerationContext as GenerationContext,
+  DraftRecoveryNoticesContext as NoticesContext,
   type DraftRecovery,
 } from "./draft-recovery-context";
 
@@ -55,6 +64,17 @@ function recoveryStore(
   const flush = async () => {
     if (transitioning || retired)
       throw new Error("Draft recovery store is no longer writable");
+    // Background writes stay latched after a failure so a failing disk is not
+    // hammered on every keystroke. An explicit flush is a person's save or
+    // retry: it clears the latch and tries the queued writes again, so a save
+    // can succeed as soon as access returns.
+    if (error && !running) {
+      error = null;
+      onError("");
+    }
+    return settle();
+  };
+  const settle = async () => {
     while (queue.length || running) {
       if (error) throw error;
       await pump();
@@ -98,7 +118,7 @@ function recoveryStore(
         });
         records.set(owner, saved);
       });
-      const pending = flush();
+      const pending = settle();
       // Callers that deliberately await flush see the error; background edits show the banner.
       void pending.catch(() => {});
       return pending;
@@ -149,6 +169,13 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [cutoverPending, setCutoverPending] = useState(false);
+  // Editors that show the recovery failure beside their own content claim it,
+  // so the window-level notice does not repeat it over the page.
+  const [inlineNotices, setInlineNotices] = useState(0);
+  const claimNotice = useCallback(() => {
+    setInlineNotices((count) => count + 1);
+    return () => setInlineNotices((count) => count - 1);
+  }, []);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -294,55 +321,81 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
       active = false;
     };
   }, [attempt]);
+  const retryRecovery = () =>
+    recovery.store ? recovery.store.retry() : setAttempt((value) => value + 1);
+  if (!recovery.store)
+    return (
+      <div className="grid min-h-screen place-items-center p-6">
+        {error ? (
+          <Alert tone="error" className="w-full max-w-xl">
+            <AlertTitle>Could not open the workspace</AlertTitle>
+            <AlertDescription>
+              ticketd could not read or write its workspace, so nothing can be
+              shown yet. Check that the workspace folder and its files are
+              writable, then retry. {error}
+            </AlertDescription>
+            <AlertActions>
+              <Button type="button" onClick={retryRecovery}>
+                Retry
+              </Button>
+            </AlertActions>
+          </Alert>
+        ) : (
+          <EmptyState size="hint" role="status" title="Opening workspace…" />
+        )}
+      </div>
+    );
+  // The notices sit in the flow at the top of the main content (see
+  // useDraftRecoveryNotices) so they push the page down instead of covering it.
+  const notices = (cutoverPending || (error && inlineNotices === 0)) && (
+    <div className="mx-auto flex max-h-1/2 w-full max-w-xl flex-none flex-col gap-2 overflow-y-auto p-2">
+      {error && inlineNotices === 0 && (
+        <Alert tone="error">
+          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
+          <AlertDescription>Keep this window open. {error}</AlertDescription>
+          <AlertActions>
+            <Button type="button" onClick={retryRecovery}>
+              Retry draft recovery
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+      {cutoverPending && (
+        <Alert role="status">
+          <AlertDescription>
+            Files are protected while legacy drafts are reviewed. Open each
+            desktop profile to import its drafts before allowing cleanup.
+          </AlertDescription>
+          <AlertActions>
+            <Button
+              type="button"
+              onClick={() =>
+                void draftRetention
+                  .completeCutover()
+                  .then(() => setCutoverPending(false))
+                  .catch((reason) => setError(String(reason)))
+              }
+            >
+              All desktop profiles reviewed
+            </Button>
+          </AlertActions>
+        </Alert>
+      )}
+    </div>
+  );
   return (
     <>
-      {cutoverPending && (
-        <div
-          role="status"
-          className="fixed inset-x-4 bottom-4 z-40 mx-auto max-w-xl rounded-md border bg-(--surface) p-4 shadow-lg"
-        >
-          Files are protected while legacy drafts are reviewed. Open each
-          desktop profile to import its drafts before allowing cleanup.{" "}
-          <Button
-            onClick={() =>
-              void draftRetention
-                .completeCutover()
-                .then(() => setCutoverPending(false))
-                .catch((reason) => setError(String(reason)))
-            }
-          >
-            All desktop profiles reviewed
-          </Button>
-        </div>
-      )}
-      {error && (
-        <div
-          role="alert"
-          className="fixed inset-x-4 top-4 z-40 mx-auto max-w-xl rounded-md border bg-(--surface) p-4 shadow-lg"
-        >
-          Could not protect recoverable drafts. Keep this window open. {error}{" "}
-          <Button
-            onClick={() =>
-              recovery.store
-                ? recovery.store.retry()
-                : setAttempt((value) => value + 1)
-            }
-          >
-            Retry draft recovery
-          </Button>
-        </div>
-      )}
-      {recovery.store ? (
-        <GenerationContext.Provider value={recovery.generation}>
-          <ErrorContext.Provider value={error}>
+      <GenerationContext.Provider value={recovery.generation}>
+        <ErrorContext.Provider value={error}>
+          <NoticeContext.Provider value={claimNotice}>
             <Context.Provider value={recovery.store}>
-              {children}
+              <NoticesContext.Provider value={notices}>
+                {children}
+              </NoticesContext.Provider>
             </Context.Provider>
-          </ErrorContext.Provider>
-        </GenerationContext.Provider>
-      ) : (
-        <p role="status">Loading recoverable drafts…</p>
-      )}
+          </NoticeContext.Provider>
+        </ErrorContext.Provider>
+      </GenerationContext.Provider>
     </>
   );
 }

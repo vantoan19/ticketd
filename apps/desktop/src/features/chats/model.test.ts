@@ -120,6 +120,12 @@ test("a list row says what the Chat is doing in the design's words", () => {
   expect(summaryLine(row({ preview: "All done" }))).toBe("All done");
 });
 
+test("the row summary shows the last response as plain text", () => {
+  expect(
+    summaryLine(row({ preview: "There are **0 entries**. I ran `ls` here." })),
+  ).toBe("There are 0 entries. I ran ls here.");
+});
+
 test("plain states the design did not draw still read as words", () => {
   expect(summaryLine(row({ activity: "failed" }))).toBe("Failed");
   expect(summaryLine(row({ activity: "interrupted" }))).toBe("Interrupted");
@@ -315,4 +321,17 @@ test("a step that has not run, or did not complete, is not counted as run", () =
   expect(
     stepTally([{ verb: "ran", target: "touch a", more: 0, state: "running" }]),
   ).toBe("1 step in progress");
+});
+
+test("a missing ticketd component is a reinstall notice, not an update of the harness", () => {
+  const notice = problemNotice(
+    {
+      kind: "unavailable",
+      message: "ticketd's Claude bridge is missing. Reinstall ticketd.",
+    },
+    "Claude Code",
+  );
+  expect(notice.title).toBe("Claude Code isn't available");
+  expect(notice.body).not.toMatch(/Update it/);
+  expect(notice.actions).toEqual(["check"]);
 });

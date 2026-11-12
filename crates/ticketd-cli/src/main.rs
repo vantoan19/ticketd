@@ -1367,7 +1367,13 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         std::io::stdin().read_to_string(&mut body)?;
                         body
                     } else {
-                        std::fs::read_to_string(path)?
+                        std::fs::read_to_string(&path).map_err(|error| {
+                            if error.kind() == std::io::ErrorKind::NotFound {
+                                format!("file not found: {path}")
+                            } else {
+                                format!("could not read {path}: {error}")
+                            }
+                        })?
                     };
                     ticketd_core::MarkdownExportSource::Markdown { body }
                 }

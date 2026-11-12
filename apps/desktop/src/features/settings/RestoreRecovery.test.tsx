@@ -14,9 +14,12 @@ import {
   type DraftRecovery,
   useDraftRecovery,
   useDraftRecoveryGeneration,
+  useDraftRecoveryNotices,
 } from "@/lib/draft-recovery-context";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { RestoreDialog } from "./RestoreDialog";
+
+const Notices = () => <main>{useDraftRecoveryNotices()}</main>;
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@uiw/react-codemirror", () => ({
@@ -150,6 +153,7 @@ test.each([false, true])(
     });
     render(
       <DraftRecoveryProvider>
+        <Notices />
         <Editor />
         <RestoreDialog
           path="backup.sqlite3"

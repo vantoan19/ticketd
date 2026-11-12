@@ -98,6 +98,21 @@ test("Attachments opens from the existing Context navigation without replacing t
   expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
 });
 
+test("Storage settings in the Attachments library opens Settings at Attachments", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Storage settings" }),
+  );
+  const nav = await screen.findByRole("navigation", {
+    name: "Settings sections",
+  });
+  expect(nav.querySelector("[aria-current=page]")?.textContent).toContain(
+    "Attachments",
+  );
+});
+
 async function openManageMenu(label: string, item: string) {
   fireEvent.keyDown(screen.getByRole("button", { name: label }), {
     key: "Enter",

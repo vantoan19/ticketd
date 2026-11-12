@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import type { z } from "zod";
 
 export type DraftRecovery = {
@@ -31,3 +31,13 @@ export const useDraftRecoveryGeneration = () =>
   useContext(DraftRecoveryGenerationContext);
 export const useDraftRecoveryError = () =>
   useContext(DraftRecoveryErrorContext);
+/** An editor showing the recovery failure inline claims it; returns a release. */
+export const DraftRecoveryNoticeContext = createContext<() => () => void>(
+  () => () => {},
+);
+export const useClaimRecoveryNotice = () =>
+  useContext(DraftRecoveryNoticeContext);
+/** The window-level recovery notices, for the shell to place in the page flow. */
+export const DraftRecoveryNoticesContext = createContext<ReactNode>(null);
+export const useDraftRecoveryNotices = () =>
+  useContext(DraftRecoveryNoticesContext);

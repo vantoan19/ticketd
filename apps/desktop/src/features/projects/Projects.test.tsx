@@ -44,6 +44,26 @@ test("shows checkouts home-relative on one line with the full path on hover", ()
   expect(within(list).getByTitle("/other/checkout")).toBeTruthy();
 });
 
+test("labels the project's own path as the first checkout, not the alphabetically first", () => {
+  render(
+    <Projects
+      {...props}
+      projects={[{ ...project, path: "/zeta", paths: ["/eta", "/zeta"] }]}
+    />,
+  );
+  const list = screen.getByRole("list", { name: "Checkouts of Original" });
+  const [eta, zeta] = within(list).getAllByRole("listitem");
+  expect(eta?.textContent).toContain("Checkout");
+  expect(eta?.textContent).not.toContain("First checkout");
+  expect(zeta?.textContent).toContain("First checkout");
+});
+
+test("the New project hint does not promise dropping or name a macOS app", () => {
+  render(<Projects {...props} projects={[]} />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  expect(screen.queryByText(/Finder|drop it/)).toBeNull();
+});
+
 test("copies a checkout path and the project ID, and shows the folder in the file manager", () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {

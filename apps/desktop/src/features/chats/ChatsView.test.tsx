@@ -950,6 +950,25 @@ test("a managed folder reads as the ticketd folder, and its path has no verbatim
   expect(popover.textContent).not.toContain("?");
 });
 
+test("an incompatible harness notice keeps the full stop with the path", async () => {
+  const client = await open([]);
+  const path = "/opt/tools/a/very/long/folder/for/the/codex/executable/codex";
+  client.setHarnesses([
+    {
+      id: "codex",
+      name: "Codex",
+      status: "incompatible",
+      path,
+      message: `Found Codex 0.1.0 at \`${path}\`. ticketd needs Codex 0.162.1 or newer.`,
+    },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  const sentence = await screen.findByText(/ticketd needs Codex 0\.162\.1/);
+  const wrapper = sentence.querySelector(".notice-path");
+  expect(wrapper?.textContent?.endsWith(".")).toBe(true);
+  expect(wrapper?.nextSibling?.textContent?.startsWith(".")).toBe(false);
+});
+
 test("the link picker asks for a name before it lists anything", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   fireEvent.click(button("Link a ticket, Document or Project"));

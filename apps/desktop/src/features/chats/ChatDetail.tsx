@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -59,22 +59,36 @@ import { useChat } from "@/features/chats/use-chats";
 
 /**
  * Sets `code spans` of a notice's sentence in mono. A span that is `path` reads
- * as paths do elsewhere: one line, shortened in the middle.
+ * as paths do elsewhere: one line, shortened in the middle. Punctuation right
+ * after the path stays on the path's line, so a wrapped path never leaves a
+ * line that starts with "." or ",".
  */
 function NoticeText({ text, path }: { text: string; path?: string }) {
-  return text.split("`").map((part, index) =>
-    index % 2 ? (
-      path && part === withoutVerbatim(path) ? (
-        <PathText key={index} path={path} />
-      ) : (
+  const parts = text.split("`");
+  const nodes: ReactNode[] = [];
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index] ?? "";
+    if (index % 2 === 0) {
+      nodes.push(part);
+    } else if (path && part === withoutVerbatim(path)) {
+      const next = parts[index + 1] ?? "";
+      const punctuation = /^[.,;:!?)]+/.exec(next)?.[0] ?? "";
+      if (punctuation) parts[index + 1] = next.slice(punctuation.length);
+      nodes.push(
+        <span key={index} className="notice-path">
+          <PathText path={path} />
+          {punctuation}
+        </span>,
+      );
+    } else {
+      nodes.push(
         <code key={index} className="chat-mono">
           {part}
-        </code>
-      )
-    ) : (
-      part
-    ),
-  );
+        </code>,
+      );
+    }
+  }
+  return nodes;
 }
 
 const ACTION_LABEL: Record<Exclude<NoticeAction, "help">, string> = {

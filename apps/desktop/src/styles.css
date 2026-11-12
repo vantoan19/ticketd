@@ -247,6 +247,10 @@
     font-size: var(--text-ui);
     font-weight: 400;
   }
+  /* The native checkbox draws a bright white square on dark surfaces. */
+  input[type="checkbox"] {
+    accent-color: var(--primary);
+  }
   button:disabled {
     color: var(--disabled-foreground);
     cursor: default;
@@ -747,8 +751,9 @@ body:has([data-slot="dialog-overlay"])
 .ui-comment-row-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 8px;
   min-height: 28px;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
@@ -770,6 +775,7 @@ body:has([data-slot="dialog-overlay"])
 .ui-comment-row-actions {
   display: flex;
   flex: none;
+  margin-inline-start: auto;
   align-items: center;
   gap: 8px;
 }
@@ -2111,6 +2117,25 @@ html[data-theme="dark"][data-input="pointer"]
   color: var(--muted-foreground);
   opacity: 1;
   cursor: default;
+}
+
+/* Every dialog shell keeps its footer inside the viewport: a tall body
+   (an alert, a long review) scrolls instead of pushing the footer out. */
+.ui-dialog:has(.dialog-shell-form) {
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ui-dialog:has(.dialog-shell-form) .dialog-shell-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.ui-dialog:has(.dialog-shell-form) .dialog-shell-body {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* The New ticket dialog grows by the docked editor toolbar on focus. Its top

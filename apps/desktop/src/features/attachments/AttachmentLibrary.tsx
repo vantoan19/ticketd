@@ -162,7 +162,7 @@ export function AttachmentLibrary({
                           </span>
                         </button>
                       </td>
-                      <td>
+                      <td data-label="Storage">
                         {file.kind === "local_snapshot" ? (
                           <StorageAvailability
                             name={file.display_name}
@@ -174,12 +174,12 @@ export function AttachmentLibrary({
                           "External reference"
                         )}
                       </td>
-                      <td>
+                      <td data-label="Size">
                         {file.size_bytes === null
                           ? "—"
                           : formatSize(file.size_bytes)}
                       </td>
-                      <td>
+                      <td data-label="Used in">
                         <button
                           type="button"
                           className="attachment-usage-link"
@@ -192,7 +192,7 @@ export function AttachmentLibrary({
                               : "Unused"}
                         </button>
                       </td>
-                      <td>
+                      <td data-label="Added">
                         {file.added_at ? (
                           <time
                             dateTime={file.added_at}
