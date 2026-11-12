@@ -66,7 +66,8 @@ export function NewChat({
   onCreated: (id: string) => void;
 }) {
   const client = useChatClient();
-  const [harnesses, setHarnesses] = useState<HarnessStatus[]>([]);
+  /** null until the first probe answers: seconds, while each harness is asked. */
+  const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null);
   const [harnessId, setHarnessId] = useState("");
   /** null is the managed folder ticketd keeps for the Chat. */
   const [folder, setFolder] = useState<string | null>(null);
@@ -100,11 +101,14 @@ export function NewChat({
       current = false;
     };
   }, [client, folder]);
+  const found = harnesses ?? [];
   const harness =
-    harnesses.find((item) => item.id === harnessId) ??
-    harnesses.find((item) => item.status === "ready") ??
-    harnesses.find((item) => harnessUsable(item.status)) ??
-    harnesses[0];
+    found.find((item) => item.id === harnessId) ??
+    found.find((item) => item.status === "ready") ??
+    found.find((item) => harnessUsable(item.status)) ??
+    found[0];
+  const harnessLabel =
+    harness?.name ?? (harnesses ? "No harness" : "Checking…");
   const ready = harness !== undefined && harnessUsable(harness.status);
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
   return (
@@ -138,144 +142,155 @@ export function NewChat({
         </div>
       </div>
       <div className="chat-new">
-        <h2>What should we work on?</h2>
-        <Composer
-          autoFocus
-          placeholder="Describe a task or ask a question"
-          initialText={draft}
-          onText={(text) => (draft = text)}
-          controls={(text) => ({
-            kind: "send",
-            enabled: ready && text.trim() !== "",
-          })}
-          onSend={async (message) => {
-            if (!harness) return;
-            const input = {
-              harness_id: harness.id,
-              folder,
-              links: links.map(({ kind, id }) => ({ kind, id })),
-              message,
-            };
-            const request = JSON.stringify(input);
-            if (attempt.current.request !== request)
-              attempt.current = { id: crypto.randomUUID(), request };
-            try {
-              const created = await client.createChat({
-                command_id: attempt.current.id,
-                ...input,
-              });
-              // Answered: whatever is asked for next is a new request.
-              attempt.current = { id: crypto.randomUUID(), request: "" };
-              // The Chat exists but holds no message. It is opened with the
-              // unsent words in its composer, so they are sent there and no
-              // second Chat is made for them.
-              if (created.send_error)
-                carryIntoChat(
-                  created.chat_id,
-                  message,
-                  `Your first message was not sent: ${created.send_error}. It is in the box below.`,
+        <div>
+          <h2>What should we work on?</h2>
+          <Composer
+            autoFocus
+            placeholder="Describe a task or ask a question"
+            initialText={draft}
+            onText={(text) => (draft = text)}
+            controls={(text) => ({
+              kind: "send",
+              enabled: ready && text.trim() !== "",
+            })}
+            onSend={async (message) => {
+              if (!harness) return;
+              const input = {
+                harness_id: harness.id,
+                folder,
+                links: links.map(({ kind, id }) => ({ kind, id })),
+                message,
+              };
+              const request = JSON.stringify(input);
+              if (attempt.current.request !== request)
+                attempt.current = { id: crypto.randomUUID(), request };
+              try {
+                const created = await client.createChat({
+                  command_id: attempt.current.id,
+                  ...input,
+                });
+                // Answered: whatever is asked for next is a new request.
+                attempt.current = { id: crypto.randomUUID(), request: "" };
+                // The Chat exists but holds no message. It is opened with the
+                // unsent words in its composer, so they are sent there and no
+                // second Chat is made for them.
+                if (created.send_error)
+                  carryIntoChat(
+                    created.chat_id,
+                    message,
+                    `Your first message was not sent: ${created.send_error}. It is in the box below.`,
+                  );
+                setFailure("");
+                onCreated(created.chat_id);
+              } catch (reason) {
+                setFailure(
+                  `Could not start the Chat: ${reason instanceof Error ? reason.message : String(reason)}`,
                 );
-              setFailure("");
-              onCreated(created.chat_id);
-            } catch (reason) {
-              setFailure(
-                `Could not start the Chat: ${reason instanceof Error ? reason.message : String(reason)}`,
-              );
-              throw reason;
-            }
-          }}
-        />
-        <div className="chat-chips">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="xs"
-                aria-label={`Harness: ${harness?.name ?? "none found"}`}
-              >
-                <SquareTerminal aria-hidden />
-                {harness?.name ?? "No harness"}
-                <ChevronDown aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuRadioGroup
-                value={harness?.id ?? ""}
-                onValueChange={setHarnessId}
-              >
-                {harnesses.map((item) => (
-                  <DropdownMenuRadioItem key={item.id} value={item.id}>
-                    {item.name}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="xs"
-                aria-label={`Folder: ${folder ?? "a folder kept by ticketd"}`}
-              >
-                <Folder aria-hidden />
-                {folderName ?? "ticketd folder"}
-                <ChevronDown aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem
-                onSelect={() =>
-                  void client.pickFolder().then(
-                    (path) => path && setFolder(path),
-                    (reason: unknown) => setFailure(String(reason)),
-                  )
-                }
-              >
-                Choose a folder…
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setFolder(null)}>
-                Use a folder kept by ticketd
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {links.map((record) => (
-            <RecordChip
-              key={`${record.kind}:${record.id}`}
-              record={record}
-              onRemove={() => setLinks(links.filter((item) => item !== record))}
-            />
-          ))}
-          <LinkPicker
-            withLabel
-            linked={links}
-            onPick={(record) => setLinks([...links, record])}
-          />
-        </div>
-        {shared > 0 && (
-          <p className="chat-fine">
-            {shared === 1
-              ? "1 other Chat uses this folder."
-              : `${shared} other Chats use this folder.`}
-          </p>
-        )}
-        {harness && harness.status !== "ready" && (
-          <ProblemNotice
-            problem={{
-              kind: STATUS_PROBLEM[harness.status],
-              message: harness.message,
-              command: harness.command,
-              help_url: harness.help_url,
+                throw reason;
+              }
             }}
-            harness={harness.name}
-            onAction={() => setProbe((count) => count + 1)}
           />
-        )}
-        {failure && (
-          <p className="chat-fine" role="alert">
-            {failure}
-          </p>
-        )}
+          <div className="chat-chips">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  disabled={!harnesses}
+                  aria-label={
+                    harnesses
+                      ? `Harness: ${harness?.name ?? "none found"}`
+                      : "Harness: checking which are installed"
+                  }
+                >
+                  <SquareTerminal aria-hidden />
+                  {harnessLabel}
+                  <ChevronDown aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  value={harness?.id ?? ""}
+                  onValueChange={setHarnessId}
+                >
+                  {found.map((item) => (
+                    <DropdownMenuRadioItem key={item.id} value={item.id}>
+                      {item.name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  aria-label={`Folder: ${folder ?? "a folder kept by ticketd"}`}
+                >
+                  <Folder aria-hidden />
+                  {folderName ?? "ticketd folder"}
+                  <ChevronDown aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void client.pickFolder().then(
+                      (path) => path && setFolder(path),
+                      (reason: unknown) => setFailure(String(reason)),
+                    )
+                  }
+                >
+                  Choose a folder…
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setFolder(null)}>
+                  Use a folder kept by ticketd
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {links.map((record) => (
+              <RecordChip
+                key={`${record.kind}:${record.id}`}
+                record={record}
+                onRemove={() =>
+                  setLinks(links.filter((item) => item !== record))
+                }
+              />
+            ))}
+            <LinkPicker
+              withLabel
+              linked={links}
+              onPick={(record) => setLinks([...links, record])}
+            />
+          </div>
+        </div>
+        <div>
+          {shared > 0 && (
+            <p className="chat-fine">
+              {shared === 1
+                ? "1 other Chat uses this folder."
+                : `${shared} other Chats use this folder.`}
+            </p>
+          )}
+          {harness && harness.status !== "ready" && (
+            <ProblemNotice
+              problem={{
+                kind: STATUS_PROBLEM[harness.status],
+                message: harness.message,
+                command: harness.command,
+                help_url: harness.help_url,
+              }}
+              harness={harness.name}
+              onAction={() => setProbe((count) => count + 1)}
+            />
+          )}
+          {failure && (
+            <p className="chat-fine" role="alert">
+              {failure}
+            </p>
+          )}
+        </div>
       </div>
     </section>
   );

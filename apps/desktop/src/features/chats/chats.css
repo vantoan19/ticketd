@@ -83,6 +83,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The context gives way before the status does. */
+.chat-row-sub > span + span {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-row-sub strong {
   color: var(--foreground);
   font-weight: 500;
@@ -104,8 +113,20 @@
 .detail-header h2.chat-head-title {
   font-weight: 500;
 }
-.chat-head-spacer {
-  flex: 1;
+/* The title group takes the free room and gives it up first, so the actions
+   stay on the header's one 48px line, as on a ticket. */
+.chat-pane > .detail-header > .detail-title-group {
+  flex: 1 1 0;
+}
+/* A narrow pane keeps the header on one line: the trigger keeps its chevron
+   and accessible name, as the ticket header keeps the reminder's bell. */
+@container ticket-detail (max-width: 460px) {
+  .chat-pane .detail-title-group > button {
+    flex: none;
+  }
+  .chat-pane .detail-title-group > button > .truncate {
+    display: none;
+  }
 }
 .chat-body {
   flex: 1;
@@ -181,6 +202,14 @@
 .chat-ai {
   line-height: 22px;
 }
+/* A single line break in a reply is a new line, as in other chat apps. A hard
+   break already ends in a newline, so its <br> is not drawn twice. */
+.chat-ai p {
+  white-space: pre-line;
+}
+.chat-ai p br {
+  display: none;
+}
 .chat-turn {
   display: flex;
   flex-direction: column;
@@ -190,7 +219,8 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  margin: -12px 0 0 -8px;
+  /* Tucked under the reply so the hidden row costs little space. */
+  margin: -16px 0 -8px -8px;
 }
 /* Response actions show on hover and whenever the keyboard is inside them. */
 .chat-turn .chat-actions {
@@ -221,6 +251,16 @@
 }
 .chat-line .chat-spacer {
   flex: 1;
+}
+/* What ticketd says, not the harness: a smaller muted line with a marker. */
+.chat-note {
+  align-items: flex-start;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-note > svg {
+  flex: none;
+  margin-top: 1px;
 }
 .chat-steplist {
   display: flex;
@@ -275,6 +315,8 @@
   max-height: 200px;
   padding: 6px 0;
   border: 0;
+  border-radius: 0;
+  box-shadow: none;
   outline: none;
   background: transparent;
   color: var(--foreground);
@@ -333,6 +375,11 @@
   font-size: var(--text-ui);
   font-weight: 500;
 }
+.chat-card-text {
+  color: var(--foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .chat-card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -380,20 +427,30 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+/* The heading, composer and chips sit in the middle row; notices that arrive
+   later fill the row under them, so nothing above moves. */
 .chat-new {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 20px;
+  display: grid;
+  grid-template-rows: 1fr auto 1fr;
   min-height: 0;
   padding: 32px 32px 96px;
   overflow-y: auto;
 }
-.chat-new > * {
+.chat-new::before {
+  content: "";
+}
+.chat-new > div {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
   width: 100%;
   max-width: 600px;
   margin: 0 auto;
+}
+.chat-new > div + div {
+  align-self: start;
+  padding-top: 20px;
 }
 .chat-new h2 {
   color: var(--foreground);
@@ -410,9 +467,10 @@
   gap: 4px;
   margin-top: -8px;
 }
+/* The bottom inset keeps the link button's focus ring off the transcript. */
 .chat-linked {
   flex: none;
-  padding: 12px 32px 0;
+  padding: 12px 32px 8px;
 }
 .chat-linked > div {
   display: flex;
@@ -531,6 +589,11 @@
 }
 .chat-pop p {
   color: var(--foreground);
+}
+.chat-pop .path-tail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chat-pop small {
   color: var(--muted-foreground);

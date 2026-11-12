@@ -460,13 +460,19 @@ fn step(tool: &ChatTool, harness: &str) -> Step {
             output: Some(tool.input.clone()),
         };
     }
-    let kind = serde_json::from_str::<serde_json::Value>(&tool.input)
-        .ok()
-        .and_then(|input| Some(input.get("type")?.as_str()?.to_owned()));
-    let (verb, target) = match (kind.as_deref(), tool.name.strip_prefix("Edit ")) {
+    let input = serde_json::from_str::<serde_json::Value>(&tool.input).ok();
+    let field = |name: &str| input.as_ref().and_then(|input| input.get(name)?.as_str());
+    // Codex names a command step by its command; Claude Code names its tool and
+    // passes the command or file in the input.
+    let (verb, target) = match (field("type"), tool.name.strip_prefix("Edit ")) {
         (Some("commandExecution"), _) => ("ran", tool.name.as_str()),
         (_, Some(paths)) => ("edited", paths),
-        _ => ("other", tool.name.as_str()),
+        _ => match (tool.name.as_str(), field("command"), field("file_path")) {
+            ("Bash" | "PowerShell", Some(command), _) => ("ran", command),
+            ("Read", _, Some(path)) => ("read", path),
+            ("Edit" | "MultiEdit" | "Write", _, Some(path)) => ("edited", path),
+            _ => ("other", tool.name.as_str()),
+        },
     };
     let outcome = match tool.state {
         ChatToolState::Running | ChatToolState::Completed => None,
@@ -780,13 +786,11 @@ pub fn chat_state(
         catching_up: false,
         steering: Steering {
             available: live.steering.is_some(),
-            effect: live.steering.map(|steering| {
-                if steering.interrupts_tools {
-                    format!("Sending now may interrupt tools {name} is running.")
-                } else {
-                    format!("{name} takes your message into the turn in progress.")
-                }
-            }),
+            // "Send adds this to the turn in progress" already says the plain case.
+            effect: live
+                .steering
+                .filter(|steering| steering.interrupts_tools)
+                .map(|_| format!("Sending now may interrupt tools {name} is running.")),
         },
         links: around.links.clone(),
         queue: around.queue.clone(),
@@ -819,7 +823,9 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         id: chat.id.clone(),
         title: title(chat),
         harness_name: harness_name(&chat.harness).to_owned(),
-        folder_name: (!around.folder_missing).then(|| last_component(&chat.execution_folder)),
+        // A managed folder is named by an id and never shared: the row leaves it out.
+        folder_name: (!around.folder_missing && !chat.folder_managed)
+            .then(|| last_component(&chat.execution_folder)),
         first_ticket: around.links.iter().find_map(|link| match link {
             LinkedRecord::Ticket { reference, .. } => Some(reference.clone()),
             LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,
@@ -860,7 +866,33 @@ pub fn idle() -> ChatLive {
 
 #[cfg(test)]
 mod tests {
-    use super::needs_you;
+    use super::{ChatTool, ChatToolState, needs_you, step};
+
+    #[test]
+    fn a_claude_command_step_names_the_command_it_ran() {
+        let tool = |name: &str, input: &str| ChatTool {
+            id: "t".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            name: name.to_owned(),
+            input: input.to_owned(),
+            state: ChatToolState::Completed,
+            output: None,
+            output_truncated: false,
+        };
+        let ran = step(
+            &tool("PowerShell", r#"{"command":"ticketd --version"}"#),
+            "Claude Code",
+        );
+        assert_eq!(
+            (ran.verb, ran.target.as_str()),
+            ("ran", "ticketd --version")
+        );
+        let read = step(&tool("Read", r#"{"file_path":"src/a.ts"}"#), "Claude Code");
+        assert_eq!((read.verb, read.target.as_str()), ("read", "src/a.ts"));
+        let other = step(&tool("WebSearch", r#"{"query":"x"}"#), "Claude Code");
+        assert_eq!((other.verb, other.target.as_str()), ("other", "WebSearch"));
+    }
 
     #[test]
     fn the_count_takes_waiting_uncertain_and_failed_chats_but_not_setup_blocks() {
