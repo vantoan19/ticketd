@@ -132,20 +132,6 @@ async function addLabel(name: string) {
   await screen.findByRole("button", { name: `Remove ${name}` });
 }
 
-/** A repository added on a connected source, ready to preview. */
-async function addConnected(name: string) {
-  await connect();
-  await addRepository(name);
-}
-
-async function connect() {
-  vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
-    account: "octo",
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
-  await screen.findByText("Connected as octo.");
-}
-
 async function addRepository(name: string) {
   const input = screen.getByLabelText(/Repositories/);
   fireEvent.change(input, { target: { value: name } });
@@ -166,7 +152,7 @@ test("a new source is not configured and cannot be saved before a preview", asyn
   ).toBeNull();
 });
 
-test("Preview matches needs a repository and a connection; Refresh now needs a saved configuration", async () => {
+test("Preview matches needs a repository; Refresh now needs a saved configuration", async () => {
   render(<SourceCard entry={entry} />);
   const previewButton = () =>
     screen.getByRole("button", {
@@ -178,8 +164,6 @@ test("Preview matches needs a repository and a connection; Refresh now needs a s
   expect(previewButton().disabled).toBe(true);
   expect(refresh.disabled).toBe(true);
   await addRepository("o/r");
-  expect(previewButton().disabled).toBe(true);
-  await connect();
   expect(previewButton().disabled).toBe(false);
 });
 
@@ -202,7 +186,7 @@ test("preview lists matches, then Save turns discovery on without importing at o
     preview,
   });
   render(<SourceCard entry={entry} />);
-  await addConnected("o/r");
+  await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   const panel = await screen.findByRole("region", { name: "Preview" });
   expect(panel.textContent).toContain("1 issue matches");
@@ -223,7 +207,7 @@ test("preview lists matches, then Save turns discovery on without importing at o
 test("editing after a preview makes the preview stale and blocks Save", async () => {
   vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
   render(<SourceCard entry={entry} />);
-  await addConnected("o/r");
+  await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByRole("region", { name: "Preview" });
   fireEvent.change(screen.getByLabelText(/Assignee/), {
@@ -244,7 +228,7 @@ test("an empty preview is allowed and a provider failure keeps the draft", async
     )
     .mockResolvedValueOnce({ ...preview, issues: [], matched: 0 });
   render(<SourceCard entry={entry} />);
-  await addConnected("o/r");
+  await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
     "rejected the credential",
@@ -273,7 +257,7 @@ test("a partial count is labeled as a minimum", async () => {
     complete: false,
   });
   render(<SourceCard entry={entry} />);
-  await addConnected("o/r");
+  await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   const panel = await screen.findByRole("region", { name: "Preview" });
   expect(panel.textContent).toContain("at least 200 issues match");
@@ -287,7 +271,7 @@ test("field problems from the core appear beside their fields", async () => {
     ]),
   );
   render(<SourceCard entry={entry} />);
-  await addConnected("o/r");
+  await addRepository("o/r");
   fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "-x-" },
   });
@@ -387,7 +371,7 @@ test("switching settings sections retains the source draft and its preview", asy
     <SettingsView {...props} selected="source-github" />,
   );
   await screen.findByRole("heading", { name: "Discovery" });
-  await addConnected("o/r");
+  await addRepository("o/r");
   fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "octo" },
   });
@@ -654,7 +638,7 @@ test("the panel bar and the save bar follow the draft: not configured, unsaved, 
   expect(panelStatus()).toBe("Not configured");
   expect(saveBar().textContent).toContain("Not configured. Add a repository");
 
-  await addConnected("o/r");
+  await addRepository("o/r");
   expect(panelStatus()).toBe("Unsaved changes");
   expect(saveBar().textContent).toContain(
     "Unsaved changes. Preview the matching issues before saving.",
@@ -744,7 +728,7 @@ test("a failed preview is announced beside the Discovery fields and keeps the sa
     new SourceFailure("unauthenticated", "GitHub rejected the credential"),
   );
   render(<SourceCard entry={entry} />);
-  await addConnected("o/r");
+  await addRepository("o/r");
   fireEvent.click(
     within(saveBar()).getByRole("button", { name: "Preview matches" }),
   );

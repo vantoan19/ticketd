@@ -205,8 +205,6 @@ export function SourceCard({
   const [busy, setBusy] = useState<Busy>(null);
   const [failure, setFailure] = useState<SourceFailure | null>(null);
   const [connection, setConnection] = useState("");
-  // Known once a check succeeds or a configuration was saved.
-  const [connected, setConnected] = useState(entry.saved !== null);
   const [previewed, setPreviewed] = useState<{
     key: string;
     preview: DiscoveryPreview;
@@ -228,7 +226,7 @@ export function SourceCard({
   const hasTarget = fields.some((field) => field.key === "repositories")
     ? Array.isArray(repositories) && repositories.length > 0
     : Object.keys(config).length > 0;
-  const canPreview = !working && hasTarget && (connected || saved !== null);
+  const canPreview = !working && hasTarget;
   const canSave = preview !== null && !working && (dirty || saved === null);
 
   const loadOptions: LoadOptions = (field, query) =>
@@ -263,10 +261,7 @@ export function SourceCard({
     run(
       "checking",
       () => sourcesClient.checkConnection(connector.provider, config),
-      (info) => {
-        setConnected(true);
-        setConnection(`Connected as ${info.account}.`);
-      },
+      (info) => setConnection(`Connected as ${info.account}.`),
     );
   const previewMatches = () => {
     setConnection("");
