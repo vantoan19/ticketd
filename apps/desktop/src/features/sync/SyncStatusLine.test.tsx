@@ -9,16 +9,22 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
+import { invoke } from "@tauri-apps/api/core";
 import { syncApi, type SyncStatus } from "@/lib/sync-api";
 import { SyncStatusProvider } from "./SyncStatusProvider";
 import { useSyncNavigation } from "./sync-status";
-import { notConnected, syncStatus } from "./sync-fixtures";
+import { hostFailure, notConnected, syncStatus } from "./sync-fixtures";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/sync-api", async (original) => ({
   ...(await original<typeof import("@/lib/sync-api")>()),
   syncApi: { status: vi.fn(), syncNow: vi.fn(), recover: vi.fn() },
 }));
 const api = vi.mocked(syncApi);
+/** The api as shipped, over the mocked bridge. */
+const real = (
+  await vi.importActual<typeof import("@/lib/sync-api")>("@/lib/sync-api")
+).syncApi;
 window.ResizeObserver = class {
   observe() {}
   unobserve() {}
@@ -112,10 +118,11 @@ test("saved locally: offline changes wait, and the popover offers Try now", asyn
   expect(within(dialog).getByRole("listitem").textContent).toBe(
     "3 changes waiting to upload",
   );
-  api.syncNow.mockRejectedValue(new Error("no network"));
+  api.syncNow.mockImplementation(real.syncNow);
+  vi.mocked(invoke).mockRejectedValue(hostFailure("no network"));
   fireEvent.click(within(dialog).getByRole("button", { name: "Try now" }));
-  expect((await within(dialog).findByRole("alert")).textContent).toContain(
-    "no network",
+  expect((await within(dialog).findByRole("alert")).textContent).toBe(
+    "Sync did not run: no network",
   );
 });
 

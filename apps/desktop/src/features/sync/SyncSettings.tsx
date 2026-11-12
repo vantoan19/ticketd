@@ -16,6 +16,7 @@ import { Reference } from "@/components/ui/reference";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { ago } from "@/features/tickets/ticket-source";
+import { toFailure } from "@/lib/api/bridge-failure";
 import {
   SYNC_MIN_POLL_SECS,
   syncApi,
@@ -53,9 +54,7 @@ function useCommand() {
       apply(await command());
       return true;
     } catch (reason) {
-      setFailure(
-        `${failed}: ${reason instanceof Error ? reason.message : String(reason)}`,
-      );
+      setFailure(`${failed}: ${toFailure(reason).message}`);
       return false;
     } finally {
       setBusy(false);
@@ -185,7 +184,9 @@ function Choose({
       })
       .catch((reason: unknown) => {
         if (current)
-          setReadFailure(`Could not read your Drive: ${String(reason)}`);
+          setReadFailure(
+            `Could not read your Drive: ${toFailure(reason).message}`,
+          );
       });
     return () => {
       current = false;
@@ -426,7 +427,9 @@ function Connected({ status }: { status: SyncStatus }) {
               syncApi
                 .openFolder()
                 .catch((reason: unknown) =>
-                  setOpenFailure(`Could not open Drive: ${String(reason)}`),
+                  setOpenFailure(
+                    `Could not open Drive: ${toFailure(reason).message}`,
+                  ),
                 );
             }}
           >
@@ -502,7 +505,9 @@ function DesktopSettings() {
       })
       .catch((reason: unknown) => {
         if (current)
-          setFailure(`Could not read the sync settings: ${String(reason)}`);
+          setFailure(
+            `Could not read the sync settings: ${toFailure(reason).message}`,
+          );
       });
     return () => {
       current = false;
@@ -523,7 +528,9 @@ function DesktopSettings() {
       setName(next.desktop_name);
       setSeconds(String(next.poll_interval_secs));
     } catch (reason) {
-      setFailure(`Could not save the sync settings: ${String(reason)}`);
+      setFailure(
+        `Could not save the sync settings: ${toFailure(reason).message}`,
+      );
     } finally {
       setSaving(false);
     }

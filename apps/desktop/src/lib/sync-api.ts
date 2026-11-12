@@ -1,5 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as bridge } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { structured } from "@/lib/api/bridge-failure";
 
 /**
  * The desktop's contract with the core for Workspace sync through Google Drive.
@@ -136,6 +137,10 @@ const exitReportSchema = z.object({
   pending_total: z.number().int().nonnegative().optional(),
 });
 export type SyncExitReport = z.infer<typeof exitReportSchema>;
+
+/** Every sync command rejects with the host's structured failure; callers get its message. */
+const invoke = (...call: Parameters<typeof bridge>) =>
+  structured(bridge<unknown>(...call));
 
 const status = async (call: Promise<unknown>) => statusSchema.parse(await call);
 

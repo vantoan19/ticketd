@@ -8,11 +8,18 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import { syncApi } from "@/lib/sync-api";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
-import { notConnected, syncSettings, syncStatus } from "./sync-fixtures";
+import {
+  hostFailure,
+  notConnected,
+  syncSettings,
+  syncStatus,
+} from "./sync-fixtures";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/sync-api", async (original) => ({
   ...(await original<typeof import("@/lib/sync-api")>()),
   syncApi: {
@@ -31,6 +38,10 @@ vi.mock("@/lib/sync-api", async (original) => ({
   },
 }));
 const api = vi.mocked(syncApi);
+/** The api as shipped, over the mocked bridge. */
+const real = (
+  await vi.importActual<typeof import("@/lib/sync-api")>("@/lib/sync-api")
+).syncApi;
 
 const choosing = () =>
   syncStatus({
@@ -86,13 +97,14 @@ test("before connecting, the card says files are not encrypted and offers Google
 
 test("a failed sign-in is reported and leaves the card as it was", async () => {
   api.status.mockResolvedValue(notConnected());
-  api.connect.mockRejectedValue(new Error("sign-in was cancelled"));
+  api.connect.mockImplementation(real.connect);
+  vi.mocked(invoke).mockRejectedValue(hostFailure("sign-in was cancelled"));
   show();
   fireEvent.click(
     await screen.findByRole("button", { name: "Connect Google Drive" }),
   );
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "sign-in was cancelled",
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not connect Google Drive: sign-in was cancelled",
   );
   expect(
     screen.getByRole("button", { name: "Connect Google Drive" }),

@@ -142,7 +142,10 @@ function known<T>(schema: z.ZodType<T>, value: unknown): T[] {
 export const syncReview = {
   /** Every record that Needs review. */
   async conflicts(): Promise<ConflictSummary[]> {
-    return known(conflictSummarySchema, await invoke("sync_conflicts"));
+    return known(
+      conflictSummarySchema,
+      await structured(invoke("sync_conflicts")),
+    );
   },
   async conflict(key: RecordKey): Promise<Conflict> {
     return conflictSchema.parse(await structured(invoke("sync_conflict", key)));
@@ -159,11 +162,11 @@ export const syncReview = {
   },
   /** Things sync did that need no decision, newest first. */
   async notices(): Promise<Notice[]> {
-    return known(noticeSchema, await invoke("sync_notices"));
+    return known(noticeSchema, await structured(invoke("sync_notices")));
   },
   /** Marks Inbox entries read; an id is a notice id or a conflicting record's id. */
   async setRead(ids: string[], read: boolean): Promise<void> {
-    await invoke("set_sync_read", { ids, read });
+    await structured(invoke("set_sync_read", { ids, read }));
   },
   /** Earlier versions, newest first; never includes the current one. */
   async versions(key: VersionKey): Promise<Version[]> {
@@ -190,7 +193,7 @@ export const syncReview = {
   async availability(ids: string[]): Promise<Availability[]> {
     return known(
       availabilitySchema,
-      await invoke("attachment_availability", { ids }),
+      await structured(invoke("attachment_availability", { ids })),
     );
   },
   /** Starts downloading the file's bytes; progress shows through `availability`. */

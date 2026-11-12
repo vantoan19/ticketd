@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSyncStatus } from "@/features/sync/sync-status";
 import { formatTime } from "@/lib/format";
+import { toFailure } from "@/lib/api/bridge-failure";
 import {
   syncReview,
   type Version,
@@ -80,7 +81,7 @@ export function RecordHistory({
           await syncReview.versions({ kind, id, source: "local" }),
         );
       } catch (reason) {
-        if (active) setError(String(reason));
+        if (active) setError(toFailure(reason).message);
         return;
       }
       if (!active) return;
@@ -99,8 +100,7 @@ export function RecordHistory({
         setDrive(older);
         setSelected(older[0] ?? null);
       } catch (reason) {
-        if (active)
-          setError(reason instanceof Error ? reason.message : String(reason));
+        if (active) setError(toFailure(reason).message);
       }
     })();
     return () => {
@@ -115,7 +115,7 @@ export function RecordHistory({
         from("drive", await syncReview.versions({ kind, id, source: "drive" })),
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(toFailure(reason).message);
     }
     setAsking(false);
   }
@@ -129,7 +129,7 @@ export function RecordHistory({
         if (active) setDetail({ version: { source, id: version }, fields });
       },
       (reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active) setError(toFailure(reason).message);
       },
     );
     return () => {
@@ -148,7 +148,7 @@ export function RecordHistory({
       onRestored?.();
       onClose();
     } catch (reason) {
-      setError(String(reason));
+      setError(toFailure(reason).message);
       setBusy(false);
     }
   }

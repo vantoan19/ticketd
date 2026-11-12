@@ -9,6 +9,8 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { hostFailure } from "@/features/sync/sync-fixtures";
 import {
   syncReview,
   type ConflictSummary,
@@ -171,4 +173,28 @@ test("a removed parent link is a notice naming the parent", async () => {
       "Sync removed parent T-KQ4 · it would have made a loop",
     ),
   ).toBeTruthy();
+});
+
+test("a failed mark as read says what the host reported", async () => {
+  const real = (
+    await vi.importActual<typeof import("@/lib/sync-review-api")>(
+      "@/lib/sync-review-api",
+    )
+  ).syncReview;
+  vi.mocked(syncReview.setRead).mockImplementation(real.setRead);
+  vi.mocked(invoke).mockImplementation((command: string) =>
+    command === "set_sync_read"
+      ? Promise.reject(hostFailure("the Workspace is busy"))
+      : Promise.resolve(command === "inbox" ? ordinary : undefined),
+  );
+  open();
+  await screen.findByText(/^Needs review/);
+  fireEvent.click(
+    entryOf("A Drive file could not be read").getByRole("button", {
+      name: /Mark .* unread/,
+    }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "the Workspace is busy",
+  );
 });

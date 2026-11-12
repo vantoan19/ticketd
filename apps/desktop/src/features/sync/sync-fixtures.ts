@@ -36,3 +36,14 @@ export const syncSettings = (
   attachment_download: "automatic",
   ...overrides,
 });
+
+/**
+ * What a failed command rejects with across the bridge: the host's serialised
+ * failure, not an `Error`. Tests reject `invoke` with it and run the real api,
+ * so a call that does not unwrap it shows as "[object Object]".
+ */
+export const hostFailure = (message: string) => ({
+  code: "failed",
+  index: null,
+  message,
+});

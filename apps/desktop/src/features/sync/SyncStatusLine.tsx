@@ -19,6 +19,7 @@ import {
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { formatSize } from "@/features/attachments/format-size";
 import { ago } from "@/features/tickets/ticket-source";
+import { toFailure } from "@/lib/api/bridge-failure";
 import { syncApi, type SyncReviewItem, type SyncStatus } from "@/lib/sync-api";
 import { useNow } from "@/lib/use-now";
 import { recoveryCopy } from "./sync-recovery";
@@ -174,9 +175,7 @@ export function SyncStatusLine() {
     try {
       apply(await command());
     } catch (reason) {
-      setFailure(
-        `${failed}: ${reason instanceof Error ? reason.message : String(reason)}`,
-      );
+      setFailure(`${failed}: ${toFailure(reason).message}`);
       // The failure is read in the popover, also when the line's own button caused it.
       setOpen(true);
     } finally {

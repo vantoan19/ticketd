@@ -4,6 +4,7 @@ import { RadioGroup } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Textarea } from "@/components/ui/textarea";
+import { toFailure } from "@/lib/api/bridge-failure";
 import {
   syncReview,
   type Conflict,
@@ -50,7 +51,7 @@ export function ConflictReview({
         if (active) setConflict(loaded);
       },
       (reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active) setError(toFailure(reason).message);
       },
     );
     return () => {
@@ -75,7 +76,7 @@ export function ConflictReview({
       onResolved?.();
       onClose();
     } catch (reason) {
-      setError(String(reason));
+      setError(toFailure(reason).message);
       setBusy(false);
     }
   }

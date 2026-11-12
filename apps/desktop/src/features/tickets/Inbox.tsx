@@ -43,6 +43,7 @@ import {
   useSyncEntries,
   type SyncEntry,
 } from "@/features/sync-review/inbox-entries";
+import { toFailure } from "@/lib/api/bridge-failure";
 import { syncReview, type ConflictSummary } from "@/lib/sync-review-api";
 
 const PAGE_SIZE = 50;
@@ -250,7 +251,7 @@ export function Inbox({
       if (ids.length) await syncReview.setRead(ids, read);
       sync.reload();
     } catch (e) {
-      setError(String(e));
+      setError(toFailure(e).message);
     }
   }
   const syncShown = sync.entries.filter((e) => filter === "all" || !e.read);
