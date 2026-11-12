@@ -334,12 +334,16 @@ pub(crate) fn save_snapshot(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    if root.exists() && parent.canonicalize()?.starts_with(root.canonicalize()?) {
+    let parent_absolute = parent
+        .canonicalize()
+        .map_err(|e| crate::path_error("destination folder", parent, e))?;
+    if root.exists() && parent_absolute.starts_with(root.canonicalize()?) {
         return Err(Error::Backup(
             "save the backup outside managed attachment storage".into(),
         ));
     }
-    let staged = tempfile::NamedTempFile::new_in(parent)?;
+    let staged = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| crate::path_error("destination folder", parent, e))?;
     let mut destination = Connection::open(staged.path())?;
     // Byte-restoring reference writes take only the SQLite writer lock. Freeze them
     // for the snapshot/path inventory, never for hashing/copying large file bodies.
