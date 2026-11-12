@@ -1671,3 +1671,46 @@ pub(crate) fn find_record(
 ) -> Result<Option<SyncRecord>, Error> {
     read_record(connection, kind, id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a file of format 1 holds after `kind`, `format` and `id`.
+    const FORMAT_1: &str = "\
+project: name
+document: title created_at tags origin_activity trashed kept pinned
+plan: name archived spec documents
+ticket: ref title status project plan parent blocked_by blocked_since blocked_by_removed parent_removed related discovered duplicate_of duplicate_restore tags documents attachments trashed following reminder source_provider source_external_id source_locator source_display source_url source_origin source_linked_at source_authority source_authority_changed_at source_state source_closure_reason source_updated_at
+<!-- ticketd:activity -->: reported_at updated_at agent document
+<!-- ticketd:evidence -->: kind name value created_at updated_at agent
+";
+
+    #[test]
+    fn the_fields_and_section_markers_of_the_current_format_are_pinned() {
+        // A section kind added here must also join `parts` below.
+        match SyncPartKind::Activity {
+            SyncPartKind::Activity | SyncPartKind::Evidence => {}
+        }
+        let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
+        let blocks = SyncKind::ALL
+            .into_iter()
+            .map(|kind| (kind.name().to_owned(), Block::Record(kind)))
+            .chain(parts.into_iter().map(|kind| {
+                (
+                    format!("<!-- ticketd:{} -->", kind.name()),
+                    Block::Part(kind),
+                )
+            }));
+        let mut written = String::new();
+        for (label, block) in blocks {
+            let names: Vec<_> = shape(block).0.iter().map(|field| field.0).collect();
+            written.push_str(&format!("{label}: {}\n", names.join(" ")));
+        }
+        assert_eq!(
+            (FILE_FORMAT, written.as_str()),
+            (1, FORMAT_1),
+            "The header fields or section markers of sync files changed. A ticketd that does not know a field rejects the whole file, and only a higher `format` tells it the file is from a newer ticketd: raise FILE_FORMAT in the same change, then pin the new list here under the new number."
+        );
+    }
+}
