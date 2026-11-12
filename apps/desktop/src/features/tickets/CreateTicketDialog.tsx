@@ -13,6 +13,7 @@ import { TokenField } from "@/components/ui/token-field";
 import { client, type Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
+import { modifierKeyLabel } from "@/lib/platform";
 import { loadPreferences } from "@/lib/preferences";
 import { z } from "zod";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
@@ -291,7 +292,7 @@ export function CreateTicketDialog({
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
       title="New ticket"
       primaryLabel={primaryLabel}
-      primaryHint="⌘↵"
+      primaryHint={`${modifierKeyLabel()}↵`}
       footerLeading={
         <label className="create-more">
           <Switch

@@ -215,6 +215,14 @@ test("Create ticket stays disabled with its reason until there is a title", () =
   expect(screen.queryByText("Add a title to create")).toBeNull();
 });
 
+test("the primary shortcut hint names the platform modifier", () => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  render(<Harness create={vi.fn()} />);
+  const button = screen.getByRole("button", { name: /^Create ticket/ });
+  expect(button.textContent).toBe("Create ticketCtrl↵");
+  vi.restoreAllMocks();
+});
+
 test("opening from a project scope preselects that project", () => {
   render(
     <Harness
