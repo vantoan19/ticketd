@@ -378,6 +378,16 @@ impl ChatHost {
             .map_err(|_| HostError::Quitting)
     }
 
+    /// After the Chat's links were changed through the core: a live session is given the
+    /// new context with its next new turn, and a resumed one when it differs from what it
+    /// was given. Views are told as for `notify_changed`.
+    pub async fn links_changed(&self, chat_id: &str) -> Result<(), HostError> {
+        self.sender(chat_id)?
+            .send(Command::LinksChanged)
+            .await
+            .map_err(|_| HostError::Quitting)
+    }
+
     /// Chat was switched off: refuses every request that would reach or start a
     /// supervisor, on every clone of this host, then stops every running Chat.
     pub async fn turn_off(&self) -> Vec<UnconfirmedCleanup> {

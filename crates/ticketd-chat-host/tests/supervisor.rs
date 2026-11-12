@@ -1412,3 +1412,72 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
     }
     assert_eq!(notices(&f).len(), 4);
 }
+
+/// L4: links changed after the session started reach the agent with the next new turn,
+/// kept as context like the first delivery; a resumed native session is told only
+/// when its context differs from what it was given.
+#[tokio::test(start_paused = true)]
+async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_message() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let context = Arc::new(std::sync::Mutex::new("links: none".to_owned()));
+    let source = context.clone();
+    f.host = ChatHost::with_context(
+        Arc::new(move || Workspace::open(&path)),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |_| Ok(Some(source.lock().unwrap().clone())))),
+    )
+    .unwrap();
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("session-1"),
+    })
+    .await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    *context.lock().unwrap() = "links: T-1".to_owned();
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    f.send("second").await;
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    f.send("third").await;
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-3"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(
+        texts(&f),
+        ["links: none\n\nfirst", "links: T-1\n\nsecond", "third"]
+    );
+    let kept: Vec<_> = f
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == CONTEXT_RECORD_NAME => Some(tool.input),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kept, ["links: none", "links: T-1"]);
+
+    // A resumed native session already has what it was given ...
+    f.host.stop_all().await;
+    f.send("fourth").await;
+    assert_eq!(texts(&f)[3], "fourth");
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-4"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    // ... and is told when the links changed while no session was live.
+    f.host.stop_all().await;
+    *context.lock().unwrap() = "links: T-2".to_owned();
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    f.send("fifth").await;
+    assert_eq!(texts(&f)[4], "links: T-2\n\nfifth");
+}

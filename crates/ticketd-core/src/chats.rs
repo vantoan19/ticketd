@@ -1706,6 +1706,23 @@ impl Workspace {
         })
     }
 
+    /// The input of the Chat's latest tool record named `name`, such as the context a
+    /// session was last given.
+    pub fn chat_latest_tool_input(
+        &self,
+        chat_id: &str,
+        name: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT input FROM chat_tools WHERE chat_id = ?1 AND name = ?2 ORDER BY position DESC LIMIT 1",
+                params![chat_id, name],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// The Chat and its latest `limit` history items, with the change sequence to follow from.
     pub fn chat_snapshot(&self, chat_id: &str, limit: usize) -> Result<ChatSnapshot, Error> {
         let transaction = self.connection.unchecked_transaction()?;

@@ -63,6 +63,8 @@ pub(crate) enum Command {
     },
     Trash(Reply<Option<String>>),
     Changed,
+    /// The Chat's links were changed; the session is given the new context.
+    LinksChanged,
     /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
     Shutdown(oneshot::Sender<Option<String>>),
 }
@@ -77,6 +79,11 @@ enum Done {
     },
     Dispatched {
         outcome: DispatchOutcome,
+    },
+    /// The ticketd context read again for the live session after its links changed.
+    Context {
+        generation: RuntimeGeneration,
+        context: Result<Option<String>, String>,
     },
     Interrupted {
         generation: RuntimeGeneration,
@@ -192,6 +199,9 @@ pub(crate) struct Supervisor {
     closing: bool,
     /// Something may have been written since views were last brought up to date.
     unpublished: bool,
+    /// The context of the live session is being read again; nothing is dispatched until
+    /// it is, so the next message carries it.
+    refreshing: Option<RuntimeGeneration>,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -256,6 +266,7 @@ impl Supervisor {
             queue_started: false,
             closing: false,
             unpublished: true,
+            refreshing: None,
         };
         tokio::spawn(supervisor.run());
         sender
@@ -428,8 +439,42 @@ impl Supervisor {
                 };
                 let _ = reply.send(result);
             }
+            Command::LinksChanged => self.refresh_context(),
             Command::Changed | Command::Shutdown(_) => {}
         }
+    }
+
+    /// Reads the ticketd context again for the live session. Without one there is nothing
+    /// to tell: the next session reads the context when it opens.
+    fn refresh_context(&mut self) {
+        let (Some(runtime), Some(source)) = (&self.runtime, self.context.clone()) else {
+            return;
+        };
+        let (done, chat_id, generation) =
+            (self.done.clone(), self.chat_id.clone(), runtime.generation);
+        self.refreshing = Some(generation);
+        tokio::spawn(async move {
+            // It runs the CLI and can take seconds: off the async threads.
+            let context = tokio::task::spawn_blocking(move || source(&chat_id))
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()));
+            let _ = done.send(Done::Context {
+                generation,
+                context,
+            });
+        });
+    }
+
+    /// The context this Chat's sessions were last given or are about to be given.
+    fn context_given(&self) -> Option<String> {
+        if let Some(context) = self.session_context.as_ref().or(self.context_sent.as_ref()) {
+            return Some(context.clone());
+        }
+        let chat = self.chat_id.clone();
+        // Unreadable: treated as never given, so the context is sent rather than lost.
+        self.core(|core| core.chat_latest_tool_input(&chat, CONTEXT_RECORD_NAME))
+            .ok()
+            .flatten()
     }
 
     fn attach(&mut self) -> Result<(ChatView, Subscription), HostError> {
@@ -678,11 +723,9 @@ impl Supervisor {
             }
             return;
         };
-        // A resumed native session already has it; a new one starts without it.
-        let source = self
-            .context
-            .clone()
-            .filter(|_| origin != ChatSessionOrigin::NativeResume);
+        // Read for every session. A resumed native session is given it only when it
+        // differs from what the Chat's sessions were last given (see `on_opened`).
+        let source = self.context.clone();
         self.generations += 1;
         let generation = RuntimeGeneration(self.generations);
         let request = OpenRequest {
@@ -854,6 +897,7 @@ impl Supervisor {
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
+            || self.refreshing.is_some()
             || self.unconfirmed_start.is_some()
         {
             return;
@@ -1023,6 +1067,29 @@ impl Supervisor {
                 context,
             } => self.on_opened(generation, result, context),
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
+            Done::Context {
+                generation,
+                context,
+            } => {
+                if self.refreshing != Some(generation) {
+                    return;
+                }
+                self.refreshing = None;
+                let current = self.runtime.as_ref().map(|runtime| runtime.generation);
+                match context {
+                    // Told with the next new turn, and only when it is news to the session.
+                    Ok(Some(context))
+                        if current == Some(generation)
+                            && self.context_given().as_ref() != Some(&context) =>
+                    {
+                        self.session_context = Some(context);
+                    }
+                    Ok(_) => {}
+                    Err(error) => self.notice(format!(
+                        "ticketd could not read this Chat's changed links, so the session was not told about them: {error}"
+                    )),
+                }
+            }
             Done::Interrupted {
                 generation,
                 outcome,
@@ -1097,6 +1164,10 @@ impl Supervisor {
                     self.preamble = opening.preamble;
                 }
                 match context {
+                    // A resumed native session remembers what it was given.
+                    Ok(Some(context))
+                        if opening.origin == ChatSessionOrigin::NativeResume
+                            && self.context_given().as_ref() == Some(&context) => {}
                     Ok(Some(context)) => self.session_context = Some(context),
                     Ok(None) => {}
                     Err(error) => self.notice(format!(

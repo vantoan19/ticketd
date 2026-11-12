@@ -1164,7 +1164,8 @@ impl Chats {
         let host = self.host()?;
         self.workspace()?
             .set_chat_link(chat_id, link.into(), present)?;
-        Ok(host.notify_changed(chat_id).await?)
+        // A running session is told with its next message.
+        Ok(host.links_changed(chat_id).await?)
     }
 
     /// Continues the same Chat in a fresh harness session started with the history the
