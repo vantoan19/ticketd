@@ -29,7 +29,10 @@ import "./sync.css";
 type Line = {
   /** The dot beside the label; none while work is in progress. */
   tone: StatusDotTone | null;
+  /** Short enough for the footer: 160px beside the dot, about 22 characters. */
   label: string;
+  /** The whole sentence, when the label is a shortened one. */
+  full?: string;
   detail: string;
   title: string;
   description: string;
@@ -54,6 +57,10 @@ function needsReview(items: SyncReviewItem[]): string {
     ? `1 ${one} needs review`
     : `${items.length} ${many} need review`;
 }
+
+/** The same without the kind, which does not fit the footer: "1 needs review". */
+const needsReviewShort = (count: number) =>
+  count === 1 ? "1 needs review" : `${count} need review`;
 
 /** What the footer line and its popover say. The core decides the state; this only picks wording. */
 function describe(status: SyncStatus, now: number): Line {
@@ -139,10 +146,15 @@ function describe(status: SyncStatus, now: number): Line {
       return {
         tone: "attention",
         label: status.needs_review.length
-          ? needsReview(status.needs_review)
+          ? needsReviewShort(status.needs_review.length)
           : "Sync needs attention",
+        ...(status.needs_review.length
+          ? { full: needsReview(status.needs_review) }
+          : {}),
         detail: paused ? held : synced ? `Synced ${synced}` : "Not synced yet",
-        title: status.needs_review.length ? "Needs review" : "Needs attention",
+        title: status.needs_review.length
+          ? needsReview(status.needs_review)
+          : "Needs attention",
         description: [
           paused,
           status.needs_review.length
@@ -209,10 +221,14 @@ export function SyncStatusLine() {
     <div className="sidebar-source sidebar-sync">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button type="button" className="sidebar-source-line">
+          <button
+            type="button"
+            className="sidebar-source-line"
+            aria-label={line.full && `${line.full}, ${line.detail}`}
+          >
             <span className="sidebar-source-label">
               {line.tone && <StatusDot tone={line.tone} size={10} />}
-              <span className="sync-line-text" title={line.label}>
+              <span className="sync-line-text" title={line.full ?? line.label}>
                 {line.label}
               </span>
             </span>

@@ -154,10 +154,15 @@ test("needs review: the line counts the tickets and Review opens them", async ()
       ],
     }),
   );
-  expect((await line()).textContent).toBe(
-    "1 ticket needs reviewSynced 1 min ago",
+  // The footer slot is too narrow for the kind; the name, tooltip and popover say it.
+  const trigger = await line();
+  expect(trigger.textContent).toBe("1 needs reviewSynced 1 min ago");
+  expect(trigger.getAttribute("aria-label")).toBe(
+    "1 ticket needs review, Synced 1 min ago",
   );
+  expect(screen.getByTitle("1 ticket needs review")).toBeTruthy();
   const dialog = await popover();
+  expect(within(dialog).getByText("1 ticket needs review")).toBeTruthy();
   expect(dialog.textContent).toContain("Changed on two desktops");
   expect(within(dialog).getByRole("listitem").textContent).toBe(
     "Rate-limit failed login attempts",
@@ -244,7 +249,7 @@ test("a conflict waiting while offline: the line offers Review, and the popover 
     needs_review: [change("Rate-limit failed login attempts")],
   });
   await footer(status);
-  expect((await line()).textContent).toBe("1 ticket needs reviewOffline");
+  expect((await line()).textContent).toBe("1 needs reviewOffline");
   fireEvent.click(screen.getByRole("button", { name: "Review" }));
   expect(openReview).toHaveBeenCalledTimes(1);
   const dialog = await popover();
