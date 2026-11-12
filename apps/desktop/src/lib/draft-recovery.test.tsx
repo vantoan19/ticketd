@@ -10,7 +10,11 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { DraftRecoveryProvider } from "./draft-recovery";
-import { useDraftRecovery, type DraftRecovery } from "./draft-recovery-context";
+import {
+  useDraftRecovery,
+  useDraftRecoveryNotices,
+  type DraftRecovery,
+} from "./draft-recovery-context";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 afterEach(() => {
@@ -21,7 +25,12 @@ afterEach(() => {
 
 function Probe({ expose }: { expose: (recovery: DraftRecovery) => void }) {
   expose(useDraftRecovery());
-  return <p>App content</p>;
+  return (
+    <>
+      <main>{useDraftRecoveryNotices()}</main>
+      <p>App content</p>
+    </>
+  );
 }
 
 test("an explicit flush retries a latched write once access returns, without a separate recovery retry", async () => {
