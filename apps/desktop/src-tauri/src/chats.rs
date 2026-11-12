@@ -239,6 +239,8 @@ pub struct HarnessStatus {
     pub message: Option<String>,
     pub command: Option<String>,
     pub help_url: Option<String>,
+    /// The executable that was found, when the message is about one.
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -279,6 +281,15 @@ fn folder_argument(path: &str) -> Outcome<String> {
         return Err(failed(format!("'{path}' is not a folder that exists")));
     }
     Ok(path.to_owned())
+}
+
+/// The number in a harness's version output ("codex-cli 0.150.0", "2.1.322 (Claude Code)"),
+/// which names the tool itself; the whole text when no number is found.
+fn version_number(output: &str) -> &str {
+    output
+        .split_whitespace()
+        .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
+        .unwrap_or(output)
 }
 
 fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) -> HarnessStatus {
@@ -325,7 +336,13 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             requirement,
         } => (
             "incompatible",
-            format!("{} lacks {requirement}", found(executable, version)),
+            format!(
+                "Found {name} {} at `{}`. ticketd needs {requirement}.",
+                version
+                    .as_deref()
+                    .map_or("(unknown version)", version_number),
+                executable.display()
+            ),
             None,
         ),
         Inspection::NotInstalled => ("not_installed", format!("{name} was not found"), None),
@@ -341,6 +358,10 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
         help_url: matches!(status, "not_installed" | "incompatible")
             .then(|| chat_view::help_url(id).map(str::to_owned))
             .flatten(),
+        path: match &inspection {
+            Inspection::Incompatible { executable, .. } => Some(executable.display().to_string()),
+            _ => None,
+        },
     }
 }
 
@@ -769,10 +790,11 @@ impl Chats {
                 Err(_) => HarnessStatus {
                     id,
                     name,
-                    status: "incompatible",
+                    status: "unavailable",
                     message: Some(self.unavailable(id)),
                     command: None,
                     help_url: None,
+                    path: None,
                 },
             });
         }

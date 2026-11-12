@@ -50,10 +50,8 @@ fn claude_bridge() -> Result<PathBuf, String> {
         .and_then(|executable| Some(executable.parent()?.to_owned()));
     match folder.map(|folder| folder.join(&name)) {
         Some(bridge) if bridge.is_file() => Ok(bridge),
-        Some(bridge) => Err(format!(
-            "Claude Code is unavailable: ticketd's Claude bridge is missing at {}. Reinstall ticketd to restore it.",
-            bridge.display()
-        )),
+        Some(_) => Err(
+            "Claude Code is unavailable: ticketd's Claude bridge is missing from this installation. Reinstall ticketd to restore it.".to_owned()),
         None => Err("Claude Code is unavailable: ticketd could not find its own folder to look for its Claude bridge.".to_owned()),
     }
 }

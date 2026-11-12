@@ -60,10 +60,7 @@ pub(super) fn locate(
 
 pub(super) fn version_requirement() -> String {
     let (major, minor, patch) = MINIMUM_VERSION;
-    format!(
-        "Codex {major}.{minor}.{patch} or newer, the oldest version whose app-server \
-         protocol ticketd was written against. Update Codex, then recheck."
-    )
+    format!("Codex {major}.{minor}.{patch} or newer")
 }
 
 /// What a session on this Codex version supports. An unreadable version is unknown,

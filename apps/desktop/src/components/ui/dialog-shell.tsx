@@ -127,7 +127,7 @@ export function DialogShell({
         })}
       >
         <form
-          className="dialog-shell-form relative"
+          className="dialog-shell-form relative min-w-0"
           onSubmit={(event) => {
             event.preventDefault();
             if (!blocked) onSubmit();
