@@ -184,6 +184,8 @@ fn name(kind: SyncKind) -> &'static str {
 struct Stored {
     /// The storage's identity of the file that version belongs to.
     file: Option<String>,
+    /// When the storage made that file.
+    file_created: Option<String>,
     /// The remote version last merged or written.
     version: Option<String>,
     /// The file as last synced: the base of the next merge.
@@ -199,19 +201,26 @@ struct Stored {
 }
 
 fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, Error> {
-    let row: Option<([Option<String>; 5], bool)> = connection
+    let row: Option<([Option<String>; 6], bool)> = connection
         .query_row(
-            "SELECT version, content, wanted, applied, file, newer FROM sync_files WHERE kind = ?1 AND id = ?2",
+            "SELECT version, content, wanted, applied, file, file_created, newer FROM sync_files WHERE kind = ?1 AND id = ?2",
             params![name(kind), id],
             |row| {
                 Ok((
-                    [row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?],
-                    row.get(5)?,
+                    [
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ],
+                    row.get(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some(([version, base, wanted, applied, file], newer)) = row else {
+    let Some(([version, base, wanted, applied, file, file_created], newer)) = row else {
         return Ok(Stored::default());
     };
     // A copy this version cannot read is no copy: the record is then merged as
@@ -220,6 +229,7 @@ fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, E
     let parse = |text: Option<String>| text.and_then(|text| SyncRecord::parse(&text).ok());
     Ok(Stored {
         file,
+        file_created,
         version,
         base: parse(base),
         wanted: parse(wanted),
@@ -231,9 +241,9 @@ fn stored(connection: &Connection, kind: SyncKind, id: &str) -> Result<Stored, E
 fn store(connection: &Connection, kind: SyncKind, id: &str, stored: &Stored) -> Result<(), Error> {
     let text = |record: &Option<SyncRecord>| record.as_ref().map(SyncRecord::to_markdown);
     connection.execute(
-        "INSERT INTO sync_files (kind, id, version, content, wanted, applied, newer, file) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT(kind, id) DO UPDATE SET version = excluded.version, content = excluded.content, wanted = excluded.wanted, applied = excluded.applied, newer = excluded.newer, file = excluded.file",
-        params![name(kind), id, stored.version, text(&stored.base), text(&stored.wanted), text(&stored.applied), stored.newer, stored.file],
+        "INSERT INTO sync_files (kind, id, version, content, wanted, applied, newer, file, file_created) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(kind, id) DO UPDATE SET version = excluded.version, content = excluded.content, wanted = excluded.wanted, applied = excluded.applied, newer = excluded.newer, file = excluded.file, file_created = excluded.file_created",
+        params![name(kind), id, stored.version, text(&stored.base), text(&stored.wanted), text(&stored.applied), stored.newer, stored.file, stored.file_created],
     )?;
     Ok(())
 }
@@ -632,6 +642,20 @@ fn is_file_fault(error: &Error) -> bool {
     }
 }
 
+/// Whether another file than the one last synced still shares its history. One
+/// made later does: a desktop wrote it from the same content after the first
+/// went missing, so the copy kept here remains the base of the merge. One made
+/// earlier is an old file that came back, and a time that cannot be read
+/// proves nothing: its content is merged as a record that never synced, so a
+/// value that differs waits for review instead of replacing a newer edit.
+fn made_no_earlier(created: &str, known: Option<&str>) -> bool {
+    let time = |text: &str| chrono::DateTime::parse_from_rfc3339(text).ok();
+    match (time(created), known.and_then(time)) {
+        (Some(created), Some(known)) => created >= known,
+        _ => false,
+    }
+}
+
 /// The text of a version another device wrote between this device's last sync
 /// and its update, when the storage accepted the update anyway. Drive checks
 /// the expected version just before it uploads, so a write landing in between
@@ -874,8 +898,9 @@ impl Workspace {
         let mut seen = stored(&transaction, kind, id)?;
         seen.newer = newer;
         if !newer {
+            // Which file was last synced stays as it was: nothing of this one
+            // was merged, so once corrected it is still compared with that one.
             seen.version = Some(file.version.clone());
-            seen.file = Some(file.file_id.clone());
         }
         store(&transaction, kind, id, &seen)?;
         let reason = match error {
@@ -916,11 +941,9 @@ impl Workspace {
             resolve_ticket_references(&workspace.connection, &mut remote)?;
             let mut stored = stored(&workspace.connection, kind, id)?;
             stored.newer = false;
-            // Another file than the one last synced (removed and written again, or
-            // an older one restored) shares no history with the copy kept here:
-            // it is merged as a record that never synced, so a value that
-            // differs waits for review instead of replacing a newer edit.
-            if stored.file.as_deref().is_some_and(|known| known != from.file_id) {
+            if stored.file.as_deref().is_some_and(|known| known != from.file_id)
+                && !made_no_earlier(&from.created, stored.file_created.as_deref())
+            {
                 stored.base = None;
             }
             let (merged, conflicts) = match local_view(&workspace.connection, kind, id, &stored)? {
@@ -993,6 +1016,7 @@ impl Workspace {
             }
             stored.version = Some(from.version.clone());
             stored.file = Some(from.file_id.clone());
+            stored.file_created = Some(from.created.clone());
             // What local changes remain shows as a difference from the remote copy.
             if merged != remote {
                 mark_dirty(connection, dirty_kind(kind), id)?;
@@ -1202,6 +1226,7 @@ impl Workspace {
                         let mut merged = self::stored(&self.connection, kind, &dirty.id)?;
                         merged.version = Some(file.version);
                         merged.file = Some(file.file_id);
+                        merged.file_created = Some(file.created);
                         merged.base = Some(local);
                         store(&self.connection, kind, &dirty.id, &merged)?;
                         mark_dirty(&self.connection, dirty.kind, &dirty.id)?;
@@ -1210,6 +1235,7 @@ impl Workspace {
                     }
                     stored.version = Some(file.version);
                     stored.file = Some(file.file_id);
+                    stored.file_created = Some(file.created);
                     stored.base = Some(local);
                     store(&self.connection, kind, &dirty.id, &stored)?;
                     // False when the record changed during the upload: it stays pending.

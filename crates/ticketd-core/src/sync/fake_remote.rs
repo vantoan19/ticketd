@@ -38,6 +38,8 @@ struct FakeRevision {
 struct FakeFile {
     /// The storage's identity of this file; a key can be written again as another file.
     id: String,
+    /// The clock when the file was made.
+    created: String,
     name: String,
     revisions: Vec<FakeRevision>,
 }
@@ -168,7 +170,7 @@ impl FakeRemote {
         }
     }
 
-    /// The time stamped on revisions written from now on (RFC 3339).
+    /// The time stamped on files made and revisions written from now on (RFC 3339).
     pub fn set_now(&self, now: &str) {
         self.state().now = now.into();
     }
@@ -216,6 +218,7 @@ fn check(folder: &str, key: Option<&RemoteKey>) -> Result<(), RemoteError> {
 fn fake_file(key: &RemoteKey, file: &FakeFile) -> Option<RemoteFile> {
     file.revisions.last().map(|revision| RemoteFile {
         file_id: file.id.clone(),
+        created: file.created.clone(),
         key: key.clone(),
         name: file.name.clone(),
         version: revision.version.clone(),
@@ -328,7 +331,9 @@ impl RemoteStorage for FakeRemote {
         } else {
             state.versions += 1;
             let id = format!("file-{}", state.versions);
+            let created = state.now.clone();
             let file = stored.files.entry(key.clone()).or_insert_with(|| FakeFile {
+                created,
                 id,
                 name: String::new(),
                 revisions: Vec::new(),

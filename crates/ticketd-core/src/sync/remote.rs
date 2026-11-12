@@ -79,6 +79,9 @@ pub struct RemoteFile {
     /// its content then shares no history with the file last synced. Compare
     /// for equality only.
     pub file_id: String,
+    /// RFC 3339 time at which the storage made that file. Of two files that a
+    /// key named, the one made earlier holds the older history.
+    pub created: String,
 }
 
 /// One stored version of a file, oldest first in listings.

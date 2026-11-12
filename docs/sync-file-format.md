@@ -80,7 +80,7 @@ A file is rejected as a whole, with the reason, when:
 
 A rejected file changes nothing in the Workspace. The next change made to that record in ticketd replaces the file, with one exception: a file that a newer ticketd may have written (a higher `format`, an unknown field or an unknown section marker) is never replaced by a desktop that cannot read it. Changes made to that record on such a desktop wait until it runs a ticketd that reads the file, or until the file is corrected.
 
-A file that disappears from the folder is not a deletion. The next sync run of a desktop that had synced it writes it again. When the file found for a record is not the Drive file a desktop last synced (it was removed and written again, or an older one was restored from Drive's trash), the two share no history: every field whose value differs goes to Needs review and nothing is replaced silently.
+A file that disappears from the folder is not a deletion. The next sync run of a desktop that had synced it writes it again. The file a desktop then finds is another Drive file than the one it last synced, made later, and is merged against the last-synced copy like any change. Only a file made earlier than the one last synced (an old file restored from Drive's trash), or one whose creation time cannot be compared, is taken to share no history: every field whose value differs goes to Needs review and nothing is replaced silently.
 
 ## Relationships
 

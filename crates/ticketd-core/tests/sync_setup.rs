@@ -1618,6 +1618,51 @@ fn an_attachment_download_that_keeps_failing_becomes_a_notice_and_runs_succeed_a
     assert_eq!(b.sync_notices().unwrap(), []);
 }
 
+/// F47: the folder is deleted and one desktop uploads everything again. Every
+/// file is then a new one, made after the files the desktops last synced, so
+/// the others keep their merge base: edits to different fields combine and
+/// nobody is asked anything.
+#[test]
+fn a_folder_uploaded_again_by_one_desk_merges_the_others_edits_without_review() {
+    let desks = desks();
+    let (mut a, reference, _) = desks.uploaded("Desk A");
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    let mut c = desks.joined("Desk C", AttachmentDownload::Automatic);
+    for desk in [&mut b, &mut c, &mut a] {
+        assert_eq!(desk.sync_now(&desks.remote).unwrap().recovery, None);
+    }
+    let folder = desks.folder();
+    retitle(&mut b, &reference, "Sign in");
+    c.change_ticket(
+        &reference,
+        TicketPatch {
+            status: Some(ticketd_core::Status::InProgress),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    desks.remote.remove_folder(&folder);
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.recovery, Some(SyncRecovery::FolderMissing));
+    desks.remote.set_now("2026-01-02T00:00:00Z");
+    assert_eq!(a.sync_recover(&desks.remote).unwrap().recovery, None);
+
+    for _ in 0..3 {
+        for desk in [&mut b, &mut c, &mut a] {
+            let status = desk.sync_now(&desks.remote).unwrap();
+            assert_eq!(status.recovery, None);
+            assert_eq!(status.needs_review, []);
+        }
+    }
+    for desk in [&a, &b, &c] {
+        let ticket = desk.show_ticket(&reference).unwrap();
+        assert_eq!(ticket.title, "Sign in");
+        assert_eq!(ticket.status, ticketd_core::Status::InProgress);
+        assert_eq!(desk.sync_conflicts().unwrap(), []);
+    }
+}
+
 /// F40: format 61 was in use before `sync_attachments.attempts` joined it, so a
 /// Workspace at 61 can lack the column. Format 62 adds it.
 #[test]

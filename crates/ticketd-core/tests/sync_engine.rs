@@ -818,18 +818,12 @@ fn a_missing_or_emptied_storage_never_removes_local_content() {
     assert_eq!(devices.sync(1).uploaded, 1);
     devices.settle([0, 2, 1]);
     devices.assert_converged();
-    // The other desktops meet a file that is not the one they synced: its
-    // content shares no history with theirs, so the difference waits for review.
-    let waiting = devices.workspaces[0]
-        .sync_conflict(SyncKind::Ticket, &id)
-        .unwrap();
-    assert_eq!(
-        waiting.fields[0].remote,
-        Some(SyncValue::Text("Still here".into()))
-    );
+    // The other desktops meet a file made after the one they synced: it is
+    // merged against the copy they kept, so a one-sided edit arrives silently.
+    assert_eq!(devices.workspaces[0].sync_conflicts().unwrap(), []);
     assert_eq!(
         devices.workspaces[0].show_ticket(&reference).unwrap().title,
-        "Login"
+        "Still here"
     );
 
     // The whole folder is gone: the run reports it and local content stays.
@@ -1321,6 +1315,7 @@ fn a_restored_older_file_for_a_record_goes_to_review_instead_of_reverting_edits(
     let original = devices.remote.list(FOLDER).unwrap()[0].file_id.clone();
 
     assert!(devices.remote.remove_file(FOLDER, &key));
+    devices.remote.set_now("2026-01-02T00:00:00Z");
     assert_eq!(devices.sync(0).uploaded, 1);
     assert_ne!(devices.remote.list(FOLDER).unwrap()[0].file_id, original);
     devices.workspaces[0]
@@ -1352,6 +1347,36 @@ fn a_restored_older_file_for_a_record_goes_to_review_instead_of_reverting_edits(
     for workspace in &devices.workspaces {
         assert_eq!(workspace.show_ticket(&reference).unwrap().title, "Newer");
     }
+}
+
+/// F50: the restored older file is unreadable at first. Skipping it must not
+/// make it the file last synced, or its corrected content would later be merged
+/// against the newer file's copy and revert the edit silently.
+#[test]
+fn a_restored_older_file_that_is_first_unreadable_still_goes_to_review_once_fixed() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let key = RemoteKey::new(RemoteKind::Ticket, id.clone());
+    let (_, old) = devices.remote_text(RemoteKind::Ticket, &id);
+
+    assert!(devices.remote.remove_file(FOLDER, &key));
+    devices.remote.set_now("2026-01-02T00:00:00Z");
+    devices.sync(0);
+    devices.workspaces[0]
+        .change_ticket(&reference, title("Newer"))
+        .unwrap();
+    devices.sync(0);
+    assert!(devices.remote.restore_file(FOLDER, &key));
+    devices.hand_edit(RemoteKind::Ticket, &id, "---\nkind: ticket\ntitle: [oops\n");
+    assert_eq!(devices.sync(0).skipped, 1);
+    devices.hand_edit(RemoteKind::Ticket, &id, &format!("{old}\nRestored text.\n"));
+
+    assert!(devices.sync(0).conflicts > 0);
+    assert_eq!(
+        devices.workspaces[0].show_ticket(&reference).unwrap().title,
+        "Newer"
+    );
 }
 
 /// F39: two desktops that track the same external source each import the same

@@ -90,6 +90,12 @@ pub(crate) fn migrate_file_identity(connection: &Connection) -> Result<(), Error
     add_columns(connection, &[("sync_files", "file", "TEXT")])
 }
 
+/// Format version 64: when the storage made that file, which tells an older
+/// file that came back from one written after it.
+pub(crate) fn migrate_file_created(connection: &Connection) -> Result<(), Error> {
+    add_columns(connection, &[("sync_files", "file_created", "TEXT")])
+}
+
 fn add_columns(connection: &Connection, columns: &[(&str, &str, &str)]) -> Result<(), Error> {
     for (table, column, definition) in columns {
         let present: bool = connection.query_row(

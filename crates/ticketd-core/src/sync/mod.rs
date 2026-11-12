@@ -62,3 +62,8 @@ pub(crate) fn migrate_download_attempts(
 pub(crate) fn migrate_file_identity(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_file_identity(connection)
 }
+
+/// Format version 64.
+pub(crate) fn migrate_file_created(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_file_created(connection)
+}
