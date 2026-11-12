@@ -249,3 +249,41 @@ test("one 48px toolbar, with Open item in the panel beside the map", async () =>
   expect(canvas.querySelector(".graph-legend")).toBeNull();
   expect(container.querySelector(".graph-legend")).toBeTruthy();
 });
+
+test("marks a trashed item in the Connected items list", async () => {
+  vi.mocked(client.contextGraphExpanded).mockResolvedValue({
+    center: "one",
+    nodes: [
+      {
+        id: "one",
+        kind: "ticket",
+        label: "T-KQ1 · First",
+        state: "Todo",
+        trashed: false,
+        activity_detail: false,
+      },
+      {
+        id: "two",
+        kind: "document",
+        label: "Old notes",
+        state: null,
+        trashed: true,
+        activity_detail: false,
+      },
+    ],
+    edges: [
+      { source: "one", target: "two", kind: "mention", explanation: "x" },
+    ],
+    omitted: false,
+    omitted_groups: [],
+    continuations: [],
+    hidden_details: false,
+    max_nodes: 50,
+    max_edges: 300,
+    max_work: 800,
+  });
+  render(<ContextGraph origin="T-KQ1" onBack={vi.fn()} onOpen={vi.fn()} />);
+  expect(
+    await screen.findByRole("button", { name: "Old notes (Trash)" }),
+  ).toBeTruthy();
+});

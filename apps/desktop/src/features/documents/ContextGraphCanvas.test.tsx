@@ -10,6 +10,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 
+const flow: { onMoveStart?: ((event: unknown) => void) | undefined } = {};
 const instance = {
   fitView: vi.fn(),
   zoomTo: vi.fn(),
@@ -17,8 +18,12 @@ const instance = {
   getZoom: () => 1,
 };
 vi.mock("@xyflow/react", () => ({
-  ReactFlow: ({ onInit }: { onInit: (value: unknown) => void }) => {
-    onInit(instance);
+  ReactFlow: (props: {
+    onInit: (value: unknown) => void;
+    onMoveStart?: (event: unknown) => void;
+  }) => {
+    flow.onMoveStart = props.onMoveStart;
+    props.onInit(instance);
     return <div>Canvas</div>;
   },
   Background: () => null,
@@ -153,4 +158,51 @@ test("the canvas stays hidden until the first fit, so the map is never seen at t
   const canvas = view.getByLabelText("Connections canvas");
   expect(canvas.hasAttribute("data-pending")).toBe(true);
   expect(canvas.style.visibility).toBe("");
+});
+
+test("a resize refits after Fit, even when the viewport syncs back, but not after a person's own pan", () => {
+  vi.useFakeTimers();
+  let notify: () => void = () => {};
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        notify = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  try {
+    render(
+      <ContextGraphCanvas
+        edges={[]}
+        selected={null}
+        positions={{}}
+        onPositions={vi.fn()}
+        viewport={{ x: 0, y: 0, zoom: 1 }}
+        onViewport={vi.fn()}
+        onSelect={vi.fn()}
+        onError={vi.fn()}
+        nodes={[]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+    // The controlled viewport syncing back starts a move with a marker object.
+    flow.onMoveStart?.({ sync: true });
+    flow.onMoveStart?.(null);
+    instance.fitView.mockClear();
+    notify();
+    act(() => vi.advanceTimersByTime(200));
+    expect(instance.fitView).toHaveBeenCalledTimes(1);
+
+    // A real wheel or pointer move is the person's: later resizes keep their view.
+    flow.onMoveStart?.(new WheelEvent("wheel"));
+    instance.fitView.mockClear();
+    notify();
+    act(() => vi.advanceTimersByTime(200));
+    expect(instance.fitView).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
 });

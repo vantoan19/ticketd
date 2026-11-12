@@ -93,7 +93,8 @@ export function DocumentPicker({
       </ul>
       {results !== null && shown.length === 0 && !error && (
         <EmptyState
-          size="inline"
+          // The picker sits in a narrow popover: stack icon, title, description and action.
+          size="block"
           role="status"
           icon={<FileText />}
           title={

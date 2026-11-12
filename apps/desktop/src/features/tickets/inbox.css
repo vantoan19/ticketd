@@ -98,6 +98,9 @@
 }
 .inbox-actions {
   display: flex;
+  /* Two icon-sm buttons and the gap: a fixed slot keeps the time column aligned. */
+  justify-content: flex-end;
+  width: 66px;
   gap: 2px;
   margin-block: -4px;
   opacity: 0;

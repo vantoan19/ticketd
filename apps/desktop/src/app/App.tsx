@@ -40,7 +40,10 @@ import { ExitDialog } from "@/features/sync/ExitDialog";
 import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
 import { useSyncNavigation } from "@/features/sync/sync-status";
 import { TicketNavigation } from "@/features/tickets/navigation";
-import { useDraftRecoveryGeneration } from "@/lib/draft-recovery-context";
+import {
+  useDraftRecoveryGeneration,
+  useDraftRecoveryNotices,
+} from "@/lib/draft-recovery-context";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
@@ -60,6 +63,7 @@ export function App() {
 
 function AppContent() {
   const recoveryGeneration = useDraftRecoveryGeneration();
+  const recoveryNotices = useDraftRecoveryNotices();
   const [view, setViewState] = useState<
     | "tickets"
     | "projects"
@@ -376,6 +380,7 @@ function AppContent() {
                     tabIndex={-1}
                     className="content-panel"
                   >
+                    {recoveryNotices}
                     {isMobile && view !== "settings" && (
                       <div className="mobile-nav-bar">
                         <SidebarTrigger
@@ -432,8 +437,9 @@ function AppContent() {
                       <AttachmentLibrary
                         onPreview={setAttachmentPreview}
                         onOpenSettings={() => {
-                          setSettingsSection("attachments");
+                          // openView resets the section, so choose it afterwards.
                           openView("settings");
+                          setSettingsSection("attachments");
                         }}
                       />
                     )}

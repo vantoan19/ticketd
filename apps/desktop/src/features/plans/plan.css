@@ -335,6 +335,7 @@
   overflow-y: auto;
 }
 .plan-graph-canvas {
+  flex-shrink: 0;
   height: 440px;
   border-radius: var(--radius);
   box-shadow: var(--shadow-border-base);

@@ -32,6 +32,7 @@
   min-height: 0;
   min-width: 0;
   overflow: auto;
+  container: attachment-library / inline-size;
 }
 .attachment-library header,
 .attachment-library-tools,
@@ -152,6 +153,46 @@
   flex-wrap: wrap;
   border-top: 1px solid var(--border);
   padding-top: 16px;
+}
+/* Narrow library (window or sidebar): once the 720px table no longer fits,
+   each file becomes a block, so no column or action hides behind a sideways
+   scroll. */
+@container attachment-library (max-width: 719px) {
+  .attachment-library table,
+  .attachment-library tbody {
+    display: block;
+    min-width: 0;
+  }
+  .attachment-library thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .attachment-library tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+    padding: 14px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .attachment-library td {
+    border-bottom: 0;
+    padding: 0;
+  }
+  .attachment-library td:first-child {
+    width: 100%;
+    min-width: 0;
+  }
+  .attachment-library td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--muted-foreground);
+  }
+  .attachment-library td:last-child {
+    margin-left: auto;
+  }
 }
 @media (max-width: 640px) {
   .attachment-library {

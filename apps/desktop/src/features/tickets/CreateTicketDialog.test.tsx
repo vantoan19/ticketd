@@ -215,6 +215,14 @@ test("Create ticket stays disabled with its reason until there is a title", () =
   expect(screen.queryByText("Add a title to create")).toBeNull();
 });
 
+test("the primary shortcut hint names the platform modifier", () => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  render(<Harness create={vi.fn()} />);
+  const button = screen.getByRole("button", { name: /^Create ticket/ });
+  expect(button.textContent).toBe("Create ticketCtrl↵");
+  vi.restoreAllMocks();
+});
+
 test("opening from a project scope preselects that project", () => {
   render(
     <Harness
@@ -356,6 +364,31 @@ test("retrying recovery cleanup after creation does not create a duplicate ticke
   fireEvent.click(screen.getByRole("button", { name: "Finish cleanup" }));
   await waitFor(() => expect(recovery.getReleaseAttempts()).toBe(2));
   expect(create).toHaveBeenCalledTimes(1);
+});
+
+test("a failed creation scrolls its error into view so Retry safely is explained", async () => {
+  recoveryBridge({ failFirstRelease: false });
+  const scrolled = vi.fn();
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = scrolled;
+  try {
+    const create = vi.fn().mockRejectedValue(new Error("response lost"));
+    render(
+      <DraftRecoveryProvider>
+        <Harness create={create} />
+      </DraftRecoveryProvider>,
+    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+      target: { value: "Fails" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/Retry safely/);
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    expect(scrolled.mock.instances).toContain(alert);
+  } finally {
+    Element.prototype.scrollIntoView = original as typeof scrolled;
+  }
 });
 
 test("a lost-response submission reuses its request ID and follow choice after remount", async () => {

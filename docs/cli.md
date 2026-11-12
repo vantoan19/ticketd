@@ -65,8 +65,9 @@ to 256. Use `ticketd show T-KQ1` for full ticket content and `ticketd activity l
 T-KQ1` for the full activity feed. The bounded body must not be used as an editable draft.
 
 Search saved titles, bodies, and Activity briefs with `ticketd search QUERY`. The query is a
-literal substring (ASCII letters match without case); an empty query returns no
-matches. Results exclude trash and are ordered by descending ticket reference.
+literal substring (ASCII letters match without case); an empty query applies only
+the filters, like `ticketd list` (the desktop search box returns nothing for an
+empty query). Results exclude trash and are ordered by descending ticket reference.
 Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
 or `--unlinked` to restrict results. The desktop search uses the same matching
 and pages through 50 results at a time.
