@@ -72,6 +72,30 @@ pub trait DriveTransport: Send + Sync {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError>;
 }
 
+/// Whether [`GoogleTransport`] sends a request. Defense in depth: bearer and
+/// refresh credentials never reach redirects or caller-supplied URLs. Tests run
+/// every request the adapters build through this, so a mismatch fails a test.
+pub fn request_allowed(method: &str, url: &str) -> bool {
+    const FILES: &str = "https://www.googleapis.com/drive/v3/files";
+    match method {
+        "POST" if url == "https://oauth2.googleapis.com/token" => true,
+        "POST" | "PUT" | "PATCH" if super::upload_provider::safe_session_url(url) => true,
+        // Metadata-only creation of the Workspace sync folders.
+        "POST" => url.starts_with(&format!("{FILES}?")),
+        "GET" => {
+            url.strip_prefix(FILES)
+                .is_some_and(|rest| rest.starts_with(['/', '?']))
+                || url.starts_with("https://www.googleapis.com/drive/v3/changes")
+                // The account of a picker authorization, and of a sync sign-in.
+                || matches!(
+                    url.strip_prefix("https://www.googleapis.com/drive/v3/about?fields="),
+                    Some("user(permissionId)" | "user(permissionId,emailAddress)")
+                )
+        }
+        _ => false,
+    }
+}
+
 pub struct GoogleTransport {
     agent: ureq::Agent,
 }
@@ -90,25 +114,7 @@ impl Default for GoogleTransport {
 }
 impl DriveTransport for GoogleTransport {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
-        // Defense in depth: never forward bearer/refresh credentials to redirects or caller URLs.
-        let upload_url = super::upload_provider::safe_session_url(&request.url);
-        let files = "https://www.googleapis.com/drive/v3/files";
-        let allowed = request.method == "POST"
-            && request.url == "https://oauth2.googleapis.com/token"
-            || matches!(request.method, "POST" | "PUT" | "PATCH") && upload_url
-            // Metadata-only creation of the Workspace sync folders.
-            || request.method == "POST" && request.url.starts_with(&format!("{files}?"))
-            || request.method == "GET"
-                && (request
-                    .url
-                    .strip_prefix(files)
-                    .is_some_and(|rest| rest.starts_with(['/', '?']))
-                    || request
-                        .url
-                        .starts_with("https://www.googleapis.com/drive/v3/changes")
-                    || request.url
-                        == "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)");
-        if !allowed {
+        if !request_allowed(request.method, &request.url) {
             return Err(DriveError::new(
                 DriveErrorKind::Unsupported,
                 "unsupported Drive request",

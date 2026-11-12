@@ -100,6 +100,13 @@ fn authorization_code_verifier_matches_the_browser_s256_challenge() {
     }
     impl DriveTransport for VerifyPkce {
         fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+            // The real transport refuses anything outside its allow-list.
+            assert!(
+                ticketd_core::drive::request_allowed(request.method, &request.url),
+                "GoogleTransport refuses {} {}",
+                request.method,
+                request.url
+            );
             if request.method == "POST" {
                 let fields: std::collections::BTreeMap<_, _> =
                     url::form_urlencoded::parse(&request.body)
@@ -253,6 +260,13 @@ fn picker_requires_confirmed_narrow_scope_before_account_lookup_or_vault_access(
     }
     impl DriveTransport for TokenOnly {
         fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+            // The real transport refuses anything outside its allow-list.
+            assert!(
+                ticketd_core::drive::request_allowed(request.method, &request.url),
+                "GoogleTransport refuses {} {}",
+                request.method,
+                request.url
+            );
             assert_eq!(request.method, "POST");
             assert_eq!(request.url, "https://oauth2.googleapis.com/token");
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -325,6 +339,13 @@ impl CredentialStore for Vault {
 struct Http;
 impl DriveTransport for Http {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+        // The real transport refuses anything outside its allow-list.
+        assert!(
+            ticketd_core::drive::request_allowed(request.method, &request.url),
+            "GoogleTransport refuses {} {}",
+            request.method,
+            request.url
+        );
         if request.method == "GET" {
             assert_eq!(
                 request.url,
@@ -350,6 +371,13 @@ impl DriveTransport for Http {
 struct Reconnect;
 impl DriveTransport for Reconnect {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+        // The real transport refuses anything outside its allow-list.
+        assert!(
+            ticketd_core::drive::request_allowed(request.method, &request.url),
+            "GoogleTransport refuses {} {}",
+            request.method,
+            request.url
+        );
         if request.method == "GET" {
             return Http.send(request);
         }
@@ -359,6 +387,13 @@ impl DriveTransport for Reconnect {
 struct DifferentAccount;
 impl DriveTransport for DifferentAccount {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+        // The real transport refuses anything outside its allow-list.
+        assert!(
+            ticketd_core::drive::request_allowed(request.method, &request.url),
+            "GoogleTransport refuses {} {}",
+            request.method,
+            request.url
+        );
         if request.method == "GET" {
             return Ok(DriveResponse {
                 headers: vec![],
@@ -375,6 +410,13 @@ fn disabled_drive_api_reports_publisher_setup_without_saving_credentials() {
     struct DisabledApi(&'static [u8]);
     impl DriveTransport for DisabledApi {
         fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+            // The real transport refuses anything outside its allow-list.
+            assert!(
+                ticketd_core::drive::request_allowed(request.method, &request.url),
+                "GoogleTransport refuses {} {}",
+                request.method,
+                request.url
+            );
             if request.method == "POST" {
                 return Http.send(request);
             }
@@ -609,6 +651,13 @@ fn sign_in_needs_no_picked_file_and_names_the_account() {
     struct SignIn;
     impl DriveTransport for SignIn {
         fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+            // The real transport refuses anything outside its allow-list.
+            assert!(
+                ticketd_core::drive::request_allowed(request.method, &request.url),
+                "GoogleTransport refuses {} {}",
+                request.method,
+                request.url
+            );
             let body: &[u8] = if request.method == "POST" {
                 br#"{"access_token":"access-secret","refresh_token":"refresh-secret","scope":"https://www.googleapis.com/auth/drive.file"}"#
             } else {

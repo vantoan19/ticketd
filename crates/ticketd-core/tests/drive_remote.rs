@@ -371,3 +371,73 @@ fn the_change_feed_probe_reports_files_written_since_its_token() {
         Vec::<String>::new()
     );
 }
+
+/// F31: the production transport refuses requests outside its allow-list, and
+/// tests run on a fake transport. Every request shape sync sends goes through
+/// the production predicate here (the fake also checks each request it gets).
+#[test]
+fn the_production_transport_allows_every_request_sync_sends() {
+    let sim = DriveSim::default();
+    let remote = connected(&sim);
+    let ticket = key("3f2c9a1e-0000-4000-8000-00000000000b");
+    let big = vec![7_u8; 300 * 1024];
+    let first = put(&remote, &ticket, None, &big).unwrap();
+    let second = put(&remote, &ticket, Some(&first.version), b"edit").unwrap();
+    remote.list(FOLDER).unwrap();
+    remote.folders().unwrap();
+    remote.revisions(FOLDER, &ticket).unwrap();
+    let mut bytes = Vec::new();
+    remote
+        .download(FOLDER, &ticket, &first.version, &mut bytes)
+        .unwrap();
+    assert_eq!(bytes, big);
+    remote
+        .download(FOLDER, &ticket, &second.version, &mut Vec::new())
+        .unwrap();
+    let (_, start) = remote.changed_file_ids(None).unwrap();
+    remote.changed_file_ids(Some(&start)).unwrap();
+
+    let requests = sim.requests();
+    let sent = |method: &str, part: &str| {
+        requests
+            .iter()
+            .any(|(m, url)| m == method && url.contains(part))
+    };
+    for (method, part) in [
+        ("POST", "oauth2.googleapis.com/token"),
+        ("GET", "/drive/v3/files?q="),
+        ("GET", "/drive/v3/files/generateIds?"),
+        ("POST", "/drive/v3/files?supportsAllDrives=true&fields=id"),
+        ("POST", "/upload/drive/v3/files?uploadType=resumable"),
+        ("PATCH", "/upload/drive/v3/files/"),
+        ("PUT", "upload_id="),
+        ("GET", "/revisions?"),
+        ("GET", "?fields=id,size"),
+        ("GET", "?alt=media"),
+        ("GET", "/drive/v3/changes/startPageToken"),
+        ("GET", "/drive/v3/changes?"),
+    ] {
+        assert!(
+            sent(method, part),
+            "the scenario never sent {method} {part}"
+        );
+    }
+    for (method, url) in &requests {
+        assert!(
+            ticketd_core::drive::request_allowed(method, url),
+            "GoogleTransport refuses {method} {url}"
+        );
+    }
+    // Credentials go nowhere else.
+    for (method, url) in [
+        ("GET", "https://www.googleapis.com/drive/v3/about?fields=*"),
+        ("GET", "https://example.com/drive/v3/files/x"),
+        ("DELETE", "https://www.googleapis.com/drive/v3/files/x"),
+        (
+            "POST",
+            "https://www.googleapis.com/drive/v3/files/x/permissions",
+        ),
+    ] {
+        assert!(!ticketd_core::drive::request_allowed(method, url));
+    }
+}
