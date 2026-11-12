@@ -1573,7 +1573,12 @@ impl Supervisor {
             } => {
                 let exit =
                     exit_code.map_or_else(String::new, |code| format!(" (exit code {code})"));
-                self.on_loss(format!("the harness process ended{exit}: {diagnostics}"));
+                let reason = if diagnostics.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {diagnostics}")
+                };
+                self.on_loss(format!("the harness process ended{exit}{reason}"));
             }
             // The harness keeps the turn; nothing is retried or ended here.
             EventKind::Notice {
