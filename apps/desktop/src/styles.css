@@ -697,8 +697,9 @@ body:has([data-slot="dialog-overlay"])
 .ui-comment-row-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 8px;
   min-height: 28px;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
@@ -720,6 +721,7 @@ body:has([data-slot="dialog-overlay"])
 .ui-comment-row-actions {
   display: flex;
   flex: none;
+  margin-inline-start: auto;
   align-items: center;
   gap: 8px;
 }
