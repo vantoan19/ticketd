@@ -286,6 +286,19 @@ fn notify_once(
     Ok(recorded > 0)
 }
 
+/// Take back the notices about a record's file in the storage that could not
+/// be read: the file reads again, was replaced from here, or is gone.
+fn withdraw_unreadable(connection: &Connection, kind: SyncKind, id: &str) -> Result<(), Error> {
+    let withdrawn = connection.execute(
+        "DELETE FROM sync_notices WHERE instr(cause, ?1) = 1",
+        [format!("unreadable:{}:{id}:", name(kind))],
+    )?;
+    if withdrawn > 0 {
+        touch(connection)?;
+    }
+    Ok(())
+}
+
 /// The ticket of this Workspace, other than `record`, that holds the external
 /// source identity `record` carries.
 fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<String>, Error> {
@@ -887,6 +900,7 @@ impl Workspace {
                 params![name(kind), id],
             )?;
             mark_dirty(&self.connection, dirty_kind(kind), &id)?;
+            withdraw_unreadable(&self.connection, kind, &id)?;
         }
         Ok(())
     }
@@ -917,10 +931,8 @@ impl Workspace {
     /// it is not read again, and a later local change replaces it.
     ///
     /// A file only a `newer` ticketd reads is different: it is never replaced
-    /// from here, and it is read again on every run, so the run after this
-    /// desktop is updated takes it.
-    // ponytail: one download per such file per run; remember the version and
-    // re-read after an update of the app if a folder ever holds many of them.
+    /// from here, and it is read again after each launch of the app (see
+    /// `start_sync_session`), so this desktop takes it once it is updated.
     fn skip(
         &mut self,
         kind: SyncKind,
@@ -932,11 +944,9 @@ impl Workspace {
         let transaction = self.connection.savepoint()?;
         let mut seen = stored(&transaction, kind, id)?;
         seen.newer = newer;
-        if !newer {
-            // Which file was last synced stays as it was: nothing of this one
-            // was merged, so once corrected it is still compared with that one.
-            seen.version = Some(file.version.clone());
-        }
+        // Which file was last synced stays as it was: nothing of this one
+        // was merged, so once corrected it is still compared with that one.
+        seen.version = Some(file.version.clone());
         store(&transaction, kind, id, &seen)?;
         let reason = match error {
             Error::SyncFile(reason) => reason.clone(),
@@ -1068,6 +1078,7 @@ impl Workspace {
             }
             stored.base = Some(remote);
             store(connection, kind, id, &stored)?;
+            withdraw_unreadable(connection, kind, id)?;
             for conflict in &conflicts {
                 connection.execute(
                     &format!(
@@ -1268,6 +1279,7 @@ impl Workspace {
             };
             match written {
                 Ok(file) => {
+                    withdraw_unreadable(&self.connection, kind, &dirty.id)?;
                     if self
                         .connection
                         .execute("DELETE FROM sync_notices WHERE cause = ?1", [&oversized])?

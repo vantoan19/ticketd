@@ -645,9 +645,13 @@ impl Workspace {
         } else {
             AttachmentDownloads::default()
         };
+        // A change held back by a file from a newer ticketd is not pending, but
+        // it has not reached the storage either: reading the notice does not
+        // make that synced.
         let unreadable = count(
             connection,
-            "SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') = 'unreadable_file'",
+            "SELECT (SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') = 'unreadable_file')
+                  + (SELECT COUNT(*) FROM sync_dirty WHERE id IN (SELECT id FROM sync_files WHERE newer))",
         )?;
         let blocked = matches!(
             state.recovery,
@@ -860,10 +864,13 @@ impl Workspace {
     /// cut off when the app last stopped start again, and the first run
     /// writes a fresh run token into this desktop's entry of the device
     /// registry, which is how a copy of this Workspace file that also syncs
-    /// is found out.
+    /// is found out. A file held back as one from a newer ticketd is read
+    /// again, since this launch may be of a ticketd that reads it.
     pub fn start_sync_session(&mut self) -> Result<(), Error> {
         self.connection
             .execute("UPDATE sync_state SET run_due = 1", [])?;
+        self.connection
+            .execute("UPDATE sync_files SET version = NULL WHERE newer", [])?;
         self.reset_interrupted_downloads()
     }
 

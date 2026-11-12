@@ -1222,13 +1222,15 @@ with it.
   Workspace again. Failed authorization asks to reconnect.
 - A file edited directly in Drive is treated as an edit from another desktop once
   it validates. An unreadable file is skipped with a Needs attention notice and
-  changes nothing locally; the next local change to that record replaces it. A
+  changes nothing locally; the notice names the file and the reason, and goes once
+  the file reads again or the next local change to that record replaces it. A
   file created by hand in the folder does not become a record, because ticketd
   sees only files it created.
 - A file written by a newer ticketd than this desktop runs (a higher format
-  number, or a field this version does not know) is skipped with the same notice
-  and is never replaced from this desktop. Local changes to that record wait
-  until the desktop is updated.
+  number) is skipped with the same notice and is never replaced from this
+  desktop. Local changes to that record wait, and sync stays Needs attention,
+  until the desktop is updated. A field this version does not know, in a format
+  it reads, is an unreadable file like any other.
 - An Attachment whose bytes are missing or damaged on this desktop, or cannot be
   saved here, is a Needs attention notice of its own. It does not stop records
   or other Attachments from syncing. An Attachment that Drive fails to deliver

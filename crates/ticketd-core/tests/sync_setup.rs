@@ -1321,13 +1321,65 @@ fn a_record_held_back_by_a_newer_format_file_is_not_a_pending_upload_and_is_put_
     assert_eq!(status.state, SyncState::NeedsAttention);
     assert_eq!(unreadable(&a).len(), 1);
     assert_eq!(desks.file(&key).1, newer.as_bytes());
+    // Reading the notice does not make the held change synced.
+    let notice = a.sync_notices().unwrap()[0].id.clone();
+    a.set_sync_read(&[notice], true).unwrap();
+    assert_eq!(a.sync_status().unwrap().state, SyncState::NeedsAttention);
 
     // With the file gone there is nothing left to protect.
     desks.remote.remove_file(&desks.folder(), &key);
     let status = a.sync_now(&desks.remote).unwrap();
-    assert_eq!(status.pending_total, 0);
+    assert_eq!(
+        (status.pending_total, status.state),
+        (0, SyncState::Uploaded)
+    );
+    assert_eq!(unreadable(&a), [] as [&str; 0]);
     let restored = String::from_utf8(desks.file(&key).1).unwrap();
     assert!(restored.contains("Changed here"), "{restored}");
+}
+
+/// L2: a downloaded Workspace says which file it could not take, and why.
+#[test]
+fn downloading_a_workspace_names_the_file_it_could_not_read_until_the_file_is_replaced() {
+    let desks = desks();
+    let (mut a, reference, _) = desks.uploaded("Desk A");
+    a.create_ticket("Other").unwrap();
+    a.sync_now(&desks.remote).unwrap();
+    let key = RemoteKey::new(RemoteKind::Ticket, a.show_ticket(&reference).unwrap().id);
+    let (version, synced) = desks.file(&key);
+    let edited = String::from_utf8(synced)
+        .unwrap()
+        .replacen("ref:", "priority: high\nref:", 1);
+    desks
+        .remote
+        .write(
+            &desks.folder(),
+            &key,
+            "Login.md",
+            Some(&version),
+            &mut Cursor::new(edited.as_bytes()),
+        )
+        .unwrap();
+
+    let mut b = desks.joined("Desk B", AttachmentDownload::OnOpen);
+    let status = b.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(titles(&b), ["Other"]);
+    assert_eq!(status.state, SyncState::NeedsAttention);
+    let notices = b.sync_notices().unwrap();
+    assert!(
+        matches!(&notices[..], [notice] if matches!(&notice.notice, SyncNoticeKind::UnreadableFile { path, reason } if path == "tickets/Login.md" && reason.contains("unknown field 'priority'"))),
+        "{notices:?}"
+    );
+
+    // The next change on a desktop that holds the ticket brings it over.
+    a.sync_now(&desks.remote).unwrap();
+    retitle(&mut a, &reference, "Login again");
+    a.sync_now(&desks.remote).unwrap();
+    let status = b.sync_now(&desks.remote).unwrap();
+    assert_eq!(titles(&b).len(), 2);
+    assert_eq!(unreadable(&b), [] as [&str; 0]);
+    assert_ne!(status.state, SyncState::NeedsAttention);
 }
 
 fn availability_of(workspace: &Workspace, attachment: &str) -> AttachmentAvailabilityState {

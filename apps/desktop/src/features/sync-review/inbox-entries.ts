@@ -43,7 +43,7 @@ function fromNotice(notice: Notice): SyncEntry {
       read,
       reference: null,
       title: "A Drive file could not be read",
-      summary: `${notice.path} was skipped · nothing here changed`,
+      summary: `${notice.path} was skipped · ${notice.reason}`,
       icon: "file",
     };
   if (notice.kind === "parent_removed")

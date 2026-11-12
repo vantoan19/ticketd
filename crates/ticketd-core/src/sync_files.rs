@@ -789,39 +789,21 @@ fn blocks(file: &str) -> Result<Vec<(Option<SyncPartKind>, String)>, Error> {
     Ok(blocks)
 }
 
-/// Whether a file that does not parse holds what a newer ticketd may have
-/// written: a higher format number, a field or a section this version does not
-/// know. Such a file must not be replaced by a desktop that cannot read it.
+/// Whether a file that does not parse says a newer ticketd wrote it: its
+/// format number is higher than this version reads. Such a file must not be
+/// replaced by a desktop that cannot read it. The number is the only mark: a
+/// field or section this version does not know, in a format it reads, is a
+/// mistake made by hand like any other, and a later change here replaces it.
 pub(crate) fn from_newer_version(file: &str) -> bool {
-    let Ok(blocks) = blocks(file) else {
-        // The only failure is a section marker this version does not know.
-        return true;
-    };
-    let mut record = None;
-    blocks.iter().any(|(part, block)| {
-        let Ok((entries, _)) = read_block(block) else {
-            return false;
-        };
-        let block = match (part, record) {
-            (Some(part), Some(_)) => Block::Part(*part),
-            _ => {
-                let kind = entries.iter().find_map(|(name, value)| match value {
-                    Raw::Text(kind) if name == "kind" => SyncKind::parse(kind),
-                    _ => None,
-                });
-                let Some(kind) = kind else {
-                    return false;
-                };
-                record = Some(kind);
-                Block::Record(kind)
-            }
-        };
-        let top = matches!(block, Block::Record(_));
-        entries.iter().any(|(name, value)| match name.as_str() {
-            "id" => false,
-            "kind" if top => false,
-            "format" if top => matches!(value, Raw::Integer(format) if *format > FILE_FORMAT),
-            name => !shape(block).0.iter().any(|field| field.0 == name),
+    let file = file.strip_prefix('\u{feff}').unwrap_or(file);
+    // The record's own header, whatever sections follow it.
+    let record: String = file
+        .split_inclusive('\n')
+        .take_while(|line| !line.starts_with("<!-- ticketd:"))
+        .collect();
+    read_block(&record).is_ok_and(|(entries, _)| {
+        entries.iter().any(|(name, value)| {
+            name == "format" && matches!(value, Raw::Integer(format) if *format > FILE_FORMAT)
         })
     })
 }

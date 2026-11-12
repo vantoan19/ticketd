@@ -61,6 +61,7 @@ const notices: Notice[] = [
     timestamp: hours(2),
     read: true,
     path: "tickets/T-MW21.md",
+    reason: "unknown field 'priority' in a ticket",
   },
 ];
 
@@ -107,7 +108,9 @@ test("notices need no decision: a removed dependency opens its ticket, an unread
   expect(syncReview.setRead).toHaveBeenCalledWith(["notice-1"], true);
   const file = entryOf("A Drive file could not be read");
   expect(
-    file.getByText("tickets/T-MW21.md was skipped · nothing here changed"),
+    file.getByText(
+      "tickets/T-MW21.md was skipped · unknown field 'priority' in a ticket",
+    ),
   ).toBeTruthy();
   expect(screen.queryByRole("dialog")).toBeNull();
   // Already read, so its action marks it unread.

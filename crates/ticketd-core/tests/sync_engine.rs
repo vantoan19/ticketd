@@ -770,7 +770,82 @@ fn an_unreadable_file_is_skipped_with_one_notice_and_changes_nothing() {
         devices.workspaces[2].show_ticket(&reference).unwrap().title,
         "Fixed here"
     );
-    assert_eq!(devices.workspaces[2].sync_notices().unwrap().len(), 2);
+    // The notice about the replaced file is taken back, read or not; the one
+    // about the stray file stays.
+    for workspace in &devices.workspaces {
+        let notices = workspace.sync_notices().unwrap();
+        assert!(
+            matches!(&notices[..], [notice] if matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason, .. } if reason.contains("do not match"))),
+            "{notices:?}"
+        );
+    }
+}
+
+fn downloads(devices: &Devices) -> usize {
+    let calls = devices.remote.calls();
+    calls.iter().filter(|op| **op == RemoteOp::Download).count()
+}
+
+/// L1: a field this version does not know is a hand edit gone wrong, not a
+/// file from a newer ticketd. It is read once, and the next change here replaces it.
+#[test]
+fn a_file_with_an_unknown_field_or_section_is_read_once_and_replaced_by_the_next_change_here() {
+    for (from, to, reason) in [
+        ("ref:", "priority: high\nref:", "unknown field 'priority'"),
+        ("ref:", "x_note: typo-field\nref:", "unknown field 'x_note'"),
+        (
+            "---\n",
+            "---\n<!-- ticketd:mood -->\n",
+            "unknown section marker",
+        ),
+    ] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("Login");
+        let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+        let (_, synced) = devices.remote_text(RemoteKind::Ticket, &id);
+        // The last match is the rule that closes the header.
+        let at = synced.rfind(from).unwrap();
+        let edited = format!("{}{to}{}", &synced[..at], &synced[at + from.len()..]);
+        devices.hand_edit(RemoteKind::Ticket, &id, &edited);
+
+        assert_eq!(devices.sync(1).skipped, 1, "{to}");
+        let notices = devices.workspaces[1].sync_notices().unwrap();
+        assert!(
+            matches!(&notices[..], [notice] if matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason: told, .. } if told.contains(reason))),
+            "{notices:?}"
+        );
+        let read = downloads(&devices);
+        let idle = devices.sync(1);
+        assert_eq!((idle.skipped, idle.pending), (0, 0), "{to}");
+        assert_eq!(downloads(&devices), read, "{to}");
+
+        devices.workspaces[1]
+            .change_ticket(&reference, title("Changed here"))
+            .unwrap();
+        let report = devices.sync(1);
+
+        assert_eq!((report.uploaded, report.pending), (1, 0), "{to}");
+        let (_, replaced) = devices.remote_text(RemoteKind::Ticket, &id);
+        assert!(replaced.contains("Changed here"), "{replaced}");
+        assert_eq!(devices.workspaces[1].sync_notices().unwrap(), [], "{to}");
+    }
+}
+
+/// L5: the notice goes when the file is corrected in the storage.
+#[test]
+fn the_notice_about_an_unreadable_file_is_taken_back_once_the_file_reads_again() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let (_, synced) = devices.remote_text(RemoteKind::Ticket, &id);
+    devices.hand_edit(RemoteKind::Ticket, &id, "---\nkind: ticket\ntitle: [oops\n");
+    devices.sync(1);
+    assert_eq!(devices.workspaces[1].sync_notices().unwrap().len(), 1);
+
+    devices.hand_edit(RemoteKind::Ticket, &id, &synced);
+    devices.sync(1);
+
+    assert_eq!(devices.workspaces[1].sync_notices().unwrap(), []);
 }
 
 #[test]
@@ -1076,10 +1151,11 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 
 #[test]
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
-    // A higher format number, and a field this version does not know.
+    // A higher format number, with or without what else this version does not know.
     for (from, to) in [
         ("format: 1\n", "format: 2\n"),
-        ("ref:", "mood: \"happy\"\nref:"),
+        ("format: 1\n", "format: 2\nmood: \"happy\"\n"),
+        ("format: 1\n", "format: 2\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");
@@ -1102,6 +1178,15 @@ fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_
             matches!(&notices[..], [notice] if matches!(notice.notice, SyncNoticeKind::UnreadableFile { .. })),
             "{notices:?}"
         );
+        // It is not read again on every run, only after the app starts again,
+        // which is when this desktop may have been updated.
+        let read = downloads(&devices);
+        devices.sync(1);
+        assert_eq!(downloads(&devices), read, "{to}");
+        devices.workspaces[1].start_sync_session().unwrap();
+        assert_eq!(devices.sync(1).skipped, 1, "{to}");
+        assert_eq!(downloads(&devices), read + 1, "{to}");
+        assert_eq!(devices.workspaces[1].sync_notices().unwrap().len(), 1);
 
         // Once the file reads again, what was changed meanwhile is merged and sent.
         devices.hand_edit(RemoteKind::Ticket, &id, &synced);

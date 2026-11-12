@@ -99,6 +99,8 @@ const noticeSchema = z.discriminatedUnion("kind", [
     kind: z.literal("unreadable_file"),
     /** Path inside the sync folder, such as `tickets/T-MW21.md`. */
     path: z.string(),
+    /** Why, in words for the person: "unknown field 'priority' in a ticket". */
+    reason: z.string(),
   }),
 ]);
 export type Notice = z.infer<typeof noticeSchema>;
