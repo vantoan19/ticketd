@@ -132,10 +132,11 @@
   gap: 8px;
 }
 
-.publish-dialog {
+.ui-dialog.publish-dialog {
   top: 96px;
-  transform: translateX(-50%);
-  translate: none;
+  /* Only `translate` moves the dialog: the minifier folds a `translate: none`
+     reset into `transform`, which left the utility's translate active. */
+  translate: -50% 0;
   max-height: calc(100dvh - 112px);
   gap: 20px;
 }
