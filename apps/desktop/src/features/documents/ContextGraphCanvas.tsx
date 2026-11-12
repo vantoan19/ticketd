@@ -21,7 +21,12 @@ import {
 } from "@xyflow/react";
 import { FileText, Layers, Maximize, Minus, Plus } from "lucide-react";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { centerZoom, panToInclude } from "./graph-text";
+import {
+  centerZoom,
+  countNotFullyShown,
+  isUserMove,
+  panToInclude,
+} from "./graph-text";
 import { GraphLegend } from "./GraphLegend";
 import { routeAll, type Rect } from "./edge-routing";
 import { RoutedEdge } from "./RoutedEdge";
@@ -419,26 +424,27 @@ export function ContextGraphCanvas({
       observer.disconnect();
     };
   }, []);
-  // Cards wholly outside the view, so Fit at its legibility floor never hides
-  // some without saying so.
-  let offscreen = 0;
-  if (size.width && size.height)
-    for (const node of nodes) {
-      const at = positions[node.id];
-      if (!at) continue;
-      const left = at.x * viewport.zoom + viewport.x;
-      const top = at.y * viewport.zoom + viewport.y;
-      if (
-        left + CARD_WIDTH * viewport.zoom < 0 ||
-        left > size.width ||
-        top + CARD_HEIGHT * viewport.zoom < 0 ||
-        top > size.height
-      )
-        offscreen++;
-    }
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
   >({});
+  // Cards cut by an edge count too: Fit at its legibility floor can clip a card
+  // without hiding it, and the person should be told either way.
+  const notFullyShown = countNotFullyShown(
+    nodes.flatMap((node) => {
+      const at = positions[node.id];
+      return at
+        ? [
+            {
+              ...at,
+              width: sizes[node.id]?.width || CARD_WIDTH,
+              height: Math.max(CARD_HEIGHT, sizes[node.id]?.height ?? 0),
+            },
+          ]
+        : [];
+    }),
+    viewport,
+    size,
+  );
   function rememberSizes(changes: NodeChange[]) {
     const seen = changes.flatMap((change) =>
       change.type === "dimensions" && change.dimensions
@@ -546,8 +552,9 @@ export function ContextGraphCanvas({
             viewport={viewport}
             onViewportChange={onViewport}
             onMoveStart={(event) => {
-              // A pointer or wheel move (not a programmatic fit) is the person's own.
-              if (event) autoFitted.current = false;
+              // Only a pointer or wheel move is the person's own: Fit and the
+              // controlled viewport syncing back also start moves, with no DOM event.
+              if (isUserMove(event)) autoFitted.current = false;
             }}
             nodesDraggable={false}
             // The Connected items list is the keyboard path to every card.
@@ -586,11 +593,12 @@ export function ContextGraphCanvas({
             <Maximize aria-hidden="true" />
             Fit
           </button>
-          {offscreen > 0 && (
+          {notFullyShown > 0 && (
             <>
               <span className="context-graph-zoom-rule" aria-hidden="true" />
               <span role="status">
-                {offscreen} {offscreen === 1 ? "item" : "items"} off-screen
+                {notFullyShown} {notFullyShown === 1 ? "item" : "items"} not
+                fully shown
               </span>
             </>
           )}
