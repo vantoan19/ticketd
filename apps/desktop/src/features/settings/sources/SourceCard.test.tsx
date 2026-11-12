@@ -91,6 +91,47 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** The status label at the end of the Discovery heading row. */
+function discoveryStatus() {
+  const section = screen.getByRole("region", { name: "Discovery" });
+  return section.querySelector('[data-slot="status-label"]')?.textContent;
+}
+/** The short save state in the panel bar's end slot. */
+function panelStatus() {
+  return document.querySelector(".settings-panel-bar-end")?.textContent;
+}
+function saveBar() {
+  return screen.getByRole("region", { name: "Save changes" });
+}
+const withLabels: SourceEntry = {
+  ...entry,
+  connector: {
+    ...entry.connector,
+    schema: {
+      fields: [
+        ...entry.connector.schema.fields,
+        {
+          key: "labels",
+          label: "Labels",
+          required: false,
+          type: "multi_select",
+          options: { source: "dynamic", depends_on: [] },
+          allow_custom: true,
+          min_items: 0,
+          max_items: 5,
+          format: null,
+        },
+      ],
+    },
+  },
+};
+async function addLabel(name: string) {
+  const input = screen.getByRole("textbox", { name: /^Labels/ });
+  fireEvent.change(input, { target: { value: name } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByRole("button", { name: `Remove ${name}` });
+}
+
 async function addRepository(name: string) {
   const input = screen.getByLabelText(/Repositories/);
   fireEvent.change(input, { target: { value: name } });
@@ -100,13 +141,15 @@ async function addRepository(name: string) {
 
 test("a new source is not configured and cannot be saved before a preview", async () => {
   render(<SourceCard entry={entry} />);
-  expect(screen.getByText("Not configured")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Not configured");
   const save = screen.getByRole("button", { name: "Save" });
   expect((save as HTMLButtonElement).disabled).toBe(true);
   await addRepository("o/r");
-  expect(screen.getByText("Unsaved changes")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Unsaved changes");
   expect((save as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText(/Preview the matching issues/)).toBeTruthy();
+  expect(
+    screen.getByText("Preview the matching issues before saving."),
+  ).toBeTruthy();
 });
 
 test("preview lists matches, then Save turns discovery on without importing at once", async () => {
@@ -136,7 +179,7 @@ test("preview lists matches, then Save turns discovery on without importing at o
   expect(sourcesClient.save).toHaveBeenCalledWith("github", {
     repositories: ["o/r"],
   });
-  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Saved configuration");
 });
 
 test("editing after a preview makes the preview stale and blocks Save", async () => {
@@ -231,14 +274,14 @@ test("a saved configuration is shown as saved until edited", () => {
       }}
     />,
   );
-  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Saved configuration");
   expect((screen.getByLabelText(/Assignee/) as HTMLInputElement).value).toBe(
     "octo",
   );
   fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "someone" },
   });
-  expect(screen.getByText("Unsaved changes")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Unsaved changes");
   expect(screen.getByText(/still applies until you save/)).toBeTruthy();
 });
 
@@ -433,7 +476,7 @@ test("rules equal to the saved configuration are not described as changed", asyn
   );
   fireEvent.click(screen.getByRole("button", { name: "Remove o/r" }));
   await addRepository("o/r");
-  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Saved configuration");
   expect(screen.queryByText(/The rules changed/)).toBeNull();
   expect(
     screen.getByText(/These rules are the saved configuration/),
@@ -485,7 +528,7 @@ test("an unavailable source never claims a fresh sync or a green configuration",
   expect(screen.getByText(/GitHub is unavailable/)).toBeTruthy();
   expect(screen.getByText("Connected as octo")).toBeTruthy();
   // The saved configuration is a separate fact and is not shown as healthy.
-  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Saved configuration");
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="positive"]'),
   ).toBeNull();
@@ -527,7 +570,7 @@ test("discovery uses the core's imported references and Discard restores saved r
   expect(table.textContent).toContain("Already T-KQ142");
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
   expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "");
-  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(discoveryStatus()).toBe("Saved configuration");
   expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
     "disabled",
     true,
@@ -556,4 +599,122 @@ test("the section list puts Connections after Agents and before Help", async () 
     "Connections",
     "Help",
   ]);
+});
+
+test("the panel bar and the save bar follow the draft: not configured, unsaved, ready to save, saved", async () => {
+  vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
+  vi.mocked(sourcesClient.save).mockResolvedValue({
+    source: {
+      provider: "github",
+      config: { repositories: ["o/r"] },
+      account: "octo",
+      saved_at: "2026-01-01T00:00:00Z",
+    },
+    preview,
+  });
+  render(<SourceCard entry={entry} />);
+  expect(panelStatus()).toBe("Not configured");
+  expect(saveBar().textContent).toContain("Not configured. Add a repository");
+
+  await addRepository("o/r");
+  expect(panelStatus()).toBe("Unsaved changes");
+  expect(saveBar().textContent).toContain(
+    "Unsaved changes. Preview the matching issues before saving.",
+  );
+
+  fireEvent.click(
+    within(saveBar()).getByRole("button", { name: "Preview matches" }),
+  );
+  await screen.findByRole("region", { name: "Preview" });
+  expect(panelStatus()).toBe("Ready to save");
+  expect(saveBar().textContent).toContain("Preview is current.");
+  // The preview is current, so the button that makes one goes away.
+  expect(
+    within(saveBar()).queryByRole("button", { name: "Preview matches" }),
+  ).toBeNull();
+
+  fireEvent.click(within(saveBar()).getByRole("button", { name: "Save" }));
+  await screen.findByText(/Matching issues are imported on the next refresh/);
+  expect(panelStatus()).toBe("Saved configuration");
+  expect(saveBar().textContent).toContain("saved");
+  expect(
+    within(saveBar())
+      .getByRole("button", { name: "Discard changes" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+});
+
+test("the save actions live in the save bar, not in the Discovery section", () => {
+  render(<SourceCard entry={entry} />);
+  const discovery = screen.getByRole("region", { name: "Discovery" });
+  for (const name of ["Save", "Discard changes", "Preview matches"]) {
+    expect(within(saveBar()).getByRole("button", { name })).toBeTruthy();
+    expect(within(discovery).queryByRole("button", { name })).toBeNull();
+  }
+});
+
+test("GitHub reads the draft back as one sentence", async () => {
+  render(<SourceCard entry={withLabels} />);
+  const readback = () => screen.getByTestId("source-readback").textContent;
+  expect(readback()).toBe(
+    "Imports open issues from no repository yet, assigned to anyone.",
+  );
+  await addRepository("o/r");
+  expect(readback()).toBe("Imports open issues from o/r, assigned to anyone.");
+  await addLabel("bug");
+  expect(readback()).toBe(
+    "Imports open issues from o/r that have the label bug, assigned to anyone.",
+  );
+  await addLabel("urgent");
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
+    target: { value: "octo" },
+  });
+  expect(readback()).toBe(
+    "Imports open issues from o/r that have the labels bug and urgent, assigned to octo.",
+  );
+});
+
+test("another source shows no readback sentence", () => {
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        connector: { ...entry.connector, provider: "gitlab", name: "GitLab" },
+      }}
+    />,
+  );
+  expect(screen.queryByTestId("source-readback")).toBeNull();
+});
+
+test("the Sync section shows the refresh command with a copy button", () => {
+  render(<SourceCard entry={entry} />);
+  const sync = screen.getByRole("region", { name: "Sync" });
+  expect(sync.textContent).toContain(
+    "Agents can refresh without the desktop open",
+  );
+  expect(sync.textContent).toContain("ticketd source refresh");
+  expect(
+    within(sync).getByRole("button", { name: "Copy refresh command" }),
+  ).toBeTruthy();
+  expect(
+    within(sync).getByRole("button", { name: "Refresh now" }),
+  ).toBeTruthy();
+});
+
+test("a failed preview is announced beside the Discovery fields and keeps the save bar usable", async () => {
+  vi.mocked(sourcesClient.preview).mockRejectedValue(
+    new SourceFailure("unauthenticated", "GitHub rejected the credential"),
+  );
+  render(<SourceCard entry={entry} />);
+  await addRepository("o/r");
+  fireEvent.click(
+    within(saveBar()).getByRole("button", { name: "Preview matches" }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(
+    within(screen.getByRole("region", { name: "Discovery" })).getByRole(
+      "alert",
+    ),
+  ).toBe(alert);
+  expect(panelStatus()).toBe("Unsaved changes");
 });

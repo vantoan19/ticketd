@@ -1,0 +1,113 @@
+/* Miniature ticketd windows for the Appearance tiles. Every color is a token;
+   each screen carries data-theme-preview so it draws that theme's tokens. */
+.mini {
+  position: relative;
+  display: block;
+  height: 120px;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.mini s,
+.mini b,
+.mini i {
+  display: block;
+  text-decoration: none;
+  font-style: normal;
+}
+.mini-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 6px;
+  padding: 8px 8px 0 0;
+  background: var(--background);
+  color: var(--control-boundary);
+}
+.mini-screen[data-cut] {
+  clip-path: polygon(62% 0, 100% 0, 100% 100%, 38% 100%);
+}
+.mini-side {
+  flex: 0 0 26%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 6px 0 8px;
+}
+.mini-side i {
+  height: 5px;
+  border-radius: var(--radius-segment);
+  background: currentColor;
+}
+.mini-side i[data-on] {
+  height: 9px;
+  background: var(--accent);
+}
+.mini-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  border-radius: var(--radius-segment) var(--radius-segment) 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.mini-split {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+.mini-list {
+  flex: 0 0 44%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.mini-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 8px;
+  box-shadow: inset 1px 0 0 var(--group-hairline);
+}
+.mini-detail[data-full] {
+  padding-left: 0;
+  box-shadow: none;
+}
+.mini-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.mini-line[data-selected] {
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border-radius: var(--radius-segment);
+  background: var(--recessed);
+}
+.mini-line s {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.mini-line s[data-ok] {
+  box-shadow: none;
+  background: var(--status-ready);
+}
+.mini-line b,
+.mini-detail b {
+  height: 5px;
+  border-radius: var(--radius-segment);
+  background: currentColor;
+}
+.mini-line b[data-head],
+.mini-detail b[data-head] {
+  height: 7px;
+  background: var(--disabled-foreground);
+}
+.appearance-failure {
+  margin-top: 12px;
+}

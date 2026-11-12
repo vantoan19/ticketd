@@ -1,90 +1,199 @@
 import { useState } from "react";
-import { Monitor, Moon, Sun } from "lucide-react";
-import { RadioGroup } from "radix-ui";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   setPreference,
+  useDarkTheme,
   usePreferences,
   type OpenTicketsPreference,
 } from "@/lib/preferences";
-import { SettingsCard } from "@/features/settings/SettingsCard";
+import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import {
   AppliesRightAway,
   SettingsPage,
 } from "@/features/settings/layout/SettingsPage";
+import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import "@/features/settings/pages/appearance.css";
 
-const THEME_OPTIONS = [
-  { value: "system", label: "System", icon: <Monitor aria-hidden="true" /> },
-  { value: "light", label: "Light", icon: <Sun aria-hidden="true" /> },
-  { value: "dark", label: "Dark", icon: <Moon aria-hidden="true" /> },
-] as const;
+type Resolved = "light" | "dark";
 
-function LayoutPreview({ kind }: { kind: OpenTicketsPreference }) {
+/** The side rail and pane every miniature shares, drawn from the theme's tokens. */
+function MiniScreen({
+  theme,
+  cut = false,
+  children,
+}: {
+  theme: Resolved;
+  cut?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <span
-      className="layout-preview"
-      data-layout={kind}
-      aria-hidden="true"
-      role="presentation"
+      className="mini-screen"
+      data-theme-preview={theme}
+      data-cut={cut || undefined}
     >
-      {kind === "split" ? (
-        <>
-          <span className="layout-preview-list" />
-          <span className="layout-preview-detail" />
-        </>
-      ) : (
-        <span className="layout-preview-detail" />
-      )}
+      <span className="mini-side">
+        <i data-on="" />
+        <i />
+        <i />
+        <i style={{ width: "60%" }} />
+      </span>
+      <span className="mini-pane">{children}</span>
     </span>
   );
 }
 
-const OPEN_TICKETS_OPTIONS: {
-  value: OpenTicketsPreference;
-  label: string;
-  hint: string;
-}[] = [
-  { value: "split", label: "Beside the list", hint: "Split view" },
-  { value: "expanded", label: "Full width", hint: "Expanded view" },
-];
+function Line({
+  width,
+  head = false,
+  ok = false,
+  selected = false,
+}: {
+  width: string;
+  head?: boolean;
+  ok?: boolean;
+  selected?: boolean;
+}) {
+  return (
+    <span className="mini-line" data-selected={selected || undefined}>
+      <s data-ok={ok || undefined} />
+      <b data-head={head || undefined} style={{ width }} />
+    </span>
+  );
+}
 
-function AppearanceCard() {
+function ListLines() {
+  return (
+    <>
+      <Line head width="62%" />
+      <Line width="48%" />
+      <Line ok width="70%" />
+      <Line width="40%" />
+      <Line width="56%" />
+    </>
+  );
+}
+
+function Mini({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="mini" aria-hidden="true">
+      {children}
+    </span>
+  );
+}
+
+function ThemeMini({ theme }: { theme: "system" | Resolved }) {
+  if (theme === "system")
+    return (
+      <Mini>
+        <MiniScreen theme="light">
+          <ListLines />
+        </MiniScreen>
+        <MiniScreen theme="dark" cut>
+          <ListLines />
+        </MiniScreen>
+      </Mini>
+    );
+  return (
+    <Mini>
+      <MiniScreen theme={theme}>
+        <ListLines />
+      </MiniScreen>
+    </Mini>
+  );
+}
+
+function OpenMini({
+  kind,
+  theme,
+}: {
+  kind: OpenTicketsPreference;
+  theme: Resolved;
+}) {
+  return (
+    <Mini>
+      <MiniScreen theme={theme}>
+        <span className="mini-split">
+          {kind === "split" && (
+            <span className="mini-list">
+              <Line selected head width="70%" />
+              <Line width="56%" />
+              <Line ok width="76%" />
+              <Line width="48%" />
+            </span>
+          )}
+          <span
+            className="mini-detail"
+            data-full={kind === "expanded" || undefined}
+          >
+            <b
+              data-head=""
+              style={{ width: kind === "split" ? "70%" : "40%" }}
+            />
+            <b style={{ width: "92%" }} />
+            <b style={{ width: "84%" }} />
+            <b style={{ width: kind === "split" ? "60%" : "52%" }} />
+          </span>
+        </span>
+      </MiniScreen>
+    </Mini>
+  );
+}
+
+export function AppearancePage() {
   const { theme, openTickets } = usePreferences();
+  const dark = useDarkTheme();
+  const resolved: Resolved = dark ? "dark" : "light";
   const [failure, setFailure] = useState("");
   const report = (saved: boolean, what: string) =>
     setFailure(saved ? "" : `Could not save ${what}.`);
   return (
-    <SettingsCard id="appearance" title="Appearance">
-      <div className="settings-row">
-        <div>
-          <p className="settings-label" id="theme-label">
-            Theme
-          </p>
-          <p className="settings-hint">
-            System follows your operating system. Light and Dark override it.
-          </p>
-        </div>
-        <SegmentedControl
-          aria-labelledby="theme-label"
+    <SettingsPage
+      {...sectionMeta("appearance")}
+      lede="How ticketd looks on this computer."
+      endSlot={<AppliesRightAway />}
+    >
+      <SettingsSection
+        title="Theme"
+        caption="System follows your operating system. Light and Dark override it."
+      >
+        <ChoiceTiles
+          aria-label="Theme"
+          columns={3}
           value={theme}
           onValueChange={(value) =>
-            report(setPreference("theme", value), "the theme")
+            report(
+              setPreference("theme", value as "system" | Resolved),
+              "the theme",
+            )
           }
-          options={[...THEME_OPTIONS]}
-        />
-      </div>
-      <div className="settings-row settings-row-stacked">
-        <div>
-          <p className="settings-label" id="open-tickets-label">
-            Open tickets
-          </p>
-          <p className="settings-hint">
-            Applies to the next ticket you open from a list.
-          </p>
-        </div>
-        <RadioGroup.Root
-          aria-labelledby="open-tickets-label"
+        >
+          <ChoiceTile
+            value="system"
+            title="System"
+            description={dark ? "Dark right now" : "Light right now"}
+            preview={<ThemeMini theme="system" />}
+          />
+          <ChoiceTile
+            value="light"
+            title="Light"
+            description="Always light"
+            preview={<ThemeMini theme="light" />}
+          />
+          <ChoiceTile
+            value="dark"
+            title="Dark"
+            description="Always dark"
+            preview={<ThemeMini theme="dark" />}
+          />
+        </ChoiceTiles>
+      </SettingsSection>
+      <SettingsSection
+        title="Open tickets"
+        caption="Applies to the next ticket you open from a list."
+      >
+        <ChoiceTiles
+          aria-label="Open tickets"
           value={openTickets}
           onValueChange={(value) =>
             report(
@@ -92,42 +201,26 @@ function AppearanceCard() {
               "the Open tickets choice",
             )
           }
-          orientation="horizontal"
-          className="layout-choices"
         >
-          {OPEN_TICKETS_OPTIONS.map((option) => (
-            <RadioGroup.Item
-              key={option.value}
-              value={option.value}
-              className="layout-choice"
-            >
-              <LayoutPreview kind={option.value} />
-              <span className="layout-choice-label">
-                <span className="layout-choice-dot" aria-hidden="true" />
-                {option.label}
-              </span>
-              <span className="settings-hint">{option.hint}</span>
-            </RadioGroup.Item>
-          ))}
-        </RadioGroup.Root>
-      </div>
-      {failure && (
-        <p role="alert" className="settings-failure">
-          {failure}
-        </p>
-      )}
-    </SettingsCard>
-  );
-}
-
-export function AppearancePage() {
-  return (
-    <SettingsPage
-      {...sectionMeta("appearance")}
-      lede="How ticketd looks on this computer."
-      endSlot={<AppliesRightAway />}
-    >
-      <AppearanceCard />
+          <ChoiceTile
+            value="split"
+            title="Beside the list"
+            description="Split view. The list stays in view while you read."
+            preview={<OpenMini kind="split" theme={resolved} />}
+          />
+          <ChoiceTile
+            value="expanded"
+            title="Full width"
+            description="Expanded view. The ticket takes the whole pane."
+            preview={<OpenMini kind="expanded" theme={resolved} />}
+          />
+        </ChoiceTiles>
+        {failure && (
+          <p role="alert" className="settings-failure appearance-failure">
+            {failure}
+          </p>
+        )}
+      </SettingsSection>
     </SettingsPage>
   );
 }
