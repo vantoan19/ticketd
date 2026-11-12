@@ -227,3 +227,54 @@ test("a trashed ticket's rail says it is locked", () => {
     screen.getByRole("img", { name: "Locked while in Trash" }),
   ).toBeTruthy();
 });
+
+test("focus returns to the Status trigger after a status change", async () => {
+  Object.assign(Element.prototype, {
+    hasPointerCapture: () => false,
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+  });
+  bridge.invoke.mockResolvedValue({});
+  render(
+    <TicketProperties
+      ticket={{
+        id: "1",
+        reference: "T-KQ1",
+        title: "Ticket",
+        body: "",
+        status: "Todo",
+        tags: [],
+        project_id: null,
+        plan_id: null,
+        trashed: false,
+        availability: null,
+        parent: null,
+        children: [],
+        prerequisites: [],
+      }}
+      projects={[]}
+      plans={[]}
+      onSaved={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  let savedFrom: Element | null = null;
+  const trigger = screen.getByRole("combobox", { name: "Status: Todo" });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  const option = await screen.findByRole("option", { name: "In progress" });
+  option.focus();
+  // A browser drops focus to the page once the list closes and the trigger
+  // is disabled while saving; jsdom does not, so do it after Radix has settled.
+  bridge.invoke.mockImplementationOnce(async () => {
+    savedFrom = document.activeElement;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+    return {};
+  });
+  fireEvent.keyDown(option, { key: "Enter" });
+  await waitFor(() => expect(savedFrom).not.toBeNull());
+  expect((savedFrom as HTMLElement | null)?.closest("aside")).toBeNull();
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+});

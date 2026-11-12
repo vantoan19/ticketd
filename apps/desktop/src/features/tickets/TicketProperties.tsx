@@ -50,6 +50,7 @@ import "./properties.css";
 import { Badge } from "@/components/ui/badge";
 
 type Choice = { value: string; label: string };
+
 export function PropertyPicker({
   label,
   value,
@@ -216,6 +217,8 @@ export function TicketProperties({
     const returnFocus =
       document.activeElement instanceof HTMLElement &&
       (document.activeElement.closest('[role="dialog"]') !== null ||
+        // The Status select's open list lives in a portal outside the rail.
+        document.activeElement.closest('[role="listbox"]') !== null ||
         document.activeElement.closest('[role="menu"]') !== null ||
         propertiesRef.current?.contains(document.activeElement));
     function restoreFocus() {

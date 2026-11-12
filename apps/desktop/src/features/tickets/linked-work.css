@@ -169,6 +169,8 @@
   /* A long related title wraps so the ticket can still be told apart. */
   .linked-work-title {
     grid-column: 3;
+    /* Keep a wrapped title clear of the absolutely placed remove button. */
+    padding-right: 32px;
     white-space: normal;
     overflow: visible;
     align-items: flex-start;
