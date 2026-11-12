@@ -14,6 +14,10 @@ import { ChatClientContext } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ExperimentalCard } from "@/features/chats/ExperimentalCard";
 import {
+  SettingsStateContext,
+  type SettingsState,
+} from "@/features/settings/use-settings-state";
+import {
   chatState,
   createMockChatClient,
   type MockChatClient,
@@ -59,7 +63,7 @@ const settings = (client: MockChatClient) =>
       </ChatProvider>
     </ChatClientContext>,
   );
-const chatSwitch = () => screen.getByRole("switch", { name: "Chat" });
+const chatSwitch = () => screen.getByRole("switch", { name: "Show Chat" });
 
 test("Chat is off by default and turns on at once", async () => {
   const client = createMockChatClient();
@@ -70,6 +74,43 @@ test("Chat is off by default and turns on at once", async () => {
     expect(chatSwitch().getAttribute("aria-checked")).toBe("true"),
   );
   expect(await client.getEnabled()).toBe(true);
+});
+
+test("the Show Chat row explains itself and the notice links to About", async () => {
+  const openPage = vi.fn();
+  const state: SettingsState = {
+    query: "",
+    setQuery: () => {},
+    openPage,
+    needsSetup: {},
+    refreshIndicators: () => {},
+  };
+  render(
+    <SettingsStateContext.Provider value={state}>
+      <ChatClientContext value={createMockChatClient()}>
+        <ChatProvider>
+          <ExperimentalCard />
+        </ChatProvider>
+      </ChatClientContext>
+    </SettingsStateContext.Provider>,
+  );
+  expect(
+    screen.getByText("Not yet qualified against real subscriptions"),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Adds Chats to the sidebar, where you start and follow conversations with your agent.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Turning Chat off hides it and keeps your Chats. Running Chats are stopped first, after you confirm.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "About › Report an issue" }),
+  );
+  expect(openPage).toHaveBeenCalledWith("about");
 });
 
 test("turning Chat off while Chats work asks first, and stops them only on confirmation", async () => {
