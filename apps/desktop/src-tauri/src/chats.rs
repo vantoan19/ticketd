@@ -1450,6 +1450,17 @@ pub fn quit_action(working: usize, confirmed: bool) -> QuitAction {
     }
 }
 
+/// The tray icon's tooltip while the window is hidden. A Chat that needs the person
+/// (an approval or question, a failure, uncertain delivery) is named before work.
+pub fn tray_tooltip(overview: &Overview) -> String {
+    match (overview.needs_you, overview.working) {
+        (0, 0) => "ticketd is running in the background".to_owned(),
+        (0, _) => "ticketd: Chats are still working".to_owned(),
+        (1, _) => "ticketd: 1 Chat needs you".to_owned(),
+        (needs_you, _) => format!("ticketd: {needs_you} Chats need you"),
+    }
+}
+
 #[cfg(test)]
 #[path = "chats_tests.rs"]
 mod tests;

@@ -141,6 +141,17 @@ fn closing_keeps_chats_running_only_when_some_are_working_and_quit_asks_before_s
     assert_eq!(quit_action(2, true), QuitAction::Quit);
 }
 
+#[test]
+fn the_tray_says_what_the_hidden_chats_are_doing_now() {
+    let tooltip = |working, needs_you| tray_tooltip(&Overview { needs_you, working });
+    assert_eq!(tooltip(2, 0), "ticketd: Chats are still working");
+    // Finished while hidden: the app stays open for its results and for sync.
+    assert_eq!(tooltip(0, 0), "ticketd is running in the background");
+    // A Chat waiting for an approval still counts as working, but the person is needed.
+    assert_eq!(tooltip(1, 1), "ticketd: 1 Chat needs you");
+    assert_eq!(tooltip(0, 2), "ticketd: 2 Chats need you");
+}
+
 #[tokio::test(start_paused = true)]
 async fn quit_stops_running_chats_and_nothing_is_accepted_afterwards() {
     let f = Fixture::new().await;

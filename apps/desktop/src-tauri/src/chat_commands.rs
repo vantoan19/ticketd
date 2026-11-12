@@ -20,7 +20,7 @@ use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, ChatFailure, Chats, CloseAction, Created, HarnessStatus, HistorySelection, LinkRef,
     NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
-    close_action, quit_action,
+    close_action, quit_action, tray_tooltip,
 };
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
@@ -125,6 +125,7 @@ fn watch_overview(app: &AppHandle) {
                 && shown.as_ref() != Some(&digest)
             {
                 shown = Some(digest);
+                update_tray(&app, &overview);
                 let _ = app.emit(OVERVIEW_EVENT, overview);
             }
         }
@@ -385,7 +386,16 @@ pub fn show_window(app: &AppHandle) {
 /// The page asks before it starts its own way out.
 #[tauri::command]
 pub fn close_keeps_running(bridge: State<'_, ChatBridge>) -> bool {
-    keeps_running(&bridge)
+    page_close_keeps_running(&bridge)
+}
+
+/// The page asks this once per close, after the shell's own close handling. A confirmed
+/// Quit is spent here: from now the page's way out decides, and when it keeps the
+/// window open (sync's "Keep open") later closes and Quits behave as before it.
+fn page_close_keeps_running(bridge: &ChatBridge) -> bool {
+    let keeps = keeps_running(bridge);
+    bridge.quit_confirmed.store(false, Ordering::SeqCst);
+    keeps
 }
 
 fn keeps_running(bridge: &ChatBridge) -> bool {
@@ -415,17 +425,26 @@ fn request_quit(app: &AppHandle) {
     app.exit(0);
 }
 
-/// While the window is hidden with Chats working, the tray icon is the way back to the
-/// window and the place to quit. It exists only then.
-fn show_tray(app: &AppHandle) -> tauri::Result<()> {
+/// Keeps a shown tray icon saying what the hidden Chats are doing now. When they have
+/// finished, ticketd stays open for their results and for sync, and the tray says so.
+fn update_tray(app: &AppHandle, overview: &Overview) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(tray_tooltip(overview)));
+    }
+}
+
+/// Once the window was hidden with Chats working, the tray icon is the way back to the
+/// window and the place to quit, until the window is shown again.
+fn show_tray(app: &AppHandle, overview: &Overview) -> tauri::Result<()> {
     if app.tray_by_id(TRAY_ID).is_some() {
+        update_tray(app, overview);
         return Ok(());
     }
     let open = MenuItemBuilder::with_id("open", "Open ticketd").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit ticketd").build(app)?;
     let menu = MenuBuilder::new(app).items(&[&open, &quit]).build()?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("ticketd: Chats are still working")
+        .tooltip(tray_tooltip(overview))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -466,7 +485,11 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
                     let _ = window.hide();
                 }
                 // Without a tray icon, starting ticketd again brings the window back.
-                let _ = show_tray(app);
+                let overview = bridge.chats.overview().unwrap_or(Overview {
+                    needs_you: 0,
+                    working: bridge.chats.working(),
+                });
+                let _ = show_tray(app, &overview);
             }
         }
         // Coming back to ticketd, perhaps after moving a Chat's folder back into place.
@@ -500,5 +523,32 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
             });
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_confirmed_quit_that_the_page_does_not_complete_is_asked_again() {
+        let bridge = ChatBridge {
+            chats: Chats::new(
+                Arc::new(|| Err(ticketd_core::Error::Backup("not opened".to_owned()))),
+                Vec::new(),
+                Vec::new(),
+                None,
+            ),
+            watching: AtomicBool::new(false),
+            quit_confirmed: AtomicBool::new(true),
+        };
+
+        // The confirmed quit's own close goes on to the page's way out.
+        assert!(!page_close_keeps_running(&bridge));
+
+        // The page kept the window open (sync's "Keep open"): the next Quit asks again
+        // and the next close hides the window while Chats work.
+        let confirmed = bridge.quit_confirmed.load(Ordering::SeqCst);
+        assert_eq!(quit_action(2, confirmed), QuitAction::Confirm(2));
     }
 }
