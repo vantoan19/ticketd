@@ -110,7 +110,8 @@ impl StderrTail {
     }
 
     /// What a person can read of the tail: terminal colour and control codes removed,
-    /// and only the last lines, since earlier ones are rarely about the loss.
+    /// timestamped log lines (a tool's own chatter, rarely the reason) left out, and
+    /// only the last lines, since earlier ones are rarely about the loss.
     pub fn readable(&self) -> String {
         readable_lines(&self.snapshot())
     }
@@ -123,10 +124,29 @@ fn readable_lines(text: &str) -> String {
     let lines: Vec<&str> = clean
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .filter(|line| !line.is_empty() && !is_log_line(line))
         .collect();
     let keep = lines.len().saturating_sub(READABLE_STDERR_LINES);
     lines[keep..].join("\n")
+}
+
+/// A line a logger wrote: a leading date, then a level word ("2026-11-12T16:56:48Z ERROR ...").
+fn is_log_line(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let dated = bytes.len() >= 10
+        && bytes[..10].iter().enumerate().all(|(index, byte)| {
+            if index == 4 || index == 7 {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+    dated
+        && line
+            .split_whitespace()
+            .skip(1)
+            .take(2)
+            .any(|word| matches!(word, "ERROR" | "WARN" | "INFO" | "DEBUG" | "TRACE"))
 }
 
 /// Removes ANSI escape sequences (colours, cursor moves, titles) and other control
@@ -319,11 +339,10 @@ mod tests {
     }
 
     #[test]
-    fn readable_stderr_has_no_terminal_codes_and_keeps_the_last_lines() {
-        let raw = "old\n\u{1b}[2m2026-11-12T16:56:48Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m worker quit\n\u{1b}]0;title\u{7}done\n";
-        assert_eq!(
-            readable_lines(raw),
-            "2026-11-12T16:56:48Z ERROR worker quit\ndone"
-        );
+    fn readable_stderr_has_no_terminal_codes_skips_log_lines_and_keeps_the_last_lines() {
+        let raw = "old\nolder\n\u{1b}[2m2026-11-12T16:56:48Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m worker quit\n\u{1b}]0;title\u{7}done\n";
+        assert_eq!(readable_lines(raw), "older\ndone");
+        let only_logs = "2026-11-12T16:56:48.1Z  WARN a\n2026-11-12T16:56:49Z ERROR rmcp::transport::worker: worker quit\n";
+        assert_eq!(readable_lines(only_logs), "");
     }
 }
