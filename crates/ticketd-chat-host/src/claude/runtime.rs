@@ -311,7 +311,7 @@ impl Connection {
             Inspection::Incompatible { requirement, .. } => {
                 return Err(Problem {
                     kind: ProblemKind::IncompatibleVersion,
-                    message: requirement,
+                    message: format!("ticketd needs {requirement}."),
                     detail: None,
                     resets_at: None,
                 });
@@ -421,7 +421,7 @@ impl Connection {
         .unwrap_or(None);
         let lost = EventKind::RuntimeLost {
             exit_code,
-            diagnostics: self.stderr.snapshot(),
+            diagnostics: self.stderr.readable(),
         };
         let _ = events.send(self.event(lost)).await;
     }
@@ -574,7 +574,7 @@ impl Connection {
         let diagnostics = format!(
             "The Claude Code session ended ({}){cause}\n{}",
             event["reason"].as_str().unwrap_or("unknown"),
-            self.stderr.snapshot()
+            self.stderr.readable()
         );
         Applied {
             // The bridge's own exit code says nothing about Claude Code.

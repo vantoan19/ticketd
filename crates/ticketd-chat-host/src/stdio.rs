@@ -102,11 +102,89 @@ impl StderrTail {
         }
     }
 
+    /// The raw tail, kept exactly for the diagnostic detail.
     pub fn snapshot(&self) -> String {
         let tail = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let bytes: Vec<u8> = tail.iter().copied().collect();
         String::from_utf8_lossy(&bytes).trim().to_owned()
     }
+
+    /// What a person can read of the tail: terminal colour and control codes removed,
+    /// timestamped log lines (a tool's own chatter, rarely the reason) left out, and
+    /// only the last lines, since earlier ones are rarely about the loss.
+    pub fn readable(&self) -> String {
+        readable_lines(&self.snapshot())
+    }
+}
+
+const READABLE_STDERR_LINES: usize = 2;
+
+fn readable_lines(text: &str) -> String {
+    let clean = strip_terminal_codes(text);
+    let lines: Vec<&str> = clean
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_log_line(line))
+        .collect();
+    let keep = lines.len().saturating_sub(READABLE_STDERR_LINES);
+    lines[keep..].join("\n")
+}
+
+/// A line a logger wrote: a leading date, then a level word ("2026-11-12T16:56:48Z ERROR ...").
+fn is_log_line(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let dated = bytes.len() >= 10
+        && bytes[..10].iter().enumerate().all(|(index, byte)| {
+            if index == 4 || index == 7 {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+    dated
+        && line
+            .split_whitespace()
+            .skip(1)
+            .take(2)
+            .any(|word| matches!(word, "ERROR" | "WARN" | "INFO" | "DEBUG" | "TRACE"))
+}
+
+/// Removes ANSI escape sequences (colours, cursor moves, titles) and other control
+/// characters except line breaks and tabs.
+fn strip_terminal_codes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{1b}' => match chars.next() {
+                // Control sequence: parameters, then one final byte in @..~.
+                Some('[') => {
+                    for next in chars.by_ref() {
+                        if ('\u{40}'..='\u{7e}').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                // Operating system command: ends at BEL or ESC \.
+                Some(']') => {
+                    while let Some(next) = chars.next() {
+                        if next == '\u{7}' {
+                            break;
+                        }
+                        if next == '\u{1b}' {
+                            chars.next_if_eq(&'\\');
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '\n' | '\t' => out.push(c),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Starts `executable` on piped stdio with the launch environment unchanged, so the
@@ -258,5 +336,13 @@ mod tests {
         };
         assert_eq!(variable(Some("chat-1")), Some(Some("chat-1".into())));
         assert_eq!(variable(None), Some(None));
+    }
+
+    #[test]
+    fn readable_stderr_has_no_terminal_codes_skips_log_lines_and_keeps_the_last_lines() {
+        let raw = "old\nolder\n\u{1b}[2m2026-11-12T16:56:48Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m worker quit\n\u{1b}]0;title\u{7}done\n";
+        assert_eq!(readable_lines(raw), "older\ndone");
+        let only_logs = "2026-11-12T16:56:48.1Z  WARN a\n2026-11-12T16:56:49Z ERROR rmcp::transport::worker: worker quit\n";
+        assert_eq!(readable_lines(only_logs), "");
     }
 }

@@ -5,9 +5,13 @@
   gap: 4px;
 }
 .publication-dialog {
-  max-width: 600px;
+  max-width: min(600px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
   overflow-y: auto;
+  /* The sticky header and footer bleed to the padding edge with negative
+     margins; the scroller still reports 24px of horizontal overflow for
+     them, which drew a scrollbar under the footer. */
+  overflow-x: hidden;
 }
 /* The heading stays in view while a long review scrolls beneath it. */
 .publication-dialog [data-slot="dialog-header"] {
@@ -132,10 +136,11 @@
   gap: 8px;
 }
 
-.publish-dialog {
+.ui-dialog.publish-dialog {
   top: 96px;
-  transform: translateX(-50%);
-  translate: none;
+  /* Only `translate` moves the dialog: the minifier folds a `translate: none`
+     reset into `transform`, which left the utility's translate active. */
+  translate: -50% 0;
   max-height: calc(100dvh - 112px);
   gap: 20px;
 }

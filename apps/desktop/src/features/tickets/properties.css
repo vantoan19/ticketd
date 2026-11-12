@@ -119,6 +119,19 @@
 .rail-tags-picker .rail-tags {
   flex: 1;
   gap: 6px;
+  /* Let a long tag shrink to the picker and end in an ellipsis. */
+  min-width: 0;
+}
+/* In the chip bar the Tags chip wraps its tags inside the bar's width. */
+.chip-bar > button[aria-label^="Tags:"] {
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  padding-block: 4px;
+  white-space: normal;
+}
+.chip-bar .rail-tags {
+  min-width: 0;
 }
 .rail-tags-chevron {
   flex: none;

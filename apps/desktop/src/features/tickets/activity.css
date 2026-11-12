@@ -90,10 +90,14 @@
 }
 .activity-attached {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 0;
   font-size: var(--text-ui);
+}
+.activity-attached .activity-muted {
+  flex-basis: 100%;
 }
 .activity-attached svg {
   flex: none;

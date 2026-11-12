@@ -36,6 +36,7 @@ const STATUS_PROBLEM: Record<
 > = {
   not_installed: "not_installed",
   incompatible: "incompatible",
+  unavailable: "unavailable",
   not_signed_in: "not_signed_in",
   not_subscription: "not_subscription",
   sign_in_unknown: "sign_in_unknown",
@@ -280,6 +281,7 @@ export function NewChat({
                 message: harness.message,
                 command: harness.command,
                 help_url: harness.help_url,
+                path: harness.path,
               }}
               harness={harness.name}
               onAction={() => setProbe((count) => count + 1)}

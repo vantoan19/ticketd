@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { client } from "@/lib/api/client";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IconButton } from "@/components/ui/icon-button";
@@ -423,6 +423,9 @@ export function DocumentEditor({
     setFailed(false);
     const slow = window.setTimeout(() => setStatus("Still saving…"), 2000);
     try {
+      // Flush first: an explicit save clears a latched recovery failure, so the
+      // put below is not rejected with the stale error after access returns.
+      await recovery.flush();
       await persistRecovery();
       await recovery.flush();
       const result = await documents.save(
@@ -727,28 +730,27 @@ export function DocumentEditor({
     </div>
   );
   const connected = groupConnections(links);
-  // A Plan row with no passage is a Plan attachment: the designated spec, or (attached) a supporting Document.
+  // A Plan link with no passage is a Plan attachment: the designated spec, or (attached) a supporting
+  // Document. The Plan can also be mentioned in the body, so the two are tracked separately.
   const planSpec = connected.find(
-    (item) =>
-      item.kind === "plan" && item.passages.length === 0 && !item.attached,
+    (item) => item.kind === "plan" && item.attachment && !item.attached,
   );
   const planSupport = planSpec
     ? undefined
     : connected.find(
-        (item) =>
-          item.kind === "plan" && item.passages.length === 0 && item.attached,
+        (item) => item.kind === "plan" && item.attachment && item.attached,
       );
-  // Plans this Document is the spec of (or supports) have their own section;
-  // every other connection is a mention, listed once.
-  const isAttachment = (item: (typeof connected)[number]) =>
-    item.kind === "plan" && item.passages.length === 0;
+  // Plans this Document is the spec of (or supports) have their own section; a Plan that is only
+  // attached is not a mention, and every other connection is a mention, listed once.
+  const isMention = (item: (typeof connected)[number]) =>
+    !item.attachment || item.passages.length > 0;
   // Reference order (T-KQ1 before T-KQ3), not the order the links were recorded in.
   const mentions = connected
-    .filter((item) => !isAttachment(item))
+    .filter(isMention)
     .sort((a, b) =>
       a.label.localeCompare(b.label, undefined, { numeric: true }),
     );
-  const attachments = connected.filter(isAttachment);
+  const attachments = connected.filter((item) => item.attachment);
   const attachmentLabel = planSpec ? "Spec of" : "Supporting Document of";
   const passages = [
     ...new Set(mentions.flatMap((item) => item.passages)),
@@ -953,19 +955,14 @@ export function DocumentEditor({
           </p>
         )}
         {external && (
-          <div
-            role="alert"
-            className="document-conflict"
-            ref={noticeRef}
-            tabIndex={-1}
-          >
-            <p>
+          <Alert ref={noticeRef} tabIndex={-1}>
+            <AlertDescription>
               Saved content changed while you were editing. Choose “Reload saved
               content” to discard your draft, or “Save my draft” to replace the
               saved content with it.
-            </p>
-            {blockedLeaving && <p>Choose Reload or Save my draft first.</p>}
-            <div className="document-conflict-actions">
+              {blockedLeaving && " Choose Reload or Save my draft first."}
+            </AlertDescription>
+            <AlertActions>
               <Button
                 variant="outline"
                 onClick={() => {
@@ -1002,15 +999,14 @@ export function DocumentEditor({
               >
                 Save my draft
               </Button>
-            </div>
-          </div>
+            </AlertActions>
+          </Alert>
         )}
         {discarded && (
-          <p role="status" className="document-conflict-undo">
-            Your draft was discarded.{" "}
+          <Alert role="status" size="compact">
+            <AlertDescription>Your draft was discarded.</AlertDescription>
             <Button
-              variant="link"
-              size="sm"
+              variant="outline"
               onClick={() => {
                 draft.current = discarded;
                 setTitle(discarded.title);
@@ -1021,7 +1017,7 @@ export function DocumentEditor({
             >
               Undo
             </Button>
-          </p>
+          </Alert>
         )}
         {initial && saveError}
         <div className="document-body">
@@ -1306,6 +1302,8 @@ type Connection = {
   passages: string[];
   /** A person attached the Document to the ticket; there is no passage to quote. */
   attached: boolean;
+  /** A Plan attachment link (the spec or a supporting Document), which has no passage. */
+  attachment: boolean;
 };
 /** One row per connected item, however many links or directions join it to this Document. */
 function groupConnections(links: Awaited<ReturnType<typeof documents.links>>) {
@@ -1325,8 +1323,10 @@ function groupConnections(links: Awaited<ReturnType<typeof documents.links>>) {
         from: false,
         passages: [],
         attached: false,
+        attachment: false,
       };
       if (link.explicit) row.attached = true;
+      if (kind === "plan" && !link.passage) row.attachment = true;
       if (out) row.to = true;
       else row.from = true;
       if (link.passage && !row.passages.includes(link.passage))
@@ -1366,7 +1366,7 @@ function ConnectedLabel({ item }: { item: Connection }) {
     };
   }, [item.kind, item.label]);
   const text =
-    item.kind === "plan" && item.passages.length === 0
+    item.attachment && item.passages.length === 0
       ? item.label
       : ticket?.title
         ? `${item.label} · ${ticket.title}`

@@ -59,6 +59,8 @@ export function TicketWorkspaceView({
   const [narrowDetail, setNarrowDetail] = useState(false);
   const listRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
+  // The content panel’s width, not the window’s: collapsing the sidebar gives it back.
+  const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
   // The Filters panel docks beside the list, so the detail pane makes room.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterDock = useMemo(
@@ -66,7 +68,8 @@ export function TicketWorkspaceView({
       open: filtersOpen,
       setOpen: setFiltersOpen,
       anchor:
-        workspace.layout === "board"
+        // Stacked, the list fills the window: no room beside it, so use collision handling.
+        workspace.layout === "board" || narrow
           ? null
           : {
               // Always a measurable: the panel measures the list pane when it opens.
@@ -79,7 +82,7 @@ export function TicketWorkspaceView({
               } as HTMLElement,
             },
     }),
-    [filtersOpen, workspace.layout],
+    [filtersOpen, workspace.layout, narrow],
   );
   // Dependencies are temporary; ticket layouts share the remembered preference.
   const [showDependencies, setShowDependencies] = useState(false);
@@ -170,8 +173,6 @@ export function TicketWorkspaceView({
     }
     focusPane.current = null;
   });
-  // The content panel’s width, not the window’s: collapsing the sidebar gives it back.
-  const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
   const [previousNarrow, setPreviousNarrow] = useState(narrow);
   if (previousNarrow !== narrow) {
     setPreviousNarrow(narrow);

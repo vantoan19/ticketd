@@ -184,6 +184,10 @@
   padding: 6px 0;
   text-align: right;
 }
+.restore-compare th + th,
+.restore-compare td + td {
+  padding-left: 16px;
+}
 .restore-compare tbody tr {
   box-shadow: inset 0 1px 0 0 var(--group-hairline);
 }

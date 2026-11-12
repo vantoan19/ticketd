@@ -21,7 +21,12 @@ import {
 } from "@xyflow/react";
 import { FileText, Layers, Maximize, Minus, Plus } from "lucide-react";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { centerZoom, panToInclude } from "./graph-text";
+import {
+  centerZoom,
+  countNotFullyShown,
+  isUserMove,
+  panToInclude,
+} from "./graph-text";
 import { GraphLegend } from "./GraphLegend";
 import { routeAll, type Rect } from "./edge-routing";
 import { RoutedEdge } from "./RoutedEdge";
@@ -231,6 +236,9 @@ export function ContextGraphCanvas({
   const instance = useRef<ReactFlowInstance | null>(null);
   const settleTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(settleTimer.current), []);
+  // Whether the view is still the one a fit chose. A resize refits only then;
+  // a restored or user-moved view keeps its zoom and pan.
+  const autoFitted = useRef(false);
   const onFittedRef = useRef(onFitted);
   useEffect(() => {
     onFittedRef.current = onFitted;
@@ -272,6 +280,7 @@ export function ContextGraphCanvas({
       const target = centerOn ? positions[centerOn] : undefined;
       if (centerOn && target && instance.current) {
         // Centre on the card's middle without changing the zoom.
+        autoFitted.current = false;
         void instance.current.setCenter(
           target.x + CARD_WIDTH / 2,
           target.y + CARD_HEIGHT / 2,
@@ -285,6 +294,7 @@ export function ContextGraphCanvas({
         );
         // The first fit is not animated: it is applied before anything is shown.
         const first = !shownRef.current;
+        autoFitted.current = true;
         const applied = instance.current?.fitView(
           first ? { ...options, duration: 0 } : options,
         );
@@ -315,6 +325,7 @@ export function ContextGraphCanvas({
   // Steps from the zoom the person sees, so repeated presses always move by one
   // step and never restart from a half-finished animation.
   const stepZoom = (factor: number) => {
+    autoFitted.current = false;
     const next = Math.min(
       MAX_ZOOM,
       Math.max(MIN_ZOOM, viewportRef.current.zoom * factor),
@@ -386,6 +397,7 @@ export function ContextGraphCanvas({
     )
       void instance.current.setViewport(next, { duration: 200 });
   }, [positions, nodes, fit, centerOn, ready]);
+  const [size, setSize] = useState({ width: 0, height: 0 });
   // Fit again when the panel is resized, so the map never stays clipped.
   useEffect(() => {
     const element = container.current;
@@ -396,14 +408,15 @@ export function ContextGraphCanvas({
       // The canvas just got its first real size: fit now, whatever ran before it.
       const late = sized && !fitSized.current && !!instance.current;
       if (late) fitSized.current = true;
+      setSize({ width: element.clientWidth, height: element.clientHeight });
+      if (!autoFitted.current) return;
       window.clearTimeout(timer);
-      timer = window.setTimeout(
-        () =>
-          void instance.current?.fitView(
-            fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-          ),
-        150,
-      );
+      timer = window.setTimeout(() => {
+        if (!autoFitted.current) return;
+        void instance.current?.fitView(
+          fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+        );
+      }, 150);
     });
     observer.observe(element);
     return () => {
@@ -414,6 +427,24 @@ export function ContextGraphCanvas({
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
   >({});
+  // Cards cut by an edge count too: Fit at its legibility floor can clip a card
+  // without hiding it, and the person should be told either way.
+  const notFullyShown = countNotFullyShown(
+    nodes.flatMap((node) => {
+      const at = positions[node.id];
+      return at
+        ? [
+            {
+              ...at,
+              width: sizes[node.id]?.width || CARD_WIDTH,
+              height: Math.max(CARD_HEIGHT, sizes[node.id]?.height ?? 0),
+            },
+          ]
+        : [];
+    }),
+    viewport,
+    size,
+  );
   function rememberSizes(changes: NodeChange[]) {
     const seen = changes.flatMap((change) =>
       change.type === "dimensions" && change.dimensions
@@ -520,6 +551,11 @@ export function ContextGraphCanvas({
             }}
             viewport={viewport}
             onViewportChange={onViewport}
+            onMoveStart={(event) => {
+              // Only a pointer or wheel move is the person's own: Fit and the
+              // controlled viewport syncing back also start moves, with no DOM event.
+              if (isUserMove(event)) autoFitted.current = false;
+            }}
             nodesDraggable={false}
             // The Connected items list is the keyboard path to every card.
             nodesFocusable={false}
@@ -547,15 +583,25 @@ export function ContextGraphCanvas({
           <span className="context-graph-zoom-rule" aria-hidden="true" />
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              autoFitted.current = true;
               void instance.current?.fitView(
                 fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-              )
-            }
+              );
+            }}
           >
             <Maximize aria-hidden="true" />
             Fit
           </button>
+          {notFullyShown > 0 && (
+            <>
+              <span className="context-graph-zoom-rule" aria-hidden="true" />
+              <span role="status">
+                {notFullyShown} {notFullyShown === 1 ? "item" : "items"} not
+                fully shown
+              </span>
+            </>
+          )}
         </div>
       </div>
       <div className="context-graph-overlay">

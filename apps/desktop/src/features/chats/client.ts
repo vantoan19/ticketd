@@ -24,6 +24,8 @@ export type Activity = z.infer<typeof activitySchema>;
 export const problemKindSchema = z.enum([
   "not_installed",
   "incompatible",
+  /** ticketd's own part for this harness is missing from the installation. */
+  "unavailable",
   "probe_failed",
   "not_signed_in",
   /** Signed in with an API key or cloud provider: usable, billed there. */
@@ -130,6 +132,8 @@ export const harnessStatusSchema = z.object({
     "ready",
     "not_installed",
     "incompatible",
+    /** ticketd's own part for this harness is missing; reinstalling restores it. */
+    "unavailable",
     "not_signed_in",
     /** Usable, but not on the harness subscription; `message` says how it bills. */
     "not_subscription",
@@ -141,6 +145,8 @@ export const harnessStatusSchema = z.object({
   message: z.string().nullish(),
   command: z.string().nullish(),
   help_url: z.string().nullish(),
+  /** The executable the message is about, to show as a path. */
+  path: z.string().nullish(),
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
 

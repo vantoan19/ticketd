@@ -10,6 +10,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
+  type ReactNode,
 } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
@@ -77,6 +78,7 @@ import {
 } from "@/features/attachments/AttachmentPreview";
 import {
   useDraftRecovery,
+  useClaimRecoveryNotice,
   useDraftRecoveryError,
 } from "@/lib/draft-recovery-context";
 import {
@@ -470,10 +472,13 @@ function Toolbar({
   visible,
   floating,
   onAttach,
+  children,
 }: {
   visible: boolean;
   floating: boolean;
   onAttach: () => void;
+  /** The editor's copy/export/source actions: the last item of the toolbar row. */
+  children?: ReactNode;
 }) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
@@ -513,204 +518,211 @@ function Toolbar({
       className="rich-toolbar"
       data-floating={floating || undefined}
       data-visible={visible}
-      aria-hidden={!visible}
-      inert={!visible}
-      role="toolbar"
-      aria-label={selected ? "Selection formatting" : "Document formatting"}
     >
-      {essentials.map(([title, icon, run]) => (
+      <div
+        className="rich-toolbar-tools"
+        aria-hidden={!visible}
+        inert={!visible}
+        role="toolbar"
+        aria-label={selected ? "Selection formatting" : "Document formatting"}
+      >
+        {essentials.map(([title, icon, run]) => (
+          <Button
+            key={title}
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label={title}
+            title={title}
+            onMouseDown={keepFocus}
+            onClick={run}
+          >
+            {icon}
+          </Button>
+        ))}
         <Button
-          key={title}
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label={title}
-          title={title}
+          aria-label="Insert attachment"
+          title="Insert attachment"
           onMouseDown={keepFocus}
-          onClick={run}
+          onClick={onAttach}
         >
-          {icon}
+          <Paperclip />
         </Button>
-      ))}
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        aria-label="Insert attachment"
-        title="Insert attachment"
-        onMouseDown={keepFocus}
-        onClick={onAttach}
-      >
-        <Paperclip />
-      </Button>
-      <Popover
-        open={linkOpen}
-        onOpenChange={(open) => {
-          setLinkOpen(open);
-          if (open) setUrl("");
-        }}
-      >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Link"
-            title="Link"
-            onMouseDown={keepFocus}
-          >
-            <Link />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={6} collisionPadding={12}>
-          <p className="mb-2 text-xs text-muted-foreground">Link a Document</p>
-          <DocumentPicker
-            autoFocus
-            onPick={(picked) => {
-              const collapsed = !editor.selection || editor.api.isCollapsed();
-              upsertLink(editor, {
-                url: `ticketd://document/${picked.id}`,
-                ...(collapsed ? { text: picked.heading } : {}),
-              });
-              setLinkOpen(false);
-              editor.tf.focus();
-            }}
-          />
-          <form
-            className="mt-3 flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const target = url.trim();
-              if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(target)) {
+        <Popover
+          open={linkOpen}
+          onOpenChange={(open) => {
+            setLinkOpen(open);
+            if (open) setUrl("");
+          }}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Link"
+              title="Link"
+              onMouseDown={keepFocus}
+            >
+              <Link />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" sideOffset={6} collisionPadding={12}>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Link a Document
+            </p>
+            <DocumentPicker
+              autoFocus
+              onPick={(picked) => {
                 const collapsed = !editor.selection || editor.api.isCollapsed();
-                const documentId = /^ticketd:\/\/document\/([^/?#\s]+)$/i.exec(
-                  target,
-                )?.[1];
-                // A typed Document link reads as the Document's heading, not its raw URL.
-                void (async () => {
-                  let text: string | undefined;
-                  if (collapsed && documentId)
-                    text = await documents
-                      .show(documentId)
-                      .then((doc) => doc.heading)
-                      .catch(() => undefined);
-                  upsertLink(editor, {
-                    url: target,
-                    ...(text ? { text } : {}),
-                  });
-                  setUrl("");
-                  setLinkOpen(false);
-                  editor.tf.focus();
-                })();
-              }
-            }}
-          >
-            <label htmlFor="rich-link-url">Link URL</label>
-            <Input
-              id="rich-link-url"
-              placeholder="https://… or ticketd://…"
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-            />
-            <Button type="submit">Apply link</Button>
-          </form>
-        </PopoverContent>
-      </Popover>
-      {listButtons.map(([title, icon, type]) => (
-        <Button
-          key={type}
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          aria-label={title}
-          title={title}
-          onMouseDown={keepFocus}
-          onClick={() => insert(editor, type)}
-        >
-          {icon}
-        </Button>
-      ))}
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        aria-label="Inline code"
-        title="Inline code"
-        onMouseDown={keepFocus}
-        onClick={() => {
-          editor.tf.toggleMark("code");
-          editor.tf.focus();
-        }}
-      >
-        <Code />
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="More formatting"
-            title="More formatting"
-            onMouseDown={keepFocus}
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-80">
-          <DropdownMenuGroup>
-            <DropdownMenuItem
-              onSelect={() => {
-                editor.tf.toggleMark("strikethrough");
+                upsertLink(editor, {
+                  url: `ticketd://document/${picked.id}`,
+                  ...(collapsed ? { text: picked.heading } : {}),
+                });
+                setLinkOpen(false);
                 editor.tf.focus();
               }}
+            />
+            <form
+              className="mt-3 flex flex-col gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const target = url.trim();
+                if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(target)) {
+                  const collapsed =
+                    !editor.selection || editor.api.isCollapsed();
+                  const documentId =
+                    /^ticketd:\/\/document\/([^/?#\s]+)$/i.exec(target)?.[1];
+                  // A typed Document link reads as the Document's heading, not its raw URL.
+                  void (async () => {
+                    let text: string | undefined;
+                    if (collapsed && documentId)
+                      text = await documents
+                        .show(documentId)
+                        .then((doc) => doc.heading)
+                        .catch(() => undefined);
+                    upsertLink(editor, {
+                      url: target,
+                      ...(text ? { text } : {}),
+                    });
+                    setUrl("");
+                    setLinkOpen(false);
+                    editor.tf.focus();
+                  })();
+                }
+              }}
             >
-              Strikethrough
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => editor.undo()}>
-              Undo
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => editor.redo()}>
-              Redo
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => moveBlock(editor, -1)}>
-              Move block up
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => moveBlock(editor, 1)}>
-              Move block down
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Insert</DropdownMenuLabel>
-            {insertions.map(([type, title]) => (
+              <label htmlFor="rich-link-url">Link URL</label>
+              <Input
+                id="rich-link-url"
+                placeholder="https://… or ticketd://…"
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+              />
+              <Button type="submit">Apply link</Button>
+            </form>
+          </PopoverContent>
+        </Popover>
+        {listButtons.map(([title, icon, type]) => (
+          <Button
+            key={type}
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label={title}
+            title={title}
+            onMouseDown={keepFocus}
+            onClick={() => insert(editor, type)}
+          >
+            {icon}
+          </Button>
+        ))}
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Inline code"
+          title="Inline code"
+          onMouseDown={keepFocus}
+          onClick={() => {
+            editor.tf.toggleMark("code");
+            editor.tf.focus();
+          }}
+        >
+          <Code />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="More formatting"
+              title="More formatting"
+              onMouseDown={keepFocus}
+            >
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-80">
+            <DropdownMenuGroup>
               <DropdownMenuItem
-                key={type}
-                onSelect={() => insert(editor, type)}
+                onSelect={() => {
+                  editor.tf.toggleMark("strikethrough");
+                  editor.tf.focus();
+                }}
               >
-                {title}
+                Strikethrough
               </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Table</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => insertTableRow(editor)}>
-              Add row
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => insertTableColumn(editor)}>
-              Add column
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => deleteRow(editor)}>
-              Delete row
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => deleteColumn(editor)}>
-              Delete column
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+              <DropdownMenuItem onSelect={() => editor.undo()}>
+                Undo
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.redo()}>
+                Redo
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => moveBlock(editor, -1)}>
+                Move block up
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => moveBlock(editor, 1)}>
+                Move block down
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Insert</DropdownMenuLabel>
+              {insertions.map(([type, title]) => (
+                <DropdownMenuItem
+                  key={type}
+                  onSelect={() => insert(editor, type)}
+                >
+                  {title}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Table</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => insertTableRow(editor)}>
+                Add row
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => insertTableColumn(editor)}>
+                Add column
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => deleteRow(editor)}>
+                Delete row
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => deleteColumn(editor)}>
+                Delete column
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {children}
     </div>
   );
 }
@@ -806,6 +818,11 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const recovery = useDraftRecovery();
   const recoveryError = useDraftRecoveryError();
+  const claimRecoveryNotice = useClaimRecoveryNotice();
+  useEffect(
+    () => (recoveryError ? claimRecoveryNotice() : undefined),
+    [recoveryError, claimRecoveryNotice],
+  );
   const [historyOwner] = useState(
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
@@ -1131,7 +1148,15 @@ export function MarkdownEditor({
       unit: "character",
       reverse: true,
     });
+    const index = editor.selection?.anchor.path[0];
     insert(editor, type);
+    if (type === "blockquote" && index !== undefined)
+      // Wrapping the paragraph in a quote replaces its DOM nodes, which drops the browser's caret.
+      window.requestAnimationFrame(() => {
+        const end = editor.api.end([index]);
+        if (end) editor.tf.select(end);
+        editor.tf.focus();
+      });
     closeSlash();
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -1215,6 +1240,86 @@ export function MarkdownEditor({
     )
       closeSlash();
   }
+  const actionGroup = (
+    <div
+      className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
+      data-persistent={persistentToolbar || undefined}
+    >
+      <CopySourceButton
+        compact
+        source={value}
+        label={`Copy ${label} Markdown`}
+      />
+      <ExportMarkdownButton
+        compact
+        source={() => {
+          const selection = sourceEditor.current?.view?.state.selection.main;
+          if (source && selection && !selection.empty)
+            return {
+              kind: "selection",
+              body: value.slice(selection.from, selection.to),
+              context: value,
+            };
+          const nativeSelection = window.getSelection();
+          const rich =
+            !source &&
+            nativeSelection &&
+            container.current?.contains(nativeSelection.anchorNode)
+              ? editor.api.toSlateRange(nativeSelection, {
+                  exactMatch: false,
+                  suppressThrow: true,
+                })
+              : editor.selection;
+          const selected =
+            !source && rich && !RangeApi.isCollapsed(rich)
+              ? writeMarkdown(editor.api.fragment(rich))
+              : value;
+          return { kind: "markdown", body: selected };
+        }}
+      />
+      {source && !readOnly && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Insert attachment"
+          title="Insert attachment"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={beginAttachment}
+        >
+          <Paperclip />
+        </Button>
+      )}
+      <Button
+        disabled={document.reasons.length > 0}
+        type="button"
+        variant="ghost"
+        size={inlineMode ? "icon-sm" : "sm"}
+        aria-pressed={source}
+        {...(inlineMode
+          ? {
+              "aria-label": "Edit Markdown source",
+              title: "Edit Markdown source",
+            }
+          : {})}
+        onClick={() => {
+          setSourceMode((current) => !current);
+          closeSlash();
+        }}
+      >
+        {document.reasons.length > 0 ? (
+          "Markdown source required"
+        ) : source ? (
+          "Use rich editor"
+        ) : inlineMode ? (
+          <FileCode2 />
+        ) : (
+          "Edit Markdown source"
+        )}
+      </Button>
+    </div>
+  );
+
   return (
     <section
       ref={container}
@@ -1302,83 +1407,7 @@ export function MarkdownEditor({
             </span>
           </p>
         )}
-      <div
-        className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
-        data-persistent={persistentToolbar || undefined}
-      >
-        <CopySourceButton
-          compact
-          source={value}
-          label={`Copy ${label} Markdown`}
-        />
-        <ExportMarkdownButton
-          compact
-          source={() => {
-            const selection = sourceEditor.current?.view?.state.selection.main;
-            if (source && selection && !selection.empty)
-              return {
-                kind: "selection",
-                body: value.slice(selection.from, selection.to),
-                context: value,
-              };
-            const nativeSelection = window.getSelection();
-            const rich =
-              !source &&
-              nativeSelection &&
-              container.current?.contains(nativeSelection.anchorNode)
-                ? editor.api.toSlateRange(nativeSelection, {
-                    exactMatch: false,
-                    suppressThrow: true,
-                  })
-                : editor.selection;
-            const selected =
-              !source && rich && !RangeApi.isCollapsed(rich)
-                ? writeMarkdown(editor.api.fragment(rich))
-                : value;
-            return { kind: "markdown", body: selected };
-          }}
-        />
-        {source && !readOnly && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Insert attachment"
-            title="Insert attachment"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={beginAttachment}
-          >
-            <Paperclip />
-          </Button>
-        )}
-        <Button
-          disabled={document.reasons.length > 0}
-          type="button"
-          variant="ghost"
-          size={inlineMode ? "icon-sm" : "sm"}
-          aria-pressed={source}
-          {...(inlineMode
-            ? {
-                "aria-label": "Edit Markdown source",
-                title: "Edit Markdown source",
-              }
-            : {})}
-          onClick={() => {
-            setSourceMode((current) => !current);
-            closeSlash();
-          }}
-        >
-          {document.reasons.length > 0 ? (
-            "Markdown source required"
-          ) : source ? (
-            "Use rich editor"
-          ) : inlineMode ? (
-            <FileCode2 />
-          ) : (
-            "Edit Markdown source"
-          )}
-        </Button>
-      </div>
+      {!inlineMode && actionGroup}
       {document.reasons.length > 0 && (
         <Alert>
           <AlertTitle>Markdown source preserves this document</AlertTitle>
@@ -1442,7 +1471,9 @@ export function MarkdownEditor({
               visible={active || persistentToolbar}
               floating={!persistentToolbar}
               onAttach={beginAttachment}
-            />
+            >
+              {actionGroup}
+            </Toolbar>
           )}
           <AttachmentProtection.Provider value={protectAttachment}>
             <PlateContent
@@ -1480,9 +1511,24 @@ export function MarkdownEditor({
                 event.preventDefault();
                 event.stopPropagation();
                 const incoming = readMarkdown(pasted);
-                if (incoming.reasons.length) editor.tf.insertText(pasted);
+                if (incoming.reasons.length || !pasted.trim())
+                  editor.tf.insertText(pasted);
                 else {
                   const first = incoming.value[0];
+                  const last = incoming.value[incoming.value.length - 1];
+                  // Parsing drops a paragraph's edge whitespace, but a paste must keep it:
+                  // "hello" + " world" is "hello world". It goes in as a plain text node so it
+                  // never inherits a mark from the pasted text next to it.
+                  const lead =
+                    first?.type === "p"
+                      ? (/^[ \t]*/.exec(pasted)?.[0] ?? "")
+                      : "";
+                  const trail =
+                    last?.type === "p"
+                      ? (/[ \t]*$/.exec(pasted)?.[0] ?? "")
+                      : "";
+                  if (lead)
+                    editor.tf.insertNodes({ text: lead }, { select: true });
                   // Slate merges a fragment's first block into the current block.
                   // An empty leading paragraph protects a pasted heading/list/table.
                   editor.tf.insertFragment(
@@ -1493,6 +1539,8 @@ export function MarkdownEditor({
                           ...incoming.value,
                         ],
                   );
+                  if (trail)
+                    editor.tf.insertNodes({ text: trail }, { select: true });
                 }
               }}
               onDragOver={(event) => {
