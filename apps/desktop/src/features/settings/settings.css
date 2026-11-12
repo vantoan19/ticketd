@@ -375,36 +375,6 @@
   flex: 1;
 }
 
-/* Keyboard shortcuts */
-.shortcut-list {
-  margin: 0;
-}
-.shortcut-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 36px;
-  font-size: var(--text-ui);
-}
-.shortcut-row + .shortcut-row {
-  box-shadow: 0 -1px 0 var(--border);
-}
-.shortcut-row dt {
-  color: var(--foreground);
-}
-.shortcut-row dd {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-}
-.shortcut-keys {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 /* Location and About actions */
 .settings-actions {
   display: flex;

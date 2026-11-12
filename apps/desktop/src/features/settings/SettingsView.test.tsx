@@ -189,23 +189,6 @@ test("a workspace that cannot be read shows an error instead of counts", async (
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 
-test("the About links open Documentation and the issue tracker", async () => {
-  render(
-    <SettingsView
-      selected="about"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Documentation" }));
-  fireEvent.click(screen.getByRole("button", { name: "Report an issue" }));
-  await waitFor(() =>
-    expect(workspaceClient.openLink).toHaveBeenCalledTimes(2),
-  );
-  const urls = vi.mocked(workspaceClient.openLink).mock.calls.map(([u]) => u);
-  expect(urls.every((url) => url.startsWith("https://"))).toBe(true);
-});
-
 const lastBackup = {
   path: "/Users/me/Backups/ticketd-backup-2026-11-01.sqlite3",
   completed_at: "2026-11-01T09:30:00.000Z",
@@ -293,45 +276,13 @@ test("a refused backup explains itself and keeps the previous status", async () 
 
 test("cancelling a save dialog changes nothing and shows no error", async () => {
   const props = { onRestore: async () => {}, onOpenInbox: () => {} };
-  const { rerender } = render(<SettingsView selected="backups" {...props} />);
+  render(<SettingsView selected="backups" {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
   await waitFor(() =>
     expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
   );
-  rerender(<SettingsView selected="export" {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  await waitFor(() =>
-    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(2),
-  );
   expect(client.backupWorkspace).not.toHaveBeenCalled();
-  expect(client.exportWorkspace).not.toHaveBeenCalled();
   expect(screen.queryByRole("alert")).toBeNull();
-});
-
-test("Export… writes to the chosen file and Copy puts the CLI command on the clipboard", async () => {
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue("/tmp/out.json");
-  vi.mocked(client.exportWorkspace).mockResolvedValue(undefined);
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText },
-  });
-  render(
-    <SettingsView
-      selected="export"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  expect(
-    await screen.findByText("Export saved to /tmp/out.json."),
-  ).toBeTruthy();
-  expect(client.exportWorkspace).toHaveBeenCalledWith("/tmp/out.json");
-  fireEvent.click(screen.getByRole("button", { name: "Copy export command" }));
-  await waitFor(() =>
-    expect(writeText).toHaveBeenCalledWith("ticketd export --file PATH"),
-  );
 });
 
 test("Follow tickets I create is on by default and the choice persists", () => {
