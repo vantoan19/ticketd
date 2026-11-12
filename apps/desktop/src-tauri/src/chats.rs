@@ -4,7 +4,7 @@
 //! Requests are validated here and carried out by the core and the host; this module
 //! decides nothing about dispatch. It has no Tauri dependency so it can be tested with
 //! the fake adapter; `chat_commands` exposes it over the bridge.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -366,7 +366,10 @@ fn surroundings(
     folder_users: &[Chat],
     checked_turn: Option<String>,
     live: &ChatLive,
+    missing_folders: &Mutex<HashSet<String>>,
 ) -> Result<Surroundings, ticketd_core::Error> {
+    let folder_missing = !Path::new(&chat.execution_folder).is_dir();
+    note_folder(missing_folders, &chat.id, folder_missing);
     let shared_with = folder_users
         .iter()
         .filter(|other| other.id != chat.id && other.execution_folder == chat.execution_folder)
@@ -374,7 +377,7 @@ fn surroundings(
         .collect();
     Ok(Surroundings {
         checked_turn,
-        folder_missing: !Path::new(&chat.execution_folder).is_dir(),
+        folder_missing,
         shared_with,
         links: links(workspace, &chat.id)?,
         // Input the host holds to send is being sent, not in the person's queue.
@@ -391,6 +394,17 @@ fn surroundings(
             })
             .collect(),
     })
+}
+
+/// Remembers whether a Chat was last shown with its folder missing; returns whether
+/// that changed.
+fn note_folder(missing_folders: &Mutex<HashSet<String>>, chat_id: &str, missing: bool) -> bool {
+    let mut missing_folders = lock(missing_folders);
+    if missing {
+        missing_folders.insert(chat_id.to_owned())
+    } else {
+        missing_folders.remove(chat_id)
+    }
 }
 
 fn messages(workspace: &Workspace, chat_id: &str) -> Result<Vec<ChatMessage>, ticketd_core::Error> {
@@ -441,6 +455,8 @@ pub struct Chats {
     feeds: Mutex<HashMap<u64, Feed>>,
     next_feed: AtomicU64,
     fresh: Mutex<HashMap<String, FreshHistory>>,
+    /// Chats last shown with their folder missing, so a check can tell what changed.
+    missing_folders: Mutex<HashSet<String>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -466,6 +482,7 @@ impl Chats {
             feeds: Mutex::new(HashMap::new()),
             next_feed: AtomicU64::new(1),
             fresh: Mutex::new(HashMap::new()),
+            missing_folders: Mutex::new(HashSet::new()),
         })
     }
 
@@ -645,6 +662,7 @@ impl Chats {
                     &folder_users,
                     self.checked(&chat.id),
                     &live,
+                    &self.missing_folders,
                 )?,
             ));
         }
@@ -789,7 +807,14 @@ impl Chats {
         let workspace = self.workspace()?;
         let users = folder_users(&workspace)?;
         let checked = self.checked(&view.chat.id);
-        let around = surroundings(&workspace, &view.chat, &users, checked, &view.live)?;
+        let around = surroundings(
+            &workspace,
+            &view.chat,
+            &users,
+            checked,
+            &view.live,
+            &self.missing_folders,
+        )?;
         Ok(chat_view::chat_state(
             &view.chat,
             &view.live,
@@ -815,6 +840,7 @@ impl Chats {
                 &folder_users(&workspace)?,
                 self.checked(chat_id),
                 &attached.live,
+                &self.missing_folders,
             )?,
         );
         let fresh = self.fresh(chat_id);
@@ -1092,14 +1118,41 @@ impl Chats {
         }
     }
 
+    /// Looks at every Chat's folder again (the window regained focus, or "Check again").
+    /// A folder that went missing or came back since a view last showed it is logged as
+    /// a Chat change, so open views and the list follow without anything else changing.
+    pub async fn recheck_folders(&self) -> Outcome<()> {
+        let Some(host) = self.started_host() else {
+            return Ok(());
+        };
+        let mut workspace = self.workspace()?;
+        let mut changed = Vec::new();
+        for chat in folder_users(&workspace)? {
+            let missing = !Path::new(&chat.execution_folder).is_dir();
+            if note_folder(&self.missing_folders, &chat.id, missing) {
+                workspace.mark_chat_changed(&chat.id)?;
+                changed.push(chat.id);
+            }
+        }
+        drop(workspace);
+        for chat_id in changed {
+            host.notify_changed(&chat_id).await?;
+        }
+        Ok(())
+    }
+
     /// Probes the Chat's harness again. When it is not usable, says why. When it is:
     /// a Chat stopped by a failed start tries that start again, and a failure of the
     /// last turn stops being told as a problem, since what the probe can see is in
     /// order. No input is sent by this.
     pub async fn check_again(&self, chat_id: &str) -> Outcome<()> {
         let host = self.host()?;
+        self.recheck_folders().await?;
         let workspace = self.workspace()?;
         let chat = workspace.chat(chat_id)?;
+        if !Path::new(&chat.execution_folder).is_dir() {
+            return Err(failed("The folder is still missing.".to_owned()));
+        }
         let items = workspace.chat_snapshot(chat_id, SUMMARY_ITEMS)?.items;
         drop(workspace);
         let (id, name) = HARNESSES

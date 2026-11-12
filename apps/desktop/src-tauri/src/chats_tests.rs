@@ -1348,3 +1348,73 @@ async fn a_message_whose_session_did_not_open_is_back_in_the_queue() {
     tokio::time::sleep(Duration::from_secs(3_600)).await;
     assert_eq!(f.submitted(), ["first"], "nothing is resent automatically");
 }
+
+/// N4: losing the harness mid-turn is told once, by the transcript's marker ("whether
+/// this turn finished is unknown"), not again by an error card claiming the turn is
+/// not complete.
+#[tokio::test(start_paused = true)]
+async fn contact_lost_mid_turn_is_told_once() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(EventKind::TextDelta {
+        turn: turn(),
+        item: NativeItemId::new("m1"),
+        text: "Half an ans".to_owned(),
+    })
+    .await;
+    f.fake.lose_process().await;
+    settle().await;
+
+    let (opened, _) = f.open(&id).await;
+    let markers = opened
+        .snapshot
+        .items
+        .iter()
+        .filter(|item| matches!(item, Item::Marker { message: Some(text), .. } if text.starts_with("Contact with")))
+        .count();
+    assert_eq!(markers, 1);
+    assert_eq!(
+        opened.snapshot.chat.problem.map(|problem| problem.kind),
+        None
+    );
+}
+
+/// L9: a Chat's folder that goes missing, or comes back, is seen when ticketd checks
+/// folders again (window focus, "Check again"): open views and the list follow from the
+/// Chat change log, with nothing else having to change first.
+#[tokio::test(start_paused = true)]
+async fn a_folder_that_comes_back_clears_the_missing_folder_state() {
+    let f = Fixture::new().await;
+    let folder = f.dir.path().join("work");
+    std::fs::create_dir(&folder).unwrap();
+    let mut input = f.input("first");
+    input.folder = Some(folder.to_string_lossy().into_owned());
+    let id = f.chats.create(input).await.unwrap().chat_id;
+    settle().await;
+    let (_, seen) = f.open(&id).await;
+    let shown = |seen: &Arc<Mutex<Vec<Value>>>| {
+        let seen = seen.lock().unwrap();
+        let chat = seen.iter().rev().find(|change| change["kind"] == "chat");
+        chat.map(|change| change["chat"]["problem"]["kind"].clone())
+    };
+    // The list is fetched again when the digest moves.
+    let before = f.chats.digest();
+
+    let moved = f.dir.path().join("moved");
+    std::fs::rename(&folder, &moved).unwrap();
+    f.chats.recheck_folders().await.unwrap();
+    settle().await;
+    assert_eq!(shown(&seen), Some(json!("folder_missing")));
+    let missing = f.chats.digest();
+    assert_ne!(missing, before);
+
+    std::fs::rename(&moved, &folder).unwrap();
+    f.chats.recheck_folders().await.unwrap();
+    settle().await;
+    assert_eq!(shown(&seen), Some(Value::Null));
+    assert_ne!(f.chats.digest(), missing);
+    // Nothing changed since: checking again logs nothing.
+    let settled = f.chats.digest();
+    f.chats.recheck_folders().await.unwrap();
+    assert_eq!(f.chats.digest(), settled);
+}

@@ -725,6 +725,14 @@ fn problem(
             problem.kind,
             Some(problem.message.clone()),
         )),
+        // The turn it cut short already carries the loss as its marker; say it once.
+        Some(ChatProblem::RuntimeLost { detail })
+            if tracker.last_turn.as_ref().is_some_and(|turn| {
+                turn.state == ChatTurnState::Unknown && turn.detail.as_ref() == Some(detail)
+            }) =>
+        {
+            None
+        }
         Some(ChatProblem::RuntimeLost { detail }) => Some(failed(format!(
             "Contact with the harness was lost: {detail}"
         ))),

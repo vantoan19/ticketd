@@ -6,7 +6,7 @@ use ticketd_core::{
     ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, FORMAT_VERSION, NewChat, Workspace,
 };
 
-const CHAT_TABLES: &str = "DROP TABLE chat_changes; DROP TABLE chat_notices; DROP TABLE chat_interactions; DROP TABLE chat_tools; DROP TABLE chat_submission_attempts; DROP TABLE chat_messages; DROP TABLE chat_turns; DROP TABLE chat_sessions; DROP TABLE chat_links; DROP TABLE chats;";
+const CHAT_TABLES: &str = "DROP TABLE chat_record_writes; DROP TABLE chat_changes; DROP TABLE chat_notices; DROP TABLE chat_interactions; DROP TABLE chat_tools; DROP TABLE chat_submission_attempts; DROP TABLE chat_messages; DROP TABLE chat_turns; DROP TABLE chat_sessions; DROP TABLE chat_links; DROP TABLE chats;";
 
 fn new_chat() -> NewChat {
     NewChat {
@@ -1442,4 +1442,46 @@ fn the_ticket_changes_a_chats_agent_made_during_a_turn_are_listed() {
             },
         ]
     );
+}
+
+/// N2: two Chats of one harness working at the same time are each credited only with
+/// the writes made for them (the CLI acting for a Chat); a write with no Chat identity
+/// while they overlap is credited to neither, since either could have made it.
+#[test]
+fn overlapping_chats_of_one_harness_are_credited_only_with_their_own_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let (mut workspace, first) = workspace_with_chat(&dir);
+    let second = workspace.create_chat(None, new_chat()).unwrap();
+    let reference = workspace.create_ticket("Reset email").unwrap().reference;
+    start_turn(&mut workspace, &first, "go", "turn-a");
+    start_turn(&mut workspace, &second, "go", "turn-b");
+
+    let mut for_first = Workspace::open(&path).unwrap();
+    for_first.act_for_chat(&first.id).unwrap();
+    let mut for_second = Workspace::open(&path).unwrap();
+    for_second.act_for_chat(&second.id).unwrap();
+    for_first
+        .add_activity(&reference, "A-note", Some("claude-code"))
+        .unwrap();
+    for_second
+        .add_activity(&reference, "B-note", Some("claude-code"))
+        .unwrap();
+    workspace
+        .add_activity(&reference, "No Chat identity", Some("claude-code"))
+        .unwrap();
+
+    let excerpts = |chat: &Chat, turn: &str| {
+        workspace
+            .chat_turn_agent_changes(&chat.id, turn)
+            .unwrap()
+            .into_iter()
+            .map(|change| match change {
+                ticketd_core::ChatAgentChange::Update { excerpt, .. } => excerpt,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(excerpts(&first, "turn-a"), ["A-note"]);
+    assert_eq!(excerpts(&second, "turn-b"), ["B-note"]);
 }

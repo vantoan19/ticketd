@@ -17,6 +17,7 @@ const GENERATION: RuntimeGeneration = RuntimeGeneration(1);
 async fn open(fake: &FakeAdapter, generation: RuntimeGeneration) -> OpenedRuntime {
     fake.open(OpenRequest {
         generation,
+        chat_id: "chat-1".into(),
         working_directory: PathBuf::from("chat-folder"),
         session: SessionStart::New,
     })

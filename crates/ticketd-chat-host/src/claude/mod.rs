@@ -76,7 +76,7 @@ impl HarnessAdapter for ClaudeAdapter {
         let Some(executable) = self.executable() else {
             return Inspection::NotInstalled;
         };
-        match spawn(&self.bridge, &[]) {
+        match spawn(&self.bridge, &[], None) {
             Ok(io) => runtime::probe(io, &executable, Options::default()).await,
             Err(error) => Inspection::ProbeFailed {
                 reason: self.bridge_problem(&error).message,
@@ -86,7 +86,8 @@ impl HarnessAdapter for ClaudeAdapter {
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
         let executable = self.executable().ok_or_else(not_installed)?;
-        let io = spawn(&self.bridge, &[]).map_err(|error| self.bridge_problem(&error))?;
+        let io = spawn(&self.bridge, &[], Some(&request.chat_id))
+            .map_err(|error| self.bridge_problem(&error))?;
         runtime::open_over(io, &request, &executable, Options::default()).await
     }
 }

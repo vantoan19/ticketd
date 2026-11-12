@@ -291,3 +291,72 @@ fn an_agent_records_progress_while_a_person_edits_the_same_ticket() {
         .collect();
     assert_eq!(agents, [&json!("codex"), &json!("codex")]);
 }
+
+/// N2: a Chat's harness runs this CLI with the Chat's ID in `TICKETD_CHAT_ID`; what it
+/// writes is credited to that Chat, even while another Chat of the same harness works.
+#[test]
+fn writes_made_with_a_chat_id_are_credited_to_that_chat() {
+    use ticketd_core::{CHAT_ID_VARIABLE, ChatObservation, ChatSubmissionIntent};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    let mut workspace = Workspace::open(workspace_path(path)).unwrap();
+    workspace.create_ticket("Fix the cache").unwrap();
+    let mut chats = Vec::new();
+    for turn in ["turn-a", "turn-b"] {
+        let chat = workspace
+            .create_chat(
+                None,
+                NewChat {
+                    title: None,
+                    harness: "codex".into(),
+                    execution_folder: path.display().to_string(),
+                    folder_managed: false,
+                    links: Vec::new(),
+                },
+            )
+            .unwrap();
+        let input = workspace.save_chat_input(None, &chat.id, "go").unwrap();
+        let attempt = format!("attempt-{turn}");
+        workspace
+            .record_chat_submission(&chat.id, &input.id, &attempt, ChatSubmissionIntent::NewTurn)
+            .unwrap();
+        workspace
+            .record_chat_observations(
+                &chat.id,
+                vec![
+                    ChatObservation::SubmissionAcknowledged {
+                        attempt_id: attempt.clone(),
+                    },
+                    ChatObservation::TurnStarted {
+                        turn_id: turn.into(),
+                        native_turn_id: None,
+                    },
+                    ChatObservation::SubmissionProcessing {
+                        attempt_id: attempt,
+                        turn_id: turn.into(),
+                    },
+                ],
+            )
+            .unwrap();
+        chats.push(chat);
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args([
+            "activity", "add", "T-1", "--brief", "From A", "--agent", "codex",
+        ])
+        .current_dir(path)
+        .env("TICKETD_TEST_WORKSPACE", workspace_path(path))
+        .env(CHAT_ID_VARIABLE, &chats[0].id)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    let credited = |chat: &ticketd_core::Chat, turn: &str| {
+        workspace
+            .chat_turn_agent_changes(&chat.id, turn)
+            .unwrap()
+            .len()
+    };
+    assert_eq!(credited(&chats[0], "turn-a"), 1);
+    assert_eq!(credited(&chats[1], "turn-b"), 0);
+}

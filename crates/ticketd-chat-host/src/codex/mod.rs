@@ -78,7 +78,7 @@ impl HarnessAdapter for CodexAdapter {
                 requirement: discovery::version_requirement(),
             };
         }
-        let login = match spawn(&executable, ARGUMENTS) {
+        let login = match spawn(&executable, ARGUMENTS, None) {
             Ok(io) => runtime::probe_login(io, Options::default()).await,
             Err(_) => crate::LoginState::Unknown,
         };
@@ -100,12 +100,13 @@ impl HarnessAdapter for CodexAdapter {
             detail: None,
             resets_at: None,
         })?;
-        let io = spawn(&executable, ARGUMENTS).map_err(|error| Problem {
-            kind: ProblemKind::Other,
-            message: format!("Could not start {}: {error}", executable.display()),
-            detail: Some(ProviderDetail::new("spawn", &error.to_string())),
-            resets_at: None,
-        })?;
+        let io =
+            spawn(&executable, ARGUMENTS, Some(&request.chat_id)).map_err(|error| Problem {
+                kind: ProblemKind::Other,
+                message: format!("Could not start {}: {error}", executable.display()),
+                detail: Some(ProviderDetail::new("spawn", &error.to_string())),
+                resets_at: None,
+            })?;
         runtime::open_over(io, &request, Options::default()).await
     }
 }

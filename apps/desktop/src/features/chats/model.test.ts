@@ -298,8 +298,10 @@ test("a missing folder is told without claiming a restore happened", () => {
     "Codex",
   );
   expect(notice.body).toBe(
-    "`/work/app` wasn't found. Nothing was re-run. Pick another folder to keep going here.",
+    "`/work/app` wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.",
   );
+  // L9: a folder moved back is seen without picking another one.
+  expect(notice.actions).toEqual(["check", "pick-folder"]);
 });
 
 test("a step that has not run, or did not complete, is not counted as run", () => {

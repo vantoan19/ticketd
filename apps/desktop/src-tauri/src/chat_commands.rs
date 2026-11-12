@@ -451,6 +451,17 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
                 }
             }
         }
+        // Coming back to ticketd, perhaps after moving a Chat's folder back into place.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::Focused(true),
+            ..
+        } if label == "main" && bridge.chats.enabled() => {
+            let chats = bridge.chats.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = chats.recheck_folders().await;
+            });
+        }
         // The system's own Quit (for example Cmd+Q) rather than ticketd's confirmed exit.
         RunEvent::ExitRequested {
             code: None, api, ..

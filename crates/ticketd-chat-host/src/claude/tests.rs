@@ -38,6 +38,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
     peer.load(fixture);
     let request = OpenRequest {
         generation: GENERATION,
+        chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
     };
@@ -703,7 +704,7 @@ async fn the_built_bridge_answers_hello() {
         eprintln!("skipped: {} has not been built", bridge.display());
         return;
     }
-    let mut io = spawn(&bridge, &[]).expect("the bridge starts");
+    let mut io = spawn(&bridge, &[], None).expect("the bridge starts");
     let hello = b"{\"id\":\"t1\",\"cmd\":\"hello\",\"protocol\":1}\n";
     io.stdin.write_all(hello).await.expect("stdin");
     io.stdin.flush().await.expect("stdin");

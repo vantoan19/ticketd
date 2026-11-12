@@ -141,7 +141,9 @@ struct LiveRequest {
     request: NativeRequestId,
     turn_id: String,
     kind: InteractionKind,
-    answering: bool,
+    /// The response being written, kept so a harness that confirms the answer before
+    /// the write returns does not lose what the person chose.
+    answering: Option<String>,
 }
 
 struct TextBuffer {
@@ -633,12 +635,11 @@ impl Supervisor {
         let live = self
             .interactions
             .get_mut(&interaction_id)
-            .filter(|live| Some(live.generation) == current && !live.answering);
+            .filter(|live| Some(live.generation) == current && live.answering.is_none());
         let (Some(live), Some(runtime)) = (live, &self.runtime) else {
             let _ = reply.send(Err(HostError::InteractionExpired));
             return;
         };
-        live.answering = true;
         let response = match &answer {
             InteractionAnswer::Approval(ApprovalDecision::Allow) => "allow".to_owned(),
             InteractionAnswer::Approval(ApprovalDecision::AllowForSession) => {
@@ -651,6 +652,7 @@ impl Supervisor {
                 .collect::<Vec<_>>()
                 .join("\n"),
         };
+        live.answering = Some(response.clone());
         let request = InteractionResponse {
             generation: live.generation,
             request: live.request.clone(),
@@ -734,6 +736,7 @@ impl Supervisor {
         let generation = RuntimeGeneration(self.generations);
         let request = OpenRequest {
             generation,
+            chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
             session,
         };
@@ -964,12 +967,15 @@ impl Supervisor {
             self.open(&chat, session, origin, preamble, None);
             return;
         }
+        let mut from_queue = false;
         if resend.is_some() {
             self.resend = None;
         } else if self.direct.front() == Some(&message_id) {
             self.direct.pop_front();
+        } else {
+            from_queue = true;
         }
-        self.dispatch(&message_id, resend.is_some());
+        self.dispatch(&message_id, resend.is_some(), from_queue);
     }
 
     /// Records the possible submission, then hands the input to the adapter. Nothing
@@ -977,8 +983,8 @@ impl Supervisor {
     /// generation and expected turn at its write.
     ///
     /// `resend` is set only for input the person asked to send again; it alone may
-    /// follow an uncertain attempt.
-    fn dispatch(&mut self, message_id: &str, resend: bool) {
+    /// follow an uncertain attempt. `from_queue` input had no row on screen until now.
+    fn dispatch(&mut self, message_id: &str, resend: bool, from_queue: bool) {
         let Some(runtime) = &self.runtime else {
             return;
         };
@@ -998,6 +1004,8 @@ impl Supervisor {
         let recorded = self.write(|core| {
             if resend {
                 core.record_chat_resubmission(&chat, message_id, &attempt)
+            } else if from_queue {
+                core.record_chat_queue_submission(&chat, message_id, &attempt, intent)
             } else {
                 core.record_chat_submission(&chat, message_id, &attempt, intent)
             }
@@ -1476,14 +1484,20 @@ impl Supervisor {
                 resolution,
             } => {
                 let interaction_id = format!("{run}:request:{}", request.0);
-                self.interactions.remove(&interaction_id);
+                // The harness may confirm an answer before writing it returns: the
+                // answer being written is what was chosen.
+                let answering = self
+                    .interactions
+                    .remove(&interaction_id)
+                    .and_then(|live| live.answering);
+                let (state, response) = match resolution {
+                    InteractionResolution::Answered => (ChatInteractionState::Answered, answering),
+                    InteractionResolution::Withdrawn => (ChatInteractionState::Expired, None),
+                };
                 self.record(vec![ChatObservation::InteractionResolved {
                     interaction_id,
-                    state: match resolution {
-                        InteractionResolution::Answered => ChatInteractionState::Answered,
-                        InteractionResolution::Withdrawn => ChatInteractionState::Expired,
-                    },
-                    response: None,
+                    state,
+                    response,
                 }]);
             }
             EventKind::TurnEnded {
@@ -1675,7 +1689,7 @@ impl Supervisor {
                 request: request.request,
                 turn_id,
                 kind: request.kind,
-                answering: false,
+                answering: None,
             },
         );
     }
@@ -1769,7 +1783,7 @@ impl Supervisor {
             interactions: self
                 .interactions
                 .iter()
-                .filter(|(_, live)| !live.answering)
+                .filter(|(_, live)| live.answering.is_none())
                 .map(|(id, live)| LiveInteraction {
                     interaction_id: id.clone(),
                     kind: live.kind.clone(),

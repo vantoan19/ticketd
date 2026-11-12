@@ -312,16 +312,24 @@ impl Session {
             // seen in a live session; any other shape stays ignored, as before.
             "mcpServer/startupStatus/updated" if text(params, &["status"]) == Some("failed") => {
                 let server = text(params, &["name"]).unwrap_or("an MCP server");
+                let first = self.failed_servers.is_empty();
                 // Codex reports a server for the session and again for a thread: one line.
                 if !self.failed_servers.insert(server.to_owned()) {
                     return Vec::new();
                 }
                 let reason = text(params, &["error"]).unwrap_or("no reason given");
+                let reason = reason.trim_end().trim_end_matches('.');
+                // The recovery applies to every server: said with the first one only.
+                let recovery = if first {
+                    " Work that does not need it continues; MCP servers are set up in Codex's own MCP settings."
+                } else {
+                    ""
+                };
                 Some(vec![EventKind::Notice {
                     turn: None,
                     kind: NoticeKind::CapabilityUnavailable,
                     message: format!(
-                        "Codex could not start the MCP server {server}: {reason}. Work that does not need it continues; the server is set up in Codex's own MCP settings."
+                        "Codex could not start the MCP server {server}: {reason}.{recovery}"
                     ),
                     detail: Some(detail(method, params)),
                 }])
