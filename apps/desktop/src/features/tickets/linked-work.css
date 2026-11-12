@@ -169,11 +169,17 @@
   /* A long related title wraps so the ticket can still be told apart. */
   .linked-work-title {
     grid-column: 3;
-    /* Keep a wrapped title clear of the absolutely placed remove button. */
-    padding-right: 32px;
+    display: block;
     white-space: normal;
     overflow: visible;
-    align-items: flex-start;
+  }
+  /* The absolutely placed remove button overlaps only the first lines, so a
+     float there narrows those lines and later lines use the full column. */
+  .linked-work-title::before {
+    content: "";
+    float: right;
+    width: 32px;
+    height: 32px;
   }
   .linked-work-title .truncate {
     overflow: visible;
@@ -216,11 +222,6 @@
   .linked-work-remove {
     opacity: 1;
     pointer-events: auto;
-  }
-  @container (max-width: 260px) {
-    .linked-work-title {
-      padding-right: 32px;
-    }
   }
 }
 .link-ticket-note {
