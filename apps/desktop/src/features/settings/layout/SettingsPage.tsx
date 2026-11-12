@@ -15,6 +15,7 @@ export function SettingsPage({
   lede,
   endSlot,
   titleAccessory,
+  footer,
   hidden = false,
   focusTitle = true,
   children,
@@ -32,6 +33,8 @@ export function SettingsPage({
   endSlot?: ReactNode;
   /** Sits beside the title, such as Chat's Experimental badge. */
   titleAccessory?: ReactNode;
+  /** Sticks to the bottom of the panel, under the page: a source's save bar. */
+  footer?: ReactNode;
   /** Keeps the page mounted but out of sight (a source's draft and preview). */
   hidden?: boolean;
   /** Pages with a better first control, such as Search, take focus themselves. */
@@ -71,6 +74,7 @@ export function SettingsPage({
         </header>
         {children}
       </div>
+      {footer}
     </div>
   );
 }
