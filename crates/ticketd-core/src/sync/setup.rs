@@ -716,10 +716,10 @@ impl Workspace {
         };
         // A change held back by a file from a newer ticketd is not pending, but
         // it has not reached the storage either: reading the notice does not
-        // make that synced.
+        // make that synced. A file replaced from here needs nothing more.
         let unreadable = count(
             connection,
-            "SELECT (SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') = 'unreadable_file')
+            "SELECT (SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') IN ('unreadable_file', 'oversized_record'))
                   + (SELECT COUNT(*) FROM sync_dirty WHERE id IN (SELECT id FROM sync_files WHERE newer))",
         )?;
         let blocked = matches!(

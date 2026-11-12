@@ -149,6 +149,11 @@ pub enum SyncNoticeKind {
     },
     /// A file in the storage could not be used and was left alone.
     UnreadableFile { path: String, reason: String },
+    /// A file that could not be read (`reason`) was replaced by this desktop's
+    /// version of the record. Recorded as already read: nothing is left to do.
+    ReplacedFile { path: String, reason: String },
+    /// A record of this desktop is too large for a file and was not uploaded.
+    OversizedRecord { path: String, reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,11 +292,39 @@ fn notify_once(
 }
 
 /// Take back the notices about a record's file in the storage that could not
-/// be read: the file reads again, was replaced from here, or is gone.
+/// be read: the file reads again or is gone.
 fn withdraw_unreadable(connection: &Connection, kind: SyncKind, id: &str) -> Result<(), Error> {
     let withdrawn = connection.execute(
         "DELETE FROM sync_notices WHERE instr(cause, ?1) = 1",
         [format!("unreadable:{}:{id}:", name(kind))],
+    )?;
+    if withdrawn > 0 {
+        touch(connection)?;
+    }
+    Ok(())
+}
+
+/// This desktop replaced a record's file that could not be read. What was in
+/// that file is now only in the storage's version history, so its notice is
+/// kept as a trace: already read, and under a cause that the file reading
+/// again does not withdraw.
+fn note_replaced(connection: &Connection, kind: SyncKind, id: &str) -> Result<(), Error> {
+    let cause = format!("unreadable:{}:{id}:", name(kind));
+    let kept = connection.execute(
+        "UPDATE OR REPLACE sync_notices SET read = 1, cause = 'replaced:' || substr(cause, ?2), notice = json_set(notice, '$.kind', 'replaced_file') WHERE instr(cause, ?1) = 1",
+        params![cause, "unreadable:".len() + 1],
+    )?;
+    if kept > 0 {
+        touch(connection)?;
+    }
+    Ok(())
+}
+
+/// Take back the notice that a record is too large to upload.
+fn withdraw_oversized(connection: &Connection, kind: SyncKind, id: &str) -> Result<(), Error> {
+    let withdrawn = connection.execute(
+        "DELETE FROM sync_notices WHERE cause = ?1",
+        [format!("oversized:{}:{id}", name(kind))],
     )?;
     if withdrawn > 0 {
         touch(connection)?;
@@ -1235,27 +1268,28 @@ impl Workspace {
                 continue;
             }
             let Some(local) = local_view(&self.connection, kind, &dirty.id, &stored)? else {
+                withdraw_oversized(&self.connection, kind, &dirty.id)?;
                 self.clear_dirty(&dirty)?;
                 continue;
             };
             // Marks over-report; only a real difference is worth a write. A file
             // that is gone from the storage (no version) is always written.
             if stored.version.is_some() && stored.base.as_ref() == Some(&local) {
+                withdraw_oversized(&self.connection, kind, &dirty.id)?;
                 self.clear_dirty(&dirty)?;
                 continue;
             }
             let text = with_device(&self.sync_file_text(&local)?, device);
             // A file the other desktops would skip is not written: the record
             // waits here, and the person is told, until it is short enough.
-            let oversized = format!("oversized:{}:{}", name(kind), dirty.id);
             if text.len() as u64 > MAX_FILE_BYTES {
                 notify(
                     &self.connection,
-                    &oversized,
-                    &SyncNoticeKind::UnreadableFile {
+                    &format!("oversized:{}:{}", name(kind), dirty.id),
+                    &SyncNoticeKind::OversizedRecord {
                         path: format!("{}/{}", kind.table(), local.display_name()),
                         reason: format!(
-                            "this record is larger than {} MiB, the most a record's file may be, and was not uploaded; shorten it to sync it",
+                            "larger than {} MiB, the most a record's file may be",
                             MAX_FILE_BYTES / (1024 * 1024)
                         ),
                     },
@@ -1279,14 +1313,8 @@ impl Workspace {
             };
             match written {
                 Ok(file) => {
-                    withdraw_unreadable(&self.connection, kind, &dirty.id)?;
-                    if self
-                        .connection
-                        .execute("DELETE FROM sync_notices WHERE cause = ?1", [&oversized])?
-                        > 0
-                    {
-                        touch(&self.connection)?;
-                    }
+                    note_replaced(&self.connection, kind, &dirty.id)?;
+                    withdraw_oversized(&self.connection, kind, &dirty.id)?;
                     let replaced = match stored.version.as_deref() {
                         Some(expected) if expected != file.version => {
                             replaced_revision(remote, folder, &key, expected, &file.version)?

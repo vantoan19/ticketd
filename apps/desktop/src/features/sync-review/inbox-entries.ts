@@ -36,15 +36,24 @@ function fromConflict(conflict: ConflictSummary): SyncEntry {
 
 function fromNotice(notice: Notice): SyncEntry {
   const { id, timestamp, read } = notice;
+  const file = { id, timestamp, read, reference: null, icon: "file" as const };
   if (notice.kind === "unreadable_file")
     return {
-      id,
-      timestamp,
-      read,
-      reference: null,
+      ...file,
       title: "A Drive file could not be read",
       summary: `${notice.path} was skipped · ${notice.reason}`,
-      icon: "file",
+    };
+  if (notice.kind === "replaced_file")
+    return {
+      ...file,
+      title: "A Drive file was replaced",
+      summary: `${notice.path} could not be read and was replaced by this desktop's version · ${notice.reason} · the earlier file is in Drive's version history`,
+    };
+  if (notice.kind === "oversized_record")
+    return {
+      ...file,
+      title: "A record is too large to sync",
+      summary: `${notice.path} was not uploaded · ${notice.reason} · shorten it to sync it`,
     };
   if (notice.kind === "parent_removed")
     return {

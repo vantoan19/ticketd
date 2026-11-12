@@ -118,6 +118,37 @@ test("notices need no decision: a removed dependency opens its ticket, an unread
   expect(syncReview.setRead).toHaveBeenCalledWith(["notice-2"], false);
 });
 
+test("a replaced file and a record too large to sync are worded as what they are", async () => {
+  const file = { id: "n", timestamp: hours(1), path: "tickets/T-MW21.md" };
+  vi.mocked(syncReview.notices).mockResolvedValue([
+    {
+      ...file,
+      kind: "replaced_file",
+      read: true,
+      reason: "unknown field 'priority' in a ticket",
+    },
+    {
+      ...file,
+      id: "m",
+      kind: "oversized_record",
+      read: false,
+      reason: "larger than 8 MiB, the most a record's file may be",
+    },
+  ]);
+  open();
+  await screen.findByText("A Drive file was replaced");
+  expect(
+    entryOf("A Drive file was replaced").getByText(
+      "tickets/T-MW21.md could not be read and was replaced by this desktop's version · unknown field 'priority' in a ticket · the earlier file is in Drive's version history",
+    ),
+  ).toBeTruthy();
+  expect(
+    entryOf("A record is too large to sync").getByText(
+      "tickets/T-MW21.md was not uploaded · larger than 8 MiB, the most a record's file may be · shorten it to sync it",
+    ),
+  ).toBeTruthy();
+});
+
 test("sync entries sit among the others by time and follow the Unread filter", async () => {
   ordinary = [
     {

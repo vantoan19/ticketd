@@ -7,7 +7,7 @@ use std::io::Cursor;
 use ticketd_core::{
     ActivityFeedEntry, Error, RecordKind, Status, SyncKind, SyncValue, TicketPatch, Workspace,
     sync::{
-        SyncChoice, SyncNoticeKind, SyncResolution,
+        SyncChoice, SyncNoticeKind, SyncResolution, SyncState,
         remote::{FakeRemote, RemoteError, RemoteKey, RemoteKind, RemoteOp, RemoteStorage},
     },
 };
@@ -770,14 +770,21 @@ fn an_unreadable_file_is_skipped_with_one_notice_and_changes_nothing() {
         devices.workspaces[2].show_ticket(&reference).unwrap().title,
         "Fixed here"
     );
-    // The notice about the replaced file is taken back, read or not; the one
-    // about the stray file stays.
-    for workspace in &devices.workspaces {
+    // The notice about the replaced file is taken back where the file reads
+    // again, read or not; the one about the stray file stays. The desktop
+    // that replaced the file keeps a trace of it instead.
+    for (device, workspace) in devices.workspaces.iter().enumerate() {
         let notices = workspace.sync_notices().unwrap();
+        let unreadable: Vec<_> = notices
+            .iter()
+            .filter(|notice| matches!(notice.notice, SyncNoticeKind::UnreadableFile { .. }))
+            .collect();
         assert!(
-            matches!(&notices[..], [notice] if matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason, .. } if reason.contains("do not match"))),
+            matches!(&unreadable[..], [notice] if matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason, .. } if reason.contains("do not match"))),
             "{notices:?}"
         );
+        let traces = usize::from(device == 0);
+        assert_eq!(notices.len(), 1 + traces, "{notices:?}");
     }
 }
 
@@ -827,7 +834,18 @@ fn a_file_with_an_unknown_field_or_section_is_read_once_and_replaced_by_the_next
         assert_eq!((report.uploaded, report.pending), (1, 0), "{to}");
         let (_, replaced) = devices.remote_text(RemoteKind::Ticket, &id);
         assert!(replaced.contains("Changed here"), "{replaced}");
-        assert_eq!(devices.workspaces[1].sync_notices().unwrap(), [], "{to}");
+        // The hand edit is gone from the file, so the notice stays as a trace
+        // of it: already read, and no longer a reason for Needs attention.
+        let notices = devices.workspaces[1].sync_notices().unwrap();
+        assert!(
+            matches!(&notices[..], [notice] if notice.read && matches!(&notice.notice, SyncNoticeKind::ReplacedFile { path, reason: told } if path.starts_with("tickets/") && told.contains(reason))),
+            "{notices:?}"
+        );
+        let state = devices.workspaces[1].sync_status().unwrap().state;
+        assert_ne!(state, SyncState::NeedsAttention, "{to}");
+        // The file reading again on later runs does not take the trace back.
+        devices.settle([0, 1, 2]);
+        assert_eq!(devices.workspaces[1].sync_notices().unwrap(), notices);
     }
 }
 
@@ -1877,9 +1895,11 @@ fn a_record_larger_than_a_file_may_be_is_not_uploaded_and_is_reported() {
     let notices = devices.workspaces[0].sync_notices().unwrap();
     assert_eq!(notices.len(), 1);
     assert!(
-        matches!(&notices[0].notice, SyncNoticeKind::UnreadableFile { path, reason } if path.contains(&reference) && reason.contains("8 MiB")),
+        matches!(&notices[0].notice, SyncNoticeKind::OversizedRecord { path, reason } if path.contains(&reference) && reason.contains("8 MiB")),
         "{notices:?}"
     );
+    let state = devices.workspaces[0].sync_status().unwrap().state;
+    assert_eq!(state, SyncState::NeedsAttention);
 
     devices.workspaces[0]
         .change_ticket(&reference, body("Short again".into()))
@@ -1891,4 +1911,30 @@ fn a_record_larger_than_a_file_may_be_is_not_uploaded_and_is_reported() {
         devices.workspaces[2].show_ticket(&reference).unwrap().body,
         "Short again"
     );
+}
+
+/// R1: a record that was too large and is put back as it last synced has
+/// nothing to upload, and its notice goes all the same.
+#[test]
+fn the_notice_about_an_oversized_record_goes_when_the_record_is_put_back_as_synced() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let body = |text: String| TicketPatch {
+        body: Some(text),
+        ..Default::default()
+    };
+    let synced = devices.workspaces[0].show_ticket(&reference).unwrap().body;
+    devices.workspaces[0]
+        .change_ticket(&reference, body("x".repeat(8 * 1024 * 1024)))
+        .unwrap();
+    devices.sync(0);
+    assert_eq!(devices.workspaces[0].sync_notices().unwrap().len(), 1);
+
+    devices.workspaces[0]
+        .change_ticket(&reference, body(synced))
+        .unwrap();
+    let report = devices.sync(0);
+
+    assert_eq!((report.uploaded, report.pending), (0, 0));
+    assert_eq!(devices.workspaces[0].sync_notices().unwrap(), []);
 }

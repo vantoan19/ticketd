@@ -73,6 +73,13 @@ export type Resolution = { field: string; detected_at: string } & (
 );
 
 const noticeBase = { id: z.string(), timestamp: z.string(), read: z.boolean() };
+const fileNotice = {
+  ...noticeBase,
+  /** Path inside the sync folder, such as `tickets/T-MW21.md`. */
+  path: z.string(),
+  /** Why, in words for the person: "unknown field 'priority' in a ticket". */
+  reason: z.string(),
+};
 const noticeSchema = z.discriminatedUnion("kind", [
   /** Sync dropped a dependency edge that would have made a loop. */
   z.object({
@@ -94,14 +101,11 @@ const noticeSchema = z.discriminatedUnion("kind", [
     other: z.string(),
   }),
   /** A file in Drive could not be read and was skipped. */
-  z.object({
-    ...noticeBase,
-    kind: z.literal("unreadable_file"),
-    /** Path inside the sync folder, such as `tickets/T-MW21.md`. */
-    path: z.string(),
-    /** Why, in words for the person: "unknown field 'priority' in a ticket". */
-    reason: z.string(),
-  }),
+  z.object({ ...fileNotice, kind: z.literal("unreadable_file") }),
+  /** Such a file was then replaced by this desktop's version of the record. */
+  z.object({ ...fileNotice, kind: z.literal("replaced_file") }),
+  /** A record of this desktop is too large to upload. */
+  z.object({ ...fileNotice, kind: z.literal("oversized_record") }),
 ]);
 export type Notice = z.infer<typeof noticeSchema>;
 
