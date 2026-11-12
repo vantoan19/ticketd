@@ -1303,6 +1303,54 @@ fn source_fields_refreshed_on_two_devices_take_the_later_refresh_without_review(
     }
 }
 
+/// F48: taking a ticket over is not part of a refresh. A refresh made on
+/// another desktop before the two sync, however late, leaves the takeover in
+/// place, and the takeover leaves that refresh in place.
+#[test]
+fn a_takeover_on_one_device_survives_a_later_refresh_on_another() {
+    const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    for order in [[0, 1, 2], [1, 0, 2]] {
+        let mut devices = devices();
+        let apply = |workspace: &mut Workspace, text: String| {
+            let record = ticketd_core::SyncRecord::parse(&text).unwrap();
+            workspace.apply_sync_record(&record).unwrap();
+        };
+        let open = sourced("open", "2026-01-03T00:00:00Z");
+        apply(&mut devices.workspaces[0], open.clone());
+        devices.settle([0, 1, 2]);
+        let taken = open
+            .replace(
+                "source_authority: \"external\"",
+                "source_authority: \"local\"",
+            )
+            .replace(
+                "source_authority_changed_at: \"2026-01-02T03:04:05.000Z\"",
+                "source_authority_changed_at: \"2026-01-04T00:00:00.000Z\"",
+            );
+        apply(&mut devices.workspaces[0], taken);
+        apply(
+            &mut devices.workspaces[1],
+            sourced("closed", "2026-01-05T00:00:00Z"),
+        );
+
+        devices.settle(order);
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_conflicts().unwrap(), [], "{order:?}");
+            let record = workspace.export_sync_record(SyncKind::Ticket, ID).unwrap();
+            let field = |name: &str| record.fields.get(name).cloned();
+            let text = |value: &str| Some(SyncValue::Text(value.into()));
+            assert_eq!(field("source_authority"), text("local"), "{order:?}");
+            assert_eq!(
+                field("source_authority_changed_at"),
+                text("2026-01-04T00:00:00.000Z")
+            );
+            assert_eq!(field("source_state"), text("closed"), "{order:?}");
+            assert_eq!(field("source_updated_at"), text("2026-01-05T00:00:00Z"));
+        }
+    }
+}
+
 /// F41: a record's file is removed in the storage and written again, then the
 /// first file comes back. It is another file than the one last synced, so its
 /// older content must not replace newer edits without review.

@@ -428,9 +428,21 @@ fn note_removals(connection: &Connection, record: &SyncRecord, read: bool) -> Re
     Ok(all)
 }
 
-/// The source fields describe one refresh from the tracker and go together.
-/// When both sides refreshed, the later `source_updated_at` wins as a whole:
-/// mixing two refreshes field by field, or asking a person, helps nobody.
+/// The fields a refresh from the tracker writes. They describe one refresh and
+/// go together; who holds authority over the ticket is a decision made on a
+/// desktop and is merged like any other field.
+const REFRESHED: [&str; 6] = [
+    "source_state",
+    "source_closure_reason",
+    "source_updated_at",
+    "source_locator",
+    "source_display",
+    "source_url",
+];
+
+/// When both sides refreshed, the later `source_updated_at` wins for the
+/// refreshed fields as a whole: mixing two refreshes field by field, or asking
+/// a person, helps nobody.
 fn settle_source(
     base: Option<&SyncRecord>,
     local: &SyncRecord,
@@ -440,7 +452,7 @@ fn settle_source(
     let group = |record: &SyncRecord| -> BTreeMap<String, SyncValue> {
         let source = record.fields.iter();
         source
-            .filter(|(name, _)| name.starts_with("source_"))
+            .filter(|(name, _)| REFRESHED.contains(&name.as_str()))
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect()
     };
@@ -462,11 +474,12 @@ fn settle_source(
     } else {
         ours
     };
-    merged.fields.retain(|name, _| !name.starts_with("source_"));
+    let refreshed = |name: &str| REFRESHED.contains(&name);
+    merged.fields.retain(|name, _| !refreshed(name));
     merged.fields.extend(later);
     merged
         .conflicts
-        .retain(|conflict| !conflict.field.starts_with("source_"));
+        .retain(|conflict| !refreshed(&conflict.field));
 }
 
 /// Merge two versions of a record against their last-synced copy. Sections are
