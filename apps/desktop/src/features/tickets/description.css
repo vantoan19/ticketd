@@ -117,6 +117,11 @@
 .description-reading:focus-within .description-document {
   box-shadow: inset 0 0 0 1px var(--border);
 }
+/* The Edit button sits over the document's top-right corner. A code block that opens the
+   description would put its Copy code button under it, so the block starts below the button. */
+.description-document .markdown-document > .markdown-code-block:first-child {
+  margin-top: 32px;
+}
 .description-edit {
   position: absolute;
   top: 8px;
