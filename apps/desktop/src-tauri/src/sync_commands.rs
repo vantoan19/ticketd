@@ -111,10 +111,14 @@ fn name_this_desktop(
     Ok(())
 }
 
+/// What the scheduler does at launch and once a day while the app stays open.
+pub fn upkeep(workspace: &mut Workspace) -> Result<(), Error> {
+    workspace.expire_versions(None).map(drop)
+}
+
 /// What the desktop does once when it starts, before the first sync run.
 pub fn at_launch() {
     let prepared = open_workspace().and_then(|mut workspace| {
-        workspace.expire_versions(None)?;
         // No download survives the app closing: what the last session left
         // as downloading is fetched again by the next run.
         workspace.start_sync_session()?;

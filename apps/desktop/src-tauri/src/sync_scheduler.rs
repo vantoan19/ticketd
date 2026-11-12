@@ -1,6 +1,6 @@
 //! Decides when the desktop runs Workspace sync: at launch and when a
 //! connection appears, on a poll, shortly after a local change, on request and
-//! once more on exit. Time is passed in and the storage comes from the
+//! once more on exit; and the daily upkeep that needs no connection. Time is passed in and the storage comes from the
 //! binding, so none of it needs a clock or a network to be exercised.
 
 use std::{
@@ -17,6 +17,8 @@ use ticketd_core::{
 const UPLOAD_DELAY: Duration = Duration::from_secs(3);
 /// How long quitting waits for the last upload.
 pub const EXIT_LIMIT: Duration = Duration::from_secs(10);
+/// How often the upkeep runs while the app stays open.
+const UPKEEP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What this Workspace syncs with, read from the Workspace before every use.
 #[derive(Clone)]
@@ -32,6 +34,9 @@ pub struct Binding {
 type Open = dyn Fn() -> Result<Workspace, Error> + Send + Sync;
 /// `None` while the Workspace is not connected to a folder.
 type Bound = dyn Fn(&Workspace) -> Result<Option<Binding>, Error> + Send + Sync;
+/// What the Workspace needs now and then whether or not it syncs, such as
+/// dropping versions past their 30 days.
+type Upkeep = dyn Fn(&mut Workspace) -> Result<(), Error> + Send + Sync;
 /// A sync workflow of the core: an ordinary run, or the recovery action.
 type Run = fn(&mut Workspace, &dyn RemoteStorage) -> Result<SyncStatus, Error>;
 
@@ -48,6 +53,9 @@ struct Watch {
 pub struct Scheduler {
     open: Box<Open>,
     binding: Box<Bound>,
+    upkeep: Box<Upkeep>,
+    /// When the upkeep runs next: at the first tick, then once a day.
+    upkeep_at: Mutex<Duration>,
     watch: Mutex<Watch>,
     /// Held for the length of a run, so two never overlap.
     running: Mutex<()>,
@@ -74,10 +82,12 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Scheduler {
-    pub fn new(open: Box<Open>, binding: Box<Bound>) -> Self {
+    pub fn new(open: Box<Open>, binding: Box<Bound>, upkeep: Box<Upkeep>) -> Self {
         Self {
             open,
             binding,
+            upkeep,
+            upkeep_at: Mutex::default(),
             watch: Mutex::default(),
             running: Mutex::default(),
         }
@@ -110,7 +120,8 @@ impl Scheduler {
             Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
             Err(TryLockError::WouldBlock) => return Ok(None),
         };
-        let workspace = (self.open)()?;
+        let mut workspace = (self.open)()?;
+        self.keep_up(&mut workspace, now);
         let Some(binding) = (self.binding)(&workspace)? else {
             // The next connection starts with a run.
             *lock(&self.watch) = Watch::default();
@@ -137,6 +148,19 @@ impl Scheduler {
         }
         self.run(Ok(workspace), &binding, now, Workspace::sync_now)
             .map(Some)
+    }
+
+    /// Runs the upkeep when it is due. A failure waits for the next day or
+    /// launch and never holds up sync.
+    fn keep_up(&self, workspace: &mut Workspace, now: Duration) {
+        let mut at = lock(&self.upkeep_at);
+        if now < *at {
+            return;
+        }
+        *at = now + UPKEEP_INTERVAL;
+        if let Err(error) = (self.upkeep)(workspace) {
+            eprintln!("Workspace upkeep could not run: {error}");
+        }
     }
 
     /// Sync now: waits for a run in progress, then runs. `None` when not connected.
@@ -321,6 +345,8 @@ mod tests {
         scheduler: Arc<Scheduler>,
         /// How often the scheduler opened the Workspace.
         opens: Arc<AtomicUsize>,
+        /// How often the upkeep ran.
+        upkeeps: Arc<AtomicUsize>,
         bound: Arc<Mutex<Option<Binding>>>,
         path: std::path::PathBuf,
         folder: String,
@@ -365,18 +391,25 @@ mod tests {
         let (open_path, source) = (path.clone(), Arc::clone(&bound));
         let opens = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&opens);
+        let upkeeps = Arc::new(AtomicUsize::new(0));
+        let kept = Arc::clone(&upkeeps);
         let scheduler = Arc::new(Scheduler::new(
             Box::new(move || {
                 counted.fetch_add(1, Ordering::SeqCst);
                 Workspace::open(&open_path)
             }),
             Box::new(move |_| Ok(lock(&source).clone())),
+            Box::new(move |_| {
+                kept.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
         ));
         let desk = Desk {
             _directory: directory,
             remote,
             scheduler,
             opens,
+            upkeeps,
             bound,
             path,
             folder: status.folder.unwrap().id,
@@ -398,6 +431,20 @@ mod tests {
         assert_eq!(desk.scheduler.tick(2 * SECOND).unwrap(), None);
         desk.bind(Some(desk.binding(MINUTE)));
         assert!(desk.scheduler.tick(3 * SECOND).unwrap().is_some());
+    }
+
+    #[test]
+    fn upkeep_runs_at_the_first_tick_and_once_a_day_connected_or_not() {
+        let desk = desk();
+        desk.bind(None);
+        let day = 24 * 60 * MINUTE;
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+        assert_eq!(desk.upkeeps.load(Ordering::SeqCst), 1);
+        desk.scheduler.tick(day - SECOND).unwrap();
+        assert_eq!(desk.upkeeps.load(Ordering::SeqCst), 1);
+        desk.bind(Some(desk.binding(MINUTE)));
+        desk.scheduler.tick(day).unwrap();
+        assert_eq!(desk.upkeeps.load(Ordering::SeqCst), 2);
     }
 
     #[test]

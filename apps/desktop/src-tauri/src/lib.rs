@@ -1446,6 +1446,7 @@ pub fn run() -> Result<(), tauri::Error> {
     let sync = std::sync::Arc::new(sync_scheduler::Scheduler::new(
         Box::new(open_workspace),
         Box::new(sync_commands::binding),
+        Box::new(sync_commands::upkeep),
     ));
     let coordinator = std::sync::Arc::new(ticketd_core::source::RefreshCoordinator::new(
         std::sync::Arc::new(ticketd_core::source::SystemClock),
