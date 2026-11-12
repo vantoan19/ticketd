@@ -1342,6 +1342,21 @@ impl Supervisor {
                         turn_id: turn_id.clone(),
                     });
                 }
+                // The harness ended the turn, so text it streamed without a final copy
+                // is all there is: it is kept whole. Only lost contact leaves a response
+                // cut off.
+                let (ended, streaming) = std::mem::take(&mut self.text)
+                    .into_iter()
+                    .partition(|buffer| buffer.turn_id == turn_id);
+                self.text = streaming;
+                observations.extend(ended.into_iter().map(|buffer: TextBuffer| {
+                    ChatObservation::AssistantText {
+                        message_id: buffer.message_id,
+                        turn_id: buffer.turn_id,
+                        text: buffer.text,
+                        complete: true,
+                    }
+                }));
                 let (state, detail, problem, problem_resets_at) = match outcome {
                     TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
                     TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None, None),

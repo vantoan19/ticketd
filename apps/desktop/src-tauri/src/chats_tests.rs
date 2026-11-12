@@ -1137,3 +1137,77 @@ fn a_restore_that_replaced_the_data_is_a_success_whatever_followed_it() {
     let refused = restore_outcome(Err("not a ticketd backup".to_owned()), Ok(()), 3);
     assert_eq!(refused.unwrap_err(), "not a ticketd backup");
 }
+
+fn responses<'a>(changes: &'a [Value], item: &str) -> Vec<&'a str> {
+    changes
+        .iter()
+        .filter(|change| {
+            change["item"]["kind"] == "response"
+                && change["item"]["id"]
+                    .as_str()
+                    .is_some_and(|id| id.ends_with(item))
+        })
+        .map(|change| change["item"]["state"].as_str().unwrap())
+        .collect()
+}
+
+/// L1, L2: a turn that starts after the view attached streams as streaming, its
+/// working line counts from its own start, and a turn that ended leaves no response
+/// reading as cut off.
+#[tokio::test(start_paused = true)]
+async fn a_turn_started_after_the_view_attached_streams_and_times_from_its_own_start() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (_, seen) = f.open(&id).await;
+    // A Chat change while turn-1 is active, so the view holds the Chat with that turn.
+    f.chats
+        .set_retention(&id, Retention::Archive)
+        .await
+        .unwrap();
+    settle().await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    f.chats.send(&id, "second", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(EventKind::TextDelta {
+        turn: NativeTurnId::new("turn-2"),
+        item: NativeItemId::new("m2"),
+        text: "Hel".to_owned(),
+    })
+    .await;
+    // Past a checkpoint: the stored, unfinished text reaches the view as a record.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let changes = seen.lock().unwrap().clone();
+    let current = f.core().chat(&id).unwrap().active_turn.unwrap();
+    let chat = changes.iter().rev().find(|c| c["kind"] == "chat").unwrap();
+    assert_eq!(chat["chat"]["doing"]["since"], json!(current.started_at));
+    let states = responses(&changes, ":m2");
+    assert!(states.len() >= 2, "streamed and checkpointed: {states:?}");
+    assert!(
+        states.iter().all(|state| *state == "streaming"),
+        "{states:?}"
+    );
+
+    // The harness ended the turn without a final text: nothing was lost, so it is
+    // complete, not "Incomplete".
+    f.emit(EventKind::TurnEnded {
+        turn: NativeTurnId::new("turn-2"),
+        outcome: TurnOutcome::Interrupted,
+        submissions: Vec::new(),
+    })
+    .await;
+    let changes = seen.lock().unwrap().clone();
+    assert_eq!(responses(&changes, ":m2").last(), Some(&"complete"));
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Response { state: "complete", text, .. } if text == "Hel"
+    )));
+}
