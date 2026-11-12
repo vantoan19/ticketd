@@ -77,6 +77,7 @@ import {
 } from "@/features/attachments/AttachmentPreview";
 import {
   useDraftRecovery,
+  useClaimRecoveryNotice,
   useDraftRecoveryError,
 } from "@/lib/draft-recovery-context";
 import {
@@ -806,6 +807,11 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const recovery = useDraftRecovery();
   const recoveryError = useDraftRecoveryError();
+  const claimRecoveryNotice = useClaimRecoveryNotice();
+  useEffect(
+    () => (recoveryError ? claimRecoveryNotice() : undefined),
+    [recoveryError, claimRecoveryNotice],
+  );
   const [historyOwner] = useState(
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
