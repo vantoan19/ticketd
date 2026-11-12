@@ -141,6 +141,7 @@
   overflow: hidden;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
   color: var(--foreground);
   font-size: var(--text-ui);
   font-weight: 400;
