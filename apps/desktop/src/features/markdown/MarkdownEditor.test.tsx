@@ -399,7 +399,17 @@ describe("Toolbar layout and links", () => {
     expect(container.querySelector(".rich-toolbar")).toBe(toolbar);
     expect(toolbar?.hasAttribute("hidden")).toBe(false);
     expect(toolbar?.getAttribute("data-visible")).toBe("false");
-    expect(toolbar?.hasAttribute("inert")).toBe(true);
+    expect(
+      toolbar?.querySelector(".rich-toolbar-tools")?.hasAttribute("inert"),
+    ).toBe(true);
+  });
+  it("makes the copy and source actions the toolbar row's last item, not an overlay", () => {
+    const { container } = render(
+      <MarkdownEditor value="text" onChange={vi.fn()} />,
+    );
+    const row = container.querySelector(".rich-toolbar");
+    expect(row?.lastElementChild?.classList.contains("editor-mode")).toBe(true);
+    expect(row?.firstElementChild?.getAttribute("role")).toBe("toolbar");
   });
   it("floats a focus-only toolbar above the frame but keeps a persistent one in it (L6)", () => {
     const idle = render(<MarkdownEditor value="text" onChange={vi.fn()} />);

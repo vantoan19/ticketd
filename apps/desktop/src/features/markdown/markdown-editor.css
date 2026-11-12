@@ -17,8 +17,18 @@
   align-items: center;
   gap: 2px;
   min-height: 40px;
-  padding: 4px var(--editor-actions-reserve, 0) 4px 4px;
+  padding: 4px;
   background: var(--background);
+}
+/* The formatting tools wrap among themselves only when alone on a row; the copy/export/source
+   actions are the row's last item, so when both cannot fit it is the actions that drop to a second
+   row, never a single formatting button. */
+.rich-toolbar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
 }
 /* A toolbar that appears on focus is docked inside the frame's top edge and grows the frame, so it
    can never cover a neighbour. While idle it takes no space: the frame stays tight. */
@@ -26,18 +36,22 @@
   border-radius: var(--radius) var(--radius) 0 0;
   box-shadow: 0 1px 0 var(--border);
 }
+/* Idle: only the hover-revealed actions remain, out of flow at the row's own position (no top
+   offset), so they sit below any notice above the editor and never cover it. */
 .rich-toolbar[data-floating][data-visible="false"] {
-  display: none;
-}
-/* A persistent toolbar is hidden by visibility, never removed: controls below must not move. */
-.rich-toolbar[data-visible="false"] {
-  visibility: hidden;
-}
-.editor-mode--inline {
   position: absolute;
-  top: 4px;
   right: 4px;
   z-index: 1;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+.rich-toolbar[data-visible="false"] .rich-toolbar-tools {
+  display: none;
+}
+.editor-mode--inline {
+  margin-inline-start: auto;
   align-items: center;
   padding: 0;
 }
