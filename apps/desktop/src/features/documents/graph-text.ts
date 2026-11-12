@@ -361,3 +361,8 @@ export function stateLine(node: {
 export function nodeAriaLabel(node: GraphNode): string {
   return `${kindNames[node.kind]}: ${node.label}${node.trashed ? " (Trash)" : ""}`;
 }
+
+/** A node's name in a list: its label with a Trash suffix when it is trashed. */
+export function nodeName(node: { label: string; trashed: boolean }): string {
+  return `${node.label}${node.trashed ? " (Trash)" : ""}`;
+}
