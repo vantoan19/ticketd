@@ -68,3 +68,8 @@ pub(crate) fn migrate_file_identity(connection: &rusqlite::Connection) -> Result
 pub(crate) fn migrate_file_created(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_file_created(connection)
 }
+
+/// Format version 65.
+pub(crate) fn migrate_last_folder(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_last_folder(connection)
+}

@@ -113,6 +113,8 @@ const setupOptionsSchema = z.object({
       counts: countsSchema,
     }),
   ),
+  /** The folder this Workspace synced with before it was disconnected, while it can go back to it. */
+  reconnect: z.object({ id: z.string(), name: z.string() }).nullable(),
 });
 export type SyncSetupOptions = z.infer<typeof setupOptionsSchema>;
 
@@ -154,10 +156,16 @@ export const syncApi = {
    */
   connect: () => status(invoke("sync_connect")),
 
-  /** `sync_setup_options`: what the two setup choices would do, while `choosing`. */
+  /** `sync_setup_options`: what the setup choices would do, while `choosing`. */
   async setupOptions(): Promise<SyncSetupOptions> {
     return setupOptionsSchema.parse(await invoke("sync_setup_options"));
   },
+
+  /**
+   * `sync_reconnect`: back to the folder of `setupOptions().reconnect`. The sync
+   * that follows merges both sides; nothing is replaced.
+   */
+  reconnect: () => status(invoke("sync_reconnect")),
 
   /** `sync_upload_workspace`: creates the Drive folder and starts the first upload. */
   uploadWorkspace: () => status(invoke("sync_upload_workspace")),

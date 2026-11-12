@@ -43,7 +43,7 @@ Keeping one person's Workspace the same on several desktops through that person'
 _Avoid_: Cloud sync, backup
 
 **Last-synced copy**:
-A device's own copy of a synced record as it was when that device last synchronized it. When a record changed both locally and in Drive, each side is compared with this copy to tell which fields each side changed.
+A device's own copy of a synced record as it was when that device last synchronized it. When a record changed both locally and in Drive, each side is compared with this copy to tell which fields each side changed. The copies are kept while a device is disconnected, so reconnecting to the same folder merges the same way.
 
 **Needs review**:
 The state of a synced record whose same field was changed on two devices. The local value is kept until the person chooses or edits the value in a comparison of the conflicting fields. Changes to different fields, and to tags and other sets, combine without review.

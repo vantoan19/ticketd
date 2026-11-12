@@ -1822,3 +1822,172 @@ fn an_attachment_that_cannot_be_saved_here_is_not_downloaded_again_by_every_run(
     );
     assert_eq!(b.sync_notices().unwrap(), []);
 }
+
+/// L2: a desktop that disconnected goes back to its folder as after a long
+/// time offline, instead of uploading or downloading a Workspace again.
+#[test]
+fn reconnecting_to_the_folder_last_synced_merges_both_sides_and_keeps_this_desktops_identity() {
+    let desks = desks();
+    let (mut a, login, attachment) = desks.uploaded("Desk A");
+    let search = a.create_ticket("Search").unwrap().reference;
+    a.sync_now(&desks.remote).unwrap();
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    b.sync_now(&desks.remote).unwrap();
+    let code = b.device_code().unwrap();
+    let devices = registered(&desks);
+    let folder = desks.folder();
+
+    b.sync_disconnect().unwrap();
+    // Signed out and in again, also through "Use another account" on the way.
+    b.sync_connect("connection-2", "person@example.com")
+        .unwrap();
+    b.sync_disconnect().unwrap();
+    b.sync_connect("connection-2", "person@example.com")
+        .unwrap();
+    let in_progress = TicketPatch {
+        status: Some(ticketd_core::Status::InProgress),
+        ..Default::default()
+    };
+    a.change_ticket(&login, in_progress).unwrap();
+    retitle(&mut b, &login, "Log on");
+    retitle(&mut a, &search, "Find");
+    retitle(&mut b, &search, "Look up");
+    a.create_ticket("Made on A").unwrap();
+    b.create_ticket("Made on B").unwrap();
+    a.sync_now(&desks.remote).unwrap();
+
+    let options = b.sync_setup_options(&desks.remote).unwrap();
+    let offered = options.reconnect.unwrap();
+    assert_eq!(
+        (offered.id.as_str(), offered.name.as_str()),
+        (folder.as_str(), "ticketd Home")
+    );
+    // Upload and Download are still there to choose.
+    assert_eq!(options.existing.len(), 1);
+
+    let status = b.sync_reconnect(&desks.remote).unwrap();
+    assert_eq!(
+        (status.connection, status.first_sync),
+        (SyncConnection::Connected, None)
+    );
+    let status = b.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(status.recovery, None);
+    let review: Vec<_> = status
+        .needs_review
+        .iter()
+        .map(|item| (item.reference.as_deref(), item.title.as_str()))
+        .collect();
+    assert_eq!(review, [(Some(search.as_str()), "Look up")]);
+    let merged = b.show_ticket(&login).unwrap();
+    assert_eq!(
+        (merged.title.as_str(), merged.status),
+        ("Log on", ticketd_core::Status::InProgress)
+    );
+    a.sync_now(&desks.remote).unwrap();
+    assert_eq!(a.show_ticket(&login).unwrap().title, "Log on");
+    for desk in [&a, &b] {
+        let mut all = titles(desk);
+        all.sort();
+        assert_eq!(all.len(), 4, "{all:?}");
+        assert!(all.contains(&"Made on A".into()) && all.contains(&"Made on B".into()));
+    }
+    // The same desktop as before: its code, its entry, its files.
+    assert_eq!(b.device_code().unwrap(), code);
+    let after = registered(&desks);
+    assert_eq!(
+        after["devices"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        devices["devices"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(after.get("retired"), devices.get("retired"));
+    assert_eq!(
+        availability_of(&b, &attachment),
+        AttachmentAvailabilityState::Downloaded
+    );
+    assert_eq!(
+        std::fs::read(b.attachment_open_path(&attachment).unwrap()).unwrap(),
+        BYTES
+    );
+    assert_eq!(desks.remote.folders().unwrap().len(), 1);
+}
+
+#[test]
+fn reconnect_is_not_offered_to_another_account_a_missing_folder_or_a_restored_workspace() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    let offered = |desk: &Workspace| desk.sync_setup_options(&desks.remote).unwrap().reconnect;
+    // Never disconnected: nothing to go back to.
+    assert_eq!(offered(&desks.desk("Desk B")), None);
+
+    a.sync_disconnect().unwrap();
+    a.sync_connect("connection-2", "other@example.com").unwrap();
+    assert_eq!(offered(&a), None);
+    assert!(matches!(
+        a.sync_reconnect(&desks.remote),
+        Err(Error::Sync(_))
+    ));
+    assert_eq!(
+        a.sync_status().unwrap().connection,
+        SyncConnection::Choosing
+    );
+
+    a.sync_connect("connection-3", "person@example.com")
+        .unwrap();
+    assert!(offered(&a).is_some());
+
+    // A backup made while disconnected is restored: upload or download, as
+    // after any restore.
+    let path = desks.directory.path().join("Desk A");
+    let backup = desks.directory.path().join("backup.sqlite3");
+    a.backup(&backup).unwrap();
+    drop(a);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut a = Workspace::open(&path).unwrap();
+    a.sync_connect("connection-3", "person@example.com")
+        .unwrap();
+    assert_eq!(offered(&a), None);
+
+    let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
+    b.sync_now(&desks.remote).unwrap();
+    b.sync_disconnect().unwrap();
+    b.sync_connect("connection-1", "person@example.com")
+        .unwrap();
+    assert!(offered(&b).is_some());
+    desks.remote.remove_folder(&desks.folder());
+    assert_eq!(offered(&b), None);
+    assert!(matches!(
+        b.sync_reconnect(&desks.remote),
+        Err(Error::Sync(_))
+    ));
+}
+
+/// Format 65 remembers the folder a disconnected Workspace last synced with.
+#[test]
+fn a_format_64_workspace_gains_the_remembered_folder() {
+    let desks = desks();
+    let (desk, _, _) = desks.uploaded("a");
+    drop(desk);
+    let path = desks.directory.path().join("a");
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture
+        .execute_batch(
+            "ALTER TABLE sync_state DROP COLUMN last_folder; ALTER TABLE sync_state DROP COLUMN last_account; PRAGMA user_version = 64;",
+        )
+        .unwrap();
+    drop(fixture);
+
+    let mut desk = Workspace::open(&path).unwrap();
+    desk.sync_disconnect().unwrap();
+    desk.sync_connect("connection-1", "person@example.com")
+        .unwrap();
+    let options = desk.sync_setup_options(&desks.remote).unwrap();
+    assert_eq!(options.reconnect.unwrap().name, "ticketd Home");
+}

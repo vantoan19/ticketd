@@ -1158,7 +1158,8 @@ and upload queues. Workspace sync never publishes to an external tracker.
 ### 20.2. Setup
 
 - Connect Google Drive, then choose one of two actions: upload this Workspace, or
-  download an existing one from Drive.
+  download an existing one from Drive. A Workspace that was disconnected can
+  instead reconnect to its folder, as described below.
 - Downloading replaces the local Workspace after saving a safety backup. Two
   Workspaces created independently are never merged automatically.
 - A Workspace has one storage destination.
@@ -1172,6 +1173,13 @@ and upload queues. Workspace sync never publishes to an external tracker.
 - Restoring a backup disconnects the Workspace from its Drive folder. The
   restored content is not overwritten by what Drive holds: the person chooses
   upload or download again.
+- Disconnecting stops sync on that desktop and deletes nothing. When the same
+  Google account is connected again and the folder the Workspace synced with is
+  still in Drive, setup offers Reconnect to that folder first, above upload and
+  download. Reconnecting merges like a return from a long time offline (20.4):
+  nothing is replaced on either side, the desktop keeps its device code, and
+  Attachments already downloaded stay downloaded. A restored Workspace is not
+  offered Reconnect.
 
 ### 20.3. When sync runs
 

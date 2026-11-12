@@ -1663,6 +1663,7 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::sync_connect,
             sync_commands::sync_setup_options,
             sync_commands::sync_upload_workspace,
+            sync_commands::sync_reconnect,
             sync_commands::sync_download_workspace,
             sync_commands::sync_now,
             sync_commands::sync_recover,

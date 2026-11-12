@@ -204,6 +204,7 @@ function Connect() {
 }
 
 const UPLOAD = "upload";
+const RECONNECT = "reconnect";
 
 function Choose({
   status,
@@ -226,9 +227,15 @@ function Choose({
       .then((read) => {
         if (!current) return;
         setOptions(read);
-        // Nothing here to upload and a Workspace in Drive: that one is what the person came for.
+        // The folder this Workspace synced with is where it goes back to. Failing
+        // that, nothing here to upload and a Workspace in Drive: that one is
+        // what the person came for.
         const [first] = read.existing;
-        if (first && Object.values(read.local).every((count) => count === 0))
+        if (read.reconnect) setChoice(RECONNECT);
+        else if (
+          first &&
+          Object.values(read.local).every((count) => count === 0)
+        )
           setChoice(first.folder_id);
       })
       .catch((reason: unknown) => {
@@ -264,10 +271,19 @@ function Choose({
               onClick={() =>
                 download
                   ? setConfirming(true)
-                  : void run(syncApi.uploadWorkspace, "Sync did not start")
+                  : void run(
+                      choice === RECONNECT
+                        ? syncApi.reconnect
+                        : syncApi.uploadWorkspace,
+                      "Sync did not start",
+                    )
               }
             >
-              {download ? "Download…" : "Start sync"}
+              {download
+                ? "Download…"
+                : choice === RECONNECT
+                  ? "Reconnect"
+                  : "Start sync"}
             </Button>
           </div>
         </>
@@ -293,6 +309,21 @@ function Choose({
             onValueChange={setChoice}
             className="upload-destination-choices"
           >
+            {options.reconnect && (
+              <RadioGroup.Item
+                value={RECONNECT}
+                className="upload-destination-choice"
+              >
+                <span className="layout-choice-dot" aria-hidden="true" />
+                <span>
+                  Reconnect to “{options.reconnect.name}”
+                  <small>
+                    Changes made here and in Drive are merged, and nothing is
+                    replaced
+                  </small>
+                </span>
+              </RadioGroup.Item>
+            )}
             <RadioGroup.Item
               value={UPLOAD}
               className="upload-destination-choice"

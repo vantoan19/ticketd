@@ -20,7 +20,7 @@ use super::{
     RecordKind,
     attachments::{AttachmentDownloads, MANIFEST},
     engine::{dirty_kind, touch},
-    remote::{RemoteError, RemoteFile, RemoteKey, RemoteKind, RemoteStorage},
+    remote::{RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteKind, RemoteStorage},
 };
 use crate::{Error, SyncKind, Workspace, sync_files::MAX_FILE_BYTES};
 
@@ -97,14 +97,29 @@ pub(crate) fn migrate_file_created(connection: &Connection) -> Result<(), Error>
     add_columns(connection, &[("sync_files", "file_created", "TEXT")])
 }
 
+/// Format version 65: the folder this Workspace synced with until it was
+/// disconnected, and the account that folder is in, for reconnecting to it.
+pub(crate) fn migrate_last_folder(connection: &Connection) -> Result<(), Error> {
+    add_columns(
+        connection,
+        &[
+            ("sync_state", "last_folder", "TEXT"),
+            ("sync_state", "last_account", "TEXT"),
+        ],
+    )
+}
+
+fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, Error> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+        [table, column],
+        |row| row.get(0),
+    )?)
+}
+
 fn add_columns(connection: &Connection, columns: &[(&str, &str, &str)]) -> Result<(), Error> {
     for (table, column, definition) in columns {
-        let present: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
-            [table, column],
-            |row| row.get(0),
-        )?;
-        if !present {
+        if !has_column(connection, table, column)? {
             connection.execute_batch(&format!(
                 "ALTER TABLE {table} ADD COLUMN {column} {definition};"
             ))?;
@@ -291,6 +306,9 @@ pub struct ExistingWorkspace {
 pub struct SetupOptions {
     pub local: SyncCounts,
     pub existing: Vec<ExistingWorkspace>,
+    /// The folder this Workspace synced with before it was disconnected, when
+    /// [`Workspace::sync_reconnect`] can go back to it.
+    pub reconnect: Option<SyncFolder>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -375,6 +393,8 @@ struct State {
     run_token: Option<String>,
     run_previous: Option<String>,
     run_due: bool,
+    last_folder: Option<String>,
+    last_account: Option<String>,
 }
 
 /// A unit enum as the text serde gives it, for a column.
@@ -391,7 +411,7 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
 
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due FROM sync_state",
+        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account FROM sync_state",
         [],
         |row| {
             Ok(State {
@@ -412,6 +432,8 @@ fn state(connection: &Connection) -> Result<State, Error> {
                 run_token: row.get(13)?,
                 run_previous: row.get(14)?,
                 run_due: row.get(15)?,
+                last_folder: row.get(16)?,
+                last_account: row.get(17)?,
             })
         },
     )?)
@@ -456,8 +478,32 @@ pub(super) fn forget_folder(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "UPDATE sync_state SET folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, first_sync = NULL;",
     )?;
+    // Without the last-synced copies there is nothing to reconnect with.
+    if has_column(connection, "sync_state", "last_folder")? {
+        connection
+            .execute_batch("UPDATE sync_state SET last_folder = NULL, last_account = NULL;")?;
+    }
     connection.execute_batch(GIVE_UP_DOWNLOADS)?;
     forget_synced(connection)
+}
+
+/// The folder a disconnected Workspace can go back to: the one it last synced
+/// with, while the account signed in is the one that folder is in and the
+/// storage still lists it.
+fn remembered(state: &State, folders: &[RemoteFolder]) -> Option<SyncFolder> {
+    let account = state
+        .account
+        .as_ref()
+        .filter(|account| !account.is_empty())?;
+    if state.folder.is_some() || state.last_account.as_ref() != Some(account) {
+        return None;
+    }
+    let last = state.last_folder.as_ref()?;
+    let folder = folders.iter().find(|folder| folder.id == *last)?;
+    Some(SyncFolder {
+        id: folder.id.clone(),
+        name: folder.name.clone(),
+    })
 }
 
 /// A record as the status names it, or `None` when it is not in this Workspace.
@@ -545,13 +591,36 @@ impl Workspace {
         self.sync_status()
     }
 
-    /// Stop syncing here. Local content and the folder in the storage stay as they are.
+    /// Stop syncing here. Local content and the folder in the storage stay as
+    /// they are, and so do the last-synced copies and this desktop's place in
+    /// the device registry: the folder is remembered with its account, for
+    /// [`Workspace::sync_reconnect`].
     pub fn sync_disconnect(&mut self) -> Result<SyncStatus, Error> {
+        // Signing out before a folder is chosen leaves what was remembered.
         self.connection.execute(
-            "UPDATE sync_state SET connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
+            "UPDATE sync_state SET last_account = CASE WHEN folder IS NULL THEN last_account ELSE account END, last_folder = COALESCE(folder, last_folder), connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
             [],
         )?;
         self.connection.execute_batch(GIVE_UP_DOWNLOADS)?;
+        touch(&self.connection)?;
+        self.sync_status()
+    }
+
+    /// Go back to the folder this Workspace synced with before it was
+    /// disconnected. The next [`Workspace::sync_now`] is an ordinary run after
+    /// a long time offline: the last-synced copies are still the merge bases,
+    /// this desktop is still the one the device registry lists, and nothing is
+    /// replaced on either side.
+    pub fn sync_reconnect(&mut self, remote: &dyn RemoteStorage) -> Result<SyncStatus, Error> {
+        let folder = remembered(&state(&self.connection)?, &remote.folders()?).ok_or_else(|| {
+            Error::Sync(
+                "the folder this Workspace synced with is not in this Google Drive account; upload or download instead".into(),
+            )
+        })?;
+        self.connection.execute(
+            "UPDATE sync_state SET folder = ?1, folder_name = ?2, first_sync = NULL, first_total = 0, recovery = NULL, recovery_message = NULL",
+            params![folder.id, folder.name],
+        )?;
         touch(&self.connection)?;
         self.sync_status()
     }
@@ -735,8 +804,10 @@ impl Workspace {
                 "SELECT COUNT(*) FROM attachments WHERE kind = 'local_snapshot'",
             )?,
         };
+        let folders = remote.folders()?;
+        let reconnect = remembered(&state(connection)?, &folders);
         let mut existing = Vec::new();
-        for folder in remote.folders()? {
+        for folder in folders {
             let listing = match remote.list(&folder.id) {
                 Ok(listing) => listing,
                 // Removed since it was listed.
@@ -774,7 +845,11 @@ impl Workspace {
                 folder_name: folder.name,
             });
         }
-        Ok(SetupOptions { local, existing })
+        Ok(SetupOptions {
+            local,
+            existing,
+            reconnect,
+        })
     }
 
     /// Give this Workspace a folder of its own in the storage, named `name`.

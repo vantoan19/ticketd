@@ -894,6 +894,15 @@ pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
     Ok(workspace.sync_upload_workspace(remote.as_ref(), "ticketd Workspace")?)
 }
 
+/// Back to the folder this Workspace synced with before it was disconnected.
+/// The scheduler's next look runs the sync that merges both sides.
+#[tauri::command(async)]
+pub fn sync_reconnect() -> Outcome<SyncStatus> {
+    let mut workspace = open_workspace()?;
+    let remote = signed_in_drive(&workspace)?;
+    Ok(workspace.sync_reconnect(remote.as_ref())?)
+}
+
 /// The status after a download, and where the replaced Workspace was kept.
 #[derive(Debug, Serialize)]
 pub struct Downloaded {

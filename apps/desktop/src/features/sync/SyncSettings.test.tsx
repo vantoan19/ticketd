@@ -28,6 +28,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     connect: vi.fn(),
     setupOptions: vi.fn(),
     uploadWorkspace: vi.fn(),
+    reconnect: vi.fn(),
     downloadWorkspace: vi.fn(),
     syncNow: vi.fn(),
     recover: vi.fn(),
@@ -63,6 +64,7 @@ const options = {
       counts: { tickets: 42, documents: 9, attachments: 12 },
     },
   ],
+  reconnect: null,
 };
 
 function show() {
@@ -134,6 +136,35 @@ test("uploading this Workspace is the preselected setup choice", async () => {
   expect(
     screen.getByRole("progressbar", { name: "First upload" }),
   ).toBeTruthy();
+  expect(api.downloadWorkspace).not.toHaveBeenCalled();
+});
+
+test("a Workspace that synced with a folder of this account is offered that folder first", async () => {
+  api.status.mockResolvedValue(choosing());
+  api.setupOptions.mockResolvedValue({
+    ...options,
+    // Also when there is nothing here to upload, which otherwise preselects a download.
+    local: { tickets: 0, documents: 0, attachments: 0 },
+    reconnect: { id: "folder-1", name: "ticketd · web-app" },
+  });
+  api.reconnect.mockResolvedValue(syncStatus({ state: "upload_pending" }));
+  show();
+  const choices = await screen.findAllByRole("radio");
+  expect(choices.map((choice) => choice.textContent.split("”")[0])).toEqual([
+    "Reconnect to “ticketd · web-app",
+    "Upload this Workspace0 tickets and 0 Documents go to a new folder in your Drive",
+    "Download “ticketd · web-app",
+  ]);
+  expect(choices[0]?.getAttribute("aria-checked")).toBe("true");
+  expect(choices[0]?.textContent).toContain(
+    "Changes made here and in Drive are merged, and nothing is replaced",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  expect(
+    await screen.findByRole("heading", { name: "This desktop" }),
+  ).toBeTruthy();
+  expect(api.reconnect).toHaveBeenCalled();
+  expect(api.uploadWorkspace).not.toHaveBeenCalled();
   expect(api.downloadWorkspace).not.toHaveBeenCalled();
 });
 
@@ -427,6 +458,7 @@ test("an empty Workspace beside one in Drive preselects the download, and each f
         counts: { tickets: 1, documents: 0, attachments: 0 },
       },
     ],
+    reconnect: null,
   });
   const first = await screen.findByRole("radio", {
     name: /Download “ticketd · web-app”/,
