@@ -1348,3 +1348,33 @@ async fn a_message_whose_session_did_not_open_is_back_in_the_queue() {
     tokio::time::sleep(Duration::from_secs(3_600)).await;
     assert_eq!(f.submitted(), ["first"], "nothing is resent automatically");
 }
+
+/// N4: losing the harness mid-turn is told once, by the transcript's marker ("whether
+/// this turn finished is unknown"), not again by an error card claiming the turn is
+/// not complete.
+#[tokio::test(start_paused = true)]
+async fn contact_lost_mid_turn_is_told_once() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(EventKind::TextDelta {
+        turn: turn(),
+        item: NativeItemId::new("m1"),
+        text: "Half an ans".to_owned(),
+    })
+    .await;
+    f.fake.lose_process().await;
+    settle().await;
+
+    let (opened, _) = f.open(&id).await;
+    let markers = opened
+        .snapshot
+        .items
+        .iter()
+        .filter(|item| matches!(item, Item::Marker { message: Some(text), .. } if text.starts_with("Contact with")))
+        .count();
+    assert_eq!(markers, 1);
+    assert_eq!(
+        opened.snapshot.chat.problem.map(|problem| problem.kind),
+        None
+    );
+}
