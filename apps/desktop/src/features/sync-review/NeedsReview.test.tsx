@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { syncReview, type ConflictSummary } from "@/lib/sync-review-api";
@@ -111,4 +112,26 @@ test("conflicts that cannot be read again keep the notice that was showing", asy
   await vi.waitFor(() => expect(syncReview.conflicts).toHaveBeenCalledTimes(2));
   await act(() => new Promise<void>((done) => setTimeout(done)));
   expect(screen.getByRole("region", { name: "Needs review" })).toBeTruthy();
+});
+
+test("a comparison stays open when its conflict leaves the list", async () => {
+  vi.mocked(syncReview.conflicts).mockResolvedValue([conflict]);
+  const view = (change: number) => (
+    <WorkspaceChangeProvider value={change}>
+      <NeedsReviewNotice kind="ticket" id="guid-12" />
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(view(0));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Review changes" }),
+  );
+  // The comparison reads the list itself, and has seen the conflict on it.
+  await waitFor(() => expect(syncReview.conflicts).toHaveBeenCalledTimes(2));
+  vi.mocked(syncReview.conflicts).mockResolvedValue([]);
+  rerender(view(1));
+  expect((await screen.findByRole("status")).textContent).toContain(
+    "A newer change settled this",
+  );
+  expect(screen.queryByRole("region", { name: "Needs review" })).toBeNull();
+  expect(screen.getByRole("dialog", { name: "Review changes" })).toBeTruthy();
 });

@@ -10,11 +10,12 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { BridgeFailure } from "@/lib/api/bridge-failure";
 import { syncReview, type Conflict } from "@/lib/sync-review-api";
+import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 import { ConflictReview } from "./ConflictReview";
 import { dayTime } from "./labels";
 
 vi.mock("@/lib/sync-review-api", () => ({
-  syncReview: { conflict: vi.fn(), resolve: vi.fn() },
+  syncReview: { conflict: vi.fn(), conflicts: vi.fn(), resolve: vi.fn() },
 }));
 
 window.ResizeObserver = class {
@@ -70,6 +71,7 @@ const open = () =>
 
 beforeEach(() => {
   vi.mocked(syncReview.conflict).mockResolvedValue(conflict);
+  vi.mocked(syncReview.conflicts).mockResolvedValue([summary]);
   vi.mocked(syncReview.resolve).mockResolvedValue();
 });
 afterEach(() => {
@@ -338,4 +340,42 @@ test("a review whose values were all settled meanwhile says so and offers nothin
   );
   expect(screen.queryByRole("radio")).toBeNull();
   expect(onResolved).toHaveBeenCalled();
+});
+
+test("the keyboard starts on the first choice, and reaches Save before Later", async () => {
+  open();
+  const first = await screen.findByRole("radio", {
+    name: "Status from this desktop: In review",
+  });
+  await waitFor(() => expect(document.activeElement).toBe(first));
+  const save = screen.getByRole("button", { name: "Save" });
+  const later = screen.getByRole("button", { name: "Later" });
+  expect(
+    first.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    save.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("a review that a newer change settles while open says so and stays open", async () => {
+  const view = (change: number) => (
+    <WorkspaceChangeProvider value={change}>
+      <ConflictReview conflict={summary} onClose={onClose} />
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(view(0));
+  await screen.findByRole("radio", { name: /Status from this desktop/ });
+  vi.mocked(syncReview.conflicts).mockResolvedValue([]);
+  rerender(view(1));
+  expect((await screen.findByRole("status")).textContent).toContain(
+    "A newer change settled this while it was open",
+  );
+  expect(screen.queryByRole("radio")).toBeNull();
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled,
+  ).toBe(true);
+  // Nothing is left to put off.
+  expect(screen.queryByRole("button", { name: "Later" })).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
 });
