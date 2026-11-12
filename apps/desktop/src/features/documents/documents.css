@@ -168,14 +168,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.document-conflict p {
-  margin: 0 0 12px;
-}
-.document-conflict-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
 .document-dialog #document-title {
   font-size: var(--text-ui);
 }
@@ -222,11 +214,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 20px;
-}
-@media (max-width: 767px) {
-  .document-workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .documents-toolbar {
@@ -552,6 +539,23 @@
   box-shadow: inset 1px 0 0 0 var(--border);
   font-size: var(--text-ui);
   line-height: 20px;
+}
+/* Narrow window: the rail drops below the text and the pane scrolls as one.
+   This follows the two-column rule above so it wins at equal specificity. */
+@media (max-width: 767px) {
+  .document-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 48px auto auto;
+    overflow-y: auto;
+  }
+  .document-workspace > .document-main {
+    padding: 24px 16px;
+    overflow-y: visible;
+  }
+  .document-workspace > .document-rail {
+    overflow-y: visible;
+    box-shadow: inset 0 1px 0 0 var(--border);
+  }
 }
 .document-rail h2 {
   line-height: 16px;

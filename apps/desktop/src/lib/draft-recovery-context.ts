@@ -31,3 +31,9 @@ export const useDraftRecoveryGeneration = () =>
   useContext(DraftRecoveryGenerationContext);
 export const useDraftRecoveryError = () =>
   useContext(DraftRecoveryErrorContext);
+/** An editor showing the recovery failure inline claims it; returns a release. */
+export const DraftRecoveryNoticeContext = createContext<() => () => void>(
+  () => () => {},
+);
+export const useClaimRecoveryNotice = () =>
+  useContext(DraftRecoveryNoticeContext);
