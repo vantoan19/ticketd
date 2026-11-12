@@ -259,6 +259,47 @@ pub(super) fn notify(
     Ok(())
 }
 
+/// The source fields describe one refresh from the tracker and go together.
+/// When both sides refreshed, the later `source_updated_at` wins as a whole:
+/// mixing two refreshes field by field, or asking a person, helps nobody.
+fn settle_source(
+    base: Option<&SyncRecord>,
+    local: &SyncRecord,
+    remote: &SyncRecord,
+    merged: &mut super::merge::Merged,
+) {
+    let group = |record: &SyncRecord| -> BTreeMap<String, SyncValue> {
+        let source = record.fields.iter();
+        source
+            .filter(|(name, _)| name.starts_with("source_"))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect()
+    };
+    let (ours, theirs) = (group(local), group(remote));
+    let before = base.map(group).unwrap_or_default();
+    if ours == theirs || ours == before || theirs == before {
+        return;
+    }
+    // Equal times fall back to the values, so both devices pick the same side.
+    let age = |group: &BTreeMap<String, SyncValue>| {
+        let time = match group.get("source_updated_at") {
+            Some(SyncValue::Text(time)) => chrono::DateTime::parse_from_rfc3339(time).ok(),
+            _ => None,
+        };
+        (time, group.clone())
+    };
+    let later = if age(&theirs) > age(&ours) {
+        theirs
+    } else {
+        ours
+    };
+    merged.fields.retain(|name, _| !name.starts_with("source_"));
+    merged.fields.extend(later);
+    merged
+        .conflicts
+        .retain(|conflict| !conflict.field.starts_with("source_"));
+}
+
 /// Merge two versions of a record against their last-synced copy. Sections are
 /// matched by GUID; one removed on a side that the other side changed is kept.
 /// Conflicts keep the local value and name sections as `<GUID>:<field>`.
@@ -273,6 +314,8 @@ fn merge_records(
         &local.fields,
         &remote.fields,
     );
+    let mut top = top;
+    settle_source(base, local, remote, &mut top);
     let mut conflicts = top.conflicts;
     let part = |record: Option<&'_ SyncRecord>, id: &str| {
         record.and_then(|record| record.parts.iter().find(|part| part.id == id).cloned())

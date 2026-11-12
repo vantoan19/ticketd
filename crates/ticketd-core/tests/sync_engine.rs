@@ -1251,3 +1251,47 @@ fn a_conflict_is_withdrawn_when_later_changes_settle_the_field() {
         devices.assert_converged();
     }
 }
+
+fn sourced(state: &str, updated: &str) -> String {
+    let closure = if state == "closed" {
+        "source_closure_reason: \"completed\"\n"
+    } else {
+        ""
+    };
+    format!(
+        "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Todo\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"I_42\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42 at {updated}\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"{state}\"\n{closure}source_updated_at: \"{updated}\"\n---\nFrom the tracker.\n"
+    )
+}
+
+/// F38: what two desktops each refreshed from the tracker is not a decision for
+/// a person: the later refresh wins for the source fields as a whole.
+#[test]
+fn source_fields_refreshed_on_two_devices_take_the_later_refresh_without_review() {
+    for order in [[0, 1, 2], [1, 0, 2]] {
+        let mut devices = devices();
+        let apply = |workspace: &mut Workspace, state: &str, updated: &str| {
+            let record = ticketd_core::SyncRecord::parse(&sourced(state, updated)).unwrap();
+            workspace.apply_sync_record(&record).unwrap();
+        };
+        apply(&mut devices.workspaces[0], "open", "2026-01-03T00:00:00Z");
+        devices.settle([0, 1, 2]);
+        apply(&mut devices.workspaces[0], "closed", "2026-01-04T00:00:00Z");
+        apply(&mut devices.workspaces[1], "open", "2026-01-05T00:00:00Z");
+
+        devices.settle(order);
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_conflicts().unwrap(), [], "{order:?}");
+            let record = workspace
+                .export_sync_record(SyncKind::Ticket, "3f2c9a1e-0000-4000-8000-000000000001")
+                .unwrap();
+            let field = |name: &str| record.fields.get(name).cloned();
+            assert_eq!(
+                field("source_updated_at"),
+                Some(SyncValue::Text("2026-01-05T00:00:00Z".into()))
+            );
+            assert_eq!(field("source_state"), Some(SyncValue::Text("open".into())));
+            assert_eq!(field("source_closure_reason"), None, "{order:?}");
+        }
+    }
+}
