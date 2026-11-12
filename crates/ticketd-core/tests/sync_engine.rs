@@ -1397,3 +1397,44 @@ fn the_same_external_issue_imported_on_two_devices_converges_as_a_duplicate() {
         }
     }
 }
+
+/// F45: a file too large to be a record, or one whose header nests without
+/// end, is skipped with the normal notice instead of being read into memory or
+/// overflowing the stack.
+#[test]
+fn an_oversized_or_endlessly_nested_file_is_skipped_with_a_notice() {
+    let mut devices = devices();
+    let reference = devices.shared_ticket("Login");
+    let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+    let (_, good) = devices.remote_text(RemoteKind::Ticket, &id);
+    let before = files(&devices.workspaces[1]);
+
+    let nested = good.replace(
+        "trashed: false",
+        &format!("tags:\n  {}x\ntrashed: false", "- ".repeat(5000)),
+    );
+    devices.hand_edit(RemoteKind::Ticket, &id, &nested);
+    assert_eq!(devices.sync(1).skipped, 1);
+    let reason = |workspace: &Workspace| match &workspace.sync_notices().unwrap()[0].notice {
+        SyncNoticeKind::UnreadableFile { reason, .. } => reason.clone(),
+        other => panic!("unexpected notice {other:?}"),
+    };
+    assert!(
+        reason(&devices.workspaces[1]).contains("nest"),
+        "{}",
+        reason(&devices.workspaces[1])
+    );
+
+    let huge = format!("{good}{}", "x".repeat(8 * 1024 * 1024));
+    devices.hand_edit(RemoteKind::Ticket, &id, &huge);
+    let calls = devices.remote.calls().len();
+    assert_eq!(devices.sync(1).skipped, 1);
+    assert!(!devices.remote.calls()[calls..].contains(&RemoteOp::Download));
+    assert!(
+        reason(&devices.workspaces[1]).contains("8 MiB"),
+        "{}",
+        reason(&devices.workspaces[1])
+    );
+    assert_eq!(files(&devices.workspaces[1]), before);
+    assert_eq!(devices.sync(1).skipped, 0);
+}

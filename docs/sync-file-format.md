@@ -78,7 +78,8 @@ A file is rejected as a whole, with the reason, when:
 - `kind` or `id` is missing, or an id is not a lowercase GUID;
 - a required field is missing, a field is unknown, or a value has the wrong form;
 - `format` is higher than this version reads;
-- a ticket names itself in a relationship.
+- a ticket names itself in a relationship;
+- it is larger than 8 MiB, in which case it is not downloaded at all, or a header line is indented or nested more than 64 columns deep.
 
 A rejected file changes nothing in the Workspace. The next change made to that record in ticketd replaces the file, with one exception: a file that a newer ticketd may have written (a higher `format`, an unknown field or an unknown section marker) is never replaced by a desktop that cannot read it. Changes made to that record on such a desktop wait until it runs a ticketd that reads the file, or until the file is corrected.
 

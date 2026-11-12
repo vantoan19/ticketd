@@ -21,7 +21,7 @@ use super::{
 };
 use crate::{
     Error, SyncKind, SyncPart, SyncRecord, SyncValue, Workspace,
-    sync_files::{find_record, from_newer_version, resolve_ticket_references},
+    sync_files::{MAX_FILE_BYTES, find_record, from_newer_version, resolve_ticket_references},
 };
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -653,7 +653,12 @@ fn replaced_revision(
         .position(|revision| revision.version == written)
         .and_then(|ours| ours.checked_sub(1))
         .map(|index| revisions[index].version.as_str());
-    let Some(before) = before.filter(|before| *before != expected) else {
+    let fits = |version: &str| {
+        revisions
+            .iter()
+            .any(|revision| revision.version == version && revision.size <= MAX_FILE_BYTES)
+    };
+    let Some(before) = before.filter(|before| *before != expected && fits(before)) else {
         return Ok(None);
     };
     let mut bytes = Vec::new();
@@ -724,6 +729,15 @@ impl Workspace {
                 .optional()?
                 .flatten();
             if seen.as_deref() == Some(&file.version) {
+                continue;
+            }
+            if file.size > MAX_FILE_BYTES {
+                report.skipped += 1;
+                let reason = format!(
+                    "the file is larger than {} MiB, the most a record's file may be",
+                    MAX_FILE_BYTES / (1024 * 1024)
+                );
+                self.skip(kind, &file, &Error::SyncFile(reason), false)?;
                 continue;
             }
             let mut bytes = Vec::new();

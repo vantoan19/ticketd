@@ -53,6 +53,13 @@ impl SyncKind {
     }
 }
 
+/// The largest file read as a record. Larger ones are skipped unread.
+pub(crate) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// How far into a header line list and key markers may reach. Every nested
+/// list starts further right, so this bounds how deep a header nests; the
+/// YAML reader bounds `[`-style nesting itself. ticketd writes two columns.
+const MAX_HEADER_INDENT: usize = 64;
+
 /// The format of sync files this version writes. A file that says a higher
 /// number is left alone until this desktop runs a ticketd that reads it.
 pub(crate) const FILE_FORMAT: i64 = 1;
@@ -628,6 +635,16 @@ fn read_block(block: &str) -> Result<(Vec<(String, Raw)>, String), Error> {
         match lines.next() {
             None => return Err(bad("a header has no closing '---' line")),
             Some(line) if is_rule(line) => break,
+            // The values read from a header are walked and freed recursively.
+            Some(line)
+                if line
+                    .bytes()
+                    .take_while(|byte| matches!(byte, b' ' | b'-' | b'?'))
+                    .count()
+                    > MAX_HEADER_INDENT =>
+            {
+                return Err(bad("the header nests lists too deeply"));
+            }
             Some(line) => header.push_str(line),
         }
     }
