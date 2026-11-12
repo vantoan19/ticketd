@@ -473,12 +473,12 @@ export function Projects({
                           className="checkout-list"
                           aria-label={`Checkouts of ${item.name}`}
                         >
-                          {item.paths.map((path, index) => (
+                          {item.paths.map((path) => (
                             <li key={path}>
                               <CheckoutRow
                                 project={item}
                                 path={path}
-                                first={index === 0}
+                                first={path === item.path}
                                 confirming={
                                   confirming?.id === item.id &&
                                   confirming.path === path
@@ -568,7 +568,7 @@ export function Projects({
             label="Repository folder"
             path={newPath}
             title="Choose the repository folder"
-            hint="Pick it in Finder or drop it here. It becomes the first checkout."
+            hint="Choose it with the button. It becomes the first checkout."
             onChoose={setNewPath}
           />
           <Field>
