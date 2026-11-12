@@ -1368,3 +1368,47 @@ async fn streamed_text_does_not_read_the_workspace_for_every_fragment() {
         .collect();
     assert!(shown.ends_with(&"word ".repeat(200)), "{shown}");
 }
+
+/// L5: a notice the harness repeats word for word is kept once per session.
+#[tokio::test(start_paused = true)]
+async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let repeated = || {
+        [
+            EventKind::Notice {
+                turn: None,
+                kind: NoticeKind::Warning,
+                message: "Codex reported a warning".to_owned(),
+                detail: None,
+            },
+            EventKind::Unknown {
+                summary: "Unrecognized Codex message: thread/new".to_owned(),
+                detail: ProviderDetail::new("thread/new", "{}"),
+            },
+        ]
+    };
+    for _ in 0..3 {
+        for event in repeated() {
+            f.emit(event).await;
+        }
+    }
+    assert_eq!(
+        notices(&f),
+        [
+            "Codex reported a warning",
+            "Unrecognized Codex message: thread/new"
+        ]
+    );
+
+    // A new session says it again, once.
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host.stop_all().await;
+    f.send("second").await;
+    for _ in 0..2 {
+        for event in repeated() {
+            f.emit(event).await;
+        }
+    }
+    assert_eq!(notices(&f).len(), 4);
+}

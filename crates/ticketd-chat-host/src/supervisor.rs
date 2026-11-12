@@ -101,6 +101,8 @@ struct Runtime {
     origin: ChatSessionOrigin,
     turns: HashSet<String>,
     tools: HashSet<String>,
+    /// Harness notices already kept for this session.
+    said: HashSet<String>,
 }
 
 struct Opening {
@@ -1089,6 +1091,7 @@ impl Supervisor {
                     origin: opening.origin,
                     turns: HashSet::new(),
                     tools: HashSet::new(),
+                    said: HashSet::new(),
                 });
                 if opening.preamble.is_some() {
                     self.preamble = opening.preamble;
@@ -1485,7 +1488,7 @@ impl Supervisor {
                 // An unavailable capability stops nothing, so it is a stored notice like
                 // the others and never the Chat's problem.
                 NoticeKind::Retrying | NoticeKind::Warning | NoticeKind::CapabilityUnavailable => {
-                    self.notice(message);
+                    self.harness_notice(message);
                 }
                 NoticeKind::EffectiveSettings => {
                     let settings = detail.map_or(message, |detail| detail.payload().to_owned());
@@ -1493,7 +1496,7 @@ impl Supervisor {
                     let _ = self.write(|core| core.set_chat_effective_settings(&chat, &settings));
                 }
             },
-            EventKind::Unknown { summary, .. } => self.notice(summary),
+            EventKind::Unknown { summary, .. } => self.harness_notice(summary),
         }
     }
 
@@ -1598,9 +1601,21 @@ impl Supervisor {
         }
     }
 
+    /// A notice from the harness. One it repeats word for word (the same unknown
+    /// message every turn, a warning on every start) is kept once per session, so the
+    /// conversation is not buried under it.
+    fn harness_notice(&mut self, text: String) {
+        let first = self
+            .runtime
+            .as_mut()
+            .is_none_or(|runtime| runtime.said.insert(text.clone()));
+        if first {
+            self.notice(text);
+        }
+    }
+
     /// Keeps something worth telling the person that belongs to no other record. It is
     /// stored, so it is there for a view that attaches later.
-    // ponytail: one record per notice; coalesce repeats if a harness proves noisy.
     fn notice(&mut self, text: String) {
         let chat = self.chat_id.clone();
         let notice = ChatObservation::Notice {

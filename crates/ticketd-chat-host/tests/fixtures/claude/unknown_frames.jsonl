@@ -6,6 +6,7 @@
 {"server":{"v":2,"event":"hello","id":"c9","protocol":2}}
 {"server":{"v":1,"event":"from_the_future","generation":7,"anything":true}}
 {"server":{"v":1,"event":"sdk_message_unmapped","generation":7,"sdk_type":"system","sdk_subtype":"status","json":"{\"type\":\"system\",\"subtype\":\"status\",\"status\":\"compacting\"}","truncated":false}}
+{"server":{"v":1,"event":"sdk_message_unmapped","generation":7,"sdk_type":"system","sdk_subtype":"hook_response","json":"{\"type\":\"system\",\"subtype\":\"hook_response\"}","truncated":false}}
 {"server":{"v":1,"event":"delta","generation":6,"kind":"text","text":"stale","index":0,"parent_tool_use_id":null}}
 {"server":{"v":1,"event":"command_rejected","id":null,"code":"invalid_json","message":"Unexpected token"}}
 {"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"other","block_type":"server_tool_use"}],"error":null,"aborted":false}}

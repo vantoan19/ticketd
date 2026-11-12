@@ -467,7 +467,7 @@ fn an_unavailable_model_or_mcp_server_is_reported_as_a_capability_not_a_warning(
     };
     assert_eq!(
         message,
-        "Codex could not start the MCP server github: exited with 1"
+        "Codex could not start the MCP server github: exited with 1. Work that does not need it continues; the server is set up in Codex's own MCP settings."
     );
     assert!(ready.is_empty(), "{ready:?}");
 }
@@ -696,4 +696,49 @@ async fn closing_kills_a_process_that_stopped_reading_its_input_within_the_bound
     let outcome = timeout(crate::WRITE_TIMEOUT, writing).await;
     let outcome = outcome.expect("the write gives up").expect("the task ends");
     assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
+}
+
+/// L5: one line per failed MCP server per session, saying where it is fixed; a reroute
+/// names both models; routine goal notifications are not shown.
+#[test]
+fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_models() {
+    let mut session = Session::default();
+    let failed =
+        json!({"threadId": null, "name": "grafana", "status": "failed", "error": "timed out"});
+    let first = session.notification("mcpServer/startupStatus/updated", &failed);
+    let again = json!({"threadId": "t1", "name": "grafana", "status": "failed", "error": "exited"});
+    let again = session.notification("mcpServer/startupStatus/updated", &again);
+    let other = json!({"name": "postman", "status": "failed", "error": "exited"});
+    let other = session.notification("mcpServer/startupStatus/updated", &other);
+
+    let messages = |events: &[EventKind]| -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                EventKind::Notice { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        messages(&first),
+        [
+            "Codex could not start the MCP server grafana: timed out. Work that does not need it continues; the server is set up in Codex's own MCP settings."
+        ]
+    );
+    assert!(again.is_empty(), "{again:?}");
+    assert_eq!(messages(&other).len(), 1);
+
+    let rerouted = json!({"turnId": "turn_1", "fromModel": "gpt-5", "toModel": "gpt-5-mini", "reason": "highRiskCyberActivity"});
+    let rerouted = session.notification("model/rerouted", &rerouted);
+    assert_eq!(
+        messages(&rerouted),
+        ["Codex rerouted this turn from gpt-5 to gpt-5-mini."]
+    );
+    for routine in ["thread/goal/cleared", "thread/goal/updated"] {
+        assert!(
+            session.notification(routine, &json!({})).is_empty(),
+            "{routine}"
+        );
+    }
 }
