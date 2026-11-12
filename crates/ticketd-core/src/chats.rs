@@ -1450,6 +1450,13 @@ impl Workspace {
         })
     }
 
+    /// Logs a change of the Chat record with nothing stored changed, for a change views
+    /// must see that lives outside the workspace, such as its folder going missing or
+    /// coming back.
+    pub fn mark_chat_changed(&mut self, id: &str) -> Result<Chat, Error> {
+        self.update_chat(id, |_| Ok(()))
+    }
+
     /// Add or remove a link. The linked record is validated but never changed.
     pub fn set_chat_link(
         &mut self,

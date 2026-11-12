@@ -355,8 +355,8 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: "This Chat's folder is missing",
-        body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Pick another folder to keep going here.`,
-        actions: ["pick-folder"],
+        body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.`,
+        actions: ["check", "pick-folder"],
       };
     case "history_lost":
       return {
