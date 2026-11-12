@@ -93,9 +93,11 @@
 .path-lead {
   flex: none;
 }
-/* The part between the root and the last folders gives way, ellipsis first. */
+/* The part between the root and the last folders gives way first, keeping room
+   for its ellipsis; only then do the last folders shorten, at their end. */
 .path-middle {
-  min-width: 0;
+  flex-shrink: 1000;
+  min-width: 2ch;
   overflow: hidden;
   direction: rtl;
   text-overflow: ellipsis;
@@ -115,7 +117,10 @@
   text-underline-offset: 3px;
 }
 .path-tail {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .register-checkout {
   align-self: flex-start;
