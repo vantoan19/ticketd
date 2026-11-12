@@ -277,6 +277,28 @@ describe("Markdown draft editor", () => {
       expect(changes).toHaveBeenLastCalledWith("hello world"),
     );
   });
+  it("keeps edge whitespace of a multi-paragraph paste", async () => {
+    const { editable, changes } = await mountWithCaret("hi", 2);
+    const event = createEvent.paste(editable);
+    Object.defineProperty(event, "clipboardData", {
+      value: { getData: () => " one\n\n two " },
+    });
+    fireEvent(editable, event);
+    await waitFor(() =>
+      expect(changes).toHaveBeenLastCalledWith("hi one\n\ntwo"),
+    );
+  });
+  it("does not let pasted edge whitespace inherit a mark", async () => {
+    const { editable, changes } = await mountWithCaret("pre", 3);
+    const event = createEvent.paste(editable);
+    Object.defineProperty(event, "clipboardData", {
+      value: { getData: () => " **b** and _i_ " },
+    });
+    fireEvent(editable, event);
+    await waitFor(() =>
+      expect(changes).toHaveBeenLastCalledWith("pre **b** and *i*"),
+    );
+  });
   it("enforces read-only content and hides editing controls", () => {
     render(<MarkdownEditor value="View only" onChange={vi.fn()} readOnly />);
     expect(

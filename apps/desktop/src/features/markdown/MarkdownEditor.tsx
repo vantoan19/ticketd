@@ -861,6 +861,22 @@ export function MarkdownEditor({
   // In the rich editor the copy and source buttons share the toolbar row instead of adding one.
   const inlineMode = !source && !readOnly;
   const container = useRef<HTMLElement>(null);
+  const actions = useRef<HTMLDivElement>(null);
+  // The action group overlays the toolbar row's end, so the toolbar reserves exactly its width.
+  useEffect(() => {
+    const group = actions.current;
+    const root = container.current;
+    if (!group || !root || typeof ResizeObserver === "undefined") return;
+    const measure = () =>
+      root.style.setProperty(
+        "--editor-actions-reserve",
+        `${Math.ceil(group.offsetWidth) + 8}px`,
+      );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(group);
+    return () => observer.disconnect();
+  }, [inlineMode]);
   const sourceEditor = useRef<ReactCodeMirrorRef>(null);
   const sourceEditorExtensions = useMemo(
     () => [
@@ -1317,6 +1333,7 @@ export function MarkdownEditor({
           </p>
         )}
       <div
+        ref={actions}
         className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
         data-persistent={persistentToolbar || undefined}
       >
@@ -1496,17 +1513,22 @@ export function MarkdownEditor({
                 const incoming = readMarkdown(pasted);
                 if (incoming.reasons.length || !pasted.trim())
                   editor.tf.insertText(pasted);
-                else if (
-                  incoming.value.length === 1 &&
-                  incoming.value[0]?.type === "p"
-                ) {
-                  // Parsing drops a paragraph's edge whitespace, but a paste must keep it:
-                  // "hello" + " world" is "hello world".
-                  editor.tf.insertText(/^[ \t]*/.exec(pasted)?.[0] ?? "");
-                  editor.tf.insertFragment(incoming.value);
-                  editor.tf.insertText(/[ \t]*$/.exec(pasted)?.[0] ?? "");
-                } else {
+                else {
                   const first = incoming.value[0];
+                  const last = incoming.value[incoming.value.length - 1];
+                  // Parsing drops a paragraph's edge whitespace, but a paste must keep it:
+                  // "hello" + " world" is "hello world". It goes in as a plain text node so it
+                  // never inherits a mark from the pasted text next to it.
+                  const lead =
+                    first?.type === "p"
+                      ? (/^[ \t]*/.exec(pasted)?.[0] ?? "")
+                      : "";
+                  const trail =
+                    last?.type === "p"
+                      ? (/[ \t]*$/.exec(pasted)?.[0] ?? "")
+                      : "";
+                  if (lead)
+                    editor.tf.insertNodes({ text: lead }, { select: true });
                   // Slate merges a fragment's first block into the current block.
                   // An empty leading paragraph protects a pasted heading/list/table.
                   editor.tf.insertFragment(
@@ -1517,6 +1539,8 @@ export function MarkdownEditor({
                           ...incoming.value,
                         ],
                   );
+                  if (trail)
+                    editor.tf.insertNodes({ text: trail }, { select: true });
                 }
               }}
               onDragOver={(event) => {
