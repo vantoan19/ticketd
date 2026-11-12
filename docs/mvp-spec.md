@@ -1202,6 +1202,10 @@ with it.
   removal made at the same time. No review is needed.
 - When changes from two desktops together would form a dependency loop, every
   desktop drops the same dependency, the later one, and shows a notice naming it.
+- When two desktops each imported the same external issue before they synced,
+  the ticket with the lower GUID keeps the source and the other becomes a
+  Duplicate of it. What two desktops each refreshed from a tracker is not
+  reviewed: the later refresh wins.
 - No duplicate ticket and no conflict copy of a file is created.
 - Needs review appears as a badge on the record and as an entry in the Attention
   inbox that opens the comparison.

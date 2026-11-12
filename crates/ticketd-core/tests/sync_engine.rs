@@ -1353,3 +1353,47 @@ fn a_restored_older_file_for_a_record_goes_to_review_instead_of_reverting_edits(
         assert_eq!(workspace.show_ticket(&reference).unwrap().title, "Newer");
     }
 }
+
+/// F39: two desktops that track the same external source each import the same
+/// issue before they sync. The ticket with the lower GUID keeps the source; the
+/// other becomes a Duplicate of it, identically on every desktop.
+#[test]
+fn the_same_external_issue_imported_on_two_devices_converges_as_a_duplicate() {
+    const KEEPER: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    const OTHER: &str = "3f2c9a1e-0000-4000-8000-000000000002";
+    for order in [[0, 1, 2], [1, 0, 2], [2, 1, 0]] {
+        let mut devices = devices();
+        let import = |workspace: &mut Workspace, id: &str, reference: &str| {
+            let text = sourced("open", "2026-01-03T00:00:00Z")
+                .replace(KEEPER, id)
+                .replace("T-ZZ7", reference);
+            let record = ticketd_core::SyncRecord::parse(&text).unwrap();
+            workspace.apply_sync_record(&record).unwrap();
+        };
+        import(&mut devices.workspaces[0], KEEPER, "T-ZZ7");
+        import(&mut devices.workspaces[1], OTHER, "T-YY8");
+
+        for _ in 0..3 {
+            for device in order {
+                assert_eq!(devices.sync(device).skipped, 0, "{order:?}");
+            }
+        }
+        devices.assert_converged();
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_notices().unwrap(), [], "{order:?}");
+            assert_eq!(workspace.sync_conflicts().unwrap(), [], "{order:?}");
+            let field = |id: &str, name: &str| {
+                let record = workspace.export_sync_record(SyncKind::Ticket, id).unwrap();
+                record.fields.get(name).cloned()
+            };
+            let text = |value: &str| Some(SyncValue::Text(value.into()));
+            assert_eq!(field(KEEPER, "source_external_id"), text("I_42"));
+            assert_eq!(field(KEEPER, "status"), text("Todo"));
+            assert_eq!(field(OTHER, "source_external_id"), None, "{order:?}");
+            assert_eq!(field(OTHER, "source_provider"), None);
+            assert_eq!(field(OTHER, "status"), text("Duplicate"));
+            assert_eq!(field(OTHER, "duplicate_of"), text(KEEPER));
+            assert_eq!(field(OTHER, "duplicate_restore"), text("Todo"));
+        }
+    }
+}

@@ -272,6 +272,42 @@ fn notify_once(
     Ok(recorded > 0)
 }
 
+/// The ticket of this Workspace, other than `record`, that holds the external
+/// source identity `record` carries.
+fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<String>, Error> {
+    let field = |name: &str| match record.fields.get(name) {
+        Some(SyncValue::Text(text)) => Some(text.as_str()),
+        _ => None,
+    };
+    let (Some(provider), Some(external)) = (field("source_provider"), field("source_external_id"))
+    else {
+        return Ok(None);
+    };
+    Ok(connection
+        .query_row(
+            "SELECT ticket_id FROM external_identities WHERE provider = ?1 AND external_id = ?2 AND ticket_id != ?3",
+            params![provider, external, record.id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Take the source fields off a ticket and make it a Duplicate of `canonical`,
+/// the ticket that keeps the source. A ticket that already is a Duplicate
+/// stays the duplicate it was.
+fn duplicate_without_source(record: &mut SyncRecord, canonical: &str) {
+    let fields = &mut record.fields;
+    fields.retain(|name, _| !name.starts_with("source_"));
+    let duplicate = SyncValue::Text("Duplicate".into());
+    if fields.get("status") == Some(&duplicate) {
+        return;
+    }
+    if let Some(status) = fields.insert("status".into(), duplicate) {
+        fields.insert("duplicate_restore".into(), status);
+    }
+    fields.insert("duplicate_of".into(), SyncValue::Text(canonical.into()));
+}
+
 /// The two relationships sync removes to break a loop, as the ticket file
 /// fields that carry the removals to every desktop.
 const REMOVED: [(&str, &str); 2] = [
@@ -880,7 +916,32 @@ impl Workspace {
                     (remote.clone(), Vec::new())
                 }
             };
+            // Two desktops can each import the same external issue before they
+            // sync, as two tickets. Only one ticket may hold a source identity:
+            // the lower GUID keeps it on every desktop, and the other becomes a
+            // Duplicate of it without the source.
+            let mut merged = merged;
+            let mut demoted = None;
+            if let Some(holder) = source_holder(&workspace.connection, &merged)? {
+                if holder.as_str() < id {
+                    duplicate_without_source(&mut merged, &holder);
+                } else if let Some(mut other) =
+                    find_record(&workspace.connection, SyncKind::Ticket, &holder)?
+                {
+                    // It gives the identity up before the incoming ticket takes it.
+                    other
+                        .fields
+                        .retain(|name, _| !name.starts_with("source_"));
+                    workspace.apply_sync_record(&other)?;
+                    duplicate_without_source(&mut other, id);
+                    demoted = Some(other);
+                }
+            }
             let missing = workspace.apply_sync_record(&merged)?;
+            if let Some(other) = demoted {
+                workspace.apply_sync_record(&other)?;
+                mark_dirty(&workspace.connection, RecordKind::Ticket, &other.id)?;
+            }
             let connection = &workspace.connection;
             // A removal that came with a record new to this desktop is old news
             // here: it is recorded as read.
