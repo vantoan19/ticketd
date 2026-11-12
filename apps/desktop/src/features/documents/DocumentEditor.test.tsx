@@ -615,6 +615,41 @@ it("lists each connected item once and names Plans that use the Document as spec
   ).toBeTruthy();
 });
 
+it("keeps the Spec of section for a spec Document that also mentions its Plan", async () => {
+  const document = {
+    id: "d1",
+    title: "Spec",
+    body: "See the plan",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  const plan = {
+    source_id: "p1",
+    target_id: "d1",
+    source_kind: "plan",
+    target_kind: "document",
+    source_label: "Roadmap",
+    target_label: "",
+    source_trashed: false,
+    target_trashed: false,
+    explicit: false,
+  };
+  vi.mocked(documents.links).mockResolvedValue([
+    [],
+    [
+      { ...plan, passage: "See the plan" },
+      { ...plan, passage: "" },
+    ],
+  ]);
+  renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
+  await screen.findByRole("region", { name: "Spec of" });
+  expect(screen.getByRole("region", { name: "Mentions" })).toBeTruthy();
+  expect(
+    screen.getByText(/^Updated .* · spec of the Plan Roadmap$/),
+  ).toBeTruthy();
+});
+
 it("names a Plan that only has the Document attached as a supporting Document", async () => {
   const document = {
     id: "d1",
@@ -895,7 +930,9 @@ it("says nothing is saved and explains a blocked Back to work while the conflict
   );
   fireEvent.click(screen.getByRole("button", { name: "Back to work" }));
   expect(close).not.toHaveBeenCalled();
-  const notice = document.querySelector<HTMLElement>(".document-conflict")!;
+  const notice = screen
+    .getAllByRole("alert")
+    .find((alert) => alert.textContent?.includes("Saved content changed"))!;
   expect(document.activeElement).toBe(notice);
   expect(notice.textContent).toContain("Choose Reload or Save my draft first");
 });
