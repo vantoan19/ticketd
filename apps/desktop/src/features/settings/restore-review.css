@@ -1,52 +1,92 @@
-/* Backups card: restore row and recessed footer. */
-.backup-restore-row {
+/* Backups page. */
+.backups-title-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
   flex-wrap: wrap;
-  margin-top: 16px;
+  gap: 8px;
 }
-.backup-footer {
-  margin: 12px -24px -24px;
-  min-height: 48px;
-  padding: 10px 16px 10px 24px;
-  justify-content: center;
-  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
-  background: var(--recessed);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.backup-footer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.safety-backups ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.safety-backups li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.safety-backup-path {
-  display: block;
+.backups-file {
   font-family: var(--font-mono);
   font-size: var(--text-caption);
-  line-height: 16px;
-  color: var(--muted-foreground);
+  line-height: var(--text-caption-line);
   overflow-wrap: anywhere;
   user-select: text;
+}
+/* One line: the file name stays whole and the folder gives way with an ellipsis. */
+.backups-last-path {
+  display: flex;
+  min-width: 0;
+}
+.backups-last-path .backups-file {
+  flex: none;
+  max-width: 60%;
+}
+.backups-last-folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* pre, not nowrap: a flex item drops its leading space before the "·". */
+  white-space: pre;
+}
+.backups-icon-error {
+  color: var(--error-foreground);
+}
+.backups-icon-muted {
+  color: var(--disabled-foreground);
+}
+.backups-failure {
+  margin: 4px 0 0;
+  color: var(--error-foreground);
+}
+.backups-message {
+  margin: 4px 0 0;
+}
+.backups-message:empty {
+  display: none;
+}
+.backups-contains {
+  list-style: none;
+  margin: 0;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+}
+.backups-contains li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.backups-contains svg {
+  flex: none;
+  margin-top: 2px;
+}
+.backups-contains .included {
+  color: var(--status-ready);
+}
+.backups-contains .excluded {
+  color: var(--disabled-foreground);
+}
+.backups-contains li > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.backups-contains-title {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.backups-contains-detail {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+@media (max-width: 767px) {
+  .backups-contains {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Restore review dialog. */
@@ -111,16 +151,25 @@
 .restore-file {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  box-shadow: inset var(--shadow-border-base);
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-border-base);
 }
-.restore-file > svg {
+.restore-file-tile {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+}
+.restore-file-tile svg {
   width: 16px;
   height: 16px;
-  color: var(--muted-foreground);
 }
 .restore-file-text {
   flex: 1;
@@ -136,13 +185,31 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.restore-file-text span {
+.restore-file-text > span {
+  display: flex;
+  align-items: center;
+  min-width: 0;
   font-size: var(--text-caption);
-  line-height: 16px;
+  line-height: var(--text-caption-line);
   color: var(--muted-foreground);
+}
+/* The folder gives way with an ellipsis; the check result never wraps. */
+.restore-file-text > span > [aria-label="Backup folder"] {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.restore-file-check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: 6px;
+  white-space: nowrap;
+}
+.restore-file-text [data-slot="status-label"] {
+  color: inherit;
 }
 .restore-checked {
   display: flex;
@@ -152,77 +219,63 @@
 .restore-checked [data-slot="status-dot"] {
   margin-top: 6px;
 }
-.restore-problem {
-  display: flex;
-  gap: 10px;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  background: var(--error-surface);
-  color: var(--error-foreground);
-}
-.restore-problem > svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-}
-.restore-problem > span {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.restore-failure {
-  color: var(--error-foreground);
-}
 .restore-compare {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-border-base);
+  overflow: hidden;
   font-variant-numeric: tabular-nums;
 }
 .restore-compare th,
 .restore-compare td {
-  padding: 6px 0;
-  text-align: right;
+  padding: 10px 16px;
+  text-align: left;
+  vertical-align: top;
 }
-.restore-compare th + th,
-.restore-compare td + td {
-  padding-left: 16px;
+.restore-compare tbody tr td,
+.restore-compare tbody tr th {
+  box-shadow: inset 0 1px 0 var(--group-hairline);
 }
-.restore-compare tbody tr {
-  box-shadow: inset 0 1px 0 0 var(--group-hairline);
+.restore-compare thead th {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+  color: var(--muted-foreground);
+  background: var(--recessed);
+}
+.restore-compare tbody th {
+  font-weight: 400;
+  color: var(--muted-foreground);
 }
 .restore-compare td {
   white-space: nowrap;
 }
-.restore-compare thead th {
-  font-size: var(--text-caption);
-  line-height: 16px;
-  font-weight: 500;
-  color: var(--muted-foreground);
-}
-.restore-compare thead th:first-child {
-  text-align: left;
-}
-.restore-compare tbody th {
-  text-align: left;
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
 .restore-compare td[data-differs="true"] {
-  font-weight: 500;
+  font-weight: 600;
 }
 @media (max-width: 480px) {
   .restore-compare {
     table-layout: fixed;
   }
   .restore-compare th:first-child {
-    width: 46%;
+    width: 40%;
   }
   .restore-compare th,
   .restore-compare td {
+    padding: 8px 10px;
     white-space: normal;
     overflow-wrap: anywhere;
   }
+}
+.restore-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
 }
 .restore-notes {
   display: flex;
@@ -234,15 +287,45 @@
 }
 /* The safety notes stay in view above the footer however far the body scrolls. */
 .restore-pinned {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
   padding: 0 24px 16px;
 }
-.restore-pinned .restore-notes {
-  gap: 8px;
+@media (max-width: 480px) {
+  .restore-pinned {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.restore-pin {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-border-base);
+}
+.restore-pin > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+.restore-pin > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.restore-pin strong {
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
+  font-weight: 500;
 }
-.restore-pinned p {
-  margin: 0;
+.restore-pin > span > span {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
 }
 .restore-notes code {
   font-family: var(--font-mono);
@@ -270,23 +353,8 @@
   gap: 8px 12px;
   min-height: 60px;
   padding: 12px 16px 12px 24px;
-  background: transparent;
+  background: var(--recessed);
   box-shadow: inset 0 1px 0 var(--header-boundary);
   font-size: var(--text-caption);
   line-height: 16px;
-}
-
-.safety-toggle {
-  height: 28px;
-  gap: 4px;
-  padding: 0 8px;
-  color: var(--foreground);
-}
-.safety-toggle svg {
-  width: 14px;
-  height: 14px;
-  color: var(--muted-foreground);
-}
-.safety-toggle svg[data-open="true"] {
-  transform: rotate(180deg);
 }

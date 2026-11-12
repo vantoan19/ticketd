@@ -88,7 +88,11 @@ it("no custom property is defined in terms of itself", () => {
 
 it("the radius tokens match DESIGN.md section 4", () => {
   const css = readFileSync(join(srcDir, "styles.css"), "utf8");
-  const root = css.slice(0, css.indexOf("}", css.indexOf(":root")));
+  // The light token block: :root plus any data-theme-preview subtree.
+  const root = css.slice(
+    0,
+    css.indexOf("}", css.indexOf("[data-theme-preview] {")),
+  );
   const radius = (name: string) =>
     new RegExp(name + ": *([^;]+);").exec(root)?.[1]?.trim();
   expect(radius("--radius")).toBe("6px");

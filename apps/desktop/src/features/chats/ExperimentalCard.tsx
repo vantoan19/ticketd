@@ -1,18 +1,28 @@
 import { useState } from "react";
+import { FlaskConical } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Switch } from "@/components/ui/switch";
-import { SettingsCard } from "@/features/settings/SettingsCard";
+import {
+  SettingsList,
+  SettingsListFooter,
+  SettingsRow,
+} from "@/features/settings/layout/SettingsList";
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
+import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import { useSettingsState } from "@/features/settings/use-settings-state";
 import { useChatClient } from "@/features/chats/client";
 import { chatCount } from "@/features/chats/model";
 import { useChatFeature } from "@/features/chats/use-chats";
 
 /**
- * Settings > Experimental: the Chat switch. Off by default. Turning it off
+ * Settings > Chat: the notice and the Show Chat switch. Off by default. Turning it off
  * hides Chat and keeps every Chat; Chats that are working are stopped first,
  * and only after the person confirms.
  */
 export function ExperimentalCard() {
   const client = useChatClient();
+  const { openPage } = useSettingsState();
   const { enabled, setEnabled } = useChatFeature();
   const [failure, setFailure] = useState("");
   /** How many Chats turning off would stop; set while the confirmation is open. */
@@ -36,36 +46,46 @@ export function ExperimentalCard() {
     setConfirming(working ?? -1);
   }
   return (
-    <SettingsCard
-      id="experimental"
-      title="Experimental"
-      footer={
-        <p className="settings-hint">
-          Turning Chat off hides it and keeps your Chats. Running Chats are
-          stopped first, after you confirm.
-        </p>
-      }
-    >
-      <div className="settings-row">
-        <div>
-          <p className="settings-label">Chat</p>
-          <p className="settings-hint">
-            Work with Claude Code or Codex from ticketd, using the copy
-            installed on this computer. Chat is not yet qualified against real
-            subscriptions.
+    <>
+      <Alert role="note" className="mt-10">
+        <AlertTitle>
+          <FlaskConical aria-hidden="true" size={16} />
+          Not yet qualified against real subscriptions
+        </AlertTitle>
+        <AlertDescription>
+          If something breaks, tell us from{" "}
+          <SettingsLink onClick={() => openPage("about")}>
+            About › Report an issue
+          </SettingsLink>
+          .
+        </AlertDescription>
+      </Alert>
+      <SettingsSection title="Chat">
+        <SettingsList>
+          <SettingsRow
+            variant="top"
+            title="Show Chat"
+            titleId="show-chat-title"
+            description="Adds Chats to the sidebar, where you start and follow conversations with your agent."
+            trailing={
+              <Switch
+                aria-labelledby="show-chat-title"
+                checked={enabled}
+                onCheckedChange={(value) => void change(value)}
+              />
+            }
+          />
+          <SettingsListFooter>
+            Turning Chat off hides it and keeps your Chats. Running Chats are
+            stopped first, after you confirm.
+          </SettingsListFooter>
+        </SettingsList>
+        {failure && (
+          <p className="mt-3 text-xs leading-4 text-destructive" role="alert">
+            {failure}
           </p>
-        </div>
-        <Switch
-          aria-label="Chat"
-          checked={enabled}
-          onCheckedChange={(value) => void change(value)}
-        />
-      </div>
-      {failure && (
-        <p className="settings-hint" role="alert">
-          {failure}
-        </p>
-      )}
+        )}
+      </SettingsSection>
       <DialogShell
         open={confirming !== null}
         onOpenChange={(open) => {
@@ -92,6 +112,6 @@ export function ExperimentalCard() {
           restarts by itself.
         </p>
       </DialogShell>
-    </SettingsCard>
+    </>
   );
 }

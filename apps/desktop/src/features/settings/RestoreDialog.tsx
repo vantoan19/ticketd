@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  CircleAlert,
   Copy,
   Database,
   FolderOpen,
   RotateCcw,
+  ShieldCheck,
+  Terminal,
 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { StatusDot } from "@/components/ui/status-dot";
+import { StatusLabel } from "@/components/ui/status-label";
 import { client } from "@/lib/api/client";
 import {
   workspaceClient,
@@ -24,6 +27,7 @@ import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { writeClipboard } from "@/lib/clipboard";
 import { revealFile } from "@/lib/reveal";
+import { splitPath } from "@/features/settings/settings-format";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "@/features/settings/restore-review.css";
 
@@ -45,16 +49,6 @@ const UNCHANGED = "Your workspace hasn't changed.";
 
 function formatWhen(timestamp: string | null) {
   return timestamp ? formatDateTime(timestamp) : "No changes yet";
-}
-
-function splitPath(path: string) {
-  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return cut < 0
-    ? { folder: "", name: path }
-    : {
-        folder: path.slice(0, cut) || path.slice(0, 1),
-        name: path.slice(cut + 1),
-      };
 }
 
 const COUNTS = [
@@ -281,6 +275,11 @@ export function RestoreDialog({
       <DialogContent
         className="restore-dialog sm:max-w-160"
         showCloseButton={phase.name !== "restoring"}
+        // Land on the dialog, not the scroll region, so no ring shows on open.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          if (event.target instanceof HTMLElement) event.target.focus();
+        }}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <div className="restore-head">
@@ -300,12 +299,23 @@ export function RestoreDialog({
           tabIndex={0}
         >
           <div className="restore-file">
-            <Database aria-hidden="true" />
+            <span className="restore-file-tile" aria-hidden="true">
+              <Database />
+            </span>
             <span className="restore-file-text">
               <code aria-label="Chosen backup file">{name}</code>
               <span>
-                <span aria-label="Backup folder">{folder}</span>
-                {valid ? " · integrity checked" : ""}
+                <span aria-label="Backup folder" title={folder}>
+                  {folder}
+                </span>
+                {valid && (
+                  <span className="restore-file-check">
+                    {" · "}
+                    <StatusLabel tone="checked" size="caption">
+                      Integrity checked · format version {valid.format_version}
+                    </StatusLabel>
+                  </span>
+                )}
               </span>
             </span>
             {!done && (
@@ -328,50 +338,39 @@ export function RestoreDialog({
           )}
 
           {phase.name === "unreadable" && (
-            <p role="alert" className="restore-problem">
-              <CircleAlert aria-hidden="true" />
-              <span>
-                <strong>This file could not be read.</strong>
-                <span>
-                  {phase.reason} {UNCHANGED}
-                </span>
-              </span>
-            </p>
+            <Alert tone="error">
+              <AlertTitle>This file could not be read.</AlertTitle>
+              <AlertDescription>
+                {phase.reason} {UNCHANGED}
+              </AlertDescription>
+            </Alert>
           )}
 
           {issue && (
-            <p role="alert" className="restore-problem">
-              <CircleAlert aria-hidden="true" />
-              <span>
-                <strong>{issue.title}</strong>
-                <span>
-                  {issue.detail} {UNCHANGED}
-                </span>
-              </span>
-            </p>
+            <Alert tone="error">
+              <AlertTitle>{issue.title}</AlertTitle>
+              <AlertDescription>
+                {issue.detail} {UNCHANGED}
+              </AlertDescription>
+            </Alert>
           )}
 
           {valid && inspection && (
             <>
-              <p className="restore-checked">
-                <StatusDot tone="checked" />
-                <span>
-                  <strong>Backup checked.</strong>{" "}
-                  <span className="restore-muted">
-                    Workspace format version {valid.format_version}.
-                  </span>
-                </span>
-              </p>
               <Comparison current={inspection.current} backup={valid.summary} />
+              <p>
+                {differences(inspection.current, valid.summary)} Restoring
+                replaces everything in this workspace, including follows,
+                reminders and inbox state.
+                {inspection.attachment_content &&
+                  " Local attachment bytes in the backup are complete."}
+              </p>
               {inspection.attachment_content && (
                 <div
-                  className="restore-notes"
+                  className="restore-attachments"
                   aria-label="Attachment completeness"
                 >
                   <p>
-                    <strong>Local attachment bytes are complete.</strong>
-                  </p>
-                  <p className="restore-muted">
                     {inspection.attachment_content.local_snapshots} local{" "}
                     {inspection.attachment_content.local_snapshots === 1
                       ? "snapshot"
@@ -385,7 +384,7 @@ export function RestoreDialog({
                     bytes. Includes unused files, files in Trash, and retained
                     quarantine.
                   </p>
-                  <p className="restore-muted">
+                  <p>
                     {inspection.attachment_content.remote_references} remote{" "}
                     {inspection.attachment_content.remote_references === 1
                       ? "reference"
@@ -394,7 +393,7 @@ export function RestoreDialog({
                     credentials are not backed up.
                   </p>
                   {inspection.attachment_content.remote_references > 0 && (
-                    <p className="restore-muted">
+                    <p>
                       Restoring does not verify Drive access. If unavailable,
                       connect the appropriate account and select the file again
                       in the attachment picker's Google Drive tab. Last-known
@@ -403,11 +402,6 @@ export function RestoreDialog({
                   )}
                 </div>
               )}
-              <p className="restore-muted">
-                Restoring replaces everything in this workspace, including
-                follows, reminders, and inbox state.{" "}
-                {differences(inspection.current, valid.summary)}
-              </p>
             </>
           )}
 
@@ -454,14 +448,14 @@ export function RestoreDialog({
                   </div>
                 </div>
                 {phase.warning && (
-                  <p role="alert" className="restore-failure">
-                    {phase.warning}
-                  </p>
+                  <Alert tone="attention" size="compact">
+                    <AlertDescription>{phase.warning}</AlertDescription>
+                  </Alert>
                 )}
                 {phase.reloadFailure ? (
-                  <p role="alert" className="restore-failure">
-                    {phase.reloadFailure}
-                  </p>
+                  <Alert tone="error" size="compact">
+                    <AlertDescription>{phase.reloadFailure}</AlertDescription>
+                  </Alert>
                 ) : (
                   <p className="restore-muted">
                     Open tickets and views were reloaded from the restored
@@ -475,29 +469,29 @@ export function RestoreDialog({
             )}
 
           {failure && (
-            <p role="alert" className="restore-failure">
-              {failure}
-            </p>
+            <Alert tone="error" size="compact">
+              <AlertDescription>{failure}</AlertDescription>
+            </Alert>
           )}
         </div>
 
         {valid && (
           <div className="restore-pinned">
-            <div className="restore-notes">
-              <p>
-                <strong>A safety backup comes first.</strong>{" "}
-                <span className="restore-muted">
-                  ticketd saves a backup of this workspace next to it before
-                  replacing anything. Restore that backup the same way to undo.
+            <div className="restore-pin">
+              <ShieldCheck aria-hidden="true" />
+              <span>
+                <strong>A safety backup comes first</strong>
+                <span>Restore that safety backup to undo.</span>
+              </span>
+            </div>
+            <div className="restore-pin">
+              <Terminal aria-hidden="true" />
+              <span>
+                <strong>Pause ticketd CLI commands</strong>
+                <span>
+                  Agents should stop recording while the restore runs.
                 </span>
-              </p>
-              <p>
-                <strong>Pause ticketd CLI commands.</strong>{" "}
-                <span className="restore-muted">
-                  Stop other ticketd commands, such as an agent recording
-                  activities, until the restore finishes.
-                </span>
-              </p>
+              </span>
             </div>
           </div>
         )}
@@ -526,6 +520,7 @@ export function RestoreDialog({
               </Button>
               <Button
                 type="button"
+                variant="destructive"
                 disabled={!valid || phase.name === "restoring"}
                 onClick={() => inspection && void replace(inspection)}
               >

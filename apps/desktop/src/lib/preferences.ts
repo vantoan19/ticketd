@@ -137,6 +137,42 @@ export function useDarkTheme(): boolean {
   return resolveTheme(theme, systemDark) === "dark";
 }
 
+const SYSTEM_THEME_KEY = "ticketd.system-theme";
+
+function recallSystemDark(): boolean | null {
+  try {
+    const raw = localStorage.getItem(SYSTEM_THEME_KEY);
+    return raw === "dark" ? true : raw === "light" ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the operating system is dark right now: true, false, or null when
+ * unknown. Light and Dark also set the native window theme, which changes what
+ * the page's media query reports, so the query only speaks for the operating
+ * system while the choice is System. It is remembered then and read back while
+ * Light or Dark is chosen.
+ */
+export function useSystemDark(): boolean | null {
+  const { theme } = usePreferences();
+  const live = useSyncExternalStore(
+    subscribeToSystemTheme,
+    systemPrefersDark,
+    () => false,
+  );
+  useEffect(() => {
+    if (theme !== "system") return;
+    try {
+      localStorage.setItem(SYSTEM_THEME_KEY, live ? "dark" : "light");
+    } catch {
+      // Nothing to remember it in; the next System choice records it again.
+    }
+  }, [theme, live]);
+  return theme === "system" ? live : recallSystemDark();
+}
+
 /** Keeps the document root in step with the choice and the operating system. */
 export function useThemeSync() {
   const dark = useDarkTheme();

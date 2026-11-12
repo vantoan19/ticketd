@@ -9,6 +9,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { AgentSkillsCard } from "@/features/settings/AgentSkillsCard";
+import {
+  SettingsStateContext,
+  type SettingsState,
+} from "@/features/settings/use-settings-state";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -36,6 +40,10 @@ const codex = {
 };
 const installed = { state: "installed" };
 
+function skillStatus() {
+  return document.getElementById("agent-skill-status")?.textContent ?? "";
+}
+
 test("one action installs or updates every agent that needs it, then focuses the status", async () => {
   invoke
     .mockResolvedValueOnce([claude, codex])
@@ -46,11 +54,7 @@ test("one action installs or updates every agent that needs it, then focuses the
       { ...codex, ...installed },
     ]);
   render(<AgentSkillsCard />);
-  expect(
-    await screen.findByText("Update available", {
-      selector: "#agent-skill-status",
-    }),
-  ).toBeTruthy();
+  await waitFor(() => expect(skillStatus()).toContain("Update available"));
   fireEvent.click(
     screen.getByRole("button", { name: "Update for Claude Code and Codex" }),
   );
@@ -81,7 +85,7 @@ test("an agent missing from this computer is left out of the action", async () =
   expect(
     await screen.findByRole("button", { name: "Install for Claude Code" }),
   ).toBeTruthy();
-  const codexRow = screen.getByText("Codex").closest("li");
+  const codexRow = screen.getByText("Codex").closest('[role="listitem"]');
   expect(
     within(codexRow as HTMLElement).getByText("Not found on this computer"),
   ).toBeTruthy();
@@ -134,4 +138,82 @@ test("an unreadable folder or a linked SKILL.md stays in its row with no Replace
   expect(screen.getByText(/is a link or folder/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Replace/ })).toBeNull();
   expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+});
+
+test("Check again belongs to the Agents section and reads the folders again", async () => {
+  invoke.mockResolvedValueOnce([claude, codex]).mockResolvedValueOnce([
+    { ...claude, ...installed },
+    { ...codex, ...installed },
+  ]);
+  render(<AgentSkillsCard />);
+  const agents = await screen.findByRole("region", {
+    name: "Agents on this computer",
+  });
+  fireEvent.click(within(agents).getByRole("button", { name: "Check again" }));
+  await waitFor(() => expect(skillStatus()).toContain("Installed"));
+  expect(invoke).toHaveBeenCalledTimes(2);
+});
+
+test("a failed read says so and offers Try again", async () => {
+  invoke
+    .mockRejectedValueOnce(new Error("Disk unavailable"))
+    .mockResolvedValueOnce([
+      { ...claude, ...installed },
+      { ...codex, ...installed },
+    ]);
+  render(<AgentSkillsCard />);
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Could not check agent skills: Disk unavailable",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(skillStatus()).toContain("Installed"));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("with no supported agent on this computer the empty state explains what to do", async () => {
+  invoke.mockResolvedValueOnce([
+    { ...claude, detected: false },
+    { ...codex, detected: false, state: "not_installed" },
+  ]);
+  render(<AgentSkillsCard />);
+  expect(
+    await screen.findByText("No supported agent was found on this computer"),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Install Claude Code or Codex, then choose Check again."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Install for/ })).toBeNull();
+});
+
+test("the Replace review shows the folder, and the footnote opens Command line", async () => {
+  invoke.mockResolvedValueOnce([
+    { ...claude, state: "edited" },
+    { ...codex, ...installed },
+  ]);
+  const openPage = vi.fn();
+  const state: SettingsState = {
+    query: "",
+    setQuery: () => {},
+    openPage,
+    needsSetup: {},
+    refreshIndicators: () => {},
+  };
+  render(
+    <SettingsStateContext.Provider value={state}>
+      <AgentSkillsCard />
+    </SettingsStateContext.Provider>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Replace for Claude Code" }),
+  );
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("~/.claude/skills/ticketd")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(
+    screen.getByRole("button", { name: "Check the command line" }).dataset.slot,
+  ).toBe("settings-link");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Check the command line" }),
+  );
+  expect(openPage).toHaveBeenCalledWith("command-line");
 });

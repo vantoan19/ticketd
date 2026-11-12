@@ -38,6 +38,19 @@
   font-synthesis: none;
   font-size: 16px;
   line-height: normal;
+}
+
+/*
+ * The light tokens. [data-theme-preview] applies them to any subtree, so a
+ * preview can sit inside a dark app (or the reverse) in the other theme: put
+ * data-theme-preview="light" or "dark" on the element. The attribute alone is
+ * light. Tokens are declared again on that element, so ones derived from others
+ * (shadows, focus ring) are recomputed there. The element also paints that
+ * theme's background and text color. Tailwind's dark: variant still follows
+ * the root class, so inside a preview use the tokens, not dark: utilities.
+ */
+:root,
+[data-theme-preview] {
   color: var(--foreground);
   /* The type scale (DESIGN.md section 3). Every font-size uses one of these. */
   --text-wordmark: 15px;
@@ -137,7 +150,8 @@
  * The reference has no dark palette. These are ticketd's matching dark roles.
  * The theme preference sets data-theme on the root (see lib/preferences.ts).
  */
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+[data-theme-preview="dark"] {
   color-scheme: dark;
   --background: #0a0a0a;
   --surface: #171717;
@@ -417,6 +431,42 @@
 :where(:root[data-theme="dark"])
   .ui-input:where(:not([aria-invalid="true"], :focus-visible)) {
   box-shadow: inset 0 0 0 1px var(--control-boundary);
+}
+/* ChoiceTiles, CommandBlock and Steps: rings and hairlines are box-shadows
+   that utilities cannot express with tokens. The chosen tile wears the 2px
+   interactive ring; hover shows the control boundary; the radio is an
+   inset ring that thickens into a dot when chosen. */
+[data-slot="choice-tile"]:enabled[data-state="unchecked"]:hover {
+  box-shadow: 0 0 0 1px var(--control-boundary);
+}
+[data-slot="choice-tile"][data-state="checked"] {
+  box-shadow: 0 0 0 2px var(--interactive);
+}
+[data-slot="choice-tile-radio"] {
+  box-shadow: inset 0 0 0 1.5px var(--control-boundary);
+}
+[data-slot="choice-tile"][data-state="checked"]
+  [data-slot="choice-tile-radio"] {
+  box-shadow: inset 0 0 0 5px var(--interactive);
+}
+[data-slot="command-block"] {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+[data-slot="command-block"] code {
+  scrollbar-width: none;
+}
+/* The line joining a step's number to the next one. */
+[data-slot="step"]:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 30px;
+  bottom: 6px;
+  left: 11.5px;
+  width: 1px;
+  background: var(--border);
+}
+[data-slot="step"]:not([data-state]) > [data-slot="step-number"] {
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .ui-select:focus-visible {
   outline: none;
