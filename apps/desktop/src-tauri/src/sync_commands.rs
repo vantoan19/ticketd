@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri_plugin_opener::OpenerExt;
 use ticketd_core::{
     DocumentPatch, Error, RecordKind, Status, SyncKind, SyncPartKind, SyncRecord, SyncValue,
-    TicketPatch, Workspace, WriteRequest,
+    TicketPatch, Version, Workspace, WriteRequest,
     drive::{
         DesktopOAuthClient, DriveRemote, GoogleTransport, PickerSession, PlatformCredentialStore,
     },
@@ -404,8 +404,14 @@ pub enum Source {
 pub struct VersionEntry {
     id: String,
     timestamp: String,
+    /// The other desktop whose change made this version; `None` for this
+    /// desktop, and where `oldest` or Drive leaves it unknown.
     device: Option<String>,
+    /// The fields in which this version differs from the current one, which is
+    /// what selecting it shows. Empty for Drive: its list is not read file by file.
     changed: Vec<String>,
+    /// The oldest version kept here: what made it was not recorded.
+    oldest: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -459,6 +465,28 @@ impl Content {
         fields.push(("body", self.body));
         fields
     }
+
+    fn saved(version: Version) -> Self {
+        Self {
+            title: version.title.unwrap_or_default(),
+            status: version.status.map(|status| status.to_string()),
+            body: version.body,
+        }
+    }
+
+    /// The fields whose value is not the one `current` has, with both values.
+    fn differences(self, current: Self) -> Vec<VersionField> {
+        self.fields()
+            .into_iter()
+            .zip(current.fields())
+            .filter(|(earlier, current)| earlier.1 != current.1)
+            .map(|((field, value), (_, current))| VersionField {
+                field,
+                value,
+                current,
+            })
+            .collect()
+    }
 }
 
 fn versions(
@@ -507,6 +535,7 @@ fn versions(
                 timestamp: revision.modified,
                 device: None,
                 changed: Vec::new(),
+                oldest: false,
             })
             .collect());
     }
@@ -515,30 +544,41 @@ fn versions(
         RecordKind::Document => id.to_owned(),
     };
     let saved = workspace.versions(kind, &reference)?;
-    // The core says when and how each version was replaced. The list shows when
-    // and how it came to be, which is what replaced the version before it.
-    Ok(saved
+    // The core says when and by whom each version was replaced. The list shows
+    // when and by whom it came to be, which is what replaced the version before it.
+    saved
         .iter()
         .enumerate()
-        .map(|(index, version)| match saved.get(index + 1) {
-            Some(made_by) => VersionEntry {
-                id: version.id.to_string(),
-                timestamp: made_by.replaced_at.clone(),
-                device: made_by.device.clone(),
-                changed: made_by.changed.clone(),
-            },
-            // The oldest kept version: no earlier change is known. A Document
-            // knows when it was created; a ticket only when this version ended.
-            None => VersionEntry {
-                id: version.id.to_string(),
-                timestamp: Some(text(&record, "created_at"))
-                    .filter(|created| !created.is_empty())
-                    .unwrap_or_else(|| version.replaced_at.clone()),
-                device: None,
-                changed: vec!["created".into()],
-            },
+        .map(|(index, version)| {
+            // A row names what selecting it shows: where the version differs from now.
+            let changed = Content::saved(workspace.version(version.id)?)
+                .differences(Content::of(kind, &record))
+                .into_iter()
+                .map(|difference| difference.field.to_owned())
+                .collect();
+            Ok(match saved.get(index + 1) {
+                Some(made_by) => VersionEntry {
+                    id: version.id.to_string(),
+                    timestamp: made_by.replaced_at.clone(),
+                    device: made_by.device.clone(),
+                    changed,
+                    oldest: false,
+                },
+                // The oldest kept version: no earlier change is known, so neither
+                // is the desktop it came from. A Document knows when it was
+                // created; a ticket only when this version ended.
+                None => VersionEntry {
+                    id: version.id.to_string(),
+                    timestamp: Some(text(&record, "created_at"))
+                        .filter(|created| !created.is_empty())
+                        .unwrap_or_else(|| version.replaced_at.clone()),
+                    device: None,
+                    changed,
+                    oldest: true,
+                },
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// The content of one earlier version, wherever it is kept.
@@ -560,11 +600,7 @@ fn version_content(
             if saved.kind != kind || saved.record_id != id {
                 return missing();
             }
-            Ok(Content {
-                title: saved.title.unwrap_or_default(),
-                status: saved.status.map(|status| status.to_string()),
-                body: saved.body,
-            })
+            Ok(Content::saved(saved))
         }
         Source::Drive => {
             let Some(bound) = bound else {
@@ -620,17 +656,7 @@ fn version_detail(
     let current = Content::of(kind, &workspace.export_sync_record(sync_kind(kind), id)?);
     let earlier = version_content(workspace, bound, kind, id, source, version)?;
     Ok(VersionDetail {
-        fields: earlier
-            .fields()
-            .into_iter()
-            .zip(current.fields())
-            .filter(|(earlier, current)| earlier.1 != current.1)
-            .map(|((field, value), (_, current))| VersionField {
-                field,
-                value,
-                current,
-            })
-            .collect(),
+        fields: earlier.differences(current),
     })
 }
 
@@ -1253,8 +1279,12 @@ mod tests {
         )
         .unwrap();
         let changed: Vec<_> = list.iter().map(|entry| entry.changed.join(" ")).collect();
-        // Newest first: "Two" was made by the retitle, "One" by creating the ticket.
-        assert_eq!(changed, ["title", "created"]);
+        // Newest first, each named by where it differs from the ticket as it is
+        // now: "Two" lacks the new status and text, "One" the new title as well.
+        assert_eq!(changed, ["status body", "title status body"]);
+        // Only the oldest kept version has no recorded origin.
+        let oldest: Vec<_> = list.iter().map(|entry| entry.oldest).collect();
+        assert_eq!(oldest, [false, true]);
 
         let first = &list[1].id;
         let detail = |workspace: &Workspace| {
