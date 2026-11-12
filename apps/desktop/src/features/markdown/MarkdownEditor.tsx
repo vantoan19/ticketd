@@ -1131,7 +1131,15 @@ export function MarkdownEditor({
       unit: "character",
       reverse: true,
     });
+    const index = editor.selection?.anchor.path[0];
     insert(editor, type);
+    if (type === "blockquote" && index !== undefined)
+      // Wrapping the paragraph in a quote replaces its DOM nodes, which drops the browser's caret.
+      window.requestAnimationFrame(() => {
+        const end = editor.api.end([index]);
+        if (end) editor.tf.select(end);
+        editor.tf.focus();
+      });
     closeSlash();
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -1480,8 +1488,18 @@ export function MarkdownEditor({
                 event.preventDefault();
                 event.stopPropagation();
                 const incoming = readMarkdown(pasted);
-                if (incoming.reasons.length) editor.tf.insertText(pasted);
-                else {
+                if (incoming.reasons.length || !pasted.trim())
+                  editor.tf.insertText(pasted);
+                else if (
+                  incoming.value.length === 1 &&
+                  incoming.value[0]?.type === "p"
+                ) {
+                  // Parsing drops a paragraph's edge whitespace, but a paste must keep it:
+                  // "hello" + " world" is "hello world".
+                  editor.tf.insertText(/^[ \t]*/.exec(pasted)?.[0] ?? "");
+                  editor.tf.insertFragment(incoming.value);
+                  editor.tf.insertText(/[ \t]*$/.exec(pasted)?.[0] ?? "");
+                } else {
                   const first = incoming.value[0];
                   // Slate merges a fragment's first block into the current block.
                   // An empty leading paragraph protects a pasted heading/list/table.
