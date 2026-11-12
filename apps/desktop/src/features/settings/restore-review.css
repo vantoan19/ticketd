@@ -25,7 +25,8 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  /* pre, not nowrap: a flex item drops its leading space before the "·". */
+  white-space: pre;
 }
 .backups-icon-error {
   color: var(--error-foreground);
