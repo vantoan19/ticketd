@@ -191,6 +191,8 @@ pub struct ChatState {
     pub activity: &'static str,
     pub problem: Option<Problem>,
     pub doing: Option<Doing>,
+    /// Working while the harness session opens: "resume" or "start".
+    pub opening: Option<&'static str>,
     pub catching_up: bool,
     pub steering: Steering,
     pub links: Vec<LinkedRecord>,
@@ -802,6 +804,7 @@ pub fn chat_state(
 ) -> ChatState {
     let name = harness_name(&chat.harness);
     let activity = activity(live, tracker);
+    let opening = opening(activity, live.running, chat.native_session_id.is_some());
     ChatState {
         id: chat.id.clone(),
         title: title(chat),
@@ -823,11 +826,12 @@ pub fn chat_state(
         doing: chat
             .active_turn
             .as_ref()
-            .filter(|_| activity == "working")
+            .filter(|_| activity == "working" && opening.is_none())
             .map(|turn| Doing {
                 label: "Working".to_owned(),
                 since: turn.started_at.clone(),
             }),
+        opening,
         catching_up: false,
         steering: Steering {
             available: live.steering.is_some(),
@@ -841,6 +845,15 @@ pub fn chat_state(
         queue: around.queue.clone(),
         queue_paused: chat.queue_paused,
     }
+}
+
+/// Work with no harness process behind it yet is its session opening: every turn,
+/// steer and dispatch needs the runtime. It resumes the Chat's native session when
+/// one is recorded.
+// ponytail: an explicit "Resume in a fresh session" also reads "resume" while it
+// opens; expose the host's session origin if that wording matters.
+fn opening(activity: &str, running: bool, resumes: bool) -> Option<&'static str> {
+    (activity == "working" && !running).then_some(if resumes { "resume" } else { "start" })
 }
 
 /// Whether a Chat counts in the sidebar: it waits for an answer or a delivery decision
@@ -915,8 +928,18 @@ pub fn idle() -> ChatLive {
 mod tests {
     use super::{
         ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatTool, ChatToolState, Item,
-        idle, needs_you, request, step,
+        idle, needs_you, opening, request, step,
     };
+
+    /// U16: work before the harness process exists is the session opening.
+    #[test]
+    fn work_with_no_process_yet_is_the_session_opening() {
+        assert_eq!(opening("working", false, true), Some("resume"));
+        assert_eq!(opening("working", false, false), Some("start"));
+        assert_eq!(opening("working", true, true), None);
+        assert_eq!(opening("waiting", false, true), None);
+        assert_eq!(opening("idle", false, false), None);
+    }
 
     #[test]
     fn a_claude_command_step_names_the_command_it_ran() {

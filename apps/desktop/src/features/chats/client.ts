@@ -251,6 +251,8 @@ export const chatStateSchema = z.object({
   problem: problemSchema.nullish(),
   /** What the harness is doing now, for the working line. */
   doing: z.object({ label: z.string(), since: z.string() }).nullish(),
+  /** Working, but the harness session is still opening: resuming the Chat's native session, or starting one. */
+  opening: z.enum(["resume", "start"]).nullish(),
   /** The view reattached to live work and is still receiving what it missed. */
   catching_up: z.boolean().default(false),
   /** Whether Send can reach the turn in progress; otherwise input is queued. */

@@ -590,7 +590,16 @@
 .chat-pop p {
   color: var(--foreground);
 }
-.chat-pop .path-tail {
+/* A path inside a notice's sentence: the popover's path, kept in the line and
+   in the sentence's weight; a long one shortens in the middle, then the tail. */
+.chat-dock .ui-notice-description .path-text {
+  display: inline-flex;
+  max-width: 100%;
+  line-height: inherit;
+  font-weight: inherit;
+}
+.chat-pop .path-tail,
+.chat-dock .ui-notice-description .path-tail {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

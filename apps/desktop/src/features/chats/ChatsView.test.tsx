@@ -376,7 +376,11 @@ test("a missing folder keeps the Chat readable and offers another folder", async
         id: "c1",
         title: "Reset email",
         activity: "failed",
-        folder: { missing: true, path: "~/ticketd/chats/reset-email" },
+        folder: {
+          missing: true,
+          path: "~/ticketd/chats/reset-email",
+          name: "reset-email",
+        },
         problem: {
           kind: "folder_missing",
           path: "~/ticketd/chats/reset-email",
@@ -387,7 +391,14 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   );
   expect(screen.getAllByText("Drafted the copy.").length).toBeGreaterThan(0);
   expect(screen.queryByLabelText("Message Codex")).toBeNull();
-  expect(button("Harness and folder").textContent).toBe("Codex");
+  expect(button("Harness and folder").textContent).toBe(
+    "Codex · reset-email (missing)",
+  );
+  // The path reads like the folder popover's: one line, not a code block.
+  const notice = screen.getByRole("alert");
+  expect(within(notice).getByTitle("~/ticketd/chats/reset-email")).toBeTruthy();
+  expect(notice.querySelector("code")).toBeNull();
+  expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
   client.nextFolder = "~/code/emails";
   fireEvent.click(button("Pick another folder…"));
   expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
@@ -735,6 +746,24 @@ test("after reopening the window the view says it is catching up while work cont
   );
   expect(screen.getByRole("status").textContent).toBe("Catching up…");
   expect(button("Stop")).toBeTruthy();
+});
+
+test("while its session opens the working line says so and counts, then reads as working", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working", opening: "resume" }),
+  );
+  expect(screen.getByRole("status").textContent).toBe(
+    "Resuming the Codex session… · 0s",
+  );
+  act(() => client.patch("c1", { opening: "start" }));
+  expect(screen.getByRole("status").textContent).toBe("Starting Codex… · 0s");
+  act(() =>
+    client.patch("c1", {
+      opening: null,
+      doing: { label: "Working", since: new Date().toISOString() },
+    }),
+  );
+  expect(screen.getByRole("status").textContent).toBe("Working · 0s");
 });
 
 test("New Chat keeps the draft when the harness is missing and starts once it is found", async () => {

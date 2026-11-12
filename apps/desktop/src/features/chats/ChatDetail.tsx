@@ -57,13 +57,20 @@ import {
 } from "@/features/chats/Transcript";
 import { useChat } from "@/features/chats/use-chats";
 
-/** Sets `code spans` of a notice's sentence in mono. */
-function NoticeText({ text }: { text: string }) {
+/**
+ * Sets `code spans` of a notice's sentence in mono. A span that is `path` reads
+ * as paths do elsewhere: one line, shortened in the middle.
+ */
+function NoticeText({ text, path }: { text: string; path?: string }) {
   return text.split("`").map((part, index) =>
     index % 2 ? (
-      <code key={index} className="chat-mono">
-        {part}
-      </code>
+      path && part === withoutVerbatim(path) ? (
+        <PathText key={index} path={path} />
+      ) : (
+        <code key={index} className="chat-mono">
+          {part}
+        </code>
+      )
     ) : (
       part
     ),
@@ -100,7 +107,10 @@ export function ProblemNotice({
     <Alert tone={notice.tone}>
       <AlertTitle>{notice.title}</AlertTitle>
       <AlertDescription>
-        <NoticeText text={notice.body} />
+        <NoticeText
+          text={notice.body}
+          {...(problem.path && { path: problem.path })}
+        />
       </AlertDescription>
       <AlertActions>
         {notice.actions.map((action) =>
@@ -159,8 +169,8 @@ function HarnessAndFolder({ chat }: { chat: ChatState }) {
           aria-label="Harness and folder"
         >
           <span className="truncate">
-            {chat.harness.name}
-            {!chat.folder.missing && ` · ${folder}`}
+            {chat.harness.name} · {folder}
+            {chat.folder.missing && " (missing)"}
           </span>
           <ChevronDown aria-hidden />
         </Button>
