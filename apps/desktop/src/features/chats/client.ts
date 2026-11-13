@@ -375,6 +375,13 @@ export type ChatChange = z.infer<typeof chatChangeSchema>;
 
 export type LinkRef = { kind: LinkedRecord["kind"]; id: string };
 
+/** A file or folder in a Chat's folder; `path` is relative, with `/` separators. */
+export const folderFileSchema = z.object({
+  path: z.string(),
+  folder: z.boolean(),
+});
+export type FolderFile = z.infer<typeof folderFileSchema>;
+
 /** A click on a Chat's system notification: open it under its own list. */
 export const openRequestSchema = z.object({
   chat_id: z.string(),
@@ -446,9 +453,16 @@ export interface ChatClient {
     cursor: number,
     listener: (change: ChatChange) => void,
   ): Unsubscribe;
-  /** Starts a turn, or steers the one in progress; the host queues it when steering is known not to have been accepted. */
-  send(id: string, text: string): Promise<void>;
-  queue(id: string, text: string): Promise<void>;
+  /**
+   * Starts a turn, or steers the one in progress; the host queues it when steering is known not to have been accepted.
+   * `links` are the records the message mentions or quotes: linked as it is sent (spec 21.4).
+   */
+  send(id: string, text: string, links?: LinkRef[]): Promise<void>;
+  queue(id: string, text: string, links?: LinkRef[]): Promise<void>;
+  /** The Chats outside the trash linked to one record. Refetch on `revision`. */
+  linkedTo(link: LinkRef): Promise<ChatSummary[]>;
+  /** Files and folders under `folder` matching `query`, for the composer's `@` menu. */
+  folderFiles(folder: string, query: string): Promise<FolderFile[]>;
   removeQueued(id: string, queuedId: string): Promise<void>;
   resumeQueue(id: string): Promise<void>;
   /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */

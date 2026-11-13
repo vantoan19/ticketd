@@ -1,0 +1,537 @@
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type Ref,
+} from "react";
+import { File, FileText, Folder, FolderKanban } from "lucide-react";
+import { Reference } from "@/components/ui/reference";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import type { FolderFile, LinkedRecord } from "@/features/chats/client";
+import {
+  insertToken,
+  mentionText,
+  reconcile,
+  removeToken,
+  stepOver,
+  triggerAt,
+  type Insert,
+  type Token,
+  type Trigger,
+} from "@/features/chats/composer-mentions";
+
+/** Where the composer's `#`, `@` and `/` menus find what they offer. */
+export type ComposerMentions = {
+  /** Tickets, Documents and Projects by name. */
+  records: (query: string) => Promise<LinkedRecord[]>;
+  /** Shown under `#` before anything is typed. */
+  linked: LinkedRecord[];
+  /** The folder `@` lists; absent when there is none to read yet. */
+  folder?: { name: string; files: (query: string) => Promise<FolderFile[]> };
+  /** The harness's own commands, when it lists them; `/` opens only then. */
+  commands?: { name: string; description?: string | null }[];
+  harness: string;
+};
+
+type Option = { id: string; insert: Insert; group: string };
+type Menu = {
+  trigger: Trigger;
+  options: Option[];
+  state: "searching" | "ready" | "failed";
+  error?: string;
+};
+
+const RECORD_GROUPS = {
+  ticket: "Tickets",
+  document: "Documents",
+  project: "Projects",
+} as const;
+
+function recordOptions(records: LinkedRecord[], group?: string): Option[] {
+  return records.map((record) => ({
+    id: `${record.kind}:${record.id}`,
+    group: group ?? RECORD_GROUPS[record.kind],
+    insert: { kind: "record", text: mentionText(record), record },
+  }));
+}
+
+/**
+ * Edits `textarea` through the browser's own editing, so ⌘Z undoes it; where
+ * that is unavailable, `fallback` sets the text directly.
+ */
+function replaceRange(
+  textarea: HTMLTextAreaElement,
+  start: number,
+  end: number,
+  replacement: string,
+  fallback: () => void,
+) {
+  textarea.focus();
+  textarea.setSelectionRange(start, end);
+  let done = false;
+  try {
+    done =
+      typeof document.execCommand === "function" &&
+      document.execCommand(
+        replacement ? "insertText" : "delete",
+        false,
+        replacement,
+      );
+  } catch {
+    done = false;
+  }
+  if (!done) fallback();
+}
+
+function OptionLabel({ option }: { option: Option }) {
+  const pick = option.insert;
+  if (pick.kind === "record") {
+    const record = pick.record;
+    if (record.kind === "ticket")
+      return (
+        <>
+          <StatusIcon status={record.status} size={14} decorative />
+          <Reference>{record.reference}</Reference>
+          <span className="chat-menu-title">{record.title}</span>
+        </>
+      );
+    return (
+      <>
+        {record.kind === "project" ? (
+          <FolderKanban size={14} aria-hidden />
+        ) : (
+          <FileText size={14} aria-hidden />
+        )}
+        <span className="chat-menu-title">{record.title}</span>
+      </>
+    );
+  }
+  if (pick.kind === "path") {
+    const parts = pick.text.split("/");
+    const name = parts.pop() ?? pick.text;
+    return (
+      <>
+        {option.group === "folder" ? (
+          <Folder size={14} aria-hidden />
+        ) : (
+          <File size={14} aria-hidden />
+        )}
+        <span className="chat-menu-title">{name}</span>
+        {parts.length > 0 && (
+          <span className="chat-menu-detail">{parts.join("/")}</span>
+        )}
+      </>
+    );
+  }
+  return <span className="chat-menu-mono">{pick.text}</span>;
+}
+
+/**
+ * The composer's message box with its `#` record, `@` path and `/` command
+ * menus. Inserted mentions are tokens over the plain text: a record is drawn
+ * as a link (in a layer behind the text, so the text itself stays editable as
+ * typed) and is linked when the message is sent. Focus never leaves the box;
+ * while a menu is open the box is its combobox.
+ */
+export function ComposerField({
+  text,
+  tokens,
+  onChange,
+  onKeyDown,
+  mentions,
+  placeholder,
+  autoFocus,
+  inputRef,
+}: {
+  text: string;
+  tokens: Token[];
+  onChange: (text: string, tokens: Token[]) => void;
+  /** Keys the menus and tokens did not take: Enter, ↑. */
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  mentions?: ComposerMentions | undefined;
+  placeholder: string;
+  autoFocus: boolean;
+  inputRef?: Ref<HTMLTextAreaElement> | undefined;
+}) {
+  const box = useRef<HTMLTextAreaElement | null>(null);
+  const mirror = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const [trigger, setTrigger] = useState<Trigger | null>(null);
+  /** The trigger Escape closed; it stays closed until another one starts. */
+  const [dismissed, setDismissed] = useState<number | null>(null);
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const [active, setActive] = useState(0);
+  const [announce, setAnnounce] = useState("");
+  const removed = useRef<Token[]>([]);
+  /** A pick being inserted: added as a token once the edit lands. */
+  const inserting = useRef<{ start: number; insert: Insert } | null>(null);
+  const caretAfter = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const caret = caretAfter.current;
+    if (caret === null || !box.current) return;
+    caretAfter.current = null;
+    box.current.setSelectionRange(caret, caret);
+  });
+
+  const open =
+    trigger && trigger.start !== dismissed && mentions ? trigger : null;
+  const openKey = open ? `${open.char}${open.start}:${open.query}` : "";
+  useEffect(() => {
+    if (!open || !mentions) {
+      setMenu(null);
+      return;
+    }
+    let current = true;
+    const show = (options: Option[]) => {
+      if (!current) return;
+      setMenu({ trigger: open, options, state: "ready" });
+      setActive(0);
+    };
+    const fail = (reason: unknown) =>
+      current &&
+      setMenu({
+        trigger: open,
+        options: [],
+        state: "failed",
+        error: reason instanceof Error ? reason.message : String(reason),
+      });
+    const query = open.query.trim();
+    if (open.char === "#") {
+      if (!query) show(recordOptions(mentions.linked, "Linked to this Chat"));
+      else {
+        setMenu((last) => ({
+          trigger: open,
+          options: last?.trigger.char === "#" ? last.options : [],
+          state: "searching",
+        }));
+        mentions.records(query).then(
+          (found) =>
+            show(
+              recordOptions(
+                [...found].sort(
+                  (a, b) =>
+                    Object.keys(RECORD_GROUPS).indexOf(a.kind) -
+                    Object.keys(RECORD_GROUPS).indexOf(b.kind),
+                ),
+              ),
+            ),
+          fail,
+        );
+      }
+    } else if (open.char === "@") {
+      const folder = mentions.folder;
+      if (!folder) setMenu(null);
+      else
+        folder.files(query).then(
+          (files) =>
+            show(
+              files.map((file) => ({
+                id: file.path,
+                group: file.folder ? "folder" : "file",
+                insert: { kind: "path", text: file.path },
+              })),
+            ),
+          fail,
+        );
+    } else {
+      const commands = mentions.commands ?? [];
+      const needle = query.toLowerCase();
+      show(
+        commands
+          .filter((command) => command.name.toLowerCase().includes(needle))
+          .map((command) => ({
+            id: command.name,
+            group: command.description ?? "",
+            insert: { kind: "command", text: `/${command.name}` },
+          })),
+      );
+    }
+    return () => {
+      current = false;
+    };
+    // `openKey` names the trigger; `mentions` is read when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openKey]);
+
+  // `/` opens only when the harness lists commands; with none it is plain text.
+  const commandsListed = (mentions?.commands?.length ?? 0) > 0;
+  const shown =
+    menu &&
+    open &&
+    !(open.char === "/" && !commandsListed) &&
+    !(open.char === "@" && !mentions?.folder)
+      ? menu
+      : null;
+  const options = shown?.options ?? [];
+
+  const changed = (next: string, caret: number) => {
+    let nextTokens = reconcile(text, next, tokens, removed.current);
+    const pick = inserting.current;
+    if (pick) {
+      inserting.current = null;
+      const token = {
+        ...pick.insert,
+        start: pick.start,
+        end: pick.start + pick.insert.text.length,
+      } as Token;
+      nextTokens = [
+        ...nextTokens.filter(
+          (item) => item.end <= token.start || item.start >= token.end,
+        ),
+        token,
+      ].sort((a, b) => a.start - b.start);
+    }
+    onChange(next, nextTokens);
+    const found = triggerAt(next, caret);
+    setTrigger(found);
+    if (!found || found.start !== dismissed) setDismissed(null);
+  };
+
+  const pick = (option: Option) => {
+    const textarea = box.current;
+    if (!textarea || !open) return;
+    const caret = textarea.selectionStart;
+    const after = text.slice(caret);
+    const spaced = /^\s/.test(after)
+      ? option.insert.text
+      : `${option.insert.text} `;
+    inserting.current = { start: open.start, insert: option.insert };
+    replaceRange(textarea, open.start, caret, spaced, () => {
+      inserting.current = null;
+      const inserted = insertToken(text, tokens, open, caret, option.insert);
+      caretAfter.current = inserted.caret;
+      onChange(inserted.text, inserted.tokens);
+    });
+    setTrigger(null);
+    setAnnounce(
+      option.insert.kind === "record"
+        ? `Inserted ${option.insert.text}. Links when you send.`
+        : `Inserted ${option.insert.text}.`,
+    );
+  };
+
+  const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    const textarea = event.currentTarget;
+    if (shown) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (options.length === 0) return;
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setActive((index) => (index + step + options.length) % options.length);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        const option = options[active];
+        if (option) {
+          // Inserting never sends.
+          event.preventDefault();
+          pick(option);
+          return;
+        }
+      }
+      if (event.key === "Escape") {
+        // Closes the menu and keeps the text; a second Escape is Stop's.
+        event.preventDefault();
+        event.stopPropagation();
+        setDismissed(shown.trigger.start);
+        return;
+      }
+    }
+    const caret = textarea.selectionStart;
+    const collapsed = caret === textarea.selectionEnd;
+    const plain = !event.shiftKey && !event.metaKey && !event.altKey;
+    if (collapsed && plain && !event.ctrlKey) {
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const removal = removeToken(
+          text,
+          tokens,
+          caret,
+          event.key === "Backspace" ? "back" : "forward",
+        );
+        if (removal) {
+          event.preventDefault();
+          removed.current = [...removed.current.slice(-19), removal.removed];
+          replaceRange(
+            textarea,
+            removal.removed.start,
+            removal.removed.end,
+            "",
+            () => {
+              caretAfter.current = removal.caret;
+              onChange(removal.text, removal.tokens);
+            },
+          );
+          setAnnounce(`Removed ${removal.removed.text}.`);
+          return;
+        }
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        const to = stepOver(
+          tokens,
+          caret,
+          event.key === "ArrowLeft" ? "left" : "right",
+        );
+        if (to !== null) {
+          event.preventDefault();
+          textarea.setSelectionRange(to, to);
+          return;
+        }
+      }
+    }
+    onKeyDown(event);
+  };
+
+  const activeOption = options[active];
+  const optionId = (index: number) => `${listId}-${index}`;
+  const groups: { name: string; items: { option: Option; index: number }[] }[] =
+    [];
+  if (shown?.trigger.char === "#")
+    options.forEach((option, index) => {
+      const group = groups.find((item) => item.name === option.group);
+      if (group) group.items.push({ option, index });
+      else groups.push({ name: option.group, items: [{ option, index }] });
+    });
+  else if (shown)
+    groups.push({
+      name:
+        shown.trigger.char === "@"
+          ? `Files in ${mentions?.folder?.name ?? "this folder"}`
+          : `${mentions?.harness ?? "Harness"} commands`,
+      items: options.map((option, index) => ({ option, index })),
+    });
+  const query = shown?.trigger.query.trim() ?? "";
+  const empty =
+    shown && shown.state !== "searching" && options.length === 0
+      ? shown.state === "failed"
+        ? `Search failed: ${shown.error ?? ""}`
+        : shown.trigger.char === "@"
+          ? query
+            ? `No file or folder matches “${query}”.`
+            : "This Chat’s folder has no files yet."
+          : shown.trigger.char === "#"
+            ? query
+              ? "No ticket, Document or Project has that in its name."
+              : "Type part of a name to find it."
+            : `No ${mentions?.harness ?? "harness"} command matches “${query}”.`
+      : "";
+
+  // The layer behind the text draws record tokens as links.
+  const segments: { text: string; token?: Token }[] = [];
+  let at = 0;
+  for (const token of tokens) {
+    if (token.start < at || token.end > text.length) continue;
+    segments.push({ text: text.slice(at, token.start) });
+    segments.push({ text: text.slice(token.start, token.end), token });
+    at = token.end;
+  }
+  segments.push({ text: text.slice(at) });
+
+  return (
+    <div className="chat-composer-field">
+      {shown && (
+        <div className="chat-menu" role="presentation">
+          <ul id={listId} role="listbox" aria-label={groups[0]?.name ?? "Menu"}>
+            {groups.map((group) => (
+              <li key={group.name} role="presentation">
+                <div className="chat-menu-group" aria-hidden="true">
+                  {group.name}
+                </div>
+                <ul role="group" aria-label={group.name}>
+                  {group.items.map(({ option, index }) => (
+                    <li
+                      key={option.id}
+                      id={optionId(index)}
+                      role="option"
+                      aria-selected={index === active}
+                      className="chat-menu-option"
+                      onMouseDown={(event) => {
+                        // Keeps focus, and the caret, in the message box.
+                        event.preventDefault();
+                        pick(option);
+                      }}
+                      onMouseEnter={() => setActive(index)}
+                    >
+                      <OptionLabel option={option} />
+                      {option.insert.kind === "command" && option.group && (
+                        <span className="chat-menu-detail">{option.group}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+          {shown.state === "searching" && options.length === 0 && (
+            <p className="chat-menu-note">Searching…</p>
+          )}
+          {empty && (
+            <p className="chat-menu-note" role={shown.state === "failed" ? "alert" : undefined}>
+              {empty}
+            </p>
+          )}
+          {shown.trigger.char === "#" && (
+            <p className="chat-menu-foot">Links when you send</p>
+          )}
+        </div>
+      )}
+      <div className="chat-composer-input">
+        <div ref={mirror} className="chat-composer-mirror" aria-hidden="true">
+          {segments.map((segment, index) =>
+            segment.token?.kind === "record" ? (
+              <span key={index} className="chat-token">
+                {segment.text}
+              </span>
+            ) : (
+              <span key={index}>{segment.text}</span>
+            ),
+          )}
+          {"​"}
+        </div>
+        <textarea
+          ref={(node) => {
+            box.current = node;
+            if (typeof inputRef === "function") inputRef(node);
+            else if (inputRef) inputRef.current = node;
+          }}
+          rows={1}
+          aria-label={placeholder}
+          placeholder={placeholder}
+          value={text}
+          autoFocus={autoFocus}
+          {...(shown && {
+            role: "combobox",
+            "aria-expanded": true,
+            "aria-controls": listId,
+            "aria-autocomplete": "list" as const,
+            ...(activeOption && {
+              "aria-activedescendant": optionId(active),
+            }),
+          })}
+          onChange={(event) =>
+            changed(event.target.value, event.target.selectionStart)
+          }
+          onSelect={(event) => {
+            const target = event.currentTarget;
+            if (target.selectionStart !== target.selectionEnd) return;
+            setTrigger(triggerAt(target.value, target.selectionStart));
+          }}
+          onScroll={(event) => {
+            if (mirror.current)
+              mirror.current.scrollTop = event.currentTarget.scrollTop;
+          }}
+          onKeyDown={onKey}
+        />
+      </div>
+      <div className="sr-only" aria-live="polite">
+        {shown && shown.state === "ready"
+          ? `${options.length} ${options.length === 1 ? "result" : "results"}`
+          : announce}
+      </div>
+    </div>
+  );
+}

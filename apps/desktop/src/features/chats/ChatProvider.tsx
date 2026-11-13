@@ -11,6 +11,7 @@ import {
 } from "@/features/chats/use-chats";
 import { usePreferences } from "@/lib/preferences";
 import "@/features/chats/chats.css";
+import "@/features/chats/ticket-chats.css";
 
 /**
  * Holds what every screen needs to know about Chat: whether it is on, how

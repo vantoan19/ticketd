@@ -1,6 +1,12 @@
-import { useState, type Ref } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Square } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
+import type { LinkRef } from "@/features/chats/client";
+import { linksOf, type Token } from "@/features/chats/composer-mentions";
+import {
+  ComposerField,
+  type ComposerMentions,
+} from "@/features/chats/ComposerField";
 import type { ComposerControls } from "@/features/chats/model";
 import { SendButton } from "@/features/chats/SendButton";
 
@@ -15,7 +21,10 @@ export function Composer({
   placeholder,
   controls,
   initialText = "",
+  initialTokens = [],
   onText,
+  mentions,
+  above,
   onSend,
   onQueue,
   onStop,
@@ -28,10 +37,18 @@ export function Composer({
   /** Computed from the text the composer reports through `onText`. */
   controls: (text: string) => ComposerControls;
   initialText?: string;
-  onText?: (text: string) => void;
-  /** Send, steer or answer. Resolve to clear the box; reject to keep the text. */
-  onSend: (text: string) => Promise<void>;
-  onQueue?: (text: string) => Promise<void>;
+  initialTokens?: Token[];
+  onText?: (text: string, tokens: Token[]) => void;
+  /** The `#`, `@` and `/` menus; without it the box is plain text. */
+  mentions?: ComposerMentions | undefined;
+  /** Shown inside the box above the text, such as quotes added to the Chat. */
+  above?: ReactNode;
+  /**
+   * Send, steer or answer. Resolve to clear the box; reject to keep the text.
+   * `links` are the records mentioned with `#`, linked as the message is sent.
+   */
+  onSend: (text: string, links: LinkRef[]) => Promise<void>;
+  onQueue?: (text: string, links: LinkRef[]) => Promise<void>;
   /** Pass only while a turn is in progress. */
   onStop?: () => void;
   /** Stop was asked for and has not finished: Stop waits. */
@@ -42,17 +59,30 @@ export function Composer({
   autoFocus?: boolean;
 }) {
   const [text, setTextState] = useState(initialText);
+  const [tokens, setTokens] = useState(initialTokens);
   const [busy, setBusy] = useState(false);
-  const setText = (next: string) => {
+  const setText = (next: string, nextTokens: Token[] = []) => {
     setTextState(next);
-    onText?.(next);
+    setTokens(nextTokens);
+    onText?.(next, nextTokens);
   };
+  // A prefilled box is focused with the caret after the text.
+  const box = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    const field = box.current;
+    if (autoFocus && field && initialText)
+      field.setSelectionRange(initialText.length, initialText.length);
+    // Only the text the box opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const state = controls(text);
-  const submit = (action: ((text: string) => Promise<void>) | undefined) => {
+  const submit = (
+    action: ((text: string, links: LinkRef[]) => Promise<void>) | undefined,
+  ) => {
     const message = text.trim();
     if (!action || !message || busy) return;
     setBusy(true);
-    action(message).then(
+    action(message, linksOf(tokens)).then(
       () => {
         setText("");
         setBusy(false);
@@ -72,14 +102,19 @@ export function Composer({
         if (state.enabled) submit(primary);
       }}
     >
-      <textarea
-        ref={inputRef}
-        rows={1}
-        aria-label={placeholder}
+      {above}
+      <ComposerField
+        inputRef={(node) => {
+          box.current = node;
+          if (typeof inputRef === "function") inputRef(node);
+          else if (inputRef) inputRef.current = node;
+        }}
         placeholder={placeholder}
-        value={text}
+        text={text}
+        tokens={tokens}
+        mentions={mentions}
         autoFocus={autoFocus}
-        onChange={(event) => setText(event.target.value)}
+        onChange={setText}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
           if (
