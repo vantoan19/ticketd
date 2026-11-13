@@ -18,6 +18,7 @@ import {
   type OpenRequest,
   type Problem,
   type ProblemKind,
+  type ProjectRef,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { changeLine } from "@/features/chats/model";
@@ -322,6 +323,8 @@ export type MockChatClient = ChatClient & {
   savedDocuments: string[];
   /** Items passed to readThrough, in order. */
   readThroughs: string[];
+  /** The Project each folder belongs to, as the host would find it. */
+  folderProjects: Map<string, ProjectRef>;
   /** Paths opened through a changed-files row or a step's file name, in order. */
   openedFiles: string[];
   /** What the next folder dialog returns. */
@@ -572,6 +575,7 @@ export function createMockChatClient(
     savedDocuments: [],
     openedFiles: [],
     readThroughs: [],
+    folderProjects: new Map(),
     nextFolder: null,
     push,
     patch,
@@ -612,6 +616,7 @@ export function createMockChatClient(
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     harnesses: async () => harnesses,
     pickFolder: async () => client.nextFolder,
+    folderProject: async (path) => client.folderProjects.get(path) ?? null,
     folderUse: async (path) =>
       [...chats.values()].filter((entry) => entry.chat.folder.path === path)
         .length,

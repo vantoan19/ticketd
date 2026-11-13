@@ -1673,6 +1673,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_set_notify,
             chat_commands::chat_mark_read,
             chat_commands::chat_read_through,
+            chat_commands::chat_folder_project,
             chat_commands::chat_mark_unread,
             chat_commands::chat_set_muted,
             chat_commands::chat_list,

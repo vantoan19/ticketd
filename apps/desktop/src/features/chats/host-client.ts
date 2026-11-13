@@ -17,6 +17,7 @@ import {
   suggestionSchema,
   type ChatChange,
   type ChatClient,
+  projectRefSchema,
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 
@@ -180,6 +181,10 @@ export function createHostChatClient(
     harnesses: async () =>
       z.array(harnessStatusSchema).parse(await call("chat_harnesses")),
     pickFolder: () => bridge.pickFolder(),
+    folderProject: async (path) =>
+      projectRefSchema
+        .nullable()
+        .parse(await call("chat_folder_project", { path })),
     folderUse: async (path) =>
       z
         .number()

@@ -307,13 +307,22 @@ pub struct HarnessRef {
     pub permissions: Option<String>,
 }
 
+/// Another Chat that uses the same folder, as the context popover lists it to open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SharedChat {
+    pub id: String,
+    pub title: String,
+    /// "active" or "archived": the list it opens under.
+    pub retention: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Folder {
     pub path: String,
     pub name: String,
     pub managed: bool,
     pub missing: bool,
-    pub shared_with: Vec<String>,
+    pub shared_with: Vec<SharedChat>,
     /// The git branch checked out in the folder, read now; `None` outside a repository.
     pub branch: Option<BranchView>,
     /// The Project whose folder holds the Chat's, else the first linked Project.
@@ -456,8 +465,8 @@ pub struct FreshHistory {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Surroundings {
     pub folder_missing: bool,
-    /// Titles of other Chats that use the same folder.
-    pub shared_with: Vec<String>,
+    /// The other Chats that use the same folder.
+    pub shared_with: Vec<SharedChat>,
     pub links: Vec<LinkedRecord>,
     pub queue: Vec<Queued>,
     pub project: Option<ProjectRef>,
@@ -1357,7 +1366,7 @@ fn home_folder() -> Option<String> {
         .ok()
 }
 
-fn retention(chat: &Chat) -> &'static str {
+pub fn retention(chat: &Chat) -> &'static str {
     if chat.trashed {
         "trashed"
     } else if chat.archived {

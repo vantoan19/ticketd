@@ -16,6 +16,7 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
+import { ProjectNavigation } from "@/features/documents/navigation";
 import { drafts } from "@/features/chats/drafts";
 import {
   chatState,
@@ -60,7 +61,11 @@ const approval: TranscriptItem = {
   state: "pending",
 };
 
-async function open(chats: MockChat[], title?: string) {
+async function open(
+  chats: MockChat[],
+  title?: string,
+  openProject: (id: string) => void = () => {},
+) {
   const client = createMockChatClient({
     enabled: true,
     chats,
@@ -77,11 +82,13 @@ async function open(chats: MockChat[], title?: string) {
     ],
   });
   render(
-    <ChatClientContext value={client}>
-      <ChatProvider>
-        <ChatsView />
-      </ChatProvider>
-    </ChatClientContext>,
+    <ProjectNavigation.Provider value={openProject}>
+      <ChatClientContext value={client}>
+        <ChatProvider>
+          <ChatsView />
+        </ChatProvider>
+      </ChatClientContext>
+    </ProjectNavigation.Provider>,
   );
   const first = chats[0];
   if (first) {
@@ -1310,6 +1317,52 @@ test("records are linked by title and unlinked from their chip", async () => {
   );
 });
 
+test("a recheck that fails no longer says Signed in", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  fireEvent.click(button(/^Folder web-app/));
+  const popover = await screen.findByRole("dialog", { name: "Chat context" });
+  expect(await within(popover).findByText("Signed in")).toBeTruthy();
+  client.harnesses = () => Promise.reject(new Error("probe failed"));
+  fireEvent.click(within(popover).getByRole("button", { name: "Check again" }));
+  expect(await within(popover).findByText("Couldn't check")).toBeTruthy();
+  expect(within(popover).queryByText("Signed in")).toBeNull();
+});
+
+test("the context popover opens the other Chats here and the Project's tickets", async () => {
+  const openProject = vi.fn();
+  const client = await open(
+    [
+      ...one({
+        id: "c1",
+        title: "Limiter",
+        folder: {
+          shared_with: [
+            { id: "c2", title: "Alert on-call", retention: "active" },
+          ],
+          project: { id: "p1", title: "Web App" },
+        },
+      }),
+      ...one({ id: "c2", title: "Alert on-call" }),
+    ],
+    undefined,
+    openProject,
+  );
+  void client;
+  fireEvent.click(button(/^Folder web-app/));
+  let popover = await screen.findByRole("dialog", { name: "Chat context" });
+  fireEvent.click(
+    within(popover).getByRole("button", { name: "Open tickets of Web App" }),
+  );
+  expect(openProject).toHaveBeenCalledWith("p1");
+  popover = await screen.findByRole("dialog", { name: "Chat context" });
+  fireEvent.click(
+    within(popover).getByRole("button", { name: "Alert on-call" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Alert on-call" }),
+  ).toBeTruthy();
+});
+
 test("the context popover holds the harness, folder, branch and the other Chats sharing the folder", async () => {
   const client = await open(
     one({
@@ -1317,7 +1370,9 @@ test("the context popover holds the harness, folder, branch and the other Chats 
       title: "Limiter",
       harness: { permissions: "Uses your Codex settings." },
       folder: {
-        shared_with: ["Alert on-call"],
+        shared_with: [
+          { id: "c9", title: "Alert on-call", retention: "active" },
+        ],
         branch: { kind: "branch", name: "rate-limit-logins" },
         project: { id: "p1", title: "Web App" },
       },

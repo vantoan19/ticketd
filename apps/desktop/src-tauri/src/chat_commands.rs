@@ -387,6 +387,15 @@ pub async fn chat_folder_use(bridge: State<'_, ChatBridge>, path: String) -> Out
     bridge.chats.folder_use(&path)
 }
 
+/// The Project whose checkout holds a folder New Chat may use.
+#[tauri::command]
+pub fn chat_folder_project(
+    bridge: State<'_, ChatBridge>,
+    path: String,
+) -> Outcome<Option<crate::chat_view::ProjectRef>> {
+    bridge.chats.folder_project(&path)
+}
+
 #[tauri::command]
 pub async fn chat_create(bridge: State<'_, ChatBridge>, input: NewChatInput) -> Outcome<Created> {
     bridge.chats.create(input).await

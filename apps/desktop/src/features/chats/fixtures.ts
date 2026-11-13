@@ -188,7 +188,13 @@ const chats: MockChat[] = [
       activity: "working",
       doing: { label: "Running npm test", since: minutesAgo(2) },
       folder: {
-        shared_with: ["Alert on-call when logins spike"],
+        shared_with: [
+          {
+            id: "alert",
+            title: "Alert on-call when logins spike",
+            retention: "active",
+          },
+        ],
         branch: { kind: "branch", name: "rate-limit-logins" },
         project: { id: "web", title: "Web App" },
       },

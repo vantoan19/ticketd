@@ -20,8 +20,10 @@ import {
   type HarnessStatus,
   type LinkedRecord,
   type Suggestion,
+  type ProjectRef,
 } from "@/features/chats/client";
 import { ProblemNotice } from "@/features/chats/ChatDetail";
+import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { Composer } from "@/features/chats/Composer";
 import type { Token } from "@/features/chats/composer-mentions";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
@@ -268,6 +270,23 @@ export function NewChat({
       current = false;
     };
   }, [client, folder]);
+  // The folder's Project, for its icon on the folder button.
+  const [projectOf, setProjectOf] = useState<{
+    folder: string;
+    project: ProjectRef | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!folder) return;
+    let current = true;
+    client.folderProject(folder).then(
+      (project) => current && setProjectOf({ folder, project }),
+      () => current && setProjectOf({ folder, project: null }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [client, folder]);
+  const project = projectOf?.folder === folder ? projectOf.project : null;
   // A Project's folder that is not on this computer gives way to a ticketd folder.
   useEffect(() => {
     const path = start?.folder;
@@ -446,7 +465,11 @@ export function NewChat({
                   size="xs"
                   aria-label={`Folder: ${folder ?? "a folder kept by ticketd"}`}
                 >
-                  <Folder aria-hidden />
+                  {project ? (
+                    <ProjectIcon project={project} />
+                  ) : (
+                    <Folder aria-hidden />
+                  )}
                   {folderName ?? "ticketd folder"}
                   <ChevronDown aria-hidden />
                 </Button>
@@ -502,7 +525,9 @@ export function NewChat({
               </Button>
             </p>
           )}
-          {typed.trim() === "" && (
+          {/* Suggestions or the harness's notice, never both: the notice's
+              actions come next in Tab order. */}
+          {typed.trim() === "" && !harness?.problem && (
             <Suggestions
               folder={folder}
               linked={links.flatMap((record) =>

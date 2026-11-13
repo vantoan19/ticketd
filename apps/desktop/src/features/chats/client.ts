@@ -487,7 +487,13 @@ export const chatStateSchema = z.object({
     managed: z.boolean(),
     missing: z.boolean(),
     /** Titles of other Chats running in the same folder. */
-    shared_with: z.array(z.string()),
+    shared_with: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        retention: retentionSchema,
+      }),
+    ),
     /** The git branch checked out there, read by the host; absent outside a repository. */
     branch: z
       .object({
@@ -660,6 +666,8 @@ export interface ChatClient {
   pickFolder(): Promise<string | null>;
   /** How many Chats already run in the folder. */
   folderUse(path: string): Promise<number>;
+  /** The Project whose checkout holds `path`, for New Chat's folder button. */
+  folderProject(path: string): Promise<ProjectRef | null>;
   /**
    * `folder: null` asks for a managed folder. `command_id` is a UUID made once
    * per request and repeated only when the very same request is sent again,

@@ -92,14 +92,7 @@ impl Workspace {
         skip: HashSet<String>,
     ) -> Result<Vec<ChatSuggestion>, Error> {
         let project_id = match folder {
-            Some(folder) => self.list_projects()?.into_iter().find_map(|project| {
-                project
-                    .paths
-                    .iter()
-                    .chain(std::iter::once(&project.path))
-                    .any(|path| !path.is_empty() && folder.starts_with(path))
-                    .then_some(project.id)
-            }),
+            Some(folder) => self.project_for_folder(folder)?.map(|project| project.id),
             None => None,
         };
         let tickets = self

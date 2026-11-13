@@ -1078,10 +1078,19 @@ async fn the_list_is_not_read_again_for_checkpointed_text_and_shared_folders_are
 
     let other = f.chats.create(f.input("second")).await.unwrap().chat_id;
     settle().await;
+    let titles = |opened: &Opened| {
+        let shared = &opened.snapshot.chat.folder.shared_with;
+        shared
+            .iter()
+            .map(|chat| chat.title.clone())
+            .collect::<Vec<_>>()
+    };
     let (opened, _) = f.open(&other).await;
-    assert_eq!(opened.snapshot.chat.folder.shared_with, ["first"]);
+    assert_eq!(titles(&opened), ["first"]);
+    // Each is named by its id too, so the popover can open it.
+    assert_eq!(opened.snapshot.chat.folder.shared_with[0].id, id);
     let (opened, _) = f.open(&id).await;
-    assert_eq!(opened.snapshot.chat.folder.shared_with, ["second"]);
+    assert_eq!(titles(&opened), ["second"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1128,6 +1137,32 @@ async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the
 /// #368: the header names the folder's Project and branch; a list row names the
 /// harness, the Project and the linked tickets.
 #[tokio::test(start_paused = true)]
+async fn the_branch_is_read_again_when_the_window_regains_focus() {
+    let f = Fixture::new().await;
+    let folder = f.dir.path().join("web-app");
+    std::fs::create_dir_all(folder.join(".git")).unwrap();
+    std::fs::write(folder.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    let mut input = f.input("first");
+    input.folder = Some(folder.to_string_lossy().into_owned());
+    let id = f.chats.create(input).await.unwrap().chat_id;
+    settle().await;
+    let (_view, seen) = f.open(&id).await;
+    // Switched outside ticketd while the window was in the background.
+    f.chats.set_focused(false).await;
+    std::fs::write(folder.join(".git/HEAD"), "ref: refs/heads/rate-limit\n").unwrap();
+    f.chats.set_focused(true).await;
+    settle().await;
+    let branch = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|change| change["kind"] == "chat")
+        .map(|change| change["chat"]["folder"]["branch"]["name"].clone());
+    assert_eq!(branch, Some(json!("rate-limit")));
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_chat_names_its_folders_project_and_branch_and_its_row_names_its_tickets() {
     let f = Fixture::new().await;
     let folder = f.dir.path().join("web-app");
@@ -1160,6 +1195,11 @@ async fn a_chat_names_its_folders_project_and_branch_and_its_row_names_its_ticke
         title: "Web App".to_owned(),
     });
     assert_eq!(opened.snapshot.chat.folder.project, named);
+    // New Chat names the same Project for the folder before any Chat uses it.
+    assert_eq!(
+        f.chats.folder_project(folder.to_str().unwrap()).unwrap(),
+        named
+    );
     assert_eq!(
         opened.snapshot.chat.folder.branch,
         Some(BranchView {

@@ -551,7 +551,11 @@ fn surroundings(
     let shared_with = folder_users
         .iter()
         .filter(|other| other.id != chat.id && other.execution_folder == chat.execution_folder)
-        .map(|other| other.title.clone().unwrap_or("Untitled Chat".to_owned()))
+        .map(|other| chat_view::SharedChat {
+            id: other.id.clone(),
+            title: other.title.clone().unwrap_or("Untitled Chat".to_owned()),
+            retention: chat_view::retention(other),
+        })
         .collect();
     let links = links(workspace, &chat.id)?;
     Ok(Surroundings {
@@ -599,14 +603,8 @@ fn project(
     folder: &str,
     links: &[LinkedRecord],
 ) -> Result<Option<ProjectRef>, ticketd_core::Error> {
-    // Checkout paths are stored canonical; the Chat's folder may not be.
-    let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| PathBuf::from(folder));
-    let found = workspace.list_projects()?.into_iter().find(|project| {
-        std::iter::once(&project.path)
-            .chain(&project.paths)
-            .any(|path| folder.starts_with(path))
-    });
-    Ok(found
+    Ok(workspace
+        .project_for_folder(Path::new(folder))?
         .map(|project| ProjectRef {
             id: project.id,
             title: project.name,
@@ -938,14 +936,21 @@ impl Chats {
             .collect()
     }
 
-    /// The window gained or lost focus. Regaining it marks the open Chats seen.
+    /// The window gained or lost focus. Regaining it marks the open Chats seen and
+    /// reads them again, so a branch switched outside ticketd shows.
     pub async fn set_focused(&self, focused: bool) {
         self.focused.store(focused, Ordering::SeqCst);
         if focused {
             for chat_id in self.in_view() {
                 log_failure("mark the Chat seen", self.mark_seen(&chat_id).await);
+                log_failure("read the Chat again", self.reread(&chat_id).await);
             }
         }
+    }
+
+    /// Tells the Chat's views to read its state again.
+    async fn reread(&self, chat_id: &str) -> Outcome<()> {
+        Ok(self.host()?.notify_changed(chat_id).await?)
     }
 
     pub fn notifies(&self) -> bool {
@@ -1094,6 +1099,17 @@ impl Chats {
     }
 
     /// How many Chats outside the trash already use the folder.
+    /// The Project whose checkout holds `path`, for New Chat's folder button.
+    pub fn folder_project(&self, path: &str) -> Outcome<Option<ProjectRef>> {
+        Ok(self
+            .workspace()?
+            .project_for_folder(Path::new(path))?
+            .map(|project| ProjectRef {
+                id: project.id,
+                title: project.name,
+            }))
+    }
+
     pub fn folder_use(&self, path: &str) -> Outcome<usize> {
         let workspace = self.workspace()?;
         let mut count = 0;

@@ -498,7 +498,10 @@ impl Supervisor {
                 let _ = reply.send(Ok(self.change_setting(setting, value)));
             }
             Command::LinksChanged => self.refresh_context(),
-            Command::Changed | Command::Shutdown(_) => {}
+            // Views read the Chat again even when no record changed: what they show
+            // can depend on the folder too, such as its branch.
+            Command::Changed => self.last_live = None,
+            Command::Shutdown(_) => {}
         }
     }
 

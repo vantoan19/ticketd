@@ -27,7 +27,7 @@ test("the context button names folder, branch, Project and sharing", () => {
       name: "web-app",
       branch: { kind: "branch", name: "rate-limit-logins" },
       project: { id: "p1", title: "Web App" },
-      shared_with: ["Alert on-call"],
+      shared_with: [{ id: "c2", title: "Alert on-call", retention: "active" }],
     },
   });
   expect(contextLabel(chat)).toBe(
