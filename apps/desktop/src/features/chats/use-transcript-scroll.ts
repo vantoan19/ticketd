@@ -59,7 +59,11 @@ function note(box: HTMLElement, anchor: { current: Anchor }) {
  * Holds the reading position of the transcript: `root` goes on the scrolling
  * element, `content` on the column inside it, `marker` on the New marker.
  * Following is an intent: it stops when the reader scrolls up and resumes only at
- * the bottom, from `follow()` (Jump to latest, or sending), or with End. Otherwise
+ * the bottom, from `follow()` (Jump to latest, or sending), or with End. A scroll
+ * event arrives a frame after the scroll, so content that grew meanwhile must not
+ * read as the reader leaving the end: only a smaller offset stops following.
+ * Both the content and the scroller are watched, so a dock or composer that grows
+ * keeps the end in view too. Otherwise
  * the first visible `[data-anchor]` keeps its offset through every change, since
  * WebKit has no CSS scroll anchoring.
  *
@@ -78,6 +82,8 @@ export function useTranscriptScroll(
   const [following, setFollowing] = useState(true);
   const follows = useRef(true);
   const anchor = useRef<Anchor>(null);
+  // The offset after the last scroll, ours or the reader's.
+  const lastTop = useRef(0);
   const opened = useRef("");
   const told = useRef<string | undefined>(undefined);
   // The latest `onRead`, for scroll and resize callbacks that outlive a render.
@@ -112,6 +118,7 @@ export function useTranscriptScroll(
     } else if (typeof saved === "number") box.scrollTop = saved;
     else box.scrollTop = box.scrollHeight;
     follows.current = atBottom(box);
+    lastTop.current = box.scrollTop;
     read(box);
     // The opening position decides whether the control shows from the first paint.
     setFollowing(follows.current);
@@ -125,14 +132,17 @@ export function useTranscriptScroll(
     };
   }, [chatId]);
 
-  // Every change to the content keeps the bottom, or the anchor, where it was.
+  // Every change to the content, or to the scroller's own height, keeps the
+  // bottom, or the anchor, where it was.
   useEffect(() => {
     const box = root.current;
     const column = content.current;
     if (!box || !column || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (follows.current) box.scrollTop = box.scrollHeight;
-      else if (anchor.current?.element.isConnected) {
+      if (follows.current) {
+        box.scrollTop = box.scrollHeight;
+        lastTop.current = box.scrollTop;
+      } else if (anchor.current?.element.isConnected) {
         const { element, offset } = anchor.current;
         const moved =
           element.getBoundingClientRect().top -
@@ -143,16 +153,25 @@ export function useTranscriptScroll(
       read(box);
     });
     observer.observe(column);
+    observer.observe(box);
     return () => observer.disconnect();
   }, [chatId]);
 
   const onScroll = () => {
     const box = root.current;
     if (!box) return;
-    const bottom = atBottom(box);
-    if (bottom !== follows.current) {
-      follows.current = bottom;
-      setFollowing(bottom);
+    const top = box.scrollTop;
+    const up = top < lastTop.current - 1;
+    lastTop.current = top;
+    // Following stops only when the reader moves up; it resumes at the bottom.
+    const next = atBottom(box) || (follows.current && !up);
+    if (next !== follows.current) {
+      follows.current = next;
+      setFollowing(next);
+    }
+    if (next && !atBottom(box)) {
+      box.scrollTop = box.scrollHeight;
+      lastTop.current = box.scrollTop;
     }
     read(box);
   };
@@ -161,7 +180,10 @@ export function useTranscriptScroll(
     const box = root.current;
     follows.current = true;
     setFollowing(true);
-    if (box) box.scrollTop = box.scrollHeight;
+    if (box) {
+      box.scrollTop = box.scrollHeight;
+      lastTop.current = box.scrollTop;
+    }
   };
 
   /**

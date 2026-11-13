@@ -249,6 +249,19 @@ fn common_install_directories() -> Vec<PathBuf> {
     directories
 }
 
+/// Where to look when PATH has no `ticketd`: the app's own folder first, where a
+/// development build (`target/debug`) puts the CLI beside the desktop executable and
+/// an installation may ship it, then the usual install folders. The path is absolute,
+/// so a hosted agent runs it without PATH.
+fn fallback_directories(app_executable: Option<&Path>) -> Vec<PathBuf> {
+    app_executable
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(common_install_directories())
+        .collect()
+}
+
 /// The process PATH, then the login shell's PATH, without repeats.
 fn path_directories() -> Vec<PathBuf> {
     let mut directories: Vec<PathBuf> = Vec::new();
@@ -271,9 +284,10 @@ fn path_directories() -> Vec<PathBuf> {
 /// Finds this user's `ticketd` and checks it against the app's version and workspace.
 /// Blocking: it runs the executable, and once per process a login shell.
 pub fn locate(app_version: &str, app_workspace: Option<&Path>) -> CliStatus {
+    let app = std::env::current_exe().ok();
     detect(
         &path_directories(),
-        &common_install_directories(),
+        &fallback_directories(app.as_deref()),
         app_version,
         app_workspace,
     )
@@ -310,6 +324,15 @@ impl CliStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_folder_of_the_app_itself_is_searched_before_the_common_install_folders() {
+        let app = Path::new("/work/target/debug").join("ticketd-desktop");
+        let folders = fallback_directories(Some(&app));
+        assert_eq!(folders.first(), Some(&PathBuf::from("/work/target/debug")));
+        assert_eq!(&folders[1..], common_install_directories().as_slice());
+        assert_eq!(fallback_directories(None), common_install_directories());
+    }
 
     #[test]
     fn reports_not_found_when_no_directory_has_the_executable() {

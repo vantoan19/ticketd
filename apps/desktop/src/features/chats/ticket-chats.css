@@ -55,6 +55,10 @@
   background: var(--popover);
   box-shadow: var(--shadow-menu);
 }
+/* Rows keep their 32px when the list is longer than the menu: it scrolls. */
+.chat-menu > * {
+  flex: none;
+}
 .chat-menu ul {
   margin: 0;
   padding: 0;
@@ -99,9 +103,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A command name never wraps: it truncates, and leaves room for its description. */
 .chat-menu-mono {
+  flex: none;
+  overflow: hidden;
+  min-width: 0;
+  max-width: 60%;
   font-family: var(--font-mono);
   font-size: var(--text-code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-menu-note,
 .chat-menu-foot {
@@ -197,24 +208,33 @@ blockquote.chat-quote {
 .linked-chats-line .chat-status {
   min-width: 0;
 }
+.linked-chats-line .chat-status-word {
+  flex: 0 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .linked-chats-note {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
 .linked-chats-mark {
-  align-self: flex-start;
-  margin-top: 2px;
   color: var(--muted-foreground);
 }
+/* A flat row of mark, title and status word; the menu fits the window. */
 .linked-chats-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-  max-width: 320px;
+  max-width: min(320px, calc(100vw - 64px));
 }
 .linked-chats-item-title {
+  flex: 1;
   overflow: hidden;
+  min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -222,8 +242,10 @@ blockquote.chat-quote {
   font-weight: 500;
 }
 .linked-chats-item .chat-status {
+  flex: none;
+}
+.linked-chats-item .chat-status-word {
   color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 
 /* The records receipt row under a response: 28px, step-row anatomy. */

@@ -440,6 +440,22 @@ async fn stop_during_a_pending_submission_interrupts_its_turn_and_keeps_unsent_i
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_turn_the_person_stopped_is_interrupted_even_when_the_harness_says_completed() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    settle().await;
+    assert!(matches!(
+        f.fake.written().last(),
+        Some(Written::Interrupt(_))
+    ));
+    // Codex can end an interrupted turn as `completed`.
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.turns()[0].state, ChatTurnState::Interrupted);
+    assert_eq!(f.live().await.stop, None);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_stop_the_harness_never_confirms_is_reported_as_unconfirmed() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;

@@ -196,9 +196,25 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
+  // Measured again whenever the message's width changes: a pane narrowed after
+  // the message was shown clamps it, and then it needs Show more. A clamped box
+  // reports only its four lines as its scroll height in WebKit and Chrome, so the
+  // full height is read with the clamp lifted for the measurement.
   useLayoutEffect(() => {
     const box = text.current;
-    if (box && !more) setLong(box.scrollHeight > box.clientHeight + 1);
+    if (!box || more) return;
+    const measure = () => {
+      const clamped = box.clientHeight;
+      box.removeAttribute("data-clamped");
+      const full = box.scrollHeight;
+      box.setAttribute("data-clamped", "");
+      setLong(full > clamped + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
   }, [item.text, more]);
   const time = sentAt(item.at);
   return (
@@ -977,7 +993,7 @@ const Item = memo(function Item({
 
 /**
  * The live line: the spinner and what the turn is doing, shown only while no step
- * row runs. `since` counts "Working for 1m 32s" from the turn's start; `fromShown`
+ * or reasoning row runs, so a turn has one spinner. `since` counts "Working for 1m 32s" from the turn's start; `fromShown`
  * counts from when the line appeared, for a phase the host gives no start time for.
  * The clock is not read out: one polite status says when a turn starts, waits and
  * ends.
@@ -1150,7 +1166,9 @@ export function Transcript({
       part.kind === "turn" &&
       part.turn.live &&
       part.turn.rows.some(
-        (row) => row.kind === "step" && row.step.state === "running",
+        (row) =>
+          (row.kind === "step" && row.step.state === "running") ||
+          (row.kind === "reasoning" && row.item.state === "running"),
       ),
   );
   const working = chat.activity === "working";

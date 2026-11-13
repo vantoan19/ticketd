@@ -79,10 +79,77 @@ test("⌘L on selected rendered text offers linked Chats first and quotes the te
   await waitFor(() =>
     expect(
       screen.getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["Lockout", "Recent work", "New Chat"]),
+    ).toEqual(["LockoutIdle", "Recent workIdle", "New Chat"]),
   );
-  fireEvent.click(screen.getByRole("menuitem", { name: "Lockout" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Lockout/ }));
   expect(
     screen.getByRole("status", { name: "Quotes in linked" }).textContent,
   ).toBe("T-KQ12 · Description: Lock the account after five tries.");
+});
+
+test("a triple-clicked last paragraph, whose selection ends at the next block, still offers Add to chat", async () => {
+  const client = createMockChatClient({ enabled: true, chats: [] });
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <div
+          {...chatSource("T-KQ12 · Description", { kind: "ticket", id: "t1" })}
+        >
+          <p>Lock the account after five tries.</p>
+        </div>
+        <section>
+          <p>Subtickets</p>
+        </section>
+        <Quotes id={NEW_CHAT} />
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  await waitFor(() => expect(client.getEnabled()).resolves.toBe(true));
+  // WebKit selects a paragraph up to offset 0 of the block after it.
+  act(() => {
+    const range = document.createRange();
+    range.setStart(
+      screen.getByText("Lock the account after five tries.").firstChild!,
+      0,
+    );
+    range.setEnd(screen.getByText("Subtickets"), 0);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  fireEvent.keyDown(document, { key: "l", metaKey: true });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "New Chat" }));
+  expect(
+    screen.getByRole("status", { name: `Quotes in ${NEW_CHAT}` }).textContent,
+  ).toBe("T-KQ12 · Description: Lock the account after five tries.");
+});
+
+test("a selection running past the source into other text is not offered", async () => {
+  const client = createMockChatClient({ enabled: true, chats: [] });
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <div
+          {...chatSource("T-KQ12 · Description", { kind: "ticket", id: "t1" })}
+        >
+          <p>Lock the account after five tries.</p>
+        </div>
+        <p>Subtickets</p>
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  await waitFor(() => expect(client.getEnabled()).resolves.toBe(true));
+  act(() => {
+    const range = document.createRange();
+    range.setStart(
+      screen.getByText("Lock the account after five tries.").firstChild!,
+      0,
+    );
+    range.setEnd(screen.getByText("Subtickets").firstChild!, 4);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  fireEvent.keyDown(document, { key: "l", metaKey: true });
+  expect(screen.queryByRole("menuitem")).toBeNull();
 });

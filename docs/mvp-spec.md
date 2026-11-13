@@ -1393,7 +1393,8 @@ required. Ordinary ticketd CLI operations remain usable without the desktop.
 Every Chat has one ranked status, highest first: Approval needed, Question,
 Working, Failed, Done, Idle. A question includes input whose delivery is not
 confirmed. Failed covers a turn that ended with an error or was cut off without
-one (shown as Interrupted); a turn the person stopped, or Quit, is Idle. Failed
+one (shown as Interrupted); a turn the person stopped, or Quit, is Idle, even
+when the harness reports the stopped turn as completed. Failed
 and Done are shown only until seen; afterwards the Chat is Idle and its row says
 the outcome in words. List rows, the sidebar count, the app-icon count and system
 notifications all read this one status.

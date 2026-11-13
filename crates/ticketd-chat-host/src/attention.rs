@@ -43,6 +43,9 @@ pub struct Status {
     pub unseen: bool,
     /// "Approval needed", "Working", or for Idle the plain last line ("You stopped it").
     pub word: String,
+    /// The word naming its rank, for a one-line summary such as a ticket's Chats line:
+    /// `word`, except that Idle after a finished turn says "Done", not the reply.
+    pub label: String,
     /// What it is about; truncated first.
     pub detail: Option<String>,
 }
@@ -137,19 +140,22 @@ pub fn status(facts: &Facts<'_>) -> Status {
     // Only an outcome the person has not seen ranks as Failed or Done; a Chat they
     // marked unread keeps the words it had, with the blue dot, and never notifies.
     let unseen = ended.is_some_and(|turn| facts.chat.unseen(turn));
-    let make = |rank, word: &str, detail: Option<String>| Status {
+    let labelled = |rank, word: &str, label: &str, detail: Option<String>| Status {
         rank,
         unseen: unseen || facts.chat.marked_unread,
         word: word.to_owned(),
+        label: label.to_owned(),
         detail,
     };
+    let make = |rank, word: &str, detail: Option<String>| labelled(rank, word, word, detail);
     let requests = &facts.live.interactions;
     let approval = requests.iter().find_map(|request| match &request.kind {
         InteractionKind::Approval { description, .. } => Some(description),
         InteractionKind::Question { .. } => None,
     });
     if let Some(description) = approval {
-        return make(Rank::Approval, "Approval needed", plain_start(description));
+        let command = crate::step_kind::unwrapped(description);
+        return make(Rank::Approval, "Approval needed", plain_start(&command));
     }
     let question = requests.iter().find_map(|request| match &request.kind {
         InteractionKind::Question { questions } => {
@@ -216,7 +222,7 @@ pub fn status(facts: &Facts<'_>) -> Status {
         return make(Rank::Idle, words, None);
     }
     match outcome {
-        Some((Rank::Done, _, Some(line))) => make(Rank::Idle, &line, None),
+        Some((Rank::Done, word, Some(line))) => labelled(Rank::Idle, &line, &word, None),
         Some((Rank::Done, _, None)) | None => make(Rank::Idle, "Idle", None),
         Some((_, word, detail)) => make(Rank::Idle, &word, detail),
     }

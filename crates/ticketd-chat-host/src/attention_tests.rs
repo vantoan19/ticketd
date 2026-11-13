@@ -94,6 +94,25 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     assert_eq!(approval.line(), "Approval needed · npm install");
     assert!(approval.rank.needs_you());
 
+    // A command is named as written, without the shell that wraps it.
+    let mut wrapped = idle();
+    wrapped.interactions.push(LiveInteraction {
+        interaction_id: "i".to_owned(),
+        kind: InteractionKind::Approval {
+            description: r#"/bin/zsh -lc "printf '%s\n' verified >> hello.txt""#.to_owned(),
+            reason: None,
+            decisions: Vec::new(),
+        },
+    });
+    let approval = status(&Facts {
+        activity: "waiting",
+        ..facts(&chat(0), &wrapped, None)
+    });
+    assert_eq!(
+        approval.line(),
+        r"Approval needed · printf '%s\n' verified >> hello.txt"
+    );
+
     let live = idle();
     let failed = turn(3, ChatTurnState::Failed);
     let unseen = status(&facts(&chat(2), &live, Some(&failed)));
@@ -122,6 +141,10 @@ fn marked_unread_is_the_blue_dot_on_the_seen_words_and_never_notifies() {
     let status_done = super::status(&facts(&marked, &live, Some(&done)));
     assert_eq!(status_done.rank, Rank::Idle);
     assert!(status_done.unread());
+    // The row keeps the reply's words; a one-line summary names the outcome.
+    assert_eq!(status_done.word, "All done. See x.");
+    assert_eq!(status_done.label, "Done");
+    assert_eq!(status.label, "Failed");
 
     let mut notifier = Notifier::default();
     let quiet = HashSet::new();
@@ -156,6 +179,7 @@ fn done(line: &str) -> Status {
         rank: Rank::Done,
         unseen: true,
         word: "Done".to_owned(),
+        label: "Done".to_owned(),
         detail: Some(line.to_owned()),
     }
 }
@@ -178,6 +202,7 @@ fn done_waits_out_the_quiet_window_and_a_new_turn_cancels_it() {
         rank: Rank::Working,
         unseen: false,
         word: "Working".to_owned(),
+        label: "Working".to_owned(),
         detail: None,
     };
     // What is there at startup is not announced again.
@@ -228,12 +253,14 @@ fn a_chat_in_view_muted_or_with_notifications_off_is_never_announced() {
         rank: Rank::Approval,
         unseen: false,
         word: "Approval needed".to_owned(),
+        label: "Approval needed".to_owned(),
         detail: None,
     };
     let idle = Status {
         rank: Rank::Idle,
         unseen: false,
         word: "Idle".to_owned(),
+        label: "Idle".to_owned(),
         detail: None,
     };
     let open = HashSet::from(["c".to_owned()]);
