@@ -10,7 +10,9 @@ import {
   type ChatState,
   type ChatStatus,
   type ChatSummary,
+  type FolderFile,
   type HarnessStatus,
+  type LinkRef,
   type LinkedRecord,
   type OpenRequest,
   type TranscriptItem,
@@ -192,6 +194,8 @@ export function createMockChatClient(
     chats?: MockChat[];
     harnesses?: HarnessStatus[];
     records?: LinkedRecord[];
+    /** What every Chat's folder holds, for the `@` menu. */
+    files?: FolderFile[];
     now?: string;
     /** How many log entries are kept per Chat for a reconnecting subscriber. */
     logLimit?: number;
@@ -353,6 +357,17 @@ export function createMockChatClient(
     patch(id, {
       queue: [...get(id).chat.queue, { id: nextId("queued"), text }],
     });
+  const linkAll = (id: string, links: LinkRef[]) => {
+    for (const link of links) {
+      const record = (seed.records ?? []).find(
+        (item) => item.kind === link.kind && item.id === link.id,
+      );
+      if (!record) throw new ChatError("failed", "The record was not found.");
+      const current = get(id).chat.links;
+      if (!current.some((item) => item.id === record.id))
+        patch(id, { links: [...current, record] });
+    }
+  };
   const send = async (id: string, text: string) => {
     const { chat } = get(id);
     if (chat.retention === "trashed")
@@ -469,8 +484,29 @@ export function createMockChatClient(
       entry.listeners.add(listener);
       return () => entry.listeners.delete(listener);
     },
-    send,
-    queue,
+    async send(id, text, links = []) {
+      linkAll(id, links);
+      await send(id, text);
+    },
+    async queue(id, text, links = []) {
+      linkAll(id, links);
+      await queue(id, text);
+    },
+    linkedTo: async (link) =>
+      [...chats.values()]
+        .filter(
+          (entry) =>
+            entry.chat.retention !== "trashed" &&
+            entry.chat.links.some(
+              (item) => item.kind === link.kind && item.id === link.id,
+            ),
+        )
+        .map(summary)
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+    folderFiles: async (_folder, query) =>
+      (seed.files ?? []).filter((file) =>
+        file.path.toLowerCase().includes(query.trim().toLowerCase()),
+      ),
     async removeQueued(id, queuedId) {
       patch(id, {
         queue: get(id).chat.queue.filter((item) => item.id !== queuedId),

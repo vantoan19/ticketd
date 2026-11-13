@@ -54,6 +54,7 @@ import {
   type TurnRow,
 } from "@/features/chats/model";
 import { OutputBox } from "@/features/chats/OutputBox";
+import { ReceiptRow } from "@/features/chats/ReceiptRow";
 import { useReading } from "@/features/chats/use-transcript-scroll";
 
 type Of<K extends TranscriptItem["kind"]> = Extract<
@@ -505,6 +506,9 @@ function TurnView({
     if (!next) rowButton.current?.focus();
   };
   const rowLive = live && turn.live;
+  const changes = turn.rows.flatMap((row) =>
+    row.kind === "record" ? [row.change] : [],
+  );
   const rows = (only: (row: TurnRow) => boolean) =>
     turn.rows
       .filter(only)
@@ -578,6 +582,17 @@ function TurnView({
       {turn.marker && (
         <div className="chat-below" data-anchor="">
           <StopMarker item={turn.marker} harness={harness} />
+        </div>
+      )}
+      {!turn.live && changes.length > 0 && (
+        <div className="chat-below" data-anchor="">
+          {/* Never folded; "N more" opens the fold, where each is a step row. */}
+          <ReceiptRow
+            changes={changes}
+            onMore={() => {
+              if (!open) toggle();
+            }}
+          />
         </div>
       )}
     </>

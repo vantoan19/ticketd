@@ -161,10 +161,13 @@ export function TicketProperties({
   onOpenTicket,
   onOpenNote,
   children,
+  chats,
   active = true,
   revision = 0,
   layout = "rail",
 }: {
+  /** The ticket's Chats, after Status and Latest update. */
+  chats?: ReactNode;
   /** "chips" folds the rail into a wrapping row of chips for a narrow pane. */
   layout?: "rail" | "chips";
   active?: boolean;
@@ -458,6 +461,7 @@ export function TicketProperties({
         </>,
       )}
       {!chips && latestUpdate}
+      {chats}
       <ConfirmLeaveDuplicate
         canonical={ticket.duplicate_of ?? ""}
         status={leaving}

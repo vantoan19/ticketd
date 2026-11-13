@@ -17,6 +17,7 @@ import {
 } from "react";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { chatSource } from "@/features/chats/quotes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -1101,7 +1102,12 @@ export function Activity({
                     </Button>
                   </p>
                 )}
-                <div>
+                <div
+                  {...chatSource(`${reference} · Update`, {
+                    kind: "ticket",
+                    id: ticketId,
+                  })}
+                >
                   <ClampedBrief>
                     <MarkdownDocument
                       source={item.note.brief}

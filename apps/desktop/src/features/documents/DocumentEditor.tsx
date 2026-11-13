@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import {
@@ -1020,7 +1021,12 @@ export function DocumentEditor({
           </Alert>
         )}
         {initial && saveError}
-        <div className="document-body">
+        <div
+          className="document-body"
+          {...(initial &&
+            !writing &&
+            chatSource(heading, { kind: "document", id: initial.id }))}
+        >
           {!initial || writing ? (
             <LazyMarkdownEditor
               recoveryOwner={recoveryOwner}

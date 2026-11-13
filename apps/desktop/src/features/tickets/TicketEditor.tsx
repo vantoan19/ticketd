@@ -1,6 +1,7 @@
 import { EmptyState } from "@/components/ui/empty-state";
 import "./description.css";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import {
   useEffect,
@@ -610,6 +611,10 @@ export function TicketEditor({
               <div
                 ref={documentRef}
                 className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
+                {...chatSource(`${ticket.reference} · Description`, {
+                  kind: "ticket",
+                  id: ticket.id,
+                })}
               >
                 <MarkdownDocument
                   source={rendered}
