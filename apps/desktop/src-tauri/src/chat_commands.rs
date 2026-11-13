@@ -16,6 +16,9 @@ use ticketd_chat_host::{
 };
 use ticketd_core::ChatListFilter;
 
+use tauri_plugin_opener::OpenerExt;
+
+use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, ChatFailure, Chats, CloseAction, Created, HarnessStatus, HistorySelection, LinkRef,
@@ -247,6 +250,57 @@ pub async fn chat_send_queued_now(
     queued_id: String,
 ) -> Outcome<()> {
     bridge.chats.send_queued_now(&chat_id, &queued_id).await
+}
+
+/// Changes the live session's model, effort or permission from its next turn.
+#[tauri::command]
+pub async fn chat_change_setting(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    setting: String,
+    value: String,
+) -> Outcome<SettingChangeView> {
+    bridge
+        .chats
+        .change_setting(&chat_id, &setting, &value)
+        .await
+}
+
+/// Opens a file the agent changed in the system's default app for its type, as
+/// attachments open.
+#[tauri::command]
+pub fn chat_open_file(
+    app: AppHandle,
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    path: String,
+) -> Outcome<()> {
+    let path = bridge.chats.changed_file(&chat_id, &path)?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|error| open_failure(&path, &error.to_string()))
+}
+
+/// "Couldn't open limiter.ts. No app on this computer opens .ts files."
+fn open_failure(path: &std::path::Path, error: &str) -> ChatFailure {
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let lower = error.to_lowercase();
+    let reason = match path.extension() {
+        Some(extension) if lower.contains("no application") || lower.contains("no app") => {
+            format!(
+                "No app on this computer opens .{} files.",
+                extension.to_string_lossy()
+            )
+        }
+        _ => format!("{error}."),
+    };
+    ChatFailure {
+        code: "failed",
+        message: format!("Couldn't open {name}. {reason}"),
+    }
 }
 
 #[tauri::command]

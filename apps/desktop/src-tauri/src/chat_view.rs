@@ -14,6 +14,7 @@ use ticketd_core::{
     ChatToolState, ChatTurn, ChatTurnState,
 };
 
+use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
 use crate::step_kind::{self, Kind, Variant};
 
 pub const HARNESSES: [(&str, &str); 2] = [("claude-code", "Claude Code"), ("codex", "Codex")];
@@ -177,6 +178,34 @@ pub enum Item {
         history: &'static str,
         count: usize,
     },
+    /// One reasoning item of a turn. Times are milliseconds since the Unix epoch.
+    Reasoning {
+        id: String,
+        at: String,
+        turn_id: String,
+        state: &'static str,
+        started_at: Option<i64>,
+        ended_at: Option<i64>,
+        text: Option<String>,
+        heading: Option<String>,
+    },
+    /// A turn's plan, as the harness last reported it.
+    Plan {
+        id: String,
+        at: String,
+        turn_id: String,
+        state: &'static str,
+        steps: Vec<PlanStepView>,
+        explanation: Option<String>,
+    },
+    /// The files a turn changed.
+    Files {
+        id: String,
+        at: String,
+        turn_id: String,
+        state: &'static str,
+        files: Vec<FileView>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -233,6 +262,10 @@ pub struct ChatState {
     pub links: Vec<LinkedRecord>,
     pub queue: Vec<Queued>,
     pub queue_paused: bool,
+    /// How full the live session's context window is, when the harness reported it.
+    pub context: Option<ContextView>,
+    /// The live session's settings, when the harness reported them.
+    pub settings: Option<SettingsView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -293,6 +326,9 @@ pub struct Tracker {
     last_response: Option<String>,
     last_change: Option<ChatAgentChange>,
     updated_at: Option<String>,
+    /// Reasoning, plan and files records of the latest turn: how they read depends on
+    /// whether it still runs.
+    reports: HashMap<String, ChatTool>,
 }
 
 /// How user input that was submitted at least once, or that the host holds to send,
@@ -371,6 +407,11 @@ impl Tracker {
                     self.pending.remove(&interaction.id);
                 }
             }
+            ChatItem::Tool(tool) if chat_reports::is_report(tool) => {
+                // Only the latest turn can still be running.
+                self.reports.retain(|_, kept| kept.turn_id == tool.turn_id);
+                self.reports.insert(tool.id.clone(), tool.clone());
+            }
             ChatItem::Tool(tool) => {
                 if let Some(changes) = agent_changes(tool) {
                     self.last_change = changes.last().cloned().or(self.last_change.take());
@@ -417,7 +458,8 @@ impl Tracker {
     pub fn dependents(&self) -> Vec<ChatItem> {
         let open = self.open.values().cloned().map(ChatItem::Message);
         let pending = self.pending.values().cloned().map(ChatItem::Interaction);
-        open.chain(pending).collect()
+        let reports = self.reports.values().cloned().map(ChatItem::Tool);
+        open.chain(pending).chain(reports).collect()
     }
 }
 
@@ -878,6 +920,13 @@ pub fn item(
                 message,
             }
         }
+        ChatItem::Tool(tool)
+            if let Some(report) = chat_reports::report(tool, chat, live, &|path| {
+                shown_path(path, &chat.execution_folder, home_folder().as_deref())
+            }) =>
+        {
+            report_item(tool, report)
+        }
         ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => Item::Records {
             id: tool.id.clone(),
             at: String::new(),
@@ -896,6 +945,50 @@ pub fn item(
             message: Some(notice.text.clone()),
         },
     })
+}
+
+fn report_item(tool: &ChatTool, report: Report) -> Item {
+    let (id, at) = (tool.id.clone(), String::new());
+    match report {
+        Report::Reasoning {
+            turn_id,
+            state,
+            record,
+        } => Item::Reasoning {
+            id,
+            at,
+            turn_id,
+            state,
+            started_at: record.started_at,
+            ended_at: record.ended_at,
+            text: record.text,
+            heading: record.heading,
+        },
+        Report::Plan {
+            turn_id,
+            state,
+            steps,
+            explanation,
+        } => Item::Plan {
+            id,
+            at,
+            turn_id,
+            state,
+            steps,
+            explanation,
+        },
+        Report::Files {
+            turn_id,
+            state,
+            files,
+        } => Item::Files {
+            id,
+            at,
+            turn_id,
+            state,
+            files,
+        },
+    }
 }
 
 fn home_folder() -> Option<String> {
@@ -1074,7 +1167,7 @@ fn last_component(path: &str) -> String {
         .to_owned()
 }
 
-fn title(chat: &Chat) -> String {
+pub(crate) fn title(chat: &Chat) -> String {
     chat.title.clone().unwrap_or("Untitled Chat".to_owned())
 }
 
@@ -1133,6 +1226,8 @@ pub fn chat_state(
         links: around.links.clone(),
         queue: around.queue.clone(),
         queue_paused: chat.queue_paused,
+        context: chat_reports::context(live),
+        settings: chat_reports::settings(live, name),
     }
 }
 
@@ -1529,5 +1624,66 @@ mod tests {
         assert!(!needs_you(false, "idle", Some("not_signed_in")));
         assert!(!needs_you(false, "interrupted", None));
         assert!(!needs_you(false, "working", None));
+    }
+
+    /// #367: a turn's records read by whether it still runs, and a stop that did not
+    /// confirm leaves the plan unconfirmed rather than finished.
+    #[test]
+    fn turn_records_read_by_whether_their_turn_runs() {
+        use super::{Tracker, item};
+        use ticketd_chat_host::StopState;
+        use ticketd_chat_host::records::{
+            FILES_RECORD_NAME, PLAN_RECORD_NAME, REASONING_RECORD_NAME,
+        };
+        use ticketd_core::ChatItem;
+        let record = |name: &str, input: &str, state| {
+            ChatItem::Tool(ChatTool {
+                id: name.to_owned(),
+                turn_id: "turn-1".to_owned(),
+                ..tool(name, input, state, None)
+            })
+        };
+        let plan = record(
+            PLAN_RECORD_NAME,
+            r#"{"steps":[{"text":"Add it","status":"in_progress","active_label":null}],"explanation":null}"#,
+            ChatToolState::Completed,
+        );
+        let mut stopping = idle();
+        stopping.stop = Some(StopState::Unconfirmed);
+        let state = |chat: &Chat, live: &_| match item(&plan, chat, live, None) {
+            Some(Item::Plan { state, .. }) => state,
+            other => panic!("a plan, got {other:?}"),
+        };
+        let running = idle();
+        assert_eq!(state(&chat(Some("turn-1")), &running), "running");
+        assert_eq!(state(&chat(Some("turn-1")), &stopping), "unconfirmed");
+        assert_eq!(state(&chat(None), &running), "ended");
+
+        let thinking = record(
+            REASONING_RECORD_NAME,
+            r#"{"running":true,"started_at":1,"ended_at":null,"text":null,"heading":null}"#,
+            ChatToolState::Running,
+        );
+        let Some(Item::Reasoning { state, .. }) = item(&thinking, &chat(None), &idle(), None)
+        else {
+            panic!("reasoning");
+        };
+        assert_eq!(state, "not_finished");
+
+        let files = record(
+            FILES_RECORD_NAME,
+            r#"{"files":[{"path":"src/limiter.ts","kind":"added","from":null,"added_lines":48,"removed_lines":0,"confirmed":true}]}"#,
+            ChatToolState::Completed,
+        );
+        let Some(Item::Files { files: shown, .. }) = item(&files, &chat(None), &idle(), None)
+        else {
+            panic!("files");
+        };
+        assert_eq!(shown[0].path, "src/limiter.ts");
+        assert_eq!(shown[0].open_path, "/work/limiter/src/limiter.ts");
+
+        // When the turn ends, its records are shown again with the turn.
+        let tracker = Tracker::from_items(&[plan.clone(), files]);
+        assert_eq!(tracker.dependents().len(), 2);
     }
 }

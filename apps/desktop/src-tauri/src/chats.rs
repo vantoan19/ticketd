@@ -23,6 +23,7 @@ use ticketd_core::{
 };
 use tokio::sync::oneshot;
 
+use crate::chat_reports::{self, SettingChangeView};
 use crate::chat_view::{
     self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, Queued, Summary, Surroundings,
     Tracker, harness_name,
@@ -455,6 +456,26 @@ fn note_folder(missing_folders: &Mutex<HashSet<String>>, chat_id: &str, missing:
         missing_folders.insert(chat_id.to_owned())
     } else {
         missing_folders.remove(chat_id)
+    }
+}
+
+/// A stored time's date as "Nov 13, 2026". Stored times are UTC, so near midnight it
+/// can be the neighbouring day.
+fn shown_date(at: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let mut parts = at.get(..10).unwrap_or_default().split('-');
+    let (Some(year), Some(month), Some(day)) = (parts.next(), parts.next(), parts.next()) else {
+        return at.to_owned();
+    };
+    let month = month
+        .parse::<usize>()
+        .ok()
+        .and_then(|month| MONTHS.get(month.checked_sub(1)?));
+    match (month, day.parse::<u32>()) {
+        (Some(month), Ok(day)) => format!("{month} {day}, {year}"),
+        _ => at.to_owned(),
     }
 }
 
@@ -1425,7 +1446,8 @@ impl Chats {
             .await?)
     }
 
-    /// Saves one assistant response as a Document through the ordinary core workflow.
+    /// Saves one assistant response, or a turn's plan as a checklist, as a Document
+    /// through the ordinary core workflow.
     pub fn save_as_document(
         &self,
         chat_id: &str,
@@ -1434,12 +1456,71 @@ impl Chats {
     ) -> Outcome<String> {
         self.host()?;
         let mut workspace = self.workspace()?;
-        let response = messages(&workspace, chat_id)?
-            .into_iter()
-            .find(|message| message.id == response_id && message.role == ChatRole::Assistant)
-            .ok_or_else(|| failed("that response is not in this Chat"))?;
+        let snapshot = workspace.chat_snapshot(chat_id, HISTORY_ITEMS)?;
+        let text = snapshot.items.iter().find_map(|item| match item {
+            ChatItem::Message(message)
+                if message.id == response_id && message.role == ChatRole::Assistant =>
+            {
+                Some(message.text.clone())
+            }
+            ChatItem::Tool(tool) if tool.id == response_id => {
+                let turn = snapshot.items.iter().find_map(|item| match item {
+                    ChatItem::Turn(turn) if turn.id == tool.turn_id => Some(turn),
+                    _ => None,
+                });
+                let date = turn.map_or(String::new(), |turn| shown_date(&turn.started_at));
+                let chat_title = chat_view::title(&snapshot.chat);
+                chat_reports::plan_document(tool, &chat_title, &date)
+            }
+            _ => None,
+        });
+        let text = text.ok_or_else(|| failed("that response is not in this Chat"))?;
         let title = Some(title.trim()).filter(|title| !title.is_empty());
-        Ok(workspace.create_document(title, &response.text)?.id)
+        Ok(workspace.create_document(title, &text)?.id)
+    }
+
+    /// Asks the live session to use `value` for `setting` from its next turn, and says
+    /// where the change stands.
+    pub async fn change_setting(
+        &self,
+        chat_id: &str,
+        setting: &str,
+        value: &str,
+    ) -> Outcome<SettingChangeView> {
+        let key = chat_reports::setting_key(setting)
+            .ok_or_else(|| failed(format!("there is no setting named {setting}")))?;
+        let state = self.host()?.change_setting(chat_id, key, value).await?;
+        Ok(chat_reports::change_view(value, &state))
+    }
+
+    /// A file the agent changed in this Chat, to open. Only files a turn reported
+    /// changing can be opened this way.
+    pub fn changed_file(&self, chat_id: &str, path: &str) -> Outcome<PathBuf> {
+        let workspace = self.workspace()?;
+        let snapshot = workspace.chat_snapshot(chat_id, HISTORY_ITEMS)?;
+        let live = self.live(chat_id);
+        let named = snapshot.items.iter().any(|item| match item {
+            ChatItem::Tool(tool) => matches!(
+                chat_reports::report(tool, &snapshot.chat, &live, &str::to_owned),
+                Some(chat_reports::Report::Files { files, .. })
+                    if files.iter().any(|file| file.open_path == path)
+            ),
+            _ => false,
+        });
+        if !named {
+            return Err(failed("that file is not one this Chat changed"));
+        }
+        let path = PathBuf::from(path);
+        if !path.exists() {
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            return Err(failed(format!(
+                "Couldn't open {name}. It is no longer on this computer."
+            )));
+        }
+        Ok(path)
     }
 }
 

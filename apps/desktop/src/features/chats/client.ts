@@ -210,6 +210,30 @@ const requestOptionSchema = z.object({
 });
 
 const item = { id: z.string(), at: z.string() };
+
+const planStepSchema = z.object({
+  text: z.string(),
+  status: z.enum(["pending", "in_progress", "completed"]),
+  /** What the harness shows while the step runs ("Running tests"). */
+  active_label: z.string().nullish(),
+});
+export type PlanStep = z.infer<typeof planStepSchema>;
+
+const changedFileSchema = z.object({
+  /** Relative to the Chat's folder, or with `~` for the home folder. */
+  path: z.string(),
+  /** The absolute path the host opens. */
+  open_path: z.string(),
+  kind: z.enum(["added", "modified", "deleted", "renamed"]),
+  /** A renamed file's earlier path. */
+  from: z.string().nullish(),
+  /** Absent when the harness reported no line counts. */
+  added_lines: z.number().int().nullish(),
+  removed_lines: z.number().int().nullish(),
+  /** The harness reported the change as made. */
+  confirmed: z.boolean(),
+});
+export type ChangedFile = z.infer<typeof changedFileSchema>;
 export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
@@ -267,8 +291,95 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     history: z.enum(["last_response", "last_messages", "all", "picked"]),
     count: z.number().int().nonnegative(),
   }),
+  /** One reasoning item. Times are milliseconds since the Unix epoch, as reported. */
+  z.object({
+    ...item,
+    kind: z.literal("reasoning"),
+    turn_id: z.string(),
+    /** `not_finished`: the turn ended first; `unknown`: contact was lost. */
+    state: z.enum(["running", "done", "not_finished", "unknown"]),
+    started_at: z.number().nullish(),
+    ended_at: z.number().nullish(),
+    /** Only what the harness showed; absent when it showed nothing or redacted it. */
+    text: z.string().nullish(),
+    /** A heading the harness itself marked. */
+    heading: z.string().nullish(),
+  }),
+  /** A turn's plan as the harness last reported it. */
+  z.object({
+    ...item,
+    kind: z.literal("plan"),
+    turn_id: z.string(),
+    /** `unconfirmed`: Stop was asked for and did not confirm. */
+    state: z.enum(["running", "ended", "unconfirmed"]),
+    steps: z.array(planStepSchema),
+    explanation: z.string().nullish(),
+  }),
+  /** The files a turn changed. */
+  z.object({
+    ...item,
+    kind: z.literal("files"),
+    turn_id: z.string(),
+    state: z.enum(["running", "ended"]),
+    files: z.array(changedFileSchema),
+  }),
 ]);
 export type TranscriptItem = z.infer<typeof transcriptItemSchema>;
+
+const contextSchema = z.object({
+  /** Tokens in use. */
+  used: z.number(),
+  /** The window's size in tokens. */
+  window: z.number(),
+  /** What the harness says fills the window. */
+  categories: z.array(z.object({ name: z.string(), tokens: z.number() })),
+  /** Where the harness compacts on its own, in tokens. */
+  compacts_at: z.number().nullish(),
+  /** When it was reported, in milliseconds since the Unix epoch. */
+  at: z.number(),
+  compacted_at: z.number().nullish(),
+});
+export type ContextUsage = z.infer<typeof contextSchema>;
+
+export const settingChangeSchema = z.object({
+  value: z.string(),
+  /** `held`: waits for the turn to end; then `sent`, then the outcome. */
+  state: z.enum([
+    "held",
+    "sent",
+    "applied",
+    "refused",
+    "unconfirmed",
+    "unsupported",
+  ]),
+  reason: z.string().nullish(),
+});
+export type SettingChange = z.infer<typeof settingChangeSchema>;
+
+/** One harness setting. Full access is never among the choosable options. */
+const settingSchema = z.object({
+  current: z.string().nullish(),
+  options: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      description: z.string().nullish(),
+      is_default: z.boolean(),
+      permission: z
+        .enum(["read_only", "ask", "accept_edits", "full_access"])
+        .nullish(),
+      allowed: z.boolean(),
+    }),
+  ),
+  changeable: z.boolean(),
+  /** Why it cannot be changed, when it cannot. */
+  reason: z.string().nullish(),
+  applies_from: z.enum(["next_turn", "next_request"]),
+  /** The model the harness says answered, when not the chosen one. */
+  answered_by: z.string().nullish(),
+  change: settingChangeSchema.nullish(),
+});
+export type HarnessSetting = z.infer<typeof settingSchema>;
 
 export const chatStateSchema = z.object({
   id: z.string(),
@@ -307,6 +418,16 @@ export const chatStateSchema = z.object({
   links: z.array(linkedRecordSchema),
   queue: z.array(z.object({ id: z.string(), text: z.string() })),
   queue_paused: z.boolean(),
+  /** The live session's context window; absent until the harness reports it. */
+  context: contextSchema.nullish(),
+  /** The live session's settings, for the composer's pickers (#368). */
+  settings: z
+    .object({
+      model: settingSchema.nullish(),
+      effort: settingSchema.nullish(),
+      permission: settingSchema.nullish(),
+    })
+    .nullish(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
@@ -437,7 +558,18 @@ export interface ChatClient {
   removeLink(id: string, link: LinkRef): Promise<void>;
   /** Continues the same Chat in a fresh harness session started with the chosen history. */
   resume(id: string, history: HistorySelection): Promise<void>;
-  /** Ordinary core Document creation; resolves to the Document's id. */
+  /**
+   * Uses `value` for a harness setting from the next turn. While a turn runs
+   * the change is held until it ends. Resolves to where it stands.
+   */
+  changeSetting(
+    id: string,
+    setting: "model" | "effort" | "permission",
+    value: string,
+  ): Promise<SettingChange>;
+  /** Opens a file the agent changed in the system's default app for it. */
+  openFile(id: string, path: string): Promise<void>;
+  /** Ordinary core Document creation from a response or a plan; resolves to the Document's id. */
   saveAsDocument(
     id: string,
     responseId: string,

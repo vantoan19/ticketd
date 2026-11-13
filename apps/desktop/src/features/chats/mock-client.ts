@@ -74,6 +74,8 @@ export type MockChatClient = ChatClient & {
   quit: boolean;
   /** Titles saved through Save as Document, in order. */
   savedDocuments: string[];
+  /** Paths opened through a changed-files row, in order. */
+  openedFiles: string[];
   /** What the next folder dialog returns. */
   nextFolder: string | null;
 };
@@ -249,6 +251,7 @@ export function createMockChatClient(
   const client: MockChatClient = {
     quit: false,
     savedDocuments: [],
+    openedFiles: [],
     nextFolder: null,
     push,
     patch,
@@ -476,9 +479,36 @@ export function createMockChatClient(
       });
       patch(id, { activity: "idle", problem: null });
     },
+    async changeSetting(id, setting, value) {
+      const current = get(id).chat.settings?.[setting];
+      if (!current?.options.some((option) => option.id === value && option.allowed))
+        return { value, state: "refused", reason: "not one of its choices" };
+      const change = { value, state: live(get(id).chat) ? "held" : "applied" } as const;
+      patch(id, {
+        settings: {
+          ...get(id).chat.settings,
+          [setting]: {
+            ...current,
+            ...(change.state === "applied" && { current: value }),
+            change,
+          },
+        },
+      });
+      return change;
+    },
+    async openFile(id, path) {
+      client.openedFiles.push(path);
+      const known = get(id).items.some(
+        (item) =>
+          item.kind === "files" &&
+          item.files.some((file) => file.open_path === path),
+      );
+      if (!known)
+        throw new ChatError("failed", "That file is not one this Chat changed.");
+    },
     async saveAsDocument(id, responseId, title) {
       const response = get(id).items.find((item) => item.id === responseId);
-      if (response?.kind !== "response")
+      if (response?.kind !== "response" && response?.kind !== "plan")
         throw new ChatError("failed", "That response no longer exists.");
       client.savedDocuments.push(title);
       return `document-${client.savedDocuments.length}`;
