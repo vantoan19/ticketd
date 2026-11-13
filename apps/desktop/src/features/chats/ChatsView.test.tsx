@@ -346,7 +346,7 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
     within(screen.getByRole("list", { name: "Chats" })).getByRole("button", {
       name: /^Limiter/,
     }).textContent,
-  ).toContain("Failed · Codex reached your usage limit");
+  ).toContain("Failed\u00a0· Codex reached your usage limit");
 
   act(() =>
     client.patch("c1", {
@@ -558,7 +558,7 @@ test("the list says which Chats need the person, in words as well as the dot", a
   const rows = within(screen.getByRole("list", { name: "Chats" }));
   const waiting = rows.getByRole("button", { name: /^Alert on-call/ });
   expect(waiting.textContent).toContain(
-    "Approval needed · npm install @pagerduty/pdjs",
+    "Approval needed\u00a0· npm install @pagerduty/pdjs",
   );
   expect(waiting.textContent).toContain("T-13 · web-app");
   expect(waiting.getAttribute("aria-current")).toBe("true");
@@ -578,7 +578,7 @@ test("a row's actions mark it unread or read and mute it, and say a refusal", as
   ]);
   const rows = within(screen.getByRole("list", { name: "Chats" }));
   const done = rows.getByRole("button", { name: /^Limiter/ });
-  expect(done.textContent).toContain("Done · All done");
+  expect(done.textContent).toContain("Done\u00a0· All done");
   expect(done.textContent).toContain("unread");
 
   openMenu("Actions for Limiter");

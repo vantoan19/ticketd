@@ -33,7 +33,7 @@ export function ChatStatus({
       <span className="chat-status-word">{status.word}</span>
       {status.detail && (
         <span className="chat-status-detail">
-          {" · "}
+          {"\u00a0· "}
           {status.detail}
         </span>
       )}

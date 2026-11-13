@@ -24,7 +24,6 @@
   padding: 4px 0;
   overflow-y: auto;
   list-style: none;
-  container-type: inline-size;
 }
 /* The row's ⋯ sits over the time on line 1 and shows on hover or focus. */
 .chat-row-item {
@@ -122,7 +121,10 @@
 .chat-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+}
+.chat-status > [data-slot="status-dot"],
+.chat-status > svg {
+  margin-right: 6px;
 }
 .chat-status-word {
   flex: none;
@@ -134,8 +136,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The context item gives way first in a narrow list. */
-@container (max-width: 459px) {
+/* The context item gives way first in a narrow window. */
+@media (max-width: 459px) {
   .chat-row-context {
     display: none;
   }
