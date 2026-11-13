@@ -12,13 +12,34 @@ const BRANCHING = [
     kind: "run_agent" as const,
     agent_id: "agent-1",
     execution_folder: "/work",
-    on_failure: [{ id: "on-failure", kind: "notify" as const }],
+    on_failure: [
+      {
+        id: "on-failure",
+        kind: "notify" as const,
+        text: "Done",
+        opens: "ticket" as const,
+      },
+    ],
   },
   {
     id: "if",
     kind: "if" as const,
-    yes: [{ id: "yes", kind: "notify" as const }],
-    no: [{ id: "no", kind: "notify" as const }],
+    yes: [
+      {
+        id: "yes",
+        kind: "notify" as const,
+        text: "Done",
+        opens: "ticket" as const,
+      },
+    ],
+    no: [
+      {
+        id: "no",
+        kind: "notify" as const,
+        text: "Done",
+        opens: "ticket" as const,
+      },
+    ],
   },
 ];
 const states = (

@@ -101,6 +101,7 @@ mod automation_background;
 mod automation_matching;
 mod automation_run_machine;
 mod automation_runs;
+mod automation_steps;
 mod automations;
 mod change_token;
 mod chats;
@@ -116,6 +117,7 @@ pub use automation_runs::{
     AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
     AutomationStepStatus,
 };
+pub use automation_steps::AutomationNotification;
 pub use automations::{
     AUTOMATION_TRIGGER_ID, Automation, AutomationDefinition, AutomationProblem, Check, Condition,
     NotifyTarget, Schedule, Step, StepAction, StepChange, Trigger, Weekday,

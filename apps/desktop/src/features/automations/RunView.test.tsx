@@ -64,8 +64,21 @@ const VERIFY: Automation = {
       id: "passed",
       kind: "if",
       checks: [{ kind: "tag", tag: "verified", has: true }],
-      yes: [{ id: "tell-me", kind: "notify" }],
-      no: [{ id: "send-back", kind: "change_ticket" }],
+      yes: [
+        {
+          id: "tell-me",
+          kind: "notify",
+          text: "Verified {{ticket.reference}}",
+          opens: "run",
+        },
+      ],
+      no: [
+        {
+          id: "send-back",
+          kind: "change_ticket",
+          change: { action: "add_tag", tag: "needs-fix" },
+        },
+      ],
     },
   ],
   enabled: true,

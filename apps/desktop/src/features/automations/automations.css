@@ -440,6 +440,58 @@
   line-height: var(--text-caption-line);
 }
 
+/* Text that can hold ticket fields: an input (`ui-input`) whose fields are chips. */
+.flow-text {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.flow-text-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+.flow-field {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 1px;
+  padding: 0 6px;
+  border-radius: var(--radius-segment);
+  background: var(--accent);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: 18px;
+  white-space: nowrap;
+  user-select: all;
+}
+
+/* The notification as the desktop will show it. */
+.notify-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-panel);
+  background: var(--recessed);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  overflow-wrap: anywhere;
+}
+.notify-preview strong {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.notify-preview-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+
 /* A ticket's runs in its side panel: the Automation, then how the run ended. */
 .ticket-runs {
   align-self: stretch;
