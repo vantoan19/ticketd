@@ -70,6 +70,10 @@ function anchored(box: HTMLElement, anchor: NonNullable<Anchor>) {
   return null;
 }
 
+/** Keeps where the Chat is now, for when it reopens this session. */
+const remember = (chatId: string, following: boolean, box: HTMLElement) =>
+  positions.set(chatId, following ? "end" : box.scrollTop);
+
 /** How long after the reader's wheel, touch or key a scroll counts as theirs. */
 const INPUT_MS = 500;
 
@@ -114,8 +118,6 @@ export function useTranscriptScroll(
   const pressed = useRef(false);
   const theirs = () =>
     pressed.current || performance.now() - input.current < INPUT_MS;
-  const remember = (box: HTMLElement) =>
-    positions.set(chatId, follows.current ? "end" : box.scrollTop);
   const setFollows = (next: boolean) => {
     if (next === follows.current) return;
     follows.current = next;
@@ -155,7 +157,7 @@ export function useTranscriptScroll(
     else box.scrollTop = box.scrollHeight;
     follows.current = atBottom(box);
     lastTop.current = box.scrollTop;
-    remember(box);
+    remember(chatId, follows.current, box);
     read(box);
     // The opening position decides whether the control shows from the first paint.
     setFollowing(follows.current);
@@ -221,7 +223,7 @@ export function useTranscriptScroll(
         if (moved) box.scrollTop += moved;
         lastTop.current = box.scrollTop;
       }
-      remember(box);
+      remember(chatId, follows.current, box);
       read(box);
     });
     observer.observe(column);
@@ -243,7 +245,7 @@ export function useTranscriptScroll(
       box.scrollTop = box.scrollHeight;
       lastTop.current = box.scrollTop;
     }
-    remember(box);
+    remember(chatId, follows.current, box);
     read(box);
   };
 
@@ -253,7 +255,7 @@ export function useTranscriptScroll(
     if (box) {
       box.scrollTop = box.scrollHeight;
       lastTop.current = box.scrollTop;
-      remember(box);
+      remember(chatId, follows.current, box);
     }
   };
 
