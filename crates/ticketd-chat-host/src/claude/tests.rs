@@ -808,6 +808,32 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
     assert_eq!(status(events), ToolStatus::Failed);
 }
 
+/// The lines an edit added and removed, from its result, stay with the tool so its
+/// step row can show them.
+#[test]
+fn an_edit_keeps_the_lines_its_result_counted() {
+    use super::session::Session;
+    let mut session = Session::default();
+    session.event("assistant_content", &json!({"blocks": [{"type": "tool_use", "id": "toolu_1", "name": "Edit", "input": {"file_path": "/w/a.ts"}}], "parent_tool_use_id": null}));
+    let (events, _) = session
+        .event(
+            "tool_result",
+            &json!({"tool_use_id": "toolu_1", "text": "ok", "outcome": {"kind": "file", "change": "update", "added_lines": 48, "removed_lines": 6}}),
+        )
+        .expect("modeled");
+    let kept = events.iter().find_map(|event| match event {
+        EventKind::ToolUpdated {
+            detail: Some(detail),
+            ..
+        } => serde_json::from_str::<serde_json::Value>(detail.payload()).ok(),
+        _ => None,
+    });
+    assert_eq!(
+        kept.map(|input| input["ticketd_lines"].clone()),
+        Some(json!({"added": 48, "removed": 6}))
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn thinking_the_plan_files_and_context_carry_only_what_claude_code_reported() {
     let (mut peer, runtime, mut events) = open().await;

@@ -244,6 +244,35 @@ test("a command shows its first line, and its name says its outcome", () => {
   expect(words.label).toBe("Run python3 -c ', Failed");
 });
 
+test("a file step ends in its diffstat, and merged steps add theirs up only when each has one", () => {
+  const edit = (file: string, added?: number, removed?: number) =>
+    step({
+      kind: "edit",
+      targets: paths(file),
+      ...(added !== undefined && {
+        added_lines: added,
+        removed_lines: removed,
+      }),
+    });
+  const one = stepWords(edit("src/a.ts", 48, 6));
+  expect(one.suffix).toEqual({
+    text: "+48 −6",
+    outcome: false,
+    diffstat: true,
+  });
+  expect(one.label).toBe("Edited src/a.ts, 48 lines added, 6 removed");
+  expect(
+    mergeSteps([edit("a.ts", 3, 1), edit("b.ts", 1, 1)]).map(line),
+  ).toEqual(["Edited `a.ts` and `b.ts` · +4 −2"]);
+  expect(mergeSteps([edit("a.ts", 3, 1), edit("b.ts")]).map(line)).toEqual([
+    "Edited `a.ts` and `b.ts`",
+  ]);
+  // A step that did not finish has no diffstat: its outcome word is the suffix.
+  expect(line({ ...edit("a.ts", 3, 1), state: "failed" })).toBe(
+    "Edit `a.ts` · Failed",
+  );
+});
+
 test("steps of the same kind and outcome merge, but commands never do", () => {
   const merged = mergeSteps([
     step({ kind: "read", targets: paths("a.ts"), output: "x" }),

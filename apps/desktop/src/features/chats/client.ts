@@ -255,6 +255,9 @@ const stepSchema = z.object({
     .nullish(),
   /** When the host recorded the call, for a running step's clock. */
   started_at: z.string().nullish(),
+  /** Lines the step added and removed, when the harness said: its diffstat. */
+  added_lines: z.number().int().nonnegative().nullish(),
+  removed_lines: z.number().int().nonnegative().nullish(),
   /** The decision on the approval the harness asked for this step ("You declined this"). */
   decision: z.string().nullish(),
 });

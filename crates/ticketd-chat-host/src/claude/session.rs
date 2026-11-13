@@ -335,6 +335,7 @@ impl Session {
             text(event, "text").unwrap_or_default(),
             event["truncated"] == true,
         );
+        let detail = with_line_counts(detail, &event["outcome"]);
         events.push(EventKind::ToolUpdated {
             turn: turn.clone(),
             item: NativeItemId::new(id),
@@ -345,7 +346,7 @@ impl Session {
                 (false, _) => ToolStatus::Succeeded,
             },
             output: Some(output),
-            detail: Some(detail.clone()),
+            detail: Some(detail),
         });
         let turn = turn.clone();
         events.extend(
@@ -603,4 +604,25 @@ impl Session {
                 .collect(),
         });
     }
+}
+
+/// The tool's input with the lines its result said it added and removed, kept as
+/// `ticketd_lines` so the step row can show them; unchanged when it said none.
+fn with_line_counts(detail: &ProviderDetail, outcome: &Value) -> ProviderDetail {
+    let count = |key: &str| outcome[key].as_u64();
+    let (Some("file"), Some(added), Some(removed)) = (
+        text(outcome, "kind"),
+        count("added_lines"),
+        count("removed_lines"),
+    ) else {
+        return detail.clone();
+    };
+    let Ok(Value::Object(mut input)) = serde_json::from_str::<Value>(detail.payload()) else {
+        return detail.clone();
+    };
+    input.insert(
+        "ticketd_lines".to_owned(),
+        json!({ "added": added, "removed": removed }),
+    );
+    ProviderDetail::new(detail.kind(), &Value::Object(input).to_string())
 }

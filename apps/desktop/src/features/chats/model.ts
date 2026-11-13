@@ -79,8 +79,8 @@ const OUTCOME_WORDS = {
 export type StepWords = {
   /** The row's words in order; `code` ones are targets, shown in mono. */
   parts: { text: string; code?: boolean }[];
-  /** At most one: an outcome word, or a muted result such as "No matches". */
-  suffix?: { text: string; outcome: boolean };
+  /** At most one: an outcome word, a muted result such as "No matches", or a diffstat (12px mono). */
+  suffix?: { text: string; outcome: boolean; diffstat?: boolean };
   /** The row's accessible name: "Run npm run test:limiter, Failed". */
   label: string;
   /** The muted line under an opened row: "Exit 1 · in apps/desktop". */
@@ -169,8 +169,19 @@ export function stepWords(step: Step): StepWords {
         }
       : state === "done" && step.no_matches
         ? { text: "No matches", outcome: false }
-        : undefined;
+        : state === "done" &&
+            step.added_lines != null &&
+            step.removed_lines != null
+          ? {
+              text: `+${step.added_lines} −${step.removed_lines}`,
+              outcome: false,
+              diffstat: true,
+            }
+          : undefined;
   const words = parts.map((part) => part.text).join(" ");
+  const spoken = suffix?.diffstat
+    ? `${step.added_lines} lines added, ${step.removed_lines} removed`
+    : suffix?.text;
   const single = targets.length === 1 && !step.command ? targets[0] : undefined;
   const detail = [
     step.timed_out
@@ -186,7 +197,7 @@ export function stepWords(step: Step): StepWords {
   return {
     parts,
     ...(suffix && { suffix }),
-    label: suffix ? `${words}, ${suffix.text}` : words,
+    label: spoken ? `${words}, ${spoken}` : words,
     detail,
   };
 }
@@ -196,6 +207,9 @@ export function stepWords(step: Step): StepWords {
  * opens to its targets. Commands never merge, so each one's output stays one level
  * down. A merged row keeps "No matches" only when all its steps found nothing.
  */
+const sum = (a: number | null | undefined, b: number | null | undefined) =>
+  a != null && b != null ? a + b : null;
+
 export function mergeSteps(steps: Step[]): Step[] {
   const rows: Step[] = [];
   for (const step of steps) {
@@ -219,6 +233,9 @@ export function mergeSteps(steps: Step[]): Step[] {
       ...merged,
       targets: [...(last.targets ?? []), ...(step.targets ?? [])],
       no_matches: Boolean(last.no_matches && step.no_matches),
+      // Diffstats add up only when every merged step has one.
+      added_lines: sum(last.added_lines, step.added_lines),
+      removed_lines: sum(last.removed_lines, step.removed_lines),
     };
   }
   return rows;

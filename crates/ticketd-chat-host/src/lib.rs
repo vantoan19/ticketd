@@ -11,6 +11,7 @@ mod codex;
 pub mod conditions;
 pub mod context;
 mod contract;
+pub mod diffstat;
 mod host;
 mod install;
 pub mod records;

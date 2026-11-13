@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::diffstat::counts;
 use crate::wire::{capitalized, text};
 
 use crate::{
@@ -72,32 +73,6 @@ fn marked_heading(part: &str) -> Option<String> {
     let end = rest.find("**")?;
     let heading = rest[..end].trim();
     (!heading.is_empty()).then(|| heading.to_owned())
-}
-
-/// Lines a change adds and removes, counted from the diff Codex sent with it. An
-/// added or deleted file's diff is its content.
-fn counts(kind: &FileChangeKind, diff: &str) -> (u32, u32) {
-    let lines = u32::try_from(diff.lines().count()).unwrap_or(u32::MAX);
-    match kind {
-        FileChangeKind::Added => (lines, 0),
-        FileChangeKind::Deleted => (0, lines),
-        FileChangeKind::Modified | FileChangeKind::Renamed { .. } => unified_counts(diff),
-    }
-}
-
-fn unified_counts(diff: &str) -> (u32, u32) {
-    let (mut added, mut removed) = (0u32, 0u32);
-    for line in diff.lines() {
-        if line.starts_with("+++") || line.starts_with("---") {
-            continue;
-        }
-        if line.starts_with('+') {
-            added = added.saturating_add(1);
-        } else if line.starts_with('-') {
-            removed = removed.saturating_add(1);
-        }
-    }
-    (added, removed)
 }
 
 /// Per-file counts from a multi-file unified diff, keyed by the path after `b/`.

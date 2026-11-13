@@ -11,6 +11,7 @@ use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
     ChatProblem, InteractionKind, ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
 };
+use ticketd_chat_host::{FileChangeKind, diffstat};
 use ticketd_core::{
     Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
@@ -176,6 +177,9 @@ pub struct Step {
     /// When the host recorded the call, for a running step's clock. Absent from calls
     /// recorded before ticketd kept it.
     pub started_at: Option<String>,
+    /// Lines the step added and removed, when the harness said: the diffstat.
+    pub added_lines: Option<u32>,
+    pub removed_lines: Option<u32>,
     /// What the person decided when the harness asked to take this step ("You declined
     /// this"): the approval folds into the step it was asked for.
     pub decision: Option<String>,
@@ -836,6 +840,8 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         result: cut,
         output: tool.output.clone(),
         started_at: tool.started_at.clone(),
+        added_lines: None,
+        removed_lines: None,
         decision: None,
     };
     if tool.name == CONTEXT_RECORD_NAME {
@@ -998,10 +1004,19 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
                     .output
                     .as_deref()
                     .is_some_and(|output| output.starts_with(WRITE_CREATED));
-            kind(
-                if created { "create" } else { "edit" },
-                file.map(path).into_iter().collect(),
-            )
+            let lines = |key: &str| {
+                value("ticketd_lines")
+                    .and_then(|lines| lines[key].as_u64())
+                    .and_then(|count| u32::try_from(count).ok())
+            };
+            Step {
+                added_lines: lines("added"),
+                removed_lines: lines("removed"),
+                ..kind(
+                    if created { "create" } else { "edit" },
+                    file.map(path).into_iter().collect(),
+                )
+            }
         }
         (None, "WebSearch") => kind("web", vec![target(field("query").unwrap_or_default())]),
         (None, "WebFetch") => Step {
@@ -1027,16 +1042,27 @@ fn file_changes(
             continue;
         };
         let how = change["kind"]["type"].as_str().or(change["kind"].as_str());
-        let kind = match how {
-            Some("add") => "create",
-            Some("delete") => "delete",
-            _ => "edit",
+        let (kind, change_kind) = match how {
+            Some("add") => ("create", FileChangeKind::Added),
+            Some("delete") => ("delete", FileChangeKind::Deleted),
+            _ => ("edit", FileChangeKind::Modified),
         };
+        // A change Codex sent no diff with leaves its row's count untold.
+        let counted = change["diff"]
+            .as_str()
+            .map(|diff| diffstat::counts(&change_kind, diff));
         match rows.iter_mut().find(|row| row.kind == kind) {
-            Some(row) => row.targets.push(path(file)),
+            Some(row) => {
+                row.targets.push(path(file));
+                let sum = |kept: Option<u32>, more: Option<u32>| kept.zip(more).map(|(a, b)| a + b);
+                row.added_lines = sum(row.added_lines, counted.map(|(added, _)| added));
+                row.removed_lines = sum(row.removed_lines, counted.map(|(_, removed)| removed));
+            }
             None => rows.push(Step {
                 kind,
                 targets: vec![path(file)],
+                added_lines: counted.map(|(added, _)| added),
+                removed_lines: counted.map(|(_, removed)| removed),
                 ..base.clone()
             }),
         }
@@ -1836,6 +1862,41 @@ mod tests {
                 ("delete", vec!["old.ts"]),
             ]
         );
+    }
+
+    #[test]
+    fn a_file_step_carries_the_lines_its_harness_said_it_added_and_removed() {
+        let input = json!({"type": "fileChange", "status": "completed", "changes": [
+            {"path": "/work/limiter/src/a.ts", "kind": {"type": "update"},
+             "diff": "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n-old\n+new\n+more\n same"},
+            {"path": "/work/limiter/src/c.ts", "kind": {"type": "update"},
+             "diff": "@@ -1 +1 @@\n-x\n+y"},
+            {"path": "/work/limiter/src/b.ts", "kind": {"type": "add"}, "diff": "one\ntwo"},
+            {"path": "/work/limiter/src/d.ts", "kind": {"type": "update"}},
+        ]});
+        let change = tool("Edit a", &input.to_string(), ChatToolState::Completed, None);
+        let counts: Vec<_> = steps(&change, "Codex", &chat(None), None)
+            .iter()
+            .map(|row| (row.kind, row.added_lines, row.removed_lines))
+            .collect();
+        // One change without a diff leaves its row's count untold.
+        assert_eq!(counts, [("edit", None, None), ("create", Some(2), Some(0))]);
+
+        // Claude Code says it in the tool's result, which the adapter keeps.
+        let edit = one(&tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/a.ts","ticketd_lines":{"added":48,"removed":6}}"#,
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!((edit.added_lines, edit.removed_lines), (Some(48), Some(6)));
+        let untold = one(&tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/a.ts"}"#,
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!(untold.added_lines, None);
     }
 
     #[test]

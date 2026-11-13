@@ -401,7 +401,10 @@ export function StepRow({
       {words.suffix ? (
         <>
           <span aria-hidden> · </span>
-          <span data-outcome={words.suffix.outcome ? "" : undefined}>
+          <span
+            data-outcome={words.suffix.outcome ? "" : undefined}
+            className={words.suffix.diffstat ? "chat-file-counts" : undefined}
+          >
             {words.suffix.text}
           </span>
         </>
