@@ -8,8 +8,8 @@ use std::time::Duration;
 use ticketd_automation_runner::{RUNS_AT_ONCE, Runner, TicketdCli};
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, ChatHost, EventKind, HarnessAdapter, InteractionKind, InteractionRequest,
-    NativeRequestId, NativeTurnId, Problem, ProblemKind, TurnOutcome, WorkspaceOpener,
+    ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
+    InteractionKind, InteractionRequest, NativeRequestId, NativeTurnId, Problem, ProblemKind, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -46,15 +46,37 @@ fn tools() -> AutomationAgentTools {
 impl Fixture {
     /// A Workspace with a triage Automation that is on, and a runner over a fake
     /// harness.
-    #[allow(clippy::unwrap_used)] // Setup that fails fails the test.
     fn new() -> Self {
+        Self::on(AgentHarness::Codex)
+    }
+
+    /// The same, with the agent on `harness`.
+    #[allow(clippy::unwrap_used)] // Setup that fails fails the test.
+    fn on(harness: AgentHarness) -> Self {
+        let fake = match harness {
+            AgentHarness::Codex => FakeAdapter::codex(),
+            AgentHarness::ClaudeCode => {
+                fn unknown<B>() -> Capability<B> {
+                    Capability::Unknown {
+                        reason: "fake".into(),
+                    }
+                }
+                FakeAdapter::new(
+                    Harness::ClaudeCode,
+                    Capabilities {
+                        steering: unknown(),
+                        native_resume: unknown(),
+                    },
+                )
+            }
+        };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
         let mut workspace = Workspace::open(&path).unwrap();
         let agent = workspace
             .create_automation_agent(AutomationAgentSettings {
                 name: "Triage".into(),
-                harness: AgentHarness::Codex,
+                harness,
                 model: Some("gpt-test".into()),
                 instructions: INSTRUCTIONS.into(),
                 tools: tools(),
@@ -80,7 +102,6 @@ impl Fixture {
         let automation = workspace
             .set_automation_enabled(&automation.id, true)
             .unwrap();
-        let fake = FakeAdapter::codex();
         let host = ChatHost::new(
             opener(&path),
             vec![Arc::new(fake.clone()) as Arc<dyn HarnessAdapter>],
@@ -231,6 +252,29 @@ async fn tagging_a_ticket_runs_the_agent_as_a_chat_owned_by_the_run() {
         [(ChatLinkKind::Ticket, ticket.id.as_str())]
     );
     assert_eq!(core.list_chats(ChatListFilter::Active).unwrap(), []);
+}
+
+/// What each harness's adapter is handed for an agent with "Edit files" off. The
+/// adapters turn it into harness options (their own tests check those): Codex makes
+/// the step's folder and the Workspace data folder its only writable places, and
+/// Claude Code an allowlist that always holds the ticketd CLI.
+#[tokio::test(start_paused = true)]
+async fn either_harness_is_told_the_steps_folder_the_cli_and_the_workspace_data_folder() {
+    for harness in [AgentHarness::Codex, AgentHarness::ClaudeCode] {
+        let f = Fixture::on(harness);
+        f.agent_working().await;
+
+        let open = f.fake.opens().remove(0);
+        assert_eq!(open.working_directory, PathBuf::from("/work/app"));
+        let unattended = open.unattended.unwrap();
+        assert!(!unattended.tools.edit_files);
+        assert_eq!(
+            unattended.ticketd_cli,
+            Some(PathBuf::from("/opt/ticketd/ticketd"))
+        );
+        assert_eq!(unattended.ticketd_folders, [f.path.parent().unwrap()]);
+        assert_eq!(unattended.turn_limit, 12);
+    }
 }
 
 #[tokio::test(start_paused = true)]

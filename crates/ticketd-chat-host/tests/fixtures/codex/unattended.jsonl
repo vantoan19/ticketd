@@ -6,7 +6,7 @@
 {"server":{"method":"thread/started","params":{"thread":{"id":"thr_1"}}}}
 {"server":{"id":2,"result":{"thread":{"id":"thr_1","sessionId":"thr_1","cliVersion":"0.162.1","preview":"","ephemeral":false,"modelProvider":"openai","createdAt":1730910000,"updatedAt":1730910000,"cwd":"/work/chat-1","projectId":null,"source":"appServer","status":{"type":"idle"},"turns":[]},"model":"gpt-test","modelProvider":"openai","approvalPolicy":"never","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"},"cwd":"/work/chat-1","instructionSources":["/work/chat-1/AGENTS.md"]}}}
 {"mark":"the thread is open"}
-{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Go","text_elements":[]}],"approvalPolicy":"never","sandboxPolicy":{"type":"workspaceWrite","networkAccess":false,"writableRoots":["/data/ticketd"]}}}}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"Go","text_elements":[]}],"approvalPolicy":"never","sandboxPolicy":{"type":"workspaceWrite","networkAccess":false,"writableRoots":["/work/chat-1","/data/ticketd"],"excludeTmpdirEnvVar":true,"excludeSlashTmp":true}}}}
 {"server":{"method":"turn/started","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
 {"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}
 {"server":{"method":"item/completed","params":{"threadId":"thr_1","turnId":"turn_1","completedAtMs":3,"item":{"type":"commandExecution","id":"item_2","command":"curl example.com","commandActions":[],"cwd":"/work/chat-1","status":"declined"}}}}

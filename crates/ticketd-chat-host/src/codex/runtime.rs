@@ -201,7 +201,8 @@ impl Connection {
             ),
         };
         if let Some(unattended) = &request.unattended {
-            let (thread, turn) = super::unattended_params(unattended);
+            let (thread, turn) =
+                super::unattended_params(unattended, &request.working_directory);
             merge(&mut params, thread);
             self.state().session.turn_overrides = Some(turn);
         }

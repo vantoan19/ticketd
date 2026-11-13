@@ -2,7 +2,7 @@
 //! traffic. Each fixture is a JSON-lines transcript: `client` frames the adapter must
 //! write, `server` frames app-server sends, and `mark` lines where the test acts.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -768,30 +768,38 @@ fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
     }
 }
 
+/// Codex cannot run read-only and still let the ticketd CLI record a result, so the
+/// "Edit files" switch does not change the sandbox: it is always the step's folder
+/// and the Workspace data folder, and nothing wider.
 #[test]
-fn an_unattended_sandbox_follows_the_allowed_tools_and_is_never_full_access() {
+fn an_unattended_sandbox_writes_to_the_steps_folder_and_the_workspace_data_folder_only() {
     for (edit_files, use_web) in [(false, false), (false, true), (true, false), (true, true)] {
-        let (thread, turn) = super::unattended_params(&unattended(edit_files, use_web));
-        assert_eq!(thread["approvalPolicy"], "never");
-        assert_eq!(turn["approvalPolicy"], "never");
-        let policy = &turn["sandboxPolicy"];
-        assert_eq!(policy["networkAccess"], use_web);
-        if edit_files {
-            assert_eq!(thread["sandbox"], "workspace-write");
-            assert_eq!(policy["type"], "workspaceWrite");
-            assert_eq!(policy["writableRoots"], json!(["/data/ticketd"]));
-        } else {
-            assert_eq!(thread["sandbox"], "read-only");
-            assert_eq!(
-                policy,
-                &json!({"type": "readOnly", "networkAccess": use_web})
-            );
-        }
+        let (thread, turn) = super::unattended_params(
+            &unattended(edit_files, use_web),
+            Path::new("/work/chat-1"),
+        );
+        assert_eq!(
+            thread,
+            json!({"approvalPolicy": "never", "sandbox": "workspace-write", "model": "gpt-test"})
+        );
+        assert_eq!(
+            turn,
+            json!({
+                "approvalPolicy": "never",
+                "sandboxPolicy": {
+                    "type": "workspaceWrite",
+                    "networkAccess": use_web,
+                    "writableRoots": ["/work/chat-1", "/data/ticketd"],
+                    "excludeTmpdirEnvVar": true,
+                    "excludeSlashTmp": true,
+                },
+            })
+        );
     }
 }
 
 /// The fixture checks that the thread and every turn are started with approvals off
-/// and the sandbox; a command Codex declines then fails the turn as a denied tool.
+/// and the sandbox, here for an agent with "Edit files" off; a command Codex declines then fails the turn as a denied tool.
 #[tokio::test(start_paused = true)]
 async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
     let (mut peer, io) = pipes();
@@ -801,7 +809,7 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
-        unattended: Some(unattended(true, false)),
+        unattended: Some(unattended(false, false)),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
     let mut opened = opened.expect("the thread opens");
