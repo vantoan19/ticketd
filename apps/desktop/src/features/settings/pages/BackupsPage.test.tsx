@@ -118,7 +118,9 @@ test("Back up now shows the backing-up row, then the new last backup and a saved
   await screen.findByText("No backups yet");
   fireEvent.click(backUpButton());
   expect(
-    await screen.findByText("Backing up…", { selector: "p" }),
+    await screen.findByText("Backing up…", {
+      selector: ".settings-list-row-title",
+    }),
   ).toBeTruthy();
   expect(
     screen.getByText(
