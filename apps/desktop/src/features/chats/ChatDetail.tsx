@@ -583,6 +583,7 @@ export function ChatDetail({
   onExpand,
   onReturn,
   onClose,
+  crumb,
 }: {
   id: string;
   /** The person asked for the full width. */
@@ -592,6 +593,8 @@ export function ChatDetail({
   onExpand: () => void;
   onReturn: () => void;
   onClose: () => void;
+  /** Back to where the Chat was opened from, such as its ticket. */
+  crumb?: ReactNode;
 }) {
   const client = useChatClient();
   const { snapshot, error } = useChat(id);
@@ -606,7 +609,8 @@ export function ChatDetail({
     <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
       <div className="detail-header">
         <div className="detail-title-group">
-          {single && (
+          {crumb}
+          {!crumb && single && (
             <IconButton label="Back to Chats" onClick={onReturn}>
               <ArrowLeft aria-hidden />
             </IconButton>

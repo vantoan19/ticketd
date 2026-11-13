@@ -1,5 +1,15 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { BellOff, Check, Ellipsis, SquarePen } from "lucide-react";
+import { useContext, useLayoutEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  BellOff,
+  Check,
+  Ellipsis,
+  SquarePen,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Reference } from "@/components/ui/reference";
+import { TicketNavigation } from "@/features/tickets/navigation";
+import type { TicketStart } from "@/features/chats/ticket-chat";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Count } from "@/components/ui/count";
 import {
@@ -124,7 +134,28 @@ function ChatRow({
   );
 }
 
-type Open = { kind: "chat"; id: string } | { kind: "new" } | null;
+type Open =
+  | { kind: "chat"; id: string; from?: string }
+  | { kind: "new"; start?: TicketStart; n?: number }
+  | null;
+
+/** "← T-KQ12 /": back to the ticket the Chat was opened from. */
+function TicketCrumb({ reference }: { reference: string }) {
+  const openTicket = useContext(TicketNavigation);
+  return (
+    <Button
+      variant="ghost"
+      size="xs"
+      className="chat-crumb"
+      aria-label={`Back to ${reference}`}
+      onClick={() => openTicket?.(reference)}
+    >
+      <ArrowLeft aria-hidden />
+      <Reference>{reference}</Reference>
+      <span aria-hidden="true">/</span>
+    </Button>
+  );
+}
 
 /**
  * The Chats screen: the list of one scope beside the open Chat or New Chat,
@@ -143,12 +174,29 @@ export function ChatsView({
   const [seenRequest, setSeenRequest] = useState(0);
   const [failure, setFailure] = useState("");
   // A clicked notification opens its Chat under its own list, title focused.
-  const { openRequest } = useChatFeature();
+  const { openRequest, chatRequest } = useChatFeature();
   const [seenOpen, setSeenOpen] = useState(openRequest?.n ?? 0);
   if (openRequest && seenOpen !== openRequest.n) {
     setSeenOpen(openRequest.n);
     setScope(openRequest.request.retention);
     setOpen({ kind: "chat", id: openRequest.request.chat_id });
+  }
+  // A Chat asked for from a ticket: opened with a crumb back, or New Chat about it.
+  const [seenChat, setSeenChat] = useState(chatRequest?.n ?? 0);
+  if (chatRequest && seenChat !== chatRequest.n) {
+    setSeenChat(chatRequest.n);
+    const request = chatRequest.request;
+    if (request.kind === "open") {
+      setScope(request.retention);
+      setOpen({
+        kind: "chat",
+        id: request.chatId,
+        ...(request.from && { from: request.from }),
+      });
+    } else {
+      setScope("active");
+      setOpen({ kind: "new", start: request.start, n: chatRequest.n });
+    }
   }
   if (seenRequest !== newChatRequest) {
     setSeenRequest(newChatRequest);
@@ -263,14 +311,24 @@ export function ChatsView({
   const detailPane =
     open?.kind === "new" ? (
       <NewChat
+        key={open.n ?? 0}
         {...paneProps}
+        {...(open.start && {
+          start: open.start,
+          crumb: <TicketCrumb reference={open.start.ticket.reference} />,
+        })}
         onCreated={(id) => {
           setScope("active");
           show({ kind: "chat", id });
         }}
       />
     ) : open ? (
-      <ChatDetail key={open.id} id={open.id} {...paneProps} />
+      <ChatDetail
+        key={open.id}
+        id={open.id}
+        {...paneProps}
+        {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
+      />
     ) : (
       <section className="ticket-detail chat-pane" aria-label="No Chat open">
         <p className="chat-list-empty">Open a Chat, or start a new one.</p>

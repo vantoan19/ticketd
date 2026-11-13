@@ -135,6 +135,7 @@ export function TicketDetails({
         refresh={refresh}
         updateTicket={updateTicket}
         position={position}
+        projects={projects}
         {...(onAdjacent && { onAdjacent })}
       />
       <div className="detail-scroll">

@@ -32,7 +32,8 @@ import { Duplicates } from "@/features/tickets/Duplicates";
 import { RecordHistory } from "@/features/sync-review/RecordHistory";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { externalSource } from "@/features/tickets/ticket-source";
-import { client, type Ticket } from "@/lib/api/client";
+import { useChatAboutTicket } from "@/features/chats/LinkedChats";
+import { client, type Project, type Ticket } from "@/lib/api/client";
 import "./ticket-detail.css";
 
 /** The shell command an agent runs to read this ticket's context. */
@@ -53,7 +54,10 @@ export function TicketHeader({
   updateTicket,
   position = null,
   onAdjacent,
+  projects = [],
 }: {
+  /** For the Project folder a Chat about the ticket is offered. */
+  projects?: Project[];
   /** The selected ticket's place in the visible list, across pages. */
   position?: { index: number; total: number } | null;
   /** Opens the ticket before (-1) or after (1) this one in the list. */
@@ -68,6 +72,10 @@ export function TicketHeader({
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
+  const chatAbout = useChatAboutTicket(
+    ticket,
+    projects.find((project) => project.id === ticket?.project_id)?.path ?? null,
+  );
   const target = usePublishTarget();
   const preview = usePublicationPreview(ticket, target);
   const [publishing, setPublishing] = useState(false);
@@ -249,6 +257,11 @@ export function TicketHeader({
                 >
                   Copy context command
                 </DropdownMenuItem>
+                {chatAbout && (
+                  <DropdownMenuItem onSelect={chatAbout}>
+                    Chat about this ticket
+                  </DropdownMenuItem>
+                )}
                 {!ticket.source && target && (
                   <DropdownMenuItem
                     disabled={
