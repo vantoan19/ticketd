@@ -347,23 +347,14 @@
   line-height: var(--text-caption-line);
 }
 
-/* Text that can hold ticket fields: an input-like box whose fields are chips. */
+/* Text that can hold ticket fields: an input (`ui-input`) whose fields are chips. */
 .flow-text {
   box-sizing: border-box;
   width: 100%;
-  min-height: 84px;
+  min-height: 96px;
   padding: 8px 12px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.flow-text:focus {
-  outline: 1px solid var(--input-focus);
 }
 .flow-text-bar {
   display: flex;

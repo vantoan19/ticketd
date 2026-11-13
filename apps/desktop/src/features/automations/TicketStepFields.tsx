@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Bell, Braces } from "lucide-react";
+import { Bell, Braces, CircleDot, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -99,7 +99,7 @@ function FieldText({
     <>
       <div
         ref={box}
-        className="flow-text"
+        className="ui-input flow-text"
         role="textbox"
         aria-multiline="true"
         aria-label={label}
@@ -175,6 +175,7 @@ export function ChangeTicketFields({
         <Picker
           stacked
           label="Change"
+          icon={<SquarePen aria-hidden />}
           value={change.action}
           onValueChange={choose}
           options={[...CHANGES]}
@@ -199,6 +200,7 @@ export function ChangeTicketFields({
           <Picker
             stacked
             label="Status"
+            icon={<CircleDot aria-hidden />}
             value={change.status}
             onValueChange={(status) => onChange({ ...change, status })}
             options={STATUSES}
