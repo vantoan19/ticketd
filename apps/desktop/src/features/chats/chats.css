@@ -35,6 +35,7 @@
   top: 4px;
   right: 8px;
   opacity: 0;
+  transition: opacity 100ms ease-out;
 }
 .chat-row-item:hover .chat-row-more,
 .chat-row-item:focus-within .chat-row-more,
@@ -306,16 +307,28 @@
   content: "";
   flex: 1 1 0;
 }
-/* Jump to latest: centred 12px above the dock, whenever the reader isn't following. */
+/* Jump to latest: in its own 40px strip between the transcript and the dock,
+   so it never covers text. It opens only once the reader scrolled up, and fades
+   and closes in 120ms. */
 .chat-jump {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  z-index: 2;
-  transform: translateX(-50%);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  overflow: hidden;
+  transition:
+    height 120ms ease-out,
+    opacity 120ms ease-out;
 }
 .chat-jump:not([data-shown]) {
+  height: 0;
+  opacity: 0;
   visibility: hidden;
+  transition:
+    height 120ms ease-out,
+    opacity 120ms ease-out,
+    visibility 0s linear 120ms;
 }
 .chat-new-marker {
   display: inline-flex;
@@ -342,6 +355,27 @@
   width: 100%;
   max-width: 600px;
   margin: 0 auto;
+}
+/* A dock part whose height glides (DockSlot): 150ms ease-out, clipped only
+   while it moves. */
+.chat-dock-slot {
+  flex: none;
+  transition: height 150ms ease-out;
+}
+.chat-dock-slot[data-gliding] {
+  overflow: hidden;
+}
+/* The drawer's negative margin stays inside the content, so the slot measures
+   what shows above the composer. */
+.chat-dock-slot-content {
+  display: flow-root;
+}
+/* The notice slot is in the dock's gap rhythm only while it holds a notice. */
+.chat-dock > .chat-dock-notice {
+  margin-bottom: -8px;
+}
+.chat-dock-notice > .chat-dock-slot-content:not(:empty) {
+  padding-bottom: 8px;
 }
 /* Your message: right-aligned on an accent fill, exactly as sent. Time and Copy
    show under it on hover or focus. */
@@ -538,6 +572,19 @@ button.chat-steps:hover {
   text-underline-offset: 3px;
 }
 /* The turn row: muted, its chevron after the text and always shown. */
+/* A fold row that appears as a turn ends here fades in; history doesn't. */
+.chat-fold[data-fresh] {
+  animation: chat-fade-in 120ms ease-out;
+}
+@keyframes chat-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+/* The working line's place, kept while a step row holds the spinner. */
+.chat-working-slot {
+  min-height: var(--text-ui-line);
+}
 .chat-fold {
   display: inline-flex;
   align-self: flex-start;
@@ -1011,11 +1058,14 @@ button.chat-file-name:focus-visible,
   flex-direction: column;
   container-type: inline-size;
 }
+/* Tucked 12px under the composer, which is drawn over it, so the drawer reads
+   as a tab seated on the composer and never as a card cut off at its edge. */
 .chat-activity {
   position: relative;
   z-index: 0;
   max-height: 45vh;
-  margin: 0 8px;
+  margin: 0 8px -12px;
+  padding-bottom: 12px;
   overflow-y: auto;
   border-radius: var(--radius-panel) var(--radius-panel) 0 0;
   background: var(--surface);
@@ -1194,15 +1244,8 @@ button.chat-file-name:focus-visible,
 .chat-queue-card:focus-within .chat-queue-actions {
   opacity: 1;
 }
-/* Below a 460px pane, approval buttons stack full width. */
-@container (max-width: 428px) {
-  .chat-request-buttons {
-    flex-direction: column;
-  }
-  .chat-request-buttons > * {
-    width: 100%;
-  }
-}
+/* Approval buttons stay in one row and wrap only when they must: stacked
+   full-width buttons made the dock 190px tall at 420px. */
 @media (forced-colors: active) {
   .chat-activity,
   .chat-queue-card {

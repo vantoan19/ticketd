@@ -756,7 +756,9 @@ function Row({
       );
     case "response":
       return (
-        <div className="chat-turn-response" data-anchor="">
+        // Keyed by the item: the fold remounts the answer outside the rows, and
+        // the reading position finds it again by this key.
+        <div className="chat-turn-response" data-anchor={row.item.id}>
           <Response
             item={row.item}
             harness={harness}
@@ -821,6 +823,8 @@ function TurnView({
   // until it leaves the view. `settled` says the end has been looked at.
   const [settled, setSettled] = useState(!turn.live);
   const [held, setHeld] = useState(false);
+  // A turn seen running here fades its fold row in when it ends; history doesn't.
+  const [endsHere] = useState(turn.live);
   useLayoutEffect(() => {
     if (turn.live || settled) return;
     const element = part.current;
@@ -895,6 +899,7 @@ function TurnView({
             id={rowId}
             type="button"
             className="chat-fold"
+            data-fresh={endsHere ? "" : undefined}
             aria-expanded={open}
             aria-controls={open ? bodyId : undefined}
             onClick={toggle}
@@ -936,7 +941,7 @@ function TurnView({
         </div>
       )}
       {turn.final && (
-        <div data-anchor="">
+        <div data-anchor={turn.final.id}>
           <Response
             item={turn.final}
             harness={harness}
@@ -1122,6 +1127,11 @@ function WorkingLine({
   );
 }
 
+/** The working line's place while a turn runs and the line is not shown. */
+function WorkingSlot() {
+  return <div className="chat-working-slot" aria-hidden="true" />;
+}
+
 /** Above the first item that arrived while the reader was away. */
 function NewMarker({ markerRef }: { markerRef: Ref<HTMLDivElement> }) {
   return (
@@ -1258,6 +1268,9 @@ export function Transcript({
   );
   const working = chat.activity === "working";
   const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
+  const asking = items.some(
+    (item) => item.kind === "request" && item.state === "pending",
+  );
   return (
     <ChatFilesContext.Provider value={files}>
       <SentLinksContext.Provider value={sentLinks}>
@@ -1308,9 +1321,15 @@ export function Transcript({
               <div className="chat-skel chat-skel-short" aria-hidden="true" />
             </>
           )}
-          {/* While the turn waits on you, the dock's card says so; no line repeats it. */}
           {chat.catching_up ? (
             <WorkingLine label="Catching up…" />
+          ) : chat.activity === "waiting" ? (
+            // The dock already shows the request; the slot keeps its height.
+            chat.has_composer && asking ? (
+              <WorkingSlot />
+            ) : (
+              <WorkingLine label="Waiting for you" spinner={false} />
+            )
           ) : working && chat.stopping ? (
             <WorkingLine label="Stopping…" spinner={!stepRuns} />
           ) : working && chat.opening ? (
@@ -1323,18 +1342,21 @@ export function Transcript({
               }
               fromShown
             />
-          ) : (
-            // After an unconfirmed stop the open turn row and the notice say it.
-            working &&
+          ) : // After an unconfirmed stop the open turn row and the notice say it.
+          working &&
             !stepRuns &&
             !parts.some(
               (part) => part.kind === "turn" && part.turn.unconfirmed,
-            ) &&
-            (chat.doing ? (
+            ) ? (
+            chat.doing ? (
               <WorkingLine label={chat.doing.label} since={chat.doing.since} />
             ) : (
               <WorkingLine label="Working…" />
-            ))
+            )
+          ) : (
+            // While a step row holds the spinner the line's place is kept,
+            // so the end of the transcript does not bounce between rows.
+            working && <WorkingSlot />
           )}
         </div>
       </SentLinksContext.Provider>

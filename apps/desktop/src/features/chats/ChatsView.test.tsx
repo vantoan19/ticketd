@@ -229,7 +229,7 @@ test("a steer the harness refused is a queue card that says so and why", async (
   ).toBeTruthy();
 });
 
-test("Esc stops the turn and pauses the queue, which waits for Resume", async () => {
+test("Esc stops the turn from an empty box and pauses the queue, which waits for Resume", async () => {
   const client = await open(
     one({
       id: "c1",
@@ -238,20 +238,45 @@ test("Esc stops the turn and pauses the queue, which waits for Resume", async ()
       queue: [{ id: "q1", text: "then add tests" }],
     }),
   );
+  // With a draft in the box, Esc is not a stop.
   type("a draft", "Steer Codex");
+  fireEvent.keyDown(composer("Steer Codex"), { key: "Escape" });
+  expect((await client.openChat("c1")).chat.activity).toBe("working");
+  type("", "Steer Codex");
   fireEvent.keyDown(composer("Steer Codex"), { key: "Escape" });
   expect(
     await screen.findByText(
       "You stopped this turn. Edits already made are kept.",
     ),
   ).toBeTruthy();
-  // The draft is kept; the queue shows it is paused.
-  expect(composer()).toHaveProperty("value", "a draft");
+  // The queue shows it is paused.
   expect(screen.getByText("Paused")).toBeTruthy();
   expect(screen.getByText("then add tests")).toBeTruthy();
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
   fireEvent.click(button("Resume"));
   await waitFor(() => expect(screen.queryByText("Paused")).toBeNull());
+});
+
+test("Esc is not a stop from a request or just after closing a menu; Stop leaves focus in the box", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [approval]),
+  );
+  const box = () =>
+    document.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+  const stillWorking = async () =>
+    expect((await client.openChat("c1")).chat.activity).toBe("working");
+  fireEvent.keyDown(button("Allow once"), { key: "Escape" });
+  await stillWorking();
+  // A menu takes the first Esc; the second, a moment later, is the same habit.
+  const menu = document.createElement("div");
+  menu.setAttribute("role", "menu");
+  document.body.append(menu);
+  fireEvent.keyDown(box(), { key: "Escape" });
+  menu.remove();
+  fireEvent.keyDown(box(), { key: "Escape" });
+  await stillWorking();
+  fireEvent.click(button("Stop"));
+  expect(document.activeElement).toBe(box());
 });
 
 test("Stop waits while stopping and is the retry once the stop is not confirmed", async () => {
@@ -422,12 +447,14 @@ test("a question takes an option by key inside the request, or a typed answer", 
   });
   const open_ = within(request).getByRole("button", { name: /Fail open/ });
   expect(open_.getAttribute("aria-keyshortcuts")).toBe("1");
-  // ↑ from the empty message box reaches the options; ↓ from the last returns.
+  // ↑ from the empty message box reaches the first option; ↓ from the last
+  // returns.
   const box = composer("Answer, or pick above");
   box.focus();
   fireEvent.keyDown(box, { key: "ArrowUp" });
+  expect(document.activeElement).toBe(open_);
   const closed = within(request).getByRole("button", { name: "Fail closed" });
-  expect(document.activeElement).toBe(closed);
+  closed.focus();
   fireEvent.keyDown(closed, { key: "ArrowDown" });
   expect(document.activeElement).toBe(box);
 
@@ -1258,6 +1285,8 @@ test("scrolling up stops following; Jump to latest resumes it", async () => {
   sized(scroller, 200, 1000);
   scroller.scrollTop = 800;
   fireEvent.scroll(scroller);
+  // The reader's wheel, not just a smaller offset, stops following.
+  fireEvent.wheel(scroller, { deltaY: -500 });
   scroller.scrollTop = 300;
   fireEvent.scroll(scroller);
   expect(jump.hasAttribute("inert")).toBe(false);
