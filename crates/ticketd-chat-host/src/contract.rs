@@ -140,6 +140,30 @@ pub struct OpenRequest {
     pub chat_id: String,
     pub working_directory: PathBuf,
     pub session: SessionStart,
+    /// Set for the Chat of an Automation run. `None` leaves the model, permissions and
+    /// tools to the harness's own configuration, with the person there to approve.
+    pub unattended: Option<Unattended>,
+}
+
+/// How a harness runs when nobody is there to approve: it never asks, and anything
+/// outside `tools` is denied. An adapter must never widen this to full access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unattended {
+    /// The Automation run, given to the harness process as
+    /// `ticketd_core::AUTOMATION_RUN_ID_VARIABLE` so the ticketd CLI it runs logs its
+    /// writes as an Automation's.
+    pub run_id: String,
+    /// `None` is the harness's default model.
+    pub model: Option<String>,
+    pub tools: ticketd_core::AutomationAgentTools,
+    /// How many turns the agent may take, where the harness can cap them.
+    pub turn_limit: u32,
+    /// The ticketd CLI executable, which the agent may always run. `None` when it
+    /// was not found; the bare `ticketd` command is allowed either way.
+    pub ticketd_cli: Option<PathBuf>,
+    /// Folders the ticketd CLI writes to. A harness that sandboxes writes must keep
+    /// them writable whenever it allows any write, or the always-allowed CLI fails.
+    pub ticketd_folders: Vec<PathBuf>,
 }
 
 /// Resuming restores native history only. It never resubmits input.
@@ -477,6 +501,10 @@ pub enum ProblemKind {
     SessionInUse,
     /// A required permission or sandbox capability is unavailable.
     PermissionUnavailable,
+    /// An unattended turn used up its turn limit before finishing.
+    TurnLimitReached,
+    /// An unattended turn tried a tool outside its allowed tools.
+    ToolDenied,
     Other,
 }
 

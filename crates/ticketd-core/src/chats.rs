@@ -1389,6 +1389,18 @@ impl Workspace {
         read_chat(&self.connection, id)
     }
 
+    /// The Chat's most recent turn, whatever its state.
+    pub fn chat_latest_turn(&self, chat_id: &str) -> Result<Option<ChatTurn>, Error> {
+        Ok(self
+            .connection
+            .query_row(
+                &format!("{TURN} WHERE chat_id = ?1 ORDER BY position DESC LIMIT 1"),
+                [chat_id],
+                turn_from_row,
+            )
+            .optional()?)
+    }
+
     /// The Chat's linked records as they are now, in link order.
     pub fn chat_linked_records(&self, id: &str) -> Result<Vec<ChatLinkedRecord>, Error> {
         let heading = crate::documents::HEADING;

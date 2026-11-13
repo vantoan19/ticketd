@@ -45,6 +45,8 @@ pub(super) struct Session {
     streams: VecDeque<(i64, NativeItemId)>,
     /// When the limit Claude Code last reported as exhausted resets, if it said.
     limit_resets_at: Option<i64>,
+    /// Nobody approves for this session: a tool Claude Code denied fails the turn.
+    pub(super) unattended: bool,
 }
 
 fn text<'a>(event: &'a Value, field: &str) -> Option<&'a str> {
@@ -494,9 +496,30 @@ impl Session {
         self.streams.clear();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");
+        let denied = strings(event, "denied_tool_names");
+        let ended_by = |kind, message: String| {
+            TurnOutcome::Failed(Problem {
+                kind,
+                message,
+                detail: None,
+                resets_at: None,
+            })
+        };
         // ponytail: how Claude Code reports an interrupted turn is unverified; any
         // unsuccessful result after an interrupt was written counts as interrupted.
-        let outcome = if !failed {
+        let outcome = if subtype == "error_max_turns" {
+            ended_by(
+                ProblemKind::TurnLimitReached,
+                "Claude Code reached the turn limit before finishing.".to_owned(),
+            )
+        } else if self.unattended && !denied.is_empty() {
+            // The agent went on after the denial and may have ended its turn normally,
+            // but it did not do what it set out to do with that tool.
+            ended_by(
+                ProblemKind::ToolDenied,
+                format!("Claude Code was denied {}.", denied.join(", ")),
+            )
+        } else if !failed {
             TurnOutcome::Completed
         } else if turn.as_ref().is_some_and(|turn| turn.interrupt_written) {
             TurnOutcome::Interrupted

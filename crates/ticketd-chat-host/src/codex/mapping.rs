@@ -108,6 +108,11 @@ pub(super) struct Session {
     tools: HashMap<String, ToolProgress>,
     /// The last non-retried error per turn, for a failed turn that carries none.
     turn_errors: HashMap<String, Value>,
+    /// Set for an unattended session: what every `turn/start` adds, which keeps
+    /// approvals off and the sandbox as the agent's allowed tools set it.
+    pub(super) turn_overrides: Option<Value>,
+    /// The tool Codex declined in the open turn of an unattended session.
+    declined: Option<String>,
     rate_limits: Option<Value>,
     /// MCP servers whose failed start was already reported in this session.
     failed_servers: HashSet<String>,
@@ -355,7 +360,16 @@ impl Session {
 
     fn turn_completed(&mut self, turn: &Value) -> Option<Vec<EventKind>> {
         let id = text(turn, &["id"])?;
+        let declined = self.declined.take();
         let outcome = match text(turn, &["status"])? {
+            // Nobody approves for an unattended session, so a declined tool is one
+            // the agent needed and was denied, even if it then ended its turn.
+            "completed" if declined.is_some() => TurnOutcome::Failed(Problem {
+                kind: ProblemKind::ToolDenied,
+                message: format!("Codex was denied: {}", declined.unwrap_or_default()),
+                detail: None,
+                resets_at: None,
+            }),
             "completed" => TurnOutcome::Completed,
             "interrupted" => TurnOutcome::Interrupted,
             "failed" => {
@@ -405,6 +419,9 @@ impl Session {
         let kind = match text(error, &["codexErrorInfo"]) {
             Some("usageLimitExceeded" | "sessionBudgetExceeded") => ProblemKind::QuotaExhausted,
             Some("unauthorized") => ProblemKind::LoginRequired,
+            Some("sandboxError" | "tooManyDenials") if self.turn_overrides.is_some() => {
+                ProblemKind::ToolDenied
+            }
             Some("sandboxError") => ProblemKind::PermissionUnavailable,
             _ => ProblemKind::Other,
         };
@@ -494,6 +511,9 @@ impl Session {
         item: &Value,
         completed: bool,
     ) -> EventKind {
+        if text(item, &["status"]) == Some("declined") && self.turn_overrides.is_some() {
+            self.declined = Some(title.clone());
+        }
         let status = match text(item, &["status"]) {
             Some("failed" | "declined") => ToolStatus::Failed,
             Some("inProgress") => ToolStatus::Running,

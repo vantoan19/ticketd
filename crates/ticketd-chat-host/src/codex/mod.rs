@@ -14,11 +14,12 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use serde_json::{Value, json};
 
-use crate::stdio::{spawn, version_output};
+use crate::stdio::{Serving, spawn, version_output};
 use crate::{
     Harness, HarnessAdapter, Inspection, OpenRequest, OpenedRuntime, Problem, ProblemKind,
-    ProviderDetail,
+    ProviderDetail, Unattended,
 };
 
 use discovery::{LaunchEnvironment, Os};
@@ -54,6 +55,40 @@ impl CodexAdapter {
     }
 }
 
+/// What `thread/start` and every `turn/start` are told for an unattended session:
+/// approvals off, and a sandbox set from the allowed tools. Codex reads files and
+/// runs commands inside the sandbox whatever the switches say, so "read files",
+/// "run commands" and the list of allowed commands cannot be enforced here; what the
+/// sandbox enforces is that nothing is written unless "edit files" is on and nothing
+/// reaches the network unless "use the web" is. It is never full access.
+pub(super) fn unattended_params(unattended: &Unattended) -> (Value, Value) {
+    let network = unattended.tools.use_web;
+    let (mode, policy) = if unattended.tools.edit_files {
+        let roots: Vec<_> = unattended
+            .ticketd_folders
+            .iter()
+            .map(|folder| folder.to_string_lossy())
+            .collect();
+        (
+            "workspace-write",
+            json!({"type": "workspaceWrite", "networkAccess": network, "writableRoots": roots}),
+        )
+    } else {
+        (
+            "read-only",
+            json!({"type": "readOnly", "networkAccess": network}),
+        )
+    };
+    let mut thread = json!({"approvalPolicy": "never", "sandbox": mode});
+    if let Some(model) = &unattended.model {
+        thread["model"] = json!(model);
+    }
+    (
+        thread,
+        json!({"approvalPolicy": "never", "sandboxPolicy": policy}),
+    )
+}
+
 #[async_trait]
 impl HarnessAdapter for CodexAdapter {
     fn harness(&self) -> Harness {
@@ -78,7 +113,7 @@ impl HarnessAdapter for CodexAdapter {
                 requirement: discovery::version_requirement(),
             };
         }
-        let login = match spawn(&executable, ARGUMENTS, None) {
+        let login = match spawn(&executable, ARGUMENTS, Serving::Nothing) {
             Ok(io) => runtime::probe_login(io, Options::default()).await,
             Err(_) => crate::LoginState::Unknown,
         };
@@ -100,13 +135,12 @@ impl HarnessAdapter for CodexAdapter {
             detail: None,
             resets_at: None,
         })?;
-        let io =
-            spawn(&executable, ARGUMENTS, Some(&request.chat_id)).map_err(|error| Problem {
-                kind: ProblemKind::Other,
-                message: format!("Could not start {}: {error}", executable.display()),
-                detail: Some(ProviderDetail::new("spawn", &error.to_string())),
-                resets_at: None,
-            })?;
+        let io = spawn(&executable, ARGUMENTS, Serving::of(&request)).map_err(|error| Problem {
+            kind: ProblemKind::Other,
+            message: format!("Could not start {}: {error}", executable.display()),
+            detail: Some(ProviderDetail::new("spawn", &error.to_string())),
+            resets_at: None,
+        })?;
         runtime::open_over(io, &request, Options::default()).await
     }
 }
