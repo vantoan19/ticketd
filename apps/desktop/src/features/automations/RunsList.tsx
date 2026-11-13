@@ -21,7 +21,7 @@ import { chatTime } from "@/features/chats/model";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 
 /** The mark beside a run: an icon in its status color. The word is always there too. */
-function RunMark({ status }: { status: AutomationRun["status"] }) {
+export function RunMark({ status }: { status: AutomationRun["status"] }) {
   switch (status) {
     case "queued":
       return <Clock size={14} aria-hidden />;
@@ -46,9 +46,12 @@ function RunMark({ status }: { status: AutomationRun["status"] }) {
  */
 export function RunsList({
   automation,
+  onOpen,
   onFail,
 }: {
   automation: Automation;
+  /** Opens a run's own view. */
+  onOpen: (runId: string) => void;
   onFail: (reason: unknown) => void;
 }) {
   const [runs, setRuns] = useState<AutomationRun[] | null>(null);
@@ -87,40 +90,46 @@ export function RunsList({
             <h3 className="auto-group">{day.label}</h3>
             <ul className="auto-runs" aria-label={`Runs, ${day.label}`}>
               {day.runs.map((run) => (
-                <li
-                  key={run.id}
-                  className="chat-row"
-                  data-static
-                  {...(run.status === "needs_attention" && {
-                    "data-attention": "",
-                  })}
-                >
-                  <span className="chat-row-mark">
-                    <RunMark status={run.status} />
-                  </span>
-                  <span className="chat-row-title">
-                    {run.ticket ? (
-                      <>
-                        <span className="auto-ref">{run.ticket.reference}</span>{" "}
-                        {run.ticket.title}
-                      </>
-                    ) : (
-                      "No ticket"
-                    )}
-                  </span>
-                  <time className="chat-row-time" dateTime={run.created_at}>
-                    {chatTime(run.created_at)}
-                  </time>
-                  <span className="chat-row-sub">
-                    <span>
-                      {run.status === "needs_attention" ? (
-                        <strong>{RUN_STATUS_LABELS[run.status]}</strong>
+                <li key={run.id}>
+                  <button
+                    type="button"
+                    className="chat-row"
+                    onClick={() => onOpen(run.id)}
+                    {...(run.status === "needs_attention" && {
+                      "data-attention": "",
+                    })}
+                  >
+                    <span className="chat-row-mark">
+                      <RunMark status={run.status} />
+                    </span>
+                    <span className="chat-row-title">
+                      {run.ticket ? (
+                        <>
+                          <span className="auto-ref">
+                            {run.ticket.reference}
+                          </span>{" "}
+                          {run.ticket.title}
+                        </>
                       ) : (
-                        RUN_STATUS_LABELS[run.status]
+                        "No ticket"
                       )}
                     </span>
-                    {run.reason && <span title={run.reason}>{run.reason}</span>}
-                  </span>
+                    <time className="chat-row-time" dateTime={run.created_at}>
+                      {chatTime(run.created_at)}
+                    </time>
+                    <span className="chat-row-sub">
+                      <span>
+                        {run.status === "needs_attention" ? (
+                          <strong>{RUN_STATUS_LABELS[run.status]}</strong>
+                        ) : (
+                          RUN_STATUS_LABELS[run.status]
+                        )}
+                      </span>
+                      {run.reason && (
+                        <span title={run.reason}>{run.reason}</span>
+                      )}
+                    </span>
+                  </button>
                 </li>
               ))}
             </ul>

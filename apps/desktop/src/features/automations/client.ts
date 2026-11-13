@@ -109,6 +109,46 @@ const automationRunSchema = z.object({
 });
 export type AutomationRun = z.infer<typeof automationRunSchema>;
 
+/** A run as its own view shows it: what it executes, and each step it reached. */
+const automationRunDetailSchema = automationRunSchema.extend({
+  automation_id: z.string(),
+  /** The Automation as it was when the run was created. */
+  definition: automationDefinitionSchema,
+  started_at: z.string().nullable(),
+  ended_at: z.string().nullable(),
+  /** The steps reached so far, in the order they ran. */
+  steps: z.array(
+    z.object({
+      step_id: z.string(),
+      status: z.enum(["running", "completed", "failed"]),
+      /** Why it failed, in plain words. */
+      reason: z.string().nullable(),
+      /** The Chat of a Run agent step. */
+      chat_id: z.string().nullable(),
+      started_at: z.string(),
+      ended_at: z.string().nullable(),
+    }),
+  ),
+});
+export type AutomationRunDetail = z.infer<typeof automationRunDetailSchema>;
+
+const stepPathsSchema = z.object({
+  yes: z.array(stepSchema).optional(),
+  no: z.array(stepSchema).optional(),
+  on_failure: z.array(stepSchema).nullish(),
+});
+/**
+ * The lists of steps under a step: an If's two paths, or the path taken when
+ * the step fails. A step keeps them as they arrive; this reads them.
+ */
+export function stepPaths(step: AutomationStep): {
+  yes?: AutomationStep[] | undefined;
+  no?: AutomationStep[] | undefined;
+  on_failure?: AutomationStep[] | null | undefined;
+} {
+  return stepPathsSchema.parse(step);
+}
+
 /** What is sent back on a save: the Automation without what the core derives. */
 export function definitionOf(automation: Automation): AutomationDefinition {
   return automationDefinitionSchema.parse(automation);
@@ -177,6 +217,23 @@ export const automationsClient = {
     return z
       .array(automationRunSchema)
       .parse(await invoke("automation_run_list", { automationId }));
+  },
+  async run(id: string): Promise<AutomationRunDetail> {
+    return automationRunDetailSchema.parse(
+      await invoke("automation_run_get", { id }),
+    );
+  },
+  /** Ends a run in progress as Needs attention. */
+  async stopRun(id: string): Promise<AutomationRunDetail> {
+    return automationRunDetailSchema.parse(
+      await invoke("automation_run_stop", { id }),
+    );
+  },
+  /** Queues a new run for the event that started a finished one. */
+  async runAgain(id: string): Promise<AutomationRunDetail> {
+    return automationRunDetailSchema.parse(
+      await invoke("automation_run_again", { id }),
+    );
   },
   async agents(): Promise<AutomationAgent[]> {
     return z

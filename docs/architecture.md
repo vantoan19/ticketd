@@ -228,6 +228,14 @@ the step it was on ended, and answers with the next step or how the run ends.
 Runs are local to the device, kept 90 days, and a run left Running by a process
 that is gone ends as Needs attention when the next one starts; nothing retries.
 
+The person can stop a Queued or Running run, which ends it as Needs attention: the
+core marks the step it was on Failed and refuses the outcome its executor reports
+later, so not even the step's failure path runs, and the desktop interrupts the
+agent's Chat. Run again on a finished run queues a new run for the same Workspace
+event, from the first step of the Automation as it is now; the finished run stays
+as history. The run view draws a run from the definition the run keeps, so it shows
+the steps as they were even after the Automation is edited.
+
 A Run agent step is an ordinary Chat, created in the step's folder, linked to the
 ticket and owned by the run (`chats.automation_run_id`), which keeps it out of the
 Chat list. The host opens its harness with an `Unattended` request: the agent's

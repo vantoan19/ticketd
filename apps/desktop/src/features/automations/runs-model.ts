@@ -1,4 +1,76 @@
-import type { AutomationRun } from "@/features/automations/client";
+import type { FlowStep } from "@/features/automations/canvas-layout";
+import {
+  stepPaths,
+  type AutomationRun,
+  type AutomationRunDetail,
+  type AutomationStep,
+} from "@/features/automations/client";
+
+/** Where a step of a run stands. A step the run did not reach has no record. */
+export type StepState =
+  "waiting" | "running" | "completed" | "failed" | "not_run";
+export const STEP_STATE_LABELS: Record<StepState, string> = {
+  waiting: "Waiting",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  not_run: "Not run",
+};
+
+/**
+ * Every step of the definition a run executes, by id, in the order they run. A
+ * step the run has not reached is Waiting while the run can still get to it,
+ * and Not run once it cannot: the run ended, or went down another path.
+ */
+export function stepStates(run: AutomationRunDetail): Map<string, StepState> {
+  const reached = new Map(run.steps.map((step) => [step.step_id, step.status]));
+  const states = new Map<string, StepState>();
+  const walk = (steps: AutomationStep[], open: boolean) => {
+    let live = open;
+    for (const step of steps) {
+      const status = reached.get(step.id);
+      states.set(step.id, status ?? (live ? "waiting" : "not_run"));
+      // Until the step ends, any path under it may still be the one taken.
+      const undecided = live && status !== "completed" && status !== "failed";
+      const { on_failure, yes, no } = stepPaths(step);
+      for (const path of [on_failure, yes, no])
+        if (path)
+          walk(path, undecided || (live && reached.has(path[0]?.id ?? "")));
+      // Paths never rejoin: after a failed step or an If, the rest is passed.
+      if (status === "failed" || (status === "completed" && step.kind === "if"))
+        live = false;
+    }
+  };
+  walk(
+    run.definition.steps,
+    run.status === "queued" || run.status === "running",
+  );
+  return states;
+}
+
+/** The steps as the canvas layout takes them: ids and the paths under each. */
+export function flowSteps(steps: AutomationStep[]): FlowStep[] {
+  return steps.map((step) => {
+    const { on_failure, yes, no } = stepPaths(step);
+    return step.kind === "if"
+      ? { id: step.id, yes: flowSteps(yes ?? []), no: flowSteps(no ?? []) }
+      : {
+          id: step.id,
+          ...(on_failure && { on_failure: flowSteps(on_failure) }),
+        };
+  });
+}
+
+/** Every step at any depth, in the order they run. */
+export function everyStep(steps: AutomationStep[]): AutomationStep[] {
+  return steps.flatMap((step) => {
+    const { on_failure, yes, no } = stepPaths(step);
+    return [
+      step,
+      ...everyStep([...(on_failure ?? []), ...(yes ?? []), ...(no ?? [])]),
+    ];
+  });
+}
 
 /** A run's status in the words the interface uses. */
 export const RUN_STATUS_LABELS: Record<AutomationRun["status"], string> = {

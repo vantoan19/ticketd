@@ -7,66 +7,178 @@ export const CARD_HEIGHT = 76;
 export const GAP = 56;
 /** The + that ends a path. */
 export const END_SIZE = 32;
+/** Between two paths side by side. */
+const PATH_GAP = 48;
+/** Added below an If, so its lines have room to part and say Yes and No. */
+const BRANCH_DROP = 20;
+
+/** A step as the layout sees it: its id and the lists of steps under it. */
+export type FlowStep = {
+  id: string;
+  /** An If's two paths. */
+  yes?: FlowStep[];
+  no?: FlowStep[];
+  /** The path taken when the step fails; null or absent when it has none. */
+  on_failure?: FlowStep[] | null;
+};
+
+/** How a line leaves its step when it is not simply the next step. */
+export type FlowPath = "yes" | "no" | "failure";
+/** A list of steps under a step. The flow's own list has no owner. */
+export type FlowList = { step: string; path: FlowPath };
 
 export type FlowItem =
   /** The trigger or a step. */
   | { kind: "card"; id: string; x: number; y: number }
   /**
-   * Where a step can be added, at `index` of the steps and after the card
-   * `after`: `add` is the line between two cards (CARD_WIDTH by GAP), `end` the
-   * + that ends the path (END_SIZE square).
+   * Where a step can be added, at `index` of the steps of `list` (the flow's
+   * own steps when absent) and after the card `after`: `add` is the line above
+   * a card (CARD_WIDTH by GAP), `end` the + that ends the path (END_SIZE
+   * square).
    */
   | {
       kind: "add" | "end";
       id: string;
       index: number;
       after: string;
+      list?: FlowList;
       x: number;
       y: number;
     };
 
-export type FlowLayout = {
-  /** Top-left positions, in the order the steps run, which is the Tab order. */
-  items: FlowItem[];
-  edges: { id: string; source: string; target: string }[];
+export type FlowEdge = {
+  id: string;
+  source: string;
+  target: string;
+  path?: FlowPath;
 };
+
+export type FlowLayout = {
+  /**
+   * Top-left positions, in the order the steps run, which is the Tab order: a
+   * failure path after its step, Yes before No.
+   */
+  items: FlowItem[];
+  edges: FlowEdge[];
+};
+
+/** Part of a flow, placed from its own left edge. */
+type Block = {
+  items: FlowItem[];
+  edges: FlowEdge[];
+  width: number;
+  /** The x its first card is centered on. */
+  axis: number;
+  /** The id of its first item, where the line from above arrives. */
+  first: string;
+};
+
+const edge = (source: string, target: string, path?: FlowPath): FlowEdge => ({
+  id: `${source}>${target}`,
+  source,
+  target,
+  ...(path && { path }),
+});
+
+const moved = (block: Block, dx: number): Block => ({
+  ...block,
+  items: block.items.map((item) => ({ ...item, x: item.x + dx })),
+  axis: block.axis + dx,
+});
+
+/**
+ * Places `steps` from `index` on, the first with its top at `y`, below the
+ * card `after`. Paths never rejoin, so nothing is ever placed under a path:
+ * a block only has to know how wide it is.
+ */
+function column(
+  steps: FlowStep[],
+  index: number,
+  after: string,
+  y: number,
+  height: number,
+  list?: FlowList,
+): Block {
+  const id = `add-${list ? `${list.step}.${list.path}-` : ""}${index}`;
+  const place = { id, index, after, ...(list && { list }) };
+  const step = steps[index];
+  if (!step)
+    return {
+      items: [{ kind: "end", ...place, x: (CARD_WIDTH - END_SIZE) / 2, y }],
+      edges: [],
+      width: CARD_WIDTH,
+      axis: CARD_WIDTH / 2,
+      first: id,
+    };
+  const below = y + height + GAP;
+  const path = (path: FlowPath, steps: FlowStep[], y: number) =>
+    column(steps, 0, step.id, y, height, { step: step.id, path });
+  let under: Block;
+  if (step.yes || step.no) {
+    // An If ends its list: the run goes down one of its paths and ends there,
+    // so steps written after it never run and are not drawn.
+    const yes = path("yes", step.yes ?? [], below + BRANCH_DROP);
+    const no = moved(
+      path("no", step.no ?? [], below + BRANCH_DROP),
+      yes.width + PATH_GAP,
+    );
+    under = {
+      items: [...yes.items, ...no.items],
+      edges: [
+        edge(step.id, yes.first, "yes"),
+        edge(step.id, no.first, "no"),
+        ...yes.edges,
+        ...no.edges,
+      ],
+      width: yes.width + PATH_GAP + no.width,
+      axis: (yes.axis + no.axis) / 2,
+      first: "",
+    };
+  } else {
+    const next = column(steps, index + 1, step.id, below, height, list);
+    under = { ...next, edges: [edge(step.id, next.first), ...next.edges] };
+  }
+  // A failure path starts one row down, to the side of all that is under its
+  // step, so its line leaves the step's side and crosses nothing.
+  const failure =
+    step.on_failure &&
+    moved(path("failure", step.on_failure, below), under.width + PATH_GAP);
+  const x = under.axis - CARD_WIDTH / 2;
+  return {
+    items: [
+      { kind: "add", ...place, x, y: y - GAP },
+      { kind: "card", id: step.id, x, y },
+      ...(failure?.items ?? []),
+      ...under.items,
+    ],
+    edges: [
+      ...(failure
+        ? [edge(step.id, failure.first, "failure"), ...failure.edges]
+        : []),
+      ...under.edges,
+    ],
+    width: failure ? under.width + PATH_GAP + failure.width : under.width,
+    axis: under.axis,
+    first: step.id,
+  };
+}
 
 /**
  * Arranges a flow top to bottom: the trigger, then each step directly below the
- * one before, with a place to add a step on every line and at the end.
+ * one before, with a place to add a step on every line and at the end of every
+ * path. An If's Yes and No paths sit side by side below it; a failure path sits
+ * to the side of its step. `cardHeight` is the height every card is drawn at.
  */
-// ponytail: lays out the top-level steps only. If paths (side by side) and
-// failure paths (to the side) need subtree widths; add them with those steps.
-export function layoutFlow(stepIds: string[]): FlowLayout {
-  const pitch = CARD_HEIGHT + GAP;
-  const cards = [TRIGGER_ID, ...stepIds];
-  const items: FlowItem[] = [];
-  const edges: FlowLayout["edges"] = [];
-  cards.forEach((id, row) => {
-    const previous = cards[row - 1];
-    if (previous !== undefined) {
-      items.push({
-        kind: "add",
-        id: `add-${row - 1}`,
-        index: row - 1,
-        after: previous,
-        x: 0,
-        y: row * pitch - GAP,
-      });
-      edges.push({ id: `${previous}>${id}`, source: previous, target: id });
-    }
-    items.push({ kind: "card", id, x: 0, y: row * pitch });
-  });
-  const last = cards.at(-1) ?? TRIGGER_ID;
-  const end = `add-${stepIds.length}`;
-  items.push({
-    kind: "end",
-    id: end,
-    index: stepIds.length,
-    after: last,
-    x: (CARD_WIDTH - END_SIZE) / 2,
-    y: cards.length * pitch,
-  });
-  edges.push({ id: `${last}>${end}`, source: last, target: end });
-  return { items, edges };
+export function layoutFlow(
+  steps: FlowStep[],
+  cardHeight = CARD_HEIGHT,
+): FlowLayout {
+  const flow = column(steps, 0, TRIGGER_ID, cardHeight + GAP, cardHeight);
+  return {
+    items: [
+      { kind: "card", id: TRIGGER_ID, x: flow.axis - CARD_WIDTH / 2, y: 0 },
+      ...flow.items,
+    ],
+    edges: [edge(TRIGGER_ID, flow.first), ...flow.edges],
+  };
 }

@@ -70,10 +70,6 @@
   padding: 0;
   list-style: none;
 }
-/* A run opens nothing yet, so its row does not answer the pointer. */
-.chat-row[data-static]:hover {
-  background: transparent;
-}
 .auto-ref {
   color: var(--muted-foreground);
   font-family: var(--font-mono);
@@ -341,6 +337,96 @@
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
+}
+
+/* --- A run: the same canvas, read only, saying what happened. --- */
+.run-crumb {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  white-space: nowrap;
+}
+/* A step's icon takes the color of where it stands. */
+.flow-card[data-run="running"] .flow-card-main > svg {
+  color: var(--status-unread);
+}
+.flow-card[data-run="completed"] .flow-card-main > svg {
+  color: var(--status-ready);
+}
+.flow-card[data-run="failed"] .flow-card-main > svg {
+  color: var(--status-blocked);
+}
+.flow-card-status strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+/* A step the run did not reach: dashed and quiet. */
+.flow-card[data-run="waiting"],
+.flow-card[data-run="not_run"] {
+  background: var(--background);
+  box-shadow: none;
+  outline: 1.5px dashed var(--control-boundary);
+  outline-offset: -1.5px;
+}
+.flow-card[data-run="waiting"] .flow-card-title,
+.flow-card[data-run="not_run"] .flow-card-title {
+  color: var(--muted-foreground);
+}
+.flow-card[data-run][data-selected] {
+  background: var(--recessed);
+  outline-color: var(--foreground);
+}
+/* The lines the run followed stand out from the ones it did not; a failure
+   path leaves its step dashed. */
+.flow-canvas .flow-edge-idle .react-flow__edge-path {
+  stroke: var(--control-boundary);
+}
+.flow-canvas .flow-edge-failure .react-flow__edge-path {
+  stroke-dasharray: 6 4;
+}
+.flow-canvas .flow-edge-taken .react-flow__edge-path {
+  stroke: var(--status-ready);
+  stroke-width: 2;
+}
+.flow-canvas .flow-edge-failure.flow-edge-taken .react-flow__edge-path {
+  stroke: var(--status-blocked);
+}
+.flow-canvas .react-flow__edge-textbg {
+  fill: var(--background);
+}
+.flow-canvas .react-flow__edge-text {
+  fill: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.run-reason {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.flow-panel-section h4 {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.flow-panel-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+}
+.flow-panel-facts dt {
+  color: var(--muted-foreground);
+}
+.flow-panel-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Menu items that carry a sentence, like the ticket menu's Publish item. */
