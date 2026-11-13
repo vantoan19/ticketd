@@ -153,3 +153,26 @@ test("a selection running past the source into other text is not offered", async
   fireEvent.keyDown(document, { key: "l", metaKey: true });
   expect(screen.queryByRole("menuitem")).toBeNull();
 });
+
+test("LIVE-19: ⌘L with nothing selected says to select text first", async () => {
+  const client = createMockChatClient({ enabled: true, chats: [] });
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <div
+          {...chatSource("T-KQ12 · Description", { kind: "ticket", id: "t1" })}
+        >
+          <p>Lock the account after five tries.</p>
+        </div>
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  await waitFor(() => expect(client.getEnabled()).resolves.toBe(true));
+  act(() => document.getSelection()?.removeAllRanges());
+  await waitFor(() => {
+    fireEvent.keyDown(document, { key: "l", metaKey: true });
+    expect(document.querySelector(".add-to-chat-hint")?.textContent).toBe(
+      "Select text to add it to a Chat",
+    );
+  });
+});

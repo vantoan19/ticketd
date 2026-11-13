@@ -36,6 +36,8 @@ type Selected = {
 };
 
 const SETTLE_MS = 250;
+/** How long the ⌘L hint stays when nothing is selected. */
+const HINT_MS = 2500;
 const MAX_CHATS = 4;
 const EDGE = 16;
 
@@ -113,7 +115,14 @@ export function SelectionAddToChat() {
     [],
   );
   const [announce, setAnnounce] = useState("");
+  /** LIVE-19: ⌘L with nothing selected says how to use it, briefly. */
+  const [hint, setHint] = useState(false);
   const menuOpen = useRef(false);
+  useEffect(() => {
+    if (!hint) return;
+    const timer = window.setTimeout(() => setHint(false), HINT_MS);
+    return () => window.clearTimeout(timer);
+  }, [hint]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -133,8 +142,15 @@ export function SelectionAddToChat() {
       )
         return;
       const now = readSelection();
-      if (!now) return;
+      if (!now) {
+        // Only where there is text that could be added; elsewhere ⌘L is not ours.
+        if (!document.querySelector("[data-chat-source]")) return;
+        event.preventDefault();
+        setHint(true);
+        return;
+      }
       event.preventDefault();
+      setHint(false);
       setSelected(now);
       menuOpen.current = true;
       setOpen(true);
@@ -175,9 +191,14 @@ export function SelectionAddToChat() {
 
   if (!enabled || !selected)
     return (
-      <div className="sr-only" aria-live="polite">
-        {announce}
-      </div>
+      <>
+        {enabled && hint && (
+          <p className="add-to-chat-hint">Select text to add it to a Chat</p>
+        )}
+        <div className="sr-only" aria-live="polite">
+          {hint ? "Select text to add it to a Chat" : announce}
+        </div>
+      </>
     );
   const quote = (chatId: string) => {
     addQuote(chatId, {

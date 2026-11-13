@@ -1360,14 +1360,17 @@ not evidence that execution is still alive or that a requested task succeeded.
 Tool activity is told as what it did (read, search, edit, create, delete, run,
 web or other), the same for every harness. A shell command is classified only
 when its literal text makes the effect clear; anything else is shown as the
-command that ran. A step the person declined, one the turn ended before, and one
+command that ran. A command that only calls the ticketd CLI is told as what it does
+("Set T-MP4 to In progress"), with the exact command one click away; one that does
+anything else, or expands anything, is shown as its command. A step the person declined, one the turn ended before, and one
 whose outcome was not observed are each told as such, never as done or failed.
 
 A turn's activity folds under one summary once the turn ends, whatever its
 outcome, while its final response stays in view. The summary gives the turn's
-wall-clock duration and outcome, never "done": a finished turn is not evidence
-the task succeeded. Pending requests, unanswered or expired, and ticketd's own
-notices are never folded. Step and turn times come from the host's own records;
+duration, apart from the time it waited on the person, and its outcome, never "done":
+a finished turn is not evidence the task succeeded. Pending requests, unanswered or
+expired, and ticketd's own notices are never folded; the harness's own warnings fold
+with their turn as one line. Step and turn times come from the host's own records;
 history recorded without them shows no time.
 
 Sending while work is active steers it when the effective harness capability

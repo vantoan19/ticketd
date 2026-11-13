@@ -1,5 +1,4 @@
 import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import { StatusDot } from "@/components/ui/status-dot";
 import { modifierKeyLabel } from "@/lib/platform";
@@ -93,9 +92,6 @@ export function SettingsNav({
                       >
                         <item.icon size={16} aria-hidden="true" />
                         <span className="settings-nav-label">{item.label}</span>
-                        {item.id === "chat" && (
-                          <Badge size="sm">Experimental</Badge>
-                        )}
                         {dot && (
                           <span
                             role="img"

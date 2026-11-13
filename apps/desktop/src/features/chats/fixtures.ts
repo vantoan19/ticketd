@@ -72,6 +72,42 @@ const finishedTurn: TranscriptItem[] = [
     ),
   ),
   inTurn({
+    id: "fw1",
+    at,
+    kind: "marker",
+    reason: "warning",
+    message:
+      "Codex could not start the MCP server github: exited with 1. Work that does not need it continues; MCP servers are set up in Codex's own MCP settings.",
+  }),
+  inTurn({
+    id: "fw2",
+    at,
+    kind: "marker",
+    reason: "warning",
+    message:
+      "Codex could not start the MCP server grafana: timed out after 30 seconds.",
+  }),
+  inTurn({
+    id: "ft1",
+    at,
+    kind: "steps",
+    steps: [
+      {
+        kind: "run",
+        target: "ticketd show T-12; ticketd document show d1",
+        command:
+          "T=/Users/me/ticketd/target/debug/ticketd\n$T show T-12; $T document show d1",
+        ticketd: [
+          { verb: "read", words: [{ text: "T-12", code: true }] },
+          {
+            verb: "read",
+            words: [{ text: "Document" }, { text: "d1", record: "document" }],
+          },
+        ],
+      },
+    ],
+  }),
+  inTurn({
     id: "f3",
     at,
     kind: "steps",
@@ -97,7 +133,7 @@ const finishedTurn: TranscriptItem[] = [
   }),
   inTurn({
     id: "f5",
-    at,
+    at: minutesAgo(8),
     kind: "request",
     request: "approval",
     title: "Codex asked to run",
@@ -106,6 +142,8 @@ const finishedTurn: TranscriptItem[] = [
     free_text: false,
     state: "answered",
     outcome: "You allowed this for this session",
+    // It waited on you for 40s; the turn's time leaves that out.
+    resolved_at: minutesAgo(8 - 40 / 60),
   }),
   inTurn({
     id: "f6",
@@ -158,7 +196,10 @@ const chats: MockChat[] = [
       id: "approval",
       title: "Alert on-call when logins spike",
       activity: "waiting",
-      links: [{ ...t12, id: "t13", reference: "T-13", title: "Page on-call" }],
+      links: [
+        { ...t12, id: "t13", reference: "T-13", title: "Page on-call" },
+        { kind: "project", id: "p-web", title: "Web App" },
+      ],
     }),
     items: [
       you("a1", "Page the on-call engineer when failed logins spike."),
@@ -167,8 +208,16 @@ const chats: MockChat[] = [
         at,
         kind: "request",
         request: "approval",
-        title: "Codex wants to run a command",
-        subject: "npm install @pagerduty/pdjs",
+        title: "Codex wants to",
+        subject: "ticketd project show p-web",
+        command: "/Users/me/ticketd/target/debug/ticketd project show p-web",
+        ticketd: [
+          {
+            verb: "read",
+            words: [{ text: "Project" }, { text: "p-web", record: "project" }],
+          },
+        ],
+        reason: "May I read the linked Project so I can follow its notes?",
         options: [
           { id: "once", label: "Allow once" },
           { id: "session", label: "Allow for this session" },

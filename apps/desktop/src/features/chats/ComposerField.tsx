@@ -126,12 +126,14 @@ function OptionLabel({ option }: { option: Option }) {
   if (pick.kind === "path") {
     const parts = pick.text.split("/");
     const name = parts.pop() ?? pick.text;
+    // LIVE-20: a nested file sits under its folder, one step in per level.
+    const nested = { marginLeft: Math.min(parts.length, 4) * 12 };
     return (
       <>
         {option.group === "folder" ? (
-          <Folder size={14} aria-hidden />
+          <Folder size={14} aria-hidden style={nested} />
         ) : (
-          <File size={14} aria-hidden />
+          <File size={14} aria-hidden style={nested} />
         )}
         <span className="chat-menu-title">{name}</span>
         {parts.length > 0 && (
