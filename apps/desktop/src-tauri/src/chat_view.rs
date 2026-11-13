@@ -5,20 +5,22 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::chat_attention::{self, Facts, Status};
+use ticketd_chat_host::attention::{self, Facts, Status};
+use ticketd_chat_host::conditions::ChatProblemKind;
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
     ChatProblem, InteractionKind, ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
 };
+use ticketd_chat_host::{FileChangeKind, diffstat};
 use ticketd_core::{
     Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
-    ChatTool, ChatToolState, ChatTurn, ChatTurnState,
+    ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnState, SuggestedTicket,
 };
 
 use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
 use crate::folder_probe::Branch;
-use crate::step_kind::{self, Kind, Variant};
+use ticketd_chat_host::step_kind::{self, Kind, Variant};
 
 pub const HARNESSES: [(&str, &str); 2] = [("claude-code", "Claude Code"), ("codex", "Codex")];
 
@@ -51,7 +53,11 @@ pub fn help_url(harness: &str) -> Option<&'static str> {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Problem {
-    pub kind: &'static str,
+    pub kind: ChatProblemKind,
+    /// What the notice is titled; the list row says the same of a failed turn.
+    pub title: String,
+    /// Observed now, it keeps the Chat from taking a new message.
+    pub blocks_send: bool,
     pub message: Option<String>,
     pub command: Option<String>,
     pub help_url: Option<String>,
@@ -86,6 +92,52 @@ pub enum LinkedRecord {
 
 /// What a step acted on: a path relative to the Chat's folder (`~` for the home
 /// folder outside it), a pattern, a query or a page.
+/// One of New Chat's suggestions, with the tickets it links as the composer shows them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Suggestion {
+    Continue {
+        ticket: LinkedRecord,
+        at: Option<String>,
+    },
+    Review {
+        ticket: LinkedRecord,
+        at: Option<String>,
+    },
+    /// `count` unread entries about the linked tickets; `at` is the newest.
+    Triage {
+        count: usize,
+        links: Vec<LinkedRecord>,
+        at: String,
+    },
+}
+
+impl From<ChatSuggestion> for Suggestion {
+    fn from(suggestion: ChatSuggestion) -> Self {
+        let record = |ticket: SuggestedTicket| LinkedRecord::Ticket {
+            id: ticket.id,
+            reference: ticket.reference,
+            title: ticket.title,
+            status: ticket.status.to_string(),
+        };
+        match suggestion {
+            ChatSuggestion::Continue { ticket, at } => Self::Continue {
+                ticket: record(ticket),
+                at,
+            },
+            ChatSuggestion::Review { ticket, at } => Self::Review {
+                ticket: record(ticket),
+                at,
+            },
+            ChatSuggestion::Triage { count, links, at } => Self::Triage {
+                count,
+                links: links.into_iter().map(record).collect(),
+                at,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StepTarget {
     pub text: String,
@@ -125,6 +177,12 @@ pub struct Step {
     /// When the host recorded the call, for a running step's clock. Absent from calls
     /// recorded before ticketd kept it.
     pub started_at: Option<String>,
+    /// Lines the step added and removed, when the harness said: the diffstat.
+    pub added_lines: Option<u32>,
+    pub removed_lines: Option<u32>,
+    /// What the person decided when the harness asked to take this step ("You declined
+    /// this"): the approval folds into the step it was asked for.
+    pub decision: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -164,6 +222,9 @@ pub enum Item {
         id: String,
         at: String,
         changes: Vec<ChatAgentChange>,
+        /// For each change, whether its record is now `trashed` or `deleted`; such a
+        /// record is named, not linked. Filled in where the workspace can be read.
+        gone: Vec<Option<&'static str>>,
         turn_id: Option<String>,
     },
     /// When a turn started and ended, and how. It has no row of its own: the view folds
@@ -194,6 +255,9 @@ pub enum Item {
         outcome: Option<String>,
         /// For an answered question, the answer as given.
         answer: Option<String>,
+        /// An answered approval: its decision is told on the step it was asked for, so
+        /// it has no row of its own. Receipts are kept for questions and expiries.
+        folded: bool,
     },
     Marker {
         id: String,
@@ -246,13 +310,22 @@ pub struct HarnessRef {
     pub permissions: Option<String>,
 }
 
+/// Another Chat that uses the same folder, as the context popover lists it to open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SharedChat {
+    pub id: String,
+    pub title: String,
+    /// "active" or "archived": the list it opens under.
+    pub retention: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Folder {
     pub path: String,
     pub name: String,
     pub managed: bool,
     pub missing: bool,
-    pub shared_with: Vec<String>,
+    pub shared_with: Vec<SharedChat>,
     /// The git branch checked out in the folder, read now; `None` outside a repository.
     pub branch: Option<BranchView>,
     /// The Project whose folder holds the Chat's, else the first linked Project.
@@ -314,6 +387,9 @@ pub struct Steering {
 pub struct Queued {
     pub id: String,
     pub text: String,
+    /// It was sent to steer the running turn and the harness did not take it: why, as
+    /// the host recorded it. The card says "Couldn't steer; queued".
+    pub refused_steer: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -343,6 +419,22 @@ pub struct ChatState {
     /// The last turn ended after the person last saw the Chat, or they marked it unread.
     pub unseen: bool,
     pub muted: bool,
+    /// There is something to type into: the Chat is not in trash, and neither its
+    /// folder nor its session is gone.
+    pub has_composer: bool,
+    /// The last transcript item the person had in view: the New marker goes after it.
+    pub read_through: Option<String>,
+    /// Linked records now in the trash: a mention of one reads "(in Trash)".
+    pub trashed_links: Vec<String>,
+    /// The slash commands the live session's harness lists, for the `/` menu.
+    pub commands: Vec<CommandView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommandView {
+    /// Without its slash: "review".
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -360,7 +452,7 @@ pub struct Summary {
     pub retention: &'static str,
     pub activity: &'static str,
     pub needs_you: bool,
-    pub problem: Option<&'static str>,
+    pub problem: Option<ChatProblemKind>,
     /// `problem` is why the last turn stopped, not a condition observed now.
     pub problem_past: bool,
     pub interruption: Option<&'static str>,
@@ -387,8 +479,8 @@ pub struct FreshHistory {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Surroundings {
     pub folder_missing: bool,
-    /// Titles of other Chats that use the same folder.
-    pub shared_with: Vec<String>,
+    /// The other Chats that use the same folder.
+    pub shared_with: Vec<SharedChat>,
     pub links: Vec<LinkedRecord>,
     pub queue: Vec<Queued>,
     pub project: Option<ProjectRef>,
@@ -397,6 +489,8 @@ pub struct Surroundings {
     /// The failed turn after which the person checked the harness again and it was
     /// usable; its failure is no longer told as a problem.
     pub checked_turn: Option<String>,
+    /// Ids of linked records now in the trash.
+    pub trashed_links: Vec<String>,
 }
 
 /// What a view has to remember from the history it has seen, because a change names
@@ -411,6 +505,12 @@ pub struct Tracker {
     uncertain_text: Option<String>,
     /// Requests stored as pending; whether one can be answered is the host's live state.
     pending: HashMap<String, ChatInteraction>,
+    /// What the person decided about the approval asked for each tool call, by tool id.
+    decided: Decided,
+    /// The latest turn's tool calls, to show again when an approval for one is decided.
+    turn_tools: HashMap<String, ChatTool>,
+    /// Tool calls whose approval was just decided, to show again with the decision.
+    refold: Vec<String>,
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
     open: HashMap<String, ChatMessage>,
     last_response: Option<String>,
@@ -498,6 +598,13 @@ impl Tracker {
                 } else {
                     self.pending.remove(&interaction.id);
                 }
+                if let (Some(tool_id), Some(decision)) =
+                    (&interaction.tool_id, approval_outcome(interaction))
+                    && self.decided.get(tool_id) != Some(&decision)
+                {
+                    self.decided.insert(tool_id.clone(), decision);
+                    self.refold.push(tool_id.clone());
+                }
             }
             ChatItem::Tool(tool) if chat_reports::is_report(tool) => {
                 // Only the latest turn can still be running.
@@ -508,6 +615,10 @@ impl Tracker {
                 if let Some(changes) = agent_changes(tool) {
                     self.last_change = changes.last().cloned().or(self.last_change.take());
                 }
+                // Only the latest turn's calls can still be asked about.
+                self.turn_tools
+                    .retain(|_, kept| kept.turn_id == tool.turn_id);
+                self.turn_tools.insert(tool.id.clone(), tool.clone());
             }
             ChatItem::Session(_) | ChatItem::Notice(_) => {}
         }
@@ -545,6 +656,25 @@ impl Tracker {
         })
     }
 
+    /// What the person decided about the approval asked for each tool call.
+    pub fn decided(&self) -> &Decided {
+        &self.decided
+    }
+
+    /// A tool call of the latest turn, by its id.
+    fn tool(&self, id: &str) -> Option<&ChatTool> {
+        self.turn_tools.get(id)
+    }
+
+    /// Tool calls to show again because an approval asked for them was decided since
+    /// the last call. Calls of an earlier turn are not kept and read right on a resync.
+    pub fn refolded(&mut self) -> Vec<ChatItem> {
+        std::mem::take(&mut self.refold)
+            .iter()
+            .filter_map(|id| self.turn_tools.get(id).cloned().map(ChatItem::Tool))
+            .collect()
+    }
+
     /// Records whose display depends on the turn or on live state, to show again after
     /// either changed.
     pub fn dependents(&self) -> Vec<ChatItem> {
@@ -578,7 +708,54 @@ pub fn approval_decision(option_id: &str) -> Option<ApprovalDecision> {
     .find(|decision| approval_option(*decision).id == option_id)
 }
 
-fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Item {
+/// What the person decided about the tool calls approvals were asked for, by tool id.
+pub type Decided = HashMap<String, String>;
+
+/// An answered approval's decision as its step's tooltip says it.
+fn approval_outcome(interaction: &ChatInteraction) -> Option<String> {
+    if interaction.kind != ChatInteractionKind::Approval
+        || interaction.state != ChatInteractionState::Answered
+    {
+        return None;
+    }
+    Some(
+        match interaction.response.as_deref()? {
+            "allow" => "You allowed this once",
+            "allow for session" => "You allowed this for this session",
+            _ => "You declined this",
+        }
+        .to_owned(),
+    )
+}
+
+/// What an approval asks to do, from the step it was asked for: the title's verb, and
+/// what follows it inline (the command, or the files).
+fn asked_to(step: Option<&Step>) -> Option<(&'static str, &'static str, String)> {
+    let step = step?;
+    let targets = || {
+        step.targets
+            .iter()
+            .map(|target| target.text.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match step.kind {
+        "run" => Some(("wants to run", "asked to run", step.command.clone()?)),
+        "edit" | "create" => Some(("wants to edit", "asked to edit", targets())),
+        "delete" => Some(("wants to delete", "asked to delete", targets())),
+        _ => None,
+    }
+}
+
+/// A stored request as the dock or a receipt shows it. `step` is the step an approval
+/// was asked for, when the harness named it: its title then says what it would do,
+/// worded so the subject follows inline ("Claude Code wants to run `npm install`").
+fn request(
+    interaction: &ChatInteraction,
+    live: &ChatLive,
+    harness: &str,
+    step: Option<&Step>,
+) -> Item {
     let asked = live
         .interactions
         .iter()
@@ -591,11 +768,28 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         // A stored request with no live one behind it can no longer be answered.
         (ChatInteractionState::Pending | ChatInteractionState::Expired, _) => "expired",
     };
-    let title = match (approval, state == "pending") {
-        (true, true) => format!("{harness} is asking for approval"),
-        (true, false) => format!("{harness} asked for approval"),
-        (false, true) => format!("{harness} is asking you"),
-        (false, false) => format!("{harness} asked you"),
+    let pending = state == "pending";
+    let prompt = Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty());
+    let (title, subject) = match (approval, asked_to(step.filter(|_| approval))) {
+        (true, Some((wants, asked, what))) => (
+            format!("{harness} {}", if pending { wants } else { asked }),
+            Some(what).filter(|what| !what.is_empty()).or(prompt),
+        ),
+        (true, None) if prompt.is_some() => (
+            format!(
+                "{harness} {}",
+                if pending {
+                    "wants approval for"
+                } else {
+                    "asked for approval for"
+                }
+            ),
+            prompt,
+        ),
+        (true, None) if pending => (format!("{harness} is asking for approval"), None),
+        (true, None) => (format!("{harness} asked for approval"), None),
+        (false, _) if pending => (format!("{harness} is asking you"), prompt),
+        (false, _) => (format!("{harness} asked you"), prompt),
     };
     let (options, free_text) = match asked.map(|request| &request.kind) {
         Some(InteractionKind::Approval { decisions, .. }) => (
@@ -625,11 +819,10 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         .response
         .as_deref()
         .filter(|_| state == "answered");
-    let outcome = response.map(|response| match response {
-        "allow" => "You allowed this once".to_owned(),
-        "allow for session" => "You allowed this for this session".to_owned(),
-        "deny" => "You denied this".to_owned(),
-        answer => format!("You answered: {answer}"),
+    let outcome = approval_outcome(interaction).or_else(|| {
+        response
+            .filter(|_| !approval)
+            .map(|answer| format!("You answered: {answer}"))
     });
     Item::Request {
         id: interaction.id.clone(),
@@ -637,7 +830,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         turn_id: Some(interaction.turn_id.clone()),
         request: if approval { "approval" } else { "question" },
         title,
-        subject: Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty()),
+        subject,
         reason: interaction
             .reason
             .clone()
@@ -647,6 +840,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         state,
         outcome,
         answer: response.filter(|_| !approval).map(str::to_owned),
+        folded: approval && state == "answered",
     }
 }
 
@@ -725,6 +919,9 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         result: cut,
         output: tool.output.clone(),
         started_at: tool.started_at.clone(),
+        added_lines: None,
+        removed_lines: None,
+        decision: None,
     };
     if tool.name == CONTEXT_RECORD_NAME {
         return vec![Step {
@@ -886,10 +1083,19 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
                     .output
                     .as_deref()
                     .is_some_and(|output| output.starts_with(WRITE_CREATED));
-            kind(
-                if created { "create" } else { "edit" },
-                file.map(path).into_iter().collect(),
-            )
+            let lines = |key: &str| {
+                value("ticketd_lines")
+                    .and_then(|lines| lines[key].as_u64())
+                    .and_then(|count| u32::try_from(count).ok())
+            };
+            Step {
+                added_lines: lines("added"),
+                removed_lines: lines("removed"),
+                ..kind(
+                    if created { "create" } else { "edit" },
+                    file.map(path).into_iter().collect(),
+                )
+            }
         }
         (None, "WebSearch") => kind("web", vec![target(field("query").unwrap_or_default())]),
         (None, "WebFetch") => Step {
@@ -915,16 +1121,27 @@ fn file_changes(
             continue;
         };
         let how = change["kind"]["type"].as_str().or(change["kind"].as_str());
-        let kind = match how {
-            Some("add") => "create",
-            Some("delete") => "delete",
-            _ => "edit",
+        let (kind, change_kind) = match how {
+            Some("add") => ("create", FileChangeKind::Added),
+            Some("delete") => ("delete", FileChangeKind::Deleted),
+            _ => ("edit", FileChangeKind::Modified),
         };
+        // A change Codex sent no diff with leaves its row's count untold.
+        let counted = change["diff"]
+            .as_str()
+            .map(|diff| diffstat::counts(&change_kind, diff));
         match rows.iter_mut().find(|row| row.kind == kind) {
-            Some(row) => row.targets.push(path(file)),
+            Some(row) => {
+                row.targets.push(path(file));
+                let sum = |kept: Option<u32>, more: Option<u32>| kept.zip(more).map(|(a, b)| a + b);
+                row.added_lines = sum(row.added_lines, counted.map(|(added, _)| added));
+                row.removed_lines = sum(row.removed_lines, counted.map(|(_, removed)| removed));
+            }
             None => rows.push(Step {
                 kind,
                 targets: vec![path(file)],
+                added_lines: counted.map(|(added, _)| added),
+                removed_lines: counted.map(|(_, removed)| removed),
                 ..base.clone()
             }),
         }
@@ -944,6 +1161,7 @@ pub fn item(
     chat: &Chat,
     live: &ChatLive,
     fresh: Option<FreshHistory>,
+    tracker: &Tracker,
 ) -> Option<Item> {
     let harness = harness_name(&chat.harness);
     Some(match record {
@@ -1038,16 +1256,34 @@ pub fn item(
         ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => Item::Records {
             id: tool.id.clone(),
             at: String::new(),
+            gone: vec![None; changes.len()],
             changes,
             turn_id: Some(tool.turn_id.clone()),
         },
         ChatItem::Tool(tool) => Item::Steps {
             id: tool.id.clone(),
             at: String::new(),
-            steps: steps(tool, harness, chat, home_folder().as_deref()),
+            steps: steps(tool, harness, chat, home_folder().as_deref())
+                .into_iter()
+                .map(|step| Step {
+                    decision: tracker.decided().get(&tool.id).cloned(),
+                    ..step
+                })
+                .collect(),
             turn_id: Some(tool.turn_id.clone()),
         },
-        ChatItem::Interaction(interaction) => request(interaction, live, harness),
+        ChatItem::Interaction(interaction) => {
+            let step = interaction
+                .tool_id
+                .as_deref()
+                .and_then(|id| tracker.tool(id))
+                .and_then(|tool| {
+                    steps(tool, harness, chat, home_folder().as_deref())
+                        .into_iter()
+                        .next()
+                });
+            request(interaction, live, harness, step.as_ref())
+        }
         ChatItem::Notice(notice) => Item::Marker {
             id: notice.id.clone(),
             at: notice.created_at.clone(),
@@ -1129,6 +1365,7 @@ pub fn items(
     chat: &Chat,
     live: &ChatLive,
     fresh: Option<FreshHistory>,
+    tracker: &Tracker,
 ) -> Vec<Item> {
     let timing = match record {
         ChatItem::Turn(turn) => Some(turn_item(turn)),
@@ -1136,7 +1373,7 @@ pub fn items(
     };
     timing
         .into_iter()
-        .chain(item(record, chat, live, fresh))
+        .chain(item(record, chat, live, fresh, tracker))
         .collect()
 }
 
@@ -1146,7 +1383,7 @@ fn home_folder() -> Option<String> {
         .ok()
 }
 
-fn retention(chat: &Chat) -> &'static str {
+pub fn retention(chat: &Chat) -> &'static str {
     if chat.trashed {
         "trashed"
     } else if chat.archived {
@@ -1180,18 +1417,8 @@ fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) ->
     );
     let command = login_command(harness).filter(|_| kind == ProblemKind::LoginRequired);
     let help = help_url(harness).filter(|_| setup);
-    let kind = match kind {
-        ProblemKind::NotInstalled => "not_installed",
-        ProblemKind::IncompatibleVersion => "incompatible",
-        ProblemKind::LoginRequired => "not_signed_in",
-        ProblemKind::QuotaExhausted => "usage_limit",
-        ProblemKind::NativeHistoryUnavailable => "history_lost",
-        ProblemKind::SessionInUse => "session_in_use",
-        ProblemKind::PermissionUnavailable => "sandbox_unavailable",
-        ProblemKind::Other => "failed",
-    };
     Problem {
-        kind,
+        kind: kind.into(),
         message,
         command: command.map(str::to_owned),
         help_url: help.map(str::to_owned),
@@ -1199,27 +1426,71 @@ fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) ->
     }
 }
 
+impl Problem {
+    /// What New Chat tells about a harness that is not ready, from what its probe found.
+    pub fn for_harness(name: &str, kind: ChatProblemKind, found: &HarnessFound) -> Self {
+        Self {
+            kind,
+            message: found.message.clone(),
+            command: found.command.clone(),
+            help_url: found.help_url.clone(),
+            path: found.path.clone(),
+            ..Self::default()
+        }
+        .worded(name)
+    }
+
+    /// Fills in what follows from the kind: the title in the harness's name, and
+    /// whether it stops the next message.
+    fn worded(self, harness: &str) -> Self {
+        Self {
+            title: self.kind.title(harness, self.past),
+            blocks_send: !self.past && self.kind.blocks_send(),
+            ..self
+        }
+    }
+}
+
+/// What a harness probe found, as its notice needs it.
+pub struct HarnessFound {
+    pub message: Option<String>,
+    pub command: Option<String>,
+    pub help_url: Option<String>,
+    pub path: Option<String>,
+}
+
+/// The Chat's problem, worded for its harness.
 fn problem(
     chat: &Chat,
     live: &ChatLive,
     tracker: &Tracker,
     around: &Surroundings,
 ) -> Option<Problem> {
+    found_problem(chat, live, tracker, around)
+        .map(|problem| problem.worded(harness_name(&chat.harness)))
+}
+
+fn found_problem(
+    chat: &Chat,
+    live: &ChatLive,
+    tracker: &Tracker,
+    around: &Surroundings,
+) -> Option<Problem> {
     let failed = |message: String| Problem {
-        kind: "failed",
+        kind: ChatProblemKind::Failed,
         message: Some(message),
         ..Problem::default()
     };
     if around.folder_missing {
         return Some(Problem {
-            kind: "folder_missing",
+            kind: ChatProblemKind::FolderMissing,
             path: Some(chat.execution_folder.clone()),
             ..Problem::default()
         });
     }
     if let Some((message_id, refused)) = &tracker.uncertain {
         return Some(Problem {
-            kind: "uncertain_delivery",
+            kind: ChatProblemKind::UncertainDelivery,
             message: refused.as_ref().map(|reason| {
                 format!(
                     "You asked to send it again and {} did not accept that: {reason}.",
@@ -1231,7 +1502,7 @@ fn problem(
         });
     }
     let unconfirmed = |message: Option<String>| Problem {
-        kind: "stop_unconfirmed",
+        kind: ChatProblemKind::StopUnconfirmed,
         message,
         ..Problem::default()
     };
@@ -1329,6 +1600,11 @@ pub fn chat_state(
     let name = harness_name(&chat.harness);
     let activity = activity(live, tracker);
     let opening = opening(activity, live.opening);
+    let problem = problem(chat, live, tracker, around);
+    let has_composer = !chat.trashed
+        && !problem
+            .as_ref()
+            .is_some_and(|problem| !problem.past && problem.kind.removes_composer());
     ChatState {
         id: chat.id.clone(),
         title: title(chat),
@@ -1348,7 +1624,7 @@ pub fn chat_state(
         },
         retention: retention(chat),
         activity,
-        problem: problem(chat, live, tracker, around),
+        problem,
         doing: chat
             .active_turn
             .as_ref()
@@ -1379,11 +1655,23 @@ pub fn chat_state(
         queue_paused: chat.queue_paused,
         context: chat_reports::context(live),
         settings: chat_reports::settings(live, name),
-        unseen: tracker
-            .last_turn
-            .as_ref()
-            .is_some_and(|turn| chat.unseen(turn)),
+        unseen: chat.marked_unread
+            || tracker
+                .last_turn
+                .as_ref()
+                .is_some_and(|turn| chat.unseen(turn)),
         muted: chat.muted,
+        has_composer,
+        read_through: chat.read_through.clone(),
+        trashed_links: around.trashed_links.clone(),
+        commands: live
+            .commands
+            .iter()
+            .map(|command| CommandView {
+                name: command.name.clone(),
+                description: command.description.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -1401,7 +1689,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
     let activity = activity(live, tracker);
     let problem = problem(chat, live, tracker, around);
     let harness = harness_name(&chat.harness);
-    let status = chat_attention::status(&Facts {
+    let status = attention::status(&Facts {
         chat,
         harness,
         live,
@@ -1410,7 +1698,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         problem: problem.as_ref().map(|problem| (problem.kind, problem.past)),
         failure: problem
             .as_ref()
-            .filter(|problem| problem.kind == "failed")
+            .filter(|problem| problem.kind == ChatProblemKind::Failed)
             .and_then(|problem| problem.message.as_deref()),
         activity,
         opening: opening(activity, live.opening).is_some(),
@@ -1452,7 +1740,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             .collect(),
         retention: retention(chat),
         activity,
-        needs_you: status.rank.waits(),
+        needs_you: status.rank.needs_you(),
         problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,
@@ -1470,29 +1758,12 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
     }
 }
 
-/// The state of a Chat no supervisor has reported on: nothing runs.
-pub fn idle() -> ChatLive {
-    ChatLive {
-        activity: Activity::Idle,
-        running: false,
-        opening: None,
-        steering: None,
-        delivery_unconfirmed: false,
-        sending: Vec::new(),
-        interactions: Vec::new(),
-        stop: None,
-        problem: None,
-        context: None,
-        settings: None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatTool, ChatToolState,
-        ChatTurn, ChatTurnState, Item, STOPPED_BY_TICKETD, Step, idle, items, opening, request,
-        steps,
+        Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatLive, ChatTool,
+        ChatToolState, ChatTurn, ChatTurnState, Item, STOPPED_BY_TICKETD, Step, Tracker, items,
+        opening, request, steps,
     };
     use serde_json::json;
     use ticketd_core::ChatItem;
@@ -1540,6 +1811,8 @@ mod tests {
                 ended_at: None,
             }),
             seen_through: 0,
+            read_through: None,
+            marked_unread: false,
             muted: false,
             created_at: String::new(),
         }
@@ -1696,6 +1969,41 @@ mod tests {
     }
 
     #[test]
+    fn a_file_step_carries_the_lines_its_harness_said_it_added_and_removed() {
+        let input = json!({"type": "fileChange", "status": "completed", "changes": [
+            {"path": "/work/limiter/src/a.ts", "kind": {"type": "update"},
+             "diff": "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n-old\n+new\n+more\n same"},
+            {"path": "/work/limiter/src/c.ts", "kind": {"type": "update"},
+             "diff": "@@ -1 +1 @@\n-x\n+y"},
+            {"path": "/work/limiter/src/b.ts", "kind": {"type": "add"}, "diff": "one\ntwo"},
+            {"path": "/work/limiter/src/d.ts", "kind": {"type": "update"}},
+        ]});
+        let change = tool("Edit a", &input.to_string(), ChatToolState::Completed, None);
+        let counts: Vec<_> = steps(&change, "Codex", &chat(None), None)
+            .iter()
+            .map(|row| (row.kind, row.added_lines, row.removed_lines))
+            .collect();
+        // One change without a diff leaves its row's count untold.
+        assert_eq!(counts, [("edit", None, None), ("create", Some(2), Some(0))]);
+
+        // Claude Code says it in the tool's result, which the adapter keeps.
+        let edit = one(&tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/a.ts","ticketd_lines":{"added":48,"removed":6}}"#,
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!((edit.added_lines, edit.removed_lines), (Some(48), Some(6)));
+        let untold = one(&tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/a.ts"}"#,
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!(untold.added_lines, None);
+    }
+
+    #[test]
     fn claude_code_tools_read_as_their_kind() {
         let done = ChatToolState::Completed;
         let row = |name: &str, input: &str, output: Option<&str>| {
@@ -1782,15 +2090,48 @@ mod tests {
             reason: Some("Allow creating hello.txt?".to_owned()),
             state: ChatInteractionState::Answered,
             response: Some("deny".to_owned()),
+            tool_id: None,
         };
         let Item::Request {
             subject, reason, ..
-        } = request(&interaction, &idle(), "Codex")
+        } = request(&interaction, &ChatLive::idle(), "Codex", None)
         else {
             panic!("an interaction is a request");
         };
         assert_eq!(subject.as_deref(), Some("touch hello.txt"));
         assert_eq!(reason.as_deref(), Some("Allow creating hello.txt?"));
+
+        // Asked for a step, the title says what the step would do, subject inline.
+        let title =
+            |step: &Step| match request(&interaction, &ChatLive::idle(), "Codex", Some(step)) {
+                Item::Request { title, subject, .. } => (title, subject),
+                other => panic!("a request, got {other:?}"),
+            };
+        let run = one(&codex_command(
+            "npm install @pagerduty/pdjs",
+            "inProgress",
+            0,
+        ));
+        assert_eq!(
+            title(&run),
+            (
+                "Codex asked to run".to_owned(),
+                Some("npm install @pagerduty/pdjs".to_owned())
+            )
+        );
+        let edit = one(&tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/a.ts"}"#,
+            ChatToolState::Running,
+            None,
+        ));
+        assert_eq!(
+            title(&edit),
+            (
+                "Codex asked to edit".to_owned(),
+                Some("src/a.ts".to_owned())
+            )
+        );
     }
 
     /// #367: a turn's records read by whether it still runs, and a stop that did not
@@ -1815,13 +2156,14 @@ mod tests {
             r#"{"steps":[{"text":"Add it","status":"in_progress","active_label":null}],"explanation":null}"#,
             ChatToolState::Completed,
         );
-        let mut stopping = idle();
+        let mut stopping = ChatLive::idle();
         stopping.stop = Some(StopState::Unconfirmed);
-        let state = |chat: &Chat, live: &_| match item(&plan, chat, live, None) {
+        let state = |chat: &Chat, live: &_| match item(&plan, chat, live, None, &Tracker::default())
+        {
             Some(Item::Plan { state, .. }) => state,
             other => panic!("a plan, got {other:?}"),
         };
-        let running = idle();
+        let running = ChatLive::idle();
         assert_eq!(state(&chat(Some("turn-1")), &running), "running");
         assert_eq!(state(&chat(Some("turn-1")), &stopping), "unconfirmed");
         assert_eq!(state(&chat(None), &running), "ended");
@@ -1831,8 +2173,13 @@ mod tests {
             r#"{"running":true,"started_at":1,"ended_at":null,"text":null,"heading":null}"#,
             ChatToolState::Running,
         );
-        let Some(Item::Reasoning { state, .. }) = item(&thinking, &chat(None), &idle(), None)
-        else {
+        let Some(Item::Reasoning { state, .. }) = item(
+            &thinking,
+            &chat(None),
+            &ChatLive::idle(),
+            None,
+            &Tracker::default(),
+        ) else {
             panic!("reasoning");
         };
         assert_eq!(state, "not_finished");
@@ -1842,8 +2189,13 @@ mod tests {
             r#"{"files":[{"path":"src/limiter.ts","kind":"added","from":null,"added_lines":48,"removed_lines":0,"confirmed":true}]}"#,
             ChatToolState::Completed,
         );
-        let Some(Item::Files { files: shown, .. }) = item(&files, &chat(None), &idle(), None)
-        else {
+        let Some(Item::Files { files: shown, .. }) = item(
+            &files,
+            &chat(None),
+            &ChatLive::idle(),
+            None,
+            &Tracker::default(),
+        ) else {
             panic!("files");
         };
         assert_eq!(shown[0].path, "src/limiter.ts");
@@ -1866,10 +2218,11 @@ mod tests {
             reason: None,
             state: ChatInteractionState::Answered,
             response: Some("Fail open".to_owned()),
+            tool_id: None,
         };
         let Item::Request {
             answer, turn_id, ..
-        } = request(&interaction, &idle(), "Codex")
+        } = request(&interaction, &ChatLive::idle(), "Codex", None)
         else {
             panic!("an interaction is a request");
         };
@@ -1892,7 +2245,14 @@ mod tests {
                 ended_at: Some("2026-11-10T10:00:40Z".to_owned()),
             })
         };
-        let outcome = |record: &ChatItem| match items(record, &chat(None), &idle(), None).as_slice()
+        let outcome = |record: &ChatItem| match items(
+            record,
+            &chat(None),
+            &ChatLive::idle(),
+            None,
+            &Tracker::default(),
+        )
+        .as_slice()
         {
             [
                 Item::Turn {

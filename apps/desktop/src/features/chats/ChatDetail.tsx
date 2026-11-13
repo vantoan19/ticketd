@@ -75,7 +75,6 @@ import {
   composerPlaceholder,
   firstNew,
   unseenFrom,
-  hasComposer,
   isLive,
   problemNotice,
   requestLabel,
@@ -90,7 +89,6 @@ import {
 } from "@/features/chats/Transcript";
 import {
   ReadingContext,
-  lastSeen,
   useTranscriptScroll,
 } from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
@@ -296,7 +294,13 @@ function LinkedRecords({
 const isMessage = (item: TranscriptItem) =>
   item.kind === "user" || item.kind === "response";
 
-function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
+function Conversation({
+  snapshot,
+  focusRequest,
+}: {
+  snapshot: ChatSnapshot;
+  focusRequest: boolean;
+}) {
   const client = useChatClient();
   const { chat, items } = snapshot;
   const id = chat.id;
@@ -364,15 +368,28 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
           files: (query: string) => client.folderFiles(folder.path, query),
         },
       }),
+      commands: chat.commands,
       harness,
     }),
-    [client, chat.links, folder.missing, folder.name, folder.path, harness],
+    [
+      client,
+      chat.links,
+      chat.commands,
+      folder.missing,
+      folder.name,
+      folder.path,
+      harness,
+    ],
   );
   /** Remounts the composer with the draft after Edit moved a queued message into it. */
   const [edits, setEdits] = useState(0);
   const pending = items.filter(
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
+  );
+  // Opened from a notification: the request waiting then takes focus, once.
+  const [notifiedRequest] = useState(() =>
+    focusRequest ? pending[0]?.id : undefined,
   );
   const question = pending.find(
     (item) => item.request === "question" && item.free_text,
@@ -389,7 +406,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     setHeldFor(question && draftHeld() ? question.id : undefined);
   }
   const answering = Boolean(question) && heldFor !== question?.id;
-  const stoppable = isLive(chat) && !chat.stopping && hasComposer(chat);
+  const stoppable = isLive(chat) && !chat.stopping && chat.has_composer;
   const stop = () => quietly(client.stop(id));
   /** Esc stops the turn, unless a menu, dialog or picker is open to take it first. */
   const onPaneKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -427,15 +444,19 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
       }),
     );
   // Placed once when the Chat opens; it stays until the person sends or leaves.
-  // Without a seen position from this session, the host's own (#365) says
-  // whether the last ended turn is unseen.
+  // After what the person read through, which the host keeps (#365); a Chat
+  // never read here says from its unseen turn.
   const [newFrom, setNewFrom] = useState(() => {
-    const seen = lastSeen(id);
-    if (seen) return firstNew(items, seen);
+    const seen = chat.read_through ?? undefined;
+    const after = seen && firstNew(items, seen);
+    if (after) return after;
     return chat.unseen ? unseenFrom(items) : undefined;
   });
   const { root, content, marker, following, reading, follow, onScroll } =
-    useTranscriptScroll(id);
+    useTranscriptScroll(
+      id,
+      (itemId) => void client.readThrough(id, itemId).catch(() => {}),
+    );
   /** Sending resumes following and clears the New marker. */
   const sent = <T,>(action: Promise<T>) => {
     follow();
@@ -567,10 +588,14 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                 onAction={onNotice}
               />
             )}
-            {hasComposer(chat) && (
+            {chat.has_composer && (
               <div className="chat-seat">
                 <ActivityDock
                   chat={chat}
+                  focusRequest={
+                    notifiedRequest !== undefined &&
+                    pending[0]?.id === notifiedRequest
+                  }
                   requests={pending}
                   {...(plan && { plan: <PlanPill item={plan} /> })}
                   dockRef={dock}
@@ -699,6 +724,7 @@ export function ChatDetail({
   onReturn,
   onClose,
   crumb,
+  focusRequest = false,
 }: {
   id: string;
   /** The person asked for the full width. */
@@ -710,6 +736,8 @@ export function ChatDetail({
   onClose: () => void;
   /** Back to where the Chat was opened from, such as its ticket. */
   crumb?: ReactNode;
+  /** Opened from a notification: a pending request's title takes focus once shown. */
+  focusRequest?: boolean;
 }) {
   const client = useChatClient();
   const { snapshot, error } = useChat(id);
@@ -803,7 +831,13 @@ export function ChatDetail({
           </p>
         )}
       </div>
-      {snapshot && <Conversation key={id} snapshot={snapshot} />}
+      {snapshot && (
+        <Conversation
+          key={id}
+          snapshot={snapshot}
+          focusRequest={focusRequest}
+        />
+      )}
     </section>
   );
 }

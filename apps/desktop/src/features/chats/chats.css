@@ -579,7 +579,7 @@ button.chat-steps:hover {
   font-family: var(--font-mono);
   font-size: var(--text-code);
   font-variant-ligatures: none;
-  line-height: 20px;
+  line-height: var(--text-ui-line);
   white-space: pre;
 }
 .chat-output-prompt {
@@ -689,7 +689,7 @@ button.chat-file:focus-visible,
   color: var(--foreground);
   font-family: var(--font-mono);
   font-size: var(--text-code);
-  line-height: 20px;
+  line-height: var(--text-ui-line);
   white-space: pre;
 }
 .chat-composer {
@@ -804,6 +804,14 @@ button.chat-file:focus-visible,
 }
 .chat-pick-note {
   padding: 6px 8px;
+}
+/* Beside a trigger whose change waits for the turn to end. */
+.chat-control-note {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
 }
 .chat-send {
   display: flex;
@@ -951,12 +959,23 @@ button.chat-file:focus-visible,
   border-radius: var(--radius);
   color: var(--foreground);
 }
-.chat-queue-text {
+/* The card's words: its text, then why a refused steer waits here. */
+.chat-queue-main {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-queue-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chat-queue-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .chat-queue-actions {
   display: flex;

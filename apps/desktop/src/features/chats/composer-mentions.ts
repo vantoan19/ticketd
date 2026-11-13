@@ -163,3 +163,61 @@ export function linksOf(tokens: Token[]): LinkRef[] {
 /** The text a record is mentioned by: a ticket's reference, else its name. */
 export const mentionText = (record: LinkedRecord) =>
   record.kind === "ticket" ? record.reference : record.title;
+
+/** A sent message's text, with each mention of a linked record marked. */
+export type SentPart = { text: string; record?: LinkedRecord };
+
+const QUOTE_SOURCE = /^> From (.+):$/;
+
+/** A record's name stands alone: not part of a longer word or reference. */
+const standsAlone = (text: string, start: number, end: number) =>
+  !/[\p{L}\p{N}-]/u.test(text.charAt(start - 1)) &&
+  !/[\p{L}\p{N}-]/u.test(text.charAt(end));
+
+/**
+ * A sent message as it reads: the quotes it starts with (as `quotedMessage`
+ * wrote them), then its text with the linked records it mentions marked, so
+ * they stay links once sent.
+ */
+export function sentParts(text: string, linked: LinkedRecord[]) {
+  const blocks = text.split("\n\n");
+  const quotes: { source: string; text: string }[] = [];
+  while (blocks.length > 0) {
+    const lines = (blocks[0] ?? "").split("\n");
+    const source = QUOTE_SOURCE.exec(lines[0] ?? "")?.[1];
+    if (!source || !lines.every((line) => line.startsWith(">"))) break;
+    quotes.push({
+      source,
+      text: lines
+        .slice(1)
+        .map((line) => line.replace(/^> ?/, ""))
+        .join("\n"),
+    });
+    blocks.shift();
+  }
+  const body = blocks.join("\n\n");
+  // Longest names first, so a longer name wins where one starts another.
+  const names = linked
+    .map((record) => ({ name: mentionText(record), record }))
+    .filter(({ name }) => name.trim() !== "")
+    .sort((a, b) => b.name.length - a.name.length);
+  const parts: SentPart[] = [];
+  let plain = "";
+  for (let at = 0; at < body.length;) {
+    const found = names.find(
+      ({ name }) =>
+        body.startsWith(name, at) && standsAlone(body, at, at + name.length),
+    );
+    if (!found) {
+      plain += body.charAt(at);
+      at += 1;
+      continue;
+    }
+    if (plain) parts.push({ text: plain });
+    plain = "";
+    parts.push({ text: found.name, record: found.record });
+    at += found.name.length;
+  }
+  if (plain) parts.push({ text: plain });
+  return { quotes, parts };
+}

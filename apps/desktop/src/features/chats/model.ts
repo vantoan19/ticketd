@@ -1,15 +1,15 @@
 import type {
   ChatChange,
+  Gone,
   ChatSnapshot,
   ChatState,
   ChatStatus,
-  HarnessStatus,
   Problem,
-  ProblemKind,
   RecordChange,
   Step,
   StepTarget,
   TranscriptItem,
+  ItemOf,
 } from "@/features/chats/client";
 
 /**
@@ -80,15 +80,18 @@ const OUTCOME_WORDS = {
 export type StepWords = {
   /** The row's words in order; `code` ones are targets, shown in mono. */
   parts: { text: string; code?: boolean }[];
-  /** At most one: an outcome word, or a muted result such as "No matches". */
-  suffix?: { text: string; outcome: boolean };
+  /** At most one: an outcome word, a muted result such as "No matches", or a diffstat (12px mono). */
+  suffix?: { text: string; outcome: boolean; diffstat?: boolean };
   /** The row's accessible name: "Run npm run test:limiter, Failed". */
   label: string;
   /** The muted line under an opened row: "Exit 1 · in apps/desktop". */
   detail: string;
 };
 
-/** "12s", "2m 13s", "10m", "1h 4m": how long something took. */
+/**
+ * "12s", "2m 13s", "10m", "1h 4m": how long something took or has run. The
+ * one way a Chat says a time; never "0s".
+ */
 export function duration(ms: number): string {
   const seconds = Math.max(1, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -167,8 +170,19 @@ export function stepWords(step: Step): StepWords {
         }
       : state === "done" && step.no_matches
         ? { text: "No matches", outcome: false }
-        : undefined;
+        : state === "done" &&
+            step.added_lines != null &&
+            step.removed_lines != null
+          ? {
+              text: `+${step.added_lines} −${step.removed_lines}`,
+              outcome: false,
+              diffstat: true,
+            }
+          : undefined;
   const words = parts.map((part) => part.text).join(" ");
+  const spoken = suffix?.diffstat
+    ? `${step.added_lines} lines added, ${step.removed_lines} removed`
+    : suffix?.text;
   const single = targets.length === 1 && !step.command ? targets[0] : undefined;
   const detail = [
     step.timed_out
@@ -184,7 +198,7 @@ export function stepWords(step: Step): StepWords {
   return {
     parts,
     ...(suffix && { suffix }),
-    label: suffix ? `${words}, ${suffix.text}` : words,
+    label: spoken ? `${words}, ${spoken}` : words,
     detail,
   };
 }
@@ -194,6 +208,9 @@ export function stepWords(step: Step): StepWords {
  * opens to its targets. Commands never merge, so each one's output stays one level
  * down. A merged row keeps "No matches" only when all its steps found nothing.
  */
+const sum = (a: number | null | undefined, b: number | null | undefined) =>
+  a != null && b != null ? a + b : null;
+
 export function mergeSteps(steps: Step[]): Step[] {
   const rows: Step[] = [];
   for (const step of steps) {
@@ -217,28 +234,26 @@ export function mergeSteps(steps: Step[]): Step[] {
       ...merged,
       targets: [...(last.targets ?? []), ...(step.targets ?? [])],
       no_matches: Boolean(last.no_matches && step.no_matches),
+      // Diffstats add up only when every merged step has one.
+      added_lines: sum(last.added_lines, step.added_lines),
+      removed_lines: sum(last.removed_lines, step.removed_lines),
     };
   }
   return rows;
 }
 
-type Of<K extends TranscriptItem["kind"]> = Extract<
-  TranscriptItem,
-  { kind: K }
->;
-
 /** A reasoning row with no text leaves the list once it ends; one cut off stays. */
-export const reasoningShown = (item: Of<"reasoning">) =>
+export const reasoningShown = (item: ItemOf<"reasoning">) =>
   item.state !== "done" || Boolean(item.text?.trim());
 
 /** A plan whose turn ended with every step done: one row in the fold. */
-export const planFinished = (item: Of<"plan">) =>
+export const planFinished = (item: ItemOf<"plan">) =>
   item.state === "ended" &&
   item.steps.length > 0 &&
   item.steps.every((step) => step.status === "completed");
 
 /** A plan its turn ended without finishing, or whose stop did not confirm: a card. */
-export const planUnfinished = (item: Of<"plan">) =>
+export const planUnfinished = (item: ItemOf<"plan">) =>
   item.state !== "running" && item.steps.length > 0 && !planFinished(item);
 
 /** One row of a turn, in the order it happened. `kept` rows are never folded. */
@@ -251,18 +266,18 @@ export type TurnRow =
       decision?: string;
       kept?: false;
     }
-  | { kind: "response"; key: string; item: Of<"response">; kept?: false }
+  | { kind: "response"; key: string; item: ItemOf<"response">; kept?: false }
   | {
       kind: "record";
       key: string;
       change: RecordChange;
       kept?: false;
     }
-  | { kind: "receipt"; key: string; item: Of<"request">; kept: true }
-  | { kind: "note"; key: string; item: Of<"marker">; kept: true }
+  | { kind: "receipt"; key: string; item: ItemOf<"request">; kept: true }
+  | { kind: "note"; key: string; item: ItemOf<"marker">; kept: true }
   /** #367: a reasoning row, and a plan that finished every step. */
-  | { kind: "reasoning"; key: string; item: Of<"reasoning">; kept?: false }
-  | { kind: "plan"; key: string; item: Of<"plan">; kept?: false };
+  | { kind: "reasoning"; key: string; item: ItemOf<"reasoning">; kept?: false }
+  | { kind: "plan"; key: string; item: ItemOf<"plan">; kept?: false };
 
 /**
  * A turn, or one segment of it after a steer: your message's work through its end.
@@ -279,13 +294,13 @@ export type Turn = {
   label: string;
   rows: TurnRow[];
   /** The turn's last response, when no step follows it. */
-  final?: Of<"response">;
+  final?: ItemOf<"response">;
   /** Why the turn stopped: stopped, quit or failed. */
-  marker?: Of<"marker">;
+  marker?: ItemOf<"marker">;
   /** A plan the turn ended with unfinished: a card above the final response. */
-  plan?: Of<"plan">;
+  plan?: ItemOf<"plan">;
   /** The files the turn changed, below the response and stop marker. */
-  files?: Of<"files">;
+  files?: ItemOf<"files">;
   /** The turn ran commands that edited files the files row cannot list. */
   commandEdits?: boolean;
   /** Every item the turn holds, for the reading position. */
@@ -343,13 +358,10 @@ const time = (stamp: string | null | undefined) => {
 };
 
 /** "Answered · Fail open", "Expired · rm -rf dist": a request's receipt row. */
-export function receiptLine(request: Of<"request">) {
+export function receiptLine(request: ItemOf<"request">) {
   const subject = request.subject ?? request.title;
   if (request.state === "expired") return `Expired · ${subject}`;
-  if (request.request === "question")
-    return `Answered · ${request.answer ?? subject}`;
-  // An approval with no step to fold into still says what was decided.
-  return `${request.outcome?.startsWith("You denied") ? "Declined" : "Allowed"} · ${subject}`;
+  return `Answered · ${request.answer ?? subject}`;
 }
 
 /**
@@ -361,25 +373,12 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
   const rows: TurnRow[] = [];
   const all: Step[] = [];
   let steps: { key: string; step: Step }[] = [];
-  /** An answered approval waiting for the step it allowed or declined. */
-  let approval: Of<"request"> | undefined;
   const flush = () => {
     const first = steps[0]?.key ?? "";
     mergeSteps(steps.map((entry) => entry.step)).forEach((step, index) =>
       rows.push({ kind: "step", key: `${first}:${index}`, step }),
     );
     steps = [];
-  };
-  /** An approval no step followed keeps a receipt, so the decision is not lost. */
-  const unfolded = () => {
-    if (approval)
-      rows.push({
-        kind: "receipt",
-        key: approval.id,
-        item: approval,
-        kept: true,
-      });
-    approval = undefined;
   };
   for (const item of members) {
     if (item.kind === "steps") {
@@ -390,26 +389,17 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
             : original;
         all.push(step);
         const key = `${item.id}:${index}`;
-        if (approval) {
-          // A step that waited on a decision stands alone, so its tooltip is its own.
+        if (step.decision) {
+          // A step the person decided about stands alone, so its tooltip is its own.
           flush();
-          const decision = approval.outcome ?? receiptLine(approval);
-          rows.push({ kind: "step", key, step, decision });
-          approval = undefined;
+          rows.push({ kind: "step", key, step, decision: step.decision });
         } else steps.push({ key, step });
       });
       continue;
     }
     flush();
-    unfolded();
-    if (
-      item.kind === "request" &&
-      item.request === "approval" &&
-      item.state === "answered"
-    ) {
-      approval = item;
-      continue;
-    }
+    // The host told the decision on the step it was asked for.
+    if (item.kind === "request" && item.folded) continue;
     if (item.kind === "response")
       rows.push({ kind: "response", key: item.id, item });
     else if (item.kind === "reasoning") {
@@ -419,7 +409,11 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
       if (planFinished(item)) rows.push({ kind: "plan", key: item.id, item });
     } else if (item.kind === "records")
       item.changes.forEach((change, index) =>
-        rows.push({ kind: "record", key: `${item.id}:${index}`, change }),
+        rows.push({
+          kind: "record",
+          key: `${item.id}:${index}`,
+          change: { ...change, gone: item.gone?.[index] ?? null },
+        }),
       );
     else if (item.kind === "request" && item.state !== "pending")
       rows.push({ kind: "receipt", key: item.id, item, kept: true });
@@ -427,7 +421,6 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
       rows.push({ kind: "note", key: item.id, item, kept: true });
   }
   flush();
-  unfolded();
   return { rows, steps: all };
 }
 
@@ -442,7 +435,7 @@ export function turns(
   chat: Pick<ChatState, "activity" | "problem">,
   now = Date.now(),
 ): TranscriptPart[] {
-  const timings = new Map<string, Of<"turn">>();
+  const timings = new Map<string, ItemOf<"turn">>();
   for (const item of items)
     if (item.kind === "turn") timings.set(item.turn_id, item);
   const parts: (TranscriptPart | Segment)[] = [];
@@ -496,16 +489,16 @@ export function turns(
     );
     const marker = lastOf(
       part.members,
-      (item): item is Of<"marker"> =>
+      (item): item is ItemOf<"marker"> =>
         item.kind === "marker" && item.reason !== "note",
     );
     const plan = lastOf(
       part.members,
-      (item): item is Of<"plan"> => item.kind === "plan",
+      (item): item is ItemOf<"plan"> => item.kind === "plan",
     );
     const files = lastOf(
       part.members,
-      (item): item is Of<"files"> =>
+      (item): item is ItemOf<"files"> =>
         item.kind === "files" && item.state === "ended",
     );
     const commandEdits = steps.some(
@@ -589,7 +582,11 @@ export function turnStatus(
  * with no row of their own. Nothing is new without a seen position.
  */
 export function firstNew(items: TranscriptItem[], seen: string | undefined) {
-  const from = seen === undefined ? -1 : items.findIndex((i) => i.id === seen);
+  // The host keeps a turn's timing item by its turn's id.
+  const from =
+    seen === undefined
+      ? -1
+      : items.findIndex((i) => i.id === seen || i.id === `turn:${seen}`);
   if (from < 0) return undefined;
   return items
     .slice(from + 1)
@@ -609,7 +606,7 @@ export function firstNew(items: TranscriptItem[], seen: string | undefined) {
 export function unseenFrom(items: TranscriptItem[]) {
   const ended = lastOf(
     items,
-    (item): item is Of<"turn"> =>
+    (item): item is ItemOf<"turn"> =>
       item.kind === "turn" && item.outcome !== "active",
   );
   if (!ended) return undefined;
@@ -622,6 +619,10 @@ export function unseenFrom(items: TranscriptItem[]) {
   )?.id;
 }
 
+/** " (in Trash)", " (deleted)": said after a record that is no longer there to open. */
+export const goneWords = (gone: Gone | null | undefined) =>
+  gone === "trashed" ? " (in Trash)" : gone === "deleted" ? " (deleted)" : "";
+
 /** What the agent did to a record, as the list row says it. */
 export function changeLine(change: RecordChange) {
   if (change.kind === "status")
@@ -631,72 +632,9 @@ export function changeLine(change: RecordChange) {
   return `Created the Document "${change.title}"`;
 }
 
-/**
- * Problems that keep the Chat from taking a new message until they are resolved.
- * Only one observed now blocks; why the last turn stopped (`past`) never does.
- */
-const BLOCKING: ProblemKind[] = [
-  "not_installed",
-  "incompatible",
-  "unavailable",
-  "not_signed_in",
-  "usage_limit",
-  "sandbox_unavailable",
-  "uncertain_delivery",
-  "session_in_use",
-];
-/** Problems under which there is nothing to type into. */
-const NO_COMPOSER: ProblemKind[] = ["folder_missing", "history_lost"];
-
-export function blocksSend(problem: Problem | null | undefined) {
-  return Boolean(problem && !problem.past && BLOCKING.includes(problem.kind));
-}
-
-export function hasComposer(chat: ChatState) {
-  const problem = chat.problem;
-  return (
-    chat.retention !== "trashed" &&
-    !(problem && !problem.past && NO_COMPOSER.includes(problem.kind))
-  );
-}
-
-/**
- * Whether a Chat can be started on a harness with this status. A sign-in that is
- * not a subscription, or that ticketd could not check, does not block: it is shown.
- */
-export function harnessUsable(status: HarnessStatus["status"]) {
-  return (
-    status === "ready" ||
-    status === "not_subscription" ||
-    status === "sign_in_unknown"
-  );
-}
-
-/**
- * A harness that is not ready, as one word beside its name. `dot`: it needs
- * the person (a sign-in, an update, a check); a word without one is a fact.
- */
-export function harnessWord(
-  status: HarnessStatus["status"],
-): { word: string; dot: boolean } | null {
-  switch (status) {
-    case "ready":
-      return null;
-    case "not_signed_in":
-      return { word: "Not signed in", dot: true };
-    case "incompatible":
-    case "unavailable":
-      return { word: "Can't be used", dot: true };
-    case "unknown":
-      return { word: "Couldn't check", dot: true };
-    case "not_subscription":
-      return { word: "Not on a subscription", dot: true };
-    case "not_installed":
-      return { word: "Not installed", dot: false };
-    case "sign_in_unknown":
-      return { word: "Sign-in not checked", dot: false };
-  }
-}
+/** The host says the problem keeps the Chat from taking a new message. */
+export const blocksSend = (problem: Problem | null | undefined) =>
+  Boolean(problem?.blocks_send);
 
 /** A managed folder is named by an id; it reads as the folder ticketd keeps. */
 export const folderLabel = (folder: ChatState["folder"]) =>
@@ -723,14 +661,14 @@ export function contextLabel(chat: ChatState) {
 }
 
 /** Waits for the person: approval, question, or a failure not yet seen. */
-export const waits = (status: ChatStatus) =>
+export const needsYou = (status: ChatStatus) =>
   status.rank === "approval" ||
   status.rank === "question" ||
   status.rank === "failed";
 
 /** The row's one emphasis (title weight 500): it waits, or holds something unseen. */
 export const emphasised = (status: ChatStatus) =>
-  waits(status) || status.unseen;
+  needsYou(status) || status.unseen;
 
 /** A turn is in progress, so it can be stopped. */
 export function isLive(chat: ChatState) {
@@ -794,7 +732,7 @@ export type PendingRequest = Extract<TranscriptItem, { kind: "request" }>;
 export function requestLabel(request: PendingRequest) {
   if (request.request === "question") return request.subject || request.title;
   return request.subject
-    ? `${request.title}: ${request.subject}`
+    ? `${request.title} ${request.subject}`
     : request.title;
 }
 
@@ -826,8 +764,9 @@ export type Notice = {
 };
 
 /**
- * The notice for a problem. Wording for the states the design drew is the
- * design's; the rest (spec table 21.6) say what was observed as plainly.
+ * The notice for a problem. The host titles it; the body says what to do.
+ * Wording for the states the design drew is the design's; the rest (spec
+ * table 21.6) say what was observed as plainly.
  */
 export function problemNotice(problem: Problem, harness: string): Notice {
   const said = problem.message ? ` ${problem.message}` : "";
@@ -840,34 +779,34 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       if (past)
         return {
           tone: "neutral",
-          title: `${harness} wasn't signed in`,
+          title: problem.title,
           body: `The last turn stopped because ${harness} wasn't signed in. Run ${signIn} in a terminal and sign in, then check again or send your message. ticketd never asks for your password or keys.${said}`,
           actions: problem.command ? ["copy-command", "check"] : ["check"],
         };
       return {
         tone: "neutral",
-        title: `${harness} isn't signed in`,
+        title: problem.title,
         body: `Run ${signIn} in a terminal and sign in, then check again. ticketd never asks for your password or keys.${said}`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_subscription":
       return {
         tone: "neutral",
-        title: `${harness} isn't using a subscription`,
+        title: problem.title,
         body: `${problem.message ?? `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "sign_in_unknown":
       return {
         tone: "neutral",
-        title: `ticketd can't check ${harness}'s sign-in`,
+        title: problem.title,
         body: `${problem.message ?? `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_installed":
       return {
         tone: "neutral",
-        title: `${harness} isn't installed`,
+        title: problem.title,
         body: `ticketd couldn't find ${harness} on this computer. Install it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Install guide",
@@ -875,7 +814,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "incompatible":
       return {
         tone: "neutral",
-        title: `This ${harness} version can't be used`,
+        title: problem.title,
         body: `${problem.message ?? `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Update guide",
@@ -883,21 +822,21 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "unavailable":
       return {
         tone: "neutral",
-        title: `${harness} isn't available`,
+        title: problem.title,
         body: `${problem.message ?? `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
         actions: ["check"],
       };
     case "probe_failed":
       return {
         tone: "neutral",
-        title: `ticketd couldn't check ${harness}`,
+        title: problem.title,
         body: `It may still work.${said} Check again before sending.`,
         actions: ["check"],
       };
     case "usage_limit":
       return {
         tone: "neutral",
-        title: `${harness} reached your usage limit`,
+        title: problem.title,
         body: [
           problem.message,
           resetTime(problem.resets_at)
@@ -914,7 +853,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "sandbox_unavailable":
       return {
         tone: "error",
-        title: `${harness} can't run commands here`,
+        title: problem.title,
         body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
@@ -922,7 +861,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "uncertain_delivery":
       return {
         tone: "neutral",
-        title: `Did ${harness} get your message?`,
+        title: problem.title,
         // With a message, a resend the person asked for was not accepted.
         body: problem.message
           ? `${problem.message} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
@@ -932,14 +871,14 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "folder_missing":
       return {
         tone: "neutral",
-        title: "This Chat's folder is missing",
+        title: problem.title,
         body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.`,
         actions: ["check", "pick-folder"],
       };
     case "history_lost":
       return {
         tone: "neutral",
-        title: `${harness} no longer has this conversation`,
+        title: problem.title,
         body: "You can still read it here. To keep going, resume in a fresh session and choose which history to give it.",
         actions: ["resume"],
       };
@@ -947,13 +886,13 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       if (past)
         return {
           tone: "neutral",
-          title: `This ${harness} session was open somewhere else`,
+          title: problem.title,
           body: `The last turn stopped because of that. Close it there before you send again.${said}`,
           actions: [],
         };
       return {
         tone: "neutral",
-        title: `This ${harness} session is open somewhere else`,
+        title: problem.title,
         body: `Close it there, then check again. Nothing was sent.${said}`,
         actions: ["check"],
       };
@@ -961,14 +900,14 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       // Stop stays enabled as the retry, so the notice offers nothing else.
       return {
         tone: "neutral",
-        title: "Stop not confirmed",
+        title: problem.title,
         body: `${harness} may still be running.`,
         actions: [],
       };
     case "failed":
       return {
         tone: "error",
-        title: `${harness} stopped with an error`,
+        title: problem.title,
         body: `${problem.message ?? "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
         actions: ["check"],
       };
@@ -1003,14 +942,6 @@ export function chatTime(timestamp: string, now = Date.now()): string {
   if (new Date(now - 86_400_000).toDateString() === then.toDateString())
     return "Yesterday";
   return then.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-/** "12s", "2m 14s": how long the current step has run. */
-export function elapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  return seconds < 60
-    ? `${seconds}s`
-    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 /** KiB or MiB to one decimal, as the truncation note states sizes. */

@@ -1,4 +1,11 @@
-import { useId, useState, type ReactNode, type Ref } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   CornerUpRight,
   LoaderCircle,
@@ -21,16 +28,23 @@ function Request({
   count,
   onAnswer,
   onLeave,
+  focusTitle = false,
 }: {
   request: PendingRequest;
   position: number;
   count: number;
+  /** Take focus on the title when shown: the Chat was opened from its notification. */
+  focusTitle?: boolean;
   onAnswer: (optionId: string) => Promise<void>;
   /** ↓ from the last choice, or an answer: focus goes back to the message box. */
   onLeave: () => void;
 }) {
   const titleId = useId();
   const reasonId = useId();
+  const title = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusTitle) title.current?.focus();
+  }, [focusTitle]);
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState("");
   const question = request.request === "question";
@@ -75,15 +89,23 @@ function Request({
     >
       <div className="chat-request-head">
         <Icon size={16} aria-hidden />
-        <h3 id={titleId} className="chat-request-title">
+        {/* Focusable so a notification can bring the person straight to it. */}
+        <h3
+          ref={title}
+          id={titleId}
+          className="chat-request-title"
+          tabIndex={-1}
+        >
           {question ? (
             requestLabel(request)
           ) : (
             <>
               {request.title}
+              {/* The host words the title so the subject follows inline. */}
               {request.subject && (
                 <>
-                  : <code className="chat-mono">{request.subject}</code>
+                  {" "}
+                  <code className="chat-mono">{request.subject}</code>
                 </>
               )}
             </>
@@ -169,8 +191,15 @@ function QueueCard({
   const [sending, setSending] = useState(false);
   return (
     <li className="chat-queue-card">
-      <span id={textId} className="chat-queue-text">
-        {queued.text}
+      <span className="chat-queue-main">
+        <span id={textId} className="chat-queue-text">
+          {queued.text}
+        </span>
+        {queued.refused_steer && (
+          <span className="chat-queue-note">
+            Couldn't steer; queued · {queued.refused_steer}
+          </span>
+        )}
       </span>
       {sending ? (
         <span className="chat-queue-sending">Sending…</span>
@@ -225,8 +254,11 @@ export function ActivityDock({
   onEdit,
   onRemove,
   onResume,
+  focusRequest = false,
 }: {
   chat: ChatState;
+  /** The Chat was opened from a notification: the shown request's title takes focus. */
+  focusRequest?: boolean;
   /** Pending requests, oldest first; the first one is shown. */
   requests: PendingRequest[];
   /** The plan pill, when the turn has a plan. */
@@ -255,6 +287,7 @@ export function ActivityDock({
           count={requests.length}
           onAnswer={(optionId) => onAnswer(request.id, optionId)}
           onLeave={onLeave}
+          focusTitle={focusRequest}
         />
       )}
       {plan && <section className="chat-activity-slot">{plan}</section>}

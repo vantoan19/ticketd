@@ -13,14 +13,13 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 use ticketd_chat_host::{
-    BRIDGE_SIDECAR_NAME, ClaudeAdapter, CodexAdapter, ContextSource, HarnessAdapter, SendMode, cli,
-    context,
+    BRIDGE_SIDECAR_NAME, ClaudeAdapter, CodexAdapter, ContextSource, HarnessAdapter, SendMode,
+    SettingKey, cli, context,
 };
 use ticketd_core::ChatListFilter;
 
 use tauri_plugin_opener::OpenerExt;
 
-use crate::chat_attention::{Alert, Notifier, Row, badge_text};
 use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
@@ -28,6 +27,7 @@ use crate::chats::{
     LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
     close_action, quit_action, tray_tooltip,
 };
+use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
 const OVERVIEW_EVENT: &str = "chat-overview";
@@ -340,6 +340,16 @@ pub async fn chat_mark_read(bridge: State<'_, ChatBridge>, chat_id: String) -> O
     bridge.chats.mark_read(&chat_id).await
 }
 
+/// The person read the transcript through `item_id`; the New marker goes after it.
+#[tauri::command]
+pub fn chat_read_through(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    item_id: String,
+) -> Outcome<()> {
+    bridge.chats.read_through(&chat_id, &item_id)
+}
+
 #[tauri::command]
 pub async fn chat_mark_unread(bridge: State<'_, ChatBridge>, chat_id: String) -> Outcome<()> {
     bridge.chats.mark_unread(&chat_id).await
@@ -375,6 +385,15 @@ pub async fn chat_harnesses(bridge: State<'_, ChatBridge>) -> Outcome<Vec<Harnes
 #[tauri::command]
 pub async fn chat_folder_use(bridge: State<'_, ChatBridge>, path: String) -> Outcome<usize> {
     bridge.chats.folder_use(&path)
+}
+
+/// The Project whose checkout holds a folder New Chat may use.
+#[tauri::command]
+pub fn chat_folder_project(
+    bridge: State<'_, ChatBridge>,
+    path: String,
+) -> Outcome<Option<crate::chat_view::ProjectRef>> {
+    bridge.chats.folder_project(&path)
 }
 
 #[tauri::command]
@@ -463,17 +482,15 @@ pub async fn chat_send_queued_now(
 pub async fn chat_change_setting(
     bridge: State<'_, ChatBridge>,
     chat_id: String,
-    setting: String,
+    setting: SettingKey,
     value: String,
 ) -> Outcome<SettingChangeView> {
-    bridge
-        .chats
-        .change_setting(&chat_id, &setting, &value)
-        .await
+    bridge.chats.change_setting(&chat_id, setting, &value).await
 }
 
 /// Opens a file in the Chat's folder (a step's file, or one a turn changed) in the
-/// system's default app for its type, as attachments open. Fails as `gone` when the
+/// system's default app for its type, as attachments open. A program or script is
+/// shown in the file manager instead of being run. Fails as `gone` when the
 /// file is no longer there.
 #[tauri::command]
 pub fn chat_open_file(
@@ -483,6 +500,12 @@ pub fn chat_open_file(
     path: String,
 ) -> Outcome<()> {
     let path = bridge.chats.file_in_folder(&chat_id, &path)?;
+    if crate::chats::runs_when_opened(&path) {
+        return app
+            .opener()
+            .reveal_item_in_dir(&path)
+            .map_err(|error| open_failure(&path, &error.to_string()));
+    }
     app.opener()
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|error| open_failure(&path, &error.to_string()))
@@ -621,7 +644,7 @@ pub async fn chat_suggestions(
     bridge: State<'_, ChatBridge>,
     folder: Option<String>,
     linked: Vec<String>,
-) -> Outcome<Vec<crate::chat_suggestions::Suggestion>> {
+) -> Outcome<Vec<crate::chat_view::Suggestion>> {
     bridge.chats.suggestions(folder.as_deref(), &linked)
 }
 
@@ -800,7 +823,10 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
             tauri::async_runtime::spawn(async move {
                 chats.set_focused(focused).await;
                 if focused {
-                    let _ = chats.recheck_folders().await;
+                    crate::chats::log_failure(
+                        "check the Chats' folders",
+                        chats.recheck_folders().await,
+                    );
                 }
             });
         }

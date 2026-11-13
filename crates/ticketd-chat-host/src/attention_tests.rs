@@ -1,7 +1,9 @@
 use super::*;
-use ticketd_chat_host::LiveInteraction;
+use crate::LiveInteraction;
 
-use crate::chat_view::idle;
+fn idle() -> ChatLive {
+    ChatLive::idle()
+}
 
 fn chat(seen_through: i64) -> Chat {
     Chat {
@@ -18,6 +20,8 @@ fn chat(seen_through: i64) -> Chat {
         links: Vec::new(),
         active_turn: None,
         seen_through,
+        read_through: None,
+        marked_unread: false,
         muted: false,
         created_at: String::new(),
     }
@@ -74,7 +78,7 @@ fn a_finished_turn_is_done_until_seen_then_idle_in_words() {
 #[test]
 fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     let mut live = idle();
-    live.activity = ticketd_chat_host::Activity::WaitingForYou;
+    live.activity = crate::Activity::WaitingForYou;
     live.interactions.push(LiveInteraction {
         interaction_id: "i".to_owned(),
         kind: InteractionKind::Approval {
@@ -88,13 +92,13 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
         ..facts(&chat(0), &live, None)
     });
     assert_eq!(approval.line(), "Approval needed · npm install");
-    assert!(approval.rank.waits());
+    assert!(approval.rank.needs_you());
 
     let live = idle();
     let failed = turn(3, ChatTurnState::Failed);
     let unseen = status(&facts(&chat(2), &live, Some(&failed)));
     assert_eq!(unseen.line(), "Failed · Codex stopped with an error");
-    assert!(unseen.rank.waits());
+    assert!(unseen.rank.needs_you());
     let seen = status(&facts(&chat(3), &live, Some(&failed)));
     assert_eq!((seen.rank, seen.word.as_str()), (Rank::Idle, "Failed"));
 
@@ -102,6 +106,31 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     let interrupted = status(&facts(&chat(2), &live, Some(&lost)));
     assert_eq!(interrupted.line(), "Interrupted · Codex stopped mid-turn");
     assert_eq!(interrupted.rank, Rank::Failed);
+}
+
+#[test]
+fn marked_unread_is_the_blue_dot_on_the_seen_words_and_never_notifies() {
+    let live = idle();
+    let failed = turn(3, ChatTurnState::Failed);
+    let mut marked = chat(3);
+    marked.marked_unread = true;
+    let status = status(&facts(&marked, &live, Some(&failed)));
+    // Not Failed again: the words it had once seen, with the blue dot.
+    assert_eq!((status.rank, status.word.as_str()), (Rank::Idle, "Failed"));
+    assert!(status.unread());
+    let done = turn(3, ChatTurnState::Completed);
+    let status_done = super::status(&facts(&marked, &live, Some(&done)));
+    assert_eq!(status_done.rank, Rank::Idle);
+    assert!(status_done.unread());
+
+    let mut notifier = Notifier::default();
+    let quiet = HashSet::new();
+    let now = Instant::now();
+    let seen = super::status(&facts(&chat(3), &live, Some(&failed)));
+    notifier.update(&[row(&seen)], &quiet, true, now);
+    let alerts = notifier.update(&[row(&status)], &quiet, true, now);
+    let later = notifier.update(&[row(&status)], &quiet, true, now + QUIET_WINDOW * 2);
+    assert_eq!((alerts, later), (Vec::new(), Vec::new()));
 }
 
 #[test]
@@ -116,7 +145,7 @@ fn a_turn_the_person_stopped_is_idle_and_a_setup_step_is_words_only() {
     // Marked unread: the blue dot on its own words.
     assert!(unseen.unread());
     let setup = status(&Facts {
-        problem: Some(("not_installed", false)),
+        problem: Some((ChatProblemKind::NotInstalled, false)),
         ..facts(&chat(0), &live, None)
     });
     assert_eq!((setup.rank, setup.word.as_str()), (Rank::Idle, "Not sent"));

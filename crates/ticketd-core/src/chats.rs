@@ -108,6 +108,58 @@ pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Schema 71: Mark as unread is kept apart from an outcome the person has not seen,
+/// so a Chat they marked shows the blue dot on the words it had and never reads as
+/// a new Failed or Done that would notify.
+pub(crate) fn migrate_marked_unread(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'marked_unread')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN marked_unread INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 71;")?;
+    Ok(())
+}
+
+/// Schema 70: how far the person has read each Chat's transcript, so its New marker
+/// is placed the same way after ticketd restarts. Existing Chats start with nothing
+/// read through and place it from their unseen turn, as before.
+pub(crate) fn migrate_read_through(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'read_through')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN read_through TEXT;
+             ALTER TABLE chats ADD COLUMN read_through_position INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 70;")?;
+    Ok(())
+}
+
+/// Schema 69: an approval remembers the tool call it was asked for, so its decision
+/// is told on that step and not on whichever step came next.
+pub(crate) fn migrate_interaction_tool(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_interactions') WHERE name = 'tool_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch("ALTER TABLE chat_interactions ADD COLUMN tool_id TEXT;")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 69;")?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
@@ -170,6 +222,12 @@ pub struct Chat {
     /// The position of the last ended turn the person has seen: a turn that ended at a
     /// later position is unseen.
     pub seen_through: i64,
+    /// The last record of the transcript that was in view in a focused window: the
+    /// New marker goes after it. `None` until the person has read any.
+    pub read_through: Option<String>,
+    /// The person marked the Chat unread. It reads as unread until it is next seen,
+    /// without making its last outcome unseen.
+    pub marked_unread: bool,
     /// The person turned this Chat's notifications off.
     pub muted: bool,
     pub created_at: String,
@@ -447,6 +505,8 @@ pub struct ChatInteraction {
     pub reason: Option<String>,
     pub state: ChatInteractionState,
     pub response: Option<String>,
+    /// For an approval, the tool call it was asked for, when the harness said.
+    pub tool_id: Option<String>,
 }
 
 /// Changes listed for one turn at most; a turn that made more shows the first ones.
@@ -557,6 +617,8 @@ pub enum ChatObservation {
         prompt: String,
         /// Cut to `CHAT_NOTICE_LIMIT` characters when stored.
         reason: Option<String>,
+        /// For an approval, the tool call it is about, when the harness said.
+        tool_id: Option<String>,
     },
     /// `state` is `Answered` or `Expired`.
     InteractionResolved {
@@ -695,7 +757,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
         .query_row(
             "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
                     (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
-                    seen_through, muted
+                    seen_through, muted, read_through, marked_unread
              FROM chats WHERE id = ?1",
             [id],
             |row| {
@@ -713,6 +775,8 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
                     native_session_id: row.get(10)?,
                     seen_through: row.get(11)?,
                     muted: row.get(12)?,
+                    read_through: row.get(13)?,
+                    marked_unread: row.get(14)?,
                     links: Vec::new(),
                     active_turn: None,
                 })
@@ -832,7 +896,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Tool),
         "interaction" => connection
             .query_row(
-                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason FROM chat_interactions WHERE id = ?1",
+                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id FROM chat_interactions WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatInteraction {
@@ -845,6 +909,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         state: named(row, 6)?,
                         response: row.get(7)?,
                         reason: row.get(8)?,
+                        tool_id: row.get(9)?,
                     })
                 },
             )
@@ -1232,6 +1297,7 @@ fn observe(
             native_request_id,
             prompt,
             reason,
+            tool_id,
         } => {
             require_turn(connection, chat_id, &turn_id)?;
             if owned(connection, "chat_interactions", chat_id, &interaction_id)? {
@@ -1241,8 +1307,8 @@ fn observe(
             let reason: Option<String> =
                 reason.map(|reason| reason.chars().take(CHAT_NOTICE_LIMIT).collect());
             connection.execute(
-                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')",
-                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason],
+                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, tool_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9)",
+                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason, tool_id],
             )?;
             Ok(())
         }
@@ -1566,20 +1632,68 @@ impl Workspace {
     /// nothing, and logs nothing, when nothing ended unseen.
     pub fn mark_chat_seen(&mut self, id: &str) -> Result<Chat, Error> {
         let chat = self.chat(id)?;
-        match self.last_ended_turn(id)? {
-            Some(through) if through > chat.seen_through => self.set_seen_through(id, through),
-            _ => Ok(chat),
+        let through = self
+            .last_ended_turn(id)?
+            .filter(|through| *through > chat.seen_through);
+        if through.is_none() && !chat.marked_unread {
+            return Ok(chat);
         }
+        self.update_chat(id, |connection| {
+            connection.execute(
+                "UPDATE chats SET seen_through = MAX(seen_through, ?2), marked_unread = 0 WHERE id = ?1",
+                params![id, through.unwrap_or(0)],
+            )?;
+            Ok(())
+        })
     }
 
-    /// Mark as unread: the last ended turn reads as unseen again. A Chat with no ended
-    /// turn has nothing to mark.
+    /// Mark as unread: the Chat reads as unread until it is next seen. Its last outcome
+    /// is not made unseen, so nothing is announced again. A Chat with no ended turn
+    /// has nothing to mark.
     pub fn mark_chat_unread(&mut self, id: &str) -> Result<Chat, Error> {
         let chat = self.chat(id)?;
-        match self.last_ended_turn(id)? {
-            Some(through) if chat.seen_through >= through => self.set_seen_through(id, through - 1),
-            _ => Ok(chat),
+        if chat.marked_unread || self.last_ended_turn(id)?.is_none() {
+            return Ok(chat);
         }
+        self.update_chat(id, |connection| {
+            connection.execute("UPDATE chats SET marked_unread = 1 WHERE id = ?1", [id])?;
+            Ok(())
+        })
+    }
+
+    /// The person had the transcript in view through `record` (a message, turn, tool,
+    /// request, notice or session of this Chat). It only moves forward; a record that
+    /// is not this Chat's, or is earlier than what was read, changes nothing. No Chat
+    /// change is logged: reading is not a change the views have to follow.
+    pub fn mark_chat_read_through(&mut self, id: &str, record: &str) -> Result<Chat, Error> {
+        let chat = self.chat(id)?;
+        let position: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT position FROM (
+                     SELECT position, id, chat_id FROM chat_sessions
+                     UNION ALL SELECT position, id, chat_id FROM chat_messages
+                     UNION ALL SELECT position, id, chat_id FROM chat_turns
+                     UNION ALL SELECT position, id, chat_id FROM chat_tools
+                     UNION ALL SELECT position, id, chat_id FROM chat_interactions
+                     UNION ALL SELECT position, id, chat_id FROM chat_notices)
+                 WHERE chat_id = ?1 AND id = ?2",
+                params![id, record],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(position) = position else {
+            return Ok(chat);
+        };
+        let moved = self.connection.execute(
+            "UPDATE chats SET read_through = ?2, read_through_position = ?3
+             WHERE id = ?1 AND read_through_position < ?3",
+            params![id, record, position],
+        )?;
+        if moved == 0 {
+            return Ok(chat);
+        }
+        self.chat(id)
     }
 
     /// Mute stops the Chat's notifications and its share of the app-icon count.
@@ -1599,16 +1713,6 @@ impl Workspace {
             [id],
             |row| row.get(0),
         )?)
-    }
-
-    fn set_seen_through(&mut self, id: &str, through: i64) -> Result<Chat, Error> {
-        self.update_chat(id, |connection| {
-            connection.execute(
-                "UPDATE chats SET seen_through = ?2 WHERE id = ?1",
-                params![id, through],
-            )?;
-            Ok(())
-        })
     }
 
     pub fn set_chat_queue_paused(&mut self, id: &str, paused: bool) -> Result<Chat, Error> {

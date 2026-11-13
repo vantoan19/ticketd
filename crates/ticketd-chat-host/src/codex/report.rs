@@ -6,6 +6,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::diffstat::counts;
+use crate::wire::{capitalized, text};
+
 use crate::{
     AppliesFrom, ContextUsage, EventKind, FileChange, FileChangeKind, HarnessSettings,
     NativeItemId, NativeTurnId, PermissionKind, Plan, PlanStep, PlanStepStatus, Setting,
@@ -60,10 +63,6 @@ pub(super) struct Reports {
     pub overrides: Overrides,
 }
 
-fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str)
-}
-
 fn owned(value: &Value, key: &str) -> Option<String> {
     text(value, key).map(str::to_owned)
 }
@@ -74,32 +73,6 @@ fn marked_heading(part: &str) -> Option<String> {
     let end = rest.find("**")?;
     let heading = rest[..end].trim();
     (!heading.is_empty()).then(|| heading.to_owned())
-}
-
-/// Lines a change adds and removes, counted from the diff Codex sent with it. An
-/// added or deleted file's diff is its content.
-fn counts(kind: &FileChangeKind, diff: &str) -> (u32, u32) {
-    let lines = u32::try_from(diff.lines().count()).unwrap_or(u32::MAX);
-    match kind {
-        FileChangeKind::Added => (lines, 0),
-        FileChangeKind::Deleted => (0, lines),
-        FileChangeKind::Modified | FileChangeKind::Renamed { .. } => unified_counts(diff),
-    }
-}
-
-fn unified_counts(diff: &str) -> (u32, u32) {
-    let (mut added, mut removed) = (0u32, 0u32);
-    for line in diff.lines() {
-        if line.starts_with("+++") || line.starts_with("---") {
-            continue;
-        }
-        if line.starts_with('+') {
-            added = added.saturating_add(1);
-        } else if line.starts_with('-') {
-            removed = removed.saturating_add(1);
-        }
-    }
-    (added, removed)
 }
 
 /// Per-file counts from a multi-file unified diff, keyed by the path after `b/`.
@@ -141,13 +114,6 @@ fn per_file_counts(diff: &str) -> HashMap<String, (u32, u32)> {
 
 fn same_file(named: &str, diffed: &str) -> bool {
     named == diffed || named.ends_with(&format!("/{diffed}"))
-}
-
-fn capitalized(word: &str) -> String {
-    let mut chars = word.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(chars).collect()
-    })
 }
 
 /// A short rendering of a sandbox policy: its `type`.

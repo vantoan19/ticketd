@@ -9,6 +9,11 @@ export const PlanNavigation = createContext<((id: string) => void) | null>(
   null,
 );
 
+/** Opens a Project's tickets, by its id. */
+export const ProjectNavigation = createContext<((id: string) => void) | null>(
+  null,
+);
+
 export const ContextGraphNavigation = createContext<
   ((id: string) => void) | null
 >(null);

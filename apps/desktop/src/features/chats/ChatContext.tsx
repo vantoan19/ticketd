@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -27,7 +27,9 @@ import {
   type HarnessStatus,
 } from "@/features/chats/client";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { contextLabel, folderLabel, harnessWord } from "@/features/chats/model";
+import { useChatFeature } from "@/features/chats/use-chats";
+import { ProjectNavigation } from "@/features/documents/navigation";
+import { contextLabel, folderLabel } from "@/features/chats/model";
 
 /** The folder's Project icon, else the folder; a missing folder says so. */
 function FolderLead({ chat }: { chat: ChatState }) {
@@ -49,13 +51,18 @@ function HarnessSection({ chat }: { chat: ChatState }) {
         setStatus(found.find((item) => item.id === chat.harness.id) ?? null);
         setChecking(false);
       },
-      () => current && setChecking(false),
+      () => {
+        if (!current) return;
+        // A check that failed says nothing about the sign-in: not "Signed in".
+        setStatus(null);
+        setChecking(false);
+      },
     );
     return () => {
       current = false;
     };
   }, [client, chat.harness.id, checks]);
-  const word = status && harnessWord(status.status);
+  const word = status?.word;
   const found = [status?.version, status?.path].filter(Boolean);
   return (
     <section>
@@ -169,6 +176,8 @@ function FolderSection({ chat }: { chat: ChatState }) {
  */
 export function ChatContext({ chat }: { chat: ChatState }) {
   const { folder } = chat;
+  const { requestChat } = useChatFeature();
+  const openProject = useContext(ProjectNavigation);
   const others = folder.shared_with.length;
   return (
     <Popover>
@@ -210,20 +219,49 @@ export function ChatContext({ chat }: { chat: ChatState }) {
           {others > 0 && (
             <section>
               <h3>Other Chats here</h3>
-              {folder.shared_with.map((title, index) => (
-                <p key={index} className="chat-pop-line">
-                  <span className="chat-pop-truncate">{title}</span>
-                </p>
+              {folder.shared_with.map((other) => (
+                <Button
+                  key={other.id}
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start"
+                  onClick={() =>
+                    requestChat({
+                      kind: "open",
+                      chatId: other.id,
+                      retention: other.retention,
+                    })
+                  }
+                >
+                  <span className="chat-pop-truncate">{other.title}</span>
+                </Button>
               ))}
             </section>
           )}
           {folder.project && (
             <section>
               <h3>Project</h3>
-              <p className="chat-pop-line">
-                <ProjectIcon project={folder.project} />
-                <span>{folder.project.title}</span>
-              </p>
+              {openProject ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start"
+                  aria-label={`Open tickets of ${folder.project.title}`}
+                  onClick={() =>
+                    folder.project && openProject(folder.project.id)
+                  }
+                >
+                  <ProjectIcon project={folder.project} />
+                  <span className="chat-pop-truncate">
+                    {folder.project.title}
+                  </span>
+                </Button>
+              ) : (
+                <p className="chat-pop-line">
+                  <ProjectIcon project={folder.project} />
+                  <span>{folder.project.title}</span>
+                </p>
+              )}
             </section>
           )}
         </div>

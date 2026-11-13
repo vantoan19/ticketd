@@ -781,10 +781,17 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
         other => panic!("one tool update, got {other:?}"),
     };
     session.event("assistant_content", &tool_use("toolu_1"));
-    session.event(
-        "permission_request",
-        &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_1", "input": {"command": "rm -rf node_modules"}}),
-    );
+    let (asked, _) = session
+        .event(
+            "permission_request",
+            &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_1", "input": {"command": "rm -rf node_modules"}}),
+        )
+        .expect("modeled");
+    // The request names the tool use it is about, so its decision folds into that step.
+    assert!(asked.iter().any(|event| matches!(
+        event,
+        EventKind::InteractionRequested(request) if request.item == Some(crate::NativeItemId::new("toolu_1"))
+    )));
     let deny = InteractionAnswer::Approval(ApprovalDecision::Deny);
     session
         .answer(&NativeRequestId::new("req-1"), &deny)
@@ -799,6 +806,32 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
         .event("tool_result", &result("toolu_2"))
         .expect("modeled");
     assert_eq!(status(events), ToolStatus::Failed);
+}
+
+/// The lines an edit added and removed, from its result, stay with the tool so its
+/// step row can show them.
+#[test]
+fn an_edit_keeps_the_lines_its_result_counted() {
+    use super::session::Session;
+    let mut session = Session::default();
+    session.event("assistant_content", &json!({"blocks": [{"type": "tool_use", "id": "toolu_1", "name": "Edit", "input": {"file_path": "/w/a.ts"}}], "parent_tool_use_id": null}));
+    let (events, _) = session
+        .event(
+            "tool_result",
+            &json!({"tool_use_id": "toolu_1", "text": "ok", "outcome": {"kind": "file", "change": "update", "added_lines": 48, "removed_lines": 6}}),
+        )
+        .expect("modeled");
+    let kept = events.iter().find_map(|event| match event {
+        EventKind::ToolUpdated {
+            detail: Some(detail),
+            ..
+        } => serde_json::from_str::<serde_json::Value>(detail.payload()).ok(),
+        _ => None,
+    });
+    assert_eq!(
+        kept.map(|input| input["ticketd_lines"].clone()),
+        Some(json!({"added": 48, "removed": 6}))
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -865,6 +898,37 @@ async fn thinking_the_plan_files_and_context_carry_only_what_claude_code_reporte
 }
 
 #[test]
+fn the_slash_commands_claude_code_lists_reach_the_host() {
+    use super::session::Session;
+    let mut session = Session::default();
+    let init = json!({"models": [], "commands": [
+        {"name": "review", "description": "Review a pull request"},
+        {"name": "compact", "description": null},
+        {"name": "", "description": "nameless"},
+    ]});
+    let listed = session
+        .initialized(&init)
+        .into_iter()
+        .find_map(|event| match event {
+            EventKind::CommandsListed(commands) => Some(commands),
+            _ => None,
+        });
+    assert_eq!(
+        listed,
+        Some(vec![
+            crate::HarnessCommand {
+                name: "review".to_owned(),
+                description: Some("Review a pull request".to_owned()),
+            },
+            crate::HarnessCommand {
+                name: "compact".to_owned(),
+                description: None,
+            },
+        ])
+    );
+}
+
+#[test]
 fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
     use super::session::Session;
     let mut session = Session::default();
@@ -873,7 +937,10 @@ fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
         {"value": "haiku", "resolved_model": null, "display_name": "Haiku", "description": "", "effort_levels": []},
     ]});
     assert!(
-        session.initialized(&models).is_none(),
+        !session
+            .initialized(&models)
+            .iter()
+            .any(|event| matches!(event, EventKind::SettingsState(_))),
         "nothing in effect yet"
     );
     let info = |mode: &str| json!({"model": "claude-opus-test", "permission_mode": mode, "effort": "medium"});

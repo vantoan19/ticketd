@@ -161,7 +161,13 @@ function ChatRow({
 }
 
 type Open =
-  | { kind: "chat"; id: string; from?: string }
+  | {
+      kind: "chat";
+      id: string;
+      from?: string;
+      /** Opened from a system notification: its pending request takes focus. */
+      notified?: boolean;
+    }
   | { kind: "new"; start?: TicketStart; n?: number }
   | null;
 
@@ -204,7 +210,11 @@ export function ChatsView({
   if (openRequest && seenOpen !== openRequest.n) {
     setSeenOpen(openRequest.n);
     setScope(openRequest.request.retention);
-    setOpen({ kind: "chat", id: openRequest.request.chat_id });
+    setOpen({
+      kind: "chat",
+      id: openRequest.request.chat_id,
+      notified: true,
+    });
   }
   // A Chat asked for from a ticket: opened with a crumb back, or New Chat about it.
   const [seenChat, setSeenChat] = useState(chatRequest?.n ?? 0);
@@ -357,6 +367,7 @@ export function ChatsView({
         id={open.id}
         {...paneProps}
         {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
+        focusRequest={Boolean(open.notified)}
       />
     ) : (
       <section className="ticket-detail chat-pane" aria-label="No Chat open">

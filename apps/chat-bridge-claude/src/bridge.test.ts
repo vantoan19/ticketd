@@ -24,6 +24,8 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 /** What the next query's `initializationResult()` lists as models. */
 let initModels: unknown[] = [];
+/** What the next query's `initializationResult()` lists as slash commands. */
+let initCommands: unknown[] = [];
 
 /** A scripted stand-in for one SDK `query()` handle. No process is started. */
 class FakeQuery {
@@ -83,7 +85,11 @@ class FakeQuery {
   }
 
   async initializationResult() {
-    return { claude_code_version: "2.1.322", models: initModels };
+    return {
+      claude_code_version: "2.1.322",
+      models: initModels,
+      commands: initCommands,
+    };
   }
 
   settingsApplied: unknown[] = [];
@@ -982,6 +988,25 @@ describe("reasoning, files, context and settings", () => {
       },
       { kind: "task_created", task_id: "1", subject: "Write tests" },
       null,
+    ]);
+  });
+
+  it("reports the slash commands Claude Code lists at start", async () => {
+    initCommands = [
+      {
+        name: "review",
+        description: "Review a pull request",
+        argumentHint: "",
+      },
+      { name: "", description: "nameless" },
+      { name: "compact", description: "" },
+    ];
+    const h = harness();
+    await h.open();
+    initCommands = [];
+    expect(h.named("session_initialized")[0]?.commands).toEqual([
+      { name: "review", description: "Review a pull request" },
+      { name: "compact", description: null },
     ]);
   });
 

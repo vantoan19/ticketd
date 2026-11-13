@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -132,11 +132,14 @@ export function SelectionAddToChat() {
 
   const record = selected?.record ?? null;
   const recordKey = record ? `${record.kind}:${record.id}` : "";
+  // The selected record's Chats, read when the record changes (`recordKey`).
+  const linkedChats = useEffectEvent(() =>
+    record ? client.linkedTo(record) : Promise.resolve([]),
+  );
   useEffect(() => {
     if (!open) return;
     let current = true;
-    const linked = record ? client.linkedTo(record) : Promise.resolve([]);
-    Promise.all([linked, client.listChats("active")]).then(
+    Promise.all([linkedChats(), client.listChats("active")]).then(
       ([mine, recent]) => {
         if (!current) return;
         const rows = mine.map((chat) => ({ chat, linked: true }));
@@ -150,8 +153,6 @@ export function SelectionAddToChat() {
     return () => {
       current = false;
     };
-    // `recordKey` names the record.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, open, recordKey]);
 
   if (!enabled || !selected)

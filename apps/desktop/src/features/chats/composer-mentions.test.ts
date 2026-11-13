@@ -4,6 +4,7 @@ import {
   linksOf,
   reconcile,
   removeToken,
+  sentParts,
   stepOver,
   triggerAt,
   type Token,
@@ -102,5 +103,32 @@ describe("tokens", () => {
 
   it("comes back when undo restores its text where it was", () => {
     expect(reconcile("see  x", "see T-KQ12 x", [], [token])).toEqual([token]);
+  });
+});
+
+describe("sentParts", () => {
+  it("finds the linked records a sent message mentions, and the quotes it starts with", () => {
+    const doc = { kind: "document" as const, id: "d1", title: "Login spec" };
+    const sent = sentParts(
+      "> From T-KQ9 · Description:\n> Limit by IP\n>\n> and by user\n\nSee T-KQ12 and Login spec, not T-KQ1.",
+      [ticket, doc],
+    );
+    expect(sent.quotes).toEqual([
+      { source: "T-KQ9 · Description", text: "Limit by IP\n\nand by user" },
+    ]);
+    expect(sent.parts).toEqual([
+      { text: "See " },
+      { text: "T-KQ12", record: ticket },
+      { text: " and " },
+      { text: "Login spec", record: doc },
+      { text: ", not T-KQ1." },
+    ]);
+  });
+
+  it("leaves a message that only looks like a quote as it is", () => {
+    expect(sentParts("> just a note", []).quotes).toEqual([]);
+    expect(sentParts("> just a note", []).parts).toEqual([
+      { text: "> just a note" },
+    ]);
   });
 });

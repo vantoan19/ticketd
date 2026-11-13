@@ -1,3 +1,4 @@
+import type { LinkedRecord } from "@/features/chats/client";
 import { createContext } from "react";
 
 /**
@@ -11,6 +12,12 @@ export type ChatFiles = {
   open?: (path: string) => Promise<void>;
 };
 export const ChatFilesContext = createContext<ChatFiles>({ folder: "" });
+
+/** The Chat's linked records, so a sent message's mentions stay links, and which are in the trash. */
+export const SentLinksContext = createContext<{
+  links: LinkedRecord[];
+  trashed: string[];
+}>({ links: [], trashed: [] });
 
 /**
  * The name to show for each path: its last part, or its folder and last part when

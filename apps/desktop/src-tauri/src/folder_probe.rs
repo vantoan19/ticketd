@@ -82,15 +82,21 @@ fn mime(path: &Path) -> Option<&'static str> {
     })
 }
 
-fn read_icon(path: &Path) -> Option<Favicon> {
+/// The icon at `path` when it resolves, through any links, to a file inside `root`
+/// (the folder, already canonical): a link out of the folder is never followed.
+fn read_icon(root: &Path, path: &Path) -> Option<Favicon> {
     let mime = mime(path)?;
-    let metadata = std::fs::metadata(path).ok()?;
+    let path = path.canonicalize().ok()?;
+    if !path.starts_with(root) {
+        return None;
+    }
+    let metadata = std::fs::metadata(&path).ok()?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_ICON_BYTES {
         return None;
     }
     Some(Favicon {
         mime,
-        bytes: std::fs::read(path).ok()?,
+        bytes: std::fs::read(&path).ok()?,
     })
 }
 
@@ -134,8 +140,10 @@ fn icon_links(html: &str) -> Vec<String> {
     found
 }
 
-/// A link's path inside the folder, or `None` for one that leaves it or is not a file.
-fn inside(href: &str) -> Option<PathBuf> {
+/// The relative path an icon link names, or `None` for one that names another site,
+/// inline data, or a place above the page as written. Where it leads once links are
+/// followed is checked when the icon is read.
+fn link_target(href: &str) -> Option<PathBuf> {
     if href.contains("://") || href.starts_with("data:") || href.starts_with("//") {
         return None;
     }
@@ -150,9 +158,10 @@ fn inside(href: &str) -> Option<PathBuf> {
 /// The favicon a Project's folder ships, looked for where web projects keep one,
 /// then as the icon an `index.html` links to.
 pub fn favicon(folder: &Path) -> Option<Favicon> {
+    let root = folder.canonicalize().ok()?;
     for dir in ICON_FOLDERS {
         for name in ICON_NAMES {
-            if let Some(icon) = read_icon(&folder.join(dir).join(name)) {
+            if let Some(icon) = read_icon(&root, &folder.join(dir).join(name)) {
                 return Some(icon);
             }
         }
@@ -163,7 +172,7 @@ pub fn favicon(folder: &Path) -> Option<Favicon> {
             continue;
         };
         for href in icon_links(&html) {
-            let Some(relative) = inside(&href) else {
+            let Some(relative) = link_target(&href) else {
                 continue;
             };
             // "/favicon.svg" is served from the web root, which is the page's folder
@@ -172,7 +181,7 @@ pub fn favicon(folder: &Path) -> Option<Favicon> {
                 folder.join(dir).join(&relative),
                 folder.join("public").join(&relative),
             ];
-            if let Some(icon) = candidates.iter().find_map(|path| read_icon(path)) {
+            if let Some(icon) = candidates.iter().find_map(|path| read_icon(&root, path)) {
                 return Some(icon);
             }
         }
@@ -262,6 +271,31 @@ mod tests {
         assert_eq!(
             favicon(&project).map(|icon| (icon.mime, icon.bytes)),
             Some(("image/svg+xml", b"<svg>mark</svg>".to_vec()))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_favicon_linked_from_outside_the_folder_is_not_read() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = root.path().join("secret.svg");
+        write(&outside, "<svg>secret</svg>");
+        let project = root.path().join("site");
+        std::fs::create_dir_all(project.join("public")).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("public/favicon.svg")).unwrap();
+        assert_eq!(favicon(&project), None);
+
+        // A link that stays inside the folder still counts.
+        write(&project.join("brand/mark.svg"), "<svg>mark</svg>");
+        std::fs::remove_file(project.join("public/favicon.svg")).unwrap();
+        std::os::unix::fs::symlink(
+            project.join("brand/mark.svg"),
+            project.join("public/favicon.svg"),
+        )
+        .unwrap();
+        assert_eq!(
+            favicon(&project).map(|icon| icon.bytes),
+            Some(b"<svg>mark</svg>".to_vec())
         );
     }
 }

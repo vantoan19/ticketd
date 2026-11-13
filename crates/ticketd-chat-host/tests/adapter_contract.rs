@@ -218,6 +218,7 @@ async fn a_live_request_accepts_one_answer_from_its_own_generation() {
     fake.emit(EventKind::InteractionRequested(InteractionRequest {
         request: request.clone(),
         turn: None,
+        item: None,
         kind: InteractionKind::Approval {
             description: "Run cargo test".to_owned(),
             reason: None,

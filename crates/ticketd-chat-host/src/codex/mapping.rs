@@ -657,6 +657,10 @@ impl Session {
             },
             _ => return refuse(id, method, params),
         };
+        // A command or file change approval names the item it would run or apply.
+        let item = matches!(kind, RequestKind::Approval { .. })
+            .then(|| text(params, &["itemId"]).map(NativeItemId::new))
+            .flatten();
         let turn = text(params, &["turnId"]);
         self.requests.insert(
             request.clone(),
@@ -670,6 +674,7 @@ impl Session {
         let requested = EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: turn.map(NativeTurnId::new),
+            item,
             kind: shown,
             detail: Some(detail(method, params)),
         });

@@ -40,9 +40,17 @@ export const currentOf = (setting: HarnessSetting) =>
   setting.options.find((option) => option.is_default)?.id ??
   null;
 
-/** A change is on its way: held for the turn's end, or sent and not answered. */
-export const changing = (setting: HarnessSetting | null | undefined) =>
-  setting?.change?.state === "held" || setting?.change?.state === "sent";
+/** A change was sent and the harness has not answered it yet: the spinner. */
+export const changePending = (setting: HarnessSetting | null | undefined) =>
+  setting?.change?.state === "sent";
+
+/** A change held for the turn's end: the trigger shows it, from the next message. */
+export const changeHeld = (setting: HarnessSetting | null | undefined) =>
+  setting?.change?.state === "held";
+
+/** The value a trigger shows: a held change's, else the one in effect. */
+export const shownOf = (setting: HarnessSetting) =>
+  changeHeld(setting) ? (setting.change?.value ?? null) : currentOf(setting);
 
 /** A change the person asked for in this view, and what the host first said. */
 export type AskedChange = { setting: Setting; outcome: SettingChange };

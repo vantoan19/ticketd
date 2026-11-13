@@ -16,6 +16,7 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
+import { ProjectNavigation } from "@/features/documents/navigation";
 import { drafts } from "@/features/chats/drafts";
 import {
   chatState,
@@ -49,7 +50,7 @@ const approval: TranscriptItem = {
   at,
   kind: "request",
   request: "approval",
-  title: "Codex wants to run a command",
+  title: "Codex wants to run",
   subject: "npm install @pagerduty/pdjs",
   options: [
     { id: "once", label: "Allow once" },
@@ -60,7 +61,11 @@ const approval: TranscriptItem = {
   state: "pending",
 };
 
-async function open(chats: MockChat[], title?: string) {
+async function open(
+  chats: MockChat[],
+  title?: string,
+  openProject: (id: string) => void = () => {},
+) {
   const client = createMockChatClient({
     enabled: true,
     chats,
@@ -77,11 +82,13 @@ async function open(chats: MockChat[], title?: string) {
     ],
   });
   render(
-    <ChatClientContext value={client}>
-      <ChatProvider>
-        <ChatsView />
-      </ChatProvider>
-    </ChatClientContext>,
+    <ProjectNavigation.Provider value={openProject}>
+      <ChatClientContext value={client}>
+        <ChatProvider>
+          <ChatsView />
+        </ChatProvider>
+      </ChatClientContext>
+    </ProjectNavigation.Provider>,
   );
   const first = chats[0];
   if (first) {
@@ -201,6 +208,27 @@ test("a harness that cannot be steered reads Queue, with no caret", async () => 
   noButton("Send now");
 });
 
+test("a steer the harness refused is a queue card that says so and why", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      queue: [
+        {
+          id: "q1",
+          text: "also cover the admin login",
+          refused_steer: "a tool is still running",
+        },
+      ],
+    }),
+  );
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(
+    within(queue).getByText("Couldn't steer; queued · a tool is still running"),
+  ).toBeTruthy();
+});
+
 test("Esc stops the turn and pauses the queue, which waits for Resume", async () => {
   const client = await open(
     one({
@@ -290,7 +318,7 @@ test("a pending approval waits in the dock with its command inline, never in the
     ]),
   );
   const request = screen.getByRole("group", {
-    name: "Codex wants to run a command: npm install @pagerduty/pdjs",
+    name: "Codex wants to run npm install @pagerduty/pdjs",
   });
   expect(within(request).getByText("npm install @pagerduty/pdjs").tagName).toBe(
     "CODE",
@@ -306,17 +334,16 @@ test("a pending approval waits in the dock with its command inline, never in the
   expect(button("Steer")).toBeTruthy();
 });
 
-test("an approval is answered from the dock and becomes a receipt without buttons", async () => {
+test("an approval is answered from the dock and leaves no receipt row of its own", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
   );
   fireEvent.click(button("Allow once"));
-  // No step followed the approval, so it keeps a one-line receipt.
-  const receipt = await screen.findByText(
-    "Allowed · npm install @pagerduty/pdjs",
+  // Its decision is told on the step it was asked for, never as a receipt.
+  await waitFor(() =>
+    expect(screen.queryByRole("group", { name: /wants to run/ })).toBeNull(),
   );
-  expect(receipt.closest("button")).toBeNull();
-  expect(screen.queryByRole("group", { name: /wants to run/ })).toBeNull();
+  expect(screen.queryByText(/Allowed ·/)).toBeNull();
   // Answering returns focus to the message box.
   expect(document.activeElement).toBe(composer("Steer Codex"));
 });
@@ -773,6 +800,17 @@ test("a row's actions mark it unread or read and mute it, and say a refusal", as
   expect(await screen.findByText("The workspace is read-only.")).toBeTruthy();
 });
 
+test("a clicked notification about a request focuses that request's title", async () => {
+  const client = await open([
+    ...one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
+    ...one({ id: "c2", title: "Other" }),
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: /^Other/ }));
+  act(() => client.requestOpen({ chat_id: "c1", retention: "active" }));
+  const title = await screen.findByRole("heading", { name: /wants to run/ });
+  await waitFor(() => expect(document.activeElement).toBe(title));
+});
+
 test("a clicked notification opens its Chat under its own list", async () => {
   const client = await open([]);
   await act(async () => {
@@ -1012,12 +1050,21 @@ test("an answered approval folds into its step row, which says the decision", as
         ...approval,
         state: "answered",
         outcome: "You allowed this for this session",
+        folded: true,
       }),
       inTurn({
         id: "s1",
         at,
         kind: "steps",
-        steps: [{ ...failedRun, state: "done", output: null, truncated: null }],
+        steps: [
+          {
+            ...failedRun,
+            state: "done",
+            output: null,
+            truncated: null,
+            decision: "You allowed this for this session",
+          },
+        ],
       }),
     ]),
   );
@@ -1056,6 +1103,84 @@ test("what the agent changed in ticketd is a step row, verb first", async () => 
   expect(body.textContent).toContain("Moved T-12 to In review");
   expect(body.textContent).toContain("Posted an update on T-12");
   expect(within(body).getAllByText("T-12")[0]?.dataset.slot).toBe("reference");
+});
+
+test("/ at the start of a message lists the harness's own commands", async () => {
+  await open(
+    one({
+      id: "cmds",
+      title: "Limiter",
+      commands: [{ name: "review", description: "Review a pull request" }],
+    }),
+  );
+  type("/rev");
+  expect(await screen.findByText("Codex commands")).toBeTruthy();
+  expect(screen.getByRole("option", { name: /review/ })).toBeTruthy();
+});
+
+test("a sent message keeps its mentions as links and its quotes as quotes", async () => {
+  const t14 = {
+    kind: "ticket" as const,
+    id: "t14",
+    reference: "T-14",
+    title: "Show the remaining wait time",
+    status: "Todo",
+  };
+  const doc = { kind: "document" as const, id: "d1", title: "Login spec" };
+  await open(
+    one(
+      {
+        id: "sent",
+        title: "Limiter",
+        links: [t14, doc],
+        trashed_links: ["d1"],
+      },
+      [
+        {
+          ...youSaid,
+          text: "> From T-12 · Description:\n> keep it short\n\nLook at T-14 and Login spec",
+        },
+      ],
+    ),
+  );
+  const message = document.querySelector<HTMLElement>(".chat-you")!;
+  expect(within(message).getByRole("button", { name: "T-14" })).toBeTruthy();
+  expect(message.textContent).toContain("Login spec (in Trash)");
+  expect(
+    within(message).queryByRole("button", { name: "Login spec" }),
+  ).toBeNull();
+  const quote = message.querySelector("blockquote")!;
+  expect(quote.textContent).toBe("T-12 · Descriptionkeep it short");
+  expect(message.textContent).not.toContain("> From");
+});
+
+test("a receipt names a trashed or deleted record instead of linking it", async () => {
+  await open(
+    one({ id: "gone", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          {
+            kind: "status",
+            reference: "T-12",
+            title: "Rate-limit failed login attempts",
+            from: "In progress",
+            to: "In review",
+          },
+          { kind: "update", reference: "T-13", excerpt: "Limiter is in" },
+        ],
+        gone: ["trashed", "deleted"],
+      }),
+    ]),
+  );
+  const row = document.querySelector<HTMLElement>(".chat-records")!;
+  expect(row.textContent).toContain("Moved T-12 (in Trash) to In review");
+  expect(row.textContent).toContain("Posted an update on T-13 (deleted)");
+  expect(within(row).queryByRole("button", { name: "T-12" })).toBeNull();
 });
 
 test("a finished turn's record changes are one receipt row under it, whose more opens the fold", async () => {
@@ -1127,11 +1252,26 @@ test("scrolling up stops following; Jump to latest resumes it", async () => {
   expect(jump.hasAttribute("inert")).toBe(true);
 });
 
+test("opening a row at the bottom keeps following; only scrolling up stops it", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn({ id: "s1", at, kind: "steps", steps: [failedRun] }),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  const jump = document.querySelector<HTMLElement>(".chat-jump")!;
+  fireEvent.click(button("Worked for 2m 13s · 1 failed"));
+  expect(jump.hasAttribute("inert")).toBe(true);
+});
+
 test("what arrived while the Chat was not open is marked New, never your own message", async () => {
-  // Everything in a window of this height counts as seen.
+  // Everything in a window of this height counts as seen, and the window has focus.
   const height = vi
     .spyOn(HTMLElement.prototype, "clientHeight", "get")
     .mockReturnValue(600);
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
   try {
     const client = await open(
       one({ id: "c1", title: "Limiter" }, [youSaid, inTurn(reply("r1", "Hi"))]),
@@ -1162,6 +1302,37 @@ test("what arrived while the Chat was not open is marked New, never your own mes
     );
   } finally {
     height.mockRestore();
+    focused.mockRestore();
+  }
+});
+
+test("the New marker follows the read-through position the host kept, also after a restart", async () => {
+  // A Chat read through r1 in an earlier run of ticketd; this session never saw it.
+  const client = await open(
+    one({ id: "c1", title: "Limiter", read_through: "r1" }, [
+      youSaid,
+      inTurn(reply("r1", "Hi")),
+      reply("r2", "Done for IPs too."),
+    ]),
+  );
+  const marker = await screen.findByRole("separator", {
+    name: "New since you left",
+  });
+  const reply2 = conversation().getByText("Done for IPs too.");
+  expect(
+    marker.compareDocumentPosition(reply2) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  // What comes into view in a focused window is kept with the Chat.
+  const height = vi
+    .spyOn(HTMLElement.prototype, "clientHeight", "get")
+    .mockReturnValue(600);
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  try {
+    fireEvent.scroll(document.querySelector<HTMLElement>(".chat-scroll")!);
+    await waitFor(() => expect(client.readThroughs.at(-1)).toBe("r2"));
+  } finally {
+    height.mockRestore();
+    focused.mockRestore();
   }
 });
 
@@ -1224,6 +1395,52 @@ test("records are linked by title and unlinked from their chip", async () => {
   );
 });
 
+test("a recheck that fails no longer says Signed in", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  fireEvent.click(button(/^Folder web-app/));
+  const popover = await screen.findByRole("dialog", { name: "Chat context" });
+  expect(await within(popover).findByText("Signed in")).toBeTruthy();
+  client.harnesses = () => Promise.reject(new Error("probe failed"));
+  fireEvent.click(within(popover).getByRole("button", { name: "Check again" }));
+  expect(await within(popover).findByText("Couldn't check")).toBeTruthy();
+  expect(within(popover).queryByText("Signed in")).toBeNull();
+});
+
+test("the context popover opens the other Chats here and the Project's tickets", async () => {
+  const openProject = vi.fn();
+  const client = await open(
+    [
+      ...one({
+        id: "c1",
+        title: "Limiter",
+        folder: {
+          shared_with: [
+            { id: "c2", title: "Alert on-call", retention: "active" },
+          ],
+          project: { id: "p1", title: "Web App" },
+        },
+      }),
+      ...one({ id: "c2", title: "Alert on-call" }),
+    ],
+    undefined,
+    openProject,
+  );
+  void client;
+  fireEvent.click(button(/^Folder web-app/));
+  let popover = await screen.findByRole("dialog", { name: "Chat context" });
+  fireEvent.click(
+    within(popover).getByRole("button", { name: "Open tickets of Web App" }),
+  );
+  expect(openProject).toHaveBeenCalledWith("p1");
+  popover = await screen.findByRole("dialog", { name: "Chat context" });
+  fireEvent.click(
+    within(popover).getByRole("button", { name: "Alert on-call" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Alert on-call" }),
+  ).toBeTruthy();
+});
+
 test("the context popover holds the harness, folder, branch and the other Chats sharing the folder", async () => {
   const client = await open(
     one({
@@ -1231,7 +1448,9 @@ test("the context popover holds the harness, folder, branch and the other Chats 
       title: "Limiter",
       harness: { permissions: "Uses your Codex settings." },
       folder: {
-        shared_with: ["Alert on-call"],
+        shared_with: [
+          { id: "c9", title: "Alert on-call", retention: "active" },
+        ],
         branch: { kind: "branch", name: "rate-limit-logins" },
         project: { id: "p1", title: "Web App" },
       },
@@ -1281,9 +1500,9 @@ test("while its session opens the working line says so and counts, then reads as
   const client = await open(
     one({ id: "c1", title: "Limiter", activity: "working", opening: "resume" }),
   );
-  expect(working()).toBe("Resuming the Codex session… · 0s");
+  expect(working()).toBe("Resuming the Codex session…");
   act(() => client.patch("c1", { opening: "start" }));
-  expect(working()).toBe("Starting Codex… · 0s");
+  expect(working()).toBe("Starting Codex…");
   act(() =>
     client.patch("c1", {
       opening: null,
@@ -1617,6 +1836,36 @@ test("the composer's two triggers change model, effort and permissions; a refusa
   await waitFor(() =>
     expect(asked).toEqual(["model=sonnet", "permission=ask"]),
   );
+});
+
+test("a change held for the turn's end shows the new value, From your next message", async () => {
+  await open(
+    one({
+      id: "held",
+      title: "Limiter",
+      activity: "working",
+      harness: { id: "codex", name: "Codex" },
+      settings: {
+        model: {
+          current: "opus",
+          options: [
+            option("opus", "Opus 5.5", true),
+            option("sonnet", "Sonnet 5"),
+          ],
+          changeable: true,
+          applies_from: "next_request",
+          change: { value: "sonnet", state: "held" },
+        },
+      },
+    }),
+  );
+  const trigger = button("Model Sonnet 5");
+  expect(trigger.textContent).toBe("Sonnet 5");
+  expect(trigger.querySelector(".chat-spin")).toBeNull();
+  expect(screen.getByText("From your next message")).toBeTruthy();
+  openMenu("Model Sonnet 5");
+  expect(await screen.findAllByText("From your next message")).toHaveLength(2);
+  expect(screen.queryByText("From the next request")).toBeNull();
 });
 
 test("a harness that has not reported its settings draws no triggers", async () => {

@@ -11,9 +11,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
-    ContextUsage, Harness, HarnessAdapter, HarnessSettings, Inspection, InteractionAnswer,
-    InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome, SteeringBehavior,
-    Subscription,
+    ContextUsage, Harness, HarnessAdapter, HarnessCommand, HarnessSettings, Inspection,
+    InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome,
+    SteeringBehavior, Subscription,
 };
 
 /// Provisional bounds, to be measured in #267.
@@ -202,6 +202,28 @@ pub struct ChatLive {
     /// The live session's settings, when its harness reported them. Boxed: it is
     /// large and most updates do not carry it changed.
     pub settings: Option<Box<LiveSettings>>,
+    /// The slash commands the live session's harness lists; empty when it lists none.
+    pub commands: Vec<HarnessCommand>,
+}
+
+impl ChatLive {
+    /// A Chat with nothing running and nothing asked.
+    pub fn idle() -> Self {
+        Self {
+            activity: Activity::Idle,
+            running: false,
+            opening: None,
+            steering: None,
+            delivery_unconfirmed: false,
+            sending: Vec::new(),
+            interactions: Vec::new(),
+            stop: None,
+            problem: None,
+            context: None,
+            settings: None,
+            commands: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

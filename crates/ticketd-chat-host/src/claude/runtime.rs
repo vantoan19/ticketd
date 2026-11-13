@@ -485,7 +485,7 @@ impl Connection {
                     |_, kind| matches!(kind, Kind::Open),
                     Reply::Event(event.clone()),
                 );
-                return events(state.session.initialized(&event).into_iter().collect());
+                return events(state.session.initialized(&event));
             }
             "input_handed_to_sdk" => {
                 let submission = event["submission_id"].as_str().unwrap_or_default();

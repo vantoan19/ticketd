@@ -248,6 +248,36 @@ test("a suggestion fills the box and links its record, never sends, and undoes a
   expect(await screen.findByRole("region", { name: "Suggested" })).toBeTruthy();
 });
 
+test("New Chat shows the harness notice instead of the suggestions, never both", async () => {
+  await show([], {
+    suggestions,
+    harnesses: [
+      { id: "claude-code", name: "Claude Code", status: "not_signed_in" },
+      { id: "codex", name: "Codex", status: "not_signed_in" },
+    ],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  expect(await screen.findByText("Claude Code isn't signed in")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Suggested" })).toBeNull();
+});
+
+test("New Chat's folder button shows the folder's Project icon", async () => {
+  const client = await show([]);
+  client.folderProjects.set("/work/web-app", { id: "p1", title: "Web App" });
+  client.nextFolder = "/work/web-app";
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Folder: / }), {
+    key: "Enter",
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Choose a folder…" }),
+  );
+  const folder = await screen.findByRole("button", {
+    name: "Folder: /work/web-app",
+  });
+  await waitFor(() => expect(folder.textContent).toBe("Wweb-app"));
+});
+
 test("suggestions that fail to load say so and try again", async () => {
   const client = await show([], { suggestions });
   const real = client.suggestions;

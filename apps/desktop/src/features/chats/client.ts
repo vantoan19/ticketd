@@ -47,6 +47,10 @@ export type ProblemKind = z.infer<typeof problemKindSchema>;
 /** Why a Chat cannot continue as it is, with what the person needs to recover. */
 export const problemSchema = z.object({
   kind: problemKindSchema,
+  /** The notice's title, worded by the host in the harness's name. */
+  title: z.string(),
+  /** Observed now, it keeps the Chat from taking a new message (the host decides). */
+  blocks_send: z.boolean(),
   /** The host's plain explanation, for kinds whose wording depends on what was observed. */
   message: z.string().nullish(),
   /** A terminal command to copy, such as the harness's own sign-in. */
@@ -75,6 +79,10 @@ export const linkedRecordSchema = z.discriminatedUnion("kind", [
 ]);
 export type LinkedRecord = z.infer<typeof linkedRecordSchema>;
 
+/** A record that is no longer there to open: named, not linked. */
+export const goneSchema = z.enum(["trashed", "deleted"]);
+export type Gone = z.infer<typeof goneSchema>;
+
 export const recordChangeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
@@ -82,16 +90,19 @@ export const recordChangeSchema = z.discriminatedUnion("kind", [
     title: z.string(),
     from: z.string(),
     to: z.string(),
+    gone: goneSchema.nullish(),
   }),
   z.object({
     kind: z.literal("update"),
     reference: z.string(),
     excerpt: z.string(),
+    gone: goneSchema.nullish(),
   }),
   z.object({
     kind: z.literal("document"),
     document_id: z.string(),
     title: z.string(),
+    gone: goneSchema.nullish(),
   }),
 ]);
 export type RecordChange = z.infer<typeof recordChangeSchema>;
@@ -182,6 +193,12 @@ export const harnessStatusSchema = z.object({
     "sign_in_unknown",
     "unknown",
   ]),
+  /** Chats can be started on it (the host decides). */
+  usable: z.boolean(),
+  /** The word shown beside its name when it isn't ready; `dot` when it needs the person. */
+  word: z.object({ word: z.string(), dot: z.boolean() }).nullish(),
+  /** What New Chat's notice tells when it isn't ready. */
+  problem: problemSchema.nullish(),
   /** What was found or why the probe is uncertain: executable, version, requirement. */
   message: z.string().nullish(),
   command: z.string().nullish(),
@@ -245,6 +262,11 @@ const stepSchema = z.object({
     .nullish(),
   /** When the host recorded the call, for a running step's clock. */
   started_at: z.string().nullish(),
+  /** Lines the step added and removed, when the harness said: its diffstat. */
+  added_lines: z.number().int().nonnegative().nullish(),
+  removed_lines: z.number().int().nonnegative().nullish(),
+  /** The decision on the approval the harness asked for this step ("You declined this"). */
+  decision: z.string().nullish(),
 });
 export type Step = z.infer<typeof stepSchema>;
 
@@ -311,6 +333,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     ...item,
     kind: z.literal("records"),
     changes: z.array(recordChangeSchema),
+    /** For each change, whether its record is now trashed or deleted. */
+    gone: z.array(goneSchema.nullable()).nullish(),
   }),
   /** When a turn started and ended, and how. It has no row of its own. */
   z.object({
@@ -346,6 +370,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** For an answered question, the answer as given. */
     answer: z.string().nullish(),
     resolved_at: z.string().nullish(),
+    /** An answered approval: the host tells its decision on the step it was asked for, so it has no row. */
+    folded: z.boolean().nullish(),
   }),
   z.object({
     ...item,
@@ -394,6 +420,11 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type TranscriptItem = z.infer<typeof transcriptItemSchema>;
+/** The transcript item of one kind: `ItemOf<"step">`. */
+export type ItemOf<K extends TranscriptItem["kind"]> = Extract<
+  TranscriptItem,
+  { kind: K }
+>;
 
 const contextSchema = z.object({
   /** Tokens in use. */
@@ -465,7 +496,13 @@ export const chatStateSchema = z.object({
     managed: z.boolean(),
     missing: z.boolean(),
     /** Titles of other Chats running in the same folder. */
-    shared_with: z.array(z.string()),
+    shared_with: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        retention: retentionSchema,
+      }),
+    ),
     /** The git branch checked out there, read by the host; absent outside a repository. */
     branch: z
       .object({
@@ -493,7 +530,14 @@ export const chatStateSchema = z.object({
   /** Stop was asked for and the turn has not ended; Stop waits. Not set once unconfirmed. */
   stopping: z.boolean().default(false),
   links: z.array(linkedRecordSchema),
-  queue: z.array(z.object({ id: z.string(), text: z.string() })),
+  queue: z.array(
+    z.object({
+      id: z.string(),
+      text: z.string(),
+      /** Sent to steer, and the harness did not take it: the host's reason. */
+      refused_steer: z.string().nullish(),
+    }),
+  ),
   queue_paused: z.boolean(),
   /** The live session's context window; absent until the harness reports it. */
   context: contextSchema.nullish(),
@@ -507,6 +551,16 @@ export const chatStateSchema = z.object({
     .nullish(),
   unseen: z.boolean(),
   muted: z.boolean(),
+  /** There is something to type into: not in trash, and the folder and session are there. */
+  has_composer: z.boolean(),
+  /** Linked records now in the trash: a mention of one reads "(in Trash)". */
+  trashed_links: z.array(z.string()).default([]),
+  /** The slash commands the live session's harness lists; `/` opens only with some. */
+  commands: z
+    .array(z.object({ name: z.string(), description: z.string().nullish() }))
+    .default([]),
+  /** The last transcript item the person had in view, kept by the host: the New marker goes after it. */
+  read_through: z.string().nullish(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
@@ -627,6 +681,8 @@ export interface ChatClient {
   pickFolder(): Promise<string | null>;
   /** How many Chats already run in the folder. */
   folderUse(path: string): Promise<number>;
+  /** The Project whose checkout holds `path`, for New Chat's folder button. */
+  folderProject(path: string): Promise<ProjectRef | null>;
   /**
    * `folder: null` asks for a managed folder. `command_id` is a UUID made once
    * per request and repeated only when the very same request is sent again,
@@ -714,6 +770,8 @@ export interface ChatClient {
   markRead(id: string): Promise<void>;
   /** The last turn reads as unseen until the Chat is next opened. */
   markUnread(id: string): Promise<void>;
+  /** The person had the transcript in view through `itemId`; kept with the Chat. */
+  readThrough(id: string, itemId: string): Promise<void>;
   setMuted(id: string, muted: boolean): Promise<void>;
   /** Settings > Chat > Notify me about Chats, as the person last chose it. */
   setNotify(enabled: boolean): Promise<void>;

@@ -2,12 +2,13 @@
 //! system is told (spec 21.3). Every surface reads one ranked status per Chat: the list
 //! row, the sidebar count, the app-icon count and system notifications.
 //!
-//! Nothing here touches Tauri; `chat_commands` shows what `Notifier` decides.
+//! Nothing here touches Tauri; the desktop shows what `Notifier` decides.
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use crate::conditions::ChatProblemKind;
+use crate::{ChatLive, InteractionKind, STOPPED_BY_TICKETD, problem_kind};
 use serde::Serialize;
-use ticketd_chat_host::{ChatLive, InteractionKind, ProblemKind, STOPPED_BY_TICKETD, problem_kind};
 use ticketd_core::{Chat, ChatAgentChange, ChatTurn, ChatTurnState};
 
 /// How long "Done" waits before it notifies, so a turn that continues at once does not.
@@ -29,7 +30,7 @@ pub enum Rank {
 
 impl Rank {
     /// Waits for the person: counted on the sidebar and the app icon, notified at once.
-    pub fn waits(self) -> bool {
+    pub fn needs_you(self) -> bool {
         matches!(self, Self::Approval | Self::Question | Self::Failed)
     }
 }
@@ -61,7 +62,7 @@ impl Status {
     }
 }
 
-/// What the status is computed from, as `chat_view` knows it.
+/// What the status is computed from, as the Chat view knows it.
 pub struct Facts<'a> {
     pub chat: &'a Chat,
     pub harness: &'a str,
@@ -70,8 +71,8 @@ pub struct Facts<'a> {
     pub last_turn: Option<&'a ChatTurn>,
     /// The text of input whose delivery the person has to decide about.
     pub uncertain: Option<&'a str>,
-    /// `chat_view`'s problem kind, and whether it is why the last turn stopped.
-    pub problem: Option<(&'a str, bool)>,
+    /// The Chat's problem, and whether it is why the last turn stopped.
+    pub problem: Option<(ChatProblemKind, bool)>,
     /// A failure observed now, in words, for a problem of kind `failed`.
     pub failure: Option<&'a str>,
     pub activity: &'a str,
@@ -121,49 +122,24 @@ fn plain_start(markdown: &str) -> Option<String> {
     (!text.is_empty()).then(|| text.chars().take(140).collect())
 }
 
-/// Why a turn ended with an error, in a few words.
+/// Why a turn ended with an error, in a few words: what its notice is titled.
 fn failure_detail(turn: &ChatTurn, harness: &str) -> String {
-    match turn.problem.as_deref().map(problem_kind) {
-        Some(ProblemKind::QuotaExhausted) => format!("{harness} reached your usage limit"),
-        Some(ProblemKind::PermissionUnavailable) => format!("{harness} couldn't start its sandbox"),
-        Some(ProblemKind::LoginRequired) => format!("{harness} wasn't signed in"),
-        Some(ProblemKind::SessionInUse) => "The session was open somewhere else".to_owned(),
-        Some(ProblemKind::NativeHistoryUnavailable) => {
-            format!("{harness} no longer has this conversation")
-        }
-        Some(ProblemKind::NotInstalled | ProblemKind::IncompatibleVersion) => {
-            format!("{harness} couldn't start")
-        }
-        Some(ProblemKind::Other) | None => format!("{harness} stopped with an error"),
-    }
-}
-
-/// The words for a condition that holds now and is not a failure: an install or
-/// sign-in step, a missing folder. They are shown, never counted or notified.
-fn condition_words(kind: &str) -> Option<&'static str> {
-    Some(match kind {
-        "not_installed" | "incompatible" | "unavailable" | "probe_failed" | "not_signed_in" => {
-            "Not sent"
-        }
-        "not_subscription" => "Not on a subscription",
-        "sign_in_unknown" => "Sign-in not checked",
-        "usage_limit" => "Usage limit reached",
-        "sandbox_unavailable" => "Sandbox unavailable",
-        "folder_missing" => "Folder missing",
-        "history_lost" => "Session unavailable",
-        "session_in_use" => "Session in use elsewhere",
-        _ => return None,
-    })
+    turn.problem
+        .as_deref()
+        .map_or(ChatProblemKind::Failed, |key| problem_kind(key).into())
+        .title(harness, true)
 }
 
 pub fn status(facts: &Facts<'_>) -> Status {
     let ended = facts
         .last_turn
         .filter(|turn| turn.state != ChatTurnState::Active);
+    // Only an outcome the person has not seen ranks as Failed or Done; a Chat they
+    // marked unread keeps the words it had, with the blue dot, and never notifies.
     let unseen = ended.is_some_and(|turn| facts.chat.unseen(turn));
     let make = |rank, word: &str, detail: Option<String>| Status {
         rank,
-        unseen,
+        unseen: unseen || facts.chat.marked_unread,
         word: word.to_owned(),
         detail,
     };
@@ -189,7 +165,7 @@ pub fn status(facts: &Facts<'_>) -> Status {
     }
     if facts
         .problem
-        .is_some_and(|(kind, _)| kind == "stop_unconfirmed")
+        .is_some_and(|(kind, _)| kind == ChatProblemKind::StopUnconfirmed)
     {
         return make(Rank::Working, "Stop not confirmed", None);
     }
@@ -200,7 +176,7 @@ pub fn status(facts: &Facts<'_>) -> Status {
             facts.opening.then(|| "Starting".to_owned()),
         );
     }
-    if facts.problem == Some(("failed", false)) {
+    if facts.problem == Some((ChatProblemKind::Failed, false)) {
         return make(Rank::Failed, "Failed", facts.failure.map(str::to_owned));
     }
     let done = || {
@@ -235,7 +211,7 @@ pub fn status(facts: &Facts<'_>) -> Status {
     let condition = facts
         .problem
         .filter(|(_, past)| !past)
-        .and_then(|(kind, _)| condition_words(kind));
+        .and_then(|(kind, _)| kind.condition_word());
     if let Some(words) = condition {
         return make(Rank::Idle, words, None);
     }
@@ -298,7 +274,7 @@ impl Notifier {
         for row in rows {
             let key = (row.status.rank, row.status.line());
             let announces =
-                row.status.rank.waits() || (row.status.rank == Rank::Done && row.status.unseen);
+                row.status.rank.needs_you() || (row.status.rank == Rank::Done && row.status.unseen);
             let quiet = !announces || in_view.contains(row.id) || row.muted || !enabled;
             if quiet && self.shown.remove(row.id) {
                 alerts.push(Alert::Withdraw {
@@ -363,5 +339,5 @@ pub fn badge_text(count: usize) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "chat_attention_tests.rs"]
+#[path = "attention_tests.rs"]
 mod tests;

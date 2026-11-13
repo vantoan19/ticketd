@@ -19,10 +19,11 @@ import {
   useChatClient,
   type HarnessStatus,
   type LinkedRecord,
-  type ProblemKind,
   type Suggestion,
+  type ProjectRef,
 } from "@/features/chats/client";
 import { ProblemNotice } from "@/features/chats/ChatDetail";
+import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { Composer } from "@/features/chats/Composer";
 import type { Token } from "@/features/chats/composer-mentions";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
@@ -38,7 +39,6 @@ import {
 import { ticketPrompt, type TicketStart } from "@/features/chats/ticket-chat";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { harnessUsable, harnessWord } from "@/features/chats/model";
 import { suggestionFill } from "@/features/chats/suggestion-fill";
 import { Suggestions } from "@/features/chats/Suggestions";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -51,19 +51,6 @@ import {
 import { RadioGroup } from "radix-ui";
 import { notificationClient } from "@/lib/api/notifications";
 import { loadPreferences } from "@/lib/preferences";
-
-const STATUS_PROBLEM: Record<
-  Exclude<HarnessStatus["status"], "ready">,
-  ProblemKind
-> = {
-  not_installed: "not_installed",
-  incompatible: "incompatible",
-  unavailable: "unavailable",
-  not_signed_in: "not_signed_in",
-  not_subscription: "not_subscription",
-  sign_in_unknown: "sign_in_unknown",
-  unknown: "probe_failed",
-};
 
 /**
  * The harness choice: one 48px radio per harness with its mark and name, and
@@ -95,7 +82,7 @@ function HarnessRadios({
         onValueChange={onChange}
       >
         {harnesses.map((item) => {
-          const word = harnessWord(item.status);
+          const word = item.word;
           return (
             <Tooltip key={item.id}>
               <TooltipTrigger asChild>
@@ -283,6 +270,23 @@ export function NewChat({
       current = false;
     };
   }, [client, folder]);
+  // The folder's Project, for its icon on the folder button.
+  const [projectOf, setProjectOf] = useState<{
+    folder: string;
+    project: ProjectRef | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!folder) return;
+    let current = true;
+    client.folderProject(folder).then(
+      (project) => current && setProjectOf({ folder, project }),
+      () => current && setProjectOf({ folder, project: null }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [client, folder]);
+  const project = projectOf?.folder === folder ? projectOf.project : null;
   // A Project's folder that is not on this computer gives way to a ticketd folder.
   useEffect(() => {
     const path = start?.folder;
@@ -304,9 +308,9 @@ export function NewChat({
   const harness =
     found.find((item) => item.id === harnessId) ??
     found.find((item) => item.status === "ready") ??
-    found.find((item) => harnessUsable(item.status)) ??
+    found.find((item) => item.usable) ??
     found[0];
-  const ready = harness !== undefined && harnessUsable(harness.status);
+  const ready = harness?.usable ?? false;
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
   const mentions = useMemo<ComposerMentions>(
     () => ({
@@ -461,7 +465,11 @@ export function NewChat({
                   size="xs"
                   aria-label={`Folder: ${folder ?? "a folder kept by ticketd"}`}
                 >
-                  <Folder aria-hidden />
+                  {project ? (
+                    <ProjectIcon project={project} />
+                  ) : (
+                    <Folder aria-hidden />
+                  )}
                   {folderName ?? "ticketd folder"}
                   <ChevronDown aria-hidden />
                 </Button>
@@ -517,7 +525,9 @@ export function NewChat({
               </Button>
             </p>
           )}
-          {typed.trim() === "" && (
+          {/* Suggestions or the harness's notice, never both: the notice's
+              actions come next in Tab order. */}
+          {typed.trim() === "" && !harness?.problem && (
             <Suggestions
               folder={folder}
               linked={links.flatMap((record) =>
@@ -541,15 +551,9 @@ export function NewChat({
                 : `${shared} other Chats use this folder.`}
             </p>
           )}
-          {harness && harness.status !== "ready" && (
+          {harness?.problem && (
             <ProblemNotice
-              problem={{
-                kind: STATUS_PROBLEM[harness.status],
-                message: harness.message,
-                command: harness.command,
-                help_url: harness.help_url,
-                path: harness.path,
-              }}
+              problem={harness.problem}
               harness={harness.name}
               onAction={() => setProbe((count) => count + 1)}
             />

@@ -2,16 +2,13 @@
 mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
-mod chat_attention;
 mod chat_commands;
 mod chat_reports;
-mod chat_suggestions;
 mod chat_view;
 mod chats;
 mod cli_status;
 mod drive_commands;
 mod folder_probe;
-mod step_kind;
 mod sync_commands;
 mod sync_scheduler;
 
@@ -1675,6 +1672,8 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_overview,
             chat_commands::chat_set_notify,
             chat_commands::chat_mark_read,
+            chat_commands::chat_read_through,
+            chat_commands::chat_folder_project,
             chat_commands::chat_mark_unread,
             chat_commands::chat_set_muted,
             chat_commands::chat_list,

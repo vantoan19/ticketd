@@ -17,6 +17,7 @@ import {
   suggestionSchema,
   type ChatChange,
   type ChatClient,
+  projectRefSchema,
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 
@@ -180,6 +181,10 @@ export function createHostChatClient(
     harnesses: async () =>
       z.array(harnessStatusSchema).parse(await call("chat_harnesses")),
     pickFolder: () => bridge.pickFolder(),
+    folderProject: async (path) =>
+      projectRefSchema
+        .nullable()
+        .parse(await call("chat_folder_project", { path })),
     folderUse: async (path) =>
       z
         .number()
@@ -296,6 +301,8 @@ export function createHostChatClient(
         .parse(await call("chat_suggestions", { folder, linked })),
     markRead: (id) => run("chat_mark_read", { chatId: id }),
     markUnread: (id) => run("chat_mark_unread", { chatId: id }),
+    readThrough: (id, itemId) =>
+      run("chat_read_through", { chatId: id, itemId }),
     setMuted: (id, muted) => run("chat_set_muted", { chatId: id, muted }),
     setNotify: (enabled) => run("chat_set_notify", { enabled }),
     onOpenRequested: (listener) =>

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { effortBars, settingLine } from "@/features/chats/composer-settings";
 import { chatState } from "@/features/chats/mock-client";
-import { contextLabel, harnessWord } from "@/features/chats/model";
+import { contextLabel } from "@/features/chats/model";
 
 const efforts = ["low", "medium", "high", "max"].map((id) => ({ id }));
 
@@ -19,27 +19,6 @@ test("effort bars rise with the harness's order and Max fills them", () => {
   expect(effortBars(codex, "xhigh")).toEqual({ count: 4, filled: 4 });
 });
 
-test("a harness that isn't ready is one word, with a dot only when it needs you", () => {
-  expect(harnessWord("ready")).toBeNull();
-  expect(harnessWord("not_signed_in")).toEqual({
-    word: "Not signed in",
-    dot: true,
-  });
-  expect(harnessWord("incompatible")).toEqual({
-    word: "Can't be used",
-    dot: true,
-  });
-  expect(harnessWord("not_installed")).toEqual({
-    word: "Not installed",
-    dot: false,
-  });
-  expect(harnessWord("sign_in_unknown")).toEqual({
-    word: "Sign-in not checked",
-    dot: false,
-  });
-  expect(harnessWord("unknown")).toEqual({ word: "Couldn't check", dot: true });
-});
-
 test("the context button names folder, branch, Project and sharing", () => {
   const chat = chatState({
     id: "c1",
@@ -48,7 +27,7 @@ test("the context button names folder, branch, Project and sharing", () => {
       name: "web-app",
       branch: { kind: "branch", name: "rate-limit-logins" },
       project: { id: "p1", title: "Web App" },
-      shared_with: ["Alert on-call"],
+      shared_with: [{ id: "c2", title: "Alert on-call", retention: "active" }],
     },
   });
   expect(contextLabel(chat)).toBe(

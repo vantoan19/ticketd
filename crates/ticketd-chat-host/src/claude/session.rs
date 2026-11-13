@@ -8,10 +8,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
-    InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
-    SubmissionId, ToolStatus, TurnOutcome, reset_time,
+    ApprovalDecision, DeliveryEvidence, EventKind, HarnessCommand, InteractionAnswer,
+    InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
+    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question,
+    Refusal, SubmissionId, ToolStatus, TurnOutcome, reset_time,
 };
 
 use super::report::{PLAN_TOOLS, Reports};
@@ -207,9 +207,28 @@ impl Session {
         events.extend(self.reports.session_info(event));
     }
 
-    /// `session_initialized`: the session's choosable settings.
-    pub fn initialized(&mut self, event: &Value) -> Option<EventKind> {
-        self.reports.initialized(event)
+    /// `session_initialized`: the session's choosable settings and slash commands.
+    pub fn initialized(&mut self, event: &Value) -> Vec<EventKind> {
+        let mut events: Vec<EventKind> = self.reports.initialized(event).into_iter().collect();
+        // A bridge that does not list commands says nothing about them.
+        let Some(listed) = event["commands"].as_array() else {
+            return events;
+        };
+        let commands = listed
+            .iter()
+            .filter_map(|command| {
+                Some(HarnessCommand {
+                    name: text(command, "name")
+                        .filter(|name| !name.is_empty())?
+                        .to_owned(),
+                    description: text(command, "description")
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_owned),
+                })
+            })
+            .collect();
+        events.insert(0, EventKind::CommandsListed(commands));
+        events
     }
 
     fn delta(&mut self, event: &Value, events: &mut Vec<EventKind>) {
@@ -335,6 +354,7 @@ impl Session {
             text(event, "text").unwrap_or_default(),
             event["truncated"] == true,
         );
+        let detail = with_line_counts(detail, &event["outcome"]);
         events.push(EventKind::ToolUpdated {
             turn: turn.clone(),
             item: NativeItemId::new(id),
@@ -345,7 +365,7 @@ impl Session {
                 (false, _) => ToolStatus::Succeeded,
             },
             output: Some(output),
-            detail: Some(detail.clone()),
+            detail: Some(detail),
         });
         let turn = turn.clone();
         events.extend(
@@ -391,6 +411,8 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
+            // The bridge names the tool use a permission is asked for.
+            item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::approval(
                 subject,
                 reason,
@@ -462,6 +484,7 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
+            item: None,
             kind: InteractionKind::Question { questions },
             detail: None,
         }));
@@ -600,4 +623,25 @@ impl Session {
                 .collect(),
         });
     }
+}
+
+/// The tool's input with the lines its result said it added and removed, kept as
+/// `ticketd_lines` so the step row can show them; unchanged when it said none.
+fn with_line_counts(detail: &ProviderDetail, outcome: &Value) -> ProviderDetail {
+    let count = |key: &str| outcome[key].as_u64();
+    let (Some("file"), Some(added), Some(removed)) = (
+        text(outcome, "kind"),
+        count("added_lines"),
+        count("removed_lines"),
+    ) else {
+        return detail.clone();
+    };
+    let Ok(Value::Object(mut input)) = serde_json::from_str::<Value>(detail.payload()) else {
+        return detail.clone();
+    };
+    input.insert(
+        "ticketd_lines".to_owned(),
+        json!({ "added": added, "removed": removed }),
+    );
+    ProviderDetail::new(detail.kind(), &Value::Object(input).to_string())
 }

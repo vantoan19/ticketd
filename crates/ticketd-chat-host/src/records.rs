@@ -32,8 +32,7 @@ pub struct PlanRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanStepRecord {
     pub text: String,
-    /// `pending`, `in_progress` or `completed`.
-    pub status: String,
+    pub status: PlanStepStatus,
     pub active_label: Option<String>,
 }
 
@@ -62,12 +61,7 @@ impl From<&Plan> for PlanRecord {
                 .iter()
                 .map(|step| PlanStepRecord {
                     text: step.text.clone(),
-                    status: match step.status {
-                        PlanStepStatus::Pending => "pending",
-                        PlanStepStatus::InProgress => "in_progress",
-                        PlanStepStatus::Completed => "completed",
-                    }
-                    .to_owned(),
+                    status: step.status,
                     active_label: step.active_label.clone(),
                 })
                 .collect(),
@@ -107,4 +101,24 @@ pub fn read<T: for<'de> Deserialize<'de>>(name: &str, wanted: &str, input: &str)
     (name == wanted)
         .then(|| serde_json::from_str(input).ok())
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stored_plan_reads_its_step_statuses_and_an_unknown_one_is_not_read() {
+        let stored = r#"{"steps":[{"text":"a","status":"in_progress","active_label":null}],"explanation":null}"#;
+        let plan = read::<PlanRecord>(PLAN_RECORD_NAME, PLAN_RECORD_NAME, stored);
+        assert_eq!(
+            plan.map(|plan| plan.steps[0].status),
+            Some(PlanStepStatus::InProgress)
+        );
+        let odd = stored.replace("in_progress", "skipped");
+        assert_eq!(
+            read::<PlanRecord>(PLAN_RECORD_NAME, PLAN_RECORD_NAME, &odd),
+            None
+        );
+    }
 }

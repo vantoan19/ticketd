@@ -8,7 +8,7 @@ const approval: TranscriptItem = {
   at,
   kind: "request",
   request: "approval",
-  title: "Codex wants to run a command",
+  title: "Codex wants to run",
   subject: "npm install",
   options: [{ id: "once", label: "Allow once" }],
   free_text: false,
