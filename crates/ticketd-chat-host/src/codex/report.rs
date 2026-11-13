@@ -562,6 +562,8 @@ pub(super) fn listed_options(models: &[Value], profiles: Option<&[Value]>) -> Ha
                 Some(ModelChoice {
                     model: model_option(entry)?,
                     efforts: effort_options(entry),
+                    // Codex lists models by their own names.
+                    runs_as: None,
                 })
             })
             .collect(),

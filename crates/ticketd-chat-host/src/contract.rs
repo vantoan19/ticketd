@@ -577,6 +577,9 @@ pub struct ModelChoice {
     pub model: SettingOption,
     /// From lowest to highest; `is_default` marks the model's own default.
     pub efforts: Vec<SettingOption>,
+    /// The model this choice runs, by name, when the harness lists it as an alias
+    /// ("Default" runs "Opus 5.5"). `None` when it is its own name or unknown.
+    pub runs_as: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

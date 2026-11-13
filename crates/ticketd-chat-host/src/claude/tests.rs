@@ -632,6 +632,9 @@ async fn the_options_probe_lists_models_with_their_efforts_and_closes_the_bridge
             ("sonnet", false, vec![]),
         ]
     );
+    // The default row names what it runs; a row of its own name names nothing.
+    assert_eq!(options.models[0].runs_as.as_deref(), Some("Opus 5.5"));
+    assert_eq!(options.models[1].runs_as, None);
     // Before a session Claude Code's own mode is unknown, and full access is no choice.
     let permission = options.permission.expect("Claude Code's modes");
     assert_eq!(permission.current, None);

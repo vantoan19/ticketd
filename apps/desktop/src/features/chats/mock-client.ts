@@ -362,6 +362,7 @@ export const HARNESS_OPTIONS: HarnessOptions[] = [
           description: "Opus 5.5 for complex, multi-step work",
           is_default: true,
         }),
+        runs_as: "Opus 5.5",
         efforts: levels("low", "medium", "high", "max"),
       },
       {

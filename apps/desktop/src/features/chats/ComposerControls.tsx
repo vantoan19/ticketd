@@ -138,6 +138,7 @@ export function HarnessPicker({
   pending = false,
   note,
   notice,
+  onOpenChange,
   inputRef,
 }: {
   harnesses: PickerHarness[];
@@ -145,7 +146,8 @@ export function HarnessPicker({
   /** A Chat keeps its harness; New Chat may switch. */
   locked: boolean;
   onHarness?: (id: string) => void;
-  models: SettingOption[];
+  /** `runs_as` names what an alias row runs, for the trigger. */
+  models: (SettingOption & { runs_as?: string | null | undefined })[];
   /** The model in effect or picked; `null` is the one the harness marks default. */
   model: string | null;
   efforts: SettingOption[];
@@ -163,10 +165,13 @@ export function HarnessPicker({
   note?: string | null | undefined;
   /** What to do about a harness that is not ready, shown when it is chosen. */
   notice?: ((id: string) => ReactNode) | undefined;
+  onOpenChange?: ((open: boolean) => void) | undefined;
   /** Where focus returns after the popover closes: the message box. */
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const [open, setOpen] = useState(false);
+  // New Chat hides its own copy of a harness's notice while the popover shows it.
+  useEffect(() => onOpenChange?.(open), [open, onOpenChange]);
   const [viewed, setViewed] = useState(harnessId);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -189,7 +194,10 @@ export function HarnessPicker({
   const defaultEffort = efforts.find((option) => option.is_default);
   const effortId = effort ?? defaultEffort?.id ?? null;
   const bars = effortBars(efforts, effortId);
-  const modelLabel = shown ? shortName(shown.label) : "Default";
+  // The trigger names what will run: an alias row by the model it runs.
+  const modelLabel = shown
+    ? (shown.runs_as ?? shortName(shown.label))
+    : "Default";
   const effortLabel =
     efforts.find((option) => option.id === effortId)?.label ?? "";
   const name = [
@@ -597,6 +605,7 @@ export function NewChatControls({
   pick,
   onPick,
   notice,
+  onOpenChange,
   inputRef,
 }: {
   harnesses: HarnessStatus[];
@@ -607,6 +616,7 @@ export function NewChatControls({
   pick: Pick;
   onPick: (pick: Pick) => void;
   notice: (id: string) => ReactNode;
+  onOpenChange?: (open: boolean) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const harness = harnesses.find((item) => item.id === harnessId);
@@ -632,6 +642,7 @@ export function NewChatControls({
             : `Asking ${name} for its models…`
         }
         notice={notice}
+        onOpenChange={onOpenChange}
         inputRef={inputRef}
       />
       {permission?.changeable && (

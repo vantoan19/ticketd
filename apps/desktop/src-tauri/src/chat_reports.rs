@@ -316,6 +316,8 @@ pub struct ModelChoiceView {
     pub model: SettingOptionView,
     /// Lowest first; `is_default` marks the model's own default, when said.
     pub efforts: Vec<SettingOptionView>,
+    /// The model an alias row runs, by name ("Default" runs "Opus 5.5").
+    pub runs_as: Option<String>,
 }
 
 /// What New Chat's picker offers for one harness before any session: what the
@@ -348,6 +350,7 @@ pub fn options_view(
                 .map(|choice| ModelChoiceView {
                     model: option_view(&choice.model),
                     efforts: choice.efforts.iter().map(option_view).collect(),
+                    runs_as: choice.runs_as.clone(),
                 })
                 .collect(),
             permission: setting(
