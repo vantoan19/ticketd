@@ -18,7 +18,12 @@ const RETENTION_DAYS: i64 = 90;
 const EVENT_BATCH: u32 = 500;
 /// Why a run the person stopped needs attention, and why its step did not finish.
 const STOPPED: &str = "You stopped this run.";
+/// Why the step a run was on did not finish when the person took its Chat over.
+const TAKEN_OVER: &str = "You took this run over.";
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+/// A run needs the person from when it ends as Needs attention until they run it
+/// again, take it over or dismiss it. Opening it changes nothing.
+const NEEDS_YOU: &str = "status = 'needs_attention' AND attention_cleared = 0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -61,6 +66,9 @@ pub struct AutomationRunStep {
     pub reason: Option<String>,
     /// The Chat of a Run agent step.
     pub chat_id: Option<String>,
+    /// The run still owns that Chat, which keeps it out of the Chat list. It becomes
+    /// an ordinary Chat when the person replies in it or stops it.
+    pub chat_owned: bool,
     pub started_at: String,
     pub ended_at: Option<String>,
 }
@@ -88,6 +96,9 @@ pub struct AutomationRun {
     pub status: AutomationRunStatus,
     /// Why it needs attention.
     pub reason: Option<String>,
+    /// It ended as Needs attention and the person has not yet run it again, taken
+    /// it over or dismissed it.
+    pub needs_you: bool,
     pub created_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
@@ -126,13 +137,58 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Adds what records that the person answered a run that needed attention.
+pub(crate) fn migrate_attention(connection: &Connection) -> Result<(), Error> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('automation_runs') WHERE name = 'attention_cleared')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection.execute_batch(
+            "ALTER TABLE automation_runs ADD COLUMN attention_cleared INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 73;")?;
+    Ok(())
+}
+
+/// Adds an Attention inbox entry, on its ticket, for each run that needs the person
+/// and has none yet. Called wherever a run ends as Needs attention.
+pub(crate) fn announce(connection: &Connection) -> Result<(), Error> {
+    connection.execute(
+        &format!(
+            "INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value, editing_agent)
+             SELECT ?1, r.ticket_id, 'automation_run', r.id, COALESCE(r.reason, ''), NULLIF(TRIM(json_extract(r.definition, '$.name')), '')
+             FROM automation_runs r WHERE r.{NEEDS_YOU} AND r.ticket_id IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM inbox_entries i WHERE i.kind = 'automation_run' AND i.from_value = r.id)"
+        ),
+        [crate::inbox::LOCAL_PERSON],
+    )?;
+    Ok(())
+}
+
+/// The person acted on a run that needed attention: it stops asking, and its inbox
+/// entry is answered.
+fn answer(connection: &Connection, run_id: &str) -> Result<(), Error> {
+    connection.execute(
+        "UPDATE automation_runs SET attention_cleared = 1 WHERE id = ?1 AND status = 'needs_attention' AND attention_cleared = 0",
+        [run_id],
+    )?;
+    connection.execute(
+        "UPDATE inbox_entries SET read = 1 WHERE kind = 'automation_run' AND from_value = ?1 AND read = 0",
+        [run_id],
+    )?;
+    Ok(())
+}
+
 fn named<T: serde::de::DeserializeOwned>(text: String) -> Result<T, Error> {
     Ok(serde_json::from_value(serde_json::Value::String(text))?)
 }
 
 fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<AutomationRun>, Error> {
     let mut statement = connection.prepare(&format!(
-        "SELECT r.id, r.automation_id, r.event, r.definition, r.status, r.reason, r.created_at, r.started_at, r.ended_at, t.id, t.reference, t.title, a.name
+        "SELECT r.id, r.automation_id, r.event, r.definition, r.status, r.reason, r.created_at, r.started_at, r.ended_at, t.id, t.reference, t.title, r.{NEEDS_YOU}, a.name
          FROM automation_runs r JOIN automations a ON a.id = r.automation_id LEFT JOIN tickets t ON t.id = r.ticket_id WHERE {filter} ORDER BY r.rowid DESC"
     ))?;
     let rows = statement
@@ -156,12 +212,13 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, Option<String>>(8)?,
                 ticket,
-                row.get::<_, String>(12)?,
+                row.get::<_, bool>(12)?,
+                row.get::<_, String>(13)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     let mut steps = connection.prepare(
-        "SELECT step_id, status, reason, chat_id, started_at, ended_at FROM automation_run_steps WHERE run_id = ?1 ORDER BY position",
+        "SELECT step_id, status, reason, chat_id, started_at, ended_at, EXISTS(SELECT 1 FROM chats WHERE chats.id = chat_id AND automation_run_id IS NOT NULL) FROM automation_run_steps WHERE run_id = ?1 ORDER BY position",
     )?;
     rows.into_iter()
         .map(
@@ -176,6 +233,7 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                 started,
                 ended,
                 ticket,
+                needs_you,
                 automation_name,
             )| {
                 let reached = steps
@@ -187,22 +245,34 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                             row.get::<_, Option<String>>(3)?,
                             row.get::<_, String>(4)?,
                             row.get::<_, Option<String>>(5)?,
+                            row.get::<_, bool>(6)?,
                         ))
                     })?
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(AutomationRun {
                     steps: reached
                         .into_iter()
-                        .map(|(step_id, status, reason, chat_id, started_at, ended_at)| {
-                            Ok(AutomationRunStep {
+                        .map(
+                            |(
                                 step_id,
-                                status: named(status)?,
+                                status,
                                 reason,
                                 chat_id,
                                 started_at,
                                 ended_at,
-                            })
-                        })
+                                chat_owned,
+                            )| {
+                                Ok(AutomationRunStep {
+                                    step_id,
+                                    status: named(status)?,
+                                    reason,
+                                    chat_id,
+                                    chat_owned,
+                                    started_at,
+                                    ended_at,
+                                })
+                            },
+                        )
                         .collect::<Result<_, Error>>()?,
                     id,
                     automation_id,
@@ -212,6 +282,7 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                     definition: serde_json::from_str(&definition)?,
                     status: named(status)?,
                     reason,
+                    needs_you,
                     created_at: created,
                     started_at: started,
                     ended_at: ended,
@@ -260,7 +331,8 @@ pub(crate) fn expire(connection: &Connection, now: &str) -> Result<(), Error> {
         "automation_run_id IN (SELECT id FROM expired_runs)",
     )?;
     connection.execute_batch(
-        "DELETE FROM automation_run_steps WHERE run_id IN (SELECT id FROM expired_runs);
+        "DELETE FROM inbox_entries WHERE kind = 'automation_run' AND from_value IN (SELECT id FROM expired_runs);
+         DELETE FROM automation_run_steps WHERE run_id IN (SELECT id FROM expired_runs);
          DELETE FROM automation_runs WHERE id IN (SELECT id FROM expired_runs);
          DELETE FROM expired_runs;",
     )?;
@@ -411,6 +483,7 @@ impl Workspace {
                     &format!("UPDATE automation_runs SET status = ?2, reason = ?3, ended_at = {NOW} WHERE id = ?1"),
                     params![run_id, status.as_str(), reason],
                 )?;
+                announce(&transaction)?;
             }
         }
         transaction.commit()?;
@@ -458,6 +531,7 @@ impl Workspace {
             &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?1, ended_at = {NOW} WHERE status = 'running'"),
             [reason],
         )?;
+        announce(&transaction)?;
         transaction.commit()?;
         Ok(ended)
     }
@@ -481,6 +555,7 @@ impl Workspace {
             &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE run_id = ?1 AND status = 'running'"),
             params![run_id, STOPPED],
         )?;
+        announce(&transaction)?;
         let run = one(&transaction, run_id)?;
         transaction.commit()?;
         Ok(run)
@@ -488,8 +563,8 @@ impl Workspace {
 
     /// Queues a new run for the Workspace event that started a finished run. It
     /// begins at the first step of the Automation as it is now, so a fix made since
-    /// counts; the finished run stays as it ended. Refused while the ticket has an
-    /// active run of the Automation.
+    /// counts; the finished run stays as it ended, and no longer needs the person.
+    /// Refused while the ticket has an active run of the Automation.
     pub fn run_automation_again(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
@@ -513,9 +588,71 @@ impl Workspace {
                 "a run of this Automation is already going for the ticket".into(),
             ));
         }
+        answer(&transaction, run_id)?;
         let again = one(&transaction, &id)?;
         transaction.commit()?;
         Ok(again)
+    }
+
+    /// The person has seen that a run needs attention and wants nothing more from
+    /// it. The run stays as it ended.
+    pub fn dismiss_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        answer(&transaction, run_id)?;
+        let run = one(&transaction, run_id)?;
+        transaction.commit()?;
+        Ok(run)
+    }
+
+    /// The person replied in (`replied`) or stopped a Chat. When a run owns the
+    /// Chat, it becomes an ordinary Chat in the Chat list, and a run that was going
+    /// or needed attention ends as Taken over: the step it was on ends there and
+    /// nothing after it runs. Stopping takes over only a run that is going, because
+    /// nothing is going in the Chat of one that ended. Returns the run, or `None`
+    /// when there was nothing to take over.
+    pub fn take_over_automation_run(
+        &mut self,
+        chat_id: &str,
+        replied: bool,
+    ) -> Result<Option<AutomationRun>, Error> {
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        let owner: Option<String> = transaction
+            .query_row(
+                "SELECT automation_run_id FROM chats WHERE id = ?1",
+                [chat_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let Some(run_id) = owner else {
+            return Ok(None);
+        };
+        let status = one(&transaction, &run_id)?.status;
+        if !replied && status != AutomationRunStatus::Running {
+            return Ok(None);
+        }
+        transaction.execute(
+            "UPDATE chats SET automation_run_id = NULL WHERE id = ?1",
+            [chat_id],
+        )?;
+        // The Chat list follows the Chat log.
+        crate::chats::log(&transaction, chat_id, "chat", chat_id)?;
+        if status != AutomationRunStatus::Completed {
+            answer(&transaction, &run_id)?;
+            transaction.execute(
+                &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE run_id = ?1 AND status = 'running'"),
+                params![run_id, TAKEN_OVER],
+            )?;
+            transaction.execute(
+                &format!("UPDATE automation_runs SET status = 'taken_over', reason = NULL, ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"),
+                [&run_id],
+            )?;
+        }
+        let run = one(&transaction, &run_id)?;
+        transaction.commit()?;
+        Ok(Some(run))
     }
 
     pub fn automation_run(&self, id: &str) -> Result<AutomationRun, Error> {
@@ -534,5 +671,14 @@ impl Workspace {
     pub fn all_automation_runs(&self) -> Result<Vec<AutomationRun>, Error> {
         // `read` filters on one value; this filter passes every run.
         read(&self.connection, "?1 = ''", "")
+    }
+
+    /// The runs that acted on a ticket, newest first.
+    pub fn ticket_automation_runs(&self, reference: &str) -> Result<Vec<AutomationRun>, Error> {
+        read(
+            &self.connection,
+            "r.ticket_id = (SELECT id FROM tickets WHERE reference = ?1)",
+            reference,
+        )
     }
 }

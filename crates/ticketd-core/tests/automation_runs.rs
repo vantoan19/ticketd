@@ -774,3 +774,365 @@ fn every_run_is_listed_across_automations_newest_first_naming_its_automation() {
     names.dedup();
     assert_eq!(names, ["Triage new tickets", "Verify on staging"]);
 }
+
+const LIMIT: &str = "The agent reached its limit of 40 turns before finishing.";
+
+fn chat_for(run: &AutomationRun) -> NewChat {
+    NewChat {
+        title: Some("Triage".into()),
+        harness: "codex".into(),
+        execution_folder: "/work/app".into(),
+        folder_managed: false,
+        links: run
+            .ticket
+            .iter()
+            .map(|ticket| ChatLink {
+                kind: ChatLinkKind::Ticket,
+                id: ticket.id.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// A run on its agent step, with that step's Chat.
+#[allow(clippy::unwrap_used)]
+fn on_agent_step(workspace: &mut Workspace) -> (AutomationRun, String) {
+    let run = started(workspace);
+    workspace.advance_automation_run(&run.id, None).unwrap();
+    let chat = workspace
+        .create_automation_run_chat(&run.id, "triage", chat_for(&run))
+        .unwrap();
+    (run, chat.id)
+}
+
+/// A run whose agent step failed with no failure path, with that step's Chat.
+#[allow(clippy::unwrap_used)]
+fn needing_attention(workspace: &mut Workspace) -> (AutomationRun, String) {
+    let (run, chat) = on_agent_step(workspace);
+    workspace
+        .advance_automation_run(&run.id, failed(LIMIT))
+        .unwrap();
+    (workspace.automation_run(&run.id).unwrap(), chat)
+}
+
+#[allow(clippy::unwrap_used)]
+fn needing_you(workspace: &Workspace) -> u32 {
+    workspace.sidebar_counts().unwrap().runs_needing_you
+}
+
+#[allow(clippy::unwrap_used)]
+fn listed_chats(workspace: &Workspace) -> Vec<String> {
+    workspace
+        .list_chats(ChatListFilter::Active)
+        .unwrap()
+        .into_iter()
+        .map(|chat| chat.id)
+        .collect()
+}
+
+#[test]
+fn a_run_that_needs_attention_is_counted_and_enters_the_inbox_for_its_ticket() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    assert_eq!(needing_you(&workspace), 0);
+
+    let (run, _chat) = needing_attention(&mut workspace);
+
+    assert!(run.needs_you);
+    assert_eq!(needing_you(&workspace), 1);
+    let inbox = workspace.inbox(10, 0).unwrap();
+    assert_eq!(inbox.len(), 1);
+    let entry = &inbox[0];
+    assert_eq!(entry.reference, run.ticket.as_ref().unwrap().reference);
+    assert_eq!(
+        (
+            entry.kind.as_str(),
+            entry.from_value.as_str(),
+            entry.to_value.as_str(),
+            entry.editing_agent.as_deref(),
+            entry.read
+        ),
+        (
+            "automation_run",
+            run.id.as_str(),
+            LIMIT,
+            Some("Triage"),
+            false
+        )
+    );
+
+    // Looking at the run, or at the inbox entry, is not acting on it.
+    workspace.set_inbox_read(&[entry.id], true).unwrap();
+    assert!(workspace.automation_run(&run.id).unwrap().needs_you);
+    assert_eq!(needing_you(&workspace), 1);
+}
+
+#[test]
+fn a_run_that_completed_or_is_still_going_does_not_need_you() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, _chat) = on_agent_step(&mut workspace);
+    assert!(!workspace.automation_run(&run.id).unwrap().needs_you);
+
+    workspace
+        .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+        .unwrap();
+
+    assert!(!workspace.automation_run(&run.id).unwrap().needs_you);
+    assert_eq!(needing_you(&workspace), 0);
+    assert_eq!(workspace.inbox(10, 0).unwrap(), []);
+}
+
+#[test]
+fn a_run_the_person_stopped_or_ticketd_left_behind_needs_them_too() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    let (stopped, _chat) = on_agent_step(&mut workspace);
+    workspace.stop_automation_run(&stopped.id).unwrap();
+    let (left, _chat) = on_agent_step(&mut workspace);
+    workspace.end_running_automation_runs("closed").unwrap();
+    let (turned_off, _chat) = on_agent_step(&mut workspace);
+    workspace
+        .stop_and_turn_off_automation(&automation.id)
+        .unwrap();
+
+    assert_eq!(needing_you(&workspace), 3);
+    let inbox = workspace.inbox(10, 0).unwrap();
+    assert_eq!(
+        inbox
+            .iter()
+            .map(|entry| &entry.from_value)
+            .collect::<Vec<_>>(),
+        [&turned_off.id, &left.id, &stopped.id]
+    );
+}
+
+#[test]
+fn dismissing_a_run_clears_needs_attention_and_leaves_the_run_as_it_ended() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, _chat) = needing_attention(&mut workspace);
+
+    let dismissed = workspace.dismiss_automation_run(&run.id).unwrap();
+
+    assert!(!dismissed.needs_you);
+    assert_eq!(dismissed.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(dismissed.reason.as_deref(), Some(LIMIT));
+    assert_eq!(needing_you(&workspace), 0);
+    // The inbox entry stays, answered.
+    assert!(workspace.inbox(10, 0).unwrap()[0].read);
+    assert_eq!(workspace.inbox_page(10, 0, true).unwrap(), []);
+}
+
+#[test]
+fn running_again_clears_needs_attention_on_the_run_it_repeats() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, _chat) = needing_attention(&mut workspace);
+
+    let again = workspace.run_automation_again(&run.id).unwrap();
+
+    assert!(!workspace.automation_run(&run.id).unwrap().needs_you);
+    assert!(!again.needs_you);
+    assert_eq!(needing_you(&workspace), 0);
+    assert_eq!(workspace.inbox_page(10, 0, true).unwrap(), []);
+}
+
+#[test]
+fn replying_in_the_chat_of_a_run_that_needs_attention_takes_it_over() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = needing_attention(&mut workspace);
+    assert_eq!(listed_chats(&workspace), [] as [String; 0]);
+
+    let taken = workspace
+        .take_over_automation_run(&chat, true)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(taken.id, run.id);
+    assert_eq!(taken.status, AutomationRunStatus::TakenOver);
+    assert!(!taken.needs_you);
+    assert_eq!(needing_you(&workspace), 0);
+    assert_eq!(workspace.inbox_page(10, 0, true).unwrap(), []);
+    // The step keeps why it failed, and its Chat is the person's now.
+    assert_eq!(taken.steps[0].reason.as_deref(), Some(LIMIT));
+    assert_eq!(taken.steps[0].chat_id.as_deref(), Some(chat.as_str()));
+    assert_eq!(listed_chats(&workspace), std::slice::from_ref(&chat));
+    // A second message in what is now an ordinary Chat changes nothing.
+    assert_eq!(
+        workspace.take_over_automation_run(&chat, true).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn replying_in_the_chat_of_a_running_run_ends_it_taken_over_with_the_rest_not_run() {
+    let (_dir, mut workspace) = workspace();
+    automation_on(&mut workspace, Vec::new(), |agent| {
+        vec![
+            run_agent("triage", agent, Some(vec![notify("tell")])),
+            notify("after"),
+        ]
+    });
+    let (run, chat) = on_agent_step(&mut workspace);
+
+    let taken = workspace
+        .take_over_automation_run(&chat, true)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(taken.status, AutomationRunStatus::TakenOver);
+    assert!(taken.ended_at.is_some());
+    // The step it was on ended there; nothing after it, its failure path included,
+    // was reached.
+    assert_eq!(
+        taken
+            .steps
+            .iter()
+            .map(|step| (step.step_id.as_str(), step.status))
+            .collect::<Vec<_>>(),
+        [("triage", AutomationStepStatus::Failed)]
+    );
+    assert_eq!(
+        taken.steps[0].reason.as_deref(),
+        Some("You took this run over.")
+    );
+    assert!(taken.steps[0].ended_at.is_some());
+    assert_eq!(listed_chats(&workspace), [chat]);
+    assert_eq!(needing_you(&workspace), 0);
+    assert_eq!(workspace.inbox(10, 0).unwrap(), []);
+    // What the agent's turn reports afterwards is refused.
+    assert!(
+        workspace
+            .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+            .is_err()
+    );
+    assert_eq!(
+        workspace.automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::TakenOver
+    );
+    // The ticket is free for a new run of the Automation.
+    workspace.run_automation_again(&run.id).unwrap();
+}
+
+#[test]
+fn stopping_the_chat_takes_over_a_running_run_and_no_other() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (_ended, ended_chat) = needing_attention(&mut workspace);
+    let (running, chat) = on_agent_step(&mut workspace);
+
+    // Nothing is going in the Chat of a run that has ended, so there is nothing to
+    // take over by stopping it.
+    assert_eq!(
+        workspace
+            .take_over_automation_run(&ended_chat, false)
+            .unwrap(),
+        None
+    );
+    assert_eq!(needing_you(&workspace), 1);
+    let taken = workspace
+        .take_over_automation_run(&chat, false)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(taken.id, running.id);
+    assert_eq!(taken.status, AutomationRunStatus::TakenOver);
+    assert_eq!(listed_chats(&workspace), [chat]);
+}
+
+#[test]
+fn replying_in_the_chat_of_a_completed_run_makes_it_an_ordinary_chat_of_a_completed_run() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    workspace
+        .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+        .unwrap();
+
+    let after = workspace
+        .take_over_automation_run(&chat, true)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(after.status, AutomationRunStatus::Completed);
+    assert_eq!(listed_chats(&workspace), [chat]);
+}
+
+#[test]
+fn a_chat_that_was_taken_over_is_kept_when_its_run_is_removed_after_90_days() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    let (run, chat) = needing_attention(&mut workspace);
+    workspace.take_over_automation_run(&chat, true).unwrap();
+    let (dismissed, owned) = needing_attention(&mut workspace);
+    let created = chrono::DateTime::parse_from_rfc3339(&dismissed.created_at).unwrap();
+
+    workspace
+        .upkeep(Some(&(created + chrono::Duration::days(91)).to_rfc3339()))
+        .unwrap();
+
+    assert_eq!(runs(&workspace, &automation), []);
+    assert!(workspace.automation_run(&run.id).is_err());
+    assert_eq!(workspace.chat(&chat).unwrap().id, chat);
+    assert_eq!(listed_chats(&workspace), [chat]);
+    assert!(workspace.chat(&owned).is_err());
+    // Nothing is left pointing at a run that is gone.
+    assert_eq!(workspace.inbox(10, 0).unwrap(), []);
+    assert_eq!(needing_you(&workspace), 0);
+}
+
+#[test]
+fn a_ticket_lists_the_runs_that_acted_on_it_newest_first() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    let (first, _chat) = needing_attention(&mut workspace);
+    let ticket = first.ticket.clone().unwrap();
+    let again = workspace.run_automation_again(&first.id).unwrap();
+    let other = tagged(&mut workspace, "Another ticket");
+    workspace.queue_automation_runs().unwrap();
+    let untouched = workspace.create_ticket("No runs").unwrap();
+
+    let listed = workspace.ticket_automation_runs(&ticket.reference).unwrap();
+
+    assert_eq!(
+        listed.iter().map(|run| &run.id).collect::<Vec<_>>(),
+        [&again.id, &first.id]
+    );
+    assert_eq!(listed[0].automation_id, automation.id);
+    assert_eq!(
+        workspace
+            .ticket_automation_runs(&other.reference)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        workspace
+            .ticket_automation_runs(&untouched.reference)
+            .unwrap(),
+        []
+    );
+}
+
+#[test]
+fn the_previous_format_keeps_its_runs_and_the_ones_needing_attention_still_need_you() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    triage(&mut workspace);
+    let (run, _chat) = needing_attention(&mut workspace);
+    drop(workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 72;",
+    )
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+
+    assert!(workspace.automation_run(&run.id).unwrap().needs_you);
+    assert_eq!(needing_you(&workspace), 1);
+}

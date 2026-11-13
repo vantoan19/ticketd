@@ -31,6 +31,7 @@ export function bridgeDefault(
     case "automation_list":
     case "automation_run_list":
     case "automation_run_list_all":
+    case "automation_run_list_for_ticket":
     case "list_projects":
     case "list_plans":
     case "find_tickets":

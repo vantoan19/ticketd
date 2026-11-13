@@ -319,9 +319,23 @@ impl ChatHost {
         self.ask(chat_id, Command::Attach).await
     }
 
-    /// Saves the input, then dispatches, steers or queues it. Returns once it is saved;
-    /// delivery is reported through the Chat's records.
+    /// The person's message. Saves the input, then dispatches, steers or queues it.
+    /// Returns once it is saved; delivery is reported through the Chat's records. In
+    /// the Chat of an Automation run it takes the run over first, so the Chat is the
+    /// person's from this message on.
     pub async fn send(
+        &self,
+        chat_id: &str,
+        command_id: Option<&str>,
+        text: &str,
+        mode: SendMode,
+    ) -> Result<ChatMessage, HostError> {
+        self.workspace()?.take_over_automation_run(chat_id, true)?;
+        self.submit(chat_id, command_id, text, mode).await
+    }
+
+    /// Sends input without it counting as the person's: a run's own first message.
+    pub(crate) async fn submit(
         &self,
         chat_id: &str,
         command_id: Option<&str>,
@@ -338,8 +352,10 @@ impl ChatHost {
         .await
     }
 
-    /// Pauses queue dispatch and asks the harness to interrupt the active turn.
+    /// Pauses queue dispatch and asks the harness to interrupt the active turn. In
+    /// the Chat of an Automation run that is going, it takes the run over.
     pub async fn stop(&self, chat_id: &str) -> Result<(), HostError> {
+        self.workspace()?.take_over_automation_run(chat_id, false)?;
         self.ask(chat_id, Command::Stop).await
     }
 

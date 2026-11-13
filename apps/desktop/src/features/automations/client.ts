@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { ticketStatuses } from "@/lib/statuses";
 
 const limitSchema = z.number().int().positive();
+const statusSchema = z.enum(ticketStatuses);
 
 export const automationAgentSettingsSchema = z.object({
   name: z.string(),
@@ -59,10 +61,32 @@ const stepSchema = z.union([
   }),
   z.looseObject({
     id: z.string(),
-    kind: z.enum(["change_ticket", "notify", "if"]),
+    kind: z.literal("change_ticket"),
+    /** null until the person chooses what it changes. */
+    change: z
+      .discriminatedUnion("action", [
+        z.object({ action: z.literal("add_tag"), tag: z.string() }),
+        z.object({ action: z.literal("remove_tag"), tag: z.string() }),
+        z.object({ action: z.literal("set_status"), status: statusSchema }),
+        /** `text` may hold field references; see `automation-text.ts`. */
+        z.object({ action: z.literal("post_update"), text: z.string() }),
+      ])
+      .nullable(),
   }),
+  z.looseObject({
+    id: z.string(),
+    kind: z.literal("notify"),
+    /** May hold field references, like a posted update. */
+    text: z.string(),
+    /** What a click on the notification opens. */
+    opens: z.enum(["ticket", "run"]),
+  }),
+  z.looseObject({ id: z.string(), kind: z.literal("if") }),
 ]);
 export type AutomationStep = z.infer<typeof stepSchema>;
+export type StepChange = NonNullable<
+  Extract<AutomationStep, { kind: "change_ticket" }>["change"]
+>;
 
 const automationDefinitionSchema = z.object({
   name: z.string(),
@@ -92,6 +116,7 @@ export type Automation = z.infer<typeof automationSchema>;
 
 const automationRunSchema = z.object({
   id: z.string(),
+  automation_id: z.string(),
   status: z.enum([
     "queued",
     "running",
@@ -101,6 +126,11 @@ const automationRunSchema = z.object({
   ]),
   /** Why it needs attention. */
   reason: z.string().nullable(),
+  /**
+   * It ended as Needs attention and the person has not yet run it again, taken
+   * it over or dismissed it.
+   */
+  needs_you: z.boolean(),
   /** The ticket it acts on, as it is called now. */
   ticket: z
     .object({ id: z.string(), reference: z.string(), title: z.string() })
@@ -120,10 +150,14 @@ export type ListedRun = z.infer<typeof listedRunSchema>;
 /** The examples the empty page offers, as the core names them. */
 export type AutomationExample =
   "triage_tagged_tickets" | "verify_ready_for_testing" | "weekly_summary";
+/** A run as its ticket lists it: with the name of the Automation it ran. */
+const ticketRunSchema = automationRunSchema.extend({
+  automation_name: z.string(),
+});
+export type TicketRun = z.infer<typeof ticketRunSchema>;
 
 /** A run as its own view shows it: what it executes, and each step it reached. */
 const automationRunDetailSchema = automationRunSchema.extend({
-  automation_id: z.string(),
   /** The Automation as it was when the run was created. */
   definition: automationDefinitionSchema,
   started_at: z.string().nullable(),
@@ -137,6 +171,8 @@ const automationRunDetailSchema = automationRunSchema.extend({
       reason: z.string().nullable(),
       /** The Chat of a Run agent step. */
       chat_id: z.string().nullable(),
+      /** The run still owns that Chat: replying in it takes the run over. */
+      chat_owned: z.boolean(),
       started_at: z.string(),
       ended_at: z.string().nullable(),
     }),
@@ -249,6 +285,16 @@ export const automationsClient = {
       .array(listedRunSchema)
       .parse(await invoke("automation_run_list_all"));
   },
+  /**
+   * A step's text with its fields filled in from the most recent ticket, and
+   * `tag` for the tag from the event. null while the Workspace has no ticket.
+   */
+  async previewText(text: string, tag: string | null): Promise<string | null> {
+    return z
+      .string()
+      .nullable()
+      .parse(await invoke("automation_text_preview", { text, tag }));
+  },
   async run(id: string): Promise<AutomationRunDetail> {
     return automationRunDetailSchema.parse(
       await invoke("automation_run_get", { id }),
@@ -260,11 +306,24 @@ export const automationsClient = {
       await invoke("automation_run_stop", { id }),
     );
   },
-  /** Queues a new run for the event that started a finished one. */
+  /**
+   * Queues a new run for the event that started a finished one, which then no
+   * longer needs the person.
+   */
   async runAgain(id: string): Promise<AutomationRunDetail> {
     return automationRunDetailSchema.parse(
       await invoke("automation_run_again", { id }),
     );
+  },
+  /** The person wants nothing more from a run that needs attention. */
+  async dismissRun(id: string): Promise<void> {
+    await invoke("automation_run_dismiss", { id });
+  },
+  /** The runs that acted on a ticket, newest first. */
+  async ticketRuns(reference: string): Promise<TicketRun[]> {
+    return z
+      .array(ticketRunSchema)
+      .parse(await invoke("automation_run_list_for_ticket", { reference }));
   },
   async agents(): Promise<AutomationAgent[]> {
     return z

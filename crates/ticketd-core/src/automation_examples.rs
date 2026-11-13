@@ -4,8 +4,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::automations::{Automation, AutomationDefinition, Step, StepAction, Trigger};
-use crate::{Error, Workspace};
+use crate::automations::{Automation, AutomationDefinition, Step, StepAction, StepChange, Trigger};
+use crate::{Error, Status, Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,14 +69,16 @@ impl Workspace {
             AutomationExample::TriageTaggedTickets => {
                 (tag_added("ready-for-triage"), vec![run_agent])
             }
-            // The agent checks the work, then the ticket moves on: where to is the
-            // person's choice, so the change is left for them to make.
+            // The agent checks the work, then the ticket moves on. A step the agent
+            // fails ends the run, so only checked work is marked Done.
             AutomationExample::VerifyReadyForTesting => (
                 tag_added("ready-for-testing"),
                 vec![
                     run_agent,
                     step(StepAction::ChangeTicket {
-                        change: None,
+                        change: Some(StepChange::SetStatus {
+                            status: Status::Done,
+                        }),
                         on_failure: None,
                     }),
                 ],

@@ -680,7 +680,7 @@ fn each_example_holds_what_can_be_built_now_and_says_what_is_left() {
 
     assert_eq!(
         example_needs(&mut workspace, AutomationExample::VerifyReadyForTesting),
-        ["Needs an agent and a folder", "Needs a change"]
+        ["Needs an agent and a folder"]
     );
     assert_eq!(
         example_needs(&mut workspace, AutomationExample::WeeklySummary),

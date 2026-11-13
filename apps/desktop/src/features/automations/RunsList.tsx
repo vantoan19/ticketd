@@ -64,7 +64,7 @@ function RunRow({
         className="chat-row"
         aria-current={current ? "true" : undefined}
         onClick={() => onOpen(run.id)}
-        {...(run.status === "needs_attention" && { "data-attention": "" })}
+        {...(run.needs_you && { "data-attention": "" })}
       >
         <span className="chat-row-mark">
           <RunMark status={run.status} />

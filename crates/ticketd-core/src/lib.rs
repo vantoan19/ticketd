@@ -102,6 +102,7 @@ mod automation_examples;
 mod automation_matching;
 mod automation_run_machine;
 mod automation_runs;
+mod automation_steps;
 mod automations;
 mod change_token;
 mod chats;
@@ -118,6 +119,7 @@ pub use automation_runs::{
     AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
     AutomationStepStatus,
 };
+pub use automation_steps::AutomationNotification;
 pub use automations::{
     AUTOMATION_TRIGGER_ID, Automation, AutomationDefinition, AutomationProblem, Check, Condition,
     NotifyTarget, Schedule, Step, StepAction, StepChange, Trigger, Weekday,
@@ -138,7 +140,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 72;
+pub const FORMAT_VERSION: i64 = 73;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -972,6 +974,9 @@ impl Workspace {
         }
         if version < 72 {
             automation_background::migrate(&transaction)?;
+        }
+        if version < 73 {
+            automation_runs::migrate_attention(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

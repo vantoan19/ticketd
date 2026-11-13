@@ -1,5 +1,6 @@
 //! The runner against the Chat host's adapter contract, with a fake harness: what an
-//! agent step starts, and what each way its turn can end does to the run.
+//! agent step starts, what each way its turn can end does to the run, and how the
+//! person takes a run over in its Chat.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
     InteractionKind, InteractionRequest, NativeRequestId, NativeTurnId, Problem, ProblemKind,
-    TurnOutcome, WorkspaceOpener,
+    SendMode, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -113,7 +114,7 @@ impl Fixture {
             executable: Some(PathBuf::from("/opt/ticketd/ticketd")),
             folders: vec![dir.path().to_owned()],
         };
-        let runner = Runner::new(opener(&path), host.clone(), cli).unwrap();
+        let runner = Runner::new(opener(&path), host.clone(), cli, Arc::new(|_| Ok(()))).unwrap();
         Self {
             _dir: dir,
             path,
@@ -167,6 +168,33 @@ impl Fixture {
                 submissions: Vec::new(),
             })
             .await;
+        settle().await;
+    }
+
+    /// The Chat of the one run's agent step.
+    #[allow(clippy::unwrap_used)]
+    fn chat(&self) -> String {
+        self.runs()[0].steps[0].chat_id.clone().unwrap()
+    }
+
+    /// The Chats in the person's Chat list.
+    #[allow(clippy::unwrap_used)]
+    fn listed_chats(&self) -> Vec<String> {
+        self.core()
+            .list_chats(ChatListFilter::Active)
+            .unwrap()
+            .into_iter()
+            .map(|chat| chat.id)
+            .collect()
+    }
+
+    /// The person sends a message in a Chat.
+    #[allow(clippy::unwrap_used)]
+    async fn reply(&self, chat_id: &str, text: &str) {
+        self.host
+            .send(chat_id, None, text, SendMode::Auto)
+            .await
+            .unwrap();
         settle().await;
     }
 
@@ -445,7 +473,13 @@ async fn a_run_left_running_when_ticketd_closed_needs_attention_at_the_next_star
 
     // A new process: a new host and runner over the same Workspace.
     let host = ChatHost::new(opener(&f.path), Vec::new()).unwrap();
-    Runner::new(opener(&f.path), host, TicketdCli::default()).unwrap();
+    Runner::new(
+        opener(&f.path),
+        host,
+        TicketdCli::default(),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
 
     assert_eq!(
         f.needs_attention(),
@@ -523,4 +557,64 @@ async fn stop_it_and_turn_off_interrupts_the_agent_and_the_run_needs_attention()
     // The interrupted turn's end changes nothing: the run has already ended.
     f.end_turn(TurnOutcome::Interrupted).await;
     assert_eq!(f.needs_attention(), reason);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_message_from_the_person_takes_a_running_run_over_and_its_chat_becomes_ordinary() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    assert_eq!(f.listed_chats(), [] as [String; 0]);
+
+    f.reply(&chat, "Only check Safari 18.1").await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::TakenOver);
+    assert_eq!(f.listed_chats(), [chat]);
+    // The turn that was going ends later; the run stays the person's.
+    f.end_turn(TurnOutcome::Completed).await;
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::TakenOver);
+    assert_eq!(run.steps.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_a_running_runs_chat_takes_the_run_over() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+
+    f.host.stop(&chat).await.unwrap();
+    settle().await;
+
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert_eq!(f.listed_chats(), [chat]);
+    assert!(
+        f.fake
+            .written()
+            .iter()
+            .any(|written| matches!(written, Written::Interrupt(_))),
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn replying_to_a_run_that_needs_attention_takes_it_over_in_an_ordinary_session() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    f.end_turn(problem(ProblemKind::TurnLimitReached, "max turns"))
+        .await;
+    f.needs_attention();
+    let chat = f.chat();
+    assert_eq!(f.core().sidebar_counts().unwrap().runs_needing_you, 1);
+
+    f.reply(&chat, "Stop once you find the cause").await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::TakenOver);
+    assert_eq!(f.core().sidebar_counts().unwrap().runs_needing_you, 0);
+    assert_eq!(f.listed_chats(), [chat]);
+    // The person's session is theirs: opened again without the agent's limits.
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].unattended, None);
 }

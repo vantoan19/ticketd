@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Bot,
@@ -34,6 +34,7 @@ import {
   type ListedRun,
 } from "@/features/automations/client";
 import { AllRunsList } from "@/features/automations/RunsList";
+import { RunNavigation } from "@/features/automations/navigation";
 import { RunView } from "@/features/automations/RunView";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
@@ -100,8 +101,15 @@ function startedBy(trigger: Automation["trigger"]) {
  * switches between Automations, Agents and Runs. An Automation or an agent
  * opens beside the list and is edited in place; a run opens on its own view.
  */
-export function AutomationsView() {
+export function AutomationsView({
+  openRun,
+}: {
+  /** A run to open, asked for elsewhere; a new `key` asks again. */
+  openRun?: { id: string; key: number } | null;
+}) {
   const [tab, setTab] = useState<Tab>("automations");
+  /** The run open in place of its Automation. */
+  const [run, setRun] = useState<string | null>(null);
   /** null until the first load answers. */
   const [automations, setAutomations] = useState<Automation[] | null>(null);
   const [agents, setAgents] = useState<AutomationAgent[] | null>(null);
@@ -138,17 +146,39 @@ export function AutomationsView() {
   );
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());
+  const asked = openRun?.id;
+  const askedKey = openRun?.key;
+  useEffect(() => {
+    if (!asked) return;
+    void automationsClient.run(asked).then((found) => {
+      // Asked for from the list of every run, it opens beside that list;
+      // from anywhere else, inside its Automation.
+      setTab((current) => (current === "runs" ? "runs" : "automations"));
+      setExpanded(false);
+      setOpenIds((current) => ({
+        ...current,
+        automations: found.automation_id,
+        runs: found.id,
+      }));
+      setRun(found.id);
+    }, fail);
+  }, [asked, askedKey, fail]);
 
   const openId = openIds[tab];
-  const setOpenId = (id: string | null) =>
+  const setOpenId = (id: string | null) => {
+    setRun(null);
     setOpenIds((current) => ({ ...current, [tab]: id }));
+  };
   const openAgent =
     tab === "agents" ? agents?.find((a) => a.id === openId) : undefined;
   const openAutomation =
     tab === "automations"
       ? automations?.find((a) => a.id === openId)
       : undefined;
-  const openRun = tab === "runs" ? openId : null;
+  const listedRun = tab === "runs" ? openId : null;
+  /** The page's run navigation; without it (the view alone) the run opens here. */
+  const navigate = use(RunNavigation);
+  const openListedRun = (id: string) => (navigate ?? setOpenId)(id);
   const close = () => {
     setExpanded(false);
     setOpenId(null);
@@ -261,6 +291,7 @@ export function AutomationsView() {
           value={tab}
           onValueChange={(next) => {
             setTab(next);
+            setRun(null);
             setExpanded(false);
           }}
           options={[
@@ -277,9 +308,7 @@ export function AutomationsView() {
             {
               value: "runs",
               label: "Runs",
-              // ponytail: any run still Needs attention; follow the count the
-              // sidebar uses once dismissing a run exists.
-              ...(runs?.some((run) => run.status === "needs_attention") && {
+              ...(runs?.some((run) => run.needs_you) && {
                 attention: "a run needs you",
               }),
             },
@@ -292,7 +321,9 @@ export function AutomationsView() {
         </p>
       )}
       {tab === "runs" ? (
-        runs && <AllRunsList runs={runs} openId={openRun} onOpen={setOpenId} />
+        runs && (
+          <AllRunsList runs={runs} openId={listedRun} onOpen={openListedRun} />
+        )
       ) : tab === "automations" ? (
         <>
           {automations?.length === 0 && (
@@ -376,6 +407,8 @@ export function AutomationsView() {
       automation={openAutomation}
       agents={agents ?? []}
       {...paneProps}
+      openRun={run}
+      onOpenRun={setRun}
       onChange={(definition) => saveAutomation(openAutomation.id, definition)}
       onSetEnabled={(enabled) => void setEnabled(openAutomation.id, enabled)}
       onStopAndTurnOff={() => void stopAndTurnOff(openAutomation.id)}
@@ -393,18 +426,18 @@ export function AutomationsView() {
       onDeleteAgent={(id) => void deleteAgent(id)}
       onFail={fail}
     />
-  ) : openRun ? (
+  ) : listedRun ? (
     <RunView
-      key={openRun}
-      id={openRun}
+      key={listedRun}
+      id={listedRun}
       automationName={
-        runs?.find((run) => run.id === openRun)?.automation_name.trim() ||
+        runs?.find((run) => run.id === listedRun)?.automation_name.trim() ||
         "New Automation"
       }
       agents={agents ?? []}
       {...paneProps}
       onBack={close}
-      onOpenRun={setOpenId}
+      onOpenRun={openListedRun}
       onFail={fail}
     />
   ) : (
@@ -487,7 +520,7 @@ export function AutomationsView() {
       )}
     </section>
   );
-  const open = openAgent ?? openAutomation ?? openRun;
+  const open = openAgent ?? openAutomation ?? listedRun;
   return (
     <div ref={workspaceRef} className="plan-workspace">
       {single ? (

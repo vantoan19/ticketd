@@ -16,13 +16,34 @@ const BRANCHING = [
     kind: "run_agent" as const,
     agent_id: "agent-1",
     execution_folder: "/work",
-    on_failure: [{ id: "on-failure", kind: "notify" as const }],
+    on_failure: [
+      {
+        id: "on-failure",
+        kind: "notify" as const,
+        text: "Done",
+        opens: "ticket" as const,
+      },
+    ],
   },
   {
     id: "if",
     kind: "if" as const,
-    yes: [{ id: "yes", kind: "notify" as const }],
-    no: [{ id: "no", kind: "notify" as const }],
+    yes: [
+      {
+        id: "yes",
+        kind: "notify" as const,
+        text: "Done",
+        opens: "ticket" as const,
+      },
+    ],
+    no: [
+      {
+        id: "no",
+        kind: "notify" as const,
+        text: "Done",
+        opens: "ticket" as const,
+      },
+    ],
   },
 ];
 const states = (
@@ -35,6 +56,7 @@ const states = (
       automation_id: "automation-1",
       status,
       reason: null,
+      needs_you: false,
       ticket: null,
       created_at: "2026-11-14T10:00:00.000Z",
       started_at: null,
@@ -50,6 +72,7 @@ const states = (
         status,
         reason: null,
         chat_id: null,
+        chat_owned: false,
         started_at: "2026-11-14T10:00:00.000Z",
         ended_at: null,
       })),
@@ -92,8 +115,10 @@ test("once a run has ended, every step it did not reach is Not run", () => {
 
 const run = (id: string, created_at: string): AutomationRun => ({
   id,
+  automation_id: "automation-1",
   status: "completed",
   reason: null,
+  needs_you: false,
   ticket: null,
   created_at,
 });
@@ -127,6 +152,7 @@ test("every run is grouped by whether it is going, needs the person, or is over,
   const of = (id: string, status: AutomationRun["status"]) => ({
     ...run(id, "2026-11-14T10:00:00Z"),
     status,
+    needs_you: status === "needs_attention",
   });
 
   const groups = runsByNeed([
@@ -144,8 +170,10 @@ test("every run is grouped by whether it is going, needs the person, or is over,
     ["Needs you", ["c"]],
     ["Earlier", ["a", "e"]],
   ]);
-  // A group with nothing in it is left out.
-  expect(runsByNeed([of("a", "completed")]).map((g) => g.label)).toEqual([
-    "Earlier",
-  ]);
+  // A run the person dismissed no longer needs them, and an empty group is left out.
+  expect(
+    runsByNeed([{ ...of("a", "needs_attention"), needs_you: false }]).map(
+      (group) => group.label,
+    ),
+  ).toEqual(["Earlier"]);
 });

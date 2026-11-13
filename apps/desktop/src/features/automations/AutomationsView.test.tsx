@@ -15,6 +15,7 @@ import type {
   AutomationAgent,
   ListedRun,
 } from "@/features/automations/client";
+import { RunNavigation } from "@/features/automations/navigation";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
 
@@ -137,6 +138,7 @@ const listed = (
   automation_name: TRIAGE.name,
   status,
   reason: null,
+  needs_you: status === "needs_attention",
   ticket: { id, reference: `T-${id}`, title },
   created_at: new Date().toISOString(),
 });
@@ -361,8 +363,13 @@ test("the Runs view lists every run under Now, Needs you and Earlier, naming its
   expect(heading.textContent).toContain("Triage new tickets");
 });
 
-test("the Runs tab has no mark while no run needs the person", async () => {
-  runs = [listed("1", "completed", "Rate-limit logins")];
+test("a run the person dismissed is listed under Earlier and leaves the Runs tab unmarked", async () => {
+  runs = [
+    {
+      ...listed("1", "needs_attention", "Rate-limit logins"),
+      needs_you: false,
+    },
+  ];
   show();
   fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
 
@@ -425,4 +432,29 @@ test("Duplicate in an Automation’s menu makes a copy and opens it", async () =
       "button",
     ),
   ).toHaveLength(2);
+});
+
+test("a run chosen in the Runs view goes through the page's run navigation and opens beside the list", async () => {
+  runs = [listed("2", "needs_attention", "Login flickers")];
+  const navigate = vi.fn();
+  const page = (openRun: { id: string; key: number } | null) => (
+    <RunNavigation value={navigate}>
+      <ChatClientContext value={createMockChatClient()}>
+        <AutomationsView openRun={openRun} />
+      </ChatClientContext>
+    </RunNavigation>
+  );
+  const { rerender } = render(page(null));
+  fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Login flickers/ }),
+  );
+  expect(navigate).toHaveBeenCalledWith("2");
+  rerender(page({ id: "2", key: 1 }));
+
+  await screen.findByRole("heading", { name: /Run on T-2/ });
+  expect(
+    screen.getByRole("radio", { name: /^Runs/ }).getAttribute("aria-checked"),
+  ).toBe("true");
 });

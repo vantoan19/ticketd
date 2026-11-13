@@ -580,7 +580,12 @@ fn invalid(message: impl Into<String>) -> Error {
 }
 
 /// Appends a change entry and returns its sequence, which also orders new history items.
-fn log(connection: &Connection, chat_id: &str, kind: &str, subject: &str) -> Result<i64, Error> {
+pub(crate) fn log(
+    connection: &Connection,
+    chat_id: &str,
+    kind: &str,
+    subject: &str,
+) -> Result<i64, Error> {
     connection.execute(
         "INSERT INTO chat_changes (chat_id, kind, subject_id) VALUES (?1, ?2, ?3)",
         params![chat_id, kind, subject],
