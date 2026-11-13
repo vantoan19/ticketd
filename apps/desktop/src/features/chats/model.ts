@@ -672,6 +672,56 @@ export function harnessUsable(status: HarnessStatus["status"]) {
   );
 }
 
+/**
+ * A harness that is not ready, as one word beside its name. `dot`: it needs
+ * the person (a sign-in, an update, a check); a word without one is a fact.
+ */
+export function harnessWord(
+  status: HarnessStatus["status"],
+): { word: string; dot: boolean } | null {
+  switch (status) {
+    case "ready":
+      return null;
+    case "not_signed_in":
+      return { word: "Not signed in", dot: true };
+    case "incompatible":
+    case "unavailable":
+      return { word: "Can't be used", dot: true };
+    case "unknown":
+      return { word: "Couldn't check", dot: true };
+    case "not_subscription":
+      return { word: "Not on a subscription", dot: true };
+    case "not_installed":
+      return { word: "Not installed", dot: false };
+    case "sign_in_unknown":
+      return { word: "Sign-in not checked", dot: false };
+  }
+}
+
+/** A managed folder is named by an id; it reads as the folder ticketd keeps. */
+export const folderLabel = (folder: ChatState["folder"]) =>
+  folder.managed ? "ticketd folder" : folder.name;
+
+/** The header's context button, read aloud: what the popover holds. */
+export function contextLabel(chat: ChatState) {
+  const { folder } = chat;
+  const branch = folder.branch?.name
+    ? folder.branch.kind === "detached"
+      ? `detached at ${folder.branch.name}`
+      : `branch ${folder.branch.name}`
+    : null;
+  const others = folder.shared_with.length;
+  return [
+    `Folder ${folderLabel(folder)}`,
+    folder.missing && "missing",
+    branch,
+    folder.project && `Project ${folder.project.title}`,
+    others > 0 && `used by ${others} other ${others === 1 ? "Chat" : "Chats"}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 /** Waits for the person: approval, question, or a failure not yet seen. */
 export const waits = (status: ChatStatus) =>
   status.rank === "approval" ||

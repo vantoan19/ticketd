@@ -197,6 +197,11 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
+.linked-chats-mark {
+  align-self: flex-start;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
 .linked-chats-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

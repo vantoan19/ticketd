@@ -1326,7 +1326,9 @@ An execution folder is required but a Project is not. Offer an existing folder;
 otherwise use a persistent managed folder for the Chat. Context links do not move
 execution or create a Project. Multiple Chats may run concurrently, including in
 the same directory; show shared-directory use. No automatic isolation or worktree
-management is implied. Each Chat has at most one active turn.
+management is implied. Each Chat has at most one active turn. A Chat shows its
+folder's Project and the git branch checked out there, read from the folder and
+never changed by ticketd.
 
 A Chat can start from a ticket, linked to it, with its Project's folder offered and
 an unsent prompt; nothing is sent until the person sends it. Ticket detail lists the

@@ -119,13 +119,24 @@ export const chatStatusSchema = z.object({
 });
 export type ChatStatus = z.infer<typeof chatStatusSchema>;
 
+/** A Project as a Chat names it: the folder's Project, else a linked one. */
+export const projectRefSchema = z.object({ id: z.string(), title: z.string() });
+export type ProjectRef = z.infer<typeof projectRefSchema>;
+
 export const chatSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
+  /** Absent from older hosts; the mark then reads as an unknown harness. */
+  harness_id: z.string().nullish(),
   harness_name: z.string(),
   /** Absent while the folder is missing. */
   folder_name: z.string().nullish(),
   first_ticket: z.string().nullish(),
+  project: projectRefSchema.nullish(),
+  /** The linked tickets, in link order: the row's context item. */
+  tickets: z
+    .array(z.object({ reference: z.string(), status: z.string() }))
+    .default([]),
   retention: retentionSchema,
   activity: activitySchema,
   /** A live approval or question, or a delivery the person must decide about. */
@@ -174,8 +185,10 @@ export const harnessStatusSchema = z.object({
   message: z.string().nullish(),
   command: z.string().nullish(),
   help_url: z.string().nullish(),
-  /** The executable the message is about, to show as a path. */
+  /** The executable that was found, to show as a path. */
   path: z.string().nullish(),
+  /** The version number it reported ("2.1.322"). */
+  version: z.string().nullish(),
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
 
@@ -450,6 +463,14 @@ export const chatStateSchema = z.object({
     missing: z.boolean(),
     /** Titles of other Chats running in the same folder. */
     shared_with: z.array(z.string()),
+    /** The git branch checked out there, read by the host; absent outside a repository. */
+    branch: z
+      .object({
+        kind: z.enum(["branch", "detached", "unreadable"]),
+        name: z.string().nullish(),
+      })
+      .nullish(),
+    project: projectRefSchema.nullish(),
   }),
   retention: retentionSchema,
   activity: activitySchema,
@@ -643,6 +664,8 @@ export interface ChatClient {
     setting: "model" | "effort" | "permission",
     value: string,
   ): Promise<SettingChange>;
+  /** Opens the Chat's folder in the file manager. */
+  openFolder(id: string): Promise<void>;
   /** Opens a file the agent changed in the system's default app for it. */
   openFile(id: string, path: string): Promise<void>;
   /** Ordinary core Document creation from a response or a plan; resolves to the Document's id. */

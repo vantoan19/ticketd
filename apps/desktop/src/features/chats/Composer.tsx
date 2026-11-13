@@ -30,6 +30,7 @@ export function Composer({
   onStop,
   stopping = false,
   beforeStop,
+  leading,
   onArrowUpFromEmpty,
   inputRef,
   autoFocus = false,
@@ -56,6 +57,8 @@ export function Composer({
   stopping?: boolean;
   /** Fixed before Stop, so Send leads: the context ring (#367). */
   beforeStop?: ReactNode;
+  /** The row's start: the harness's model and permission triggers (#368). */
+  leading?: ReactNode;
   /** ↑ in an empty box: what is above it (a request's options) takes focus. */
   onArrowUpFromEmpty?: () => void;
   inputRef?: Ref<HTMLTextAreaElement>;
@@ -124,30 +127,33 @@ export function Composer({
           else if (state.enabled) submit(primary);
         }}
       />
-      {/* The left of the row is for the harness's own controls (#368). */}
+      {/* The harness's own controls lead; short of room, the end group wraps
+          to a second line, still at the end. */}
       <div className="chat-composer-row">
-        <span className="chat-spacer" />
-        {beforeStop}
-        {onStop && (
-          <IconButton
-            type="button"
-            variant="outline"
-            label="Stop"
-            shortcut="Esc"
-            aria-keyshortcuts="Escape"
-            disabled={stopping}
-            onClick={onStop}
-          >
-            {/* Filled, the stop sign does not read as an empty checkbox. */}
-            <Square fill="currentColor" aria-hidden />
-          </IconButton>
-        )}
-        <SendButton
-          controls={state}
-          busy={busy}
-          onSteer={() => submit(onSend)}
-          onQueue={queue}
-        />
+        {leading}
+        <div className="chat-composer-end">
+          {beforeStop}
+          {onStop && (
+            <IconButton
+              type="button"
+              variant="outline"
+              label="Stop"
+              shortcut="Esc"
+              aria-keyshortcuts="Escape"
+              disabled={stopping}
+              onClick={onStop}
+            >
+              {/* Filled, the stop sign does not read as an empty checkbox. */}
+              <Square fill="currentColor" aria-hidden />
+            </IconButton>
+          )}
+          <SendButton
+            controls={state}
+            busy={busy}
+            onSteer={() => submit(onSend)}
+            onQueue={queue}
+          />
+        </div>
       </div>
     </form>
   );

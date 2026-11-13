@@ -25,6 +25,9 @@ import type { ChatSummary, Retention } from "@/features/chats/client";
 import { ChatDetail } from "@/features/chats/ChatDetail";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
 import { ChatStatus } from "@/features/chats/ChatStatus";
+import { HarnessMark } from "@/features/chats/HarnessMark";
+import { ProjectIcon } from "@/features/projects/ProjectIcon";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { chatTime, emphasised } from "@/features/chats/model";
 import { NewChat } from "@/features/chats/NewChat";
 import { useChatFeature, useChatList } from "@/features/chats/use-chats";
@@ -58,6 +61,30 @@ const PANEL_STYLE = {
   overflow: "hidden",
 } as const;
 
+/**
+ * Line two's one context item: the first linked ticket's status icon and
+ * reference, with "+N" for the rest, else the Project. It gives way first.
+ */
+function RowContext({ chat }: { chat: ChatSummary }) {
+  const [ticket, ...more] = chat.tickets;
+  if (ticket)
+    return (
+      <span className="chat-row-context">
+        <StatusIcon status={ticket.status} size={12} decorative />
+        <Reference>{ticket.reference}</Reference>
+        {more.length > 0 && <span>+{more.length}</span>}
+      </span>
+    );
+  if (chat.project)
+    return (
+      <span className="chat-row-context">
+        <ProjectIcon project={chat.project} />
+        <span className="chat-row-context-name">{chat.project.title}</span>
+      </span>
+    );
+  return null;
+}
+
 function ChatRow({
   chat,
   active,
@@ -73,9 +100,6 @@ function ChatRow({
 }) {
   const row = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
-  const context = [chat.first_ticket, chat.folder_name]
-    .filter(Boolean)
-    .join(" · ");
   const strong = emphasised(chat.status);
   return (
     <li className="chat-row-item">
@@ -97,16 +121,24 @@ function ChatRow({
           }
         }}
       >
-        {/* The harness mark's place (#368). */}
-        <span className="chat-row-mark" />
-        <span className="chat-row-title">{chat.title}</span>
+        {/* Said after the title: a row reads title, harness, status, context, time. */}
+        <HarnessMark
+          harness={chat.harness_id}
+          name={chat.harness_name}
+          className="chat-row-mark"
+          decorative
+        />
+        <span className="chat-row-title">
+          {chat.title}
+          <span className="sr-only">, {chat.harness_name},</span>
+        </span>
         <span className="chat-row-time">
           {chat.muted && <BellOff size={14} aria-hidden="true" />}
           {chatTime(chat.updated_at, now)}
         </span>
         <span className="chat-row-sub">
           <ChatStatus status={chat.status} activity={chat.activity} />
-          {context && <span className="chat-row-context">{context}</span>}
+          <RowContext chat={chat} />
         </span>
         {chat.status.unseen && <span className="sr-only">, unread</span>}
         {chat.muted && <span className="sr-only">, muted</span>}

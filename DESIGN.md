@@ -625,8 +625,11 @@ A Chat (product specification section 21) opens in the detail pane: a 48px heade
 ### Identity and header
 
 - **Harness mark:** the official mark in one color, 14px in a 16px box, once per surface: before the header title and leading a list row. An unknown harness uses `SquareTerminal`. Status never sits on a mark's corner.
-- **Project icon:** derived from the Project's folder: its favicon in grays, else a letter tile on `recessed`.
-- **Header:** one line: mark and title, then one muted 32px context button (Project icon, folder, mono branch, a count only when another Chat shares the folder) before the actions. Its popover is the only place for Harness, Folder and Branch.
+- **Project icon:** derived from the Project's folder, probed when shown and never stored: a transparent favicon is its shape in the text color, an opaque one its picture in grays on the boundary ring, else a letter tile on `recessed`. Never the favicon's own colors.
+- **Header:** one line: mark and title, then one muted 32px context button (Project icon, folder, mono branch, a count only when another Chat shares the folder) before the actions. Below a 600px pane the branch moves into the popover; below 460px the button keeps only the icon, the count and the chevron. Its popover ("Chat context") is the only place for Harness (version, executable, sign-in, Check again), Folder (path with Copy, branch, Open in the file manager), Other Chats here and Project.
+- **Linked records:** 28px chips on one line, at most 280px each; remove shows on hover or focus, and what does not fit folds into "N more". With no links there is no row; the Chat actions menu links one.
+- **List rows:** the mark leads; line two is the status, then one context item, the first ticket's status icon, mono reference and "+N", else the Project.
+- **New Chat:** one 48px radio per harness, its mark and name, with a muted word only when it isn't ready ("Not signed in", "Not installed"); the notice under the composer holds the actions.
 
 ### Transcript
 

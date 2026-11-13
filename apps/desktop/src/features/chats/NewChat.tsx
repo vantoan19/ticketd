@@ -5,7 +5,6 @@ import {
   Folder,
   Maximize2,
   Minimize2,
-  SquareTerminal,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,8 +12,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
@@ -39,7 +36,16 @@ import {
 } from "@/features/chats/quotes";
 import { ticketPrompt, type TicketStart } from "@/features/chats/ticket-chat";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
-import { harnessUsable } from "@/features/chats/model";
+import { HarnessMark } from "@/features/chats/HarnessMark";
+import { harnessUsable, harnessWord } from "@/features/chats/model";
+import { StatusDot } from "@/components/ui/status-dot";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { RadioGroup } from "radix-ui";
 import { notificationClient } from "@/lib/api/notifications";
 import { loadPreferences } from "@/lib/preferences";
 
@@ -55,6 +61,79 @@ const STATUS_PROBLEM: Record<
   sign_in_unknown: "sign_in_unknown",
   unknown: "probe_failed",
 };
+
+/**
+ * The harness choice: one 48px radio per harness with its mark and name, and
+ * a muted word only when it isn't ready. Arrow keys choose; the draft and the
+ * composer stay where they are. What to do about a harness is in the notice.
+ */
+function HarnessRadios({
+  harnesses,
+  value,
+  onChange,
+}: {
+  harnesses: HarnessStatus[] | null;
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  if (!harnesses)
+    return (
+      <p className="chat-harness-checking" role="status">
+        Checking which harnesses are installed…
+      </p>
+    );
+  if (harnesses.length === 0) return null;
+  return (
+    <TooltipProvider delayDuration={400}>
+      <RadioGroup.Root
+        className="chat-harnesses"
+        aria-label="Harness"
+        value={value}
+        onValueChange={onChange}
+      >
+        {harnesses.map((item) => {
+          const word = harnessWord(item.status);
+          return (
+            <Tooltip key={item.id}>
+              <TooltipTrigger asChild>
+                <RadioGroup.Item
+                  value={item.id}
+                  className="chat-harness"
+                  aria-label={word ? `${item.name}, ${word.word}` : item.name}
+                >
+                  <span className="chat-harness-radio" aria-hidden="true">
+                    <RadioGroup.Indicator />
+                  </span>
+                  <HarnessMark
+                    harness={item.id}
+                    name={item.name}
+                    dim={item.status === "not_installed"}
+                    decorative
+                  />
+                  <span className="chat-harness-name">{item.name}</span>
+                  {word && (
+                    <span className="chat-harness-word">
+                      {word.dot && <StatusDot tone="attention" />}
+                      {word.word}
+                    </span>
+                  )}
+                </RadioGroup.Item>
+              </TooltipTrigger>
+              <TooltipContent>
+                {[
+                  item.version && `${item.name} ${item.version}`,
+                  "A Chat keeps its harness",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </RadioGroup.Root>
+    </TooltipProvider>
+  );
+}
 
 /** The draft survives leaving and returning to New Chat while the app is open. */
 let draft = "";
@@ -167,8 +246,6 @@ export function NewChat({
     found.find((item) => item.status === "ready") ??
     found.find((item) => harnessUsable(item.status)) ??
     found[0];
-  const harnessLabel =
-    harness?.name ?? (harnesses ? "No harness" : "Checking…");
   const ready = harness !== undefined && harnessUsable(harness.status);
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
   const mentions = useMemo<ComposerMentions>(
@@ -219,6 +296,11 @@ export function NewChat({
       <div className="chat-new">
         <div>
           <h2>What should we work on?</h2>
+          <HarnessRadios
+            harnesses={harnesses}
+            value={harness?.id ?? ""}
+            onChange={setHarnessId}
+          />
           <Composer
             key={composerKey}
             autoFocus
@@ -288,36 +370,6 @@ export function NewChat({
             }}
           />
           <div className="chat-chips">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  disabled={!harnesses}
-                  aria-label={
-                    harnesses
-                      ? `Harness: ${harness?.name ?? "none found"}`
-                      : "Harness: checking which are installed"
-                  }
-                >
-                  <SquareTerminal aria-hidden />
-                  {harnessLabel}
-                  <ChevronDown aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuRadioGroup
-                  value={harness?.id ?? ""}
-                  onValueChange={setHarnessId}
-                >
-                  {found.map((item) => (
-                    <DropdownMenuRadioItem key={item.id} value={item.id}>
-                      {item.name}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
