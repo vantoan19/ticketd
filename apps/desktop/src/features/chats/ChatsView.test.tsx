@@ -86,7 +86,7 @@ async function open(chats: MockChat[], title?: string) {
   if (first) {
     fireEvent.click(
       await screen.findByRole("button", {
-        name: new RegExp(title ?? first.chat.title),
+        name: new RegExp(`^${title ?? first.chat.title}`),
       }),
     );
     await screen.findByRole("heading", { name: title ?? first.chat.title });
@@ -440,9 +440,12 @@ test("an uncertain delivery is never resent unless the person says so", async ()
       ],
     ),
   );
-  expect(screen.getByText("Not confirmed")).toBeTruthy();
+  expect(
+    within(screen.getByRole("list", { name: "Chats" })).getByText(
+      "Not confirmed",
+    ),
+  ).toBeTruthy();
   expect(screen.getByText("Did Codex get your message?")).toBeTruthy();
-  expect(screen.getByText("Needs your decision")).toBeTruthy();
   type("hello?");
   expect(button("Send")).toHaveProperty("disabled", true);
   fireEvent.click(button("Don't send"));
@@ -481,7 +484,12 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
   // Output and queued input are retained; nothing is sent for the person.
   expect(screen.getAllByText("Half way there.").length).toBeGreaterThan(0);
   expect(screen.getByText("then add tests")).toBeTruthy();
-  expect(screen.getByText("Stopped: usage limit reached")).toBeTruthy();
+  // Seen once opened, the row says the outcome in words without the dot.
+  expect(
+    within(screen.getByRole("list", { name: "Chats" })).getByRole("button", {
+      name: /^Limiter/,
+    }).textContent,
+  ).toContain("Failed\u00a0· Codex reached your usage limit");
 
   act(() =>
     client.patch("c1", {
@@ -652,7 +660,7 @@ test("archive keeps the work running; trash stops it and restore re-runs nothing
   openMenu("Show active, archived or trashed Chats");
   fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
   expect(await screen.findByRole("heading", { name: "Archived" })).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button", { name: /Limiter/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Limiter/ }));
   await screen.findByRole("button", { name: "Unarchive" });
 
   openMenu("Chat actions");
@@ -691,13 +699,89 @@ test("the list says which Chats need the person, in words as well as the dot", a
     { chat: chatState({ id: "c2", title: "Limiter", activity: "working" }) },
   ]);
   const rows = within(screen.getByRole("list", { name: "Chats" }));
-  const waiting = rows.getByRole("button", { name: /Alert on-call/ });
-  expect(waiting.textContent).toContain("Waiting for you");
+  const waiting = rows.getByRole("button", { name: /^Alert on-call/ });
+  expect(waiting.textContent).toContain(
+    "Approval needed\u00a0· npm install @pagerduty/pdjs",
+  );
   expect(waiting.textContent).toContain("T-13 · web-app");
   expect(waiting.getAttribute("aria-current")).toBe("true");
-  expect(rows.getByRole("button", { name: /Limiter/ }).textContent).toContain(
-    "Working…",
+  expect(waiting.hasAttribute("data-attention")).toBe(true);
+  const working = rows.getByRole("button", { name: /^Limiter/ });
+  expect(working.textContent).toContain("Working");
+  expect(working.hasAttribute("data-attention")).toBe(false);
+});
+
+test("a row's actions mark it unread or read and mute it, and say a refusal", async () => {
+  const client = await open([
+    { chat: chatState({ id: "c1", title: "Alert on-call" }) },
+    {
+      chat: chatState({ id: "c2", title: "Limiter", unseen: true }),
+      items: [reply("r1", "All **done**")],
+    },
+  ]);
+  const rows = within(screen.getByRole("list", { name: "Chats" }));
+  const done = rows.getByRole("button", { name: /^Limiter/ });
+  expect(done.textContent).toContain("Done\u00a0· All done");
+  expect(done.textContent).toContain("unread");
+
+  openMenu("Actions for Limiter");
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Mark as read" }),
   );
+  await waitFor(() =>
+    expect(
+      rows.getByRole("button", { name: /^Limiter/ }).textContent,
+    ).not.toContain("unread"),
+  );
+  // Seen, the row says its last line in words.
+  expect(rows.getByRole("button", { name: /^Limiter/ }).textContent).toContain(
+    "All done",
+  );
+
+  openMenu("Actions for Limiter");
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Mute notifications" }),
+  );
+  await waitFor(() =>
+    expect(
+      rows.getByRole("button", { name: /^Limiter/ }).textContent,
+    ).toContain("muted"),
+  );
+  openMenu("Actions for Limiter");
+  expect(
+    await screen.findByRole("menuitem", { name: "Unmute notifications" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+
+  client.markUnread = async () => {
+    throw new Error("The workspace is read-only.");
+  };
+  openMenu("Actions for Limiter");
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Mark as unread" }),
+  );
+  expect(await screen.findByText("The workspace is read-only.")).toBeTruthy();
+});
+
+test("a clicked notification opens its Chat under its own list", async () => {
+  const client = await open([]);
+  await act(async () => {
+    await client.createChat({
+      command_id: "x",
+      harness_id: "codex",
+      folder: null,
+      links: [],
+      message: "Rate-limit failed logins",
+    });
+  });
+  await client.archive("chat-1");
+  act(() => client.requestOpen({ chat_id: "chat-1", retention: "archived" }));
+  expect(
+    await screen.findByRole("heading", { name: "Rate-limit failed logins" }),
+  ).toBe(document.activeElement);
+  expect(screen.getByRole("heading", { name: "Archived" })).toBeTruthy();
 });
 
 test("a view that missed changes resyncs from a snapshot instead of showing a broken transcript", async () => {

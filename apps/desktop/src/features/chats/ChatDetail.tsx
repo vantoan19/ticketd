@@ -10,7 +10,6 @@ import {
   ArrowLeft,
   ArrowUpRight,
   ChevronDown,
-  Ellipsis,
   Maximize2,
   Minimize2,
   Trash2,
@@ -23,12 +22,6 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import {
   Popover,
@@ -49,6 +42,7 @@ import {
   type Problem,
   type TranscriptItem,
 } from "@/features/chats/client";
+import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
 import { Composer } from "@/features/chats/Composer";
 import { arrivals, drafts } from "@/features/chats/drafts";
 import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
@@ -583,23 +577,11 @@ export function ChatDetail({
             </Button>
           )}
           {chat && chat.retention !== "trashed" && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton label="Chat actions">
-                  <Ellipsis aria-hidden />
-                </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {chat.retention === "active" && (
-                  <DropdownMenuItem onSelect={() => retain(client.archive(id))}>
-                    Archive
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onSelect={() => retain(client.trash(id))}>
-                  Move to Trash
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ChatActionsMenu
+              chat={chat}
+              label="Chat actions"
+              onResult={setFailure}
+            />
           )}
           {expanded ? (
             <IconButton label="Show beside the list" onClick={onReturn}>

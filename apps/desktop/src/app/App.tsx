@@ -27,6 +27,7 @@ import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { WindowBar } from "@/components/layout/WindowBar";
 import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
 import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
@@ -79,6 +80,12 @@ function AppContent() {
   const chat = useChatFeature();
   // Turning Chat off hides its screen at once; the Chats themselves are kept.
   if (view === "chats" && !chat.enabled) setViewState("tickets");
+  // A clicked Chat notification shows the Chats screen; it opens the Chat itself.
+  const [seenChatOpen, setSeenChatOpen] = useState(0);
+  if (chat.openRequest && chat.openRequest.n !== seenChatOpen) {
+    setSeenChatOpen(chat.openRequest.n);
+    setViewState("chats");
+  }
   const [newChatRequest, setNewChatRequest] = useState(0);
   const [attachmentPreview, setAttachmentPreview] = useState<Attachment | null>(
     null,
@@ -391,9 +398,16 @@ function AppContent() {
                           <SidebarTrigger
                             variant="ghost"
                             size="sm"
-                            aria-label="Open navigation"
+                            aria-label={
+                              chat.overview.needs_you > 0
+                                ? `Open navigation, ${chat.overview.needs_you} ${chat.overview.needs_you === 1 ? "Chat" : "Chats"} waiting`
+                                : "Open navigation"
+                            }
                           >
                             <Menu /> Navigation
+                            {chat.overview.needs_you > 0 && (
+                              <StatusDot tone="attention" />
+                            )}
                           </SidebarTrigger>
                         </div>
                       )}

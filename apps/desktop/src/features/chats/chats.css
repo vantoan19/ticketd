@@ -25,6 +25,26 @@
   overflow-y: auto;
   list-style: none;
 }
+/* The row's ⋯ sits over the time on line 1 and shows on hover or focus. */
+.chat-row-item {
+  position: relative;
+}
+.chat-row-more {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  opacity: 0;
+}
+.chat-row-item:hover .chat-row-more,
+.chat-row-item:focus-within .chat-row-more,
+.chat-row-more[data-open] {
+  opacity: 1;
+}
+.chat-row-item:hover .chat-row-time,
+.chat-row-item:focus-within .chat-row-time,
+.chat-row-item:has(.chat-row-more[data-open]) .chat-row-time {
+  visibility: hidden;
+}
 .chat-row {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
@@ -70,6 +90,11 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+.chat-row-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .chat-row-sub {
   grid-column: 2 / 4;
   display: flex;
@@ -92,9 +117,36 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-row-sub strong {
+/* Line 2: the dot or spinner, the status word, then the detail, which truncates first. */
+.chat-status {
+  display: flex;
+  align-items: center;
+}
+.chat-status > [data-slot="status-dot"],
+.chat-status > svg {
+  margin-right: 6px;
+}
+.chat-status-word {
+  flex: none;
   color: var(--foreground);
-  font-weight: 500;
+}
+.chat-status-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The context item gives way first in a narrow window. */
+@media (max-width: 459px) {
+  .chat-row-context {
+    display: none;
+  }
+}
+.chat-list-alert {
+  padding: 8px 16px 0;
+}
+.chat-settings-extra {
+  padding: 0 20px 16px;
 }
 .chat-list-empty {
   padding: 24px 16px;
