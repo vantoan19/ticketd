@@ -3,8 +3,8 @@
 
 use ticketd_core::{
     Automation, AutomationAgentSettings, AutomationDefinition, AutomationRunStatus,
-    AutomationStepStatus, NewChat, RunAction, RunEnd, Step, StepAction, StepOutcome, Trigger,
-    Workspace,
+    AutomationStepStatus, NewChat, NotifyTarget, RunAction, RunEnd, Step, StepAction, StepOutcome,
+    Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -16,7 +16,8 @@ fn workspace() -> (tempfile::TempDir, Workspace) {
     (dir, workspace)
 }
 
-/// An Automation that is on and runs one agent when `TAG` is added.
+/// An Automation that is on and runs one agent when `TAG` is added, with a step to
+/// run if the agent fails.
 #[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn triage(workspace: &mut Workspace) -> Automation {
     let agent = workspace
@@ -32,7 +33,14 @@ fn triage(workspace: &mut Workspace) -> Automation {
                 action: StepAction::RunAgent {
                     agent_id: Some(agent.id),
                     execution_folder: Some("/work/app".into()),
-                    on_failure: None,
+                    on_failure: Some(vec![Step {
+                        id: "tell-me-it-failed".into(),
+                        action: StepAction::Notify {
+                            text: "Triage failed".into(),
+                            opens: NotifyTarget::Ticket,
+                            on_failure: None,
+                        },
+                    }]),
                 },
             }],
         })
@@ -164,11 +172,19 @@ fn stopping_and_switching_off_ends_every_active_run_as_needs_attention() {
     let stopped = workspace.automation_run(&running.id).unwrap();
     assert_eq!(stopped.steps[0].status, AutomationStepStatus::Failed);
     assert_eq!(stopped.steps[0].reason, stopped.reason);
-    // The outcome its executor reports later is refused.
+    // The interrupted agent's turn ends as a failure a moment later. That outcome is
+    // refused, so the step's failure path does not run.
+    let interrupted = StepOutcome::Failed {
+        reason: "The agent could not finish.".into(),
+    };
     assert!(
         workspace
-            .advance_automation_run(&running.id, Some(StepOutcome::Completed))
+            .advance_automation_run(&running.id, Some(interrupted))
             .is_err()
+    );
+    assert_eq!(
+        workspace.automation_run(&running.id).unwrap().steps,
+        stopped.steps
     );
     // The other Automation is untouched.
     assert!(workspace.automation(&other.id).unwrap().enabled);
