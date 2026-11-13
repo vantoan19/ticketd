@@ -242,6 +242,17 @@ ended (finished, turn limit, time limit, tool denied, crashed, or another failur
 and closes the harness process. An unattended harness that asks for approval
 anyway is stopped and counted as denied.
 
+A Change ticket step is one core call, `apply_automation_change`: it logs its
+write with actor `automation`, so the change starts no Automation, and signs a
+status change or a posted update with the Automation's name. Text in a posted
+update or a notification holds field references (`{{ticket.reference}}`,
+`{{ticket.title}}`, `{{ticket.status}}`, `{{event.tag}}`) that the core fills in
+when the step runs, from the ticket as it is then. A write the core refuses fails
+the step. A Notify me step asks the core for the notification and hands it to the
+runner's host. The desktop shows it from the Rust side, not from the page, because
+a run goes on while the window is hidden to the tray; a click brings the window
+back and the page opens the ticket or the Automation's runs.
+
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process
 recovery. Only a live request registry can answer approvals. Native resume failure
