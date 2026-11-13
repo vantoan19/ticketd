@@ -50,6 +50,8 @@ export function SendButton({
     <Button
       type="submit"
       size="sm"
+      // Solid only for Send; Steer and Queue are lighter while a turn runs (LIVE-15).
+      variant={send === "send" ? "default" : "secondary"}
       disabled={busy || !enabled}
       aria-keyshortcuts="Enter"
       {...(description && { "aria-description": description })}
@@ -77,7 +79,7 @@ export function SendButton({
           <DropdownMenuTrigger asChild>
             <IconButton
               label="More ways to send"
-              variant="default"
+              variant="secondary"
               disabled={busy || (!enabled && !queues)}
             >
               <ChevronDown aria-hidden />

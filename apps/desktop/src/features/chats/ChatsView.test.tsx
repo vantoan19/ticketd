@@ -229,7 +229,7 @@ test("a steer the harness refused is a queue card that says so and why", async (
   ).toBeTruthy();
 });
 
-test("Esc stops the turn and pauses the queue, which waits for Resume", async () => {
+test("Esc stops the turn from an empty box and pauses the queue, which waits for Resume", async () => {
   const client = await open(
     one({
       id: "c1",
@@ -238,20 +238,45 @@ test("Esc stops the turn and pauses the queue, which waits for Resume", async ()
       queue: [{ id: "q1", text: "then add tests" }],
     }),
   );
+  // With a draft in the box, Esc is not a stop.
   type("a draft", "Steer Codex");
+  fireEvent.keyDown(composer("Steer Codex"), { key: "Escape" });
+  expect((await client.openChat("c1")).chat.activity).toBe("working");
+  type("", "Steer Codex");
   fireEvent.keyDown(composer("Steer Codex"), { key: "Escape" });
   expect(
     await screen.findByText(
       "You stopped this turn. Edits already made are kept.",
     ),
   ).toBeTruthy();
-  // The draft is kept; the queue shows it is paused.
-  expect(composer()).toHaveProperty("value", "a draft");
+  // The queue shows it is paused.
   expect(screen.getByText("Paused")).toBeTruthy();
   expect(screen.getByText("then add tests")).toBeTruthy();
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
   fireEvent.click(button("Resume"));
   await waitFor(() => expect(screen.queryByText("Paused")).toBeNull());
+});
+
+test("Esc is not a stop from a request or just after closing a menu; Stop leaves focus in the box", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [approval]),
+  );
+  const box = () =>
+    document.querySelector<HTMLTextAreaElement>(".chat-composer textarea")!;
+  const stillWorking = async () =>
+    expect((await client.openChat("c1")).chat.activity).toBe("working");
+  fireEvent.keyDown(button("Allow once"), { key: "Escape" });
+  await stillWorking();
+  // A menu takes the first Esc; the second, a moment later, is the same habit.
+  const menu = document.createElement("div");
+  menu.setAttribute("role", "menu");
+  document.body.append(menu);
+  fireEvent.keyDown(box(), { key: "Escape" });
+  menu.remove();
+  fireEvent.keyDown(box(), { key: "Escape" });
+  await stillWorking();
+  fireEvent.click(button("Stop"));
+  expect(document.activeElement).toBe(box());
 });
 
 test("Stop waits while stopping and is the retry once the stop is not confirmed", async () => {
@@ -422,12 +447,14 @@ test("a question takes an option by key inside the request, or a typed answer", 
   });
   const open_ = within(request).getByRole("button", { name: /Fail open/ });
   expect(open_.getAttribute("aria-keyshortcuts")).toBe("1");
-  // ↑ from the empty message box reaches the options; ↓ from the last returns.
+  // ↑ from the empty message box reaches the first option; ↓ from the last
+  // returns.
   const box = composer("Answer, or pick above");
   box.focus();
   fireEvent.keyDown(box, { key: "ArrowUp" });
+  expect(document.activeElement).toBe(open_);
   const closed = within(request).getByRole("button", { name: "Fail closed" });
-  expect(document.activeElement).toBe(closed);
+  closed.focus();
   fireEvent.keyDown(closed, { key: "ArrowDown" });
   expect(document.activeElement).toBe(box);
 
@@ -1257,6 +1284,8 @@ test("scrolling up stops following; Jump to latest resumes it", async () => {
   sized(scroller, 200, 1000);
   scroller.scrollTop = 800;
   fireEvent.scroll(scroller);
+  // The reader's wheel, not just a smaller offset, stops following.
+  fireEvent.wheel(scroller, { deltaY: -500 });
   scroller.scrollTop = 300;
   fireEvent.scroll(scroller);
   expect(jump.hasAttribute("inert")).toBe(false);
@@ -1769,13 +1798,14 @@ test("an incompatible harness notice keeps the full stop with the path", async (
   expect(wrapper?.nextSibling?.textContent?.startsWith(".")).toBe(false);
 });
 
-test("the link picker asks for a name before it lists anything", async () => {
+test("the link picker lists recent records before a name is typed", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   await linkFromMenu();
+  const recent = await screen.findByRole("list", { name: "Recent" });
   expect(
-    await screen.findByText("Type part of a name to find it."),
+    within(recent).getByRole("button", { name: "Storefront" }),
   ).toBeTruthy();
-  expect(screen.queryByText("Nothing left to link.")).toBeNull();
+  expect(screen.queryByText("Type part of a name to find it.")).toBeNull();
 });
 
 test("New Chat picks harness, model and effort in one composer picker and starts with them", async () => {
@@ -1814,7 +1844,8 @@ test("New Chat picks harness, model and effort in one composer picker and starts
       name: "Claude Code, model Sonnet 5, effort High",
     }),
   ).toBeTruthy();
-  expect(button("Permissions: Default")).toBeTruthy();
+  // Permissions names the mode it starts in.
+  expect(button("Permissions: Ask before edits")).toBeTruthy();
   type("Add a limiter", "Describe a task or ask a question");
   fireEvent.click(button("Send"));
 
@@ -1823,10 +1854,160 @@ test("New Chat picks harness, model and effort in one composer picker and starts
       harness_id: "claude-code",
       model: "sonnet",
       effort: "high",
+      permission: "default",
     }),
   );
-  // Permissions left at Default: Claude Code's own setting, nothing passed.
-  expect(client.created.at(-1)).not.toHaveProperty("permission");
+});
+
+test("New Chat starts with the model and effort its picker shows, even when they were already selected", async () => {
+  // LIVE-7: the picker showed Codex's listed default, and choosing the row that
+  // was already checked changed nothing, so nothing was sent and Codex ran its
+  // own configuration's model at Max.
+  localStorage.clear();
+  const client = await open([]);
+  client.setHarnesses([{ id: "codex", name: "Codex", status: "ready" }]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  const trigger = await screen.findByRole("button", {
+    name: "Codex, model GPT-5.5 Codex, effort Medium",
+  });
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole("radio", { name: /^GPT-5.5 Codex/ }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Medium" }));
+  type("Add a limiter", "Describe a task or ask a question");
+  fireEvent.click(button("Send"));
+
+  await waitFor(() =>
+    expect(client.created.at(-1)).toMatchObject({
+      harness_id: "codex",
+      model: "gpt-5.5-codex",
+      effort: "medium",
+    }),
+  );
+});
+
+test("a sent message starts its turn at once: one Starting line, and the composer is already running", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      {
+        id: "u1",
+        at,
+        kind: "user",
+        text: "Add a rate limiter",
+        delivery: "sending",
+      },
+    ]),
+  );
+  // Before the host reports the turn, the view already shows it starting.
+  expect(working()).toBe("Starting Codex…");
+  expect(screen.queryByText("Sending…")).toBeNull();
+  expect(button("Steer")).toBeTruthy();
+  // Stop waits until the host knows of the turn.
+  expect(button("Stop")).toHaveProperty("disabled", true);
+});
+
+test("a Chat started in New Chat keeps its picks on the triggers until the session reports", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  client.setHarnesses([
+    { id: "claude-code", name: "Claude Code", status: "ready" },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Claude Code, model Opus 5.5" }),
+  );
+  fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
+  fireEvent.click(await screen.findByRole("radio", { name: "High" }));
+  type("Add a limiter", "Describe a task or ask a question");
+  fireEvent.click(button("Send"));
+
+  // The mock's Chat has no session settings yet: the triggers show the start.
+  await screen.findByRole("heading", { name: "Add a limiter" });
+  expect(
+    await screen.findByRole("button", {
+      name: "Claude Code, model Sonnet 5, effort High",
+    }),
+  ).toBeTruthy();
+  expect(button("Permissions: Ask before edits")).toBeTruthy();
+});
+
+test("the picker keeps the default and the latest models, moves between harnesses with arrows", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  const many = Array.from({ length: 9 }, (_, index) => ({
+    id: `m${index}`,
+    label: `Model ${index}`,
+    description: `Model ${index} model.`,
+    is_default: index === 0,
+    allowed: true,
+    efforts: [],
+  }));
+  client.options.set("codex", { harness_id: "codex", models: many });
+  client.setHarnesses([
+    { id: "claude-code", name: "Claude Code", status: "ready" },
+    { id: "codex", name: "Codex", status: "ready" },
+  ]);
+  localStorage.setItem("ticketd.chat-harness", "codex");
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Codex, model Model 0" }),
+  );
+  expect(await screen.findAllByRole("radio", { name: /^Model / })).toHaveLength(
+    6,
+  );
+  // A description that only repeats the name is dropped.
+  expect(screen.queryByText("Model 1 model.")).toBeNull();
+  fireEvent.click(button("More models (3)"));
+  expect(screen.getAllByRole("radio", { name: /^Model / })).toHaveLength(9);
+
+  const codex = screen.getByRole("tab", { name: "Codex" });
+  codex.focus();
+  fireEvent.keyDown(codex, { key: "ArrowLeft" });
+  const claude = screen.getByRole("tab", { name: "Claude Code" });
+  expect(document.activeElement).toBe(claude);
+  expect(claude.getAttribute("aria-selected")).toBe("true");
+  expect(
+    await screen.findByRole("button", { name: /^Claude Code, model Opus 5.5/ }),
+  ).toBeTruthy();
+  localStorage.clear();
+});
+
+test("linking a Project with a folder in New Chat starts the Chat there", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  client.projectFolders.set("p1", "/work/storefront");
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  expect(button("Folder: Scratch folder")).toBeTruthy();
+  fireEvent.click(button("Link a ticket, Document or Project"));
+  // Recent records show before anything is typed.
+  expect(await screen.findByRole("list", { name: "Recent" })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  expect(
+    await screen.findByRole("button", { name: "Folder: /work/storefront" }),
+  ).toBeTruthy();
+});
+
+test("New Chat on Claude Code sends the shown default model and permission mode, untouched", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  client.setHarnesses([
+    { id: "claude-code", name: "Claude Code", status: "ready" },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  await screen.findByRole("button", { name: "Claude Code, model Opus 5.5" });
+  // The permission trigger names the mode, not "Default".
+  expect(button("Permissions: Ask before edits")).toBeTruthy();
+  type("Add a limiter", "Describe a task or ask a question");
+  fireEvent.click(button("Send"));
+
+  await waitFor(() =>
+    expect(client.created.at(-1)).toMatchObject({
+      harness_id: "claude-code",
+      model: "default",
+      permission: "default",
+    }),
+  );
+  // Its default model names no default effort: Claude Code's own applies.
+  expect(client.created.at(-1)).not.toHaveProperty("effort");
 });
 
 test("New Chat starts on the first harness that can be used, not the one called ready", async () => {
@@ -1934,19 +2115,15 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
     };
   };
   const picker = "Claude Code, model Opus 5.5, effort High";
-  expect(button(picker).textContent).toBe("Opus 5.5");
+  // The effort's word stands beside its bars.
+  expect(button(picker).textContent).toBe("Opus 5.5High");
   expect(button("Permissions: Accept edits").textContent).toBe("Accept edits");
 
   fireEvent.click(button(picker));
   expect(await screen.findByText("From your next message")).toBeTruthy();
-  // A Chat keeps its harness: the other one only says how to switch.
-  fireEvent.click(await screen.findByRole("tab", { name: "Codex" }));
-  expect(
-    await screen.findByText(
-      "A Chat keeps its harness. Start a new Chat to use Codex.",
-    ),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("tab", { name: "Claude Code" }));
+  // A Chat keeps its harness: only its own tab shows.
+  expect(screen.getByRole("tab", { name: "Claude Code" })).toBeTruthy();
+  expect(screen.queryByRole("tab", { name: "Codex" })).toBeNull();
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
   fireEvent.keyDown(document.activeElement ?? document.body, {
     key: "Escape",
@@ -2007,7 +2184,8 @@ test("a change held for the turn's end shows the new value, From your next messa
 });
 
 test("before its session reports, a Chat's picker shows its harness and says why there is no choice", async () => {
-  await open(one({ id: "c1", title: "Limiter" }));
+  // Not made in New Chat during this run, so no start of its own to show.
+  await open(one({ id: "reopened", title: "Limiter" }));
   fireEvent.click(button("Codex, model Default"));
   expect(
     await screen.findByText(

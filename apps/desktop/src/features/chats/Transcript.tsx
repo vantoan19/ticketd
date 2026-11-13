@@ -1,5 +1,6 @@
 import {
   Fragment,
+  createContext,
   memo,
   useContext,
   useEffect,
@@ -106,6 +107,12 @@ const DELIVERY_CAPTION = {
   set_aside: "Not confirmed · set aside",
 } as const;
 
+/**
+ * The session is opening: its working line says "Starting…", so a message's
+ * own "Sending…" is not said too (LIVE-6, one status row).
+ */
+const OpeningContext = createContext(false);
+
 /** "10:44": when your message was sent, as the hover line says it. */
 const sentAt = (stamp: string) => {
   const date = new Date(stamp);
@@ -191,7 +198,11 @@ function SentText({ text }: { text: string }) {
 }
 
 function UserMessage({ item }: { item: ItemOf<"user"> }) {
-  const caption = DELIVERY_CAPTION[item.delivery];
+  const opening = useContext(OpeningContext);
+  const caption =
+    opening && item.delivery === "sending"
+      ? ""
+      : DELIVERY_CAPTION[item.delivery];
   const { copied, error, copy } = useCopy();
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
@@ -676,7 +687,9 @@ function Row({
       );
     case "response":
       return (
-        <div className="chat-turn-response" data-anchor="">
+        // Keyed by the item: the fold remounts the answer outside the rows, and
+        // the reading position finds it again by this key.
+        <div className="chat-turn-response" data-anchor={row.item.id}>
           <Response
             item={row.item}
             harness={harness}
@@ -739,6 +752,8 @@ function TurnView({
   // until it leaves the view. `settled` says the end has been looked at.
   const [settled, setSettled] = useState(!turn.live);
   const [held, setHeld] = useState(false);
+  // A turn seen running here fades its fold row in when it ends; history doesn't.
+  const [endsHere] = useState(turn.live);
   useLayoutEffect(() => {
     if (turn.live || settled) return;
     const element = part.current;
@@ -813,6 +828,7 @@ function TurnView({
             id={rowId}
             type="button"
             className="chat-fold"
+            data-fresh={endsHere ? "" : undefined}
             aria-expanded={open}
             aria-controls={open ? bodyId : undefined}
             onClick={toggle}
@@ -854,7 +870,7 @@ function TurnView({
         </div>
       )}
       {turn.final && (
-        <div data-anchor="">
+        <div data-anchor={turn.final.id}>
           <Response
             item={turn.final}
             harness={harness}
@@ -1037,6 +1053,11 @@ function WorkingLine({
   );
 }
 
+/** The working line's place while a turn runs and the line is not shown. */
+function WorkingSlot() {
+  return <div className="chat-working-slot" aria-hidden="true" />;
+}
+
 /** Above the first item that arrived while the reader was away. */
 function NewMarker({ markerRef }: { markerRef: Ref<HTMLDivElement> }) {
   return (
@@ -1172,83 +1193,99 @@ export function Transcript({
       ),
   );
   const working = chat.activity === "working";
+  const asking = items.some(
+    (item) => item.kind === "request" && item.state === "pending",
+  );
   return (
     <ChatFilesContext.Provider value={files}>
       <SentLinksContext.Provider value={sentLinks}>
-        <div className="chat-col" ref={contentRef}>
-          {parts.map((part) => {
-            const marker = newFrom !== undefined &&
-              (part.kind === "turn"
-                ? part.turn.ids.includes(newFrom)
-                : part.item.id === newFrom) && (
-                <NewMarker key="new" markerRef={markerRef ?? null} />
-              );
-            return part.kind === "turn" ? (
-              <Fragment key={part.turn.key}>
-                {marker}
-                <TurnView
-                  turn={part.turn}
-                  chatId={chat.id}
-                  harness={harness}
-                  readOnly={readOnly}
-                  actions={actions}
-                  live={live}
-                />
-              </Fragment>
-            ) : (
-              <Fragment key={part.item.id}>
-                {marker}
-                <div
-                  className="chat-part"
-                  data-anchor=""
-                  data-seen={part.item.id}
-                >
-                  <Item
-                    item={part.item}
+        <OpeningContext.Provider value={working && Boolean(chat.opening)}>
+          <div className="chat-col" ref={contentRef}>
+            {parts.map((part) => {
+              const marker = newFrom !== undefined &&
+                (part.kind === "turn"
+                  ? part.turn.ids.includes(newFrom)
+                  : part.item.id === newFrom) && (
+                  <NewMarker key="new" markerRef={markerRef ?? null} />
+                );
+              return part.kind === "turn" ? (
+                <Fragment key={part.turn.key}>
+                  {marker}
+                  <TurnView
+                    turn={part.turn}
+                    chatId={chat.id}
                     harness={harness}
                     readOnly={readOnly}
                     actions={actions}
+                    live={live}
                   />
-                </div>
-              </Fragment>
-            );
-          })}
-          {chat.catching_up && (
-            <>
-              <div className="chat-skel chat-skel-long" aria-hidden="true" />
-              <div className="chat-skel chat-skel-short" aria-hidden="true" />
-            </>
-          )}
-          {chat.catching_up ? (
-            <WorkingLine label="Catching up…" />
-          ) : chat.activity === "waiting" ? (
-            <WorkingLine label="Waiting for you" spinner={false} />
-          ) : working && chat.stopping ? (
-            <WorkingLine label="Stopping…" spinner={!stepRuns} />
-          ) : working && chat.opening ? (
-            <WorkingLine
-              key="opening"
-              label={
-                chat.opening === "resume"
-                  ? `Resuming the ${harness} session…`
-                  : `Starting ${harness}…`
-              }
-              fromShown
-            />
-          ) : (
-            // After an unconfirmed stop the open turn row and the notice say it.
+                </Fragment>
+              ) : (
+                <Fragment key={part.item.id}>
+                  {marker}
+                  <div
+                    className="chat-part"
+                    data-anchor=""
+                    data-seen={part.item.id}
+                  >
+                    <Item
+                      item={part.item}
+                      harness={harness}
+                      readOnly={readOnly}
+                      actions={actions}
+                    />
+                  </div>
+                </Fragment>
+              );
+            })}
+            {chat.catching_up && (
+              <>
+                <div className="chat-skel chat-skel-long" aria-hidden="true" />
+                <div className="chat-skel chat-skel-short" aria-hidden="true" />
+              </>
+            )}
+            {chat.catching_up ? (
+              <WorkingLine label="Catching up…" />
+            ) : chat.activity === "waiting" ? (
+              // The dock already shows the request; the slot keeps its height.
+              chat.has_composer && asking ? (
+                <WorkingSlot />
+              ) : (
+                <WorkingLine label="Waiting for you" spinner={false} />
+              )
+            ) : working && chat.stopping ? (
+              <WorkingLine label="Stopping…" spinner={!stepRuns} />
+            ) : working && chat.opening ? (
+              <WorkingLine
+                key="opening"
+                label={
+                  chat.opening === "resume"
+                    ? `Resuming the ${harness} session…`
+                    : `Starting ${harness}…`
+                }
+                fromShown
+              />
+            ) : // After an unconfirmed stop the open turn row and the notice say it.
             working &&
-            !stepRuns &&
-            !parts.some(
-              (part) => part.kind === "turn" && part.turn.unconfirmed,
-            ) &&
-            (chat.doing ? (
-              <WorkingLine label={chat.doing.label} since={chat.doing.since} />
+              !stepRuns &&
+              !parts.some(
+                (part) => part.kind === "turn" && part.turn.unconfirmed,
+              ) ? (
+              chat.doing ? (
+                <WorkingLine
+                  label={chat.doing.label}
+                  since={chat.doing.since}
+                />
+              ) : (
+                <WorkingLine label="Working…" />
+              )
             ) : (
-              <WorkingLine label="Working…" />
-            ))
-          )}
-        </div>
+              // While a step row holds the spinner the line's place is kept,
+              // so the end of the transcript does not bounce between rows.
+              working && <WorkingSlot />
+            )}
+          </div>
+        </OpeningContext.Provider>
       </SentLinksContext.Provider>
     </ChatFilesContext.Provider>
   );

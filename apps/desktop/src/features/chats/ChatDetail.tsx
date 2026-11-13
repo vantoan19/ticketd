@@ -33,7 +33,8 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { PathText } from "@/features/projects/PathText";
 import { withoutVerbatim } from "@/features/projects/paths";
 import { ActivityDock } from "@/features/chats/ActivityDock";
-import { focusLastChoice } from "@/features/chats/dock-focus";
+import { focusFirstChoice } from "@/features/chats/dock-focus";
+import { DockSlot } from "@/features/chats/DockSlot";
 import {
   ChatError,
   useChatClient,
@@ -75,6 +76,7 @@ import {
   composerPlaceholder,
   firstNew,
   unseenFrom,
+  asStarting,
   isLive,
   problemNotice,
   requestLabel,
@@ -294,6 +296,12 @@ function LinkedRecords({
 const isMessage = (item: TranscriptItem) =>
   item.kind === "user" || item.kind === "response";
 
+/** What takes an Esc before the Chat does: menus, popovers, dialogs, pickers. */
+const LAYER =
+  '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
+/** An Esc this soon after one that closed a layer never stops the turn. */
+const ESC_AFTER_LAYER_MS = 1000;
+
 function Conversation({
   snapshot,
   focusRequest,
@@ -302,9 +310,9 @@ function Conversation({
   focusRequest: boolean;
 }) {
   const client = useChatClient();
-  const { chat, items } = snapshot;
-  const id = chat.id;
-  const harness = chat.harness.name;
+  const { chat: reported, items } = snapshot;
+  const id = reported.id;
+  const harness = reported.harness.name;
   const [failure, setFailure] = useState(() => arrivals.get(id) ?? "");
   // Said once: the next time this Chat opens it starts without the reason.
   useEffect(() => void arrivals.delete(id), [id]);
@@ -318,7 +326,7 @@ function Conversation({
   const [saved, setSaved] = useState("");
   /** A model, effort or permission change asked for here, until the next send. */
   const [asked, setAsked] = useState<AskedChange | null>(null);
-  const changeLine = settingLine(chat, asked);
+  const changeLine = settingLine(reported, asked);
   /** Runs a command; a refusal is said once, and the view keeps the host's state. */
   const run = (action: Promise<unknown>) =>
     action.then(
@@ -344,10 +352,19 @@ function Conversation({
     }),
     [client, id],
   );
+  // A message just sent shows its turn starting at once (LIVE-6).
+  const chat = asStarting(reported, items);
+  /** Running only in this view so far: Stop waits for the host to know of the turn. */
+  const unconfirmedStart = chat !== reported;
   const plan = runningPlan(items);
   const turnStartedAt = lastAsk(items);
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const dock = useRef<HTMLDivElement>(null);
+  // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
+  // must not strand the keyboard on the page: the message box takes it.
+  useEffect(() => {
+    if (document.activeElement === document.body) messageBox.current?.focus();
+  }, []);
   const { quotes, remove: removeQuote } = useQuotes(id);
   // A quote added from elsewhere puts the person in the box after it.
   const quoteCount = useRef(quotes.length);
@@ -404,19 +421,36 @@ function Conversation({
     setHeldFor(question && draftHeld() ? question.id : undefined);
   }
   const answering = Boolean(question) && heldFor !== question?.id;
-  const stoppable = isLive(chat) && !chat.stopping && chat.has_composer;
-  const stop = () => quietly(client.stop(id));
-  /** Esc stops the turn, unless a menu, dialog or picker is open to take it first. */
+  const stoppable =
+    isLive(chat) && !chat.stopping && !unconfirmedStart && chat.has_composer;
+  /** Stops the turn; the Stop button leaves, so the message box takes focus. */
+  const stop = () => {
+    messageBox.current?.focus();
+    quietly(client.stop(id));
+  };
+  // When a menu, popover or picker last took an Esc: the next Esc a moment
+  // later is the same habit (closing things), not a request to stop.
+  const layerClosedAt = useRef(-Infinity);
+  useEffect(() => {
+    const note = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && document.querySelector(LAYER))
+        layerClosedAt.current = performance.now();
+    };
+    document.addEventListener("keydown", note, true);
+    return () => document.removeEventListener("keydown", note, true);
+  }, []);
+  /**
+   * Esc stops the turn only from an empty message box or the transcript, and
+   * never just after it closed a menu or popover, or from a request in the dock.
+   */
   const onPaneKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
     if (event.defaultPrevented || !stoppable || picked) return;
-    const layer =
-      '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
-    if (
-      (event.target as Element).closest(layer) ||
-      document.querySelector(layer)
-    )
-      return;
+    const target = event.target as Element;
+    if (target.closest(LAYER) || document.querySelector(LAYER)) return;
+    if (performance.now() - layerClosedAt.current < ESC_AFTER_LAYER_MS) return;
+    if (target.closest(".chat-activity")) return;
+    if ((messageBox.current?.value ?? "").trim() !== "") return;
     event.preventDefault();
     stop();
   };
@@ -579,35 +613,39 @@ function Conversation({
           </p>
         ) : (
           <>
-            {chat.problem && (
-              <ProblemNotice
-                problem={chat.problem}
-                harness={harness}
-                onAction={onNotice}
-              />
-            )}
+            <DockSlot className="chat-dock-notice">
+              {chat.problem && (
+                <ProblemNotice
+                  problem={chat.problem}
+                  harness={harness}
+                  onAction={onNotice}
+                />
+              )}
+            </DockSlot>
             {chat.has_composer && (
               <div className="chat-seat">
-                <ActivityDock
-                  chat={chat}
-                  focusRequest={
-                    notifiedRequest !== undefined &&
-                    pending[0]?.id === notifiedRequest
-                  }
-                  requests={pending}
-                  {...(plan && { plan: <PlanPill item={plan} /> })}
-                  dockRef={dock}
-                  onAnswer={answer}
-                  onLeave={() => messageBox.current?.focus()}
-                  onSendNow={(queuedId) =>
-                    run(client.sendQueuedNow(id, queuedId)).then(() => {})
-                  }
-                  onEdit={edit}
-                  onRemove={(queuedId) =>
-                    quietly(client.removeQueued(id, queuedId))
-                  }
-                  onResume={() => quietly(client.resumeQueue(id))}
-                />
+                <DockSlot>
+                  <ActivityDock
+                    chat={chat}
+                    focusRequest={
+                      notifiedRequest !== undefined &&
+                      pending[0]?.id === notifiedRequest
+                    }
+                    requests={pending}
+                    {...(plan && { plan: <PlanPill item={plan} /> })}
+                    dockRef={dock}
+                    onAnswer={answer}
+                    onLeave={() => messageBox.current?.focus()}
+                    onSendNow={(queuedId) =>
+                      run(client.sendQueuedNow(id, queuedId)).then(() => {})
+                    }
+                    onEdit={edit}
+                    onRemove={(queuedId) =>
+                      quietly(client.removeQueued(id, queuedId))
+                    }
+                    onResume={() => quietly(client.resumeQueue(id))}
+                  />
+                </DockSlot>
                 <Composer
                   key={`${id}:${edits}`}
                   inputRef={messageBox}
@@ -652,10 +690,10 @@ function Conversation({
                     )
                   }
                   {...(pending.length > 0 && {
-                    onArrowUpFromEmpty: () => focusLastChoice(dock.current),
+                    onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
                   })}
                   {...(isLive(chat) && { onStop: stop })}
-                  stopping={chat.stopping}
+                  stopping={chat.stopping || unconfirmedStart}
                   leading={
                     <ComposerControls
                       chat={chat}
