@@ -197,11 +197,19 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
   // Measured again whenever the message's width changes: a pane narrowed after
-  // the message was shown clamps it, and then it needs Show more.
+  // the message was shown clamps it, and then it needs Show more. A clamped box
+  // reports only its four lines as its scroll height in WebKit and Chrome, so the
+  // full height is read with the clamp lifted for the measurement.
   useLayoutEffect(() => {
     const box = text.current;
     if (!box || more) return;
-    const measure = () => setLong(box.scrollHeight > box.clientHeight + 1);
+    const measure = () => {
+      const clamped = box.clientHeight;
+      box.removeAttribute("data-clamped");
+      const full = box.scrollHeight;
+      box.setAttribute("data-clamped", "");
+      setLong(full > clamped + 1);
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
