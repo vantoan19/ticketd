@@ -11,6 +11,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import {
   ChatClientContext,
+  type Step,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
@@ -101,6 +102,10 @@ const type = (text: string, name?: string) =>
 const button = (name: string | RegExp) => screen.getByRole("button", { name });
 const noButton = (name: string | RegExp) =>
   expect(screen.queryByRole("button", { name })).toBeNull();
+const conversation = () =>
+  within(document.querySelector<HTMLElement>(".chat-scroll")!);
+/** The working line's words. */
+const working = () => document.querySelector(".chat-working")?.textContent;
 const openMenu = (name: string) =>
   fireEvent.keyDown(button(name), { key: "Enter" });
 
@@ -112,7 +117,12 @@ test("an idle Chat sends what was typed and shows the turn as working, not done"
   type("Add a rate limiter");
   fireEvent.click(button("Send"));
   expect(await screen.findByText("Add a rate limiter")).toBeTruthy();
-  expect((await screen.findByRole("status")).textContent).toContain("Working");
+  // The turn's clock counts from the host's start time.
+  expect(working()).toMatch(/^Working for \d/);
+  // One polite status says the turn started.
+  expect(document.querySelector(".chat-dock [aria-live]")?.textContent).toBe(
+    "Working",
+  );
   await waitFor(() =>
     expect(composer("Steer Codex")).toHaveProperty("value", ""),
   );
@@ -301,11 +311,11 @@ test("an approval is answered from the dock and becomes a receipt without button
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
   );
   fireEvent.click(button("Allow once"));
-  const receipt = await screen.findByRole("region", {
-    name: "Answered request",
-  });
-  expect(receipt.textContent).toContain('You chose "Allow once"');
-  expect(within(receipt).queryByRole("button")).toBeNull();
+  // No step followed the approval, so it keeps a one-line receipt.
+  const receipt = await screen.findByText(
+    "Allowed · npm install @pagerduty/pdjs",
+  );
+  expect(receipt.closest("button")).toBeNull();
   expect(screen.queryByRole("group", { name: /wants to run/ })).toBeNull();
   // Answering returns focus to the message box.
   expect(document.activeElement).toBe(composer("Steer Codex"));
@@ -315,11 +325,9 @@ test("an expired request cannot be answered", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [{ ...approval, state: "expired" }]),
   );
-  const card = screen.getByRole("region", { name: "Expired request" });
-  expect(card.textContent).toContain(
-    "Expired. The turn ended before this was answered.",
-  );
-  expect(within(card).queryByRole("button")).toBeNull();
+  const receipt = screen.getByText("Expired · npm install @pagerduty/pdjs");
+  expect(receipt.closest("button")).toBeNull();
+  noButton("Allow once");
 });
 
 test("answering a request that expired behind a lost update is refused, then the view resyncs", async () => {
@@ -336,7 +344,7 @@ test("answering a request that expired behind a lost update is refused, then the
   // The next change exposes the gap; the view takes a fresh snapshot.
   act(() => client.patch("c1", { activity: "idle" }));
   expect(
-    await screen.findByRole("region", { name: "Expired request" }),
+    await screen.findByText("Expired · npm install @pagerduty/pdjs"),
   ).toBeTruthy();
   noButton("Allow once");
 });
@@ -380,7 +388,9 @@ test("a question takes an option by key inside the request, or a typed answer", 
 
   type("Fail open for five minutes", "Answer, or pick above");
   fireEvent.click(button("Send"));
-  expect((await screen.findByText(/You answered/)).textContent).toBeTruthy();
+  expect(
+    await screen.findByText("Answered · Fail open for five minutes"),
+  ).toBeTruthy();
   const { items } = await client.openChat("c1");
   expect(items.filter((item) => item.kind === "user")).toEqual([]);
 });
@@ -394,10 +404,7 @@ test("digits pick a question's option only while focus is inside the request", a
     screen.getByRole("group", { name: /Redis is unreachable/ }),
   ).toBeTruthy();
   fireEvent.keyDown(button(/Fail open/), { key: "2" });
-  expect(
-    (await screen.findByRole("region", { name: "Answered request" }))
-      .textContent,
-  ).toContain('You chose "Fail closed"');
+  expect(await screen.findByText("Answered · Fail closed")).toBeTruthy();
 });
 
 test("a request arriving mid-draft takes no focus, and the draft keeps its meaning", async () => {
@@ -831,10 +838,47 @@ test("a large transcript keeps up with many small streamed updates", async () =>
   expect(screen.getByText("Reply 299")).toBeTruthy();
 });
 
-test("each step reads as what it did, and opens to its output", async () => {
+const inTurn = (item: TranscriptItem): TranscriptItem => ({
+  ...item,
+  turn_id: "t1",
+});
+const turnTiming = (
+  outcome: Extract<TranscriptItem, { kind: "turn" }>["outcome"],
+  ended?: string,
+): TranscriptItem => ({
+  id: "turn:t1",
+  at,
+  kind: "turn",
+  turn_id: "t1",
+  started_at: at,
+  ...(ended && { ended_at: ended }),
+  outcome,
+});
+const youSaid: TranscriptItem = {
+  id: "u1",
+  at,
+  kind: "user",
+  text: "Rate-limit failed logins",
+  delivery: "delivered",
+  turn_id: "t1",
+};
+const failedRun: Step = {
+  kind: "run",
+  target: "npm run test:all",
+  command: "npm run test:all",
+  folder: "apps/desktop",
+  state: "failed",
+  exit_code: 1,
+  output: "FAIL limiter.test.ts",
+  truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
+};
+
+test("a finished turn folds under one row, its final response outside, and opens to each step's output", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [
-      {
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn({
         id: "s1",
         at,
         kind: "steps",
@@ -844,40 +888,150 @@ test("each step reads as what it did, and opens to its output", async () => {
             target: "src/auth/limiter.ts",
             targets: [{ text: "src/auth/limiter.ts" }],
           },
-          {
-            kind: "run",
-            target: "npm run test:all",
-            command: "npm run test:all",
-            folder: "apps/desktop",
-            state: "failed",
-            exit_code: 1,
-            output: "FAIL limiter.test.ts",
-            truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
-          },
+          failedRun,
         ],
-      },
+      }),
+      inTurn(reply("r1", "The limiter is in.")),
     ]),
   );
+  const row = button("Worked for 2m 13s · 1 failed");
+  expect(row.getAttribute("aria-expanded")).toBe("false");
+  // Result first: the answer is outside the fold, the work inside it.
+  expect(conversation().getByText("The limiter is in.")).toBeTruthy();
+  expect(screen.queryByText("src/auth/limiter.ts")).toBeNull();
+  fireEvent.click(row);
+  expect(row.getAttribute("aria-expanded")).toBe("true");
+  const body = screen.getByRole("group", {
+    name: "Worked for 2m 13s · 1 failed",
+  });
+  expect(row.getAttribute("aria-controls")).toBe(body.id);
   // A row with nothing to open is not a control.
-  expect(screen.getByText("src/auth/limiter.ts").closest("button")).toBeNull();
+  expect(
+    within(body).getByText("src/auth/limiter.ts").closest("button"),
+  ).toBeNull();
   const line = button("Run npm run test:all, Failed");
-  expect(line.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(line);
   expect(line.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByText("$ npm run test:all")).toBeTruthy();
-  expect(screen.getByText("FAIL limiter.test.ts")).toBeTruthy();
+  const output = screen.getByRole("region", {
+    name: "Output of npm run test:all",
+  });
+  expect(output.textContent).toBe("$ npm run test:all\n\nFAIL limiter.test.ts");
+  expect(output.tabIndex).toBe(0);
   expect(screen.getByText("Exit 1 · in apps/desktop")).toBeTruthy();
   expect(
     screen.getByText(
       "Truncated: ticketd keeps the last 1 MiB of 3.4 MiB. Codex saw all of it.",
     ),
   ).toBeTruthy();
+  // Your toggle wins: closing hides the work again.
+  fireEvent.click(row);
+  expect(screen.queryByRole("group", { name: /Worked for/ })).toBeNull();
 });
 
-test("what the agent changed in ticketd is listed where it happened", async () => {
+test("a stopped turn folds too, with its stop marker below the response", async () => {
+  await open(
+    one({ id: "c1", title: "Migrate" }, [
+      youSaid,
+      turnTiming("stopped", "2026-11-10T10:00:40Z"),
+      inTurn({
+        id: "s1",
+        at,
+        kind: "steps",
+        steps: [{ ...failedRun, state: "running" }],
+      }),
+      { id: "t1", at, kind: "marker", reason: "stopped", turn_id: "t1" },
+    ]),
+    "Migrate",
+  );
+  fireEvent.click(button("Stopped after 40s · 1 not finished"));
+  expect(button("Run npm run test:all, Not finished")).toBeTruthy();
+  expect(
+    screen.getByText("You stopped this turn. Edits already made are kept."),
+  ).toBeTruthy();
+});
+
+test("while a turn runs its steps show as they start, and the working line only between steps", async () => {
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "working",
+        doing: { label: "Working", since: at },
+      },
+      [
+        youSaid,
+        turnTiming("active"),
+        inTurn({
+          id: "s1",
+          at,
+          kind: "steps",
+          steps: [
+            {
+              kind: "run",
+              target: "npm test",
+              command: "npm test",
+              state: "running",
+              started_at: new Date(Date.now() - 12_000).toISOString(),
+            },
+          ],
+        }),
+      ],
+    ),
+  );
+  // Nothing folds while it runs; the running row carries the turn's one spinner.
+  noButton(/Worked/);
+  const running = button("Running npm test");
+  expect(running.textContent).toBe("Running npm test · 12s");
+  expect(running.querySelector(".chat-spin")).toBeTruthy();
+  expect(working()).toBeUndefined();
+  act(() =>
+    client.push(
+      "c1",
+      inTurn({
+        id: "s1",
+        at,
+        kind: "steps",
+        steps: [{ kind: "run", target: "npm test", command: "npm test" }],
+      }),
+    ),
+  );
+  expect(button("Ran npm test")).toBeTruthy();
+  expect(working()).toMatch(/^Working for \d/);
+});
+
+test("an answered approval folds into its step row, which says the decision", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      inTurn({
+        ...approval,
+        state: "answered",
+        outcome: "You allowed this for this session",
+      }),
+      inTurn({
+        id: "s1",
+        at,
+        kind: "steps",
+        steps: [{ ...failedRun, state: "done", output: null, truncated: null }],
+      }),
+    ]),
+  );
+  const row = button("Ran npm run test:all");
+  const described = document.getElementById(
+    row.getAttribute("aria-describedby") ?? "",
+  );
+  expect(described?.textContent).toBe("You allowed this for this session");
+  expect(screen.queryByText(/Allowed ·/)).toBeNull();
+});
+
+test("what the agent changed in ticketd is a step row, verb first", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [
-      {
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
         id: "rec1",
         at,
         kind: "records",
@@ -889,19 +1043,87 @@ test("what the agent changed in ticketd is listed where it happened", async () =
             from: "In progress",
             to: "In review",
           },
-          { kind: "document", document_id: "d9", title: "Reset email copy" },
+          { kind: "update", reference: "T-12", excerpt: "Limiter is in" },
         ],
-      },
+      }),
     ]),
   );
-  const block = within(
-    screen.getByRole("list", { name: "Updated in ticketd" }),
-  );
-  expect(block.getByText("In progress → In review")).toBeTruthy();
-  expect(block.getByText("Document created")).toBeTruthy();
-  expect(
-    screen.getByText('Created the Document "Reset email copy"'),
-  ).toBeTruthy();
+  fireEvent.click(button("Worked for 30s"));
+  const body = screen.getByRole("group", { name: "Worked for 30s" });
+  expect(body.textContent).toContain("Moved T-12 to In review");
+  expect(body.textContent).toContain("Posted an update on T-12");
+  expect(within(body).getAllByText("T-12")[0]?.dataset.slot).toBe("reference");
+});
+
+/** Sizes a transcript as a browser would, which jsdom does not. */
+function sized(scroller: HTMLElement, height: number, content: number) {
+  Object.defineProperty(scroller, "clientHeight", {
+    configurable: true,
+    value: height,
+  });
+  Object.defineProperty(scroller, "scrollHeight", {
+    configurable: true,
+    value: content,
+  });
+}
+
+test("scrolling up stops following; Jump to latest resumes it", async () => {
+  await open(one({ id: "c1", title: "Limiter" }, [reply("r1", "Hello")]));
+  const scroller = document.querySelector<HTMLElement>(".chat-scroll")!;
+  const jump = document.querySelector<HTMLElement>(".chat-jump")!;
+  // Following: the control is hidden and out of reach.
+  expect(jump.hasAttribute("inert")).toBe(true);
+  sized(scroller, 200, 1000);
+  scroller.scrollTop = 300;
+  fireEvent.scroll(scroller);
+  expect(jump.hasAttribute("inert")).toBe(false);
+  fireEvent.click(within(jump).getByRole("button", { name: "Jump to latest" }));
+  expect(scroller.scrollTop).toBe(1000);
+  expect(jump.hasAttribute("inert")).toBe(true);
+  // At the bottom again, scrolling there also resumes it.
+  scroller.scrollTop = 300;
+  fireEvent.scroll(scroller);
+  scroller.scrollTop = 795;
+  fireEvent.scroll(scroller);
+  expect(jump.hasAttribute("inert")).toBe(true);
+});
+
+test("what arrived while the Chat was not open is marked New, never your own message", async () => {
+  // Everything in a window of this height counts as seen.
+  const height = vi
+    .spyOn(HTMLElement.prototype, "clientHeight", "get")
+    .mockReturnValue(600);
+  try {
+    const client = await open(
+      one({ id: "c1", title: "Limiter" }, [youSaid, inTurn(reply("r1", "Hi"))]),
+    );
+    fireEvent.click(button("Close Chat"));
+    client.push("c1", { ...youSaid, id: "u2", text: "And the IPs?" });
+    client.push("c1", reply("r2", "Done for IPs too."));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limiter/ }));
+    const marker = await screen.findByRole("separator", {
+      name: "New since you left",
+    });
+    // The marker sits above the reply, not above your own message.
+    const reply2 = conversation().getByText("Done for IPs too.");
+    const you2 = conversation().getByText("And the IPs?");
+    expect(
+      marker.compareDocumentPosition(reply2) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      marker.compareDocumentPosition(you2) & Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+    // It stays until the person sends.
+    type("Thanks");
+    fireEvent.click(button("Send"));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("separator", { name: "New since you left" }),
+      ).toBeNull(),
+    );
+  } finally {
+    height.mockRestore();
+  }
 });
 
 test("a response is saved as a Document only when asked", async () => {
@@ -979,7 +1201,7 @@ test("after reopening the window the view says it is catching up while work cont
       catching_up: true,
     }),
   );
-  expect(screen.getByRole("status").textContent).toBe("Catching up…");
+  expect(working()).toBe("Catching up…");
   expect(button("Stop")).toBeTruthy();
 });
 
@@ -987,18 +1209,17 @@ test("while its session opens the working line says so and counts, then reads as
   const client = await open(
     one({ id: "c1", title: "Limiter", activity: "working", opening: "resume" }),
   );
-  expect(screen.getByRole("status").textContent).toBe(
-    "Resuming the Codex session… · 0s",
-  );
+  expect(working()).toBe("Resuming the Codex session… · 0s");
   act(() => client.patch("c1", { opening: "start" }));
-  expect(screen.getByRole("status").textContent).toBe("Starting Codex… · 0s");
+  expect(working()).toBe("Starting Codex… · 0s");
   act(() =>
     client.patch("c1", {
       opening: null,
       doing: { label: "Working", since: new Date().toISOString() },
     }),
   );
-  expect(screen.getByRole("status").textContent).toBe("Working · 0s");
+  // Under a second there is no clock yet.
+  expect(working()).toBe("Working…");
 });
 
 test("New Chat keeps the draft when the harness is missing and starts once it is found", async () => {
