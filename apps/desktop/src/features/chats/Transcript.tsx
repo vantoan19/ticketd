@@ -1170,11 +1170,14 @@ function BetweenSteps({
   children: ReactNode;
 }) {
   const [shown, setShown] = useState(!running);
+  // A step starting hides the line at once, in the same render.
+  const [wasRunning, setWasRunning] = useState(running);
+  if (running !== wasRunning) {
+    setWasRunning(running);
+    if (running) setShown(false);
+  }
   useEffect(() => {
-    if (running) {
-      setShown(false);
-      return;
-    }
+    if (running) return;
     const timer = setTimeout(() => setShown(true), BETWEEN_STEPS_MS);
     return () => clearTimeout(timer);
   }, [running]);

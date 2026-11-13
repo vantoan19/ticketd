@@ -950,7 +950,7 @@ button.chat-file-name:focus-visible,
 }
 /* The Permissions menu wears the picker's popover surface: its edge and shadow
    set it apart from the New Chat heading it overlaps (LIVE2-5). */
-.chat-perm-menu {
+[data-slot="dropdown-menu-content"]:has(> .chat-pick-note) {
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-large);
 }
