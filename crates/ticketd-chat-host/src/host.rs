@@ -344,6 +344,15 @@ impl ChatHost {
         self.ask(chat_id, Command::ResumeQueue).await
     }
 
+    /// Sends one queued input now, alone: it steers the turn in progress or starts one,
+    /// and a paused queue stays paused. Refused with `Working` while a turn that cannot
+    /// be steered runs. Returns once it is held to send; delivery is reported as usual.
+    pub async fn send_queued_now(&self, chat_id: &str, message_id: &str) -> Result<(), HostError> {
+        let message_id = message_id.to_owned();
+        self.ask(chat_id, |reply| Command::SendQueuedNow { message_id, reply })
+            .await
+    }
+
     pub async fn respond(
         &self,
         chat_id: &str,

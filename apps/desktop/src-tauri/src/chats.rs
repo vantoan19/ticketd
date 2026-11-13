@@ -1115,6 +1115,11 @@ impl Chats {
         Ok(self.host()?.resume_queue(chat_id).await?)
     }
 
+    /// Sends one queued message now, alone; see `ChatHost::send_queued_now`.
+    pub async fn send_queued_now(&self, chat_id: &str, message_id: &str) -> Outcome<()> {
+        Ok(self.host()?.send_queued_now(chat_id, message_id).await?)
+    }
+
     pub async fn stop(&self, chat_id: &str) -> Outcome<()> {
         Ok(self.host()?.stop(chat_id).await?)
     }

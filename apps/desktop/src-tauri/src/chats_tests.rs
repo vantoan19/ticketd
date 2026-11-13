@@ -343,6 +343,35 @@ async fn queued_input_is_shown_as_the_queue_and_can_be_withdrawn() {
     assert!(f.chats.remove_queued(&id, &queued.id).await.is_err());
 }
 
+/// #363: Steer always says what it does, Stop reads as in progress until the harness
+/// confirms or the wait ends, and Send now takes one queued message out of the queue.
+#[tokio::test(start_paused = true)]
+async fn steering_says_its_effect_stop_shows_progress_and_send_now_takes_one_queued_message() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (opened, _) = f.open(&id).await;
+    let chat = &opened.snapshot.chat;
+    assert!(chat.steering.available);
+    assert!(chat.steering.effect.is_some());
+    assert!(!chat.stopping);
+
+    f.chats.send(&id, "later", SendMode::Queue).await.unwrap();
+    f.chats.send(&id, "now", SendMode::Queue).await.unwrap();
+    settle().await;
+    let (opened, _) = f.open(&id).await;
+    let now = opened.snapshot.chat.queue[1].id.clone();
+    f.chats.send_queued_now(&id, &now).await.unwrap();
+    settle().await;
+    assert_eq!(f.submitted(), ["first", "now"]);
+
+    f.chats.stop(&id).await.unwrap();
+    settle().await;
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.chat.stopping);
+    let queue: Vec<_> = opened.snapshot.chat.queue.iter().map(|q| &q.text).collect();
+    assert_eq!(queue, ["later"]);
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_uncertain_submission_waits_for_the_person_and_is_resent_only_when_they_say_so() {
     let f = Fixture::new().await;
