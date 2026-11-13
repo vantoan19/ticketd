@@ -467,9 +467,9 @@ impl Workspace {
         migration_wait: Duration,
         create: bool,
     ) -> Result<Self, Error> {
-        let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        if create {
-            flags |= OpenFlags::SQLITE_OPEN_CREATE;
+        let mut flags = OpenFlags::default();
+        if !create {
+            flags.remove(OpenFlags::SQLITE_OPEN_CREATE);
         }
         use fs2::FileExt;
         let resolved = if path.exists() {
