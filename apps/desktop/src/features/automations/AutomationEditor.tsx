@@ -369,6 +369,7 @@ export function AutomationEditor({
             <Button
               variant="outline"
               size="sm"
+              className="mx-2"
               disabled={left > 0}
               {...(left > 0 && { "aria-describedby": `${headingId}-left` })}
               onClick={() => void runNow()}

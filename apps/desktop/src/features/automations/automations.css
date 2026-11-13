@@ -400,7 +400,7 @@
   line-height: var(--text-ui-line);
 }
 .flow-inline input {
-  width: 112px;
+  width: 144px;
 }
 .flow-days {
   display: flex;
