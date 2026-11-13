@@ -165,17 +165,15 @@
 .chat-status > svg {
   margin-right: 6px;
 }
-/* The word truncates too, after the detail, and both end in an ellipsis (LIVE-18). */
+/* The status word is never cut ("Question", "Approval needed"); only the
+   detail after it truncates (LIVE2-9). */
 .chat-status-word {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
+  flex: none;
   color: var(--foreground);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .chat-status-detail {
-  flex: 0 1000 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -460,6 +458,23 @@
   line-height: var(--text-caption-line);
 }
 .chat-ai {
+  line-height: 22px;
+}
+/* A reply's headings are a step above its text, never display-sized: the
+   Chat's title stays the largest text on screen (LIVE2-10). */
+.chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 600;
+  line-height: var(--text-ui-line);
+  letter-spacing: normal;
+}
+.chat-ai .markdown-document h1 {
+  font-size: 16px;
+  line-height: 24px;
+}
+.chat-ai .markdown-document h2 {
+  font-size: 15px;
   line-height: 22px;
 }
 /* A single line break in a reply is a new line, as in other chat apps. A hard
