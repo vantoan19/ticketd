@@ -44,7 +44,7 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
-import { ChatContext } from "@/features/chats/ChatContext";
+import { ChatContext, ContextCount } from "@/features/chats/ChatContext";
 import { ComposerControls } from "@/features/chats/ComposerControls";
 import {
   settingLine,
@@ -67,8 +67,8 @@ import {
   useQuotes,
 } from "@/features/chats/quotes";
 import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
-import { runningPlan } from "@/features/chats/reports";
-import { ContextRing, PlanPill } from "@/features/chats/TurnReports";
+import { lastAsk, runningPlan } from "@/features/chats/reports";
+import { PlanPill } from "@/features/chats/TurnReports";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
   composerControls,
@@ -345,9 +345,7 @@ function Conversation({
     [client, id],
   );
   const plan = runningPlan(items);
-  const turnStartedAt = [...items]
-    .reverse()
-    .find((item) => item.kind === "user")?.at;
+  const turnStartedAt = lastAsk(items);
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const { quotes, remove: removeQuote } = useQuotes(id);
@@ -680,9 +678,11 @@ function Conversation({
                   }
                   {...(chat.context && {
                     beforeStop: (
-                      <ContextRing
+                      <ContextCount
+                        chat={chat}
                         context={chat.context}
-                        turnStartedAt={turnStartedAt}
+                        asOf={turnStartedAt}
+                        returnTo={messageBox}
                       />
                     ),
                   })}
@@ -773,7 +773,9 @@ export function ChatDetail({
           <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
             {chat?.title ?? "Chat"}
           </h2>
-          {chat && <ChatContext chat={chat} />}
+          {chat && (
+            <ChatContext chat={chat} asOf={lastAsk(snapshot?.items ?? [])} />
+          )}
         </div>
         <div className="detail-actions">
           {chat?.retention === "archived" && (

@@ -636,9 +636,9 @@ export function changeLine(change: RecordChange) {
 export const blocksSend = (problem: Problem | null | undefined) =>
   Boolean(problem?.blocks_send);
 
-/** A managed folder is named by an id; it reads as the folder ticketd keeps. */
+/** A managed folder is named by an id; it reads as New Chat names it: the Scratch folder. */
 export const folderLabel = (folder: ChatState["folder"]) =>
-  folder.managed ? "ticketd folder" : folder.name;
+  folder.managed ? "Scratch folder" : folder.name;
 
 /** The header's context button, read aloud: what the popover holds. */
 export function contextLabel(chat: ChatState) {

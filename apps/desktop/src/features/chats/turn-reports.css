@@ -1,4 +1,4 @@
-/* #367: reasoning, plan, changed files and the context ring. Layout only; every
+/* #367: reasoning, plan and changed files. Layout only; every
    color, radius, shadow and size comes from a token. */
 
 /* Rows in step-row anatomy: 28px, icon slot, muted. */
@@ -220,61 +220,4 @@ div.chat-file-main .chat-file-path {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
-}
-
-/* The context ring: a 16px ring in a 32px ghost button, before Stop. */
-/* The ring inside its 32px ghost button: drawn from the top, clockwise. */
-.chat-ring {
-  transform: rotate(-90deg);
-}
-.chat-ring circle {
-  fill: none;
-  stroke-width: 2;
-}
-.chat-ring-track {
-  stroke: var(--control-boundary);
-}
-.chat-ring-arc {
-  stroke: var(--muted-foreground);
-  stroke-linecap: round;
-  transition: stroke-dasharray 200ms ease;
-}
-[data-full] > .chat-ring .chat-ring-arc {
-  stroke: var(--foreground);
-}
-.chat-ring-full {
-  color: var(--foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.chat-ring-head {
-  margin: 0 0 4px;
-  font-weight: 500;
-}
-.chat-ring-cats {
-  display: flex;
-  flex-direction: column;
-  margin: 0 0 4px;
-  padding: 0;
-  list-style: none;
-}
-.chat-ring-cats li {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 24px;
-  align-items: center;
-}
-@media (prefers-reduced-motion: reduce) {
-  .chat-ring-arc {
-    transition: none;
-  }
-}
-@media (forced-colors: active) {
-  .chat-ring-arc,
-  [data-full] > .chat-ring .chat-ring-arc {
-    stroke: CanvasText;
-  }
 }

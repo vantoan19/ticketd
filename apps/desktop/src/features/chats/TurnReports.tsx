@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   Brain,
   Check,
@@ -21,19 +21,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { StatusDot } from "@/components/ui/status-dot";
 import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
-import type {
-  ChangedFile,
-  ContextUsage,
-  PlanStep,
-  ItemOf,
-} from "@/features/chats/client";
+import type { ChangedFile, PlanStep, ItemOf } from "@/features/chats/client";
 import { duration } from "@/features/chats/model";
 import {
-  clockTime,
-  contextWords,
   currentStep,
   fileCounts,
   fileKind,
@@ -43,7 +35,6 @@ import {
   planCount,
   reasoningShown,
   reasoningWords,
-  tokens,
 } from "@/features/chats/reports";
 
 /**
@@ -403,100 +394,5 @@ export function FilesSummary({
         </div>
       )}
     </div>
-  );
-}
-
-const RADIUS = 6;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-
-/**
- * How full the session's context window is, as the harness last said: a ring
- * before Stop, opening the details. From 90% it says so in words.
- */
-export function ContextRing({
-  context,
-  turnStartedAt,
-}: {
-  context: ContextUsage;
-  /** When the turn the person is looking at began; an older report says when it is from. */
-  turnStartedAt?: string | undefined;
-}) {
-  const [open, setOpen] = useState(false);
-  const words = contextWords(context);
-  const started = turnStartedAt ? new Date(turnStartedAt).getTime() : NaN;
-  const stale = !Number.isNaN(started) && context.at < started;
-  let full: ReactNode = null;
-  if (words.full)
-    full = (
-      <>
-        <StatusDot tone="attention" />
-        <span className="chat-ring-full">{words.percent}% full</span>
-      </>
-    );
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size={words.full ? "xs" : "icon-sm"}
-          data-full={words.full ? "" : undefined}
-          aria-label={words.label}
-          onMouseDown={(event) => event.preventDefault()}
-        >
-          <svg
-            className="chat-ring"
-            viewBox="0 0 16 16"
-            width={16}
-            height={16}
-            aria-hidden="true"
-          >
-            <circle className="chat-ring-track" cx="8" cy="8" r={RADIUS} />
-            <circle
-              className="chat-ring-arc"
-              cx="8"
-              cy="8"
-              r={RADIUS}
-              strokeDasharray={`${(CIRCUMFERENCE * words.percent) / 100} ${CIRCUMFERENCE}`}
-            />
-          </svg>
-          {full}
-        </Button>
-      </PopoverTrigger>
-      {/* Said once when the window passes 90%. */}
-      <span className="sr-only" role="status">
-        {words.full ? `Context window ${words.percent}% full` : ""}
-      </span>
-      <PopoverContent
-        align="end"
-        onOpenAutoFocus={(event) => event.preventDefault()}
-      >
-        <p className="chat-ring-head">{words.headline}</p>
-        {context.categories.length > 0 && (
-          <ul className="chat-ring-cats">
-            {context.categories.map((category) => (
-              <li key={category.name}>
-                <span>{category.name}</span>
-                <span className="chat-file-counts">
-                  {tokens(category.tokens)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {context.compacts_at != null && (
-          <p className="chat-plan-note">
-            Compacts at {tokens(context.compacts_at)}
-          </p>
-        )}
-        {context.compacted_at != null && (
-          <p className="chat-plan-note">
-            Compacted at {clockTime(context.compacted_at)}.
-          </p>
-        )}
-        {stale && (
-          <p className="chat-plan-note">As of {clockTime(context.at)}</p>
-        )}
-      </PopoverContent>
-    </Popover>
   );
 }

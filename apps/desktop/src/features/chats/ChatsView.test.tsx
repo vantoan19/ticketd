@@ -594,9 +594,8 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   );
   expect(screen.getAllByText("Drafted the copy.").length).toBeGreaterThan(0);
   expect(screen.queryByLabelText("Message Codex")).toBeNull();
-  expect(button("Folder reset-email, missing").textContent).toBe(
-    "reset-emailmissing",
-  );
+  // The FolderX icon says missing; the accessible name says it in words.
+  expect(button("Folder reset-email, missing").textContent).toBe("reset-email");
   // The path reads like the folder popover's: one line, not a code block.
   const notice = screen.getByRole("alert");
   expect(within(notice).getByTitle("~/ticketd/chats/reset-email")).toBeTruthy();
@@ -1415,15 +1414,47 @@ test("records are linked by title and unlinked from their chip", async () => {
   );
 });
 
-test("a recheck that fails no longer says Signed in", async () => {
+test("Check again shows only while the harness isn't ready, and a failed recheck says so", async () => {
   const client = await open(one({ id: "c1", title: "Limiter" }));
   fireEvent.click(button(/^Folder web-app/));
-  const popover = await screen.findByRole("dialog", { name: "Chat context" });
+  let popover = await screen.findByRole("dialog", { name: "Chat context" });
   expect(await within(popover).findByText("Signed in")).toBeTruthy();
+  expect(
+    within(popover).queryByRole("button", { name: "Check again" }),
+  ).toBeNull();
+  fireEvent.keyDown(popover, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // Esc returns focus to the button that opened it.
+  expect(document.activeElement).toBe(button(/^Folder web-app/));
+
+  client.setHarnesses([
+    { id: "codex", name: "Codex", status: "not_signed_in" },
+  ]);
+  fireEvent.click(button(/^Folder web-app/));
+  popover = await screen.findByRole("dialog", { name: "Chat context" });
+  expect(await within(popover).findByText("Not signed in")).toBeTruthy();
   client.harnesses = () => Promise.reject(new Error("probe failed"));
   fireEvent.click(within(popover).getByRole("button", { name: "Check again" }));
   expect(await within(popover).findByText("Couldn't check")).toBeTruthy();
-  expect(within(popover).queryByText("Signed in")).toBeNull();
+  expect(within(popover).queryByText("Not signed in")).toBeNull();
+});
+
+test("a check that never answers reads as Couldn't check after a while", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  client.harnesses = () => new Promise(() => {});
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(button(/^Folder web-app/));
+    const popover = screen.getByRole("dialog", { name: "Chat context" });
+    expect(within(popover).getByText("Checking…")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(8_000));
+    expect(within(popover).getByText("Couldn't check")).toBeTruthy();
+    expect(
+      within(popover).getByRole("button", { name: "Check again" }),
+    ).toHaveProperty("disabled", false);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("the context popover opens the other Chats here and the Project's tickets", async () => {
@@ -1453,6 +1484,13 @@ test("the context popover opens the other Chats here and the Project's tickets",
   );
   expect(openProject).toHaveBeenCalledWith("p1");
   popover = await screen.findByRole("dialog", { name: "Chat context" });
+  // The other Chats show only when asked for.
+  expect(
+    within(popover).queryByRole("button", { name: "Alert on-call" }),
+  ).toBeNull();
+  fireEvent.click(
+    within(popover).getByRole("button", { name: "1 other Chat here" }),
+  );
   fireEvent.click(
     within(popover).getByRole("button", { name: "Alert on-call" }),
   );
@@ -1488,15 +1526,16 @@ test("the context popover holds the harness, folder, branch and the other Chats 
   const context = button(
     "Folder web-app, branch rate-limit-logins, Project Web App, used by 1 other Chat",
   );
-  // The Project's letter tile, the folder, the branch, the shared count.
-  expect(context.textContent).toBe("Wweb-apprate-limit-logins1");
+  // Only the Project's letter tile and the folder: the rest is in the popover.
+  expect(context.textContent).toBe("Wweb-app");
   fireEvent.click(context);
   const popover = await screen.findByRole("dialog", { name: "Chat context" });
   expect(await within(popover).findByText("Signed in")).toBeTruthy();
   expect(popover.textContent).toContain("0.167.2 · /usr/local/bin/codex");
   expect(popover.textContent).toContain("~/code/web-app");
-  expect(popover.textContent).toContain("Other Chats hereAlert on-call");
-  expect(popover.textContent).toContain("ProjectWWeb App");
+  expect(popover.textContent).toContain("rate-limit-logins");
+  expect(popover.textContent).toContain("1 other Chat here");
+  expect(popover.textContent).toContain("Web App");
   // The harness's own settings sentence is #367's, not this popover's (#307).
   expect(popover.textContent).not.toContain("Uses your Codex settings.");
   fireEvent.click(within(popover).getByRole("button", { name: /^Open in / }));
@@ -1689,7 +1728,7 @@ test("a Project is linked like a ticket or Document and has no page to open", as
   );
 });
 
-test("a managed folder reads as the ticketd folder, and its path has no verbatim prefix", async () => {
+test("a managed folder reads as the Scratch folder, and its path has no verbatim prefix", async () => {
   await open(
     one({
       id: "c1",
@@ -1701,11 +1740,11 @@ test("a managed folder reads as the ticketd folder, and its path has no verbatim
       },
     }),
   );
-  expect(button("Folder ticketd folder").textContent).toBe("ticketd folder");
+  expect(button("Folder Scratch folder").textContent).toBe("Scratch folder");
   expect(screen.getByRole("list", { name: "Chats" }).textContent).not.toContain(
     "f4f684bc",
   );
-  fireEvent.click(button("Folder ticketd folder"));
+  fireEvent.click(button("Folder Scratch folder"));
   const popover = await screen.findByRole("dialog", { name: "Chat context" });
   expect(popover.textContent).toContain(String.raw`C:\ws`);
   expect(popover.textContent).not.toContain("?");
