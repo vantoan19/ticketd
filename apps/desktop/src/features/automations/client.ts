@@ -92,6 +92,7 @@ export type Automation = z.infer<typeof automationSchema>;
 
 const automationRunSchema = z.object({
   id: z.string(),
+  automation_id: z.string(),
   status: z.enum([
     "queued",
     "running",
@@ -101,6 +102,11 @@ const automationRunSchema = z.object({
   ]),
   /** Why it needs attention. */
   reason: z.string().nullable(),
+  /**
+   * It ended as Needs attention and the person has not yet run it again, taken
+   * it over or dismissed it.
+   */
+  needs_you: z.boolean(),
   /** The ticket it acts on, as it is called now. */
   ticket: z
     .object({ id: z.string(), reference: z.string(), title: z.string() })
@@ -109,9 +115,14 @@ const automationRunSchema = z.object({
 });
 export type AutomationRun = z.infer<typeof automationRunSchema>;
 
+/** A run as its ticket lists it: with the name of the Automation it ran. */
+const ticketRunSchema = automationRunSchema.extend({
+  automation_name: z.string(),
+});
+export type TicketRun = z.infer<typeof ticketRunSchema>;
+
 /** A run as its own view shows it: what it executes, and each step it reached. */
 const automationRunDetailSchema = automationRunSchema.extend({
-  automation_id: z.string(),
   /** The Automation as it was when the run was created. */
   definition: automationDefinitionSchema,
   started_at: z.string().nullable(),
@@ -125,6 +136,8 @@ const automationRunDetailSchema = automationRunSchema.extend({
       reason: z.string().nullable(),
       /** The Chat of a Run agent step. */
       chat_id: z.string().nullable(),
+      /** The run still owns that Chat: replying in it takes the run over. */
+      chat_owned: z.boolean(),
       started_at: z.string(),
       ended_at: z.string().nullable(),
     }),
@@ -229,11 +242,24 @@ export const automationsClient = {
       await invoke("automation_run_stop", { id }),
     );
   },
-  /** Queues a new run for the event that started a finished one. */
+  /**
+   * Queues a new run for the event that started a finished one, which then no
+   * longer needs the person.
+   */
   async runAgain(id: string): Promise<AutomationRunDetail> {
     return automationRunDetailSchema.parse(
       await invoke("automation_run_again", { id }),
     );
+  },
+  /** The person wants nothing more from a run that needs attention. */
+  async dismissRun(id: string): Promise<void> {
+    await invoke("automation_run_dismiss", { id });
+  },
+  /** The runs that acted on a ticket, newest first. */
+  async ticketRuns(reference: string): Promise<TicketRun[]> {
+    return z
+      .array(ticketRunSchema)
+      .parse(await invoke("automation_run_list_for_ticket", { reference }));
   },
   async agents(): Promise<AutomationAgent[]> {
     return z

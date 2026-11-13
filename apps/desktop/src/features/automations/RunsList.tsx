@@ -95,7 +95,7 @@ export function RunsList({
                     type="button"
                     className="chat-row"
                     onClick={() => onOpen(run.id)}
-                    {...(run.status === "needs_attention" && {
+                    {...(run.needs_you && {
                       "data-attention": "",
                     })}
                   >

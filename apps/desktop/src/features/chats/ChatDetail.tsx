@@ -256,7 +256,13 @@ function LinkedRecords({ chat }: { chat: ChatState }) {
 const isMessage = (item: TranscriptItem) =>
   item.kind === "user" || item.kind === "response";
 
-function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
+function Conversation({
+  snapshot,
+  notice,
+}: {
+  snapshot: ChatSnapshot;
+  notice?: ReactNode;
+}) {
   const client = useChatClient();
   const { chat, items } = snapshot;
   const id = chat.id;
@@ -345,6 +351,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
         />
       </div>
       <div className="chat-dock">
+        {notice && <p className="chat-line chat-note">{notice}</p>}
         {failure && (
           <p className="chat-fine" role="alert">
             {failure}
@@ -485,8 +492,11 @@ export function ChatDetail({
   onExpand,
   onReturn,
   onClose,
+  notice,
 }: {
   id: string;
+  /** What ticketd says above the composer about this Chat, where it is open. */
+  notice?: ReactNode;
   /** The person asked for the full width. */
   expanded: boolean;
   /** The list is not beside this pane (expanded, or the window is narrow). */
@@ -573,7 +583,9 @@ export function ChatDetail({
           </p>
         )}
       </div>
-      {snapshot && <Conversation key={id} snapshot={snapshot} />}
+      {snapshot && (
+        <Conversation key={id} snapshot={snapshot} notice={notice} />
+      )}
     </section>
   );
 }

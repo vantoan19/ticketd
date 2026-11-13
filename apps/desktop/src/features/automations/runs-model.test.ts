@@ -31,6 +31,7 @@ const states = (
       automation_id: "automation-1",
       status,
       reason: null,
+      needs_you: false,
       ticket: null,
       created_at: "2026-11-14T10:00:00.000Z",
       started_at: null,
@@ -46,6 +47,7 @@ const states = (
         status,
         reason: null,
         chat_id: null,
+        chat_owned: false,
         started_at: "2026-11-14T10:00:00.000Z",
         ended_at: null,
       })),
@@ -88,8 +90,10 @@ test("once a run has ended, every step it did not reach is Not run", () => {
 
 const run = (id: string, created_at: string): AutomationRun => ({
   id,
+  automation_id: "automation-1",
   status: "completed",
   reason: null,
+  needs_you: false,
   ticket: null,
   created_at,
 });
