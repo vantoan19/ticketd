@@ -988,6 +988,81 @@ const bulkTicket = (index: number, overrides = {}) => ({
   ...overrides,
 });
 
+test.each(["split", "expanded", "beside", "narrow"])(
+  "closing %s ticket details restores focus to the just-viewed row",
+  async (mode) => {
+    narrowViewport = mode === "narrow";
+    const tickets = [bulkTicket(1), bulkTicket(2)];
+    await renderBulk({
+      find_tickets: () => tickets,
+      show_ticket: ({ reference }: { reference: string }) =>
+        tickets.find((ticket) => ticket.reference === reference),
+    });
+    const first = screen.getByRole("button", { name: /First/ });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    const second = screen.getByRole("button", { name: /Second/ });
+    expect(document.activeElement).toBe(second);
+    fireEvent.keyDown(second, { key: "Enter" });
+    await act(async () => {});
+    if (mode === "expanded" || mode === "beside") {
+      fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+      if (mode === "beside")
+        fireEvent.click(
+          screen.getByRole("button", { name: "Show beside the list" }),
+        );
+    }
+    const close = screen.getByRole("button", { name: "Close ticket details" });
+    close.focus();
+    fireEvent.click(close);
+    expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
+    expect(document.activeElement).toBe(second);
+    expect(second.getAttribute("aria-pressed")).toBe("false");
+  },
+);
+
+test("closing after Next restores focus to the current ticket rather than the original row", async () => {
+  const tickets = [bulkTicket(1), bulkTicket(2)];
+  await renderBulk({
+    find_tickets: () => tickets,
+    count_tickets: counted({ todo: 2 }),
+    show_ticket: ({ reference }: { reference: string }) =>
+      tickets.find((ticket) => ticket.reference === reference),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  await act(async () => {});
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Second",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /Second/ }),
+  );
+});
+
+test("closing details falls back to the list heading when the ticket has left the visible results", async () => {
+  let tickets = [bulkTicket(1), bulkTicket(2)];
+  const viewed = tickets[1];
+  await renderBulk({
+    find_tickets: () => tickets,
+    show_ticket: () => viewed,
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Second/ }));
+  await act(async () => {});
+  tickets = [bulkTicket(1)];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.queryByRole("button", { name: /Second/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "All tickets" }),
+  );
+});
+
 function openMenu(name: string) {
   fireEvent.keyDown(screen.getByRole("button", { name }), { key: "Enter" });
 }
