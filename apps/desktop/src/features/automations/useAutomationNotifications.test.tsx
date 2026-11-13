@@ -39,10 +39,7 @@ test("a click on a Notify me notification opens its ticket or its run, and other
   expect(openRun).not.toHaveBeenCalled();
 
   click("tap", target("run", "T-KQ1"));
-  expect(openRun).toHaveBeenCalledExactlyOnceWith({
-    automationId: "automation-1",
-    runId: "run-1",
-  });
+  expect(openRun).toHaveBeenCalledExactlyOnceWith("run-1");
 
   // A reminder's notification, and a dismissal, are not this hook's.
   click("tap", { reference: "T-KQ2" });

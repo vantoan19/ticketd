@@ -298,8 +298,10 @@ test("an unfinished step says what it needs and the Automation cannot be switche
 
 const run = (patch: Partial<AutomationRun>): AutomationRun => ({
   id: "run-1",
+  automation_id: "a2",
   status: "running",
   reason: null,
+  needs_you: false,
   ticket: { id: "t1", reference: "T-ZB7", title: "Fix login" },
   created_at: "2026-11-14T09:00:00.000Z",
   ...patch,
@@ -513,15 +515,19 @@ test("the Runs view lists the Automation's runs by day, each with its ticket, st
   runs = [
     {
       id: "run-2",
+      automation_id: "automation-1",
       status: "needs_attention",
       reason: "The agent reached its limit of 40 turns before finishing.",
+      needs_you: true,
       ticket: { id: "t-2", reference: "T-ZB8", title: "Login form flickers" },
       created_at: ago(0),
     },
     {
       id: "run-1",
+      automation_id: "automation-1",
       status: "completed",
       reason: null,
+      needs_you: false,
       ticket: { id: "t-1", reference: "T-ZB4", title: "Add a logout endpoint" },
       created_at: ago(5 * 86_400_000),
     },

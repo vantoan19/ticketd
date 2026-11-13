@@ -6,10 +6,8 @@ import { z } from "zod";
 const targetSchema = z.object({
   opens: z.enum(["ticket", "run"]),
   ticket_reference: z.string().nullable(),
-  automation_id: z.string(),
   run_id: z.string(),
 });
-export type RunTarget = { automationId: string; runId: string };
 
 /**
  * Opens what a Notify me notification points to when the person clicks it: the
@@ -19,7 +17,8 @@ export type RunTarget = { automationId: string; runId: string };
 export function useAutomationNotifications(
   enabled: boolean,
   openTicket: (reference: string) => void,
-  openRun: (target: RunTarget) => void,
+  /** The page's run navigation (`RunNavigation`), which takes a run's id. */
+  openRun: (runId: string) => void,
 ) {
   const open = useRef({ openTicket, openRun });
   useEffect(() => {
@@ -37,11 +36,7 @@ export function useAutomationNotifications(
       if (!target) return;
       if (target.opens === "ticket" && target.ticket_reference)
         open.current.openTicket(target.ticket_reference);
-      else
-        open.current.openRun({
-          automationId: target.automation_id,
-          runId: target.run_id,
-        });
+      else open.current.openRun(target.run_id);
     }).then(
       (listener) => {
         const unregister = () => void listener.unregister().catch(() => {});

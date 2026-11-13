@@ -16,7 +16,7 @@ import type {
   AutomationRunDetail,
 } from "@/features/automations/client";
 import { ChatClientContext } from "@/features/chats/client";
-import { createMockChatClient } from "@/features/chats/mock-client";
+import { chatState, createMockChatClient } from "@/features/chats/mock-client";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -90,6 +90,7 @@ const run = (patch: Partial<AutomationRunDetail>): AutomationRunDetail => ({
   automation_id: VERIFY.id,
   status: "running",
   reason: null,
+  needs_you: false,
   ticket: { id: "t-1", reference: "T-ZB7", title: "Show the wait time" },
   created_at: new Date().toISOString(),
   started_at: new Date().toISOString(),
@@ -112,6 +113,7 @@ const reached = (
   status,
   reason,
   chat_id: step_id === "verify" ? "chat-1" : null,
+  chat_owned: step_id === "verify",
   started_at: new Date().toISOString(),
   ended_at: null,
 });
@@ -150,7 +152,10 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const chat = createMockChatClient();
+const chat = createMockChatClient({
+  enabled: true,
+  chats: [{ chat: chatState({ id: "chat-1", title: "Verify T-ZB7" }) }],
+});
 const page = (version: number) => (
   <WorkspaceChangeProvider value={version}>
     <ChatClientContext value={chat}>
@@ -257,4 +262,30 @@ test("a run in progress follows the Workspace as it goes, and Stop ends it needi
   await screen.findByRole("button", { name: "Run again" });
   expect(screen.getByRole("status").textContent).toBe("Needs attention");
   expect(invoke).toHaveBeenCalledWith("automation_run_stop", { id: "run-1" });
+});
+
+const TAKE_OVER =
+  "A run of Verify on staging. Reply to take it over; it moves to your Chats.";
+const failedRun = (owned: boolean) =>
+  run({
+    status: owned ? "needs_attention" : "taken_over",
+    needs_you: owned,
+    ended_at: new Date().toISOString(),
+    steps: [{ ...reached("verify", "failed", "Limit"), chat_owned: owned }],
+  });
+
+test("a run's Chat opens in the page and says above the composer that replying takes it over", async () => {
+  runs = [failedRun(true)];
+  const view = await openRun();
+
+  fireEvent.click(screen.getByRole("button", { name: "Open Chat" }));
+
+  expect(await screen.findByText(TAKE_OVER)).toBeTruthy();
+  expect(screen.getByRole("textbox")).toBeTruthy();
+
+  // The person replied: the Chat is theirs, and the line goes.
+  runs = [failedRun(false)];
+  view.rerender(page(1));
+  await waitFor(() => expect(screen.queryByText(TAKE_OVER)).toBeNull());
+  expect(screen.getByRole("textbox")).toBeTruthy();
 });

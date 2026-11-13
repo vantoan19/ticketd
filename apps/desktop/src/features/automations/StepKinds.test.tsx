@@ -71,6 +71,7 @@ beforeEach(() => {
           automation_id: id,
           status: "completed",
           reason: null,
+          needs_you: false,
           ticket: { id: "t-1", reference: "T-ZB5", title: "Fix login" },
           created_at: now,
           started_at: now,
@@ -81,6 +82,7 @@ beforeEach(() => {
             status: "completed",
             reason: null,
             chat_id: null,
+            chat_owned: false,
             started_at: now,
             ended_at: now,
           })),
@@ -203,9 +205,7 @@ test("a notification that opens the run shows that run, with what each step did 
   };
   render(
     <ChatClientContext value={createMockChatClient()}>
-      <AutomationsView
-        runTarget={{ automationId: "automation-1", runId: "run-7" }}
-      />
+      <AutomationsView openRun={{ id: "run-7", key: 1 }} />
     </ChatClientContext>,
   );
 

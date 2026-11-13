@@ -68,13 +68,14 @@ import {
  */
 export function AutomationEditor({
   automation,
-  startOnRun = null,
   agents,
   expanded,
   single,
   onExpand,
   onReturn,
   onClose,
+  openRun,
+  onOpenRun: setOpenRun,
   onChange,
   onSetEnabled,
   onStopAndTurnOff,
@@ -85,14 +86,15 @@ export function AutomationEditor({
   onFail,
 }: {
   automation: Automation;
-  /** Opens on this run, its runs behind it: a notification pointed here. */
-  startOnRun?: string | null;
   agents: AutomationAgent[];
   expanded: boolean;
   single: boolean;
   onExpand: () => void;
   onReturn: () => void;
   onClose: () => void;
+  /** The run open in place of the Automation; closing it returns to the runs. */
+  openRun: string | null;
+  onOpenRun: (id: string | null) => void;
   onChange: (definition: AutomationDefinition) => void;
   onSetEnabled: (enabled: boolean) => void;
   /** Off, with the runs in progress ended as Needs attention. */
@@ -106,12 +108,10 @@ export function AutomationEditor({
 }) {
   const headingId = useId();
   const [draft, setDraft] = useState(() => definitionOf(automation));
-  /** The flow being edited, or what running it has done. */
+  /** The flow being edited, or what running it has done. A run returns to the runs. */
   const [view, setView] = useState<"steps" | "runs">(
-    startOnRun ? "runs" : "steps",
+    openRun ? "runs" : "steps",
   );
-  /** The run open in place of the Automation; closing it returns to the runs. */
-  const [openRun, setOpenRun] = useState<string | null>(startOnRun);
   /** The card whose panel is open: a step's id, or the trigger's. */
   const [selected, setSelected] = useState<string | null>(null);
   /** The name being typed in the Rename dialog; null while it is closed. */

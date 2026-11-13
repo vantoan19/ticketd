@@ -20,7 +20,6 @@ import {
   type AutomationAgentSettings,
   type AutomationDefinition,
 } from "@/features/automations/client";
-import type { RunTarget } from "@/features/automations/useAutomationNotifications";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import "@/features/chats/chats.css";
@@ -60,12 +59,14 @@ function startedBy(trigger: Automation["trigger"]) {
  * edited in place.
  */
 export function AutomationsView({
-  runTarget = null,
+  openRun,
 }: {
-  /** The run a notification pointed to: its Automation opens on its runs. */
-  runTarget?: RunTarget | null;
+  /** A run to open, asked for elsewhere; a new `key` asks again. */
+  openRun?: { id: string; key: number } | null;
 }) {
   const [tab, setTab] = useState<Tab>("automations");
+  /** The run open in place of its Automation. */
+  const [run, setRun] = useState<string | null>(null);
   /** null until the first load answers. */
   const [automations, setAutomations] = useState<Automation[] | null>(null);
   const [agents, setAgents] = useState<AutomationAgent[] | null>(null);
@@ -74,15 +75,6 @@ export function AutomationsView({
     automations: null,
     agents: null,
   });
-  const [shownTarget, setShownTarget] = useState<RunTarget | null>(null);
-  if (runTarget && runTarget !== shownTarget) {
-    setShownTarget(runTarget);
-    setTab("automations");
-    setOpenIds((current) => ({
-      ...current,
-      automations: runTarget.automationId,
-    }));
-  }
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
   /** Counts saves, so only the answer to the latest one is taken. */
@@ -106,10 +98,26 @@ export function AutomationsView({
   );
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());
+  const asked = openRun?.id;
+  const askedKey = openRun?.key;
+  useEffect(() => {
+    if (!asked) return;
+    void automationsClient.run(asked).then((found) => {
+      setTab("automations");
+      setExpanded(false);
+      setOpenIds((current) => ({
+        ...current,
+        automations: found.automation_id,
+      }));
+      setRun(found.id);
+    }, fail);
+  }, [asked, askedKey, fail]);
 
   const openId = openIds[tab];
-  const setOpenId = (id: string | null) =>
+  const setOpenId = (id: string | null) => {
+    setRun(null);
     setOpenIds((current) => ({ ...current, [tab]: id }));
+  };
   const openAgent =
     tab === "agents" ? agents?.find((a) => a.id === openId) : undefined;
   const openAutomation =
@@ -227,6 +235,7 @@ export function AutomationsView({
           value={tab}
           onValueChange={(next) => {
             setTab(next);
+            setRun(null);
             setExpanded(false);
           }}
           options={[
@@ -327,20 +336,12 @@ export function AutomationsView({
     />
   ) : openAutomation ? (
     <AutomationEditor
-      // A run to show opens the editor afresh, on that run.
-      key={
-        shownTarget?.automationId === openAutomation.id
-          ? shownTarget.runId
-          : openAutomation.id
-      }
+      key={openAutomation.id}
       automation={openAutomation}
-      startOnRun={
-        shownTarget?.automationId === openAutomation.id
-          ? shownTarget.runId
-          : null
-      }
       agents={agents ?? []}
       {...paneProps}
+      openRun={run}
+      onOpenRun={setRun}
       onChange={(definition) => saveAutomation(openAutomation.id, definition)}
       onSetEnabled={(enabled) => void setEnabled(openAutomation.id, enabled)}
       onStopAndTurnOff={() => void stopAndTurnOff(openAutomation.id)}

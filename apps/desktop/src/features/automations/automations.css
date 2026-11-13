@@ -491,3 +491,47 @@
   gap: 6px;
   color: var(--muted-foreground);
 }
+
+/* A ticket's runs in its side panel: the Automation, then how the run ended. */
+.ticket-runs {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ticket-run {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px;
+  border-radius: var(--radius);
+  text-align: left;
+}
+.ticket-run:hover {
+  background: var(--accent);
+}
+.ticket-run:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.ticket-run-name {
+  overflow: hidden;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-run-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
