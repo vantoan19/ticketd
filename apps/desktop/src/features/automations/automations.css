@@ -391,6 +391,21 @@
 .flow-panel-note code {
   font-family: var(--font-mono);
 }
+/* A schedule: a short field with the word that follows it, and the week's days. */
+.flow-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.flow-inline input {
+  width: 112px;
+}
+.flow-days {
+  display: flex;
+  gap: 4px;
+}
 .flow-pick-text {
   flex: 1;
   min-width: 0;

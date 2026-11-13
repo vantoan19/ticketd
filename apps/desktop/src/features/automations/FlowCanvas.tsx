@@ -13,12 +13,15 @@ import {
 import {
   Bell,
   Bot,
+  CalendarClock,
   CircleDot,
   CirclePlus,
   Ellipsis,
   MessageSquare,
   Pencil,
+  Play,
   Plus,
+  Split,
   SquarePen,
   Tag,
 } from "lucide-react";
@@ -28,6 +31,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
@@ -39,10 +43,11 @@ import {
   GAP,
   layoutFlow,
 } from "@/features/automations/canvas-layout";
-import type {
-  Automation,
-  AutomationAgent,
-  AutomationDefinition,
+import {
+  startsWithoutTicket,
+  type Automation,
+  type AutomationAgent,
+  type AutomationDefinition,
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
@@ -86,8 +91,29 @@ const TICKET_TRIGGERS = [
     icon: MessageSquare,
   },
 ] as const;
+/** The triggers that start a run without a ticket, under their own heading. */
+const OTHER_TRIGGERS = [
+  {
+    kind: "schedule",
+    label: "On a schedule",
+    note: "Every few hours, or at a time on the days you choose",
+    icon: CalendarClock,
+  },
+  {
+    kind: "by_hand",
+    label: "When I run it",
+    note: "Only when you press Run now",
+    icon: Play,
+  },
+] as const;
 /** The trigger kinds this page can set up. */
-export type TriggerChoice = (typeof TICKET_TRIGGERS)[number]["kind"];
+export type TriggerChoice = (
+  typeof TICKET_TRIGGERS | typeof OTHER_TRIGGERS
+)[number]["kind"];
+
+/** Why a step that acts on the ticket cannot be added. */
+const NEEDS_TICKET =
+  "Needs a ticket, and this Automation does not start from one";
 
 /** The step kinds this page can add and set up. */
 export type StepChoice = "run_agent" | "change_ticket" | "notify";
@@ -131,6 +157,21 @@ function TriggerMenu({ children }: { children: ReactNode }) {
             <span className="flow-menu-item-text">
               {label}
               {"note" in rest && <small>{rest.note}</small>}
+            </span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Without a ticket</DropdownMenuLabel>
+        {OTHER_TRIGGERS.map(({ kind, label, note, icon: Icon }) => (
+          <DropdownMenuItem
+            key={kind}
+            className="items-start whitespace-normal"
+            onSelect={() => onChooseTrigger(kind)}
+          >
+            <Icon aria-hidden />
+            <span className="flow-menu-item-text">
+              {label}
+              <small>{note}</small>
             </span>
           </DropdownMenuItem>
         ))}
@@ -266,11 +307,26 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
                 Change ticket
                 <small>
                   {ticketless
-                    ? "Needs a ticket, and this Automation does not start from one"
+                    ? NEEDS_TICKET
                     : "Add or remove a tag, set the status, or post an update"}
                 </small>
               </span>
             </DropdownMenuItem>
+            {/* #394 adds If for an Automation that starts from a ticket. When it
+                merges, keep one If item: #394's, with `disabled={ticketless}`
+                and this reason, as Change ticket has above. */}
+            {ticketless && (
+              <DropdownMenuItem
+                className="items-start whitespace-normal"
+                disabled
+              >
+                <Split aria-hidden />
+                <span className="flow-menu-item-text">
+                  If
+                  <small>{NEEDS_TICKET}</small>
+                </span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="items-start whitespace-normal"
               onSelect={() => onAddStep(data.index, "notify")}
@@ -376,8 +432,7 @@ export function FlowCanvas({
     return { nodes, edges };
   }, [trigger, only, steps, agents, problems, selected]);
   const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
-  const ticketless =
-    trigger?.kind === "schedule" || trigger?.kind === "by_hand";
+  const ticketless = startsWithoutTicket(trigger);
   const context = useMemo(
     () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless }),
     [onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless],

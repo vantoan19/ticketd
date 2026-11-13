@@ -5,6 +5,7 @@ import {
   CalendarClock,
   FlaskConical,
   History,
+  Play,
   Plus,
   SquarePen,
   Tag,
@@ -33,6 +34,7 @@ import {
   type AutomationExample,
   type ListedRun,
 } from "@/features/automations/client";
+import { scheduleText } from "@/features/automations/automation-text";
 import { AllRunsList } from "@/features/automations/RunsList";
 import { RunNavigation } from "@/features/automations/navigation";
 import { RunView } from "@/features/automations/RunView";
@@ -94,6 +96,20 @@ function startedBy(trigger: Automation["trigger"]) {
       </span>
     );
   }
+  if (trigger.kind === "schedule")
+    return (
+      <span className="auto-row-start">
+        <CalendarClock size={12} aria-hidden />
+        {scheduleText(trigger.schedule)}
+      </span>
+    );
+  if (trigger.kind === "by_hand")
+    return (
+      <span className="auto-row-start">
+        <Play size={12} aria-hidden />
+        By hand
+      </span>
+    );
   return (
     <span className="auto-row-start">
       <Zap size={12} aria-hidden />
@@ -107,8 +123,6 @@ const ROW_TRIGGERS = {
   ticket_created: "Ticket created",
   ticket_updated: "Ticket updated",
   activity_created: "Update added",
-  schedule: "On a schedule",
-  by_hand: "By hand",
 } as const;
 
 /**
@@ -350,7 +364,12 @@ export function AutomationsView({
                 <button
                   type="button"
                   className="chat-row"
-                  data-off={!automation.enabled || undefined}
+                  // One that is run by hand is neither on nor off.
+                  data-off={
+                    (!automation.enabled &&
+                      automation.trigger?.kind !== "by_hand") ||
+                    undefined
+                  }
                   aria-current={automation.id === openId ? "true" : undefined}
                   onClick={() => setOpenId(automation.id)}
                 >
@@ -362,13 +381,15 @@ export function AutomationsView({
                   </span>
                   <span className="chat-row-time" />
                   <span className="chat-row-sub">
-                    <span>
-                      {automation.arrived_off
-                        ? "Off on this desktop"
-                        : automation.enabled
-                          ? "On"
-                          : "Off"}
-                    </span>
+                    {automation.trigger?.kind !== "by_hand" && (
+                      <span>
+                        {automation.arrived_off
+                          ? "Off on this desktop"
+                          : automation.enabled
+                            ? "On"
+                            : "Off"}
+                      </span>
+                    )}
                     {startedBy(automation.trigger)}
                   </span>
                 </button>

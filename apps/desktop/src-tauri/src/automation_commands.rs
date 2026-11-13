@@ -237,6 +237,15 @@ pub fn automation_run_again(id: String) -> Result<AutomationRun, String> {
         .map_err(|error| error.to_string())
 }
 
+/// "Run now": queues a run of an Automation that is run by hand. The runner starts
+/// it at its next pass.
+#[tauri::command]
+pub fn automation_run_now(id: String) -> Result<AutomationRun, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.run_automation_now(&id))
+        .map_err(|error| error.to_string())
+}
+
 /// The person wants nothing more from a run that needs attention.
 #[tauri::command]
 pub fn automation_run_dismiss(id: String) -> Result<AutomationRun, String> {
