@@ -8,6 +8,7 @@ import {
   applyChange,
   chatTime,
   composerControls,
+  composerPlaceholder,
   elapsed,
   harnessUsable,
   hasComposer,
@@ -135,29 +136,67 @@ test("plain states the design did not draw still read as words", () => {
   expect(summaryLine(row({}))).toBe("Idle");
 });
 
-test("the composer offers Send, Stop or Queue for the turn's state", () => {
-  const chat = chatState({ id: "c1", title: "x" });
-  expect(composerControls(chat, "")).toEqual({ kind: "send", enabled: false });
-  expect(composerControls(chat, "hi")).toEqual({ kind: "send", enabled: true });
-  const working = { ...chat, activity: "working" as const };
-  expect(composerControls(working, " ")).toEqual({ kind: "stop" });
-  expect(composerControls(working, "hi")).toEqual({
-    kind: "steer",
-    hint: "Send adds this to the turn in progress. Queue holds it until the turn ends.",
-  });
-});
-
-test("when steering is unavailable, typing while working can only queue", () => {
+test("the send button reads Send, Steer or Queue, set by the turn", () => {
+  const idle = chatState({ id: "c1", title: "x" });
+  expect(composerControls(idle, "")).toEqual({ send: "send", enabled: false });
+  expect(composerControls(idle, "hi")).toEqual({ send: "send", enabled: true });
   const working = chatState({
     id: "c1",
     title: "x",
     activity: "working",
-    steering: { available: false },
+    steering: {
+      available: true,
+      effect: "Joins after the current tool finishes",
+    },
   });
-  expect(composerControls(working, "hi")).toEqual({
-    kind: "queue-only",
-    hint: "Codex can't take messages mid-turn. This will be queued until the turn ends.",
+  // Nothing typed: the button still names what Enter would do.
+  expect(composerControls(working, " ")).toEqual({
+    send: "steer",
+    enabled: false,
+    queues: false,
+    effect: "Joins after the current tool finishes",
   });
+  expect(composerControls(working, "hi")).toMatchObject({
+    send: "steer",
+    enabled: true,
+    queues: true,
+  });
+  const noSteer = { ...working, steering: { available: false } };
+  expect(composerControls(noSteer, "hi")).toEqual({
+    send: "queue",
+    enabled: true,
+    queues: true,
+    effect: "Codex can't steer, so this waits for the turn to end.",
+  });
+});
+
+test("an open question makes Send answer it; stopping makes Send wait while Cmd+Enter still queues", () => {
+  const waiting = chatState({ id: "c1", title: "x", activity: "waiting" });
+  expect(composerControls(waiting, "hi", true)).toEqual({
+    send: "send",
+    enabled: true,
+    queues: true,
+  });
+  const stopping = { ...waiting, activity: "working" as const, stopping: true };
+  expect(composerControls(stopping, "hi")).toEqual({
+    send: "send",
+    enabled: false,
+    queues: true,
+  });
+});
+
+test("the placeholder says what sending will do", () => {
+  const idle = chatState({ id: "c1", title: "x" });
+  expect(composerPlaceholder(idle, false)).toBe("Message Codex");
+  const working = { ...idle, activity: "working" as const };
+  expect(composerPlaceholder(working, false)).toBe("Steer Codex");
+  expect(composerPlaceholder(working, true)).toBe("Answer, or pick above");
+  expect(composerPlaceholder({ ...working, stopping: true }, false)).toBe(
+    "Message Codex",
+  );
+  expect(
+    composerPlaceholder({ ...working, steering: { available: false } }, false),
+  ).toBe("Queue for Codex");
 });
 
 test("only a problem observed now disables Send; why the last turn stopped does not", () => {
@@ -167,11 +206,11 @@ test("only a problem observed now disables Send; why the last turn stopped does 
       "hi",
     );
   expect(withProblem({ kind: "not_signed_in" })).toEqual({
-    kind: "send",
+    send: "send",
     enabled: false,
   });
   expect(withProblem({ kind: "uncertain_delivery" })).toEqual({
-    kind: "send",
+    send: "send",
     enabled: false,
   });
   for (const kind of [
@@ -181,7 +220,7 @@ test("only a problem observed now disables Send; why the last turn stopped does 
     "session_in_use",
   ] as const)
     expect(withProblem({ kind, past: true }), kind).toEqual({
-      kind: "send",
+      send: "send",
       enabled: true,
     });
   const composer = (problem: Problem) =>
@@ -334,4 +373,13 @@ test("a missing ticketd component is a reinstall notice, not an update of the ha
   expect(notice.title).toBe("Claude Code isn't available");
   expect(notice.body).not.toMatch(/Update it/);
   expect(notice.actions).toEqual(["check"]);
+});
+
+test("a stop that was not confirmed is one notice, and Stop itself is the retry", () => {
+  expect(problemNotice({ kind: "stop_unconfirmed" }, "Codex")).toEqual({
+    tone: "neutral",
+    title: "Stop not confirmed",
+    body: "Codex may still be running.",
+    actions: [],
+  });
 });

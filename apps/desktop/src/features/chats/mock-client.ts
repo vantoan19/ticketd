@@ -355,6 +355,19 @@ export function createMockChatClient(
       });
       if (first && !live(chat)) startTurn(id, first.text);
     },
+    async sendQueuedNow(id, queuedId) {
+      const { chat } = get(id);
+      const queued = chat.queue.find((item) => item.id === queuedId);
+      if (!queued)
+        throw new ChatError("stale", "This message is no longer queued.");
+      if (live(chat) && !chat.steering.available)
+        throw new ChatError(
+          "failed",
+          "the Chat is working; try again when it has finished",
+        );
+      patch(id, { queue: chat.queue.filter((item) => item.id !== queuedId) });
+      await send(id, queued.text);
+    },
     async stop(id) {
       if (live(get(id).chat)) halt(id, "stopped");
     },

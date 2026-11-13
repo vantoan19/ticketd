@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
   ChevronDown,
-  Clock,
   Ellipsis,
   Maximize2,
   Minimize2,
@@ -33,7 +39,10 @@ import { useCopy } from "@/components/ui/use-copy";
 import { workspaceClient } from "@/lib/api/workspace";
 import { PathText } from "@/features/projects/PathText";
 import { withoutVerbatim } from "@/features/projects/paths";
+import { ActivityDock } from "@/features/chats/ActivityDock";
+import { focusLastChoice } from "@/features/chats/dock-focus";
 import {
+  ChatError,
   useChatClient,
   type ChatSnapshot,
   type ChatState,
@@ -46,10 +55,13 @@ import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
   composerControls,
+  composerPlaceholder,
   hasComposer,
   isLive,
   problemNotice,
+  requestLabel,
   type NoticeAction,
+  type PendingRequest,
 } from "@/features/chats/model";
 import {
   Transcript,
@@ -283,28 +295,71 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     void run(action).catch(() => {});
   const actions = useMemo<TranscriptActions>(
     () => ({
-      answer: (requestId, answer) =>
-        void client.answer(id, requestId, answer).then(
-          () => setFailure(""),
-          (reason: unknown) =>
-            setFailure(
-              reason instanceof Error ? reason.message : String(reason),
-            ),
-        ),
       saveAsDocument: (response) =>
         setSaving({ id: response.id, text: response.text }),
     }),
-    [client, id],
+    [],
   );
-  const question = items
-    .filter(
-      (item) =>
-        item.kind === "request" &&
-        item.state === "pending" &&
-        item.request === "question" &&
-        item.free_text,
+  const messageBox = useRef<HTMLTextAreaElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
+  /** Remounts the composer with the draft after Edit moved a queued message into it. */
+  const [edits, setEdits] = useState(0);
+  const pending = items.filter(
+    (item): item is PendingRequest =>
+      item.kind === "request" && item.state === "pending",
+  );
+  const question = pending.find(
+    (item) => item.request === "question" && item.free_text,
+  );
+  // A draft typed before a question arrived keeps its meaning: only a box that
+  // was empty (or emptied since) answers it.
+  const draftHeld = () => (drafts.get(id) ?? "").trim() !== "";
+  const [seenQuestion, setSeenQuestion] = useState(question?.id);
+  const [heldFor, setHeldFor] = useState(() =>
+    question && draftHeld() ? question.id : undefined,
+  );
+  if (question?.id !== seenQuestion) {
+    setSeenQuestion(question?.id);
+    setHeldFor(question && draftHeld() ? question.id : undefined);
+  }
+  const answering = Boolean(question) && heldFor !== question?.id;
+  const stoppable = isLive(chat) && !chat.stopping && hasComposer(chat);
+  const stop = () => quietly(client.stop(id));
+  /** Esc stops the turn, unless a menu, dialog or picker is open to take it first. */
+  const onPaneKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+    if (event.defaultPrevented || !stoppable || picked) return;
+    const layer =
+      '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
+    if (
+      (event.target as Element).closest(layer) ||
+      document.querySelector(layer)
     )
-    .at(-1);
+      return;
+    event.preventDefault();
+    stop();
+  };
+  const answer = (requestId: string, optionId: string) =>
+    client.answer(id, requestId, { option_id: optionId }).then(
+      () => setFailure(""),
+      (reason: unknown) => {
+        // The request left the dock; say why the pick did nothing.
+        if (reason instanceof ChatError && reason.code === "stale")
+          setFailure("The request had closed; your answer wasn't applied.");
+        else throw reason;
+      },
+    );
+  const edit = (queued: { id: string; text: string }) =>
+    quietly(
+      client.removeQueued(id, queued.id).then(() => {
+        const draft = drafts.get(id) ?? "";
+        drafts.set(
+          id,
+          draft.trim() ? `${draft}\n\n${queued.text}` : queued.text,
+        );
+        setEdits((count) => count + 1);
+      }),
+    );
   const messageCount = items.filter(isMessage).length;
   const trashed = chat.retention === "trashed";
   const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
@@ -326,7 +381,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
       );
   };
   return (
-    <div className="chat-body">
+    <div className="chat-body" onKeyDown={onPaneKey}>
       {!trashed && !picked && <LinkedRecords chat={chat} />}
       <div className="chat-scroll" tabIndex={0} aria-label="Conversation">
         <Transcript
@@ -345,6 +400,13 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
         />
       </div>
       <div className="chat-dock">
+        <div className="sr-only" aria-live="polite">
+          {pending[0]
+            ? requestLabel(pending[0])
+            : chat.stopping
+              ? "Stopping…"
+              : ""}
+        </div>
         {failure && (
           <p className="chat-fine" role="alert">
             {failure}
@@ -395,62 +457,49 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                 onAction={onNotice}
               />
             )}
-            {chat.queue.length > 0 && (
-              <ul className="chat-queue" aria-label="Queued messages">
-                {chat.queue.map((queued) => (
-                  <li key={queued.id} className="chat-queued">
-                    <Clock size={14} aria-hidden />
-                    <span>{queued.text}</span>
-                    <IconButton
-                      label="Remove queued message"
-                      onClick={() =>
-                        quietly(client.removeQueued(id, queued.id))
-                      }
-                    >
-                      <X aria-hidden />
-                    </IconButton>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {chat.queue_paused && chat.queue.length > 0 && (
-              <div className="chat-line">
-                <span>Queue paused. Nothing sends until you resume.</span>
-                <span className="chat-spacer" />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => quietly(client.resumeQueue(id))}
-                >
-                  Resume
-                </Button>
-              </div>
-            )}
             {hasComposer(chat) && (
-              <Composer
-                key={id}
-                placeholder={
-                  question ? `Answer ${harness}` : `Message ${harness}`
-                }
-                initialText={drafts.get(id) ?? ""}
-                onText={(text) => drafts.set(id, text)}
-                controls={(text) =>
-                  question && text.trim()
-                    ? { kind: "send", enabled: true }
-                    : composerControls(chat, text)
-                }
-                onSend={(text) =>
-                  run(
-                    question
-                      ? client.answer(id, question.id, { text })
-                      : client.send(id, text),
-                  )
-                }
-                onQueue={(text) => run(client.queue(id, text))}
-                {...(isLive(chat) && {
-                  onStop: () => quietly(client.stop(id)),
-                })}
-              />
+              <div className="chat-seat">
+                <ActivityDock
+                  chat={chat}
+                  requests={pending}
+                  dockRef={dock}
+                  onAnswer={answer}
+                  onLeave={() => messageBox.current?.focus()}
+                  onSendNow={(queuedId) =>
+                    run(client.sendQueuedNow(id, queuedId)).then(() => {})
+                  }
+                  onEdit={edit}
+                  onRemove={(queuedId) =>
+                    quietly(client.removeQueued(id, queuedId))
+                  }
+                  onResume={() => quietly(client.resumeQueue(id))}
+                />
+                <Composer
+                  key={`${id}:${edits}`}
+                  inputRef={messageBox}
+                  autoFocus={edits > 0}
+                  placeholder={composerPlaceholder(chat, answering)}
+                  initialText={drafts.get(id) ?? ""}
+                  onText={(text) => {
+                    drafts.set(id, text);
+                    if (!text.trim()) setHeldFor(undefined);
+                  }}
+                  controls={(text) => composerControls(chat, text, answering)}
+                  onSend={(text) =>
+                    run(
+                      answering && question
+                        ? client.answer(id, question.id, { text })
+                        : client.send(id, text),
+                    )
+                  }
+                  onQueue={(text) => run(client.queue(id, text))}
+                  {...(pending.length > 0 && {
+                    onArrowUpFromEmpty: () => focusLastChoice(dock.current),
+                  })}
+                  {...(isLive(chat) && { onStop: stop })}
+                  stopping={chat.stopping}
+                />
+              </div>
             )}
           </>
         )}

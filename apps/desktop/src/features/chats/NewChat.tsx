@@ -151,7 +151,7 @@ export function NewChat({
             initialText={draft}
             onText={(text) => (draft = text)}
             controls={(text) => ({
-              kind: "send",
+              send: "send",
               enabled: ready && text.trim() !== "",
             })}
             onSend={async (message) => {

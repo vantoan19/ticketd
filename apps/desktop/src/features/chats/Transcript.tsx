@@ -22,7 +22,6 @@ import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type {
   ChatState,
   RecordChange,
-  RequestAnswer,
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
@@ -35,7 +34,6 @@ type Of<K extends TranscriptItem["kind"]> = Extract<
 
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
-  answer: (requestId: string, answer: RequestAnswer) => void;
   saveAsDocument: (response: Of<"response">) => void;
 };
 
@@ -212,30 +210,15 @@ const receiptTime = (timestamp: string) => {
       })}`;
 };
 
-const APPROVAL_VARIANTS = ["default", "outline", "ghost"] as const;
-
 /**
- * An approval or question. Only a pending card has controls: an answered one
- * is a receipt and an expired one says so, because a callback that belonged
- * to an earlier turn or process can no longer be answered.
+ * An answered or expired request. A pending one is not in the transcript: it
+ * waits in the activity dock above the composer, where it is answered. An
+ * expired one says so, because a callback that belonged to an earlier turn or
+ * process can no longer be answered.
  */
-function RequestCard({
-  item,
-  harness,
-  actions,
-}: {
-  item: Of<"request">;
-  harness: string;
-  actions: TranscriptActions;
-}) {
-  const pending = item.state === "pending";
-  const label = !pending
-    ? item.state === "answered"
-      ? "Answered request"
-      : "Expired request"
-    : item.request === "approval"
-      ? "Approval request"
-      : `Question from ${harness}`;
+function RequestCard({ item }: { item: Of<"request"> }) {
+  const label =
+    item.state === "answered" ? "Answered request" : "Expired request";
   return (
     <section className="chat-card" aria-label={label}>
       <h3 className="chat-card-title">{item.title}</h3>
@@ -248,42 +231,6 @@ function RequestCard({
         ))}
       {/* Why the harness asks is prose, apart from what would run. */}
       {item.reason && <p className="chat-card-text">{item.reason}</p>}
-      {pending && item.request === "approval" && (
-        <div className="chat-card-actions">
-          {item.options.map((option, index) => (
-            <Button
-              key={option.id}
-              size="sm"
-              variant={APPROVAL_VARIANTS[Math.min(index, 2)]}
-              onClick={() => actions.answer(item.id, { option_id: option.id })}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
-      )}
-      {pending && item.request === "question" && (
-        <>
-          <div className="chat-opts">
-            {item.options.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className="chat-opt"
-                onClick={() =>
-                  actions.answer(item.id, { option_id: option.id })
-                }
-              >
-                {option.label}
-                {option.description && <small>{option.description}</small>}
-              </button>
-            ))}
-          </div>
-          {item.free_text && (
-            <p className="chat-fine">Or type your own answer below.</p>
-          )}
-        </>
-      )}
       {item.state === "answered" && (
         <p className="chat-line">
           {/* The host words a denial "You denied this"; it gets no check mark. */}
@@ -369,7 +316,8 @@ const Item = memo(function Item({
         </div>
       );
     case "request":
-      return <RequestCard item={item} harness={harness} actions={actions} />;
+      // Pending requests live in the activity dock (#363), not here.
+      return item.state === "pending" ? null : <RequestCard item={item} />;
     case "marker":
       return item.reason === "note" ? (
         <p className="chat-line chat-note">

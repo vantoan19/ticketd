@@ -267,6 +267,8 @@ export const chatStateSchema = z.object({
     /** What steering does to running work, as the harness defines it. */
     effect: z.string().nullish(),
   }),
+  /** Stop was asked for and the turn has not ended; Stop waits. Not set once unconfirmed. */
+  stopping: z.boolean().default(false),
   links: z.array(linkedRecordSchema),
   queue: z.array(z.object({ id: z.string(), text: z.string() })),
   queue_paused: z.boolean(),
@@ -376,6 +378,8 @@ export interface ChatClient {
   queue(id: string, text: string): Promise<void>;
   removeQueued(id: string, queuedId: string): Promise<void>;
   resumeQueue(id: string): Promise<void>;
+  /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */
+  sendQueuedNow(id: string, queuedId: string): Promise<void>;
   stop(id: string): Promise<void>;
   /** Rejects with a `stale` ChatError unless the request is the live one. */
   answer(id: string, requestId: string, answer: RequestAnswer): Promise<void>;

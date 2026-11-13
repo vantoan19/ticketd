@@ -8,6 +8,7 @@ import type {
   ProblemKind,
   RecordChange,
   Step,
+  TranscriptItem,
 } from "@/features/chats/client";
 import { plainText } from "@/features/documents/graph-text";
 
@@ -204,40 +205,73 @@ export function isLive(chat: ChatState) {
   return chat.activity === "working" || chat.activity === "waiting";
 }
 
-export type ComposerControls =
-  | { kind: "send"; enabled: boolean }
-  /** Nothing typed during a turn: Stop is the only button. */
-  | { kind: "stop" }
-  | { kind: "steer"; hint: string }
-  | { kind: "queue-only"; hint: string };
+/**
+ * The composer's send button. Its word is set by the turn, never by what is
+ * typed or by a request: `send` with no turn running (or to answer an open
+ * question from the message box), `steer` while a turn runs that the harness
+ * can steer, `queue` while one runs that it cannot.
+ */
+export type ComposerControls = {
+  send: "send" | "steer" | "queue";
+  /** Enter, or a click, does what the word says. */
+  enabled: boolean;
+  /** Cmd/Ctrl+Enter queues instead. Only while a turn runs. */
+  queues?: boolean;
+  /** What steering does, or why the message waits: the button's tooltip. */
+  effect?: string;
+};
 
-/** Which buttons the composer shows for the turn's state and what is typed. */
+/**
+ * The send button for the turn's state and what is typed. `answering` is set
+ * while the message box answers an open question.
+ */
 export function composerControls(
   chat: ChatState,
   text: string,
+  answering = false,
 ): ComposerControls {
   const typed = text.trim() !== "";
-  if (!isLive(chat))
-    return {
-      kind: "send",
-      enabled: typed && !blocksSend(chat.problem),
-    };
-  if (!typed) return { kind: "stop" };
+  const blocked = blocksSend(chat.problem);
+  if (!isLive(chat)) return { send: "send", enabled: typed && !blocked };
+  // Stopping: Send waits for the turn to end; queueing stays possible.
+  if (chat.stopping) return { send: "send", enabled: false, queues: typed };
+  if (answering) return { send: "send", enabled: typed, queues: typed };
   if (!chat.steering.available)
     return {
-      kind: "queue-only",
-      hint: `${chat.harness.name} can't take messages mid-turn. This will be queued until the turn ends.`,
+      send: "queue",
+      enabled: typed,
+      queues: typed,
+      effect: `${chat.harness.name} can't steer, so this waits for the turn to end.`,
     };
   return {
-    kind: "steer",
-    hint: [
-      "Send adds this to the turn in progress.",
-      chat.steering.effect,
-      "Queue holds it until the turn ends.",
-    ]
-      .filter(Boolean)
-      .join(" "),
+    send: "steer",
+    enabled: typed && !blocked,
+    queues: typed,
+    ...(chat.steering.effect && { effect: chat.steering.effect }),
   };
+}
+
+/** A request item whose `state` is `pending`: it waits in the activity dock. */
+export type PendingRequest = Extract<TranscriptItem, { kind: "request" }>;
+
+/**
+ * What a pending request is called: the host's title with what would run, or
+ * the question itself. It names the request group and is what arrives in the
+ * live announcement.
+ */
+export function requestLabel(request: PendingRequest) {
+  if (request.request === "question") return request.subject || request.title;
+  return request.subject
+    ? `${request.title}: ${request.subject}`
+    : request.title;
+}
+
+/** What the message box says it will do with what is typed. */
+export function composerPlaceholder(chat: ChatState, answering: boolean) {
+  const harness = chat.harness.name;
+  if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
+  if (answering) return "Answer, or pick above";
+  return chat.steering.available ? `Steer ${harness}` : `Queue for ${harness}`;
 }
 
 export type NoticeAction =
@@ -392,11 +426,12 @@ export function problemNotice(problem: Problem, harness: string): Notice {
         actions: ["check"],
       };
     case "stop_unconfirmed":
+      // Stop stays enabled as the retry, so the notice offers nothing else.
       return {
         tone: "neutral",
-        title: `${harness} didn't confirm it stopped`,
-        body: `ticketd asked it to stop and heard nothing back. It may still be running. Edits already made are kept.${said}`,
-        actions: ["check"],
+        title: "Stop not confirmed",
+        body: `${harness} may still be running.`,
+        actions: [],
       };
     case "failed":
       return {
