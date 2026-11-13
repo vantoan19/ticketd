@@ -58,6 +58,9 @@ impl Fixture {
             folder: Some(self.dir.path().to_string_lossy().into_owned()),
             links: Vec::new(),
             message: message.to_owned(),
+            model: None,
+            effort: None,
+            permission: None,
         }
     }
 
@@ -128,6 +131,84 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
     assert!(unconfirmed.is_empty());
     assert_eq!(f.chats.working(), 0);
     assert!(f.chats.list(ChatListFilter::Active).is_err());
+    assert_eq!(
+        f.core().list_chats(ChatListFilter::Active).unwrap().len(),
+        1
+    );
+}
+
+fn offered(id: &str, is_default: bool) -> ticketd_chat_host::SettingOption {
+    ticketd_chat_host::SettingOption {
+        id: id.to_owned(),
+        label: id.to_uppercase(),
+        description: None,
+        is_default,
+        permission: None,
+        allowed: true,
+    }
+}
+
+/// Codex as the fake lists it: two models, the second with efforts.
+fn codex_options() -> ticketd_chat_host::HarnessOptions {
+    ticketd_chat_host::HarnessOptions {
+        models: vec![
+            ticketd_chat_host::ModelChoice {
+                model: offered("gpt-a", true),
+                efforts: Vec::new(),
+            },
+            ticketd_chat_host::ModelChoice {
+                model: offered("gpt-b", false),
+                efforts: vec![offered("low", false), offered("high", true)],
+            },
+        ],
+        permission: None,
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn options_are_asked_once_per_version_and_say_why_when_there_are_none() {
+    let f = Fixture::new().await;
+
+    let none = f.chats.options("codex").await.unwrap();
+    assert!(none.models.is_empty());
+    assert!(
+        none.unavailable.is_some(),
+        "the picker says why it has only Default"
+    );
+
+    f.fake.set_options(codex_options());
+    let listed = f.chats.options("codex").await.unwrap();
+    f.chats.options("codex").await.unwrap();
+
+    let models: Vec<_> = listed.models.iter().map(|m| m.model.id.as_str()).collect();
+    assert_eq!(models, ["gpt-a", "gpt-b"]);
+    // The failed probe is not remembered; the listed one is.
+    assert_eq!(f.fake.options_asked(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn new_chat_starts_its_session_with_the_picks_the_harness_offered() {
+    let f = Fixture::new().await;
+    f.fake.set_options(codex_options());
+    let picked = NewChatInput {
+        model: Some("gpt-b".to_owned()),
+        effort: Some("high".to_owned()),
+        ..f.input("first")
+    };
+
+    f.chats.create(picked).await.unwrap();
+    settle().await;
+
+    let settings = &f.fake.opens()[0].settings;
+    assert_eq!(settings.model.as_deref(), Some("gpt-b"));
+    assert_eq!(settings.effort.as_deref(), Some("high"));
+    // An effort the chosen model does not offer is refused before any Chat exists.
+    let unoffered = NewChatInput {
+        model: Some("gpt-a".to_owned()),
+        effort: Some("high".to_owned()),
+        ..f.input("second")
+    };
+    assert!(f.chats.create(unoffered).await.is_err());
     assert_eq!(
         f.core().list_chats(ChatListFilter::Active).unwrap().len(),
         1

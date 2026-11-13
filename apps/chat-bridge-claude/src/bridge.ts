@@ -21,7 +21,7 @@ import {
   type ErrorInfo,
   type InputEvidence,
   type CommandOption,
-  ModelOption,
+  type ModelOption,
   type RejectionCode,
   type ToolOutcome,
 } from "./protocol";
@@ -232,6 +232,8 @@ export function createBridge(deps: BridgeDeps) {
         return void inspect(command);
       case "open":
         return open(command);
+      case "options":
+        return void listOptions(command);
       default: {
         const current = session;
         if (!current || current.generation !== command.generation) {
@@ -299,6 +301,48 @@ export function createBridge(deps: BridgeDeps) {
     });
   }
 
+  /**
+   * The models the installed Claude Code offers, before any session. The SDK is
+   * given a prompt that never yields, so Claude Code initializes and lists its
+   * models but no message reaches a model; the query is closed as soon as it
+   * has answered. Hooks and MCP servers are left out so a check starts nothing.
+   */
+  async function listOptions(command: Extract<Command, { cmd: "options" }>) {
+    const abort = new AbortController();
+    const never = async function* (): AsyncGenerator<SDKUserMessage> {
+      await new Promise<void>((resolve) =>
+        abort.signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    };
+    let query: SdkQuery | undefined;
+    let models: ModelOption[] = [];
+    let error: string | null = null;
+    try {
+      query = deps.query({
+        prompt: never(),
+        options: {
+          pathToClaudeCodeExecutable: command.claude_executable,
+          abortController: abort,
+          persistSession: false,
+          settingSources: ["user", "project", "local"],
+          settings: { disableAllHooks: true },
+          allowedTools: [],
+          mcpServers: {},
+          strictMcpConfig: true,
+          stderr: deps.diagnostic,
+        },
+      });
+      const init = await query.initializationResult();
+      models = (init.models ?? []).filter(isObject).flatMap(modelOption);
+    } catch (cause) {
+      error = errorInfo(cause).message;
+    } finally {
+      abort.abort();
+      query?.close();
+    }
+    emit({ event: "options", id: command.id, models, error });
+  }
+
   function open(command: Extract<Command, { cmd: "open" }>) {
     if (session) {
       return reject(
@@ -332,6 +376,11 @@ export function createBridge(deps: BridgeDeps) {
         requestDecision(state, toolName, input, context),
       stderr: deps.diagnostic,
       ...(command.resume_session_id && { resume: command.resume_session_id }),
+      ...(command.model && { model: command.model }),
+      ...(command.effort && { effort: command.effort }),
+      ...(command.permission_mode && {
+        permissionMode: command.permission_mode,
+      }),
     };
     let opening: Session;
     try {

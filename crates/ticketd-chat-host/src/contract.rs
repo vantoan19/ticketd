@@ -140,6 +140,24 @@ pub struct OpenRequest {
     pub chat_id: String,
     pub working_directory: PathBuf,
     pub session: SessionStart,
+    /// The person's picks for a new session; empty for the harness's own settings.
+    pub settings: StartSettings,
+}
+
+/// Settings a new session opens with, as chosen in New Chat. `None` leaves the
+/// harness's own setting. Values are option ids the harness listed; full access is
+/// never among them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StartSettings {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission: Option<String>,
+}
+
+impl StartSettings {
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none() && self.effort.is_none() && self.permission.is_none()
+    }
 }
 
 /// Resuming restores native history only. It never resubmits input.
@@ -544,6 +562,23 @@ impl Setting {
     }
 }
 
+/// What a harness offers before any session exists, as it reported it: the models it
+/// lists, each with its own effort levels, and its permission modes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HarnessOptions {
+    pub models: Vec<ModelChoice>,
+    /// `current` is the harness's own setting when it said; `unchangeable` when
+    /// ticketd cannot choose it.
+    pub permission: Option<Setting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub model: SettingOption,
+    /// From lowest to highest; `is_default` marks the model's own default.
+    pub efforts: Vec<SettingOption>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingOption {
     pub id: String,
@@ -772,6 +807,12 @@ pub trait HarnessAdapter: Send + Sync {
     /// Starts a provider process for `request.generation` with a new or resumed
     /// native session.
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem>;
+
+    /// Asks the installed harness what it offers, without starting a session or
+    /// sending anything to a model. `Err` says why it could not tell.
+    async fn options(&self) -> Result<HarnessOptions, String> {
+        Err("this harness does not report its options before a session".to_owned())
+    }
 }
 
 #[derive(Debug)]

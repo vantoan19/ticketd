@@ -11,9 +11,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
-    ContextUsage, Harness, HarnessAdapter, HarnessCommand, HarnessSettings, Inspection,
-    InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome,
-    SteeringBehavior, Subscription,
+    ContextUsage, Harness, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings,
+    Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey,
+    SettingOutcome, StartSettings, SteeringBehavior, Subscription,
 };
 
 /// Provisional bounds, to be measured in #267.
@@ -449,6 +449,32 @@ impl ChatHost {
             reply,
         })
         .await
+    }
+
+    /// Opens the Chat's next new session with the person's New Chat picks. Sent before
+    /// the first message, so its first turn already uses them.
+    pub async fn start_with(
+        &self,
+        chat_id: &str,
+        settings: StartSettings,
+    ) -> Result<(), HostError> {
+        self.sender(chat_id)?
+            .send(Command::StartWith(settings))
+            .await
+            .map_err(|_| HostError::Quitting)
+    }
+
+    /// What the harness offers before any session: models, efforts, permissions.
+    pub async fn options(
+        &self,
+        harness: &str,
+    ) -> Result<Result<HarnessOptions, String>, HostError> {
+        let adapter = self
+            .inner
+            .adapters
+            .get(harness)
+            .ok_or_else(|| HostError::HarnessUnavailable(harness.to_owned()))?;
+        Ok(adapter.options().await)
     }
 
     /// Sends input again although its first delivery is uncertain, because the person

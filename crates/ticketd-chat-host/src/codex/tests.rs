@@ -11,14 +11,15 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
 
 use super::mapping::Session;
-use super::runtime::{Options, login_state, open_over, probe_login};
+use super::runtime::{Options, login_state, open_over, probe_login, probe_options};
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
     HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
     LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
     OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
-    RuntimeGeneration, SessionStart, Submission, SubmissionId, SubmissionKind, TurnOutcome,
+    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    TurnOutcome,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(7);
@@ -49,6 +50,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
+        settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
     (peer, opened)
@@ -684,6 +686,74 @@ async fn the_login_probe_reads_the_account_kind_and_closes_the_process() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_options_probe_lists_every_page_of_models_with_their_efforts_and_closes() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("options"));
+
+    let (options, ()) = tokio::join!(probe_options(io, options()), async {
+        peer.play().await;
+        assert!(peer.stdin_closed().await);
+        peer.exit(0);
+    });
+
+    let options = options.expect("Codex listed its options");
+    let models: Vec<_> = options
+        .models
+        .iter()
+        .map(|choice| {
+            let efforts: Vec<_> = choice.efforts.iter().map(|e| e.id.as_str()).collect();
+            (
+                choice.model.label.as_str(),
+                choice.model.is_default,
+                efforts,
+            )
+        })
+        .collect();
+    // Hidden models are not choices.
+    assert_eq!(
+        models,
+        [
+            ("GPT A", true, vec!["low", "medium", "high"]),
+            ("GPT B", false, vec!["high"]),
+        ]
+    );
+    let default_effort = options.models[0].efforts.iter().find(|e| e.is_default);
+    assert_eq!(default_effort.map(|e| e.id.as_str()), Some("medium"));
+    let permission = options.permission.expect("profiles were listed");
+    assert_eq!(permission.current, None);
+    assert!(permission.unchangeable.is_some(), "Codex sets permissions");
+    assert_eq!(permission.options.len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("start_settings"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        settings: StartSettings {
+            model: Some("gpt-b".to_owned()),
+            effort: Some("high".to_owned()),
+            permission: None,
+        },
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let runtime = opened.expect("the thread opens").runtime;
+
+    let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Go")).await;
+
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn closing_kills_a_process_that_stopped_reading_its_input_within_the_bound() {
     let (peer, runtime, _events) = open().await;
     // More than the pipe holds, and nothing reads it: the write cannot finish.
@@ -841,6 +911,7 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
+        settings: StartSettings::default(),
     };
     let listing = Options {
         list_settings: true,

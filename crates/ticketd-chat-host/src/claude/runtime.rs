@@ -21,7 +21,7 @@ use crate::stdio::{
 use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 use crate::{
     Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EVENT_BUFFER, EventKind,
-    EventStream, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
+    EventStream, HarnessOptions, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
     InterruptRequest, NativeRequestId, NoticeKind, OpenRequest, OpenedRuntime, Problem,
     ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
     SessionStart, SettingChange, SettingKey, SettingOutcome, Submission, SubmissionId,
@@ -328,14 +328,27 @@ impl Connection {
             }
             Inspection::NotInstalled => return Err(super::not_installed()),
         };
-        // Only the folder, the executable and the session to resume are passed.
-        // Model, permission mode, tools and instructions stay Claude Code's own.
+        // Only the folder, the executable, the session to resume and the person's
+        // picks are passed. Tools, instructions and anything not picked stay Claude
+        // Code's own.
         let mut open = json!({
             "cmd": "open",
             "generation": self.generation.0,
             "cwd": request.working_directory.to_string_lossy(),
             "claude_executable": claude.to_string_lossy(),
         });
+        // New Chat's picks, when the person made them. The bridge accepts no mode
+        // that skips permissions.
+        let picks = &request.settings;
+        for (field, value) in [
+            ("model", &picks.model),
+            ("effort", &picks.effort),
+            ("permission_mode", &picks.permission),
+        ] {
+            if let Some(value) = value {
+                open[field] = json!(value);
+            }
+        }
         let resuming = match &request.session {
             SessionStart::New => false,
             SessionStart::Resume(session) => {
@@ -475,7 +488,7 @@ impl Connection {
         let id = event["id"].as_str().unwrap_or_default();
         let by_id = |command: &str, _: &Kind| command == id;
         match name {
-            "hello" | "inspection" | "interrupt_result" | "setting_result" => {
+            "hello" | "inspection" | "options" | "interrupt_result" | "setting_result" => {
                 state.settle(by_id, Reply::Event(event.clone()));
             }
             // The SDK object exists; Claude Code has not answered yet.
@@ -696,6 +709,37 @@ pub(super) async fn probe(io: Io, claude: &Path, options: Options) -> Inspection
     };
     connection.close().await;
     inspection
+}
+
+/// Has the bridge ask the installed Claude Code which models it offers, through an
+/// SDK session that is given no prompt and is closed once it has initialized: nothing
+/// reaches a model. The bridge is closed afterwards.
+pub(super) async fn probe_options(
+    io: Io,
+    claude: &Path,
+    options: Options,
+) -> Result<HarnessOptions, String> {
+    let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
+    let listed = async {
+        connection
+            .handshake(claude)
+            .await
+            .map_err(|problem| problem.message)?;
+        let ask = json!({"cmd": "options", "claude_executable": claude.to_string_lossy()});
+        match connection.call(|_| Ok((ask, Kind::Plain))).await {
+            CallOutcome::Event(event) => match event["error"].as_str() {
+                Some(error) => Err(format!("Claude Code did not list its models: {error}")),
+                None => Ok(super::report::listed_options(
+                    event["models"].as_array().map_or(&[][..], Vec::as_slice),
+                )),
+            },
+            CallOutcome::Rejected(reason) => Err(reason),
+            _ => Err("the Claude bridge did not answer".to_owned()),
+        }
+    }
+    .await;
+    connection.close().await;
+    listed
 }
 
 struct ClaudeRuntime {

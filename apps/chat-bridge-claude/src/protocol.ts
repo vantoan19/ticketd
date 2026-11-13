@@ -45,8 +45,17 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     cwd: absolutePath,
     claude_executable: absolutePath,
     resume_session_id: z.string().min(1).optional(),
-    // No permission mode can be passed: Claude Code's own setting applies, and the
-    // bridge can never be asked to skip permissions.
+    // New Chat's picks; without one Claude Code's own setting applies. The bridge
+    // can never be asked to skip permissions.
+    model: z.string().min(1).optional(),
+    effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    permission_mode: z.enum(["default", "acceptEdits", "plan"]).optional(),
+  }),
+  // Lists the models Claude Code offers without a session: no prompt is sent.
+  z.strictObject({
+    id,
+    cmd: z.literal("options"),
+    claude_executable: absolutePath,
   }),
   z.strictObject({
     id,
@@ -165,6 +174,12 @@ type EventBody =
       sdk_version: string;
       sdk_claude_code_version: string;
       pairing: "matched" | "mismatched" | "unknown";
+      error: string | null;
+    }
+  | {
+      event: "options";
+      id: string;
+      models: ModelOption[];
       error: string | null;
     }
   | {

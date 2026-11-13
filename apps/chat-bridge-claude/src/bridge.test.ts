@@ -249,7 +249,58 @@ describe("hello and inspect", () => {
   });
 });
 
+describe("options", () => {
+  it("lists the models with a session that is never prompted, then closes it", async () => {
+    const h = harness();
+    initModels = [
+      {
+        value: "default",
+        displayName: "Default",
+        description: "Opus 5.5",
+        supportedEffortLevels: ["low", "high"],
+      },
+    ];
+    await h.send({ cmd: "options", claude_executable: CLAUDE });
+    initModels = [];
+
+    const [fake] = h.queries;
+    expect(fake?.closed).toBe(true);
+    expect(fake?.options).toMatchObject({
+      pathToClaudeCodeExecutable: CLAUDE,
+      persistSession: false,
+      settings: { disableAllHooks: true },
+    });
+    expect(h.named("options")).toEqual([
+      expect.objectContaining({
+        error: null,
+        models: [
+          expect.objectContaining({
+            value: "default",
+            effort_levels: ["low", "high"],
+          }),
+        ],
+      }),
+    ]);
+    // Nothing was handed to the SDK as a message.
+    expect(h.named("input_handed_to_sdk")).toHaveLength(0);
+  });
+});
+
 describe("open", () => {
+  it("opens a new session with New Chat's picks", async () => {
+    const h = harness();
+    const fake = await h.open(1, {
+      model: "sonnet",
+      effort: "high",
+      permission_mode: "acceptEdits",
+    });
+    expect(fake.options).toMatchObject({
+      model: "sonnet",
+      effort: "high",
+      permissionMode: "acceptEdits",
+    });
+  });
+
   it("starts the user's Claude Code with native settings and permissions intact", async () => {
     const h = harness();
     const fake = await h.open(1, { resume_session_id: "native-session" });

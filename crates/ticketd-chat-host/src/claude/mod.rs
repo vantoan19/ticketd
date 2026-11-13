@@ -20,8 +20,8 @@ use serde_json::Value;
 use crate::install::{LaunchEnvironment, Os, parse_version};
 use crate::stdio::spawn;
 use crate::{
-    Capabilities, Capability, Harness, HarnessAdapter, Inspection, LoginState, OpenRequest,
-    OpenedRuntime, Problem, ProblemKind, ProviderDetail,
+    Capabilities, Capability, Harness, HarnessAdapter, HarnessOptions, Inspection, LoginState,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
 };
 
 use runtime::Options;
@@ -83,6 +83,15 @@ impl HarnessAdapter for ClaudeAdapter {
                 reason: self.bridge_problem(&error).message,
             },
         }
+    }
+
+    async fn options(&self) -> Result<HarnessOptions, String> {
+        let executable = self
+            .executable()
+            .ok_or_else(|| "Claude Code was not found".to_owned())?;
+        let io =
+            spawn(&self.bridge, &[], None).map_err(|error| self.bridge_problem(&error).message)?;
+        runtime::probe_options(io, &executable, Options::default()).await
     }
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {

@@ -15,10 +15,10 @@ use tokio::time::timeout;
 
 use crate::{
     Capabilities, CloseOutcome, DispatchOutcome, EVENT_BUFFER, EventKind, EventStream,
-    HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest, LoginState,
-    NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
-    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome,
-    Submission, SubmissionKind,
+    HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest,
+    LoginState, NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
+    Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SettingChange,
+    SettingOutcome, Submission, SubmissionKind,
 };
 
 pub(super) use crate::stdio::{ChildProcess, Io, Reader, Writer};
@@ -27,6 +27,7 @@ use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 
 use super::discovery;
 use super::mapping::{Call, Session, rejection_reason, unknown};
+use super::report::{self, Overrides};
 use super::rpc::{self, Frame, MAX_FRAME_BYTES, Pending, Reply, Resolved, RpcError, StderrTail};
 
 /// How long a loss waits to learn the exit code before reporting without one.
@@ -407,6 +408,11 @@ pub(super) async fn open_over(
     options: Options,
 ) -> Result<OpenedRuntime, Problem> {
     let (connection, events) = Connection::start(io, request.generation, options);
+    // New Chat's picks go out with the first turn, as a later change would.
+    connection.state().session.reports.overrides = Overrides {
+        model: request.settings.model.clone(),
+        effort: request.settings.effort.clone(),
+    };
     match connection.open_thread(request).await {
         Ok(capabilities) => {
             if connection.options.list_settings {
@@ -456,6 +462,56 @@ pub(super) async fn probe_login(io: Io, options: Options) -> LoginState {
     };
     connection.close().await;
     login
+}
+
+/// Asks app-server for its models, each with its efforts, and its permission
+/// profiles. Starts no thread and sends nothing to a model; the process is closed
+/// afterwards. `Err` says why Codex did not list its models.
+pub(super) async fn probe_options(io: Io, options: Options) -> Result<HarnessOptions, String> {
+    let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
+    let listed = list_options(&connection).await;
+    connection.close().await;
+    listed
+}
+
+async fn list_options(connection: &Connection) -> Result<HarnessOptions, String> {
+    connection
+        .initialize()
+        .await
+        .map_err(|problem| problem.message)?;
+    let models = list_all(connection, "model/list").await?;
+    // Profiles are optional: an older Codex has no such list.
+    let profiles = list_all(connection, "permissionProfile/list").await.ok();
+    Ok(report::listed_options(&models, profiles.as_deref()))
+}
+
+/// Every page of a `*/list` request, following `nextCursor`.
+async fn list_all(connection: &Connection, method: &str) -> Result<Vec<Value>, String> {
+    let mut all = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let params = match &cursor {
+            Some(cursor) => json!({"cursor": cursor}),
+            None => json!({}),
+        };
+        let reply = match connection.request(method, params).await {
+            CallOutcome::Reply(reply) => reply,
+            CallOutcome::Error(error) => return Err(rejection_reason(&error)),
+            CallOutcome::TimedOut => return Err(format!("Codex did not answer {method}")),
+            CallOutcome::Lost | CallOutcome::Refused(_) => {
+                return Err(format!("Codex app-server stopped during {method}"));
+            }
+        };
+        let page = reply
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("Codex answered {method} without a list"))?;
+        all.extend(page.iter().cloned());
+        match reply.get("nextCursor").and_then(Value::as_str) {
+            Some(next) if cursor.as_deref() != Some(next) => cursor = Some(next.to_owned()),
+            _ => return Ok(all),
+        }
+    }
 }
 
 pub(super) fn login_state(account: &Value) -> LoginState {

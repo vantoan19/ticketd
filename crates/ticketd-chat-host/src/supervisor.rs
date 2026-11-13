@@ -30,7 +30,9 @@ use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
     ReasoningRecord,
 };
-use crate::{HarnessCommand, HarnessSettings, SettingChange, SettingKey, SettingOutcome};
+use crate::{
+    HarnessCommand, HarnessSettings, SettingChange, SettingKey, SettingOutcome, StartSettings,
+};
 
 /// Now, in milliseconds since the Unix epoch.
 fn now_millis() -> i64 {
@@ -87,6 +89,8 @@ pub(crate) enum Command {
         value: String,
         reply: Reply<SettingChangeState>,
     },
+    /// The person's New Chat picks, for the next new session this Chat opens.
+    StartWith(StartSettings),
     Changed,
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
@@ -247,6 +251,8 @@ pub(crate) struct Supervisor {
     /// The context of the live session is being read again; nothing is dispatched until
     /// it is, so the next message carries it.
     refreshing: Option<RuntimeGeneration>,
+    /// New Chat's picks, given to the next new session; kept until one opens.
+    start_settings: StartSettings,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -313,6 +319,7 @@ impl Supervisor {
             closing: false,
             unpublished: true,
             refreshing: None,
+            start_settings: StartSettings::default(),
         };
         tokio::spawn(supervisor.run());
         sender
@@ -498,6 +505,7 @@ impl Supervisor {
             } => {
                 let _ = reply.send(Ok(self.change_setting(setting, value)));
             }
+            Command::StartWith(settings) => self.start_settings = settings,
             Command::LinksChanged => self.refresh_context(),
             // Views read the Chat again even when no record changed: what they show
             // can depend on the folder too, such as its branch.
@@ -895,6 +903,11 @@ impl Supervisor {
             generation,
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
+            // A resumed session keeps what it ran with.
+            settings: match session {
+                SessionStart::New => self.start_settings.clone(),
+                SessionStart::Resume(_) => StartSettings::default(),
+            },
             session,
         };
         self.opening = Some(Opening {
@@ -1356,6 +1369,7 @@ impl Supervisor {
         };
         let result = match result {
             Ok(opened) => {
+                self.start_settings = StartSettings::default();
                 self.runtime = Some(Runtime {
                     generation,
                     run: Uuid::new_v4().to_string(),

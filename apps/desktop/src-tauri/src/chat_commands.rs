@@ -382,6 +382,15 @@ pub async fn chat_harnesses(bridge: State<'_, ChatBridge>) -> Outcome<Vec<Harnes
     bridge.chats.harnesses().await
 }
 
+/// What one harness offers before a session: models, efforts and permission modes.
+#[tauri::command]
+pub async fn chat_harness_options(
+    bridge: State<'_, ChatBridge>,
+    harness_id: String,
+) -> Outcome<crate::chat_reports::HarnessOptionsView> {
+    bridge.chats.options(&harness_id).await
+}
+
 #[tauri::command]
 pub async fn chat_folder_use(bridge: State<'_, ChatBridge>, path: String) -> Outcome<usize> {
     bridge.chats.folder_use(&path)
