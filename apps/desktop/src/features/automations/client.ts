@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import type { FlowList } from "@/features/automations/canvas-layout";
 import { ticketStatuses } from "@/lib/statuses";
 
 const limitSchema = z.number().int().positive();
@@ -63,6 +64,21 @@ const conditionSchema = z.union([
   z.object({ kind: z.literal("tag"), tag: z.string(), has: z.boolean() }),
 ]);
 export type AutomationCondition = z.infer<typeof conditionSchema>;
+/** What an If asks of the ticket. `project_id` null is "No project". */
+const checkSchema = z.union([
+  z.object({ kind: z.literal("tag"), tag: z.string(), has: z.boolean() }),
+  z.object({
+    kind: z.literal("status"),
+    status: statusSchema,
+    is: z.boolean(),
+  }),
+  z.object({
+    kind: z.literal("project"),
+    project_id: z.string().nullable(),
+    is: z.boolean(),
+  }),
+]);
+export type AutomationCheck = z.infer<typeof checkSchema>;
 const stepSchema = z.union([
   z.looseObject({
     id: z.string(),
@@ -92,7 +108,13 @@ const stepSchema = z.union([
     /** What a click on the notification opens. */
     opens: z.enum(["ticket", "run"]),
   }),
-  z.looseObject({ id: z.string(), kind: z.literal("if") }),
+  /** Its Yes and No paths are read with `stepPaths`, like a failure path. */
+  z.looseObject({
+    id: z.string(),
+    kind: z.literal("if"),
+    /** Every one must pass; with none the Automation cannot be switched on. */
+    checks: z.array(checkSchema),
+  }),
 ]);
 export type AutomationStep = z.infer<typeof stepSchema>;
 export type StepChange = NonNullable<
@@ -207,6 +229,29 @@ export function stepPaths(step: AutomationStep): {
   on_failure?: AutomationStep[] | null | undefined;
 } {
   return stepPathsSchema.parse(step);
+}
+
+/**
+ * `steps` with `edit` applied to the flow's own list and to every list under a
+ * step, at any depth. `edit` is told which list it has; a list it makes is
+ * walked in turn.
+ */
+export function editSteps(
+  steps: AutomationStep[],
+  edit: (list: AutomationStep[], owner?: FlowList) => AutomationStep[],
+  owner?: FlowList,
+): AutomationStep[] {
+  return edit(steps, owner).map((step) => {
+    const { yes, no, on_failure } = stepPaths(step);
+    const under = (path: FlowList["path"], list: AutomationStep[]) =>
+      editSteps(list, edit, { step: step.id, path });
+    return {
+      ...step,
+      ...(yes && { yes: under("yes", yes) }),
+      ...(no && { no: under("no", no) }),
+      ...(on_failure && { on_failure: under("failure", on_failure) }),
+    };
+  });
 }
 
 /** What is sent back on a save: the Automation without what the core derives. */

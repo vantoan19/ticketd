@@ -6,6 +6,7 @@ import {
   Ellipsis,
   Maximize2,
   Minimize2,
+  Split,
   SquarePen,
   Tag,
   X,
@@ -33,10 +34,14 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { AgentForm } from "@/features/automations/AgentForm";
-import { TRIGGER_ID } from "@/features/automations/canvas-layout";
+import {
+  TRIGGER_ID,
+  type FlowList,
+} from "@/features/automations/canvas-layout";
 import {
   automationsClient,
   definitionOf,
+  editSteps,
   type Automation,
   type AutomationAgent,
   type AutomationAgentSettings,
@@ -56,6 +61,8 @@ import {
   ChangeTicketFields,
   NotifyFields,
 } from "@/features/automations/TicketStepFields";
+import { IfFields } from "@/features/automations/IfFields";
+import { everyStep } from "@/features/automations/runs-model";
 import { RunsList } from "@/features/automations/RunsList";
 import { RunView } from "@/features/automations/RunView";
 import { RunAgentFields, StepPanel } from "@/features/automations/StepPanel";
@@ -166,8 +173,10 @@ export function AutomationEditor({
   };
   const changeStep = (id: string, patch: Partial<AutomationStep>) =>
     change({
-      steps: draft.steps.map((step) =>
-        step.id === id ? ({ ...step, ...patch } as AutomationStep) : step,
+      steps: editSteps(draft.steps, (list) =>
+        list.map((step) =>
+          step.id === id ? ({ ...step, ...patch } as AutomationStep) : step,
+        ),
       ),
     });
   const chooseTrigger = (kind: TriggerChoice) => {
@@ -175,33 +184,42 @@ export function AutomationEditor({
     if (draft.trigger?.kind !== kind) change({ trigger: NEW_TRIGGERS[kind] });
     setSelected(TRIGGER_ID);
   };
-  const addStep = (index: number, kind: StepChoice) => {
+  const addStep = (index: number, kind: StepChoice, list?: FlowList) => {
     const id = crypto.randomUUID();
-    const step: AutomationStep =
-      kind === "change_ticket"
-        ? {
-            id,
-            kind,
-            change: { action: "add_tag", tag: "" },
-            on_failure: null,
-          }
-        : kind === "notify"
-          ? { id, kind, text: "", opens: "ticket", on_failure: null }
-          : {
+    const step = (after: AutomationStep[]): AutomationStep =>
+      kind === "if"
+        ? // Paths never rejoin, so nothing can follow an If: the steps that
+          // came after this place go on down its Yes path.
+          { id, kind, checks: [], yes: after, no: [] }
+        : kind === "change_ticket"
+          ? {
               id,
               kind,
-              agent_id: null,
-              execution_folder: null,
+              change: { action: "add_tag", tag: "" },
               on_failure: null,
-            };
+            }
+          : kind === "notify"
+            ? { id, kind, text: "", opens: "ticket", on_failure: null }
+            : {
+                id,
+                kind,
+                agent_id: null,
+                execution_folder: null,
+                on_failure: null,
+              };
     change({
-      steps: [
-        ...draft.steps.slice(0, index),
-        step,
-        ...draft.steps.slice(index),
-      ],
+      steps: editSteps(draft.steps, (steps, owner) => {
+        if (owner?.step !== list?.step || owner?.path !== list?.path)
+          return steps;
+        const after = steps.slice(index);
+        return [
+          ...steps.slice(0, index),
+          step(after),
+          ...(kind === "if" ? [] : after),
+        ];
+      }),
     });
-    setSelected(step.id);
+    setSelected(id);
   };
   const closePanel = () => {
     const card = selected;
@@ -232,7 +250,7 @@ export function AutomationEditor({
       />
     );
   const left = automation.problems.length;
-  const step = draft.steps.find((item) => item.id === selected);
+  const step = everyStep(draft.steps).find((item) => item.id === selected);
   const openAgent = agents.find((agent) => agent.id === agentOpen);
   const trigger = draft.trigger;
   const panel =
@@ -310,6 +328,19 @@ export function AutomationEditor({
             draft.trigger?.kind === "tag_added" ? draft.trigger.tag : null
           }
           onChange={(patch) => changeStep(step.id, patch)}
+        />
+      </StepPanel>
+    ) : step?.kind === "if" ? (
+      <StepPanel
+        key={step.id}
+        title="If"
+        icon={<Split size={16} aria-hidden />}
+        onClose={closePanel}
+      >
+        <IfFields
+          checks={step.checks}
+          projects={projects}
+          onChange={(checks) => changeStep(step.id, { checks })}
         />
       </StepPanel>
     ) : null;
@@ -406,6 +437,7 @@ export function AutomationEditor({
             definition={draft}
             problems={automation.problems}
             agents={agents}
+            projects={projects}
             selected={panel ? selected : null}
             only={conditionsLine(draft.conditions, projects)}
             onSelect={setSelected}
@@ -482,10 +514,13 @@ export function AutomationEditor({
         primaryVariant="destructive"
         blockedReason={null}
         onSubmit={() => {
-          change({
-            steps: draft.steps.filter((item) => item.id !== deletingStep),
-          });
-          if (selected === deletingStep) setSelected(null);
+          const steps = editSteps(draft.steps, (list) =>
+            list.filter((item) => item.id !== deletingStep),
+          );
+          change({ steps });
+          // The open panel may be of a step on a path that went with it.
+          if (!everyStep(steps).some((item) => item.id === selected))
+            setSelected(null);
           setDeletingStep(null);
         }}
       >

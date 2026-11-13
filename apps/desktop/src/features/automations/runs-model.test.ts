@@ -28,6 +28,7 @@ const BRANCHING = [
   {
     id: "if",
     kind: "if" as const,
+    checks: [],
     yes: [
       {
         id: "yes",

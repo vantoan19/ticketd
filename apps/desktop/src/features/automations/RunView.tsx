@@ -19,7 +19,7 @@ import {
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
-  runCard,
+  stepCard,
   triggerCard,
 } from "@/features/automations/flow-cards";
 import { RunCanvas, StepMark } from "@/features/automations/RunCanvas";
@@ -63,7 +63,7 @@ function RunPanel({
   const card =
     selected === TRIGGER_ID
       ? triggerCard(run.definition.trigger)
-      : step && runCard(step, agents);
+      : step && stepCard(step, agents);
   if (!card) return null;
   const Icon = CARD_ICONS[card.icon];
   const reached = (id: string | undefined) =>

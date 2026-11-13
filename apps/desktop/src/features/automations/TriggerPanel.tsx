@@ -27,7 +27,7 @@ import { ticketStatuses } from "@/lib/statuses";
 /* What the trigger's panel holds: the trigger's own values, then its conditions. */
 
 /** A value chosen from a menu. `name` is the control's name with its value. */
-function Pick({
+export function Pick({
   name,
   text,
   menu,
