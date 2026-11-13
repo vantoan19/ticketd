@@ -52,7 +52,8 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 74] = [
+const TABLES: [(&str, i64); 75] = [
+    ("automation_agents", 67),
     ("chat_record_writes", 66),
     ("chat_notices", 66),
     ("chats", 66),
