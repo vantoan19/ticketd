@@ -71,6 +71,22 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format 68: when each tool call started, so a running step can say how long it has
+/// run. Calls recorded before this have no start time and show no clock.
+/// Like every migration step it may run again over a schema that already has it.
+pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_tools') WHERE name = 'started_at')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch("ALTER TABLE chat_tools ADD COLUMN started_at TEXT;")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 68;")?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
@@ -362,6 +378,9 @@ pub struct ChatTool {
     pub state: ChatToolState,
     pub output: Option<String>,
     pub output_truncated: bool,
+    /// When the host first recorded the call. `None` for calls recorded before
+    /// ticketd kept it.
+    pub started_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -754,7 +773,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Session),
         "tool" => connection
             .query_row(
-                "SELECT id, position, turn_id, name, input, state, output, output_truncated FROM chat_tools WHERE id = ?1",
+                "SELECT id, position, turn_id, name, input, state, output, output_truncated, started_at FROM chat_tools WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatTool {
@@ -766,6 +785,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         state: named(row, 5)?,
                         output: row.get(6)?,
                         output_truncated: row.get(7)?,
+                        started_at: row.get(8)?,
                     })
                 },
             )
@@ -1160,7 +1180,7 @@ fn observe(
             } else {
                 let position = log(connection, chat_id, "tool", &tool_id)?;
                 connection.execute(
-                    "INSERT INTO chat_tools (id, chat_id, position, turn_id, name, input, state, output, output_truncated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    &format!("INSERT INTO chat_tools (id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, {NOW})"),
                     params![tool_id, chat_id, position, turn_id, tool_name, input, name(state)?, output, truncated],
                 )?;
             }

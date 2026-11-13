@@ -200,6 +200,8 @@ const stepSchema = z.object({
   truncated: z
     .object({ kept_bytes: z.number(), total_bytes: z.number() })
     .nullish(),
+  /** When the host recorded the call, for a running step's clock. */
+  started_at: z.string().nullish(),
 });
 export type Step = z.infer<typeof stepSchema>;
 
@@ -209,7 +211,8 @@ const requestOptionSchema = z.object({
   description: z.string().nullish(),
 });
 
-const item = { id: z.string(), at: z.string() };
+/** `turn_id`: the turn that owns the item, when one does. */
+const item = { id: z.string(), at: z.string(), turn_id: z.string().nullish() };
 export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
@@ -224,6 +227,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
       "uncertain",
       "set_aside",
     ]),
+    /** Sent to steer a turn in progress: what follows is a new segment of it. */
+    steer: z.boolean().optional(),
   }),
   z.object({
     ...item,
@@ -237,6 +242,16 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     ...item,
     kind: z.literal("records"),
     changes: z.array(recordChangeSchema),
+  }),
+  /** When a turn started and ended, and how. It has no row of its own. */
+  z.object({
+    ...item,
+    kind: z.literal("turn"),
+    turn_id: z.string(),
+    started_at: z.string(),
+    ended_at: z.string().nullish(),
+    /** `stopped` by the person, `quit` with ticketd, `lost`: contact was lost. */
+    outcome: z.enum(["active", "completed", "stopped", "quit", "failed", "lost"]),
   }),
   z.object({
     ...item,
@@ -252,6 +267,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     state: z.enum(["pending", "answered", "expired"]),
     /** For an answered request: "You allowed this once". */
     outcome: z.string().nullish(),
+    /** For an answered question, the answer as given. */
+    answer: z.string().nullish(),
     resolved_at: z.string().nullish(),
   }),
   z.object({

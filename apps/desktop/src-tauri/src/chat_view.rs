@@ -10,8 +10,8 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{
     Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
-    ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatTool,
-    ChatToolState, ChatTurn, ChatTurnState,
+    ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
+    ChatTool, ChatToolState, ChatTurn, ChatTurnState,
 };
 
 use crate::step_kind::{self, Kind, Variant};
@@ -118,6 +118,9 @@ pub struct Step {
     pub state: &'static str,
     pub result: Option<String>,
     pub output: Option<String>,
+    /// When the host recorded the call, for a running step's clock. Absent from calls
+    /// recorded before ticketd kept it.
+    pub started_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -134,27 +137,48 @@ pub enum Item {
         at: String,
         text: String,
         delivery: &'static str,
+        /// The turn that took this message, once one did.
+        turn_id: Option<String>,
+        /// Sent to steer a turn in progress: what follows is a new segment of it.
+        steer: bool,
     },
     Response {
         id: String,
         at: String,
         text: String,
         state: &'static str,
+        turn_id: Option<String>,
     },
     Steps {
         id: String,
         at: String,
         steps: Vec<Step>,
+        turn_id: Option<String>,
     },
     /// What the agent changed in ticketd during a turn.
     Records {
         id: String,
         at: String,
         changes: Vec<ChatAgentChange>,
+        turn_id: Option<String>,
+    },
+    /// When a turn started and ended, and how. It has no row of its own: the view folds
+    /// the turn's items under one line that says this.
+    Turn {
+        /// `turn:` and the turn's id, apart from the id of its end marker.
+        id: String,
+        at: String,
+        turn_id: String,
+        started_at: String,
+        ended_at: Option<String>,
+        /// `active`, `completed`, `stopped` (by the person), `quit` (ticketd quit),
+        /// `failed` or `lost` (contact was lost, so how it ended is unknown).
+        outcome: &'static str,
     },
     Request {
         id: String,
         at: String,
+        turn_id: Option<String>,
         request: &'static str,
         title: String,
         subject: Option<String>,
@@ -164,12 +188,16 @@ pub enum Item {
         free_text: bool,
         state: &'static str,
         outcome: Option<String>,
+        /// For an answered question, the answer as given.
+        answer: Option<String>,
     },
     Marker {
         id: String,
         at: String,
         reason: &'static str,
         message: Option<String>,
+        /// Set for the marker that ends a turn.
+        turn_id: Option<String>,
     },
     Session {
         id: String,
@@ -487,19 +515,20 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         },
         None => (Vec::new(), false),
     };
-    let outcome = interaction
+    let response = interaction
         .response
         .as_deref()
-        .filter(|_| state == "answered")
-        .map(|response| match response {
-            "allow" => "You allowed this once".to_owned(),
-            "allow for session" => "You allowed this for the session".to_owned(),
-            "deny" => "You denied this".to_owned(),
-            answer => format!("You answered: {answer}"),
-        });
+        .filter(|_| state == "answered");
+    let outcome = response.map(|response| match response {
+        "allow" => "You allowed this once".to_owned(),
+        "allow for session" => "You allowed this for this session".to_owned(),
+        "deny" => "You denied this".to_owned(),
+        answer => format!("You answered: {answer}"),
+    });
     Item::Request {
         id: interaction.id.clone(),
         at: String::new(),
+        turn_id: Some(interaction.turn_id.clone()),
         request: if approval { "approval" } else { "question" },
         title,
         subject: Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty()),
@@ -511,6 +540,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         free_text,
         state,
         outcome,
+        answer: response.filter(|_| !approval).map(str::to_owned),
     }
 }
 
@@ -588,6 +618,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         state: "done",
         result: cut,
         output: tool.output.clone(),
+        started_at: tool.started_at.clone(),
     };
     if tool.name == CONTEXT_RECORD_NAME {
         return vec![Step {
@@ -828,6 +859,7 @@ pub fn item(
                     message: Some(format!(
                         "Continued in a fresh {harness} session with history you selected."
                     )),
+                    turn_id: None,
                 },
             }
         }
@@ -836,6 +868,16 @@ pub fn item(
             at: message.created_at.clone(),
             text: message.text.clone(),
             delivery: delivery(message, live)?,
+            turn_id: message
+                .attempts
+                .iter()
+                .rev()
+                .find_map(|attempt| attempt.turn_id.clone())
+                .or(message.turn_id.clone()),
+            steer: message
+                .attempts
+                .last()
+                .is_some_and(|attempt| attempt.intent == ChatSubmissionIntent::Steer),
         },
         ChatItem::Message(message) => {
             let active = chat.active_turn.as_ref().map(|turn| &turn.id);
@@ -850,6 +892,7 @@ pub fn item(
                 } else {
                     "partial"
                 },
+                turn_id: message.turn_id.clone(),
             }
         }
         ChatItem::Turn(turn) => {
@@ -876,17 +919,20 @@ pub fn item(
                 at: turn.ended_at.clone().unwrap_or(turn.started_at.clone()),
                 reason,
                 message,
+                turn_id: Some(turn.id.clone()),
             }
         }
         ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => Item::Records {
             id: tool.id.clone(),
             at: String::new(),
             changes,
+            turn_id: Some(tool.turn_id.clone()),
         },
         ChatItem::Tool(tool) => Item::Steps {
             id: tool.id.clone(),
             at: String::new(),
             steps: steps(tool, harness, chat, home_folder().as_deref()),
+            turn_id: Some(tool.turn_id.clone()),
         },
         ChatItem::Interaction(interaction) => request(interaction, live, harness),
         ChatItem::Notice(notice) => Item::Marker {
@@ -894,8 +940,47 @@ pub fn item(
             at: notice.created_at.clone(),
             reason: "note",
             message: Some(notice.text.clone()),
+            turn_id: None,
         },
     })
+}
+
+/// When a turn started and ended, and how; the view folds the turn under one row
+/// that says this.
+fn turn_item(turn: &ChatTurn) -> Item {
+    Item::Turn {
+        id: format!("turn:{}", turn.id),
+        at: turn.started_at.clone(),
+        turn_id: turn.id.clone(),
+        started_at: turn.started_at.clone(),
+        ended_at: turn.ended_at.clone(),
+        outcome: match turn.state {
+            ChatTurnState::Active => "active",
+            ChatTurnState::Completed => "completed",
+            ChatTurnState::Interrupted => "stopped",
+            ChatTurnState::Failed => "failed",
+            ChatTurnState::Unknown if turn.detail.as_deref() == Some(STOPPED_BY_TICKETD) => "quit",
+            ChatTurnState::Unknown => "lost",
+        },
+    }
+}
+
+/// Every transcript item one history record gives: a turn gives its timing and, when
+/// it ended other than by completing, its end marker.
+pub fn items(
+    record: &ChatItem,
+    chat: &Chat,
+    live: &ChatLive,
+    fresh: Option<FreshHistory>,
+) -> Vec<Item> {
+    let timing = match record {
+        ChatItem::Turn(turn) => Some(turn_item(turn)),
+        _ => None,
+    };
+    timing
+        .into_iter()
+        .chain(item(record, chat, live, fresh))
+        .collect()
 }
 
 fn home_folder() -> Option<String> {
@@ -1219,9 +1304,11 @@ pub fn idle() -> ChatLive {
 mod tests {
     use super::{
         Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatTool, ChatToolState,
-        ChatTurn, ChatTurnState, Item, Step, idle, needs_you, opening, request, steps,
+        ChatTurn, ChatTurnState, Item, STOPPED_BY_TICKETD, Step, idle, items, needs_you, opening,
+        request, steps,
     };
     use serde_json::json;
+    use ticketd_core::ChatItem;
     use ticketd_core::ChatSessionOrigin;
 
     /// U16, U21: work before the session's first turn runs is the session opening.
@@ -1279,6 +1366,7 @@ mod tests {
             state,
             output: output.map(str::to_owned),
             output_truncated: false,
+            started_at: None,
         }
     }
 
@@ -1514,6 +1602,93 @@ mod tests {
         };
         assert_eq!(subject.as_deref(), Some("touch hello.txt"));
         assert_eq!(reason.as_deref(), Some("Allow creating hello.txt?"));
+    }
+
+    #[test]
+    fn an_answered_question_keeps_its_answer_for_the_receipt() {
+        let interaction = ChatInteraction {
+            id: "ask-2".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Question,
+            native_request_id: None,
+            prompt: "Fail open or closed?".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("Fail open".to_owned()),
+        };
+        let Item::Request {
+            answer, turn_id, ..
+        } = request(&interaction, &idle(), "Codex")
+        else {
+            panic!("an interaction is a request");
+        };
+        assert_eq!(answer.as_deref(), Some("Fail open"));
+        assert_eq!(turn_id.as_deref(), Some("turn"));
+    }
+
+    #[test]
+    fn a_turn_gives_its_timing_and_how_it_ended_beside_its_marker() {
+        let turn = |state, detail: Option<&str>| {
+            ChatItem::Turn(ChatTurn {
+                id: "turn".to_owned(),
+                position: 0,
+                native_turn_id: None,
+                state,
+                detail: detail.map(str::to_owned),
+                problem: None,
+                problem_resets_at: None,
+                started_at: "2026-11-10T10:00:00Z".to_owned(),
+                ended_at: Some("2026-11-10T10:00:40Z".to_owned()),
+            })
+        };
+        let outcome = |record: &ChatItem| match items(record, &chat(None), &idle(), None).as_slice()
+        {
+            [
+                Item::Turn {
+                    outcome,
+                    started_at,
+                    ended_at,
+                    ..
+                },
+                rest @ ..,
+            ] => {
+                assert_eq!(started_at, "2026-11-10T10:00:00Z");
+                assert_eq!(ended_at.as_deref(), Some("2026-11-10T10:00:40Z"));
+                (*outcome, rest.len())
+            }
+            other => panic!("expected the turn's timing first: {other:?}"),
+        };
+        assert_eq!(
+            outcome(&turn(ChatTurnState::Completed, None)),
+            ("completed", 0)
+        );
+        assert_eq!(
+            outcome(&turn(ChatTurnState::Interrupted, None)),
+            ("stopped", 1)
+        );
+        assert_eq!(outcome(&turn(ChatTurnState::Failed, None)), ("failed", 1));
+        assert_eq!(
+            outcome(&turn(ChatTurnState::Unknown, Some(STOPPED_BY_TICKETD))),
+            ("quit", 1)
+        );
+        assert_eq!(outcome(&turn(ChatTurnState::Unknown, None)), ("lost", 1));
+    }
+
+    #[test]
+    fn a_running_step_keeps_when_the_host_recorded_it() {
+        let mut running = tool(
+            "Read",
+            r#"{"file_path":"a.ts"}"#,
+            ChatToolState::Running,
+            None,
+        );
+        running.started_at = Some("2026-11-10T10:00:05Z".to_owned());
+        let step = &steps(&running, "Codex", &chat(Some("turn")), None)[0];
+        assert_eq!(
+            (step.state, step.started_at.as_deref()),
+            ("running", Some("2026-11-10T10:00:05Z"))
+        );
     }
 
     #[test]

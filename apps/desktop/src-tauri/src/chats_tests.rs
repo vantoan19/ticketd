@@ -222,10 +222,30 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
     let (opened, seen) = f.open(&id).await;
     assert_eq!(opened.snapshot.cursor, 0);
     assert_eq!(opened.snapshot.chat.activity, "working");
-    assert!(matches!(
-        opened.snapshot.items.as_slice(),
-        [Item::User { delivery: "delivered", text, .. }] if text == "first"
-    ));
+    // The turn that took the message gives its timing, which the view folds it by.
+    let [
+        Item::User {
+            delivery: "delivered",
+            text,
+            turn_id: Some(took),
+            steer: false,
+            ..
+        },
+        Item::Turn {
+            turn_id,
+            outcome: "active",
+            ended_at: None,
+            ..
+        },
+    ] = opened.snapshot.items.as_slice()
+    else {
+        panic!(
+            "expected the message and its turn: {:?}",
+            opened.snapshot.items
+        );
+    };
+    assert_eq!((text.as_str(), took), ("first", turn_id));
+    let turn_id = turn_id.clone();
 
     f.emit(EventKind::TextDelta {
         turn: turn(),
@@ -260,6 +280,13 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
         .filter(|change| change["item"]["kind"] == "response")
         .map(|change| (&change["item"]["state"], &change["item"]["text"]))
         .collect();
+    assert!(
+        changes
+            .iter()
+            .filter(|change| change["item"]["kind"] == "response")
+            .all(|change| change["item"]["turn_id"] == json!(turn_id)),
+        "a streamed response says which turn it belongs to"
+    );
     assert_eq!(
         responses.first().unwrap(),
         &(&json!("streaming"), &json!("Hel"))
@@ -329,11 +356,13 @@ async fn queued_input_is_shown_as_the_queue_and_can_be_withdrawn() {
     };
     assert_eq!(queued.text, "later");
     assert!(opened.snapshot.chat.queue_paused);
-    assert_eq!(
-        opened.snapshot.items.len(),
-        1,
-        "queued input is not history"
-    );
+    let shown: Vec<_> = opened
+        .snapshot
+        .items
+        .iter()
+        .filter(|item| !matches!(item, Item::Turn { .. }))
+        .collect();
+    assert_eq!(shown.len(), 1, "queued input is not history: {shown:?}");
 
     f.chats.remove_queued(&id, &queued.id).await.unwrap();
     settle().await;

@@ -924,7 +924,7 @@ impl Chats {
             .snapshot
             .items
             .iter()
-            .filter_map(|item| chat_view::item(item, &chat, &attached.live, fresh))
+            .flat_map(|item| chat_view::items(item, &chat, &attached.live, fresh))
             .collect();
         let view = View {
             chat,
@@ -1028,6 +1028,7 @@ impl Chats {
                             at: String::new(),
                             text: delta,
                             state: "streaming",
+                            turn_id: Some(turn_id),
                         };
                         json!({ "kind": "item", "item": item })
                     } else {
@@ -1075,10 +1076,10 @@ impl Chats {
             };
             let fresh = self.fresh(&view.chat.id);
             for record in records {
-                if let Some(item) = chat_view::item(&record, &view.chat, &view.live, fresh)
-                    && !send(&mut view, json!({ "kind": "item", "item": item }))
-                {
-                    return;
+                for item in chat_view::items(&record, &view.chat, &view.live, fresh) {
+                    if !send(&mut view, json!({ "kind": "item", "item": item })) {
+                        return;
+                    }
                 }
             }
             // If the workspace cannot be read the view keeps what it shows; the next
