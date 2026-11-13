@@ -1,5 +1,11 @@
 import { useContext, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, BellOff, Check, Ellipsis, SquarePen } from "lucide-react";
+import {
+  ArrowLeft,
+  BellOff,
+  Check,
+  ChevronDown,
+  SquarePen,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reference } from "@/components/ui/reference";
 import { TicketNavigation } from "@/features/tickets/navigation";
@@ -85,15 +91,51 @@ function RowContext({ chat }: { chat: ChatSummary }) {
   return null;
 }
 
+/**
+ * MOTION-14: the list is one Tab stop. Up and Down move between rows, Home and
+ * End to the ends, Right Arrow to the row's actions and Left back to the row.
+ */
+function moveInList(event: React.KeyboardEvent<HTMLElement>) {
+  const from = event.target as HTMLElement;
+  const list = from.closest(".chat-rows");
+  if (!list) return;
+  const rows = Array.from(list.querySelectorAll<HTMLElement>(".chat-row"));
+  const row = from
+    .closest(".chat-row-item")
+    ?.querySelector<HTMLElement>(".chat-row");
+  const at = row ? rows.indexOf(row) : -1;
+  const go = (index: number) => {
+    event.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, index))]?.focus();
+  };
+  if (event.key === "ArrowDown") go(at + 1);
+  else if (event.key === "ArrowUp") go(at - 1);
+  else if (event.key === "Home") go(0);
+  else if (event.key === "End") go(rows.length - 1);
+  else if (event.key === "ArrowRight" && from === row) {
+    event.preventDefault();
+    from
+      .closest(".chat-row-item")
+      ?.querySelector<HTMLElement>(".chat-row-more button")
+      ?.focus();
+  } else if (event.key === "ArrowLeft" && from !== row) {
+    event.preventDefault();
+    row?.focus();
+  }
+}
+
 function ChatRow({
   chat,
   active,
+  tabStop,
   now,
   onOpen,
   onResult,
 }: {
   chat: ChatSummary;
   active: boolean;
+  /** The row the list's one Tab stop lands on. */
+  tabStop: boolean;
   now: number;
   onOpen: () => void;
   onResult: (failure: string) => void;
@@ -101,12 +143,18 @@ function ChatRow({
   const row = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
   const strong = emphasised(chat.status);
+  const more = useRef<HTMLSpanElement>(null);
+  // The actions are reached with Right Arrow, not Tab.
+  useLayoutEffect(() => {
+    more.current?.querySelector("button")?.setAttribute("tabindex", "-1");
+  });
   return (
-    <li className="chat-row-item">
+    <li className="chat-row-item" onKeyDown={moveInList}>
       <button
         ref={row}
         type="button"
         className="chat-row"
+        tabIndex={tabStop ? 0 : -1}
         aria-current={active ? "true" : undefined}
         data-attention={strong ? "" : undefined}
         onClick={onOpen}
@@ -143,7 +191,11 @@ function ChatRow({
         {chat.status.unseen && <span className="sr-only">, unread</span>}
         {chat.muted && <span className="sr-only">, muted</span>}
       </button>
-      <span className="chat-row-more" data-open={menu ? "" : undefined}>
+      <span
+        ref={more}
+        className="chat-row-more"
+        data-open={menu ? "" : undefined}
+      >
         <ChatActionsMenu
           chat={{ ...chat, unseen: chat.status.unseen }}
           label={`Actions for ${chat.title}`}
@@ -270,11 +322,17 @@ export function ChatsView({
         title={current?.title ?? "Chats"}
         actions={
           <>
+            {/* LIVE-18: a labelled filter, not a "⋯" that reads as actions. */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <IconButton label="Show active, archived or trashed Chats">
-                  <Ellipsis aria-hidden />
-                </IconButton>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Chats shown: ${current?.menu ?? "Active"}`}
+                >
+                  {current?.menu ?? "Active"}
+                  <ChevronDown aria-hidden />
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {SCOPES.map((item) => (
@@ -323,12 +381,19 @@ export function ChatsView({
         <p className="chat-list-empty">{current?.empty}</p>
       )}
       <ul className="chat-rows" aria-label="Chats">
-        {list?.chats.map((chat) => (
+        {list?.chats.map((chat, index) => (
           <ChatRow
             key={chat.id}
             chat={chat}
             now={now}
             active={open?.kind === "chat" && open.id === chat.id}
+            tabStop={
+              list.chats.some(
+                (one) => open?.kind === "chat" && open.id === one.id,
+              )
+                ? open?.kind === "chat" && open.id === chat.id
+                : index === 0
+            }
             onOpen={() => show({ kind: "chat", id: chat.id })}
             onResult={setFailure}
           />

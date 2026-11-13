@@ -35,7 +35,10 @@
 }
 
 /* An unfinished plan's card. */
+/* STATIC-10: the card keeps the transcript's 14/20 scale. */
 .chat-plan {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
   padding: 6px 8px 8px 16px;
   border-radius: var(--radius-panel);
   background: var(--surface);

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useId,
   useRef,
@@ -18,7 +19,13 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import type { ChatState } from "@/features/chats/client";
 import { requestChoices as choices } from "@/features/chats/dock-focus";
-import { requestLabel, type PendingRequest } from "@/features/chats/model";
+import {
+  recordNamer,
+  requestLabel,
+  ticketdParts,
+  type PendingRequest,
+  type RecordName,
+} from "@/features/chats/model";
 
 type Queued = ChatState["queue"][number];
 
@@ -28,9 +35,12 @@ function Request({
   count,
   onAnswer,
   onLeave,
+  name,
   focusTitle = false,
 }: {
   request: PendingRequest;
+  /** Names the Chat's linked records by their titles. */
+  name: RecordName;
   position: number;
   count: number;
   /** Take focus on the title when shown: the Chat was opened from its notification. */
@@ -47,7 +57,12 @@ function Request({
   }, [focusTitle]);
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [showCommand, setShowCommand] = useState(false);
+  const commandId = useId();
   const question = request.request === "question";
+  // What runs exactly, when the title says it as sentences or shortened.
+  const exact =
+    request.command ?? (request.ticketd?.length ? request.subject : undefined);
   const pick = (optionId: string) => {
     if (sending) return;
     setSending(optionId);
@@ -98,6 +113,22 @@ function Request({
         >
           {question ? (
             requestLabel(request)
+          ) : request.ticketd?.length ? (
+            <>
+              {request.title}{" "}
+              {ticketdParts(request.ticketd, 2, name, true).map(
+                (part, index) => (
+                  <Fragment key={index}>
+                    {index > 0 && part.text !== "," && " "}
+                    {part.code ? (
+                      <code className="chat-mono">{part.text}</code>
+                    ) : (
+                      part.text
+                    )}
+                  </Fragment>
+                ),
+              )}
+            </>
           ) : (
             <>
               {request.title}
@@ -123,6 +154,25 @@ function Request({
             <CodeSpans text={request.reason} />
           </p>
         )}
+        {exact && (
+          <>
+            <Button
+              variant="ghost"
+              size="xs"
+              className="chat-request-show"
+              aria-expanded={showCommand}
+              aria-controls={showCommand ? commandId : undefined}
+              onClick={() => setShowCommand(!showCommand)}
+            >
+              {showCommand ? "Hide command" : "Show command"}
+            </Button>
+            {showCommand && (
+              <pre id={commandId} className="chat-out chat-request-command">
+                {exact}
+              </pre>
+            )}
+          </>
+        )}
         {question ? (
           <div className="chat-request-options">
             {request.options.map((option, index) => (
@@ -132,9 +182,15 @@ function Request({
                 data-choice=""
                 className="chat-option"
                 disabled={sending !== null}
+                data-selected={sending === option.id ? "" : undefined}
+                aria-pressed={sending === option.id}
                 aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                 onClick={() => pick(option.id)}
               >
+                {/* A choice, with its number key: 1, 2, 3. */}
+                <span className="chat-option-key" aria-hidden>
+                  {index < 9 ? index + 1 : ""}
+                </span>
                 <span>{option.label}</span>
                 {option.description && <small>{option.description}</small>}
                 {sending === option.id && (
@@ -287,6 +343,7 @@ export function ActivityDock({
           count={requests.length}
           onAnswer={(optionId) => onAnswer(request.id, optionId)}
           onLeave={onLeave}
+          name={recordNamer(chat.links)}
           focusTitle={focusRequest}
         />
       )}

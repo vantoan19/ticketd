@@ -70,6 +70,9 @@ import {
   stepWords,
   targetLines,
   turns,
+  isLive,
+  recordNamer,
+  type RecordName,
   type Turn,
   type TurnRow,
   goneWords,
@@ -232,6 +235,7 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
         <Button
           variant="ghost"
           size="xs"
+          className="chat-you-more"
           aria-expanded={more}
           onClick={() => setMore(!more)}
         >
@@ -317,6 +321,12 @@ function useNow(on: boolean) {
   return now;
 }
 
+/** A Project, Document or Plan linked to the Chat, by its title. */
+export function useRecordName(): RecordName {
+  const { links } = useContext(SentLinksContext);
+  return useMemo(() => recordNamer(links), [links]);
+}
+
 /** One neutral icon per step kind; the verb carries the meaning. */
 const STEP_ICONS: Record<Step["kind"], LucideIcon> = {
   read: Eye,
@@ -347,6 +357,7 @@ function StepDetail({
 }) {
   const targets = step.targets ?? [];
   const words = stepWords(step);
+  // Opened, a command shows exactly what ran.
   const command = step.kind === "run" ? step.command : undefined;
   const { folder } = useContext(ChatFilesContext);
   const [failure, setFailure] = useState("");
@@ -445,8 +456,15 @@ export function StepRow({
   const reading = useReading();
   const id = useId();
   const described = useId();
-  const words = stepWords(step);
+  const words = stepWords(step, useRecordName());
   const running = live && step.state === "running";
+  // MOTION-8: a step that finishes in view keeps its running verb's width, so a
+  // name after it does not slide under the pointer.
+  const verb = useRef<HTMLSpanElement>(null);
+  const [verbWidth, setVerbWidth] = useState<number>();
+  useLayoutEffect(() => {
+    if (running && verb.current) setVerbWidth(verb.current.offsetWidth);
+  }, [running, words.parts[0]?.text]);
   const now = useNow(running && Boolean(step.started_at));
   const started = step.started_at ? Date.parse(step.started_at) : NaN;
   const clock =
@@ -475,9 +493,22 @@ export function StepRow({
         const file = part.code
           ? files.findIndex((target) => target.text === part.text)
           : -1;
+        if (index === 0 && !part.code)
+          return (
+            <span
+              key={index}
+              ref={verb}
+              className="chat-step-verb"
+              style={
+                verbWidth && !running ? { minWidth: verbWidth } : undefined
+              }
+            >
+              {part.text}
+            </span>
+          );
         return (
           <Fragment key={index}>
-            {index > 0 && " "}
+            {index > 0 && part.text !== "," && " "}
             {file >= 0 ? (
               <FileName
                 path={part.text}
@@ -651,6 +682,55 @@ function Note({ item }: { item: ItemOf<"marker"> }) {
   );
 }
 
+/**
+ * The harness's own warnings in a turn (an MCP server that did not start), as one
+ * quiet line: "2 Codex warnings". They concern its setup, not the task, so they
+ * open only when asked and fold with the turn.
+ */
+function Warnings({
+  items,
+  harness,
+}: {
+  items: ItemOf<"marker">[];
+  harness: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const reading = useReading();
+  const id = useId();
+  const n = items.length;
+  return (
+    <>
+      <button
+        type="button"
+        className="chat-steps chat-warnings"
+        data-anchor=""
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        onClick={(event) => {
+          reading.keep(event.currentTarget);
+          setOpen(!open);
+        }}
+      >
+        <RowLine icon={<Info size={16} />}>
+          {n} {harness} {n === 1 ? "warning" : "warnings"}
+        </RowLine>
+        {open ? (
+          <ChevronDown size={14} className="chat-chevron" aria-hidden />
+        ) : (
+          <ChevronRight size={14} className="chat-chevron" aria-hidden />
+        )}
+      </button>
+      {open && (
+        <ul id={id} className="chat-steplist chat-warning-list">
+          {items.map((item) => (
+            <li key={item.id}>{item.message}</li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 function Row({
   row,
   harness,
@@ -691,6 +771,8 @@ function Row({
       return <Receipt item={row.item} />;
     case "note":
       return <Note item={row.item} />;
+    case "warnings":
+      return <Warnings items={row.items} harness={harness} />;
     case "reasoning":
       return <ReasoningRow item={row.item} />;
     case "plan":
@@ -906,6 +988,7 @@ function markerText(item: ItemOf<"marker">, harness: string) {
     case "failed":
       return `This turn failed.${detail || ` ${harness} gave no reason.`} What it finished before that is kept.`;
     case "note":
+    case "warning":
       return item.message ?? "";
   }
 }
@@ -981,7 +1064,9 @@ const Item = memo(function Item({
         </div>
       );
     case "marker":
-      return item.reason === "note" ? (
+      return item.reason === "warning" ? (
+        <Warnings items={[item]} harness={harness} />
+      ) : item.reason === "note" ? (
         <Note item={item} />
       ) : (
         <StopMarker item={item} harness={harness} />
@@ -1172,10 +1257,14 @@ export function Transcript({
       ),
   );
   const working = chat.activity === "working";
+  const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
   return (
     <ChatFilesContext.Provider value={files}>
       <SentLinksContext.Provider value={sentLinks}>
         <div className="chat-col" ref={contentRef}>
+          {empty && !readOnly && (
+            <p className="chat-empty">Say what you want done.</p>
+          )}
           {parts.map((part) => {
             const marker = newFrom !== undefined &&
               (part.kind === "turn"
@@ -1219,10 +1308,9 @@ export function Transcript({
               <div className="chat-skel chat-skel-short" aria-hidden="true" />
             </>
           )}
+          {/* While the turn waits on you, the dock's card says so; no line repeats it. */}
           {chat.catching_up ? (
             <WorkingLine label="Catching up…" />
-          ) : chat.activity === "waiting" ? (
-            <WorkingLine label="Waiting for you" spinner={false} />
           ) : working && chat.stopping ? (
             <WorkingLine label="Stopping…" spinner={!stepRuns} />
           ) : working && chat.opening ? (

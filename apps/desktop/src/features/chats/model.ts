@@ -8,6 +8,7 @@ import type {
   RecordChange,
   Step,
   StepTarget,
+  TicketdCall,
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
@@ -70,6 +71,77 @@ const STEP_VERBS = {
   other: ["Using", "Used", "Use", "tool"],
 } as const;
 
+/** A ticketd call's verb: running, succeeded, and any other outcome (and an approval's). */
+const TICKETD_VERBS: Record<
+  TicketdCall["verb"],
+  readonly [string, string, string]
+> = {
+  read: ["Reading", "Read", "Read"],
+  list: ["Listing", "Listed", "List"],
+  search: ["Searching", "Searched", "Search"],
+  create: ["Creating", "Created", "Create"],
+  change: ["Changing", "Changed", "Change"],
+  set: ["Setting", "Set", "Set"],
+  post: ["Posting", "Posted", "Post"],
+  add: ["Adding", "Added", "Add"],
+  move: ["Moving", "Moved", "Move"],
+  restore: ["Restoring", "Restored", "Restore"],
+  tag: ["Tagging", "Tagged", "Tag"],
+  untag: ["Untagging", "Untagged", "Untag"],
+};
+
+/** Names a Project, Document or Plan by id; undefined when it is not known here. */
+export type RecordName = (kind: string, id: string) => string | undefined;
+
+/** Names the records linked to a Chat by their titles. */
+export const recordNamer =
+  (links: { kind: string; id: string; title: string }[]): RecordName =>
+  (kind, id) =>
+    links.find((link) => link.kind === kind && link.id === id)?.title;
+
+/**
+ * ticketd calls as one sentence: "Set `T-MP4` to In progress and post an update on
+ * `T-MP4`". `tense` 0 is running, 1 done, 2 any other outcome or an approval; `lower`
+ * starts with a lowercase verb, to follow "wants to". A record the view knows reads
+ * by its title, any other by its id.
+ */
+export function ticketdParts(
+  calls: TicketdCall[],
+  tense: 0 | 1 | 2,
+  name: RecordName = () => undefined,
+  lower = false,
+): StepWords["parts"] {
+  const parts: StepWords["parts"] = [];
+  calls.forEach((call, index) => {
+    if (index > 0)
+      parts.push({
+        text: index === calls.length - 1 ? "and" : ",",
+      });
+    const verb = TICKETD_VERBS[call.verb][tense];
+    parts.push({ text: index > 0 || lower ? verb.toLowerCase() : verb });
+    for (const word of call.words) {
+      const title = word.record ? name(word.record, word.text) : undefined;
+      parts.push(
+        title
+          ? { text: title }
+          : word.record
+            ? { text: word.text.slice(0, 8), code: true }
+            : word.code
+              ? { text: word.text, code: true }
+              : { text: word.text },
+      );
+    }
+  });
+  return parts;
+}
+
+/** Parts as one string, with "," set against the word before it. */
+export const partsText = (parts: StepWords["parts"]) =>
+  parts
+    .map((part) => part.text)
+    .join(" ")
+    .replace(/ ,/g, ",");
+
 const OUTCOME_WORDS = {
   failed: "Failed",
   declined: "Declined",
@@ -114,7 +186,10 @@ export function targetLines(target: StepTarget): string {
  * Every word of a step row: `[icon] Verb target · suffix`. Only a step that succeeded
  * is in the past tense; any other outcome keeps the plain verb and says its word.
  */
-export function stepWords(step: Step): StepWords {
+export function stepWords(
+  step: Step,
+  name: RecordName = () => undefined,
+): StepWords {
   const state = step.state ?? "done";
   const targets = step.targets ?? [];
   const key =
@@ -132,7 +207,20 @@ export function stepWords(step: Step): StepWords {
     code: key !== "web",
   });
   let parts: StepWords["parts"];
-  if (step.kind === "other" && targets.length === 0) {
+  if (step.ticketd?.length) {
+    parts = ticketdParts(
+      step.ticketd,
+      state === "running" ? 0 : state === "done" ? 1 : 2,
+      name,
+    );
+  } else if (step.variant === "plan") {
+    // Claude Code keeps its plan in its own profile; the path says nothing more.
+    parts = [
+      {
+        text: `${state === "running" ? "Writing" : state === "done" ? "Wrote" : "Write"} its plan`,
+      },
+    ];
+  } else if (step.kind === "other" && targets.length === 0) {
     parts = [{ text: step.target }];
   } else if (step.kind === "run" && step.variant === "script") {
     parts = [
@@ -141,7 +229,8 @@ export function stepWords(step: Step): StepWords {
       { text: "script" },
     ];
   } else if (step.kind === "run") {
-    const command = step.command ?? step.target;
+    // `target` is the command as shown (ticketd without its path); `command` is what ran.
+    const command = step.target || step.command || "";
     parts = [{ text: verb }, code(command.split("\n")[0] ?? command)];
   } else if (targets.length > 2) {
     // "Searched for" counts as "Searched 3 times".
@@ -163,33 +252,38 @@ export function stepWords(step: Step): StepWords {
       parts.push({ text: "in" }, code(first.scope));
   }
   const suffix =
-    state in OUTCOME_WORDS
-      ? {
-          text: OUTCOME_WORDS[state as keyof typeof OUTCOME_WORDS],
-          outcome: true,
-        }
-      : state === "done" && step.no_matches
-        ? { text: "No matches", outcome: false }
-        : state === "done" &&
-            step.added_lines != null &&
-            step.removed_lines != null
-          ? {
-              text: `+${step.added_lines} −${step.removed_lines}`,
-              outcome: false,
-              diffstat: true,
-            }
-          : undefined;
-  const words = parts.map((part) => part.text).join(" ");
+    state === "failed" && step.timed_out
+      ? { text: "Timed out", outcome: true }
+      : state in OUTCOME_WORDS
+        ? {
+            text: OUTCOME_WORDS[state as keyof typeof OUTCOME_WORDS],
+            outcome: true,
+          }
+        : state === "done" && step.no_matches
+          ? { text: "No matches", outcome: false }
+          : state === "done" &&
+              step.added_lines != null &&
+              step.removed_lines != null
+            ? {
+                text: `+${step.added_lines} −${step.removed_lines}`,
+                outcome: false,
+                diffstat: true,
+              }
+            : undefined;
+  const words = partsText(parts);
   const spoken = suffix?.diffstat
     ? `${step.added_lines} lines added, ${step.removed_lines} removed`
     : suffix?.text;
   const single = targets.length === 1 && !step.command ? targets[0] : undefined;
+  const took = step.duration_ms ? duration(step.duration_ms) : "";
+  // "Exit 1 · 4s", "Stopped after 10m": how it ended and how long it took.
   const detail = [
     step.timed_out
-      ? `Timed out${step.duration_ms ? ` after ${duration(step.duration_ms)}` : ""}`
+      ? took && `Stopped after ${took}`
       : step.exit_code
         ? `Exit ${step.exit_code}`
         : "",
+    step.timed_out ? "" : took,
     step.folder ? `in ${step.folder}` : "",
     single ? targetLines(single) : "",
   ]
@@ -206,7 +300,7 @@ export function stepWords(step: Step): StepWords {
 /**
  * Consecutive steps of the same kind and outcome as one row ("Read 6 files"), which
  * opens to its targets. Commands never merge, so each one's output stays one level
- * down. A merged row keeps "No matches" only when all its steps found nothing.
+ * down. Steps with a different outcome word ("No matches", "Timed out") never merge.
  */
 const sum = (a: number | null | undefined, b: number | null | undefined) =>
   a != null && b != null ? a + b : null;
@@ -220,7 +314,10 @@ export function mergeSteps(steps: Step[]): Step[] {
       step.kind !== "run" &&
       last.kind === step.kind &&
       (last.variant ?? null) === (step.variant ?? null) &&
-      (last.state ?? "done") === (step.state ?? "done");
+      (last.state ?? "done") === (step.state ?? "done") &&
+      // A different outcome word ("No matches") keeps its own row.
+      Boolean(last.no_matches) === Boolean(step.no_matches) &&
+      Boolean(last.timed_out) === Boolean(step.timed_out);
     if (!same) {
       rows.push(step);
       continue;
@@ -275,6 +372,13 @@ export type TurnRow =
     }
   | { kind: "receipt"; key: string; item: ItemOf<"request">; kept: true }
   | { kind: "note"; key: string; item: ItemOf<"marker">; kept: true }
+  /** The harness's warnings in the turn, as one quiet line that opens to them. */
+  | {
+      kind: "warnings";
+      key: string;
+      items: ItemOf<"marker">[];
+      kept?: false;
+    }
   /** #367: a reasoning row, and a plan that finished every step. */
   | { kind: "reasoning"; key: string; item: ItemOf<"reasoning">; kept?: false }
   | { kind: "plan"; key: string; item: ItemOf<"plan">; kept?: false };
@@ -373,6 +477,8 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
   const rows: TurnRow[] = [];
   const all: Step[] = [];
   let steps: { key: string; step: Step }[] = [];
+  // One line for every warning, where the first one came.
+  let warnings: Extract<TurnRow, { kind: "warnings" }> | undefined;
   const flush = () => {
     const first = steps[0]?.key ?? "";
     mergeSteps(steps.map((entry) => entry.step)).forEach((step, index) =>
@@ -383,6 +489,8 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
   for (const item of members) {
     if (item.kind === "steps") {
       item.steps.forEach((original, index) => {
+        // The dock holds a step waiting on its approval; it has no row until decided.
+        if (original.awaiting && original.state === "running") return;
         const step =
           original.state === "running" && running !== "running"
             ? { ...original, state: running }
@@ -419,9 +527,46 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
       rows.push({ kind: "receipt", key: item.id, item, kept: true });
     else if (item.kind === "marker" && item.reason === "note")
       rows.push({ kind: "note", key: item.id, item, kept: true });
+    else if (item.kind === "marker" && item.reason === "warning") {
+      if (warnings) warnings.items.push(item);
+      else {
+        warnings = { kind: "warnings", key: item.id, items: [item] };
+        rows.push(warnings);
+      }
+    }
   }
   flush();
   return { rows, steps: all };
+}
+
+/** A wait shorter than this is not worth saying. */
+const WAIT_SAID_FROM = 5000;
+
+/**
+ * How long, within `from`–`to`, the segment's requests waited on the person: from
+ * when each was asked until it was answered or expired, overlaps counted once.
+ * Requests recorded without those times count for nothing.
+ */
+function waitedIn(members: TranscriptItem[], from: number, to: number) {
+  const spans = members
+    .flatMap((item) => {
+      if (item.kind !== "request") return [];
+      const asked = time(item.at);
+      const resolved = time(item.resolved_at);
+      if (asked === undefined || resolved === undefined) return [];
+      const start = Math.max(from, asked);
+      const end = Math.min(to, resolved);
+      return end > start ? [[start, end] as const] : [];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let reached = -Infinity;
+  for (const [start, end] of spans) {
+    const begin = Math.max(start, reached);
+    if (end > begin) total += end - begin;
+    reached = Math.max(reached, end);
+  }
+  return total;
 }
 
 /**
@@ -490,7 +635,9 @@ export function turns(
     const marker = lastOf(
       part.members,
       (item): item is ItemOf<"marker"> =>
-        item.kind === "marker" && item.reason !== "note",
+        item.kind === "marker" &&
+        item.reason !== "note" &&
+        item.reason !== "warning",
     );
     const plan = lastOf(
       part.members,
@@ -536,10 +683,15 @@ export function turns(
       const n = steps.filter((step) => step.state === state).length;
       return n ? [`${n} ${word}`] : [];
     });
-    const span =
-      started !== undefined && ended !== undefined && ended >= started
-        ? `${words[0]} ${duration(ended - started)}`
-        : words[1];
+    const timed =
+      started !== undefined && ended !== undefined && ended >= started;
+    // Time the turn waited on the person is not time it worked.
+    const waited = timed ? waitedIn(part.members, started, ended) : 0;
+    const span = timed
+      ? `${words[0]} ${duration(Math.max(0, ended - started - waited))}`
+      : words[1];
+    const waitWords =
+      waited > WAIT_SAID_FROM ? [`waited ${duration(waited)}`] : [];
     return [
       {
         kind: "turn",
@@ -547,7 +699,7 @@ export function turns(
           key: part.members[0]?.id ?? "",
           live: ongoing && !unconfirmed,
           unconfirmed,
-          label: [span, ...counts].join(" · "),
+          label: [span, ...waitWords, ...counts].join(" · "),
           rows: rows.filter(
             (row) => row.kind !== "response" || row.item !== final,
           ),
@@ -729,8 +881,10 @@ export type PendingRequest = Extract<TranscriptItem, { kind: "request" }>;
  * the question itself. It names the request group and is what arrives in the
  * live announcement.
  */
-export function requestLabel(request: PendingRequest) {
+export function requestLabel(request: PendingRequest, name?: RecordName) {
   if (request.request === "question") return request.subject || request.title;
+  if (request.ticketd?.length)
+    return `${request.title} ${partsText(ticketdParts(request.ticketd, 2, name, true))}`;
   return request.subject
     ? `${request.title} ${request.subject}`
     : request.title;

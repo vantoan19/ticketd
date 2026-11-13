@@ -96,11 +96,14 @@
   align-items: center;
   gap: 4px;
 }
+/* One height for every row, with or without a ticket or Project (MOTION-7). */
 .chat-row-sub {
   grid-column: 2 / 4;
   display: flex;
+  align-items: center;
   gap: 12px;
   min-width: 0;
+  height: 20px;
 }
 .chat-row-sub > span:first-child {
   flex: 1;
@@ -160,11 +163,17 @@
 .chat-status > svg {
   margin-right: 6px;
 }
+/* The word truncates too, after the detail, and both end in an ellipsis (LIVE-18). */
 .chat-status-word {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-status-detail {
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -360,8 +369,9 @@
   -webkit-line-clamp: 4;
   overflow: hidden;
 }
+/* Right under the bubble, on its edge (STATIC-17). */
 .chat-you-more {
-  margin-right: -8px;
+  margin: -4px -8px 0 0;
 }
 .chat-you-actions {
   display: flex;
@@ -488,6 +498,28 @@ button.chat-steps:hover {
 }
 .chat-step-words {
   min-width: 0;
+}
+/* A step's verb; one that finished in view keeps its running width (MOTION-8). */
+.chat-step-verb {
+  display: inline-block;
+}
+/* The harness's warnings: one quiet line, opened only when asked (LIVE-9). */
+.chat-warnings {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-warning-list {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  overflow-wrap: anywhere;
+}
+/* An empty Chat says what to do (STATIC-16). */
+.chat-empty {
+  margin: auto 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: center;
 }
 /* A row's chevron shows on hover, focus or while open. */
 .chat-steps .chat-chevron {
@@ -637,8 +669,9 @@ button.chat-steps:hover {
   display: inline-flex;
   max-width: 100%;
   min-width: 0;
-  padding: 0 2px;
-  margin: 0 -2px;
+  /* A 24px target around a 20px line (STATIC-15). */
+  padding: 2px;
+  margin: -2px;
   border-radius: var(--radius);
   color: var(--foreground);
   font-family: var(--font-mono);
@@ -667,6 +700,8 @@ button.chat-file-name:focus-visible,
 }
 /* A Document a turn created: its title is the link. */
 .chat-record-link {
+  padding-block: 2px;
+  margin-block: -2px;
   border-radius: var(--radius);
   color: var(--foreground);
   text-decoration: underline;
@@ -1037,10 +1072,12 @@ button.chat-file-name:focus-visible,
   gap: 8px;
   margin-top: 12px;
 }
+/* LIVE-16: answers look like choices: bordered rows, each with its number key. */
 .chat-request-options {
   display: flex;
   flex-direction: column;
-  margin: 8px 0 0 -12px;
+  gap: 4px;
+  margin-top: 8px;
 }
 .chat-option {
   display: flex;
@@ -1048,16 +1085,37 @@ button.chat-file-name:focus-visible,
   align-items: baseline;
   column-gap: 8px;
   width: 100%;
-  min-height: 40px;
-  padding: 10px 12px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--foreground);
   text-align: left;
 }
+.chat-option-key {
+  flex: none;
+  min-width: 12px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
 .chat-option:hover:not(:disabled),
+.chat-option[data-selected] {
+  background: var(--accent);
+}
+.chat-option[data-selected] {
+  border-color: var(--foreground);
+}
 .chat-option:focus-visible {
   outline: none;
-  background: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.chat-request-show {
+  margin: 4px 0 0 -8px;
+}
+.chat-request-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .chat-option small {
   color: var(--muted-foreground);
@@ -1114,11 +1172,12 @@ button.chat-file-name:focus-visible,
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+/* STATIC-9: the actions show at rest, quieter, so the card reads as editable. */
 .chat-queue-actions {
   display: flex;
   flex: none;
   align-items: center;
-  opacity: 0;
+  opacity: 0.5;
 }
 .chat-queue-sending {
   flex: none;

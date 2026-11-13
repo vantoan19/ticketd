@@ -267,7 +267,9 @@ blockquote.chat-quote {
   white-space: nowrap;
 }
 .chat-records-ref {
-  padding: 0;
+  /* A 24px target around the inline reference (STATIC-15). */
+  padding: 2px 0;
+  margin: -2px 0;
   border: 0;
   background: none;
   color: var(--foreground);

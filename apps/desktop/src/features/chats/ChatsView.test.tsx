@@ -705,7 +705,7 @@ test("archive keeps the work running; trash stops it and restore re-runs nothing
   expect(button("Stop")).toBeTruthy();
   expect((await client.openChat("kept")).chat.activity).toBe("working");
 
-  openMenu("Show active, archived or trashed Chats");
+  openMenu("Chats shown: Active");
   fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
   expect(await screen.findByRole("heading", { name: "Archived" })).toBeTruthy();
   fireEvent.click(await screen.findByRole("button", { name: /^Limiter/ }));
@@ -1976,4 +1976,59 @@ test("before its session reports, a Chat's picker shows its harness and says why
     ),
   ).toBeTruthy();
   noButton(/^Permissions/);
+});
+
+test("LIVE-4: a ticketd approval says what it does, names the Project, and shows the exact command on request", async () => {
+  const exact = "/Users/me/ticketd/target/debug/ticketd project show p1";
+  await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "waiting",
+        links: [{ kind: "project", id: "p1", title: "Storefront" }],
+      },
+      [
+        {
+          ...approval,
+          title: "Codex wants to",
+          subject: "ticketd project show p1",
+          command: exact,
+          ticketd: [
+            {
+              verb: "read",
+              words: [{ text: "Project" }, { text: "p1", record: "project" }],
+            },
+          ],
+        },
+      ],
+    ),
+  );
+  const request = screen.getByRole("group", {
+    name: "Codex wants to read Project Storefront",
+  });
+  expect(request.textContent).not.toContain("/Users/me");
+  fireEvent.click(
+    within(request).getByRole("button", { name: "Show command" }),
+  );
+  expect(within(request).getByText(exact)).toBeTruthy();
+});
+
+test("MOTION-14: the list is one Tab stop; arrows move between rows and to a row's actions", async () => {
+  await open([
+    { chat: chatState({ id: "c1", title: "First" }) },
+    { chat: chatState({ id: "c2", title: "Second" }) },
+  ]);
+  const rows = Array.from(document.querySelectorAll<HTMLElement>(".chat-row"));
+  expect(rows.map((row) => row.tabIndex)).toEqual([0, -1]);
+  expect(
+    document.querySelector<HTMLElement>(".chat-row-more button")?.tabIndex,
+  ).toBe(-1);
+  rows[0]!.focus();
+  fireEvent.keyDown(rows[0]!, { key: "ArrowDown" });
+  expect(document.activeElement).toBe(rows[1]);
+  fireEvent.keyDown(rows[1]!, { key: "ArrowRight" });
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(
+    "Actions for Second",
+  );
 });

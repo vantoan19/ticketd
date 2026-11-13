@@ -222,6 +222,33 @@ const stepTargetSchema = z.object({
 });
 export type StepTarget = z.infer<typeof stepTargetSchema>;
 
+/** One word of a ticketd call's sentence; a `record` word is an id shown by its title. */
+const ticketdWordSchema = z.object({
+  text: z.string(),
+  code: z.boolean().optional(),
+  record: z.enum(["project", "document", "plan"]).nullish(),
+});
+
+/** A ticketd CLI call as a sentence: the verb, put in the step's tense, then its words. */
+export const ticketdCallSchema = z.object({
+  verb: z.enum([
+    "read",
+    "list",
+    "search",
+    "create",
+    "change",
+    "set",
+    "post",
+    "add",
+    "move",
+    "restore",
+    "tag",
+    "untag",
+  ]),
+  words: z.array(ticketdWordSchema),
+});
+export type TicketdCall = z.infer<typeof ticketdCallSchema>;
+
 /** The host classifies every step; the view only words it (`stepWords`). */
 const stepSchema = z.object({
   kind: z.enum([
@@ -234,8 +261,8 @@ const stepSchema = z.object({
     "web",
     "other",
   ]),
-  /** `list`: Listed; `fetch`: Fetched a page; `script`: Ran a `python3` script. */
-  variant: z.enum(["list", "fetch", "script"]).nullish(),
+  /** `list`: Listed; `fetch`: Fetched a page; `script`: Ran a `python3` script; `plan`: Wrote its plan. */
+  variant: z.enum(["list", "fetch", "script", "plan"]).nullish(),
   /** Readable text for a step without targets: the command, tool or note. */
   target: z.string(),
   targets: z.array(stepTargetSchema).optional(),
@@ -269,6 +296,10 @@ const stepSchema = z.object({
   removed_lines: z.number().int().nonnegative().nullish(),
   /** The decision on the approval the harness asked for this step ("You declined this"). */
   decision: z.string().nullish(),
+  /** A command that only calls ticketd, told as sentences; `command` is what runs. */
+  ticketd: z.array(ticketdCallSchema).nullish(),
+  /** Its approval waits in the dock, which is its only row until decided. */
+  awaiting: z.boolean().optional(),
 });
 export type Step = z.infer<typeof stepSchema>;
 
@@ -374,11 +405,23 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     resolved_at: z.string().nullish(),
     /** An answered approval: the host tells its decision on the step it was asked for, so it has no row. */
     folded: z.boolean().nullish(),
+    /** Exactly what would run, when the subject shortens it or says it as sentences. */
+    command: z.string().nullish(),
+    /** A command that only calls ticketd, said after the title ("wants to"). */
+    ticketd: z.array(ticketdCallSchema).nullish(),
   }),
   z.object({
     ...item,
     kind: z.literal("marker"),
-    reason: z.enum(["stopped", "quit", "stop_unconfirmed", "failed", "note"]),
+    /** `warning`: said by the harness; it folds with its turn. `note`: ticketd's own. */
+    reason: z.enum([
+      "stopped",
+      "quit",
+      "stop_unconfirmed",
+      "failed",
+      "note",
+      "warning",
+    ]),
     /** Required reading for `failed` and `note`; optional detail otherwise. */
     message: z.string().nullish(),
   }),

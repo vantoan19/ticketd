@@ -178,8 +178,8 @@ test.each<[Step, string, string]>([
       timed_out: true,
       duration_ms: 600_000,
     }),
-    "Run `npm run test:e2e` · Failed",
-    "Timed out after 10m",
+    "Run `npm run test:e2e` · Timed out",
+    "Stopped after 10m",
   ],
   [
     step({ kind: "delete", targets: paths("node_modules"), state: "declined" }),
@@ -288,7 +288,9 @@ test("steps of the same kind and outcome merge, but commands never do", () => {
     "Read `d.ts` · Failed",
     "Ran `npm test`",
     "Ran `npm run lint`",
-    "Searched for `x` and `y`",
+    // STATIC-8: a search that found nothing keeps its own row and its words.
+    "Searched for `x` · No matches",
+    "Searched for `y`",
   ]);
   // A merged row opens to its targets, not to one step's output.
   expect(merged[0]?.output).toBeUndefined();
@@ -766,4 +768,117 @@ test("a stop that was not confirmed is one notice, and Stop itself is the retry"
     body: "Codex may still be running.",
     actions: [],
   });
+});
+
+test("LIVE-4: a ticketd call reads as a sentence in the step's tense, records by their titles", () => {
+  const calls = [
+    {
+      verb: "set",
+      words: [{ text: "T-MP4", code: true }, { text: "to In progress" }],
+    },
+    {
+      verb: "post",
+      words: [{ text: "an update on" }, { text: "T-MP4", code: true }],
+    },
+  ] as const;
+  const ticketd = (state: Step["state"]) =>
+    step({
+      kind: "run",
+      target: "ticketd change T-MP4; ticketd activity add T-MP4",
+      command: "T=/x/ticketd; $T change T-MP4; $T activity add T-MP4",
+      ticketd: calls.map((call) => ({ ...call, words: [...call.words] })),
+      ...(state && { state }),
+    });
+  expect(stepWords(ticketd("done")).label).toBe(
+    "Set T-MP4 to In progress and posted an update on T-MP4",
+  );
+  expect(stepWords(ticketd("running")).label).toBe(
+    "Setting T-MP4 to In progress and posting an update on T-MP4",
+  );
+  const project = step({
+    kind: "run",
+    target: "ticketd project show f33fa8f7-0c7f",
+    ticketd: [
+      {
+        verb: "read",
+        words: [
+          { text: "Project" },
+          { text: "f33fa8f7-0c7f", record: "project" },
+        ],
+      },
+    ],
+  });
+  expect(stepWords(project, () => "Verify Project").label).toBe(
+    "Read Project Verify Project",
+  );
+  // A record the view does not know reads by its short id.
+  expect(stepWords(project).label).toBe("Read Project f33fa8f7");
+  // Anything else shows the command as the host shortened it.
+  expect(
+    stepWords(
+      step({
+        kind: "run",
+        target: "ticketd skills install",
+        command: "/x/ticketd skills install",
+      }),
+    ).label,
+  ).toBe("Ran ticketd skills install");
+});
+
+test("LIVE-8: Worked for leaves out the time spent waiting on you, and says the wait", () => {
+  const asked = (id: string, from: string, to: string): TranscriptItem => ({
+    id,
+    at: from,
+    resolved_at: to,
+    kind: "request",
+    turn_id: "t1",
+    request: "approval",
+    title: "Codex asked to run",
+    options: [],
+    free_text: false,
+    state: "answered",
+    folded: true,
+  });
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:03:30Z"),
+        did("s1", read("a.ts")),
+        asked("q1", "2026-11-10T10:00:20Z", "2026-11-10T10:02:20Z"),
+        // Asked at the same time: counted once.
+        asked("q2", "2026-11-10T10:01:00Z", "2026-11-10T10:02:50Z"),
+        said("r1"),
+      ],
+      idle,
+    ),
+  );
+  expect(turn?.label).toBe("Worked for 1m · waited 2m 30s");
+});
+
+test("LIVE-9: the harness's warnings fold as one line per turn; a step waiting on approval has no row", () => {
+  const warning = (id: string): TranscriptItem => ({
+    id,
+    at: "",
+    kind: "marker",
+    reason: "warning",
+    message: `Codex could not start the MCP server ${id}`,
+  });
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:30Z"),
+        warning("w1"),
+        did("s1", read("a.ts")),
+        warning("w2"),
+        did("s2", { ...ran("npm test", "running"), awaiting: true }),
+        said("r1"),
+      ],
+      idle,
+    ),
+  );
+  expect(turn?.rows.map((row) => row.kind)).toEqual(["warnings", "step"]);
+  expect(turn?.rows[0]).toMatchObject({ items: [{ id: "w1" }, { id: "w2" }] });
+  expect(turn?.rows[0]?.kept).toBeFalsy();
 });
