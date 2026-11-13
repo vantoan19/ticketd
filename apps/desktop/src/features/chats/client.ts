@@ -531,6 +531,8 @@ export const chatStateSchema = z.object({
   muted: z.boolean(),
   /** There is something to type into: not in trash, and the folder and session are there. */
   has_composer: z.boolean(),
+  /** The last transcript item the person had in view, kept by the host: the New marker goes after it. */
+  read_through: z.string().nullish(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
@@ -738,6 +740,8 @@ export interface ChatClient {
   markRead(id: string): Promise<void>;
   /** The last turn reads as unseen until the Chat is next opened. */
   markUnread(id: string): Promise<void>;
+  /** The person had the transcript in view through `itemId`; kept with the Chat. */
+  readThrough(id: string, itemId: string): Promise<void>;
   setMuted(id: string, muted: boolean): Promise<void>;
   /** Settings > Chat > Notify me about Chats, as the person last chose it. */
   setNotify(enabled: boolean): Promise<void>;

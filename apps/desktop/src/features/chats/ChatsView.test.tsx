@@ -1150,10 +1150,11 @@ test("opening a row at the bottom keeps following; only scrolling up stops it", 
 });
 
 test("what arrived while the Chat was not open is marked New, never your own message", async () => {
-  // Everything in a window of this height counts as seen.
+  // Everything in a window of this height counts as seen, and the window has focus.
   const height = vi
     .spyOn(HTMLElement.prototype, "clientHeight", "get")
     .mockReturnValue(600);
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
   try {
     const client = await open(
       one({ id: "c1", title: "Limiter" }, [youSaid, inTurn(reply("r1", "Hi"))]),
@@ -1184,6 +1185,37 @@ test("what arrived while the Chat was not open is marked New, never your own mes
     );
   } finally {
     height.mockRestore();
+    focused.mockRestore();
+  }
+});
+
+test("the New marker follows the read-through position the host kept, also after a restart", async () => {
+  // A Chat read through r1 in an earlier run of ticketd; this session never saw it.
+  const client = await open(
+    one({ id: "c1", title: "Limiter", read_through: "r1" }, [
+      youSaid,
+      inTurn(reply("r1", "Hi")),
+      reply("r2", "Done for IPs too."),
+    ]),
+  );
+  const marker = await screen.findByRole("separator", {
+    name: "New since you left",
+  });
+  const reply2 = conversation().getByText("Done for IPs too.");
+  expect(
+    marker.compareDocumentPosition(reply2) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  // What comes into view in a focused window is kept with the Chat.
+  const height = vi
+    .spyOn(HTMLElement.prototype, "clientHeight", "get")
+    .mockReturnValue(600);
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  try {
+    fireEvent.scroll(document.querySelector<HTMLElement>(".chat-scroll")!);
+    await waitFor(() => expect(client.readThroughs.at(-1)).toBe("r2"));
+  } finally {
+    height.mockRestore();
+    focused.mockRestore();
   }
 });
 

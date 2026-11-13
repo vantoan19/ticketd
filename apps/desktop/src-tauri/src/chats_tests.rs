@@ -430,6 +430,28 @@ async fn a_decided_approval_folds_into_the_step_it_answered_and_no_other() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_view_reopens_with_what_the_person_read_through() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(opened.snapshot.chat.read_through, None);
+    let turn_item = opened
+        .snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Turn { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    f.chats.read_through(&id, &turn_item).unwrap();
+    let (opened, _) = f.open(&id).await;
+    // Kept by the record it names, so it is the same item when read back.
+    let read = opened.snapshot.chat.read_through.unwrap();
+    assert_eq!(format!("turn:{read}"), turn_item);
+}
+
+#[tokio::test(start_paused = true)]
 async fn reopening_attaches_to_the_running_chat_and_closing_a_view_stops_nothing() {
     let f = Fixture::new().await;
     let id = f.chat().await;

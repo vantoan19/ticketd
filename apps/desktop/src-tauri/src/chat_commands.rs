@@ -340,6 +340,16 @@ pub async fn chat_mark_read(bridge: State<'_, ChatBridge>, chat_id: String) -> O
     bridge.chats.mark_read(&chat_id).await
 }
 
+/// The person read the transcript through `item_id`; the New marker goes after it.
+#[tauri::command]
+pub fn chat_read_through(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    item_id: String,
+) -> Outcome<()> {
+    bridge.chats.read_through(&chat_id, &item_id)
+}
+
 #[tauri::command]
 pub async fn chat_mark_unread(bridge: State<'_, ChatBridge>, chat_id: String) -> Outcome<()> {
     bridge.chats.mark_unread(&chat_id).await

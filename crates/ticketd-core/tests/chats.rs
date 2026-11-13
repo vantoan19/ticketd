@@ -1529,6 +1529,34 @@ fn last_turn(workspace: &Workspace, chat: &Chat) -> ticketd_core::ChatTurn {
 }
 
 #[test]
+fn what_the_person_read_through_is_kept_and_only_moves_forward() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let message = start_turn(&mut workspace, &chat, "Hello", "turn-1");
+    assert_eq!(chat.read_through, None);
+    let read = workspace
+        .mark_chat_read_through(&chat.id, "turn-1")
+        .unwrap();
+    assert_eq!(read.read_through.as_deref(), Some("turn-1"));
+    // Scrolling back up to an earlier record does not move it back.
+    let read = workspace
+        .mark_chat_read_through(&chat.id, &message.id)
+        .unwrap();
+    assert_eq!(read.read_through.as_deref(), Some("turn-1"));
+    // A record that is not in this Chat changes nothing.
+    let read = workspace
+        .mark_chat_read_through(&chat.id, "elsewhere")
+        .unwrap();
+    assert_eq!(read.read_through.as_deref(), Some("turn-1"));
+    drop(workspace);
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert_eq!(
+        workspace.chat(&chat.id).unwrap().read_through.as_deref(),
+        Some("turn-1")
+    );
+}
+
+#[test]
 fn a_turn_that_ends_after_the_chat_was_seen_is_unseen_until_seen_again() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

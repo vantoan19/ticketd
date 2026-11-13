@@ -20,6 +20,7 @@ fn chat(seen_through: i64) -> Chat {
         links: Vec::new(),
         active_turn: None,
         seen_through,
+        read_through: None,
         muted: false,
         created_at: String::new(),
     }

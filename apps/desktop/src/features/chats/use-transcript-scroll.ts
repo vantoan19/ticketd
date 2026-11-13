@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -12,15 +13,6 @@ const BOTTOM = 8;
 
 /** Where a Chat was left this session: following, or at a scroll offset. */
 const positions = new Map<string, number | "end">();
-/** The last item of each Chat that was in view in a focused window, this session. */
-const seenThrough = new Map<string, string>();
-
-/**
- * The last item of a Chat that was in view in a focused window this session. The
- * host keeps only whether the last ended turn is unseen (#365), so a Chat first
- * opened in a session places the marker from that instead (`unseenFrom`).
- */
-export const lastSeen = (chatId: string) => seenThrough.get(chatId);
 
 /**
  * What rows ask of the reading position: whether the reader follows the end, and
@@ -42,10 +34,10 @@ const atBottom = (box: HTMLElement) =>
   box.scrollHeight - box.scrollTop - box.clientHeight <= BOTTOM;
 
 /**
- * Notes the first visible `[data-anchor]`, and the last `[data-seen]` item in view
- * when the window has focus.
+ * Notes the first visible `[data-anchor]`, and returns the last `[data-seen]` item
+ * in view when the window has focus.
  */
-function note(box: HTMLElement, chatId: string, anchor: { current: Anchor }) {
+function note(box: HTMLElement, anchor: { current: Anchor }) {
   const top = box.getBoundingClientRect().top;
   const bottom = top + box.clientHeight;
   anchor.current = null;
@@ -56,12 +48,12 @@ function note(box: HTMLElement, chatId: string, anchor: { current: Anchor }) {
       break;
     }
   }
-  if (!document.hasFocus()) return;
+  if (!document.hasFocus()) return undefined;
   let last: string | undefined;
   for (const element of box.querySelectorAll<HTMLElement>("[data-seen]"))
     if (element.getBoundingClientRect().top < bottom)
       last = element.dataset.seen;
-  if (last) seenThrough.set(chatId, last);
+  return last;
 }
 
 /**
@@ -74,8 +66,13 @@ function note(box: HTMLElement, chatId: string, anchor: { current: Anchor }) {
  *
  * On open it goes to the New marker a quarter down when what is new does not fit,
  * else to the bottom; with nothing new, to where the Chat was left this session.
+ * `onRead` is told the last item in view in a focused window as it changes; the
+ * host keeps it with the Chat (#365) and it only moves forward there.
  */
-export function useTranscriptScroll(chatId: string) {
+export function useTranscriptScroll(
+  chatId: string,
+  onRead: (itemId: string) => void = () => {},
+) {
   const root = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const marker = useRef<HTMLDivElement>(null);
@@ -83,6 +80,14 @@ export function useTranscriptScroll(chatId: string) {
   const follows = useRef(true);
   const anchor = useRef<Anchor>(null);
   const opened = useRef("");
+  const told = useRef<string | undefined>(undefined);
+  const read = useEffectEvent((box: HTMLElement) => {
+    const last = note(box, anchor);
+    if (last && last !== told.current) {
+      told.current = last;
+      onRead(last);
+    }
+  });
 
   // The opening position, before the first paint. The marker is placed once and
   // stays until the reader sends or leaves, so this runs only when the Chat opens.
@@ -103,7 +108,7 @@ export function useTranscriptScroll(chatId: string) {
     } else if (typeof saved === "number") box.scrollTop = saved;
     else box.scrollTop = box.scrollHeight;
     follows.current = atBottom(box);
-    note(box, chatId, anchor);
+    read(box);
     // The opening position decides whether the control shows from the first paint.
     setFollowing(follows.current);
   }, [chatId]);
@@ -131,7 +136,7 @@ export function useTranscriptScroll(chatId: string) {
           offset;
         if (moved) box.scrollTop += moved;
       }
-      note(box, chatId, anchor);
+      read(box);
     });
     observer.observe(column);
     return () => observer.disconnect();
@@ -145,7 +150,7 @@ export function useTranscriptScroll(chatId: string) {
       follows.current = bottom;
       setFollowing(bottom);
     }
-    note(box, chatId, anchor);
+    read(box);
   };
 
   const follow = () => {

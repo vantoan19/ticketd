@@ -407,6 +407,8 @@ pub struct ChatState {
     /// There is something to type into: the Chat is not in trash, and neither its
     /// folder nor its session is gone.
     pub has_composer: bool,
+    /// The last transcript item the person had in view: the New marker goes after it.
+    pub read_through: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1570,6 +1572,7 @@ pub fn chat_state(
             .is_some_and(|turn| chat.unseen(turn)),
         muted: chat.muted,
         has_composer,
+        read_through: chat.read_through.clone(),
     }
 }
 
@@ -1709,6 +1712,7 @@ mod tests {
                 ended_at: None,
             }),
             seen_through: 0,
+            read_through: None,
             muted: false,
             created_at: String::new(),
         }

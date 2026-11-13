@@ -320,6 +320,8 @@ export type MockChatClient = ChatClient & {
   quit: boolean;
   /** Titles saved through Save as Document, in order. */
   savedDocuments: string[];
+  /** Items passed to readThrough, in order. */
+  readThroughs: string[];
   /** Paths opened through a changed-files row or a step's file name, in order. */
   openedFiles: string[];
   /** What the next folder dialog returns. */
@@ -565,6 +567,7 @@ export function createMockChatClient(
     notify: true,
     savedDocuments: [],
     openedFiles: [],
+    readThroughs: [],
     nextFolder: null,
     push,
     patch,
@@ -886,6 +889,12 @@ export function createMockChatClient(
     },
     markRead: async (id) => patch(id, { unseen: false }),
     markUnread: async (id) => patch(id, { unseen: true }),
+    // As the host: kept with the Chat for the next open, and announced to no view.
+    async readThrough(id, itemId) {
+      client.readThroughs.push(itemId);
+      const entry = get(id);
+      entry.chat = { ...entry.chat, read_through: itemId };
+    },
     setMuted: async (id, muted) => patch(id, { muted }),
     async setNotify(enabled) {
       client.notify = enabled;

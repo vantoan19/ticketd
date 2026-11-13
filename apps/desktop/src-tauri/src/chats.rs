@@ -963,6 +963,16 @@ impl Chats {
         Ok(host.notify_changed(chat_id).await?)
     }
 
+    /// The person had the transcript in view through `item_id`, a transcript item. It
+    /// is kept with the Chat so the New marker is placed after it the next time the
+    /// Chat opens, also after ticketd restarts. Nothing is announced.
+    pub fn read_through(&self, chat_id: &str, item_id: &str) -> Outcome<()> {
+        // A turn's timing item is named after its turn.
+        let record = item_id.strip_prefix("turn:").unwrap_or(item_id);
+        self.workspace()?.mark_chat_read_through(chat_id, record)?;
+        Ok(())
+    }
+
     pub async fn set_muted(&self, chat_id: &str, muted: bool) -> Outcome<()> {
         let host = self.host()?;
         self.workspace()?.set_chat_muted(chat_id, muted)?;

@@ -577,7 +577,11 @@ export function turnStatus(
  * with no row of their own. Nothing is new without a seen position.
  */
 export function firstNew(items: TranscriptItem[], seen: string | undefined) {
-  const from = seen === undefined ? -1 : items.findIndex((i) => i.id === seen);
+  // The host keeps a turn's timing item by its turn's id.
+  const from =
+    seen === undefined
+      ? -1
+      : items.findIndex((i) => i.id === seen || i.id === `turn:${seen}`);
   if (from < 0) return undefined;
   return items
     .slice(from + 1)

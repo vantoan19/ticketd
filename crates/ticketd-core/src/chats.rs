@@ -108,6 +108,25 @@ pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Schema 70: how far the person has read each Chat's transcript, so its New marker
+/// is placed the same way after ticketd restarts. Existing Chats start with nothing
+/// read through and place it from their unseen turn, as before.
+pub(crate) fn migrate_read_through(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'read_through')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN read_through TEXT;
+             ALTER TABLE chats ADD COLUMN read_through_position INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 70;")?;
+    Ok(())
+}
+
 /// Schema 69: an approval remembers the tool call it was asked for, so its decision
 /// is told on that step and not on whichever step came next.
 pub(crate) fn migrate_interaction_tool(connection: &Connection) -> Result<(), Error> {
@@ -185,6 +204,9 @@ pub struct Chat {
     /// The position of the last ended turn the person has seen: a turn that ended at a
     /// later position is unseen.
     pub seen_through: i64,
+    /// The last record of the transcript that was in view in a focused window: the
+    /// New marker goes after it. `None` until the person has read any.
+    pub read_through: Option<String>,
     /// The person turned this Chat's notifications off.
     pub muted: bool,
     pub created_at: String,
@@ -714,7 +736,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
         .query_row(
             "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
                     (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
-                    seen_through, muted
+                    seen_through, muted, read_through
              FROM chats WHERE id = ?1",
             [id],
             |row| {
@@ -732,6 +754,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
                     native_session_id: row.get(10)?,
                     seen_through: row.get(11)?,
                     muted: row.get(12)?,
+                    read_through: row.get(13)?,
                     links: Vec::new(),
                     active_turn: None,
                 })
@@ -1601,6 +1624,41 @@ impl Workspace {
             Some(through) if chat.seen_through >= through => self.set_seen_through(id, through - 1),
             _ => Ok(chat),
         }
+    }
+
+    /// The person had the transcript in view through `record` (a message, turn, tool,
+    /// request, notice or session of this Chat). It only moves forward; a record that
+    /// is not this Chat's, or is earlier than what was read, changes nothing. No Chat
+    /// change is logged: reading is not a change the views have to follow.
+    pub fn mark_chat_read_through(&mut self, id: &str, record: &str) -> Result<Chat, Error> {
+        let chat = self.chat(id)?;
+        let position: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT position FROM (
+                     SELECT position, id, chat_id FROM chat_sessions
+                     UNION ALL SELECT position, id, chat_id FROM chat_messages
+                     UNION ALL SELECT position, id, chat_id FROM chat_turns
+                     UNION ALL SELECT position, id, chat_id FROM chat_tools
+                     UNION ALL SELECT position, id, chat_id FROM chat_interactions
+                     UNION ALL SELECT position, id, chat_id FROM chat_notices)
+                 WHERE chat_id = ?1 AND id = ?2",
+                params![id, record],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(position) = position else {
+            return Ok(chat);
+        };
+        let moved = self.connection.execute(
+            "UPDATE chats SET read_through = ?2, read_through_position = ?3
+             WHERE id = ?1 AND read_through_position < ?3",
+            params![id, record, position],
+        )?;
+        if moved == 0 {
+            return Ok(chat);
+        }
+        self.chat(id)
     }
 
     /// Mute stops the Chat's notifications and its share of the app-icon count.

@@ -89,7 +89,6 @@ import {
 } from "@/features/chats/Transcript";
 import {
   ReadingContext,
-  lastSeen,
   useTranscriptScroll,
 } from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
@@ -426,15 +425,19 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
       }),
     );
   // Placed once when the Chat opens; it stays until the person sends or leaves.
-  // Without a seen position from this session, the host's own (#365) says
-  // whether the last ended turn is unseen.
+  // After what the person read through, which the host keeps (#365); a Chat
+  // never read here says from its unseen turn.
   const [newFrom, setNewFrom] = useState(() => {
-    const seen = lastSeen(id);
-    if (seen) return firstNew(items, seen);
+    const seen = chat.read_through ?? undefined;
+    const after = seen && firstNew(items, seen);
+    if (after) return after;
     return chat.unseen ? unseenFrom(items) : undefined;
   });
   const { root, content, marker, following, reading, follow, onScroll } =
-    useTranscriptScroll(id);
+    useTranscriptScroll(
+      id,
+      (itemId) => void client.readThrough(id, itemId).catch(() => {}),
+    );
   /** Sending resumes following and clears the New marker. */
   const sent = <T,>(action: Promise<T>) => {
     follow();
