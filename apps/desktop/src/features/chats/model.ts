@@ -118,7 +118,9 @@ export function ticketdParts(
         text: index === calls.length - 1 ? "and" : ",",
       });
     const verb = TICKETD_VERBS[call.verb][tense];
-    parts.push({ text: index > 0 || lower ? verb.toLowerCase() : verb });
+    // "Read T-12 and Document d1": a verb is said once while it repeats.
+    if (calls[index - 1]?.verb !== call.verb)
+      parts.push({ text: index > 0 || lower ? verb.toLowerCase() : verb });
     for (const word of call.words) {
       const title = word.record ? name(word.record, word.text) : undefined;
       parts.push(
