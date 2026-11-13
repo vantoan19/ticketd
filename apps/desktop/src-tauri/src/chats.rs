@@ -345,7 +345,7 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             ),
             None,
         ),
-        Inspection::NotInstalled => ("not_installed", format!("{name} was not found"), None),
+        Inspection::NotInstalled => ("not_installed", format!("{name} was not found"), sign_in),
         Inspection::ProbeFailed { reason } => ("unknown", reason.clone(), None),
     };
     HarnessStatus {
