@@ -891,7 +891,7 @@ fn replying_in_the_chat_of_a_run_that_needs_attention_takes_it_over() {
     // The step keeps why it failed, and its Chat is the person's now.
     assert_eq!(taken.steps[0].reason.as_deref(), Some(LIMIT));
     assert_eq!(taken.steps[0].chat_id.as_deref(), Some(chat.as_str()));
-    assert_eq!(listed_chats(&workspace), [chat.clone()]);
+    assert_eq!(listed_chats(&workspace), std::slice::from_ref(&chat));
     // A second message in what is now an ordinary Chat changes nothing.
     assert_eq!(
         workspace.take_over_automation_run(&chat, true).unwrap(),
