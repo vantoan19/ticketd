@@ -26,9 +26,10 @@ use tokio::sync::oneshot;
 use crate::chat_attention::Rank;
 use crate::chat_reports::{self, SettingChangeView};
 use crate::chat_view::{
-    self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, Queued, Summary, Surroundings,
-    Tracker, harness_name,
+    self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, ProjectRef, Queued, Summary,
+    Surroundings, Tracker, harness_name,
 };
+use crate::folder_probe;
 
 /// History read to build a list row. A Chat's latest outcome is near its end.
 const SUMMARY_ITEMS: usize = 50;
@@ -247,8 +248,10 @@ pub struct HarnessStatus {
     pub message: Option<String>,
     pub command: Option<String>,
     pub help_url: Option<String>,
-    /// The executable that was found, when the message is about one.
+    /// The executable that was found.
     pub path: Option<String>,
+    /// The version number it reported ("2.1.322"), when it was found and said one.
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -367,8 +370,17 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             .then(|| chat_view::help_url(id).map(str::to_owned))
             .flatten(),
         path: match &inspection {
-            Inspection::Incompatible { executable, .. } => Some(executable.display().to_string()),
-            _ => None,
+            Inspection::Installed { executable, .. }
+            | Inspection::Incompatible { executable, .. } => Some(executable.display().to_string()),
+            Inspection::NotInstalled | Inspection::ProbeFailed { .. } => None,
+        },
+        version: match &inspection {
+            Inspection::Installed { version, .. } | Inspection::Incompatible { version, .. } => {
+                version
+                    .as_deref()
+                    .map(|text| version_number(text).to_owned())
+            }
+            Inspection::NotInstalled | Inspection::ProbeFailed { .. } => None,
         },
     }
 }
@@ -505,11 +517,14 @@ fn surroundings(
         .filter(|other| other.id != chat.id && other.execution_folder == chat.execution_folder)
         .map(|other| other.title.clone().unwrap_or("Untitled Chat".to_owned()))
         .collect();
+    let links = links(workspace, &chat.id)?;
     Ok(Surroundings {
         checked_turn,
         folder_missing,
         shared_with,
-        links: links(workspace, &chat.id)?,
+        project: project(workspace, &chat.execution_folder, &links)?,
+        branch: None,
+        links,
         // Input the host holds to send is being sent, not in the person's queue.
         queue: workspace
             .chat_queue(&chat.id)?
@@ -524,6 +539,35 @@ fn surroundings(
             })
             .collect(),
     })
+}
+
+/// The Project whose folder (any checkout) holds `folder`, else the first linked one.
+fn project(
+    workspace: &Workspace,
+    folder: &str,
+    links: &[LinkedRecord],
+) -> Result<Option<ProjectRef>, ticketd_core::Error> {
+    // Checkout paths are stored canonical; the Chat's folder may not be.
+    let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| PathBuf::from(folder));
+    let found = workspace.list_projects()?.into_iter().find(|project| {
+        std::iter::once(&project.path)
+            .chain(&project.paths)
+            .any(|path| folder.starts_with(path))
+    });
+    Ok(found
+        .map(|project| ProjectRef {
+            id: project.id,
+            title: project.name,
+        })
+        .or_else(|| {
+            links.iter().find_map(|link| match link {
+                LinkedRecord::Project { id, title } => Some(ProjectRef {
+                    id: id.clone(),
+                    title: title.clone(),
+                }),
+                LinkedRecord::Ticket { .. } | LinkedRecord::Document { .. } => None,
+            })
+        }))
 }
 
 /// Remembers whether a Chat was last shown with its folder missing; returns whether
@@ -967,6 +1011,7 @@ impl Chats {
                     command: None,
                     help_url: None,
                     path: None,
+                    version: None,
                 },
             });
         }
@@ -1055,7 +1100,7 @@ impl Chats {
         let workspace = self.workspace()?;
         let users = folder_users(&workspace)?;
         let checked = self.checked(&view.chat.id);
-        let around = surroundings(
+        let mut around = surroundings(
             &workspace,
             &view.chat,
             &users,
@@ -1063,6 +1108,9 @@ impl Chats {
             &view.live,
             &self.missing_folders,
         )?;
+        // Read again with every state, so a branch switched outside shows by the
+        // turn's end.
+        around.branch = folder_probe::branch(Path::new(&view.chat.execution_folder));
         Ok(chat_view::chat_state(
             &view.chat,
             &view.live,
@@ -1081,19 +1129,16 @@ impl Chats {
         let workspace = self.workspace()?;
         let tracker = Tracker::from_items(&attached.snapshot.items);
         let chat = attached.snapshot.chat;
-        let state = chat_view::chat_state(
+        let mut around = surroundings(
+            &workspace,
             &chat,
+            &folder_users(&workspace)?,
+            self.checked(chat_id),
             &attached.live,
-            &tracker,
-            &surroundings(
-                &workspace,
-                &chat,
-                &folder_users(&workspace)?,
-                self.checked(chat_id),
-                &attached.live,
-                &self.missing_folders,
-            )?,
-        );
+            &self.missing_folders,
+        )?;
+        around.branch = folder_probe::branch(Path::new(&chat.execution_folder));
+        let state = chat_view::chat_state(&chat, &attached.live, &tracker, &around);
         let fresh = self.fresh(chat_id);
         let items = attached
             .snapshot
@@ -1718,6 +1763,15 @@ impl Chats {
 
     /// A file the agent changed in this Chat, to open. Only files a turn reported
     /// changing can be opened this way.
+    /// The Chat's execution folder, to open in the file manager, when it exists.
+    pub fn folder(&self, chat_id: &str) -> Outcome<PathBuf> {
+        let path = PathBuf::from(self.workspace()?.chat(chat_id)?.execution_folder);
+        if !path.is_dir() {
+            return Err(failed("The folder is no longer on this computer."));
+        }
+        Ok(path)
+    }
+
     pub fn changed_file(&self, chat_id: &str, path: &str) -> Outcome<PathBuf> {
         let workspace = self.workspace()?;
         let snapshot = workspace.chat_snapshot(chat_id, HISTORY_ITEMS)?;

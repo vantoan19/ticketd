@@ -9,6 +9,7 @@ mod chat_view;
 mod chats;
 mod cli_status;
 mod drive_commands;
+mod folder_probe;
 mod step_kind;
 mod sync_commands;
 mod sync_scheduler;
@@ -383,6 +384,17 @@ fn list_projects() -> Result<Vec<Project>, String> {
     open_workspace()
         .and_then(|w| w.list_projects())
         .map_err(|e| e.to_string())
+}
+/// The favicon a Project's folder ships, probed now and never stored. `None` when no
+/// checkout has one, so the Project shows its letter tile.
+#[tauri::command(async)]
+fn project_icon(id: String) -> Result<Option<folder_probe::Favicon>, String> {
+    let project = open_workspace()
+        .and_then(|w| w.show_project(&id))
+        .map_err(|e| e.to_string())?;
+    Ok(std::iter::once(&project.path)
+        .chain(&project.paths)
+        .find_map(|path| folder_probe::favicon(std::path::Path::new(path))))
 }
 #[tauri::command]
 fn create_project(name: String, path: String) -> Result<Project, String> {
@@ -1688,6 +1700,8 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_save_as_document,
             chat_commands::chat_change_setting,
             chat_commands::chat_open_file,
+            chat_commands::chat_open_folder,
+            project_icon,
             chat_commands::chat_answer_quit,
             chat_commands::close_keeps_running,
             sync_commands::sync_conflicts,
