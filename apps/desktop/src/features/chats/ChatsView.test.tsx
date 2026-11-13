@@ -311,6 +311,21 @@ test("a queued message can be sent now, alone, or moved back into the message bo
   expect(chat.queue_paused).toBe(true);
 });
 
+test("an approval's reason sets its `code spans` in mono, without the backticks", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...approval, reason: "Allow appending the `verified` line to hello.txt?" },
+    ]),
+  );
+  const reason = document.querySelector(".chat-request-reason")!;
+  expect(reason.textContent).toBe(
+    "Allow appending the verified line to hello.txt?",
+  );
+  expect(within(reason as HTMLElement).getByText("verified").tagName).toBe(
+    "CODE",
+  );
+});
+
 test("a pending approval waits in the dock with its command inline, never in the transcript", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [

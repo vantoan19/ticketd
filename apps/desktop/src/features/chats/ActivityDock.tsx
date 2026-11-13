@@ -120,7 +120,7 @@ function Request({
       <div className="chat-request-body">
         {request.reason && (
           <p id={reasonId} className="chat-request-reason">
-            {request.reason}
+            <CodeSpans text={request.reason} />
           </p>
         )}
         {question ? (
@@ -324,5 +324,20 @@ export function ActivityDock({
         </section>
       )}
     </div>
+  );
+}
+
+/** Sets a harness's `code spans` in mono; unbalanced backticks stay as written. */
+function CodeSpans({ text }: { text: string }) {
+  const parts = text.split("`");
+  if (parts.length % 2 === 0) return text;
+  return parts.map((part, index) =>
+    index % 2 ? (
+      <code key={index} className="chat-mono">
+        {part}
+      </code>
+    ) : (
+      part
+    ),
   );
 }
