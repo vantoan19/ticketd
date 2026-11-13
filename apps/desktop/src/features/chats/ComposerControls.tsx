@@ -267,8 +267,10 @@ export function HarnessPicker({
     : loading
       ? ""
       : "Default";
+  // A model that takes effort always says which: "Default" when none was chosen.
   const effortLabel =
-    efforts.find((option) => option.id === effortId)?.label ?? "";
+    efforts.find((option) => option.id === effortId)?.label ??
+    (efforts.length > 0 && !effortId ? "Default" : "");
   const name = [
     harness?.name,
     `model ${modelLabel || "Default"}`,
@@ -348,7 +350,7 @@ export function HarnessPicker({
             <span className="chat-skeleton chat-control-skeleton" aria-hidden />
           )}
           {bars && <EffortGlyph {...bars} />}
-          {bars && effortLabel && (
+          {effortLabel && (
             <span className="chat-control-effort">{effortLabel}</span>
           )}
           {pending ? (

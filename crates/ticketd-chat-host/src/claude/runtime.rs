@@ -349,6 +349,8 @@ impl Connection {
                 open[field] = json!(value);
             }
         }
+        // Claude Code may not report the effort it runs with: the pick stays shown.
+        self.state().session.effort_in_effect(picks.effort.clone());
         let resuming = match &request.session {
             SessionStart::New => false,
             SessionStart::Resume(session) => {
@@ -952,7 +954,15 @@ impl HarnessRuntime for ClaudeRuntime {
             "setting": {"kind": kind, "value": change.value},
         });
         match self.connection.call(|_| Ok((command, Kind::Setting))).await {
-            CallOutcome::Event(event) if event["outcome"] == "applied" => SettingOutcome::Applied,
+            CallOutcome::Event(event) if event["outcome"] == "applied" => {
+                if change.setting == SettingKey::Effort {
+                    self.connection
+                        .state()
+                        .session
+                        .effort_in_effect(Some(change.value.clone()));
+                }
+                SettingOutcome::Applied
+            }
             CallOutcome::Event(event) => SettingOutcome::Refused {
                 reason: reason(&event["message"]),
             },

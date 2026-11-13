@@ -207,6 +207,12 @@ impl Session {
         events.extend(self.reports.session_info(event));
     }
 
+    /// The effort the person picked, or a change Claude Code applied: in effect
+    /// until Claude Code reports another.
+    pub fn effort_in_effect(&mut self, effort: Option<String>) {
+        self.reports.effort_in_effect(effort);
+    }
+
     /// `session_initialized`: the session's choosable settings and slash commands.
     pub fn initialized(&mut self, event: &Value) -> Vec<EventKind> {
         let mut events: Vec<EventKind> = self.reports.initialized(event).into_iter().collect();

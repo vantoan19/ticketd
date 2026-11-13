@@ -1828,7 +1828,7 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   ).toBe("status");
   // No radios: the harness is the picker's, beside Send.
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5",
+    name: "Claude Code, model Opus 5.5, effort Default",
   });
   expect(screen.queryByRole("radiogroup", { name: "Harness" })).toBeNull();
   fireEvent.click(trigger);
@@ -1913,7 +1913,7 @@ test("a Chat started in New Chat keeps its picks on the triggers until the sessi
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Claude Code, model Opus 5.5" }),
+    await screen.findByRole("button", { name: "Claude Code, model Opus 5.5, effort Default" }),
   );
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
   fireEvent.click(await screen.findByRole("radio", { name: "High" }));
@@ -1993,7 +1993,7 @@ test("New Chat on Claude Code sends the shown default model and permission mode,
     { id: "claude-code", name: "Claude Code", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  await screen.findByRole("button", { name: "Claude Code, model Opus 5.5" });
+  await screen.findByRole("button", { name: "Claude Code, model Opus 5.5, effort Default" });
   // The permission trigger names the mode, not "Default".
   expect(button("Permissions: Ask before edits")).toBeTruthy();
   type("Add a limiter", "Describe a task or ask a question");

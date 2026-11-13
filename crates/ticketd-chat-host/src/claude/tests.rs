@@ -1015,6 +1015,42 @@ fn the_slash_commands_claude_code_lists_reach_the_host() {
     );
 }
 
+/// LIVE2-2: Claude Code's `session_info` may leave its effort out; the effort the
+/// session was opened with stays the one shown until Claude Code says another.
+#[test]
+fn the_picked_effort_stays_until_claude_code_reports_another() {
+    use super::session::Session;
+    let mut session = Session::default();
+    session.effort_in_effect(Some("medium".to_owned()));
+    let models = json!({"models": [
+        {"value": "default", "resolved_model": "claude-opus-test", "display_name": "Default", "description": "", "effort_levels": ["low", "medium", "high"]},
+    ]});
+    let _ = session.initialized(&models);
+    let effort = |info: Value, session: &mut Session| {
+        let (events, _) = session.event("session_info", &info).expect("modeled");
+        let Some(EventKind::SettingsState(settings)) = events.last() else {
+            panic!("settings, got {events:?}");
+        };
+        settings.effort.as_ref().and_then(|e| e.current.clone())
+    };
+    assert_eq!(
+        effort(
+            json!({"model": "claude-opus-test", "permission_mode": "default"}),
+            &mut session
+        )
+        .as_deref(),
+        Some("medium")
+    );
+    assert_eq!(
+        effort(
+            json!({"model": "claude-opus-test", "permission_mode": "plan", "effort": "high"}),
+            &mut session
+        )
+        .as_deref(),
+        Some("high")
+    );
+}
+
 #[test]
 fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
     use super::session::Session;

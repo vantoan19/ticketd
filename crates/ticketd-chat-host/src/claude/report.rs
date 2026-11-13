@@ -412,6 +412,15 @@ impl Reports {
 
     // -- settings -----------------------------------------------------------------
 
+    /// The effort the session was opened with or last switched to. Claude Code's
+    /// `session_info` does not always say its effort; until it says another, this
+    /// is the one in effect (LIVE2-2).
+    pub fn effort_in_effect(&mut self, effort: Option<String>) {
+        if effort.is_some() {
+            self.effort = effort;
+        }
+    }
+
     /// `session_info`: what Claude Code says is in effect.
     pub fn session_info(&mut self, event: &Value) -> Option<EventKind> {
         let before = (
