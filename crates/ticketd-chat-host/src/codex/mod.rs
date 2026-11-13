@@ -3,8 +3,8 @@
 //! Codex keeps its own sign-in, configuration and instructions. For a person's Chat
 //! the adapter passes only the working directory, so the approval policy and sandbox
 //! are theirs too. For an unattended session (an Automation run) it turns approvals
-//! off and sets the sandbox from the agent's allowed tools. It never reads
-//! credentials, grants full access or chooses how the user is billed.
+//! off and limits writes to the step's folder and the Workspace data folder. It never
+//! reads credentials, grants full access or chooses how the user is billed.
 
 mod discovery;
 mod mapping;
@@ -58,37 +58,37 @@ impl CodexAdapter {
 }
 
 /// What `thread/start` and every `turn/start` are told for an unattended session:
-/// approvals off, and a sandbox set from the allowed tools. Codex reads files and
-/// runs commands inside the sandbox whatever the switches say, so "read files",
-/// "run commands" and the list of allowed commands cannot be enforced here; what the
-/// sandbox enforces is that nothing is written unless "edit files" is on and nothing
-/// reaches the network unless "use the web" is. It is never full access.
-pub(super) fn unattended_params(unattended: &Unattended) -> (Value, Value) {
-    let network = unattended.tools.use_web;
-    let (mode, policy) = if unattended.tools.edit_files {
-        let roots: Vec<_> = unattended
-            .ticketd_folders
-            .iter()
-            .map(|folder| folder.to_string_lossy())
-            .collect();
-        (
-            "workspace-write",
-            json!({"type": "workspaceWrite", "networkAccess": network, "writableRoots": roots}),
-        )
-    } else {
-        (
-            "read-only",
-            json!({"type": "readOnly", "networkAccess": network}),
-        )
-    };
-    let mut thread = json!({"approvalPolicy": "never", "sandbox": mode});
+/// approvals off, and Codex's own sandbox. Codex reads files and runs commands
+/// inside the sandbox whatever the switches say, and a read-only sandbox would stop
+/// the ticketd CLI recording the agent's result, so "read files", "edit files",
+/// "run commands" and the list of allowed commands do not apply here. The sandbox
+/// always lets the agent write to the step's folder (`working_directory`) and the
+/// folders the ticketd CLI writes to, and nowhere else: not the temporary folders
+/// Codex would add by itself. Only "use the web" is the agent's own: nothing reaches
+/// the network unless it is on. It is never full access.
+pub(super) fn unattended_params(
+    unattended: &Unattended,
+    working_directory: &Path,
+) -> (Value, Value) {
+    let roots: Vec<_> = std::iter::once(working_directory)
+        .chain(unattended.ticketd_folders.iter().map(PathBuf::as_path))
+        .map(Path::to_string_lossy)
+        .collect();
+    let mut thread = json!({"approvalPolicy": "never", "sandbox": "workspace-write"});
     if let Some(model) = &unattended.model {
         thread["model"] = json!(model);
     }
-    (
-        thread,
-        json!({"approvalPolicy": "never", "sandboxPolicy": policy}),
-    )
+    let turn = json!({
+        "approvalPolicy": "never",
+        "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "networkAccess": unattended.tools.use_web,
+            "writableRoots": roots,
+            "excludeTmpdirEnvVar": true,
+            "excludeSlashTmp": true,
+        },
+    });
+    (thread, turn)
 }
 
 #[async_trait]

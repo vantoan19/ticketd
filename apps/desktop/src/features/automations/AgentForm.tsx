@@ -87,14 +87,28 @@ const TOOLS: {
   },
 ];
 
+/**
+ * The switches Codex does not follow. It reads files and runs any command inside
+ * its own sandbox, and that sandbox always lets it write in the step's folder, so
+ * with Codex these show as on and cannot be changed. The agent keeps its own
+ * choices for Claude Code.
+ */
+const FIXED_ON_FOR_CODEX: ReadonlySet<keyof Tools> = new Set([
+  "read_files",
+  "edit_files",
+  "run_commands",
+]);
+
 /** A whole number of at least 1, saved only while it is one. */
 function LimitInput({
   label,
   value,
+  disabled,
   onSave,
 }: {
   label: string;
   value: number;
+  disabled?: boolean;
   onSave: (value: number) => void;
 }) {
   const [text, setText] = useState(String(value));
@@ -105,6 +119,7 @@ function LimitInput({
       step={1}
       className="h-8 w-18"
       aria-label={label}
+      disabled={disabled}
       value={text}
       onChange={(event) => {
         setText(event.target.value);
@@ -173,6 +188,7 @@ export function AgentForm({
   };
   const changeTools = (patch: Partial<Tools>) =>
     change({ tools: { ...draft.tools, ...patch } });
+  const codex = draft.harness === "codex";
   const title = draft.name.trim() || "New agent";
   /** An Automation with a step that runs this agent: it cannot be deleted. */
   const usedBy = agent.used_by[0];
@@ -329,39 +345,45 @@ export function AgentForm({
           <div className="agent-field">
             <span className="agent-label">Allowed tools</span>
             <SettingsList>
-              {TOOLS.map(({ key, title: tool, description }) => (
-                <SettingsRow
-                  key={key}
-                  tight
-                  title={tool}
-                  description={description}
-                  trailing={
-                    <Switch
-                      aria-label={tool}
-                      checked={draft.tools[key]}
-                      onCheckedChange={(on) => changeTools({ [key]: on })}
-                    />
-                  }
-                >
-                  {key === "run_commands" && draft.tools.run_commands && (
-                    <Textarea
-                      aria-label="Allowed commands"
-                      className="mt-2"
-                      placeholder="One command per line. Leave empty to allow any command."
-                      value={commands}
-                      onChange={(event) => {
-                        setCommands(event.target.value);
-                        changeTools({
-                          allowed_commands: event.target.value
-                            .split("\n")
-                            .map((line) => line.trim())
-                            .filter(Boolean),
-                        });
-                      }}
-                    />
-                  )}
-                </SettingsRow>
-              ))}
+              {TOOLS.map(({ key, title: tool, description }) => {
+                const fixed = codex && FIXED_ON_FOR_CODEX.has(key);
+                return (
+                  <SettingsRow
+                    key={key}
+                    tight
+                    title={tool}
+                    description={fixed ? "Always on with Codex" : description}
+                    trailing={
+                      <Switch
+                        aria-label={tool}
+                        disabled={fixed}
+                        checked={fixed || draft.tools[key]}
+                        onCheckedChange={(on) => changeTools({ [key]: on })}
+                      />
+                    }
+                  >
+                    {key === "run_commands" &&
+                      !codex &&
+                      draft.tools.run_commands && (
+                        <Textarea
+                          aria-label="Allowed commands"
+                          className="mt-2"
+                          placeholder="One command per line. Leave empty to allow any command."
+                          value={commands}
+                          onChange={(event) => {
+                            setCommands(event.target.value);
+                            changeTools({
+                              allowed_commands: event.target.value
+                                .split("\n")
+                                .map((line) => line.trim())
+                                .filter(Boolean),
+                            });
+                          }}
+                        />
+                      )}
+                  </SettingsRow>
+                );
+              })}
               <SettingsRow
                 tight
                 title="ticketd command line"
@@ -372,6 +394,13 @@ export function AgentForm({
                 never asks.
               </SettingsListFooter>
             </SettingsList>
+            {codex && (
+              <p className="agent-hint">
+                Codex applies its own sandbox: it reads files, runs any command,
+                and writes only in the step’s folder and your ticketd data. Your
+                own choices are kept for Claude Code.
+              </p>
+            )}
           </div>
           <div className="agent-field">
             <span className="agent-label">
@@ -382,10 +411,15 @@ export function AgentForm({
               <SettingsRow
                 tight
                 title="Turns"
-                description="How many turns one step may take"
+                description={
+                  codex
+                    ? "Not applied with Codex"
+                    : "How many turns one step may take"
+                }
                 trailing={
                   <LimitInput
                     label="Turns"
+                    disabled={codex}
                     value={draft.turn_limit}
                     onSave={(turn_limit) => change({ turn_limit })}
                   />
