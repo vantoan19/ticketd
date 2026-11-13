@@ -35,7 +35,7 @@ const PENDING_PAGE: usize = 50;
 /// a higher number is not rewritten from here.
 const SHARED_FORMAT: u64 = 1;
 /// The `sync_files.kind` values of records, as opposed to the shared files.
-const RECORDS: &str = "('ticket', 'document', 'plan', 'project')";
+const RECORDS: &str = "('ticket', 'document', 'plan', 'project', 'automation_agent', 'automation')";
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
@@ -513,6 +513,8 @@ fn item(connection: &Connection, kind: RecordKind, id: &str) -> Result<Option<Sy
         RecordKind::Document => "SELECT NULL, COALESCE(title, '') FROM documents WHERE id = ?1",
         RecordKind::Plan => "SELECT NULL, name FROM plans WHERE id = ?1",
         RecordKind::Project => "SELECT NULL, name FROM projects WHERE id = ?1",
+        RecordKind::Automation => "SELECT NULL, name FROM automations WHERE id = ?1",
+        RecordKind::AutomationAgent => "SELECT NULL, name FROM automation_agents WHERE id = ?1",
         // Named by what the storage holds, not by a mark.
         RecordKind::Attachment => return Ok(None),
     };
@@ -679,7 +681,7 @@ impl Workspace {
             let attachments = super::attachments::pending_uploads(connection)?;
             pending_total = count(
                 connection,
-                "SELECT COUNT(*) FROM sync_dirty d WHERE d.id NOT IN (SELECT id FROM sync_files WHERE newer) AND ((d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects)))",
+                "SELECT COUNT(*) FROM sync_dirty d WHERE d.id NOT IN (SELECT id FROM sync_files WHERE newer) AND ((d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects)) OR (d.kind = 'automation' AND d.id IN (SELECT id FROM automations)) OR (d.kind = 'automation_agent' AND d.id IN (SELECT id FROM automation_agents)))",
             )? + attachments.len() as u64;
             let room = PENDING_PAGE - pending_uploads.len();
             for (id, title) in attachments.into_iter().take(room) {
@@ -753,7 +755,7 @@ impl Workspace {
                 let total = match direction {
                     SyncDirection::Upload => count(
                         connection,
-                        "SELECT (SELECT COUNT(*) FROM tickets) + (SELECT COUNT(*) FROM documents) + (SELECT COUNT(*) FROM plans) + (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM attachments WHERE kind = 'local_snapshot')",
+                        "SELECT (SELECT COUNT(*) FROM tickets) + (SELECT COUNT(*) FROM documents) + (SELECT COUNT(*) FROM plans) + (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM automations) + (SELECT COUNT(*) FROM automation_agents) + (SELECT COUNT(*) FROM attachments WHERE kind = 'local_snapshot')",
                     )?,
                     SyncDirection::Download => state.first_total,
                 };

@@ -221,6 +221,9 @@ pub struct Automation {
     pub definition: AutomationDefinition,
     /// Whether it is on for this device.
     pub enabled: bool,
+    /// It came from another device through Workspace sync and has not been
+    /// switched on here since.
+    pub arrived_off: bool,
     /// Empty when it can be switched on. In the order the steps run.
     pub problems: Vec<AutomationProblem>,
 }
@@ -247,6 +250,21 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     crate::change_token::track(connection, "automations")?;
     crate::change_token::track(connection, "automation_device_state")?;
     connection.execute_batch("PRAGMA user_version = 69;")?;
+    Ok(())
+}
+
+/// Format version 70: Automations and agents synchronize. A row of
+/// `automation_arrivals` marks an Automation that Workspace sync brought to this
+/// device and that has not been switched on here since. Like on/off, it belongs
+/// to the device and does not synchronize.
+pub(crate) fn migrate_sync(connection: &Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS automation_arrivals (automation_id TEXT PRIMARY KEY REFERENCES automations(id));",
+    )?;
+    crate::change_token::track(connection, "automation_arrivals")?;
+    // Automations and agents join the tables whose changes are captured.
+    crate::sync::migrate_capture(connection)?;
+    connection.execute_batch("PRAGMA user_version = 70;")?;
     Ok(())
 }
 
@@ -475,7 +493,7 @@ fn agent_ids(connection: &Connection) -> Result<HashSet<String>, Error> {
 fn load(connection: &Connection, id: Option<&str>) -> Result<Vec<Automation>, Error> {
     let agents = agent_ids(connection)?;
     let mut statement = connection.prepare(
-        "SELECT a.id, a.name, a.definition, d.automation_id IS NOT NULL FROM automations a LEFT JOIN automation_device_state d ON d.automation_id = a.id WHERE a.trashed = 0 AND (?1 IS NULL OR a.id = ?1) ORDER BY a.rowid DESC",
+        "SELECT a.id, a.name, a.definition, d.automation_id IS NOT NULL, EXISTS(SELECT 1 FROM automation_arrivals WHERE automation_id = a.id) FROM automations a LEFT JOIN automation_device_state d ON d.automation_id = a.id WHERE a.trashed = 0 AND (?1 IS NULL OR a.id = ?1) ORDER BY a.rowid DESC",
     )?;
     let rows = statement
         .query_map([id], |row| {
@@ -484,20 +502,98 @@ fn load(connection: &Connection, id: Option<&str>) -> Result<Vec<Automation>, Er
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, bool>(3)?,
+                row.get::<_, bool>(4)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     rows.into_iter()
-        .map(|(id, name, stored, enabled)| {
+        .map(|(id, name, stored, enabled, arrived)| {
             let definition = decode(name, &stored)?;
             Ok(Automation {
                 id,
                 problems: problems(&definition, &agents),
                 definition,
                 enabled,
+                arrived_off: arrived && !enabled,
             })
         })
         .collect()
+}
+
+const FENCE: &str = "```";
+
+/// A stored definition as the text of its sync file: indented JSON in a fenced
+/// block, so the file reads as Markdown and the steps can be followed by eye.
+pub(crate) fn file_body(stored: &str) -> Result<String, Error> {
+    let invalid = |error: serde_json::Error| Error::InvalidAutomation(error.to_string());
+    let stored: Stored = serde_json::from_str(stored).map_err(invalid)?;
+    let json = serde_json::to_string_pretty(&stored).map_err(invalid)?;
+    Ok(format!("{FENCE}json\n{json}\n{FENCE}"))
+}
+
+/// The definition to store from the text of a sync file. The text must hold a
+/// definition as ticketd stores one: an id made up on arrival for a step
+/// without one would differ on every device.
+pub(crate) fn from_file_body(body: &str) -> Result<String, Error> {
+    let bad = |reason: String| Error::SyncFile(format!("the steps of an automation: {reason}"));
+    let json = body
+        .trim()
+        .strip_prefix("```json")
+        .and_then(|rest| rest.strip_suffix(FENCE))
+        .ok_or_else(|| bad("they must be one ```json block".into()))?;
+    let stored: Stored = serde_json::from_str(json).map_err(|error| bad(error.to_string()))?;
+    if stored.schema_version > SCHEMA_VERSION {
+        return Err(bad(
+            "a newer ticketd wrote them; update ticketd on this desktop to read them".into(),
+        ));
+    }
+    let definition = AutomationDefinition {
+        name: String::new(),
+        trigger: stored.trigger,
+        conditions: stored.conditions,
+        steps: stored.steps,
+    };
+    let tidy = tidied(definition.clone()).map_err(|error| bad(error.to_string()))?;
+    if tidy != definition {
+        return Err(bad(
+            "every step needs an id, and tags are written in lowercase without spaces around them"
+                .into(),
+        ));
+    }
+    encode(&definition)
+}
+
+/// A record that Workspace sync brought to this device for the first time, before
+/// its fields are written: it is off here until the person switches it on.
+pub(crate) fn create_arrived(connection: &Connection, id: &str) -> Result<(), Error> {
+    connection.execute(
+        "INSERT INTO automations (id, name, definition) VALUES (?1, '', ?2)",
+        params![id, encode(&AutomationDefinition::default())?],
+    )?;
+    connection.execute(
+        "INSERT INTO automation_arrivals (automation_id) VALUES (?1)",
+        [id],
+    )?;
+    Ok(())
+}
+
+/// After Workspace sync changed an Automation or an agent: an Automation that is
+/// on here and was deleted, or can no longer run as it now is, goes off here, as
+/// it does after such an edit on this device.
+pub(crate) fn switch_off_unfinished(connection: &Connection) -> Result<(), Error> {
+    connection.execute(
+        "DELETE FROM automation_device_state WHERE automation_id IN (SELECT id FROM automations WHERE trashed = 1)",
+        [],
+    )?;
+    for automation in load(connection, None)? {
+        if automation.enabled && !automation.problems.is_empty() {
+            connection.execute(
+                "DELETE FROM automation_device_state WHERE automation_id = ?1",
+                [&automation.id],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn one(connection: &Connection, id: &str) -> Result<Automation, Error> {
@@ -606,6 +702,11 @@ impl Workspace {
                 "INSERT OR IGNORE INTO automation_device_state (automation_id, cursor) VALUES (?1, ?2)",
                 params![id, crate::events::head(&transaction)?],
             )?;
+            transaction.execute(
+                "DELETE FROM automation_arrivals WHERE automation_id = ?1",
+                [id],
+            )?;
+            automation.arrived_off = false;
         } else {
             transaction.execute(
                 "DELETE FROM automation_device_state WHERE automation_id = ?1",

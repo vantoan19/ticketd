@@ -88,6 +88,8 @@ fn subfolder(kind: RemoteKind) -> Option<&'static str> {
         RemoteKind::Document => Some("documents"),
         RemoteKind::Plan => Some("plans"),
         RemoteKind::Project => Some("projects"),
+        RemoteKind::Automation => Some("automations"),
+        RemoteKind::AutomationAgent => Some("automation_agents"),
         RemoteKind::Attachment => Some("attachments"),
         RemoteKind::Devices => None,
     }
@@ -218,9 +220,12 @@ fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
 
 fn content_type(kind: RemoteKind) -> &'static str {
     match kind {
-        RemoteKind::Ticket | RemoteKind::Document | RemoteKind::Plan | RemoteKind::Project => {
-            "text/markdown"
-        }
+        RemoteKind::Ticket
+        | RemoteKind::Document
+        | RemoteKind::Plan
+        | RemoteKind::Project
+        | RemoteKind::Automation
+        | RemoteKind::AutomationAgent => "text/markdown",
         RemoteKind::Attachment => "application/octet-stream",
         RemoteKind::Devices => "application/json",
     }
