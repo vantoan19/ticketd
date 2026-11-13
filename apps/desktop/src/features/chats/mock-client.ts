@@ -610,9 +610,16 @@ export function createMockChatClient(
     },
     async changeSetting(id, setting, value) {
       const current = get(id).chat.settings?.[setting];
-      if (!current?.options.some((option) => option.id === value && option.allowed))
+      if (
+        !current?.options.some(
+          (option) => option.id === value && option.allowed,
+        )
+      )
         return { value, state: "refused", reason: "not one of its choices" };
-      const change = { value, state: live(get(id).chat) ? "held" : "applied" } as const;
+      const change = {
+        value,
+        state: live(get(id).chat) ? "held" : "applied",
+      } as const;
       patch(id, {
         settings: {
           ...get(id).chat.settings,
@@ -633,7 +640,10 @@ export function createMockChatClient(
           item.files.some((file) => file.open_path === path),
       );
       if (!known)
-        throw new ChatError("failed", "That file is not one this Chat changed.");
+        throw new ChatError(
+          "failed",
+          "That file is not one this Chat changed.",
+        );
     },
     async saveAsDocument(id, responseId, title) {
       const response = get(id).items.find((item) => item.id === responseId);

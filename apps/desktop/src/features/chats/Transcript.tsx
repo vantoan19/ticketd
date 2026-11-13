@@ -25,6 +25,12 @@ import type {
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
+import { placeFiles } from "@/features/chats/reports";
+import {
+  FilesSummary,
+  PlanCard,
+  ReasoningRow,
+} from "@/features/chats/TurnReports";
 import {
   binarySize,
   elapsed,
@@ -41,6 +47,10 @@ type Of<K extends TranscriptItem["kind"]> = Extract<
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
   saveAsDocument: (response: Of<"response">) => void;
+  /** Saves a plan its turn left unfinished, as a checklist. */
+  savePlan: (plan: Of<"plan">) => void;
+  /** Opens a file the turn changed; rejects with the reason it could not. */
+  openFile: (path: string) => Promise<void>;
 };
 
 const DELIVERY_CAPTION = {
@@ -342,13 +352,31 @@ const Item = memo(function Item({
   harness,
   readOnly,
   actions,
+  commandEdits = false,
 }: {
   item: TranscriptItem;
   harness: string;
   readOnly: boolean;
   actions: TranscriptActions;
+  /** For a files row: the turn ran commands that edited files it cannot list. */
+  commandEdits?: boolean;
 }) {
   switch (item.kind) {
+    case "reasoning":
+      return <ReasoningRow item={item} />;
+    case "plan":
+      // While its turn runs, the plan lives in the activity dock.
+      return (
+        <PlanCard item={item} readOnly={readOnly} onSave={actions.savePlan} />
+      );
+    case "files":
+      return (
+        <FilesSummary
+          item={item}
+          commandEdits={commandEdits}
+          onOpen={actions.openFile}
+        />
+      );
     case "user":
       return <UserMessage item={item} />;
     case "response":
@@ -495,15 +523,17 @@ export function Transcript({
       </div>
     );
   const working = chat.activity === "working";
+  const placed = placeFiles(items);
   return (
     <div className="chat-col">
-      {items.map((item) => (
+      {placed.items.map((item) => (
         <Item
           key={item.id}
           item={item}
           harness={harness}
           readOnly={readOnly}
           actions={actions}
+          commandEdits={placed.commandEdits.has(item.id)}
         />
       ))}
       {chat.catching_up && (

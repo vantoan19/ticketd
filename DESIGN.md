@@ -645,6 +645,15 @@ An answered approval folds into its step row, with a tooltip such as "You allowe
 
 **Below the response** come 28px step-style rows, in order and only when needed: the stop marker, changed files ("3 files changed · +53 −12"), then records, verb first ("Moved T-KQ12 to In review · Posted an update on T-KQ12"). References are mono and underlined everywhere.
 
+### Reasoning, plan, files and context
+
+What a harness did not report is not drawn: no row, pill, card, files row or ring, and never "0 files" or an empty ring.
+
+- **Reasoning:** a 28px step row with `brain`: "Thinking…" or "Thinking · {heading}" while live, then "Thought for 12s" ("Thought" without a time, never "0s"; " · Not finished" when cut off). It opens its text once, muted and indented 24px; one with no text leaves when it ends.
+- **Plan:** while its turn runs, only the dock pill (`list-todo`, "3 of 7 done · {current step}") opening a popover of steps. A finished plan is a row in the turn, "Plan · 7 of 7 done"; one left unfinished is a card ("Plan · 3 of 7 done", `circle-check` or `circle` steps, open ones " · Not finished" or " · Not confirmed") whose Save as Document shows on hover or focus.
+- **Changed files:** `file-diff` and "3 files changed · +53 −7", counting only confirmed edits (" · 1 not confirmed"). It opens 32px file rows: mono path shortened in the middle, "new", "deleted" or "renamed", counts or "—", and Copy path. A row opens the file in the system's default app for it, with the reason under the row when it cannot; deleted files are not buttons.
+- **Context ring:** a 16px ring in a 32px ghost button before Stop. From 90% the arc turns `foreground` and an attention dot and "92% full" join it. Its popover reads "Context 124k of 200k", the harness's categories, "Compacts at 167k", and "As of 2:41 PM" only when the report predates the turn.
+
 ### Scroll and the New marker
 
 The transcript follows only while you are at the bottom. Scrolling up stops following; reaching the bottom, sending, or "Jump to latest" (an outline button above the dock) resumes it. Otherwise the first visible item keeps its place. A divider with the unread dot and "New" marks the first item that arrived while you were away; your own messages never count.

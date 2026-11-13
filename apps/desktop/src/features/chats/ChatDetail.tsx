@@ -46,6 +46,8 @@ import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
 import { Composer } from "@/features/chats/Composer";
 import { arrivals, drafts } from "@/features/chats/drafts";
 import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
+import { runningPlan } from "@/features/chats/reports";
+import { ContextRing, PlanPill } from "@/features/chats/TurnReports";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
   composerControls,
@@ -272,9 +274,11 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
   useEffect(() => void arrivals.delete(id), [id]);
   const [resuming, setResuming] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string> | null>(null);
-  const [saving, setSaving] = useState<{ id: string; text: string } | null>(
-    null,
-  );
+  const [saving, setSaving] = useState<{
+    id: string;
+    text: string;
+    plan?: boolean;
+  } | null>(null);
   const [saved, setSaved] = useState("");
   /** Runs a command; a refusal is said once, and the view keeps the host's state. */
   const run = (action: Promise<unknown>) =>
@@ -291,9 +295,20 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     () => ({
       saveAsDocument: (response) =>
         setSaving({ id: response.id, text: response.text }),
+      savePlan: (plan) =>
+        setSaving({
+          id: plan.id,
+          text: `Plan: ${plan.steps[0]?.text ?? ""}`,
+          plan: true,
+        }),
+      openFile: (path) => client.openFile(id, path),
     }),
-    [],
+    [client, id],
   );
+  const plan = runningPlan(items);
+  const turnStartedAt = [...items]
+    .reverse()
+    .find((item) => item.kind === "user")?.at;
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   /** Remounts the composer with the draft after Edit moved a queued message into it. */
@@ -456,6 +471,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                 <ActivityDock
                   chat={chat}
                   requests={pending}
+                  {...(plan && { plan: <PlanPill item={plan} /> })}
                   dockRef={dock}
                   onAnswer={answer}
                   onLeave={() => messageBox.current?.focus()}
@@ -492,6 +508,14 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                   })}
                   {...(isLive(chat) && { onStop: stop })}
                   stopping={chat.stopping}
+                  {...(chat.context && {
+                    beforeStop: (
+                      <ContextRing
+                        context={chat.context}
+                        turnStartedAt={turnStartedAt}
+                      />
+                    ),
+                  })}
                 />
               </div>
             )}
@@ -509,6 +533,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
       {saving && (
         <SaveDocumentDialog
           response={saving}
+          plan={saving.plan ?? false}
           onClose={() => setSaving(null)}
           onSave={async (responseId, title) => {
             await client.saveAsDocument(id, responseId, title);
