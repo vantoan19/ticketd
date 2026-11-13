@@ -74,13 +74,21 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 /// Format 67: what the person has seen of each Chat, and whether it is muted. Chats
 /// that already exist count as seen through their last turn, so upgrading marks
 /// nothing unread and announces nothing.
+/// Like every migration step it may run again over a schema that already has it.
 pub(crate) fn migrate_attention(connection: &Connection) -> Result<(), Error> {
-    connection.execute_batch(
-        "ALTER TABLE chats ADD COLUMN seen_through INTEGER NOT NULL DEFAULT 0;
-         ALTER TABLE chats ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
-         UPDATE chats SET seen_through = COALESCE((SELECT MAX(position) FROM chat_turns WHERE chat_id = chats.id), 0);
-         PRAGMA user_version = 67;",
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'seen_through')",
+        [],
+        |row| row.get(0),
     )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN seen_through INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE chats ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
+             UPDATE chats SET seen_through = COALESCE((SELECT MAX(position) FROM chat_turns WHERE chat_id = chats.id), 0);",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 67;")?;
     Ok(())
 }
 
