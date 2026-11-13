@@ -604,7 +604,7 @@ test("a large transcript keeps up with many small streamed updates", async () =>
   expect(screen.getByText("Reply 299")).toBeTruthy();
 });
 
-test("steps open into a list, with output and an honest truncation note", async () => {
+test("each step reads as what it did, and opens to its output", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [
       {
@@ -612,18 +612,18 @@ test("steps open into a list, with output and an honest truncation note", async 
         at,
         kind: "steps",
         steps: [
-          { verb: "read", target: "src/auth/login.ts", more: 5 },
           {
-            verb: "edited",
+            kind: "edit",
             target: "src/auth/limiter.ts",
-            more: 0,
-            result: "+48",
+            targets: [{ text: "src/auth/limiter.ts" }],
           },
           {
-            verb: "ran",
+            kind: "run",
             target: "npm run test:all",
-            more: 0,
-            result: "1 failed",
+            command: "npm run test:all",
+            folder: "apps/desktop",
+            state: "failed",
+            exit_code: 1,
             output: "FAIL limiter.test.ts",
             truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
           },
@@ -631,11 +631,15 @@ test("steps open into a list, with output and an honest truncation note", async 
       },
     ]),
   );
-  const line = button("Read 6 files, edited 1 file, ran 1 command");
+  // A row with nothing to open is not a control.
+  expect(screen.getByText("src/auth/limiter.ts").closest("button")).toBeNull();
+  const line = button("Run npm run test:all, Failed");
   expect(line.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(line);
   expect(line.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("$ npm run test:all")).toBeTruthy();
   expect(screen.getByText("FAIL limiter.test.ts")).toBeTruthy();
+  expect(screen.getByText("Exit 1 · in apps/desktop")).toBeTruthy();
   expect(
     screen.getByText(
       "Truncated: ticketd keeps the last 1 MiB of 3.4 MiB. Codex saw all of it.",

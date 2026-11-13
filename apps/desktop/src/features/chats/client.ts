@@ -150,15 +150,50 @@ export const harnessStatusSchema = z.object({
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
 
+const stepTargetSchema = z.object({
+  /** A path relative to the Chat's folder, a pattern, a query or a page. */
+  text: z.string(),
+  /** The lines read, first and last. */
+  lines: z.tuple([z.number(), z.number()]).nullish(),
+  /** Where a search looked. */
+  scope: z.string().nullish(),
+});
+export type StepTarget = z.infer<typeof stepTargetSchema>;
+
+/** The host classifies every step; the view only words it (`stepWords`). */
 const stepSchema = z.object({
-  verb: z.enum(["read", "edited", "ran", "other"]),
-  /** A path or command; for `other`, the readable fallback text. */
+  kind: z.enum([
+    "read",
+    "search",
+    "edit",
+    "create",
+    "delete",
+    "run",
+    "web",
+    "other",
+  ]),
+  /** `list`: Listed; `fetch`: Fetched a page; `script`: Ran a `python3` script. */
+  variant: z.enum(["list", "fetch", "script"]).nullish(),
+  /** Readable text for a step without targets: the command, tool or note. */
   target: z.string(),
-  /** Further targets merged into this row ("and 5 more"). */
-  more: z.number().int().nonnegative().default(0),
-  /** Whether the step has finished. Absent from older records: read as `done`. */
-  state: z.enum(["running", "done", "failed", "unknown"]).optional(),
-  /** Diffstat or outcome, already readable: "+12 −3", "passed", "1 failed". */
+  targets: z.array(stepTargetSchema).optional(),
+  /** The command without its shell wrappers. */
+  command: z.string().nullish(),
+  exit_code: z.number().int().nullish(),
+  /** Where the command ran, when that is not the Chat's folder. */
+  folder: z.string().nullish(),
+  timed_out: z.boolean().optional(),
+  duration_ms: z.number().nullish(),
+  /** A search that finished and found nothing. */
+  no_matches: z.boolean().optional(),
+  /**
+   * Whether the step has finished. Absent from older records: read as `done`.
+   * `not_finished`: the turn ended first; `unknown`: contact was lost.
+   */
+  state: z
+    .enum(["running", "done", "failed", "declined", "not_finished", "unknown"])
+    .optional(),
+  /** A note about the output, already readable. */
   result: z.string().nullish(),
   output: z.string().nullish(),
   /** Set when ticketd kept less output than the harness produced. */

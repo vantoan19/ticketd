@@ -8,6 +8,7 @@ import type {
   ProblemKind,
   RecordChange,
   Step,
+  StepTarget,
 } from "@/features/chats/client";
 import { plainText } from "@/features/documents/graph-text";
 
@@ -50,32 +51,176 @@ export function applyChange(
 const count = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
+/** Running, succeeded, and any other outcome; then what three or more count as. */
+const STEP_VERBS = {
+  read: ["Reading", "Read", "Read", "file"],
+  list: ["Listing", "Listed", "List", "folder"],
+  search: ["Searching for", "Searched for", "Search for", "time"],
+  edit: ["Editing", "Edited", "Edit", "file"],
+  create: ["Creating", "Created", "Create", "file"],
+  delete: ["Deleting", "Deleted", "Delete", "file"],
+  run: ["Running", "Ran", "Run", "command"],
+  web: [
+    "Searching the web for",
+    "Searched the web for",
+    "Search the web for",
+    "time",
+  ],
+  fetch: ["Fetching", "Fetched", "Fetch", "page"],
+  other: ["Using", "Used", "Use", "tool"],
+} as const;
+
+const OUTCOME_WORDS = {
+  failed: "Failed",
+  declined: "Declined",
+  not_finished: "Not finished",
+  unknown: "Not confirmed",
+} as const;
+
+export type StepWords = {
+  /** The row's words in order; `code` ones are targets, shown in mono. */
+  parts: { text: string; code?: boolean }[];
+  /** At most one: an outcome word, or a muted result such as "No matches". */
+  suffix?: { text: string; outcome: boolean };
+  /** The row's accessible name: "Run npm run test:limiter, Failed". */
+  label: string;
+  /** The muted line under an opened row: "Exit 1 · in apps/desktop". */
+  detail: string;
+};
+
+/** "12s", "2m 13s", "10m", "1h 4m": how long something took. */
+export function duration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes >= 60) {
+    const rest = minutes % 60;
+    return rest ? `${Math.floor(minutes / 60)}h ${rest}m` : `${minutes / 60}h`;
+  }
+  return seconds % 60 ? `${minutes}m ${seconds % 60}s` : `${minutes}m`;
+}
+
+/** "lines 40–90" for a read that names its lines. */
+export function targetLines(target: StepTarget): string {
+  if (!target.lines) return "";
+  const [from, to] = target.lines;
+  return from === to ? `line ${from}` : `lines ${from}–${to}`;
+}
+
 /**
- * "Read 6 files, edited 2 files, ran 1 command" for the finished steps; a step still
- * running, or one that failed, was refused or lost, is never told as done.
+ * Every word of a step row: `[icon] Verb target · suffix`. Only a step that succeeded
+ * is in the past tense; any other outcome keeps the plain verb and says its word.
  */
-export function stepTally(
-  steps: Pick<Step, "verb" | "target" | "more" | "state">[],
-) {
-  const sum = (picked: typeof steps) =>
-    picked.reduce((total, step) => total + 1 + step.more, 0);
-  const done = steps.filter((step) => (step.state ?? "done") === "done");
-  const total = (verb: Step["verb"]) =>
-    sum(done.filter((step) => step.verb === verb));
-  const running = sum(steps.filter((step) => step.state === "running"));
-  const unfinished = sum(
-    steps.filter((step) => step.state === "failed" || step.state === "unknown"),
-  );
-  const parts = [
-    total("read") && `read ${count(total("read"), "file")}`,
-    total("edited") && `edited ${count(total("edited"), "file")}`,
-    total("ran") && `ran ${count(total("ran"), "command")}`,
-    total("other") && count(total("other"), "other step"),
-    running && `${count(running, "step")} in progress`,
-    unfinished && `${count(unfinished, "step")} did not complete`,
-  ].filter((part): part is string => Boolean(part));
-  const text = parts.join(", ");
-  return text.charAt(0).toUpperCase() + text.slice(1);
+export function stepWords(step: Step): StepWords {
+  const state = step.state ?? "done";
+  const targets = step.targets ?? [];
+  const key =
+    step.kind === "read" && step.variant === "list"
+      ? "list"
+      : step.kind === "web" && step.variant === "fetch"
+        ? "fetch"
+        : step.kind;
+  const [running, done, otherwise, noun] = STEP_VERBS[key];
+  const verb =
+    state === "running" ? running : state === "done" ? done : otherwise;
+  const code = (text: string) => ({ text, code: true });
+  const quoted = (text: string) => ({
+    text: key === "web" ? `“${text}”` : text,
+    code: key !== "web",
+  });
+  let parts: StepWords["parts"];
+  if (step.kind === "other" && targets.length === 0) {
+    parts = [{ text: step.target }];
+  } else if (step.kind === "run" && step.variant === "script") {
+    parts = [
+      { text: `${verb} a` },
+      code(targets[0]?.text ?? ""),
+      { text: "script" },
+    ];
+  } else if (step.kind === "run") {
+    const command = step.command ?? step.target;
+    parts = [{ text: verb }, code(command.split("\n")[0] ?? command)];
+  } else if (targets.length > 2) {
+    // "Searched for" counts as "Searched 3 times".
+    const counted = verb.replace(/ for$/, "");
+    parts = [{ text: `${counted} ${count(targets.length, noun)}` }];
+  } else if (targets.length === 0) {
+    // `rg --files` lists files, not a folder it names.
+    const what = key === "list" ? "file" : noun;
+    parts = [
+      {
+        text: key === "search" ? verb.replace(/ for$/, "") : `${verb} ${what}s`,
+      },
+    ];
+  } else {
+    const [first, second] = targets;
+    parts = [{ text: verb }, quoted(first?.text ?? "")];
+    if (second) parts.push({ text: "and" }, quoted(second.text));
+    else if (first?.scope && key === "search")
+      parts.push({ text: "in" }, code(first.scope));
+  }
+  const suffix =
+    state in OUTCOME_WORDS
+      ? {
+          text: OUTCOME_WORDS[state as keyof typeof OUTCOME_WORDS],
+          outcome: true,
+        }
+      : state === "done" && step.no_matches
+        ? { text: "No matches", outcome: false }
+        : undefined;
+  const words = parts.map((part) => part.text).join(" ");
+  const single = targets.length === 1 && !step.command ? targets[0] : undefined;
+  const detail = [
+    step.timed_out
+      ? `Timed out${step.duration_ms ? ` after ${duration(step.duration_ms)}` : ""}`
+      : step.exit_code
+        ? `Exit ${step.exit_code}`
+        : "",
+    step.folder ? `in ${step.folder}` : "",
+    single ? targetLines(single) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    parts,
+    ...(suffix && { suffix }),
+    label: suffix ? `${words}, ${suffix.text}` : words,
+    detail,
+  };
+}
+
+/**
+ * Consecutive steps of the same kind and outcome as one row ("Read 6 files"), which
+ * opens to its targets. Commands never merge, so each one's output stays one level
+ * down. A merged row keeps "No matches" only when all its steps found nothing.
+ */
+export function mergeSteps(steps: Step[]): Step[] {
+  const rows: Step[] = [];
+  for (const step of steps) {
+    const last = rows.at(-1);
+    const same =
+      last &&
+      step.kind !== "run" &&
+      last.kind === step.kind &&
+      (last.variant ?? null) === (step.variant ?? null) &&
+      (last.state ?? "done") === (step.state ?? "done");
+    if (!same) {
+      rows.push(step);
+      continue;
+    }
+    const {
+      output: _output,
+      result: _result,
+      truncated: _truncated,
+      ...rest
+    } = last;
+    rows[rows.length - 1] = {
+      ...rest,
+      targets: [...(last.targets ?? []), ...(step.targets ?? [])],
+      no_matches: Boolean(last.no_matches && step.no_matches),
+    };
+  }
+  return rows;
 }
 
 /** What the agent did to a record, as the list row says it. */
