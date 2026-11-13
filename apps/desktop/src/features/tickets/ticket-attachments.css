@@ -147,6 +147,16 @@
   background: var(--recessed);
   overflow: hidden;
 }
+/* The image tile of a Chat message: one size everywhere. */
+.attachment-thumbnail[data-size="tile"] {
+  width: 96px;
+  height: 72px;
+  border: 0;
+  box-shadow: var(--shadow-border-base);
+}
+.attachment-thumbnail[data-size="tile"] img {
+  object-fit: cover;
+}
 .attachment-thumbnail img {
   width: 100%;
   height: 100%;

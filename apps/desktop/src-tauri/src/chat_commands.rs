@@ -472,8 +472,9 @@ pub async fn chat_change_setting(
         .await
 }
 
-/// Opens a file the agent changed in the system's default app for its type, as
-/// attachments open.
+/// Opens a file in the Chat's folder (a step's file, or one a turn changed) in the
+/// system's default app for its type, as attachments open. Fails as `gone` when the
+/// file is no longer there.
 #[tauri::command]
 pub fn chat_open_file(
     app: AppHandle,
@@ -481,7 +482,7 @@ pub fn chat_open_file(
     chat_id: String,
     path: String,
 ) -> Outcome<()> {
-    let path = bridge.chats.changed_file(&chat_id, &path)?;
+    let path = bridge.chats.file_in_folder(&chat_id, &path)?;
     app.opener()
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|error| open_failure(&path, &error.to_string()))
@@ -597,6 +598,15 @@ pub async fn chat_save_as_document(
     bridge
         .chats
         .save_as_document(&chat_id, &response_id, &title)
+}
+
+#[tauri::command]
+pub async fn chat_suggestions(
+    bridge: State<'_, ChatBridge>,
+    folder: Option<String>,
+    linked: Vec<String>,
+) -> Outcome<Vec<crate::chat_suggestions::Suggestion>> {
+    bridge.chats.suggestions(folder.as_deref(), &linked)
 }
 
 /// Replaces the workspace with a backup. A backup that cannot be restored stops

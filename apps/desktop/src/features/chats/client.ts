@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import { z } from "zod";
+import { attachmentSchema } from "@/lib/api/attachments";
 
 /**
  * What the desktop host tells the Chat screens, and what they may ask of it.
@@ -282,6 +283,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     ]),
     /** Sent to steer a turn in progress: what follows is a new segment of it. */
     steer: z.boolean().optional(),
+    /** Images sent with the message, kept as Attachments. */
+    images: z.array(attachmentSchema).optional(),
   }),
   z.object({
     ...item,
@@ -543,6 +546,29 @@ export const createdChatSchema = z.object({
   send_error: z.string().nullish(),
 });
 export type CreatedChat = z.infer<typeof createdChatSchema>;
+
+const linkedTicketSchema = linkedRecordSchema.options[0];
+/** What New Chat offers while its box is empty, chosen by the host from local records. */
+export const suggestionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("continue"),
+    ticket: linkedTicketSchema,
+    at: z.string().nullish(),
+  }),
+  z.object({
+    kind: z.literal("review"),
+    ticket: linkedTicketSchema,
+    at: z.string().nullish(),
+  }),
+  /** `count` unread Inbox entries about the linked tickets; `at` is the newest. */
+  z.object({
+    kind: z.literal("triage"),
+    count: z.number().int().positive(),
+    links: z.array(linkedTicketSchema),
+    at: z.string(),
+  }),
+]);
+export type Suggestion = z.infer<typeof suggestionSchema>;
 export type RequestAnswer = { option_id: string } | { text: string };
 export type HistorySelection =
   | { kind: "last_response" }
@@ -553,11 +579,12 @@ export type Unsubscribe = () => void;
 
 /**
  * A command the host refused. `stale` means the request, turn or runtime it
- * named is no longer current; the view shows the current state instead.
+ * named is no longer current; the view shows the current state instead. `gone`
+ * means the file it named is no longer there.
  */
 export class ChatError extends Error {
   constructor(
-    readonly code: "stale" | "failed",
+    readonly code: "stale" | "gone" | "failed",
     message: string,
   ) {
     super(message);
@@ -643,7 +670,11 @@ export interface ChatClient {
     setting: "model" | "effort" | "permission",
     value: string,
   ): Promise<SettingChange>;
-  /** Opens a file the agent changed in the system's default app for it. */
+  /**
+   * Opens a file in the Chat's folder in the system's default app: one a step
+   * named (relative to the folder) or one a turn changed (absolute). Fails with
+   * `gone` when the file is no longer there; a path outside the folder fails.
+   */
   openFile(id: string, path: string): Promise<void>;
   /** Ordinary core Document creation from a response or a plan; resolves to the Document's id. */
   saveAsDocument(
@@ -651,6 +682,11 @@ export interface ChatClient {
     responseId: string,
     title: string,
   ): Promise<string>;
+  /**
+   * New Chat's suggestions for a folder (null: one ticketd keeps), skipping the
+   * tickets already linked to it.
+   */
+  suggestions(folder: string | null, linked: string[]): Promise<Suggestion[]>;
   /** Mark as read clears an unseen outcome, never a live request. */
   markRead(id: string): Promise<void>;
   /** The last turn reads as unseen until the Chat is next opened. */

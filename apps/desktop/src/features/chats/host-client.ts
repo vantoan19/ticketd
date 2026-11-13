@@ -14,6 +14,7 @@ import {
   linkedRecordSchema,
   settingChangeSchema,
   openRequestSchema,
+  suggestionSchema,
   type ChatChange,
   type ChatClient,
 } from "@/features/chats/client";
@@ -59,7 +60,7 @@ export function tauriBridge(): HostBridge {
 }
 
 const failureSchema = z.object({
-  code: z.enum(["stale", "failed"]),
+  code: z.enum(["stale", "gone", "failed"]),
   message: z.string(),
 });
 const openedSchema = z.object({
@@ -288,6 +289,10 @@ export function createHostChatClient(
           title,
         }),
       ),
+    suggestions: async (folder, linked) =>
+      z
+        .array(suggestionSchema)
+        .parse(await call("chat_suggestions", { folder, linked })),
     markRead: (id) => run("chat_mark_read", { chatId: id }),
     markUnread: (id) => run("chat_mark_unread", { chatId: id }),
     setMuted: (id, muted) => run("chat_set_muted", { chatId: id, muted }),

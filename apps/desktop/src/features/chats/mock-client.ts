@@ -14,6 +14,7 @@ import {
   type HarnessStatus,
   type LinkRef,
   type LinkedRecord,
+  type Suggestion,
   type OpenRequest,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -175,7 +176,7 @@ export type MockChatClient = ChatClient & {
   quit: boolean;
   /** Titles saved through Save as Document, in order. */
   savedDocuments: string[];
-  /** Paths opened through a changed-files row, in order. */
+  /** Paths opened through a changed-files row or a step's file name, in order. */
   openedFiles: string[];
   /** What the next folder dialog returns. */
   nextFolder: string | null;
@@ -196,6 +197,10 @@ export function createMockChatClient(
     chats?: MockChat[];
     harnesses?: HarnessStatus[];
     records?: LinkedRecord[];
+    /** What New Chat suggests; linked tickets are left out as the host does. */
+    suggestions?: Suggestion[];
+    /** Step files that are no longer in their Chat's folder. */
+    goneFiles?: string[];
     /** What every Chat's folder holds, for the `@` menu. */
     files?: FolderFile[];
     now?: string;
@@ -673,17 +678,22 @@ export function createMockChatClient(
       return change;
     },
     async openFile(id, path) {
-      client.openedFiles.push(path);
-      const known = get(id).items.some(
-        (item) =>
-          item.kind === "files" &&
-          item.files.some((file) => file.open_path === path),
-      );
-      if (!known)
+      // As the host: only inside the Chat's folder, relative or absolute.
+      const folder = get(id).chat.folder.path.replace(/\/+$/, "");
+      const inside = path.startsWith("/")
+        ? path.startsWith(`${folder}/`)
+        : !path.split("/").includes("..");
+      if (!inside)
         throw new ChatError(
           "failed",
-          "That file is not one this Chat changed.",
+          "That file is outside the Chat's folder.",
         );
+      if (seed.goneFiles?.includes(path))
+        throw new ChatError(
+          "gone",
+          `${path.split("/").at(-1)} is no longer in this folder.`,
+        );
+      client.openedFiles.push(path);
     },
     async saveAsDocument(id, responseId, title) {
       const response = get(id).items.find((item) => item.id === responseId);
@@ -691,6 +701,13 @@ export function createMockChatClient(
         throw new ChatError("failed", "That response no longer exists.");
       client.savedDocuments.push(title);
       return `document-${client.savedDocuments.length}`;
+    },
+    async suggestions(_folder, linked) {
+      return (seed.suggestions ?? []).filter(
+        (suggestion) =>
+          suggestion.kind === "triage" ||
+          !linked.includes(suggestion.ticket.id),
+      );
     },
     markRead: async (id) => patch(id, { unseen: false }),
     markUnread: async (id) => patch(id, { unseen: true }),

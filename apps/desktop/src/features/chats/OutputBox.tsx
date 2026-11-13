@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import { Check, Copy } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { useCopy } from "@/components/ui/use-copy";
+import { plainOutput } from "@/features/chats/model";
 
 /**
  * A command's detail: `$ command`, its output and Copy, in one box at most 12 lines
@@ -18,6 +19,7 @@ export function OutputBox({
   output?: string | null | undefined;
 }) {
   const view = useRef<HTMLDivElement>(null);
+  const text = output ? plainOutput(output) : "";
   const { copied, error, copy } = useCopy();
   useLayoutEffect(() => {
     const box = view.current;
@@ -37,14 +39,14 @@ export function OutputBox({
             {"$ "}
           </span>
           {command}
-          {output ? `\n\n${output}` : ""}
+          {text ? `\n\n${text}` : ""}
         </pre>
       </div>
       <span className="chat-output-copy">
         <IconButton
           label="Copy output"
           onClick={() =>
-            void copy("Output", output ? `${command}\n\n${output}` : command)
+            void copy("Output", text ? `${command}\n\n${text}` : command)
           }
         >
           {copied ? <Check aria-hidden /> : <Copy aria-hidden />}

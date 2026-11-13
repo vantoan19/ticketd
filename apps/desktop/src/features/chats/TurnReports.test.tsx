@@ -207,7 +207,11 @@ test("changed files sit below the response, open in their app, and say why one d
     ],
   };
   const client = await open({
-    chat: chatState({ id: "c1", title: "Limiter" }),
+    chat: chatState({
+      id: "c1",
+      title: "Limiter",
+      folder: { path: "/work", name: "work" },
+    }),
     // Recorded at the first edit, before the response.
     items: [you, files, reply],
   });
