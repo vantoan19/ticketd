@@ -12,6 +12,7 @@ import {
   type ChatSummary,
   type HarnessStatus,
   type LinkedRecord,
+  type Suggestion,
   type OpenRequest,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -175,6 +176,8 @@ export type MockChatClient = ChatClient & {
   savedDocuments: string[];
   /** What the next folder dialog returns. */
   nextFolder: string | null;
+  /** Files opened through a step's file name, as `chatId:path`. */
+  openedFiles: string[];
 };
 
 const READY: HarnessStatus[] = [
@@ -192,6 +195,10 @@ export function createMockChatClient(
     chats?: MockChat[];
     harnesses?: HarnessStatus[];
     records?: LinkedRecord[];
+    /** What New Chat suggests; linked tickets are left out as the host does. */
+    suggestions?: Suggestion[];
+    /** Step files that are no longer in their Chat's folder. */
+    goneFiles?: string[];
     now?: string;
     /** How many log entries are kept per Chat for a reconnecting subscriber. */
     logLimit?: number;
@@ -374,6 +381,7 @@ export function createMockChatClient(
     quit: false,
     notify: true,
     savedDocuments: [],
+    openedFiles: [],
     nextFolder: null,
     push,
     patch,
@@ -615,6 +623,19 @@ export function createMockChatClient(
         throw new ChatError("failed", "That response no longer exists.");
       client.savedDocuments.push(title);
       return `document-${client.savedDocuments.length}`;
+    },
+    async suggestions(_folder, linked) {
+      return (seed.suggestions ?? []).filter(
+        (suggestion) =>
+          suggestion.kind === "triage" ||
+          !linked.includes(suggestion.ticket.id),
+      );
+    },
+    async openFile(id, path) {
+      get(id);
+      if (seed.goneFiles?.includes(path)) return false;
+      client.openedFiles.push(`${id}:${path}`);
+      return true;
     },
     markRead: async (id) => patch(id, { unseen: false }),
     markUnread: async (id) => patch(id, { unseen: true }),

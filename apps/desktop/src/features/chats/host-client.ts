@@ -12,6 +12,7 @@ import {
   harnessStatusSchema,
   linkedRecordSchema,
   openRequestSchema,
+  suggestionSchema,
   type ChatChange,
   type ChatClient,
 } from "@/features/chats/client";
@@ -273,6 +274,12 @@ export function createHostChatClient(
           title,
         }),
       ),
+    suggestions: async (folder, linked) =>
+      z
+        .array(suggestionSchema)
+        .parse(await call("chat_suggestions", { folder, linked })),
+    openFile: async (id, path) =>
+      z.boolean().parse(await call("chat_open_file", { chatId: id, path })),
     markRead: (id) => run("chat_mark_read", { chatId: id }),
     markUnread: (id) => run("chat_mark_unread", { chatId: id }),
     setMuted: (id, muted) => run("chat_set_muted", { chatId: id, muted }),

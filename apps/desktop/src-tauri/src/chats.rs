@@ -1531,6 +1531,97 @@ impl Chats {
         let title = Some(title.trim()).filter(|title| !title.is_empty());
         Ok(workspace.create_document(title, &response.text)?.id)
     }
+
+    /// New Chat's suggestions for `folder` (`None`: a folder ticketd keeps), skipping
+    /// the tickets the person already linked and those a working Chat is linked to.
+    pub fn suggestions(
+        &self,
+        folder: Option<&str>,
+        linked: &[String],
+    ) -> Outcome<Vec<crate::chat_suggestions::Suggestion>> {
+        use crate::chat_suggestions::{Candidate, Records, Unread, suggest};
+        let workspace = self.workspace()?;
+        let mut skip: HashSet<String> = linked.iter().cloned().collect();
+        if let Some(host) = self.started_host() {
+            for (chat_id, live) in host.live() {
+                if live.activity == Activity::Idle {
+                    continue;
+                }
+                let Ok(chat) = workspace.chat(&chat_id) else {
+                    continue;
+                };
+                skip.extend(
+                    chat.links
+                        .into_iter()
+                        .filter(|link| link.kind == ChatLinkKind::Ticket)
+                        .map(|link| link.id),
+                );
+            }
+        }
+        let project_id = folder.and_then(|folder| {
+            let folder = Path::new(folder);
+            workspace.list_projects().ok()?.into_iter().find_map(|project| {
+                project
+                    .paths
+                    .iter()
+                    .chain(std::iter::once(&project.path))
+                    .any(|path| !path.is_empty() && folder.starts_with(path))
+                    .then_some(project.id)
+            })
+        });
+        let tickets = workspace
+            .list_tickets()?
+            .into_iter()
+            .map(|ticket| Candidate {
+                id: ticket.id,
+                reference: ticket.reference,
+                title: ticket.title,
+                status: ticket.status,
+                project_id: ticket.project_id,
+                updated_at: ticket.updated_at,
+            })
+            .collect();
+        let unread = workspace
+            .inbox_page(100, 0, true)?
+            .into_iter()
+            .map(|entry| Unread {
+                reference: entry.reference,
+                timestamp: entry.timestamp,
+            })
+            .collect();
+        Ok(suggest(&Records {
+            tickets,
+            unread,
+            project_id,
+            skip,
+        }))
+    }
+
+    /// The file a step named, inside the Chat's folder, for the system to open.
+    /// `None` when it is no longer there. A path that leads out of the folder is refused.
+    pub fn file_in_folder(&self, chat_id: &str, path: &str) -> Outcome<Option<PathBuf>> {
+        let chat = self.workspace()?.chat(chat_id)?;
+        file_in(Path::new(&chat.execution_folder), path)
+    }
+}
+
+/// `path` under `folder`, resolved through links; `None` when nothing is there.
+fn file_in(folder: &Path, path: &str) -> Outcome<Option<PathBuf>> {
+    let outside = || failed("that file is outside the Chat's folder");
+    let relative = Path::new(path);
+    if relative.is_absolute() {
+        return Err(outside());
+    }
+    let Ok(folder) = folder.canonicalize() else {
+        return Ok(None);
+    };
+    let Ok(file) = folder.join(relative).canonicalize() else {
+        return Ok(None);
+    };
+    if !file.starts_with(&folder) {
+        return Err(outside());
+    }
+    Ok(file.is_file().then_some(file))
 }
 
 /// The counts the sidebar and the app icon show, from the rows outside the trash.

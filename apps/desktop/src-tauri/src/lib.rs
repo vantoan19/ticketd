@@ -4,6 +4,7 @@ mod attachment_commands;
 mod attachment_media;
 mod chat_attention;
 mod chat_commands;
+mod chat_suggestions;
 mod chat_view;
 mod chats;
 mod cli_status;
@@ -1683,6 +1684,8 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_set_link,
             chat_commands::chat_resume,
             chat_commands::chat_save_as_document,
+            chat_commands::chat_suggestions,
+            chat_commands::chat_open_file,
             chat_commands::chat_answer_quit,
             chat_commands::close_keeps_running,
             sync_commands::sync_conflicts,

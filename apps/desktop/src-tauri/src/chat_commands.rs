@@ -524,6 +524,47 @@ pub async fn chat_save_as_document(
         .save_as_document(&chat_id, &response_id, &title)
 }
 
+#[tauri::command]
+pub async fn chat_suggestions(
+    bridge: State<'_, ChatBridge>,
+    folder: Option<String>,
+    linked: Vec<String>,
+) -> Outcome<Vec<crate::chat_suggestions::Suggestion>> {
+    bridge.chats.suggestions(folder.as_deref(), &linked)
+}
+
+/// Opens a file a step named in the system's default app for it. Resolves to `false`
+/// when the file is no longer in the Chat's folder.
+#[tauri::command]
+pub async fn chat_open_file(
+    app: AppHandle,
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    path: String,
+) -> Outcome<bool> {
+    use tauri_plugin_opener::OpenerExt;
+    let Some(file) = bridge.chats.file_in_folder(&chat_id, &path)? else {
+        return Ok(false);
+    };
+    let name = file
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.clone());
+    app.opener()
+        .open_path(file.to_string_lossy(), None::<&str>)
+        .map_err(|_| ChatFailure {
+            code: "failed",
+            message: match file.extension() {
+                Some(extension) => format!(
+                    "Couldn't open {name}. No app on this computer opens .{} files.",
+                    extension.to_string_lossy()
+                ),
+                None => format!("Couldn't open {name}."),
+            },
+        })?;
+    Ok(true)
+}
+
 /// Replaces the workspace with a backup. A backup that cannot be restored stops
 /// nothing; otherwise running Chats are stopped first and nothing restored is run: what
 /// the backup held as in progress is recorded as lost contact and its queues stay

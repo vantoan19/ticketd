@@ -1602,3 +1602,16 @@ async fn a_turn_that_ends_out_of_view_is_unread_until_the_chat_is_opened() {
     f.chats.set_focused(false).await;
     assert!(f.chats.in_view().is_empty());
 }
+
+#[test]
+fn a_step_file_opens_only_inside_the_chat_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("work");
+    std::fs::create_dir_all(folder.join("src")).unwrap();
+    std::fs::write(folder.join("src/limiter.ts"), "").unwrap();
+    std::fs::write(dir.path().join("secret.txt"), "").unwrap();
+    assert!(file_in(&folder, "src/limiter.ts").unwrap().is_some());
+    assert_eq!(file_in(&folder, "src/gone.ts").unwrap(), None);
+    assert!(file_in(&folder, "../secret.txt").is_err());
+    assert!(file_in(&folder, "/etc/hosts").is_err());
+}
