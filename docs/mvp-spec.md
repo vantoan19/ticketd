@@ -1353,6 +1353,38 @@ to that work without creating a duplicate runtime. Explicit Quit stops app-owned
 execution and preserves history; an independent always-running service is not
 required. Ordinary ticketd CLI operations remain usable without the desktop.
 
+Every Chat has one ranked status, highest first: Approval needed, Question,
+Working, Failed, Done, Idle. A question includes input whose delivery is not
+confirmed. Failed covers a turn that ended with an error or was cut off without
+one (shown as Interrupted); a turn the person stopped, or Quit, is Idle. Failed
+and Done are shown only until seen; afterwards the Chat is Idle and its row says
+the outcome in words. List rows, the sidebar count, the app-icon count and system
+notifications all read this one status.
+
+A Chat is in view while it is open in the detail pane and the window has focus.
+A turn that ended after the person last viewed the Chat is unseen; opening the
+Chat, or regaining focus with it open, marks it seen, and a Chat in view never
+becomes unseen. The seen position is stored with the Chat. Mark as unread makes
+the last turn unseen again; Mark as read clears an unseen outcome, never a live
+request. Neither notifies.
+
+The sidebar shows Chats waiting for the person (Approval needed, Question,
+Failed), else the number with an unseen outcome; Working never counts. The
+app-icon count is the waiting Chats that are not muted. An archived Chat that
+asks for approval or a question is listed with the active Chats until answered.
+
+A Chat not in view gets a system notification, with sound as the system allows,
+when it needs approval, asks a question or fails, at once and once each; when a
+turn finishes, only after a quiet window of about 1.5 seconds that a new turn or
+opening the Chat cancels. A newer notification replaces the Chat's older one, and
+one that no longer holds is withdrawn where the platform allows. Muting a Chat
+stops its notifications and its share of the app-icon count; turning off
+"Notify me about Chats" stops all of them. Rows and the sidebar always update.
+What is already there when ticketd starts is not announced. Clicking a
+notification brings the window back and opens the Chat; requests are answered
+only in the Chat. Notification permission is asked when the person sends their
+first Chat message.
+
 ### 21.4. Context, permissions and durable results
 
 ticketd is the continuously updated record of tickets and their context. Hosted

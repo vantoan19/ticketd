@@ -4,6 +4,7 @@ import {
   type ChatOverview,
   type ChatSnapshot,
   type ChatSummary,
+  type OpenRequest,
   type Retention,
 } from "@/features/chats/client";
 import { applyChange } from "@/features/chats/model";
@@ -15,13 +16,23 @@ export type ChatFeature = {
   overview: ChatOverview;
   /** Rises whenever any Chat's summary may have changed. */
   revision: number;
+  /** The last clicked Chat notification; `n` rises with each click. */
+  openRequest: { request: OpenRequest; n: number } | null;
+};
+
+export const NO_CHAT_OVERVIEW: ChatOverview = {
+  needs_you: 0,
+  unread: 0,
+  app_icon: 0,
+  working: 0,
 };
 
 export const ChatFeatureContext = createContext<ChatFeature>({
   enabled: false,
   setEnabled: async () => {},
-  overview: { needs_you: 0, working: 0 },
+  overview: NO_CHAT_OVERVIEW,
   revision: 0,
+  openRequest: null,
 });
 export const useChatFeature = () => useContext(ChatFeatureContext);
 

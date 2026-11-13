@@ -8,12 +8,104 @@ import {
   type ChatClient,
   type ChatOverview,
   type ChatState,
+  type ChatStatus,
   type ChatSummary,
   type HarnessStatus,
   type LinkedRecord,
+  type OpenRequest,
   type TranscriptItem,
 } from "@/features/chats/client";
-import { harnessUsable, needsYou } from "@/features/chats/model";
+import { changeLine, harnessUsable } from "@/features/chats/model";
+import { plainText } from "@/features/documents/graph-text";
+
+/** Words for a condition that holds now and is not a failure; as the host says them. */
+const CONDITION_WORDS: Partial<Record<string, string>> = {
+  not_installed: "Not sent",
+  incompatible: "Not sent",
+  unavailable: "Not sent",
+  probe_failed: "Not sent",
+  not_signed_in: "Not sent",
+  folder_missing: "Folder missing",
+  history_lost: "Session unavailable",
+  session_in_use: "Session in use elsewhere",
+};
+
+/**
+ * The host's ranked status (spec 21.3), simplified for fixtures: the mock has no
+ * turns, so a Failed or finished Chat is unseen until it is opened.
+ */
+function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
+  const unseen = chat.unseen;
+  const make = (
+    rank: ChatStatus["rank"],
+    word: string,
+    detail?: string | null,
+  ): ChatStatus => ({ rank, unseen, word, detail: detail ?? null });
+  const pending = items.find(
+    (item): item is Extract<TranscriptItem, { kind: "request" }> =>
+      item.kind === "request" && item.state === "pending",
+  );
+  if (pending?.request === "approval")
+    return make("approval", "Approval needed", pending.subject);
+  if (pending) return make("question", "Question", pending.subject);
+  const problem = chat.problem;
+  if (problem?.kind === "uncertain_delivery") {
+    const message = items.find((item) => item.id === problem.message_id);
+    return make(
+      "question",
+      "Not confirmed",
+      message?.kind === "user" ? message.text : null,
+    );
+  }
+  if (problem?.kind === "stop_unconfirmed")
+    return make("working", "Stop not confirmed");
+  if (chat.activity === "working" || chat.activity === "waiting")
+    return make("working", "Working", chat.opening ? "Starting" : null);
+  const marker = items.at(-1)?.kind === "marker" ? items.at(-1) : undefined;
+  const reason = marker?.kind === "marker" ? marker.reason : undefined;
+  if (reason === "stopped") return make("idle", "You stopped it");
+  if (reason === "quit") return make("idle", "Stopped when ticketd quit");
+  // A failure observed now waits for the person while it holds.
+  if (problem?.kind === "failed" && !problem.past)
+    return make(
+      "failed",
+      "Failed",
+      problem.message ?? `${chat.harness.name} stopped with an error`,
+    );
+  if (chat.activity === "failed")
+    return make(
+      unseen ? "failed" : "idle",
+      "Failed",
+      `${chat.harness.name} ${problem?.kind === "usage_limit" ? "reached your usage limit" : "stopped with an error"}`,
+    );
+  if (chat.activity === "interrupted")
+    return make(
+      unseen ? "failed" : "idle",
+      "Interrupted",
+      `${chat.harness.name} stopped mid-turn`,
+    );
+  const condition = problem && !problem.past && CONDITION_WORDS[problem.kind];
+  if (condition) return make("idle", condition);
+  const change = items
+    .filter(
+      (item): item is Extract<TranscriptItem, { kind: "records" }> =>
+        item.kind === "records",
+    )
+    .at(-1)
+    ?.changes.at(-1);
+  const response = items
+    .filter(
+      (item): item is Extract<TranscriptItem, { kind: "response" }> =>
+        item.kind === "response",
+    )
+    .at(-1);
+  const line =
+    (change && changeLine(change)) ||
+    (response && plainText(response.text)) ||
+    null;
+  if (unseen && response) return make("done", "Done", line);
+  return make("idle", line ?? "Idle");
+}
 
 /** A Chat state with quiet defaults, so a test or fixture spells out only what matters. */
 export function chatState(
@@ -31,6 +123,9 @@ export function chatState(
     links: [],
     queue: [],
     queue_paused: false,
+    // A failure in a fixture has not been seen yet.
+    unseen: over.activity === "failed",
+    muted: false,
     ...over,
     harness: { id: "codex", name: "Codex", ...over.harness },
     folder: {
@@ -70,6 +165,10 @@ export type MockChatClient = ChatClient & {
   dropChanges(id: string, count: number): void;
   setHarnesses(harnesses: HarnessStatus[]): void;
   requestQuit(): void;
+  /** As if the person clicked the Chat's system notification. */
+  requestOpen(request: OpenRequest): void;
+  /** What Notify me about Chats was last set to. */
+  notify: boolean;
   /** Whether Quit was confirmed. */
   quit: boolean;
   /** Titles saved through Save as Document, in order. */
@@ -106,6 +205,7 @@ export function createMockChatClient(
   const requests = new Map<string, string>();
   const dropping = new Map<string, number>();
   const overviewListeners = new Set<(overview: ChatOverview) => void>();
+  const openListeners = new Set<(request: OpenRequest) => void>();
   const quitListeners = new Set<(working: number) => void>();
   const chats = new Map<string, Stored>();
   const store = (entry: MockChat) =>
@@ -130,8 +230,15 @@ export function createMockChatClient(
     const all = [...chats.values()].filter(
       (entry) => entry.chat.retention !== "trashed",
     );
+    const rows = all.map(summary);
     return {
-      needs_you: all.filter((entry) => summary(entry).needs_you).length,
+      needs_you: rows.filter((row) => row.needs_you).length,
+      unread: rows.filter(
+        (row) =>
+          row.status.unseen &&
+          (row.status.rank === "done" || row.status.rank === "idle"),
+      ).length,
+      app_icon: rows.filter((row) => row.needs_you && !row.muted).length,
       working: all.filter((entry) => live(entry.chat)).length,
     };
   };
@@ -146,6 +253,7 @@ export function createMockChatClient(
         .at(-1);
     const marker = items.at(-1)?.kind === "marker" ? last("marker") : undefined;
     const ticket = chat.links.find((link) => link.kind === "ticket");
+    const status = mockStatus(chat, items);
     return chatSummarySchema.parse({
       id: chat.id,
       title: chat.title,
@@ -156,7 +264,9 @@ export function createMockChatClient(
       first_ticket: ticket?.kind === "ticket" ? ticket.reference : null,
       retention: chat.retention,
       activity: chat.activity,
-      needs_you: needsYou(chat.activity, chat.problem?.kind),
+      needs_you: ["approval", "question", "failed"].includes(status.rank),
+      status,
+      muted: chat.muted,
       problem: chat.problem?.kind ?? null,
       interruption:
         marker?.reason === "stopped"
@@ -197,6 +307,13 @@ export function createMockChatClient(
   };
   const patch = (id: string, change: Partial<ChatState>) => {
     const entry = get(id);
+    // A turn that ends while nobody follows the Chat is unseen.
+    const ended =
+      live(entry.chat) &&
+      change.activity &&
+      !live({ ...entry.chat, ...change });
+    if (ended && entry.listeners.size === 0)
+      change = { unseen: true, ...change };
     entry.chat = chatStateSchema.parse({ ...entry.chat, ...change });
     emit(entry, { kind: "chat", chat: entry.chat });
   };
@@ -210,7 +327,13 @@ export function createMockChatClient(
   const halt = (id: string, reason: "stopped" | "quit") => {
     expirePending(id);
     push(id, { id: nextId("marker"), at: now, kind: "marker", reason });
-    patch(id, { activity: "interrupted", doing: null, queue_paused: true });
+    // A turn ticketd or the person stopped is Idle; it does not turn unread.
+    patch(id, {
+      activity: "interrupted",
+      doing: null,
+      queue_paused: true,
+      unseen: get(id).chat.unseen,
+    });
   };
   const startTurn = (id: string, text: string) => {
     push(id, {
@@ -248,6 +371,7 @@ export function createMockChatClient(
 
   const client: MockChatClient = {
     quit: false,
+    notify: true,
     savedDocuments: [],
     nextFolder: null,
     push,
@@ -263,6 +387,9 @@ export function createMockChatClient(
     },
     dropChanges: (id, count) => void dropping.set(id, count),
     setHarnesses: (next) => void (harnesses = next),
+    requestOpen(request) {
+      for (const listener of [...openListeners]) listener(request);
+    },
     requestQuit() {
       for (const listener of [...quitListeners]) listener(overview().working);
     },
@@ -321,6 +448,8 @@ export function createMockChatClient(
     },
     async openChat(id) {
       const entry = get(id);
+      // Opening a Chat any way marks it seen.
+      if (entry.chat.unseen) patch(id, { unseen: false });
       return chatSnapshotSchema.parse(
         structuredClone({
           chat: entry.chat,
@@ -469,6 +598,16 @@ export function createMockChatClient(
         throw new ChatError("failed", "That response no longer exists.");
       client.savedDocuments.push(title);
       return `document-${client.savedDocuments.length}`;
+    },
+    markRead: async (id) => patch(id, { unseen: false }),
+    markUnread: async (id) => patch(id, { unseen: true }),
+    setMuted: async (id, muted) => patch(id, { muted }),
+    async setNotify(enabled) {
+      client.notify = enabled;
+    },
+    onOpenRequested(listener) {
+      openListeners.add(listener);
+      return () => openListeners.delete(listener);
     },
     onQuitRequested(listener) {
       quitListeners.add(listener);

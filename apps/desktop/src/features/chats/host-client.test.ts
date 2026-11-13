@@ -22,6 +22,8 @@ const chat = {
   links: [],
   queue: [],
   queue_paused: false,
+  unseen: false,
+  muted: false,
 };
 const response = (text: string) => ({
   id: "m1",
@@ -147,7 +149,7 @@ describe("the desktop Chat client", () => {
         subscription: 1,
         snapshot: { chat, items: [{}], cursor: 0 },
       },
-      chat_overview: { needs_you: -1, working: 0 },
+      chat_overview: { needs_you: -1, unread: 0, app_icon: 0, working: 0 },
     });
     const client = createHostChatClient(stub.bridge);
 
@@ -216,14 +218,15 @@ describe("the desktop Chat client", () => {
     client.onQuitRequested((working) => quits.push(working));
     await Promise.resolve();
 
-    stub.events.get("chat-overview")?.({ needs_you: 1, working: 2 });
+    const counts = { needs_you: 1, unread: 0, app_icon: 1, working: 2 };
+    stub.events.get("chat-overview")?.(counts);
     stub.events.get("chat-overview")?.({ needs_you: "many" });
     stub.events.get("chat-quit-requested")?.(2);
     stub.events.get("chat-quit-requested")?.("all");
     stop();
     await Promise.resolve();
 
-    expect(overviews).toEqual([{ needs_you: 1, working: 2 }]);
+    expect(overviews).toEqual([counts]);
     expect(quits).toEqual([2]);
     expect(stub.events.has("chat-overview")).toBe(false);
   });

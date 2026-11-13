@@ -29,6 +29,8 @@ import { Composer } from "@/features/chats/Composer";
 import { carryIntoChat } from "@/features/chats/drafts";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import { harnessUsable } from "@/features/chats/model";
+import { notificationClient } from "@/lib/api/notifications";
+import { loadPreferences } from "@/lib/preferences";
 
 const STATUS_PROBLEM: Record<
   Exclude<HarnessStatus["status"], "ready">,
@@ -165,6 +167,9 @@ export function NewChat({
               const request = JSON.stringify(input);
               if (attempt.current.request !== request)
                 attempt.current = { id: crypto.randomUUID(), request };
+              // Notifications are asked for with the first Chat message.
+              if (loadPreferences().notifyChats)
+                void notificationClient.requestPermission().catch(() => {});
               try {
                 const created = await client.createChat({
                   command_id: attempt.current.id,
