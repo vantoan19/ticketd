@@ -103,8 +103,8 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS automation_agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, harness TEXT NOT NULL, model TEXT, instructions TEXT NOT NULL, read_files INTEGER NOT NULL, edit_files INTEGER NOT NULL, run_commands INTEGER NOT NULL, allowed_commands TEXT NOT NULL, use_web INTEGER NOT NULL, turn_limit INTEGER NOT NULL, time_limit_minutes INTEGER NOT NULL, trashed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));",
     )?;
-    // Re-create the change token triggers so the new table moves the token.
-    crate::change_token::migrate(connection)?;
+    // Views refresh on the change token, so an agent changed elsewhere shows up.
+    crate::change_token::track(connection, "automation_agents")?;
     connection.execute_batch("PRAGMA user_version = 67;")?;
     Ok(())
 }
