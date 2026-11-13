@@ -18,8 +18,9 @@ use ticketd_chat_host::{
     WorkspaceOpener, harness_key, problem_kind,
 };
 use ticketd_core::{
-    BackupCheck, Chat, ChatDelivery, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter,
-    ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent, ChatTurnState, NewChat, Workspace,
+    BackupCheck, Chat, ChatDelivery, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind,
+    ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent, ChatTurnState,
+    NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -1218,9 +1219,7 @@ impl Chats {
             .snapshot
             .items
             .iter()
-            .flat_map(|item| {
-                chat_view::items(item, &chat, &attached.live, fresh, tracker.decided())
-            })
+            .flat_map(|item| chat_view::items(item, &chat, &attached.live, fresh, &tracker))
             .collect();
         let view = View {
             chat,
@@ -1380,8 +1379,8 @@ impl Chats {
             }
             let fresh = self.fresh(&view.chat.id);
             for record in records {
-                let decided = view.tracker.decided();
-                for item in chat_view::items(&record, &view.chat, &view.live, fresh, decided) {
+                let tracker = &view.tracker;
+                for item in chat_view::items(&record, &view.chat, &view.live, fresh, tracker) {
                     if !send(&mut view, json!({ "kind": "item", "item": item })) {
                         return;
                     }

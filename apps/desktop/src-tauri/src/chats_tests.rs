@@ -351,7 +351,8 @@ fn command_tool(item: &str, command: &str, status: ToolStatus) -> EventKind {
         output: None,
         detail: Some(ProviderDetail::new(
             "commandExecution",
-            &json!({ "command": command, "status": "inProgress" }).to_string(),
+            &json!({ "type": "commandExecution", "command": command, "status": "inProgress" })
+                .to_string(),
         )),
     }
 }
@@ -379,15 +380,22 @@ async fn a_decided_approval_folds_into_the_step_it_answered_and_no_other() {
     }))
     .await;
     let (opened, seen) = f.open(&id).await;
-    let request_id = opened
+    let (request_id, title, subject) = opened
         .snapshot
         .items
         .iter()
         .find_map(|item| match item {
-            Item::Request { id, .. } => Some(id.clone()),
+            Item::Request {
+                id, title, subject, ..
+            } => Some((id.clone(), title.clone(), subject.clone())),
             _ => None,
         })
         .unwrap();
+    // Its title says what it would do, with the command inline after it.
+    assert_eq!(
+        (title.as_str(), subject.as_deref()),
+        ("Codex wants to delete", Some("node_modules"))
+    );
     let deny = Answer::Choice {
         option_id: "deny".to_owned(),
     };
@@ -434,7 +442,10 @@ async fn a_steer_the_harness_refused_waits_in_the_queue_saying_why() {
     let f = Fixture::new().await;
     let id = f.chat().await;
     let reply = f.fake.hold_next_submit();
-    f.chats.send(&id, "also this", SendMode::Auto).await.unwrap();
+    f.chats
+        .send(&id, "also this", SendMode::Auto)
+        .await
+        .unwrap();
     settle().await;
     reply
         .send(SubmitReply::Reject("a tool is still running".to_owned()))

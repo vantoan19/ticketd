@@ -101,9 +101,11 @@ function Request({
           ) : (
             <>
               {request.title}
+              {/* The host words the title so the subject follows inline. */}
               {request.subject && (
                 <>
-                  : <code className="chat-mono">{request.subject}</code>
+                  {" "}
+                  <code className="chat-mono">{request.subject}</code>
                 </>
               )}
             </>

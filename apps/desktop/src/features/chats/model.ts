@@ -723,7 +723,7 @@ export type PendingRequest = Extract<TranscriptItem, { kind: "request" }>;
 export function requestLabel(request: PendingRequest) {
   if (request.request === "question") return request.subject || request.title;
   return request.subject
-    ? `${request.title}: ${request.subject}`
+    ? `${request.title} ${request.subject}`
     : request.title;
 }
 

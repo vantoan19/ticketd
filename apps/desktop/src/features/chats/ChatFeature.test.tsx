@@ -60,7 +60,7 @@ const waitingChat = () => ({
       at: "2026-11-10T10:00:00Z",
       kind: "request" as const,
       request: "approval" as const,
-      title: "Codex wants to run a command",
+      title: "Codex wants to run",
       subject: "npm test",
       options: [{ id: "once", label: "Allow once" }],
       free_text: false,

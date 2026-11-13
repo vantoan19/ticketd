@@ -49,7 +49,7 @@ const approval: TranscriptItem = {
   at,
   kind: "request",
   request: "approval",
-  title: "Codex wants to run a command",
+  title: "Codex wants to run",
   subject: "npm install @pagerduty/pdjs",
   options: [
     { id: "once", label: "Allow once" },
@@ -311,7 +311,7 @@ test("a pending approval waits in the dock with its command inline, never in the
     ]),
   );
   const request = screen.getByRole("group", {
-    name: "Codex wants to run a command: npm install @pagerduty/pdjs",
+    name: "Codex wants to run npm install @pagerduty/pdjs",
   });
   expect(within(request).getByText("npm install @pagerduty/pdjs").tagName).toBe(
     "CODE",

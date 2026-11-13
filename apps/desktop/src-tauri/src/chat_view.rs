@@ -636,6 +636,11 @@ impl Tracker {
         &self.decided
     }
 
+    /// A tool call of the latest turn, by its id.
+    fn tool(&self, id: &str) -> Option<&ChatTool> {
+        self.turn_tools.get(id)
+    }
+
     /// Tool calls to show again because an approval asked for them was decided since
     /// the last call. Calls of an earlier turn are not kept and read right on a resync.
     pub fn refolded(&mut self) -> Vec<ChatItem> {
@@ -698,7 +703,34 @@ fn approval_outcome(interaction: &ChatInteraction) -> Option<String> {
     )
 }
 
-fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Item {
+/// What an approval asks to do, from the step it was asked for: the title's verb, and
+/// what follows it inline (the command, or the files).
+fn asked_to(step: Option<&Step>) -> Option<(&'static str, &'static str, String)> {
+    let step = step?;
+    let targets = || {
+        step.targets
+            .iter()
+            .map(|target| target.text.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match step.kind {
+        "run" => Some(("wants to run", "asked to run", step.command.clone()?)),
+        "edit" | "create" => Some(("wants to edit", "asked to edit", targets())),
+        "delete" => Some(("wants to delete", "asked to delete", targets())),
+        _ => None,
+    }
+}
+
+/// A stored request as the dock or a receipt shows it. `step` is the step an approval
+/// was asked for, when the harness named it: its title then says what it would do,
+/// worded so the subject follows inline ("Claude Code wants to run `npm install`").
+fn request(
+    interaction: &ChatInteraction,
+    live: &ChatLive,
+    harness: &str,
+    step: Option<&Step>,
+) -> Item {
     let asked = live
         .interactions
         .iter()
@@ -711,11 +743,28 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         // A stored request with no live one behind it can no longer be answered.
         (ChatInteractionState::Pending | ChatInteractionState::Expired, _) => "expired",
     };
-    let title = match (approval, state == "pending") {
-        (true, true) => format!("{harness} is asking for approval"),
-        (true, false) => format!("{harness} asked for approval"),
-        (false, true) => format!("{harness} is asking you"),
-        (false, false) => format!("{harness} asked you"),
+    let pending = state == "pending";
+    let prompt = Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty());
+    let (title, subject) = match (approval, asked_to(step.filter(|_| approval))) {
+        (true, Some((wants, asked, what))) => (
+            format!("{harness} {}", if pending { wants } else { asked }),
+            Some(what).filter(|what| !what.is_empty()).or(prompt),
+        ),
+        (true, None) if prompt.is_some() => (
+            format!(
+                "{harness} {}",
+                if pending {
+                    "wants approval for"
+                } else {
+                    "asked for approval for"
+                }
+            ),
+            prompt,
+        ),
+        (true, None) if pending => (format!("{harness} is asking for approval"), None),
+        (true, None) => (format!("{harness} asked for approval"), None),
+        (false, _) if pending => (format!("{harness} is asking you"), prompt),
+        (false, _) => (format!("{harness} asked you"), prompt),
     };
     let (options, free_text) = match asked.map(|request| &request.kind) {
         Some(InteractionKind::Approval { decisions, .. }) => (
@@ -756,7 +805,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         turn_id: Some(interaction.turn_id.clone()),
         request: if approval { "approval" } else { "question" },
         title,
-        subject: Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty()),
+        subject,
         reason: interaction
             .reason
             .clone()
@@ -1087,7 +1136,7 @@ pub fn item(
     chat: &Chat,
     live: &ChatLive,
     fresh: Option<FreshHistory>,
-    decided: &Decided,
+    tracker: &Tracker,
 ) -> Option<Item> {
     let harness = harness_name(&chat.harness);
     Some(match record {
@@ -1191,13 +1240,24 @@ pub fn item(
             steps: steps(tool, harness, chat, home_folder().as_deref())
                 .into_iter()
                 .map(|step| Step {
-                    decision: decided.get(&tool.id).cloned(),
+                    decision: tracker.decided().get(&tool.id).cloned(),
                     ..step
                 })
                 .collect(),
             turn_id: Some(tool.turn_id.clone()),
         },
-        ChatItem::Interaction(interaction) => request(interaction, live, harness),
+        ChatItem::Interaction(interaction) => {
+            let step = interaction
+                .tool_id
+                .as_deref()
+                .and_then(|id| tracker.tool(id))
+                .and_then(|tool| {
+                    steps(tool, harness, chat, home_folder().as_deref())
+                        .into_iter()
+                        .next()
+                });
+            request(interaction, live, harness, step.as_ref())
+        }
         ChatItem::Notice(notice) => Item::Marker {
             id: notice.id.clone(),
             at: notice.created_at.clone(),
@@ -1279,7 +1339,7 @@ pub fn items(
     chat: &Chat,
     live: &ChatLive,
     fresh: Option<FreshHistory>,
-    decided: &Decided,
+    tracker: &Tracker,
 ) -> Vec<Item> {
     let timing = match record {
         ChatItem::Turn(turn) => Some(turn_item(turn)),
@@ -1287,7 +1347,7 @@ pub fn items(
     };
     timing
         .into_iter()
-        .chain(item(record, chat, live, fresh, decided))
+        .chain(item(record, chat, live, fresh, tracker))
         .collect()
 }
 
@@ -1667,7 +1727,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
 mod tests {
     use super::{
         Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatLive, ChatTool,
-        ChatToolState, ChatTurn, ChatTurnState, Decided, Item, STOPPED_BY_TICKETD, Step, items,
+        ChatToolState, ChatTurn, ChatTurnState, Item, STOPPED_BY_TICKETD, Step, Tracker, items,
         opening, request, steps,
     };
     use serde_json::json;
@@ -1999,12 +2059,44 @@ mod tests {
         };
         let Item::Request {
             subject, reason, ..
-        } = request(&interaction, &ChatLive::idle(), "Codex")
+        } = request(&interaction, &ChatLive::idle(), "Codex", None)
         else {
             panic!("an interaction is a request");
         };
         assert_eq!(subject.as_deref(), Some("touch hello.txt"));
         assert_eq!(reason.as_deref(), Some("Allow creating hello.txt?"));
+
+        // Asked for a step, the title says what the step would do, subject inline.
+        let title =
+            |step: &Step| match request(&interaction, &ChatLive::idle(), "Codex", Some(step)) {
+                Item::Request { title, subject, .. } => (title, subject),
+                other => panic!("a request, got {other:?}"),
+            };
+        let run = one(&codex_command(
+            "npm install @pagerduty/pdjs",
+            "inProgress",
+            0,
+        ));
+        assert_eq!(
+            title(&run),
+            (
+                "Codex asked to run".to_owned(),
+                Some("npm install @pagerduty/pdjs".to_owned())
+            )
+        );
+        let edit = one(&tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/a.ts"}"#,
+            ChatToolState::Running,
+            None,
+        ));
+        assert_eq!(
+            title(&edit),
+            (
+                "Codex asked to edit".to_owned(),
+                Some("src/a.ts".to_owned())
+            )
+        );
     }
 
     /// #367: a turn's records read by whether it still runs, and a stop that did not
@@ -2031,7 +2123,8 @@ mod tests {
         );
         let mut stopping = ChatLive::idle();
         stopping.stop = Some(StopState::Unconfirmed);
-        let state = |chat: &Chat, live: &_| match item(&plan, chat, live, None, &Decided::new()) {
+        let state = |chat: &Chat, live: &_| match item(&plan, chat, live, None, &Tracker::default())
+        {
             Some(Item::Plan { state, .. }) => state,
             other => panic!("a plan, got {other:?}"),
         };
@@ -2050,7 +2143,7 @@ mod tests {
             &chat(None),
             &ChatLive::idle(),
             None,
-            &Decided::new(),
+            &Tracker::default(),
         ) else {
             panic!("reasoning");
         };
@@ -2066,7 +2159,7 @@ mod tests {
             &chat(None),
             &ChatLive::idle(),
             None,
-            &Decided::new(),
+            &Tracker::default(),
         ) else {
             panic!("files");
         };
@@ -2094,7 +2187,7 @@ mod tests {
         };
         let Item::Request {
             answer, turn_id, ..
-        } = request(&interaction, &ChatLive::idle(), "Codex")
+        } = request(&interaction, &ChatLive::idle(), "Codex", None)
         else {
             panic!("an interaction is a request");
         };
@@ -2122,7 +2215,7 @@ mod tests {
             &chat(None),
             &ChatLive::idle(),
             None,
-            &Decided::new(),
+            &Tracker::default(),
         )
         .as_slice()
         {
