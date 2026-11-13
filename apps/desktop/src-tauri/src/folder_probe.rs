@@ -125,10 +125,9 @@ fn icon_links(html: &str) -> Vec<String> {
             .to_ascii_lowercase()
             .split_whitespace()
             .any(|word| word == "icon")
+            && let Some(href) = attribute(tag, original, "href")
         {
-            if let Some(href) = attribute(tag, original, "href") {
-                found.push(href);
-            }
+            found.push(href);
         }
         from = end;
     }

@@ -187,7 +187,66 @@ const chats: MockChat[] = [
       harness: claude,
       activity: "working",
       doing: { label: "Running npm test", since: minutesAgo(2) },
-      folder: { shared_with: ["Alert on-call when logins spike"] },
+      folder: {
+        shared_with: ["Alert on-call when logins spike"],
+        branch: { kind: "branch", name: "rate-limit-logins" },
+        project: { id: "web", title: "Web App" },
+      },
+      settings: {
+        model: {
+          current: "opus",
+          options: [
+            {
+              id: "opus",
+              label: "Opus 5.5",
+              description: "Most capable, for complex multi-step work",
+              is_default: true,
+              allowed: true,
+            },
+            {
+              id: "sonnet",
+              label: "Sonnet 5",
+              description: "Fast and capable for everyday coding",
+              is_default: false,
+              allowed: true,
+            },
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+        effort: {
+          current: "high",
+          options: ["Low", "Medium", "High", "Max"].map((label) => ({
+            id: label.toLowerCase(),
+            label,
+            is_default: label === "High",
+            allowed: true,
+          })),
+          changeable: true,
+          applies_from: "next_turn",
+        },
+        permission: {
+          current: "accept_edits",
+          options: [
+            {
+              id: "ask",
+              label: "Ask before edits",
+              description: "Asks before editing files or running commands",
+              is_default: true,
+              allowed: true,
+            },
+            {
+              id: "accept_edits",
+              label: "Accept edits",
+              description: "Edits files in this folder without asking",
+              is_default: false,
+              allowed: true,
+            },
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+      },
       links: [t12, spec],
       queue: [{ id: "q1", text: "Then open a PR against main" }],
     }),

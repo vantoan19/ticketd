@@ -1062,7 +1062,8 @@ button.chat-file:focus-visible,
   border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 1.5px var(--control-boundary);
 }
-.chat-harness[data-state="checked"] .chat-harness-radio {
+/* aria-checked: the tooltip trigger takes over data-state. */
+.chat-harness[aria-checked="true"] .chat-harness-radio {
   box-shadow: inset 0 0 0 4px var(--ring);
 }
 .chat-harness-name {
