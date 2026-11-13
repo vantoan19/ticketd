@@ -27,6 +27,7 @@ export function bridgeDefault(
       return null;
     case "document_context_links":
       return [[], []];
+    case "automation_agent_list":
     case "list_projects":
     case "list_plans":
     case "find_tickets":

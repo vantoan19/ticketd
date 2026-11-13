@@ -2,6 +2,7 @@
 mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
+mod automation_commands;
 mod chat_commands;
 mod chat_view;
 mod chats;
@@ -1520,6 +1521,10 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::import_attachment,
             attachment_commands::capture_attachment,
             attachment_commands::cancel_attachment_upload,
+            automation_commands::automation_agent_list,
+            automation_commands::automation_agent_create,
+            automation_commands::automation_agent_update,
+            automation_commands::automation_agent_delete,
             attachment_commands::attachment_upload_limit,
             attachment_commands::attachment_workspace_id,
             attachment_commands::set_attachment_upload_limit,

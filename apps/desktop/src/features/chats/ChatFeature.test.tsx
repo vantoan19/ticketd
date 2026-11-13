@@ -183,11 +183,29 @@ test("with Chat off, nothing about Chat is in the workspace", async () => {
   app(createMockChatClient({ chats: [waitingChat()] }));
   await screen.findByRole("button", { name: /All tickets/ });
   expect(screen.queryByRole("button", { name: /^Chats/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Automations" })).toBeNull();
   fireEvent.keyDown(screen.getByRole("button", { name: "New ticket" }), {
     key: "Enter",
   });
   await screen.findByRole("menuitem", { name: "Capture a thought" });
   expect(screen.queryByRole("menuitem", { name: "New Chat" })).toBeNull();
+});
+
+test("with Chat on, Automations follows Chats in the sidebar and opens its page", async () => {
+  app(createMockChatClient({ enabled: true }));
+  const chats = await screen.findByRole("button", { name: "Chats" });
+  const entry = screen.getByRole("button", { name: "Automations" });
+  expect(
+    chats.compareDocumentPosition(entry) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
+  fireEvent.click(entry);
+
+  expect(entry.getAttribute("aria-current")).toBe("page");
+  const tabs = within(await screen.findByRole("radiogroup", { name: "Show" }));
+  expect(tabs.getByRole("radio", { name: /^Automations/ })).toBeTruthy();
+  fireEvent.click(tabs.getByRole("radio", { name: /^Agents/ }));
+  expect(await screen.findByRole("list", { name: "Agents" })).toBeTruthy();
 });
 
 test("with Chat on, the sidebar entry says how many Chats wait and opens them", async () => {

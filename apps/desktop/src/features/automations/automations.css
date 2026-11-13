@@ -1,0 +1,42 @@
+/* The Automations page reuses the Chats panes and rows (chats.css). */
+
+/* --- The agent editor: one reading column of fields. --- */
+.agent-form {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.agent-column {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 32px 48px;
+}
+.agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.agent-label small,
+.agent-hint {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: var(--text-caption-line);
+}
+.agent-standing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

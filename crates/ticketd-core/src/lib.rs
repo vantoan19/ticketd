@@ -96,11 +96,15 @@ pub use attachments::{
     Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
     DEFAULT_ATTACHMENT_LIMIT,
 };
+mod automation_agents;
 mod change_token;
 mod chats;
 mod events;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
+};
+pub use automation_agents::{
+    AgentHarness, AutomationAgent, AutomationAgentSettings, AutomationAgentTools,
 };
 pub use chats::{
     CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE,
@@ -118,7 +122,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 67;
+pub const FORMAT_VERSION: i64 = 68;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -208,6 +212,10 @@ pub enum Error {
     EmptyProject,
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("agent '{0}' was not found")]
+    AutomationAgentNotFound(String),
+    #[error("invalid agent: {0}")]
+    InvalidAutomationAgent(String),
     #[error("duplicate would create a cycle or self-link")]
     DuplicateCycle,
     #[error(
@@ -921,6 +929,9 @@ impl Workspace {
         }
         if version < 67 {
             events::migrate(&transaction)?;
+        }
+        if version < 68 {
+            automation_agents::migrate(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
