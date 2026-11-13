@@ -10,9 +10,8 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { Bot, Ellipsis, Plus, Tag, Workflow, Zap } from "lucide-react";
+import { Bot, Ellipsis, Plus, Tag } from "lucide-react";
 import "@xyflow/react/dist/style.css";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,22 +21,25 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import { folderName } from "@/features/automations/automation-text";
 import {
   CARD_HEIGHT,
   CARD_WIDTH,
   END_SIZE,
   GAP,
   layoutFlow,
-  TRIGGER_ID,
 } from "@/features/automations/canvas-layout";
-import {
-  HARNESS_NAMES,
-  type Automation,
-  type AutomationAgent,
-  type AutomationDefinition,
-  type AutomationStep,
+import type {
+  Automation,
+  AutomationAgent,
+  AutomationDefinition,
 } from "@/features/automations/client";
+import {
+  CARD_ICONS,
+  cardName,
+  stepCard,
+  triggerCard,
+  type Card,
+} from "@/features/automations/flow-cards";
 
 /** The trigger kinds this page can set up. */
 export type TriggerChoice = "tag_added";
@@ -55,107 +57,6 @@ function useActions(): Actions {
   if (!actions) throw new Error("a flow node was drawn outside its canvas");
   return actions;
 }
-
-const TRIGGER_KINDS: Record<string, string> = {
-  ticket_created: "When a ticket is created",
-  ticket_updated: "When a ticket is updated",
-  status_changed: "When the status changes",
-  tag_added: "When a tag is added",
-  tag_removed: "When a tag is removed",
-  activity_created: "When an update is added",
-  schedule: "On a schedule",
-  by_hand: "By hand",
-};
-const STEP_KINDS: Record<AutomationStep["kind"], string> = {
-  run_agent: "Run agent",
-  change_ticket: "Change ticket",
-  notify: "Notify me",
-  if: "If",
-};
-
-type Card = {
-  id: string;
-  /** The small line above: what kind of card this is. */
-  kind: string;
-  /** What it does, in words; with `kind`, its accessible name. */
-  title: string;
-  /** The title as shown, when it is more than the words. */
-  shown?: ReactNode;
-  detail?: string;
-  icon: "trigger" | "tag" | "agent" | "step";
-  /** Nothing chosen yet: the card is a prompt. */
-  unset: boolean;
-  /** Which menu the card carries. */
-  menu: "choose-trigger" | "change-trigger" | "step";
-};
-
-function triggerCard(trigger: AutomationDefinition["trigger"]): Card {
-  if (!trigger)
-    return {
-      id: TRIGGER_ID,
-      kind: "Trigger",
-      title: "Choose what starts it",
-      icon: "trigger",
-      unset: true,
-      menu: "choose-trigger",
-    };
-  const kind = TRIGGER_KINDS[trigger.kind] ?? "Trigger";
-  if (trigger.kind !== "tag_added")
-    return {
-      id: TRIGGER_ID,
-      kind: "Trigger",
-      title: kind,
-      icon: "trigger",
-      unset: false,
-      menu: "change-trigger",
-    };
-  const tag = trigger.tag.trim();
-  return {
-    id: TRIGGER_ID,
-    kind,
-    title: tag || "Choose a tag",
-    ...(tag && {
-      shown: (
-        <Badge variant="tag" size="sm">
-          {tag}
-        </Badge>
-      ),
-    }),
-    icon: "tag",
-    unset: !tag,
-    menu: "change-trigger",
-  };
-}
-
-function stepCard(step: AutomationStep, agents: AutomationAgent[]): Card {
-  const kind = STEP_KINDS[step.kind];
-  if (step.kind !== "run_agent")
-    return {
-      id: step.id,
-      kind,
-      title: "Set up in a later version",
-      icon: "step",
-      unset: false,
-      menu: "step",
-    };
-  const agent = agents.find((item) => item.id === step.agent_id);
-  const where = step.execution_folder
-    ? `in ${folderName(step.execution_folder)}`
-    : null;
-  return {
-    id: step.id,
-    kind,
-    title: agent ? agent.name.trim() || "New agent" : "Choose an agent",
-    ...(agent && {
-      detail: [HARNESS_NAMES[agent.harness], where].filter(Boolean).join(" · "),
-    }),
-    icon: "agent",
-    unset: !agent,
-    menu: "step",
-  };
-}
-
-const cardName = (card: Card) => `${card.kind}: ${card.title}`;
 
 function TriggerMenu({ children }: { children: ReactNode }) {
   const { onChooseTrigger } = useActions();
@@ -188,9 +89,7 @@ type CardData = { card: Card; selected: boolean; needs: string | undefined };
 function CardNode({ data }: NodeProps<Node<CardData>>) {
   const { card, selected, needs } = data;
   const { onSelect, onDeleteStep } = useActions();
-  const Icon = { trigger: Zap, tag: Tag, agent: Bot, step: Workflow }[
-    card.icon
-  ];
+  const Icon = CARD_ICONS[card.icon];
   const face = (
     <>
       <Icon size={16} aria-hidden />
@@ -312,7 +211,7 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
 const nodeTypes = { card: CardNode, add: AddNode };
 
 /** Brings the whole flow back into view when a step is added or removed. */
-function Refit({ shape }: { shape: string }) {
+export function Refit({ shape }: { shape: string }) {
   const { fitView } = useReactFlow();
   useEffect(() => {
     void fitView({ maxZoom: 1, padding: 0.2 });
@@ -355,7 +254,7 @@ export function FlowCanvas({
       if (!card) throw new Error(`the layout placed an unknown card: ${id}`);
       return card;
     };
-    const layout = layoutFlow(steps.map((step) => step.id));
+    const layout = layoutFlow(steps.map((step) => ({ id: step.id })));
     const nodes: Node[] = layout.items.map((item) => {
       const position = { x: item.x, y: item.y };
       if (item.kind === "card")
