@@ -352,7 +352,7 @@ fn step_needs(
     }
 }
 
-fn find_step<'a>(steps: &'a [Step], id: &str) -> Option<&'a Step> {
+pub(crate) fn find_step<'a>(steps: &'a [Step], id: &str) -> Option<&'a Step> {
     steps.iter().find_map(|step| {
         if step.id == id {
             return Some(step);

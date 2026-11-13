@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::automation_matching::{TicketFacts, matches};
 use crate::automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
-use crate::automations::AutomationDefinition;
+use crate::automations::{AutomationDefinition, Step};
 use crate::chats::{Chat, NewChat};
 use crate::events::WorkspaceEvent;
 use crate::{Error, Workspace};
@@ -89,6 +89,13 @@ pub struct AutomationRun {
     pub ended_at: Option<String>,
     /// The steps reached so far, in the order they ran.
     pub steps: Vec<AutomationRunStep>,
+}
+
+impl AutomationRun {
+    /// The step with `id` in the definition the run executes, at any depth.
+    pub fn step(&self, id: &str) -> Option<&Step> {
+        crate::automations::find_step(&self.definition.steps, id)
+    }
 }
 
 /// `ticket_id` is nullable for the runs a schedule or "Run now" will start. The
