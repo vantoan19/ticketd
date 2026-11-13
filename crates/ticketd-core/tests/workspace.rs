@@ -8,7 +8,7 @@ fn ticket_survives_reopening_workspace() {
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("A useful outcome").unwrap();
     drop(workspace);
-    let workspace = Workspace::open(&path).unwrap();
+    let workspace = Workspace::open_existing(&path).unwrap();
     assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
     assert_eq!(workspace.list_tickets().unwrap(), vec![ticket]);
 }
