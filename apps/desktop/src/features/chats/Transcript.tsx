@@ -71,6 +71,7 @@ import {
   stepWords,
   targetLines,
   turns,
+  workedFor,
   isLive,
   recordNamer,
   type RecordName,
@@ -1095,7 +1096,7 @@ const Item = memo(function Item({
 
 /**
  * The live line: the spinner and what the turn is doing, shown only while no step
- * or reasoning row runs, so a turn has one spinner. `since` counts "Working for 1m 32s" from the turn's start; `fromShown`
+ * or reasoning row runs, so a turn has one spinner. `since` counts "Working for 1m 32s" from the turn's start, less the time it waited on the person; `fromShown`
  * counts from when the line appeared, for a phase the host gives no start time for.
  * The clock is not read out: one polite status says when a turn starts, waits and
  * ends.
@@ -1103,28 +1104,30 @@ const Item = memo(function Item({
 function WorkingLine({
   label,
   since,
+  items = [],
   fromShown = false,
   spinner = true,
 }: {
   label: string;
   since?: string;
+  /** The transcript, whose requests' waits on the person are not working time. */
+  items?: TranscriptItem[];
   fromShown?: boolean;
   spinner?: boolean;
 }) {
   const [shown] = useState(() => Date.now());
   const now = useNow(Boolean(since) || fromShown);
-  const started = since ? Date.parse(since) : NaN;
+  const worked = since ? workedFor(items, since, now) : NaN;
   return (
     <div className="chat-working">
       {spinner && <LoaderCircle size={12} className="chat-spin" aria-hidden />}
       <span>
         {since ? (
-          Number.isNaN(started) || now - started < 1000 ? (
+          Number.isNaN(worked) || worked < 1000 ? (
             `${label}…`
           ) : (
             <>
-              {label} for{" "}
-              <span aria-hidden="true">{duration(now - started)}</span>
+              {label} for <span aria-hidden="true">{duration(worked)}</span>
             </>
           )
         ) : (
@@ -1365,6 +1368,7 @@ export function Transcript({
                 <WorkingLine
                   label={chat.doing.label}
                   since={chat.doing.since}
+                  items={items}
                 />
               ) : (
                 <WorkingLine label="Working…" />

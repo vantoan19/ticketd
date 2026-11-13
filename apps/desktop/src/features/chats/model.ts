@@ -567,7 +567,8 @@ function waitedIn(members: TranscriptItem[], from: number, to: number) {
     .flatMap((item) => {
       if (item.kind !== "request") return [];
       const asked = time(item.at);
-      const resolved = time(item.resolved_at);
+      // A request still waiting waits until now (`to`).
+      const resolved = item.state === "pending" ? to : time(item.resolved_at);
       if (asked === undefined || resolved === undefined) return [];
       const start = Math.max(from, asked);
       const end = Math.min(to, resolved);
@@ -582,6 +583,20 @@ function waitedIn(members: TranscriptItem[], from: number, to: number) {
     reached = Math.max(reached, end);
   }
   return total;
+}
+
+/**
+ * How long a running turn has worked since `since`: the time from then to `now`
+ * less the time its requests waited on the person, as the fold counts it (LIVE2-8).
+ */
+export function workedFor(
+  items: TranscriptItem[],
+  since: string,
+  now: number,
+): number {
+  const from = time(since);
+  if (from === undefined) return NaN;
+  return Math.max(0, now - from - waitedIn(items, from, now));
 }
 
 /**

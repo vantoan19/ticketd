@@ -10,6 +10,7 @@ import {
   unseenFrom,
   receiptLine,
   turns,
+  workedFor,
   type TranscriptPart,
   type Turn,
   chatTime,
@@ -872,6 +873,27 @@ test("LIVE-8: Worked for leaves out the time spent waiting on you, and says the 
     ),
   );
   expect(turn?.label).toBe("Worked for 1m · waited 2m 30s");
+  // LIVE2-8: the live "Working for" leaves the same wait out while the turn runs.
+  const items = [
+    asked("q1", "2026-11-10T10:00:20Z", "2026-11-10T10:02:20Z"),
+    asked("q2", "2026-11-10T10:01:00Z", "2026-11-10T10:02:50Z"),
+  ];
+  expect(
+    workedFor(
+      items,
+      "2026-11-10T10:00:00Z",
+      Date.parse("2026-11-10T10:03:30Z"),
+    ),
+  ).toBe(60_000);
+  // A request still pending is time waiting, up to now.
+  const pending = { ...items[0]!, state: "pending", resolved_at: undefined };
+  expect(
+    workedFor(
+      [pending as TranscriptItem],
+      "2026-11-10T10:00:00Z",
+      Date.parse("2026-11-10T10:01:20Z"),
+    ),
+  ).toBe(20_000);
 });
 
 test("LIVE-9: the harness's warnings fold as one line per turn; a step waiting on approval has no row", () => {
