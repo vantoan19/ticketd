@@ -365,6 +365,8 @@ export function createMockChatClient(
   const openListeners = new Set<(request: OpenRequest) => void>();
   const quitListeners = new Set<(working: number) => void>();
   const chats = new Map<string, Stored>();
+  /** Chats the person marked unread: as the host, they keep their seen words. */
+  const marked = new Set<string>();
   const store = (entry: MockChat) =>
     chats.set(entry.chat.id, {
       chat: entry.chat,
@@ -410,7 +412,9 @@ export function createMockChatClient(
         .at(-1);
     const marker = items.at(-1)?.kind === "marker" ? last("marker") : undefined;
     const ticket = chat.links.find((link) => link.kind === "ticket");
-    const status = mockStatus(chat, items);
+    const status = marked.has(chat.id)
+      ? { ...mockStatus({ ...chat, unseen: false }, items), unseen: true }
+      : mockStatus(chat, items);
     return chatSummarySchema.parse({
       id: chat.id,
       title: chat.title,
@@ -644,6 +648,7 @@ export function createMockChatClient(
     async openChat(id) {
       const entry = get(id);
       // Opening a Chat any way marks it seen.
+      marked.delete(id);
       if (entry.chat.unseen) patch(id, { unseen: false });
       return chatSnapshotSchema.parse(
         structuredClone({
@@ -887,8 +892,14 @@ export function createMockChatClient(
           !linked.includes(suggestion.ticket.id),
       );
     },
-    markRead: async (id) => patch(id, { unseen: false }),
-    markUnread: async (id) => patch(id, { unseen: true }),
+    markRead: async (id) => {
+      marked.delete(id);
+      patch(id, { unseen: false });
+    },
+    markUnread: async (id) => {
+      marked.add(id);
+      patch(id, { unseen: true });
+    },
     // As the host: kept with the Chat for the next open, and announced to no view.
     async readThrough(id, itemId) {
       client.readThroughs.push(itemId);

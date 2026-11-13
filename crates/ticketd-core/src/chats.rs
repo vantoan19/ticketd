@@ -108,6 +108,24 @@ pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Schema 71: Mark as unread is kept apart from an outcome the person has not seen,
+/// so a Chat they marked shows the blue dot on the words it had and never reads as
+/// a new Failed or Done that would notify.
+pub(crate) fn migrate_marked_unread(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'marked_unread')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN marked_unread INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 71;")?;
+    Ok(())
+}
+
 /// Schema 70: how far the person has read each Chat's transcript, so its New marker
 /// is placed the same way after ticketd restarts. Existing Chats start with nothing
 /// read through and place it from their unseen turn, as before.
@@ -207,6 +225,9 @@ pub struct Chat {
     /// The last record of the transcript that was in view in a focused window: the
     /// New marker goes after it. `None` until the person has read any.
     pub read_through: Option<String>,
+    /// The person marked the Chat unread. It reads as unread until it is next seen,
+    /// without making its last outcome unseen.
+    pub marked_unread: bool,
     /// The person turned this Chat's notifications off.
     pub muted: bool,
     pub created_at: String,
@@ -736,7 +757,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
         .query_row(
             "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
                     (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
-                    seen_through, muted, read_through
+                    seen_through, muted, read_through, marked_unread
              FROM chats WHERE id = ?1",
             [id],
             |row| {
@@ -755,6 +776,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
                     seen_through: row.get(11)?,
                     muted: row.get(12)?,
                     read_through: row.get(13)?,
+                    marked_unread: row.get(14)?,
                     links: Vec::new(),
                     active_turn: None,
                 })
@@ -1610,20 +1632,33 @@ impl Workspace {
     /// nothing, and logs nothing, when nothing ended unseen.
     pub fn mark_chat_seen(&mut self, id: &str) -> Result<Chat, Error> {
         let chat = self.chat(id)?;
-        match self.last_ended_turn(id)? {
-            Some(through) if through > chat.seen_through => self.set_seen_through(id, through),
-            _ => Ok(chat),
+        let through = self
+            .last_ended_turn(id)?
+            .filter(|through| *through > chat.seen_through);
+        if through.is_none() && !chat.marked_unread {
+            return Ok(chat);
         }
+        self.update_chat(id, |connection| {
+            connection.execute(
+                "UPDATE chats SET seen_through = MAX(seen_through, ?2), marked_unread = 0 WHERE id = ?1",
+                params![id, through.unwrap_or(0)],
+            )?;
+            Ok(())
+        })
     }
 
-    /// Mark as unread: the last ended turn reads as unseen again. A Chat with no ended
-    /// turn has nothing to mark.
+    /// Mark as unread: the Chat reads as unread until it is next seen. Its last outcome
+    /// is not made unseen, so nothing is announced again. A Chat with no ended turn
+    /// has nothing to mark.
     pub fn mark_chat_unread(&mut self, id: &str) -> Result<Chat, Error> {
         let chat = self.chat(id)?;
-        match self.last_ended_turn(id)? {
-            Some(through) if chat.seen_through >= through => self.set_seen_through(id, through - 1),
-            _ => Ok(chat),
+        if chat.marked_unread || self.last_ended_turn(id)?.is_none() {
+            return Ok(chat);
         }
+        self.update_chat(id, |connection| {
+            connection.execute("UPDATE chats SET marked_unread = 1 WHERE id = ?1", [id])?;
+            Ok(())
+        })
     }
 
     /// The person had the transcript in view through `record` (a message, turn, tool,
@@ -1678,16 +1713,6 @@ impl Workspace {
             [id],
             |row| row.get(0),
         )?)
-    }
-
-    fn set_seen_through(&mut self, id: &str, through: i64) -> Result<Chat, Error> {
-        self.update_chat(id, |connection| {
-            connection.execute(
-                "UPDATE chats SET seen_through = ?2 WHERE id = ?1",
-                params![id, through],
-            )?;
-            Ok(())
-        })
     }
 
     pub fn set_chat_queue_paused(&mut self, id: &str, paused: bool) -> Result<Chat, Error> {

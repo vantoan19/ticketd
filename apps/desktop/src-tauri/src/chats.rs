@@ -943,8 +943,9 @@ impl Chats {
     async fn mark_seen(&self, chat_id: &str) -> Outcome<()> {
         let host = self.host()?;
         let mut workspace = self.workspace()?;
-        let before = workspace.chat(chat_id)?.seen_through;
-        if workspace.mark_chat_seen(chat_id)?.seen_through != before {
+        let seen = |chat: &Chat| (chat.seen_through, chat.marked_unread);
+        let before = seen(&workspace.chat(chat_id)?);
+        if seen(&workspace.mark_chat_seen(chat_id)?) != before {
             drop(workspace);
             host.notify_changed(chat_id).await?;
         }

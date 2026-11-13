@@ -134,10 +134,12 @@ pub fn status(facts: &Facts<'_>) -> Status {
     let ended = facts
         .last_turn
         .filter(|turn| turn.state != ChatTurnState::Active);
+    // Only an outcome the person has not seen ranks as Failed or Done; a Chat they
+    // marked unread keeps the words it had, with the blue dot, and never notifies.
     let unseen = ended.is_some_and(|turn| facts.chat.unseen(turn));
     let make = |rank, word: &str, detail: Option<String>| Status {
         rank,
-        unseen,
+        unseen: unseen || facts.chat.marked_unread,
         word: word.to_owned(),
         detail,
     };

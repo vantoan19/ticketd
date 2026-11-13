@@ -1573,9 +1573,13 @@ fn a_turn_that_ends_after_the_chat_was_seen_is_unseen_until_seen_again() {
     workspace.mark_chat_seen(&chat.id).unwrap();
     assert_eq!(workspace.chat_change_sequence().unwrap(), sequence);
 
-    assert!(workspace.mark_chat_unread(&chat.id).unwrap().unseen(&turn));
-    let reopened = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
-    assert!(reopened.chat(&chat.id).unwrap().unseen(&turn));
+    // Marked unread, it reads unread without its outcome becoming unseen again.
+    let marked = workspace.mark_chat_unread(&chat.id).unwrap();
+    assert!(marked.marked_unread && !marked.unseen(&turn));
+    let mut reopened = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert!(reopened.chat(&chat.id).unwrap().marked_unread);
+    // Seeing it clears the mark.
+    assert!(!reopened.mark_chat_seen(&chat.id).unwrap().marked_unread);
 }
 
 #[test]

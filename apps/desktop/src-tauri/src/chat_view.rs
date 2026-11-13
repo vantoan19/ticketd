@@ -1566,10 +1566,11 @@ pub fn chat_state(
         queue_paused: chat.queue_paused,
         context: chat_reports::context(live),
         settings: chat_reports::settings(live, name),
-        unseen: tracker
-            .last_turn
-            .as_ref()
-            .is_some_and(|turn| chat.unseen(turn)),
+        unseen: chat.marked_unread
+            || tracker
+                .last_turn
+                .as_ref()
+                .is_some_and(|turn| chat.unseen(turn)),
         muted: chat.muted,
         has_composer,
         read_through: chat.read_through.clone(),
@@ -1713,6 +1714,7 @@ mod tests {
             }),
             seen_through: 0,
             read_through: None,
+            marked_unread: false,
             muted: false,
             created_at: String::new(),
         }
