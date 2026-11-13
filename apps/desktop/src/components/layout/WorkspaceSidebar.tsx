@@ -4,6 +4,7 @@ import {
   CirclePlay,
   ListTodo,
   MessagesSquare,
+  Workflow,
   Trash2,
   Settings,
   Ellipsis,
@@ -144,7 +145,7 @@ function GroupMenu({
   );
 }
 
-type View =
+export type View =
   | "tickets"
   | "projects"
   | "plans"
@@ -153,7 +154,8 @@ type View =
   | "inbox"
   | "documents"
   | "attachments"
-  | "chats";
+  | "chats"
+  | "automations";
 export function WorkspaceSidebar({
   view: viewName,
   workspaceGraphOpen = false,
@@ -367,6 +369,17 @@ export function WorkspaceSidebar({
                       {waiting}
                     </span>
                   )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+            {chat.enabled && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={view === "automations"}
+                  tooltip="Automations"
+                  onClick={() => setView("automations")}
+                >
+                  <Workflow size={16} /> Automations
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}

@@ -18,7 +18,10 @@ import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import { useBulkEdit } from "@/features/tickets/useBulkEdit";
 import { TicketWorkspaceView } from "@/features/tickets/TicketWorkspaceView";
-import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
+import {
+  WorkspaceSidebar,
+  type View,
+} from "@/components/layout/WorkspaceSidebar";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
@@ -46,6 +49,7 @@ import {
   useDraftRecoveryNotices,
 } from "@/lib/draft-recovery-context";
 import { ChatProvider } from "@/features/chats/ChatProvider";
+import { AutomationsView } from "@/features/automations/AutomationsView";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
 
@@ -65,20 +69,11 @@ export function App() {
 function AppContent() {
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
-  const [view, setViewState] = useState<
-    | "tickets"
-    | "projects"
-    | "plans"
-    | "archived-plans"
-    | "settings"
-    | "inbox"
-    | "documents"
-    | "attachments"
-    | "chats"
-  >("tickets");
+  const [view, setViewState] = useState<View>("tickets");
   const chat = useChatFeature();
   // Turning Chat off hides its screen at once; the Chats themselves are kept.
-  if (view === "chats" && !chat.enabled) setViewState("tickets");
+  if ((view === "chats" || view === "automations") && !chat.enabled)
+    setViewState("tickets");
   const [newChatRequest, setNewChatRequest] = useState(0);
   const [attachmentPreview, setAttachmentPreview] = useState<Attachment | null>(
     null,
@@ -594,6 +589,14 @@ function AppContent() {
                           hidden={view !== "chats" || graphOrigin !== null}
                         >
                           <ChatsView newChatRequest={newChatRequest} />
+                        </div>
+                      )}
+                      {chat.enabled && view === "automations" && (
+                        <div
+                          className="context-view-wrapper"
+                          hidden={graphOrigin !== null}
+                        >
+                          <AutomationsView />
                         </div>
                       )}
                       <TicketWorkspaceView
