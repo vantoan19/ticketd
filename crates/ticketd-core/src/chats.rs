@@ -561,6 +561,9 @@ pub struct ChatSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+// A change carries one record and lives only while a view applies it; boxing the Chat
+// would cost every reader a deref for no measurable saving.
+#[allow(clippy::large_enum_variant)]
 pub enum ChatRecord {
     Chat(Chat),
     Item(ChatItem),

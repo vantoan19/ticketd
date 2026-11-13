@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
+
+use crate::chat_attention::{self, Facts, Status};
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
     ChatProblem, InteractionKind, ProblemKind, STOPPED_BY_TICKETD, StopState, problem_kind,
@@ -198,6 +200,9 @@ pub struct ChatState {
     pub links: Vec<LinkedRecord>,
     pub queue: Vec<Queued>,
     pub queue_paused: bool,
+    /// The last turn ended after the person last saw the Chat, or they marked it unread.
+    pub unseen: bool,
+    pub muted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -218,6 +223,9 @@ pub struct Summary {
     pub last_change: Option<ChatAgentChange>,
     pub preview: Option<String>,
     pub updated_at: String,
+    /// The ranked status every Chat surface shows (spec 21.3).
+    pub status: Status,
+    pub muted: bool,
 }
 
 /// The history a fresh session was started with. It is known only for the run of
@@ -251,6 +259,8 @@ pub struct Tracker {
     /// A submission whose delivery the person has to decide about, and why the resend
     /// they asked for was not accepted, when that is how it came back to them.
     uncertain: Option<(String, Option<String>)>,
+    /// The text of that submission.
+    uncertain_text: Option<String>,
     /// Requests stored as pending; whether one can be answered is the host's live state.
     pending: HashMap<String, ChatInteraction>,
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
@@ -315,8 +325,10 @@ impl Tracker {
             ChatItem::Message(message) if message.role == ChatRole::User => {
                 if message.awaits_decision() {
                     self.uncertain = Some((message.id.clone(), refused_resend(message)));
+                    self.uncertain_text = Some(message.text.clone());
                 } else if self.uncertain.as_ref().map(|(id, _)| id) == Some(&message.id) {
                     self.uncertain = None;
+                    self.uncertain_text = None;
                 }
                 self.updated_at = Some(message.created_at.clone());
             }
@@ -852,6 +864,11 @@ pub fn chat_state(
         links: around.links.clone(),
         queue: around.queue.clone(),
         queue_paused: chat.queue_paused,
+        unseen: tracker
+            .last_turn
+            .as_ref()
+            .is_some_and(|turn| chat.unseen(turn)),
+        muted: chat.muted,
     }
 }
 
@@ -865,20 +882,26 @@ fn opening(activity: &str, origin: Option<ChatSessionOrigin>) -> Option<&'static
     }
 }
 
-/// Whether a Chat counts in the sidebar: it waits for an answer or a delivery decision
-/// (`asked`), or it Failed. An install or sign-in step is shown on the row and not
-/// counted. The desktop's `needsYou` states the same rule for its fixtures.
-fn needs_you(asked: bool, activity: &str, problem: Option<&str>) -> bool {
-    let setup = matches!(
-        problem,
-        Some("not_installed" | "incompatible" | "probe_failed" | "not_signed_in")
-    );
-    asked || (!setup && (activity == "failed" || problem == Some("failed")))
-}
-
 pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroundings) -> Summary {
     let activity = activity(live, tracker);
     let problem = problem(chat, live, tracker, around);
+    let harness = harness_name(&chat.harness);
+    let status = chat_attention::status(&Facts {
+        chat,
+        harness,
+        live,
+        last_turn: tracker.last_turn.as_ref(),
+        uncertain: tracker.uncertain_text.as_deref(),
+        problem: problem.as_ref().map(|problem| (problem.kind, problem.past)),
+        failure: problem
+            .as_ref()
+            .filter(|problem| problem.kind == "failed")
+            .and_then(|problem| problem.message.as_deref()),
+        activity,
+        opening: opening(activity, live.opening).is_some(),
+        last_change: tracker.last_change.as_ref(),
+        last_response: tracker.last_response.as_deref(),
+    });
     let interruption = match &tracker.last_turn {
         _ if activity != "interrupted" => None,
         _ if live.stop == Some(StopState::Unconfirmed) => Some("unconfirmed"),
@@ -889,7 +912,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
     Summary {
         id: chat.id.clone(),
         title: title(chat),
-        harness_name: harness_name(&chat.harness).to_owned(),
+        harness_name: harness.to_owned(),
         // A managed folder is named by an id and never shared: the row leaves it out.
         folder_name: (!around.folder_missing && !chat.folder_managed)
             .then(|| last_component(&chat.execution_folder)),
@@ -899,11 +922,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         }),
         retention: retention(chat),
         activity,
-        needs_you: needs_you(
-            !live.interactions.is_empty() || tracker.uncertain.is_some(),
-            activity,
-            problem.as_ref().map(|problem| problem.kind),
-        ),
+        needs_you: status.rank.waits(),
         problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,
@@ -916,6 +935,8 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             .updated_at
             .clone()
             .unwrap_or(chat.created_at.clone()),
+        status,
+        muted: chat.muted,
     }
 }
 
@@ -938,7 +959,7 @@ pub fn idle() -> ChatLive {
 mod tests {
     use super::{
         ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatTool, ChatToolState, Item,
-        idle, needs_you, opening, request, step,
+        idle, opening, request, step,
     };
     use ticketd_core::ChatSessionOrigin;
 
@@ -1030,18 +1051,5 @@ mod tests {
         };
         assert_eq!(subject.as_deref(), Some("touch hello.txt"));
         assert_eq!(reason.as_deref(), Some("Allow creating hello.txt?"));
-    }
-
-    #[test]
-    fn the_count_takes_waiting_uncertain_and_failed_chats_but_not_setup_blocks() {
-        assert!(needs_you(true, "waiting", None));
-        assert!(needs_you(true, "idle", Some("uncertain_delivery")));
-        assert!(needs_you(false, "failed", None));
-        assert!(needs_you(false, "idle", Some("failed")));
-        assert!(needs_you(false, "failed", Some("usage_limit")));
-        assert!(!needs_you(false, "failed", Some("not_installed")));
-        assert!(!needs_you(false, "idle", Some("not_signed_in")));
-        assert!(!needs_you(false, "interrupted", None));
-        assert!(!needs_you(false, "working", None));
     }
 }

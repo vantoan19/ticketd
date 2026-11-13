@@ -23,6 +23,7 @@ use ticketd_core::{
 };
 use tokio::sync::oneshot;
 
+use crate::chat_attention::Rank;
 use crate::chat_view::{
     self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, Queued, Summary, Surroundings,
     Tracker, harness_name,
@@ -225,9 +226,15 @@ fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Overview {
+    /// Chats waiting for the person (a request, uncertain delivery, an unseen failure),
+    /// muted ones included: the sidebar count.
     pub needs_you: usize,
+    /// Chats with an unseen outcome that does not wait for the person.
+    pub unread: usize,
+    /// Waiting Chats that are not muted: the app-icon count.
+    pub app_icon: usize,
     pub working: usize,
 }
 
@@ -508,6 +515,10 @@ pub struct Chats {
     fresh: Mutex<HashMap<String, FreshHistory>>,
     /// Chats last shown with their folder missing, so a check can tell what changed.
     missing_folders: Mutex<HashSet<String>>,
+    /// The main window has focus: an open Chat is in view only while it does.
+    focused: AtomicBool,
+    /// Settings > Chat > Notify me about Chats. The interface keeps the choice.
+    notify: AtomicBool,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -534,6 +545,8 @@ impl Chats {
             next_feed: AtomicU64::new(1),
             fresh: Mutex::new(HashMap::new()),
             missing_folders: Mutex::new(HashSet::new()),
+            focused: AtomicBool::new(true),
+            notify: AtomicBool::new(true),
         })
     }
 
@@ -714,6 +727,77 @@ impl Chats {
         self.started_host().map(|host| host.changed())
     }
 
+    /// "active", "archived" or "trashed", to open the Chat under the right list.
+    pub fn chat_retention(&self, chat_id: &str) -> Outcome<&'static str> {
+        let chat = self.workspace()?.chat(chat_id)?;
+        Ok(if chat.trashed {
+            "trashed"
+        } else if chat.archived {
+            "archived"
+        } else {
+            "active"
+        })
+    }
+
+    /// Chats open in a view while the window has focus. A visible list row is not a view.
+    pub fn in_view(&self) -> HashSet<String> {
+        if !self.focused.load(Ordering::SeqCst) {
+            return HashSet::new();
+        }
+        lock(&self.feeds)
+            .values()
+            .map(|feed| feed.chat_id.clone())
+            .collect()
+    }
+
+    /// The window gained or lost focus. Regaining it marks the open Chats seen.
+    pub async fn set_focused(&self, focused: bool) {
+        self.focused.store(focused, Ordering::SeqCst);
+        if focused {
+            for chat_id in self.in_view() {
+                let _ = self.see(&chat_id).await;
+            }
+        }
+    }
+
+    pub fn notifies(&self) -> bool {
+        self.notify.load(Ordering::SeqCst)
+    }
+
+    pub fn set_notify(&self, notify: bool) {
+        self.notify.store(notify, Ordering::SeqCst);
+    }
+
+    /// The person saw the Chat's outcome. Rows and counts follow when that changed.
+    async fn see(&self, chat_id: &str) -> Outcome<()> {
+        let host = self.host()?;
+        let mut workspace = self.workspace()?;
+        let before = workspace.chat(chat_id)?.seen_through;
+        if workspace.mark_chat_seen(chat_id)?.seen_through != before {
+            drop(workspace);
+            host.notify_changed(chat_id).await?;
+        }
+        Ok(())
+    }
+
+    /// Mark as read: clears an unseen outcome, never a live request.
+    pub async fn mark_read(&self, chat_id: &str) -> Outcome<()> {
+        self.see(chat_id).await
+    }
+
+    /// Mark as unread: the last turn reads as unseen until the Chat is next opened.
+    pub async fn mark_unread(&self, chat_id: &str) -> Outcome<()> {
+        let host = self.host()?;
+        self.workspace()?.mark_chat_unread(chat_id)?;
+        Ok(host.notify_changed(chat_id).await?)
+    }
+
+    pub async fn set_muted(&self, chat_id: &str, muted: bool) -> Outcome<()> {
+        let host = self.host()?;
+        self.workspace()?.set_chat_muted(chat_id, muted)?;
+        Ok(host.notify_changed(chat_id).await?)
+    }
+
     fn summaries(&self, filter: ChatListFilter) -> Outcome<Vec<Summary>> {
         let workspace = self.workspace()?;
         let live = self.started_host().map(|host| host.live());
@@ -744,38 +828,34 @@ impl Chats {
         Ok(summaries)
     }
 
-    /// The counts, and a text that differs exactly when a list row or the counts would
-    /// read differently. Streamed text being checkpointed changes neither, so lists are
-    /// not fetched again for it.
-    pub fn overview_digest(&self) -> Outcome<(Overview, String)> {
-        let mut overview = Overview {
-            needs_you: 0,
-            working: 0,
-        };
-        let mut rows = Vec::new();
-        for filter in [ChatListFilter::Active, ChatListFilter::Archived] {
-            for summary in self.summaries(filter)? {
-                overview.needs_you += usize::from(summary.needs_you);
-                overview.working += usize::from(matches!(summary.activity, "working" | "waiting"));
-                rows.push(summary);
-            }
-        }
-        rows.extend(self.summaries(ChatListFilter::Trashed)?);
-        let digest = format!("{rows:?}");
-        Ok((overview, digest))
+    /// The counts, the rows outside the trash, and a text that differs exactly when a
+    /// list row or the counts would read differently. Streamed text being checkpointed
+    /// changes neither, so lists are not fetched again for it.
+    pub fn overview_digest(&self) -> Outcome<(Overview, String, Vec<Summary>)> {
+        let mut rows = self.summaries(ChatListFilter::Active)?;
+        rows.extend(self.summaries(ChatListFilter::Archived)?);
+        let overview = overview_of(&rows);
+        let trashed = self.summaries(ChatListFilter::Trashed)?;
+        let digest = format!("{rows:?}{trashed:?}");
+        Ok((overview, digest, rows))
     }
 
     pub fn list(&self, scope: ChatListFilter) -> Outcome<Vec<Summary>> {
         self.host()?;
-        self.summaries(scope)
+        let mut rows = self.summaries(scope)?;
+        // An archived Chat that asks the person something shows in Active until answered.
+        if scope == ChatListFilter::Active {
+            let asking = self.summaries(ChatListFilter::Archived)?.into_iter();
+            rows.extend(
+                asking.filter(|row| matches!(row.status.rank, Rank::Approval | Rank::Question)),
+            );
+        }
+        Ok(rows)
     }
 
     pub fn overview(&self) -> Outcome<Overview> {
         if !self.enabled() {
-            return Ok(Overview {
-                needs_you: 0,
-                working: 0,
-            });
+            return Ok(Overview::default());
         }
         Ok(self.overview_digest()?.0)
     }
@@ -902,7 +982,10 @@ impl Chats {
     /// Attaches a view: a snapshot now, then every change after it through `sink`,
     /// numbered one apart from the snapshot's cursor. Attaching starts no harness.
     pub async fn open(self: &Arc<Self>, chat_id: &str, sink: Sink) -> Outcome<Opened> {
-        let (attached, subscription) = self.host()?.attach(chat_id).await?;
+        let host = self.host()?;
+        // Opening a Chat any way marks it seen. A view keeps working if that fails.
+        let _ = self.see(chat_id).await;
+        let (attached, subscription) = host.attach(chat_id).await?;
         let workspace = self.workspace()?;
         let tracker = Tracker::from_items(&attached.snapshot.items);
         let chat = attached.snapshot.chat;
@@ -987,6 +1070,7 @@ impl Chats {
                 // Closed by the view (nobody is listening) or asked to resync.
                 _ = &mut resynced => None,
             };
+            let mut ended = false;
             let records = match update {
                 Some(ChatUpdate::Changes(changes)) => {
                     let active = view.chat.active_turn.as_ref().map(|turn| turn.id.clone());
@@ -998,6 +1082,7 @@ impl Chats {
                                 // A turn starting or ending changes no Chat record, so the
                                 // Chat's active turn is followed from the turn itself.
                                 if let ChatItem::Turn(turn) = &item {
+                                    ended |= turn.state != ChatTurnState::Active;
                                     let ends_active = view.chat.active_turn.as_ref().map(|t| &t.id)
                                         == Some(&turn.id);
                                     if turn.state == ChatTurnState::Active {
@@ -1073,6 +1158,10 @@ impl Chats {
                 }
                 Some(ChatUpdate::Resync) | None => break,
             };
+            // A turn that ends while its Chat is in view is seen.
+            if ended && self.focused.load(Ordering::SeqCst) {
+                let _ = self.see(&view.chat.id).await;
+            }
             let fresh = self.fresh(&view.chat.id);
             for record in records {
                 if let Some(item) = chat_view::item(&record, &view.chat, &view.live, fresh)
@@ -1436,6 +1525,19 @@ impl Chats {
         let title = Some(title.trim()).filter(|title| !title.is_empty());
         Ok(workspace.create_document(title, &response.text)?.id)
     }
+}
+
+/// The counts the sidebar and the app icon show, from the rows outside the trash.
+pub fn overview_of(rows: &[Summary]) -> Overview {
+    let mut overview = Overview::default();
+    for row in rows {
+        let waits = row.status.rank.waits();
+        overview.needs_you += usize::from(waits);
+        overview.app_icon += usize::from(waits && !row.muted);
+        overview.unread += usize::from(row.status.unread());
+        overview.working += usize::from(matches!(row.activity, "working" | "waiting"));
+    }
+    overview
 }
 
 /// What closing the main window does.

@@ -2,6 +2,7 @@
 mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
+mod chat_attention;
 mod chat_commands;
 mod chat_view;
 mod chats;
@@ -1478,6 +1479,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .setup(move |app| {
             let version = app.package_info().version.to_string();
             tauri::Manager::manage(app, chat_commands::ChatBridge::new(version));
+            chat_commands::on_notification_click(app.handle());
             start_periodic_refresh(coordinator);
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
@@ -1656,6 +1658,10 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_enabled,
             chat_commands::chat_set_enabled,
             chat_commands::chat_overview,
+            chat_commands::chat_set_notify,
+            chat_commands::chat_mark_read,
+            chat_commands::chat_mark_unread,
+            chat_commands::chat_set_muted,
             chat_commands::chat_list,
             chat_commands::chat_harnesses,
             chat_commands::chat_folder_use,
