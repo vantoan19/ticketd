@@ -139,6 +139,17 @@ const automationRunSchema = z.object({
 });
 export type AutomationRun = z.infer<typeof automationRunSchema>;
 
+/** A run in the list of every run: with the Automation it belongs to. */
+const listedRunSchema = automationRunSchema.extend({
+  automation_id: z.string(),
+  /** The Automation as it is called now. */
+  automation_name: z.string(),
+});
+export type ListedRun = z.infer<typeof listedRunSchema>;
+
+/** The examples the empty page offers, as the core names them. */
+export type AutomationExample =
+  "triage_tagged_tickets" | "verify_ready_for_testing" | "weekly_summary";
 /** A run as its ticket lists it: with the name of the Automation it ran. */
 const ticketRunSchema = automationRunSchema.extend({
   automation_name: z.string(),
@@ -205,6 +216,19 @@ export const automationsClient = {
   async createAutomation(): Promise<Automation> {
     return automationSchema.parse(await invoke("automation_create"));
   },
+  /**
+   * One of the examples, as an Automation that is off. A step whose agent does
+   * not exist yet comes back unfinished, saying so.
+   */
+  async createExample(example: AutomationExample): Promise<Automation> {
+    return automationSchema.parse(
+      await invoke("automation_create_example", { example }),
+    );
+  },
+  /** A copy of an Automation, off. */
+  async duplicateAutomation(id: string): Promise<Automation> {
+    return automationSchema.parse(await invoke("automation_duplicate", { id }));
+  },
   /** Replaces the whole definition: renaming and reshaping are the same edit. */
   async updateAutomation(
     id: string,
@@ -254,6 +278,12 @@ export const automationsClient = {
     return z
       .array(automationRunSchema)
       .parse(await invoke("automation_run_list", { automationId }));
+  },
+  /** The runs of every Automation on this desktop, newest first. */
+  async allRuns(): Promise<ListedRun[]> {
+    return z
+      .array(listedRunSchema)
+      .parse(await invoke("automation_run_list_all"));
   },
   /**
    * A step's text with its fields filled in from the most recent ticket, and

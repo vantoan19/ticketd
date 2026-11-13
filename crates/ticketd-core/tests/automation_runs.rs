@@ -72,6 +72,21 @@ fn triage(workspace: &mut Workspace) -> Automation {
     })
 }
 
+/// Another Automation started by the same tag, under its own name.
+#[allow(clippy::unwrap_used)]
+fn triage_named(workspace: &mut Workspace, name: &str) -> Automation {
+    let automation = triage(workspace);
+    workspace
+        .update_automation(
+            &automation.id,
+            AutomationDefinition {
+                name: name.into(),
+                ..automation.definition
+            },
+        )
+        .unwrap()
+}
+
 #[allow(clippy::unwrap_used)]
 fn tagged(workspace: &mut Workspace, title: &str) -> Ticket {
     let ticket = workspace.create_ticket(title).unwrap();
@@ -706,6 +721,58 @@ fn an_automation_this_build_cannot_read_does_not_stop_the_others() {
     assert_eq!(runs(&workspace, &readable).len(), 1);
     // Its events wait for a build that can read it.
     assert_eq!(workspace.automation_cursor(&unreadable.id).unwrap(), cursor);
+}
+
+#[test]
+fn every_run_is_listed_across_automations_newest_first_naming_its_automation() {
+    let (_dir, mut workspace) = workspace();
+    let triage = triage(&mut workspace);
+    let verify = triage_named(&mut workspace, "Verify on staging");
+    tagged(&mut workspace, "Fix login");
+    workspace.queue_automation_runs().unwrap();
+    tagged(&mut workspace, "Reset email");
+    workspace.queue_automation_runs().unwrap();
+
+    let runs = workspace.all_automation_runs().unwrap();
+
+    let title = |run: &AutomationRun| run.ticket.as_ref().unwrap().title.clone();
+    assert_eq!(
+        runs.iter().map(title).collect::<Vec<_>>(),
+        ["Reset email", "Reset email", "Fix login", "Fix login"]
+    );
+    let mut named: Vec<_> = runs[..2]
+        .iter()
+        .map(|run| (run.automation_name.as_str(), run.automation_id.as_str()))
+        .collect();
+    named.sort_unstable();
+    assert_eq!(
+        named,
+        [
+            ("Triage", triage.id.as_str()),
+            ("Verify on staging", verify.id.as_str())
+        ]
+    );
+
+    // A run names its Automation as it is called now, and outlives it.
+    workspace
+        .update_automation(
+            &triage.id,
+            AutomationDefinition {
+                name: "Triage new tickets".into(),
+                ..triage.definition.clone()
+            },
+        )
+        .unwrap();
+    workspace.delete_automation(&verify.id).unwrap();
+    let mut names: Vec<_> = workspace
+        .all_automation_runs()
+        .unwrap()
+        .into_iter()
+        .map(|run| run.automation_name)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names, ["Triage new tickets", "Verify on staging"]);
 }
 
 const LIMIT: &str = "The agent reached its limit of 40 turns before finishing.";

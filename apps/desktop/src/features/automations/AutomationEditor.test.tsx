@@ -88,6 +88,8 @@ beforeEach(() => {
     switch (command) {
       case "automation_list":
         return automations;
+      case "automation_run_list_all":
+        return [];
       case "automation_agent_list":
         return agents;
       case "automation_run_list":
@@ -534,7 +536,8 @@ test("the Runs view lists the Automation's runs by day, each with its ticket, st
   ];
   await openFirst([TRIAGE_TAGGED]);
 
-  fireEvent.click(screen.getByRole("radio", { name: "Runs" }));
+  // The list header has a Runs view too; the second is the Automation's own.
+  fireEvent.click(screen.getAllByRole("radio", { name: "Runs" })[1]!);
 
   const today = await screen.findByRole("list", { name: "Runs, Today" });
   expect(screen.queryByRole("application", { name: "Steps" })).toBeNull();
@@ -561,7 +564,8 @@ test("the Runs view lists the Automation's runs by day, each with its ticket, st
 test("an Automation that has not run yet says so", async () => {
   await openFirst([TRIAGE_TAGGED]);
 
-  fireEvent.click(screen.getByRole("radio", { name: "Runs" }));
+  // The list header has a Runs view too; the second is the Automation's own.
+  fireEvent.click(screen.getAllByRole("radio", { name: "Runs" })[1]!);
 
   await screen.findByText("No runs yet");
   expect(

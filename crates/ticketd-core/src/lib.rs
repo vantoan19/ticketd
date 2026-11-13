@@ -98,6 +98,7 @@ pub use attachments::{
 };
 mod automation_agents;
 mod automation_background;
+mod automation_examples;
 mod automation_matching;
 mod automation_run_machine;
 mod automation_runs;
@@ -112,6 +113,7 @@ pub use activities::{
 pub use automation_agents::{
     AgentHarness, AutomationAgent, AutomationAgentSettings, AutomationAgentTools,
 };
+pub use automation_examples::AutomationExample;
 pub use automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
 pub use automation_runs::{
     AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,

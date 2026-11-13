@@ -3,7 +3,11 @@ import type {
   AutomationRun,
   AutomationRunDetail,
 } from "@/features/automations/client";
-import { runsByDay, stepStates } from "@/features/automations/runs-model";
+import {
+  runsByDay,
+  runsByNeed,
+  stepStates,
+} from "@/features/automations/runs-model";
 
 /** An agent step with a failure path, then an If with a step on each path. */
 const BRANCHING = [
@@ -142,4 +146,34 @@ test("runs are grouped by the local day they started on, newest day first", () =
     ["Yesterday", ["c"]],
     ["Nov 11", ["d", "e"]],
   ]);
+});
+
+test("every run is grouped by whether it is going, needs the person, or is over, in the order given", () => {
+  const of = (id: string, status: AutomationRun["status"]) => ({
+    ...run(id, "2026-11-14T10:00:00Z"),
+    status,
+    needs_you: status === "needs_attention",
+  });
+
+  const groups = runsByNeed([
+    of("a", "completed"),
+    of("b", "queued"),
+    of("c", "needs_attention"),
+    of("d", "running"),
+    of("e", "taken_over"),
+  ]);
+
+  expect(
+    groups.map((group) => [group.label, group.runs.map((item) => item.id)]),
+  ).toEqual([
+    ["Now", ["b", "d"]],
+    ["Needs you", ["c"]],
+    ["Earlier", ["a", "e"]],
+  ]);
+  // A run the person dismissed no longer needs them, and an empty group is left out.
+  expect(
+    runsByNeed([{ ...of("a", "needs_attention"), needs_you: false }]).map(
+      (group) => group.label,
+    ),
+  ).toEqual(["Earlier"]);
 });

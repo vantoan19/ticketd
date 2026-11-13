@@ -109,3 +109,23 @@ export function runsByDay(runs: AutomationRun[], now = Date.now()): RunDay[] {
   }
   return days;
 }
+
+/**
+ * Runs under what they ask of the person: going now, waiting on them, or over.
+ * A run that needed attention and was dismissed, run again or taken over is
+ * over. Each group keeps the order `runs` arrive in; an empty group is left out.
+ */
+export function runsByNeed<Run extends AutomationRun>(runs: Run[]) {
+  const need = (run: Run) =>
+    run.status === "queued" || run.status === "running"
+      ? "Now"
+      : run.needs_you
+        ? "Needs you"
+        : "Earlier";
+  return (["Now", "Needs you", "Earlier"] as const)
+    .map((label) => ({
+      label,
+      runs: runs.filter((run) => need(run) === label),
+    }))
+    .filter((group) => group.runs.length > 0);
+}

@@ -1,6 +1,7 @@
 use ticketd_core::{
-    AutomationAgentSettings, AutomationDefinition, Check, Condition, Error, NotifyTarget, Schedule,
-    Status, Step, StepAction, StepChange, Trigger, Weekday, Workspace,
+    AutomationAgentSettings, AutomationDefinition, AutomationExample, AutomationProblem, Check,
+    Condition, Error, NotifyTarget, Schedule, Status, Step, StepAction, StepChange, Trigger,
+    Weekday, Workspace,
 };
 
 #[allow(clippy::unwrap_used)] // A Workspace that cannot open fails the test during setup.
@@ -615,4 +616,129 @@ fn a_workspace_in_the_previous_format_gains_automation_storage_quietly() {
     workspace.delete_automation(&automation.id).unwrap();
     assert_eq!(workspace.workspace_event_head().unwrap(), events);
     assert!(workspace.change_token().unwrap() > token);
+}
+
+/// What each card of an example still needs, in the order the steps run.
+#[allow(clippy::unwrap_used)]
+fn example_needs(workspace: &mut Workspace, example: AutomationExample) -> Vec<String> {
+    let automation = workspace.create_example_automation(example).unwrap();
+    assert!(!automation.enabled);
+    automation
+        .problems
+        .into_iter()
+        .map(|problem| problem.message)
+        .collect()
+}
+
+#[test]
+fn an_example_is_created_off_and_a_step_whose_agent_does_not_exist_says_so() {
+    let (_dir, mut workspace) = workspace();
+
+    let example = workspace
+        .create_example_automation(AutomationExample::TriageTaggedTickets)
+        .unwrap();
+
+    assert_eq!(example.definition.name, "Triage tagged tickets");
+    assert_eq!(example.definition.trigger, tag_added("ready-for-triage"));
+    assert!(!example.enabled);
+    assert_eq!(workspace.automations().unwrap(), vec![example.clone()]);
+    let [step] = &example.definition.steps[..] else {
+        panic!("the example has one step");
+    };
+    assert!(matches!(
+        step.action,
+        StepAction::RunAgent { agent_id: None, .. }
+    ));
+    assert_eq!(
+        example.problems,
+        vec![AutomationProblem {
+            step_id: Some(step.id.clone()),
+            message: "Needs an agent and a folder".into(),
+        }]
+    );
+
+    // With an agent of the name the example runs, only the folder is left.
+    let agent = workspace
+        .create_automation_agent(AutomationAgentSettings {
+            name: "triage".into(),
+            ..AutomationAgentSettings::default()
+        })
+        .unwrap();
+    let example = workspace
+        .create_example_automation(AutomationExample::TriageTaggedTickets)
+        .unwrap();
+    assert!(matches!(
+        &example.definition.steps[0].action,
+        StepAction::RunAgent { agent_id: Some(id), .. } if *id == agent.id
+    ));
+    assert_eq!(example.problems[0].message, "Needs a folder");
+}
+
+#[test]
+fn each_example_holds_what_can_be_built_now_and_says_what_is_left() {
+    let (_dir, mut workspace) = workspace();
+
+    assert_eq!(
+        example_needs(&mut workspace, AutomationExample::VerifyReadyForTesting),
+        ["Needs an agent and a folder"]
+    );
+    assert_eq!(
+        example_needs(&mut workspace, AutomationExample::WeeklySummary),
+        ["Choose what starts it", "Needs an agent and a folder"]
+    );
+    let names: Vec<_> = workspace
+        .automations()
+        .unwrap()
+        .into_iter()
+        .map(|automation| automation.definition.name)
+        .collect();
+    assert_eq!(
+        names,
+        ["Weekly summary", "Verify what is ready for testing"]
+    );
+}
+
+#[test]
+fn a_duplicate_is_its_own_automation_with_the_same_flow_and_starts_off() {
+    let (_dir, mut workspace) = workspace();
+    let (definition, _agent) = triage(&mut workspace);
+    let original = workspace.create_automation(definition.clone()).unwrap();
+    let original = workspace
+        .set_automation_enabled(&original.id, true)
+        .unwrap();
+
+    let copy = workspace.duplicate_automation(&original.id).unwrap();
+
+    assert_ne!(copy.id, original.id);
+    assert_eq!(
+        copy.definition,
+        AutomationDefinition {
+            name: "Triage new tickets copy".into(),
+            ..definition
+        }
+    );
+    // Ready to switch on, but only the person does that.
+    assert!(!copy.enabled);
+    assert_eq!(copy.problems, []);
+    assert_eq!(
+        workspace.automations().unwrap(),
+        vec![copy.clone(), original.clone()]
+    );
+
+    // Changing the copy leaves what it was made from alone.
+    workspace
+        .update_automation(&copy.id, AutomationDefinition::default())
+        .unwrap();
+    assert_eq!(workspace.automation(&original.id).unwrap(), original);
+
+    // An Automation with no name yet has none to add to.
+    let unnamed = workspace
+        .create_automation(AutomationDefinition::default())
+        .unwrap();
+    let copy = workspace.duplicate_automation(&unnamed.id).unwrap();
+    assert_eq!(copy.definition.name, "");
+    assert!(matches!(
+        workspace.duplicate_automation("missing"),
+        Err(Error::AutomationNotFound(_))
+    ));
 }

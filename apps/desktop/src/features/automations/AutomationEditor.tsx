@@ -79,6 +79,7 @@ export function AutomationEditor({
   onChange,
   onSetEnabled,
   onStopAndTurnOff,
+  onDuplicate,
   onDelete,
   onCreateAgent,
   onSaveAgent,
@@ -99,6 +100,8 @@ export function AutomationEditor({
   onSetEnabled: (enabled: boolean) => void;
   /** Off, with the runs in progress ended as Needs attention. */
   onStopAndTurnOff: () => void;
+  /** Makes a copy, off, and opens it. */
+  onDuplicate: () => void;
   onDelete: () => void;
   /** Makes a new agent; resolves to nothing when that failed. */
   onCreateAgent: () => Promise<AutomationAgent | undefined>;
@@ -334,6 +337,9 @@ export function AutomationEditor({
             <DropdownMenuContent align="end" aria-label="Automation actions">
               <DropdownMenuItem onSelect={() => setRenaming(draft.name)}>
                 Rename…
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onDuplicate}>
+                Duplicate
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

@@ -2,12 +2,15 @@ import type { ReactNode } from "react";
 import { cn } from "cn";
 import { RadioGroup } from "radix-ui";
 import { Count } from "./count";
+import { StatusDot } from "./status-dot";
 
 export type SegmentedOption<T extends string> = {
   value: T;
   label: string;
   icon?: ReactNode;
   count?: number;
+  /** Marks the option with an attention dot; these words say why to a screen reader. */
+  attention?: string;
   disabled?: boolean;
   title?: string;
 };
@@ -58,6 +61,12 @@ export function SegmentedControl<T extends string>({
           {option.icon}
           {option.label}{" "}
           {option.count !== undefined && <Count>{option.count}</Count>}
+          {option.attention && (
+            <>
+              <StatusDot tone="attention" size={6} />
+              <span className="sr-only">, {option.attention}</span>
+            </>
+          )}
         </RadioGroup.Item>
       ))}
     </RadioGroup.Root>

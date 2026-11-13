@@ -50,6 +50,8 @@ beforeEach(() => {
     switch (command) {
       case "automation_list":
         return [stored];
+      case "automation_run_list_all":
+        return [];
       case "automation_agent_list":
         return [];
       case "automation_update":
