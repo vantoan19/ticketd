@@ -97,6 +97,28 @@ export type RecordChange = z.infer<typeof recordChangeSchema>;
 
 export const interruptionSchema = z.enum(["stopped", "quit", "unconfirmed"]);
 
+/** Highest first: a Chat shows only its top status (spec 21.3). */
+export const rankSchema = z.enum([
+  "approval",
+  "question",
+  "working",
+  "failed",
+  "done",
+  "idle",
+]);
+export type Rank = z.infer<typeof rankSchema>;
+
+/** A Chat's ranked status and its row's second line, worded by the host. */
+export const chatStatusSchema = z.object({
+  rank: rankSchema,
+  /** The last turn ended after the person last saw the Chat, or they marked it unread. */
+  unseen: z.boolean(),
+  /** "Approval needed", "Working"; for Idle, the plain last line. */
+  word: z.string(),
+  detail: z.string().nullish(),
+});
+export type ChatStatus = z.infer<typeof chatStatusSchema>;
+
 export const chatSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -116,11 +138,18 @@ export const chatSummarySchema = z.object({
   /** The start of the last response. */
   preview: z.string().nullish(),
   updated_at: z.string(),
+  status: chatStatusSchema,
+  muted: z.boolean(),
 });
 export type ChatSummary = z.infer<typeof chatSummarySchema>;
 
 export const chatOverviewSchema = z.object({
+  /** Waiting for the person, muted Chats included: the sidebar count. */
   needs_you: z.number().int().nonnegative(),
+  /** An unseen outcome that does not wait for the person: the blue dot. */
+  unread: z.number().int().nonnegative(),
+  /** Waiting Chats that are not muted: the app-icon count. */
+  app_icon: z.number().int().nonnegative(),
   working: z.number().int().nonnegative(),
 });
 export type ChatOverview = z.infer<typeof chatOverviewSchema>;
@@ -331,6 +360,8 @@ export const chatStateSchema = z.object({
   links: z.array(linkedRecordSchema),
   queue: z.array(z.object({ id: z.string(), text: z.string() })),
   queue_paused: z.boolean(),
+  unseen: z.boolean(),
+  muted: z.boolean(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
@@ -367,6 +398,13 @@ export const chatChangeSchema = z.discriminatedUnion("kind", [
 export type ChatChange = z.infer<typeof chatChangeSchema>;
 
 export type LinkRef = { kind: LinkedRecord["kind"]; id: string };
+
+/** A click on a Chat's system notification: open it under its own list. */
+export const openRequestSchema = z.object({
+  chat_id: z.string(),
+  retention: retentionSchema,
+});
+export type OpenRequest = z.infer<typeof openRequestSchema>;
 
 /**
  * A created Chat. `send_error` says why its first message was not saved: the
@@ -467,6 +505,15 @@ export interface ChatClient {
     responseId: string,
     title: string,
   ): Promise<string>;
+  /** Mark as read clears an unseen outcome, never a live request. */
+  markRead(id: string): Promise<void>;
+  /** The last turn reads as unseen until the Chat is next opened. */
+  markUnread(id: string): Promise<void>;
+  setMuted(id: string, muted: boolean): Promise<void>;
+  /** Settings > Chat > Notify me about Chats, as the person last chose it. */
+  setNotify(enabled: boolean): Promise<void>;
+  /** The person clicked a Chat's system notification. */
+  onOpenRequested(listener: (request: OpenRequest) => void): Unsubscribe;
   /** Quit was asked for while Chats work; `working` is how many. */
   onQuitRequested(listener: (working: number) => void): Unsubscribe;
   answerQuit(quit: boolean): Promise<void>;
@@ -479,7 +526,11 @@ export interface ChatClient {
 export const unavailableChatClient: ChatClient = new Proxy({} as ChatClient, {
   get: (_, method: string) => {
     if (method === "getEnabled") return async () => false;
-    if (method === "subscribeOverview" || method === "onQuitRequested")
+    if (
+      method === "subscribeOverview" ||
+      method === "onQuitRequested" ||
+      method === "onOpenRequested"
+    )
       return () => () => {};
     return async () => {
       throw new ChatError("failed", "Chat is not available in this build.");

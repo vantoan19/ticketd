@@ -143,7 +143,13 @@ fn closing_keeps_chats_running_only_when_some_are_working_and_quit_asks_before_s
 
 #[test]
 fn the_tray_says_what_the_hidden_chats_are_doing_now() {
-    let tooltip = |working, needs_you| tray_tooltip(&Overview { needs_you, working });
+    let tooltip = |working, needs_you| {
+        tray_tooltip(&Overview {
+            needs_you,
+            working,
+            ..Overview::default()
+        })
+    };
     assert_eq!(tooltip(2, 0), "ticketd: Chats are still working");
     // Finished while hidden: the app stays open for its results and for sync.
     assert_eq!(tooltip(0, 0), "ticketd is running in the background");
@@ -704,6 +710,8 @@ async fn a_typed_failure_notices_and_reported_settings_reach_a_view_opened_after
         submissions: Vec::new(),
     })
     .await;
+    // A failed turn waits for the person until they have seen it.
+    assert_eq!(f.chats.overview().unwrap().needs_you, 1);
 
     let (opened, _) = f.open(&id).await;
     let shown = opened.snapshot.chat.problem.unwrap();
@@ -715,9 +723,14 @@ async fn a_typed_failure_notices_and_reported_settings_reach_a_view_opened_after
     )));
     let permissions = opened.snapshot.chat.harness.permissions.unwrap();
     assert!(permissions.contains("model m-1") && permissions.contains("permission mode default"));
-    assert_eq!(f.chats.overview().unwrap().needs_you, 1);
+    assert_eq!(
+        f.chats.overview().unwrap().needs_you,
+        0,
+        "opening it saw it"
+    );
+    f.chats.close(opened.subscription);
 
-    // A sign-in failure in the middle of a turn is a setup step: shown, not counted.
+    // A sign-in failure that stopped a turn counts too, until seen.
     f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
     settle().await;
     f.emit(EventKind::TurnEnded {
@@ -726,6 +739,7 @@ async fn a_typed_failure_notices_and_reported_settings_reach_a_view_opened_after
         submissions: Vec::new(),
     })
     .await;
+    assert_eq!(f.chats.overview().unwrap().needs_you, 1);
     let (opened, _) = f.open(&id).await;
     let shown = opened.snapshot.chat.problem.unwrap();
     assert_eq!(shown.kind, "not_signed_in");
@@ -887,7 +901,7 @@ async fn the_list_is_not_read_again_for_checkpointed_text_and_shared_folders_are
     })
     .await;
     tokio::time::sleep(Duration::from_secs(2)).await;
-    let (_, before) = f.chats.overview_digest().unwrap();
+    let (_, before, _) = f.chats.overview_digest().unwrap();
     let written = f.chats.digest();
 
     f.emit(EventKind::TextDelta {
@@ -1048,7 +1062,7 @@ async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_find
     );
 
     // Signed in now: the notice about the past turn is cleared, and what is left is
-    // a Chat whose last turn Failed, which counts.
+    // a Chat whose last turn Failed, already seen, so it no longer counts.
     f.fake.set_inspection(installed(LoginState::SignedIn));
     f.chats.check_again(&id).await.unwrap();
     settle().await;
@@ -1057,7 +1071,8 @@ async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_find
     assert_eq!(opened.snapshot.chat.problem, None);
     assert_eq!(opened.snapshot.chat.activity, "failed");
     assert_eq!(row(&f).problem, None);
-    assert!(row(&f).needs_you, "a Failed Chat counts");
+    assert!(!row(&f).needs_you, "a seen failure is Idle");
+    assert_eq!(row(&f).status.word, "Failed");
     assert_eq!(f.submitted(), ["first"], "checking sent nothing");
 
     // A later turn that fails the same way is told again.
@@ -1543,4 +1558,47 @@ fn an_incompatible_harness_says_what_was_found_and_needed_once() {
     );
     assert_eq!(status.path.as_deref(), Some("/opt/bin/codex"));
     assert_eq!(version_number("2.1.322 (Claude Code)"), "2.1.322");
+}
+
+/// Spec 21.3: a Chat in view never turns unread; any other one does until opened.
+#[tokio::test(start_paused = true)]
+async fn a_turn_that_ends_out_of_view_is_unread_until_the_chat_is_opened() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let row = |f: &Fixture| f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row(&f).status.rank, Rank::Working);
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    assert_eq!(row(&f).status.rank, Rank::Done);
+    assert_eq!(f.chats.overview().unwrap().unread, 1);
+
+    let (_view, _) = f.open(&id).await;
+    assert_eq!(row(&f).status.rank, Rank::Idle);
+    assert_eq!(f.chats.overview().unwrap().unread, 0);
+    assert_eq!(f.chats.in_view(), HashSet::from([id.clone()]));
+
+    // Mark as unread, and mute: the row keeps its words, the dot comes back.
+    f.chats.mark_unread(&id).await.unwrap();
+    f.chats.set_muted(&id, true).await.unwrap();
+    let marked = row(&f);
+    assert!(marked.status.unread() && marked.muted);
+
+    // Another turn ends while the Chat is open and the window has focus: seen.
+    f.chats.send(&id, "again", SendMode::Auto).await.unwrap();
+    settle().await;
+    f.emit(EventKind::TurnEnded {
+        turn: NativeTurnId::new("turn-2"),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    assert!(!row(&f).status.unseen);
+
+    // The window lost focus: the open Chat is not in view.
+    f.chats.set_focused(false).await;
+    assert!(f.chats.in_view().is_empty());
 }

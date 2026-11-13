@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Check, Ellipsis, LoaderCircle, SquarePen } from "lucide-react";
+import { BellOff, Check, Ellipsis, SquarePen } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Count } from "@/components/ui/count";
 import {
   DropdownMenu,
@@ -14,14 +15,15 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { StatusDot } from "@/components/ui/status-dot";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useNow } from "@/lib/use-now";
 import type { ChatSummary, Retention } from "@/features/chats/client";
 import { ChatDetail } from "@/features/chats/ChatDetail";
-import { chatTime, summaryLine } from "@/features/chats/model";
+import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
+import { ChatStatus } from "@/features/chats/ChatStatus";
+import { chatTime, emphasised } from "@/features/chats/model";
 import { NewChat } from "@/features/chats/NewChat";
-import { useChatList } from "@/features/chats/use-chats";
+import { useChatFeature, useChatList } from "@/features/chats/use-chats";
 
 const SCOPES: { id: Retention; menu: string; title: string; empty: string }[] =
   [
@@ -57,41 +59,67 @@ function ChatRow({
   active,
   now,
   onOpen,
+  onResult,
 }: {
   chat: ChatSummary;
   active: boolean;
   now: number;
   onOpen: () => void;
+  onResult: (failure: string) => void;
 }) {
-  const line = summaryLine(chat);
+  const row = useRef<HTMLButtonElement>(null);
+  const [menu, setMenu] = useState(false);
   const context = [chat.first_ticket, chat.folder_name]
     .filter(Boolean)
     .join(" · ");
+  const strong = emphasised(chat.status);
   return (
-    <li>
+    <li className="chat-row-item">
       <button
+        ref={row}
         type="button"
         className="chat-row"
         aria-current={active ? "true" : undefined}
-        data-attention={chat.needs_you ? "" : undefined}
+        data-attention={strong ? "" : undefined}
         onClick={onOpen}
+        onKeyDown={(event) => {
+          // The standard keys for a context menu open the row's actions.
+          if (
+            event.key === "ContextMenu" ||
+            (event.shiftKey && event.key === "F10")
+          ) {
+            event.preventDefault();
+            setMenu(true);
+          }
+        }}
       >
-        <span className="chat-row-mark">
-          {chat.needs_you ? (
-            <StatusDot tone="attention" />
-          ) : (
-            chat.activity === "working" && (
-              <LoaderCircle size={14} className="chat-spin" aria-hidden />
-            )
-          )}
-        </span>
+        {/* The harness mark's place (#368). */}
+        <span className="chat-row-mark" />
         <span className="chat-row-title">{chat.title}</span>
-        <span className="chat-row-time">{chatTime(chat.updated_at, now)}</span>
-        <span className="chat-row-sub">
-          <span>{chat.needs_you ? <strong>{line}</strong> : line}</span>
-          {context && <span>{context}</span>}
+        <span className="chat-row-time">
+          {chat.muted && <BellOff size={14} aria-hidden="true" />}
+          {chatTime(chat.updated_at, now)}
         </span>
+        <span className="chat-row-sub">
+          <ChatStatus status={chat.status} activity={chat.activity} />
+          {context && <span className="chat-row-context">{context}</span>}
+        </span>
+        {chat.status.unseen && <span className="sr-only">, unread</span>}
+        {chat.muted && <span className="sr-only">, muted</span>}
       </button>
+      <span className="chat-row-more" data-open={menu ? "" : undefined}>
+        <ChatActionsMenu
+          chat={{ ...chat, unseen: chat.status.unseen }}
+          label={`Actions for ${chat.title}`}
+          open={menu}
+          onOpenChange={setMenu}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            row.current?.focus();
+          }}
+          onResult={onResult}
+        />
+      </span>
     </li>
   );
 }
@@ -113,6 +141,15 @@ export function ChatsView({
   const [open, setOpen] = useState<Open>(null);
   const [expanded, setExpanded] = useState(false);
   const [seenRequest, setSeenRequest] = useState(0);
+  const [failure, setFailure] = useState("");
+  // A clicked notification opens its Chat under its own list, title focused.
+  const { openRequest } = useChatFeature();
+  const [seenOpen, setSeenOpen] = useState(openRequest?.n ?? 0);
+  if (openRequest && seenOpen !== openRequest.n) {
+    setSeenOpen(openRequest.n);
+    setScope(openRequest.request.retention);
+    setOpen({ kind: "chat", id: openRequest.request.chat_id });
+  }
   if (seenRequest !== newChatRequest) {
     setSeenRequest(newChatRequest);
     setScope("active");
@@ -127,10 +164,13 @@ export function ChatsView({
   const openKey = open?.kind === "chat" ? open.id : open?.kind;
   // Opening a Chat moves focus to its title where the list is no longer beside it.
   const focusDetail = useRef(false);
+  const focusedOpen = useRef(seenOpen);
   useLayoutEffect(() => {
-    if (focusDetail.current) document.getElementById("chat-heading")?.focus();
+    if (focusDetail.current || focusedOpen.current !== seenOpen)
+      document.getElementById("chat-heading")?.focus();
     focusDetail.current = false;
-  }, [openKey]);
+    focusedOpen.current = seenOpen;
+  }, [openKey, seenOpen]);
   const show = (next: Open) => {
     focusDetail.current = single && next !== null;
     if (!next) setExpanded(false);
@@ -180,6 +220,13 @@ export function ChatsView({
           </Count>
         )}
       </ListHeader>
+      {failure && (
+        <div className="chat-list-alert">
+          <Alert tone="error">
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        </div>
+      )}
       {list?.error && (
         <p className="chat-list-empty" role="alert">
           Could not load Chats: {list.error}
@@ -196,6 +243,7 @@ export function ChatsView({
             now={now}
             active={open?.kind === "chat" && open.id === chat.id}
             onOpen={() => show({ kind: "chat", id: chat.id })}
+            onResult={setFailure}
           />
         ))}
       </ul>

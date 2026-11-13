@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 import type {
   ChatSnapshot,
-  ChatSummary,
   Problem,
   Step,
   TranscriptItem,
@@ -9,6 +8,7 @@ import type {
 import {
   applyChange,
   firstNew,
+  unseenFrom,
   receiptLine,
   turns,
   type TranscriptPart,
@@ -22,7 +22,6 @@ import {
   problemNotice,
   mergeSteps,
   stepWords,
-  summaryLine,
 } from "@/features/chats/model";
 import { chatState } from "@/features/chats/mock-client";
 
@@ -261,63 +260,6 @@ test("steps of the same kind and outcome merge, but commands never do", () => {
   expect(merged[0]?.output).toBeUndefined();
 });
 
-const row = (over: Partial<ChatSummary>): ChatSummary => ({
-  id: "c1",
-  title: "Limiter",
-  harness_name: "Codex",
-  retention: "active",
-  activity: "idle",
-  needs_you: false,
-  updated_at: at,
-  ...over,
-});
-
-test("a list row says what the Chat is doing in the design's words", () => {
-  expect(summaryLine(row({ activity: "waiting", needs_you: true }))).toBe(
-    "Waiting for you",
-  );
-  expect(
-    summaryLine(row({ needs_you: true, problem: "uncertain_delivery" })),
-  ).toBe("Needs your decision");
-  expect(summaryLine(row({ activity: "working" }))).toBe("Working…");
-  expect(summaryLine(row({ activity: "failed", problem: "usage_limit" }))).toBe(
-    "Stopped: usage limit reached",
-  );
-  expect(
-    summaryLine(row({ activity: "interrupted", interruption: "stopped" })),
-  ).toBe("You stopped this turn");
-  expect(
-    summaryLine(
-      row({
-        last_change: {
-          kind: "status",
-          reference: "T-12",
-          title: "Rate-limit logins",
-          from: "In progress",
-          to: "In review",
-        },
-        preview: "All done",
-      }),
-    ),
-  ).toBe("Moved T-12 to In review");
-  expect(summaryLine(row({ preview: "All done" }))).toBe("All done");
-});
-
-test("the row summary shows the last response as plain text", () => {
-  expect(
-    summaryLine(row({ preview: "There are **0 entries**. I ran `ls` here." })),
-  ).toBe("There are 0 entries. I ran ls here.");
-});
-
-test("plain states the design did not draw still read as words", () => {
-  expect(summaryLine(row({ activity: "failed" }))).toBe("Failed");
-  expect(summaryLine(row({ activity: "interrupted" }))).toBe("Interrupted");
-  expect(
-    summaryLine(row({ activity: "interrupted", interruption: "unconfirmed" })),
-  ).toBe("Stop not confirmed");
-  expect(summaryLine(row({}))).toBe("Idle");
-});
-
 test("the send button reads Send, Steer or Queue, set by the turn", () => {
   const idle = chatState({ id: "c1", title: "x" });
   expect(composerControls(idle, "")).toEqual({ send: "send", enabled: false });
@@ -433,27 +375,6 @@ test("a past failure is told as the last turn's, with Check again only where a p
   const live = problemNotice({ kind: "session_in_use" }, "Codex");
   expect(live.actions).toEqual(["check"]);
   expect(live.body).not.toMatch(/last turn/);
-});
-
-test("a row says a past sign-in failure as a stopped turn, not as unsent", () => {
-  const line = (over: Partial<ChatSummary>) =>
-    summaryLine({
-      id: "c1",
-      title: "x",
-      harness_name: "Codex",
-      retention: "active",
-      activity: "failed",
-      needs_you: false,
-      updated_at: at,
-      ...over,
-    });
-  expect(line({ problem: "not_signed_in" })).toBe("Not sent");
-  expect(line({ problem: "not_signed_in", problem_past: true })).toBe(
-    "Stopped: not signed in",
-  );
-  expect(line({ problem: "usage_limit", problem_past: true })).toBe(
-    "Stopped: usage limit reached",
-  );
 });
 
 test("a usage limit says when it resets, or says that the provider did not", () => {
@@ -793,6 +714,16 @@ test("the New marker goes above the first item after the last one seen, never yo
   expect(firstNew(items, "r1")).toBe("s1");
   expect(firstNew(items, "s1")).toBeUndefined();
   expect(firstNew(items, undefined)).toBeUndefined();
+});
+
+test("an unseen Chat opened for the first time marks its last ended turn New", () => {
+  const items = [
+    you("u1", at),
+    timing("completed", "2026-11-10T10:00:30Z"),
+    said("r1"),
+  ];
+  expect(unseenFrom(items)).toBe("r1");
+  expect(unseenFrom([you("u1", at), timing("active")])).toBeUndefined();
 });
 
 test("a stop that was not confirmed is one notice, and Stop itself is the retry", () => {

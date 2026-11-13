@@ -104,14 +104,24 @@ test("a subscriber whose cursor is older than the kept log is told to resync", a
 
 test("the overview counts Chats that need the person and Chats at work", async () => {
   const client = working({ activity: "waiting" });
-  expect(await client.overview()).toEqual({ needs_you: 1, working: 1 });
+  expect(await client.overview()).toEqual({
+    needs_you: 1,
+    unread: 0,
+    app_icon: 1,
+    working: 1,
+  });
   const seen: unknown[] = [];
   client.subscribeOverview((overview) => seen.push(overview));
   await client.stop("c1");
-  expect(seen.at(-1)).toEqual({ needs_you: 0, working: 0 });
+  expect(seen.at(-1)).toEqual({
+    needs_you: 0,
+    unread: 0,
+    app_icon: 0,
+    working: 0,
+  });
 });
 
-test("the count takes uncertain delivery and Failed, not install or sign-in blocks", async () => {
+test("the count takes uncertain delivery and failures, not a sign-in step alone", async () => {
   const chat = (id: string, over: object) => ({
     chat: chatState({ id, title: id, ...over }),
   });
@@ -128,11 +138,12 @@ test("the count takes uncertain delivery and Failed, not install or sign-in bloc
       chat("idle", {}),
     ],
   });
-  expect((await client.overview()).needs_you).toBe(3);
+  expect((await client.overview()).needs_you).toBe(4);
   const counted = (await client.listChats("active"))
     .filter((row) => row.needs_you)
     .map((row) => row.id);
-  expect(counted.sort()).toEqual(["failed", "lost", "uncertain"]);
+  // An install failure that stopped a turn counts until seen (spec 21.3).
+  expect(counted.sort()).toEqual(["failed", "install", "lost", "uncertain"]);
 });
 
 test("quitting stops working Chats and says why in their history", async () => {

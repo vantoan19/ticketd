@@ -894,6 +894,9 @@ impl Workspace {
         if version < 66 {
             chats::migrate(&transaction)?;
         }
+        if version < 67 {
+            chats::migrate_attention(&transaction)?;
+        }
         if version < 68 {
             chats::migrate_tool_start(&transaction)?;
         }

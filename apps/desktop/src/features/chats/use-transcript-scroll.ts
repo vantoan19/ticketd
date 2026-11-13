@@ -16,10 +16,9 @@ const positions = new Map<string, number | "end">();
 const seenThrough = new Map<string, string>();
 
 /**
- * The last item of a Chat that was in view in a focused window. #365 keeps one
- * persisted "seen through" position per Chat, by turn; until the view reads it per
- * item, this session's own record is used, so a Chat first opened in a session has
- * no New marker.
+ * The last item of a Chat that was in view in a focused window this session. The
+ * host keeps only whether the last ended turn is unseen (#365), so a Chat first
+ * opened in a session places the marker from that instead (`unseenFrom`).
  */
 export const lastSeen = (chatId: string) => seenThrough.get(chatId);
 

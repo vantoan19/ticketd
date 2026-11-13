@@ -858,14 +858,14 @@ fn chat_state_survives_backup_and_restore_without_resuming_work() {
 }
 
 #[test]
-fn the_previous_format_and_its_backups_gain_chat_storage_without_losing_records() {
+fn a_format_before_chat_and_its_backups_gain_chat_storage_without_losing_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let backup = dir.path().join("old-backup.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("Kept").unwrap();
     drop(workspace);
-    // The last format before Chat storage existed.
+    // Format 66 added Chat storage.
     let previous = 65;
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(&format!("{CHAT_TABLES} PRAGMA user_version = {previous};"))
@@ -1487,4 +1487,90 @@ fn overlapping_chats_of_one_harness_are_credited_only_with_their_own_changes() {
     };
     assert_eq!(excerpts(&first, "turn-a"), ["A-note"]);
     assert_eq!(excerpts(&second, "turn-b"), ["B-note"]);
+}
+
+#[allow(clippy::unwrap_used)]
+fn end_turn(workspace: &mut Workspace, chat: &Chat, turn: &str) {
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnEnded {
+                turn_id: turn.into(),
+                state: ChatTurnState::Completed,
+                detail: None,
+                problem: None,
+                problem_resets_at: None,
+            }],
+        )
+        .unwrap();
+}
+
+#[allow(clippy::unwrap_used)]
+fn last_turn(workspace: &Workspace, chat: &Chat) -> ticketd_core::ChatTurn {
+    workspace
+        .chat_snapshot(&chat.id, 500)
+        .unwrap()
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Turn(turn) => Some(turn),
+            _ => None,
+        })
+        .max_by_key(|turn| turn.position)
+        .unwrap()
+}
+
+#[test]
+fn a_turn_that_ends_after_the_chat_was_seen_is_unseen_until_seen_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "Hello", "turn-1");
+    // Seen while the turn runs: its outcome is still to come.
+    workspace.mark_chat_seen(&chat.id).unwrap();
+    end_turn(&mut workspace, &chat, "turn-1");
+    let turn = last_turn(&workspace, &chat);
+    assert!(workspace.chat(&chat.id).unwrap().unseen(&turn));
+
+    assert!(!workspace.mark_chat_seen(&chat.id).unwrap().unseen(&turn));
+    // Seeing it again writes nothing.
+    let sequence = workspace.chat_change_sequence().unwrap();
+    workspace.mark_chat_seen(&chat.id).unwrap();
+    assert_eq!(workspace.chat_change_sequence().unwrap(), sequence);
+
+    assert!(workspace.mark_chat_unread(&chat.id).unwrap().unseen(&turn));
+    let reopened = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert!(reopened.chat(&chat.id).unwrap().unseen(&turn));
+}
+
+#[test]
+fn mute_is_kept_with_the_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    assert!(!chat.muted);
+    assert!(workspace.set_chat_muted(&chat.id, true).unwrap().muted);
+    assert!(workspace.chat(&chat.id).unwrap().muted);
+    assert!(!workspace.set_chat_muted(&chat.id, false).unwrap().muted);
+}
+
+#[test]
+fn upgrading_counts_every_existing_turn_as_seen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "Hello", "turn-1");
+    end_turn(&mut workspace, &chat, "turn-1");
+    drop(workspace);
+    // Format 67 added what the person has seen of each Chat.
+    let previous = 66;
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(&format!(
+        "ALTER TABLE chats DROP COLUMN seen_through; ALTER TABLE chats DROP COLUMN muted; PRAGMA user_version = {previous};"
+    ))
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+    let upgraded = workspace.chat(&chat.id).unwrap();
+    assert!(!upgraded.unseen(&last_turn(&workspace, &chat)));
+    assert!(!upgraded.muted);
 }
