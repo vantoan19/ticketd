@@ -985,7 +985,7 @@ const Item = memo(function Item({
 
 /**
  * The live line: the spinner and what the turn is doing, shown only while no step
- * row runs. `since` counts "Working for 1m 32s" from the turn's start; `fromShown`
+ * or reasoning row runs, so a turn has one spinner. `since` counts "Working for 1m 32s" from the turn's start; `fromShown`
  * counts from when the line appeared, for a phase the host gives no start time for.
  * The clock is not read out: one polite status says when a turn starts, waits and
  * ends.
@@ -1158,7 +1158,9 @@ export function Transcript({
       part.kind === "turn" &&
       part.turn.live &&
       part.turn.rows.some(
-        (row) => row.kind === "step" && row.step.state === "running",
+        (row) =>
+          (row.kind === "step" && row.step.state === "running") ||
+          (row.kind === "reasoning" && row.item.state === "running"),
       ),
   );
   const working = chat.activity === "working";

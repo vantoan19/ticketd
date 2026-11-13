@@ -271,3 +271,30 @@ test("the context ring sits before Stop and says when the window is nearly full"
   client.patch("c1", { context: context(184_000) });
   expect(await screen.findByText("92% full")).toBeTruthy();
 });
+
+test("while reasoning runs it is the turn's one spinner: no working line under it", async () => {
+  await open({
+    chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+    items: [
+      { ...you, turn_id: "turn-1" },
+      {
+        id: "turn:turn-1",
+        at,
+        kind: "turn",
+        turn_id: "turn-1",
+        started_at: at,
+        outcome: "active",
+      },
+      {
+        id: "rs-1",
+        at,
+        kind: "reasoning",
+        turn_id: "turn-1",
+        state: "running",
+        started_at: Date.now(),
+      },
+    ],
+  });
+  expect(screen.getByText(/^Thinking/)).toBeTruthy();
+  expect(document.querySelector(".chat-working")).toBeNull();
+});
