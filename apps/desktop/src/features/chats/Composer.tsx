@@ -55,7 +55,7 @@ export function Composer({
   onStop?: () => void;
   /** Stop was asked for and has not finished: Stop waits. */
   stopping?: boolean;
-  /** Fixed before Stop, so Send leads: the context ring (#367). */
+  /** Fixed before Stop, so Send leads: the context count. */
   beforeStop?: ReactNode;
   /** The row's start: the harness's model and permission triggers (#368). */
   leading?: ReactNode;
