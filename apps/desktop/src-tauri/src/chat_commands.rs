@@ -470,7 +470,8 @@ pub async fn chat_change_setting(
 }
 
 /// Opens a file in the Chat's folder (a step's file, or one a turn changed) in the
-/// system's default app for its type, as attachments open. Fails as `gone` when the
+/// system's default app for its type, as attachments open. A program or script is
+/// shown in the file manager instead of being run. Fails as `gone` when the
 /// file is no longer there.
 #[tauri::command]
 pub fn chat_open_file(
@@ -480,6 +481,12 @@ pub fn chat_open_file(
     path: String,
 ) -> Outcome<()> {
     let path = bridge.chats.file_in_folder(&chat_id, &path)?;
+    if crate::chats::runs_when_opened(&path) {
+        return app
+            .opener()
+            .reveal_item_in_dir(&path)
+            .map_err(|error| open_failure(&path, &error.to_string()));
+    }
     app.opener()
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|error| open_failure(&path, &error.to_string()))
@@ -797,7 +804,10 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
             tauri::async_runtime::spawn(async move {
                 chats.set_focused(focused).await;
                 if focused {
-                    let _ = chats.recheck_folders().await;
+                    crate::chats::log_failure(
+                        "check the Chats' folders",
+                        chats.recheck_folders().await,
+                    );
                 }
             });
         }

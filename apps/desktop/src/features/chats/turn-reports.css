@@ -223,31 +223,8 @@ div.chat-file-main .chat-file-path {
 }
 
 /* The context ring: a 16px ring in a 32px ghost button, before Stop. */
+/* The ring inside its 32px ghost button: drawn from the top, clockwise. */
 .chat-ring {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 32px;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-}
-.chat-ring:hover,
-.chat-ring[data-state="open"] {
-  background: var(--accent);
-}
-.chat-ring:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.chat-ring[data-full] {
-  color: var(--foreground);
-}
-.chat-ring svg {
-  flex: none;
   transform: rotate(-90deg);
 }
 .chat-ring circle {
@@ -262,10 +239,11 @@ div.chat-file-main .chat-file-path {
   stroke-linecap: round;
   transition: stroke-dasharray 200ms ease;
 }
-.chat-ring[data-full] .chat-ring-arc {
+[data-full] > .chat-ring .chat-ring-arc {
   stroke: var(--foreground);
 }
 .chat-ring-full {
+  color: var(--foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   font-variant-numeric: tabular-nums;
@@ -296,7 +274,7 @@ div.chat-file-main .chat-file-path {
 }
 @media (forced-colors: active) {
   .chat-ring-arc,
-  .chat-ring[data-full] .chat-ring-arc {
+  [data-full] > .chat-ring .chat-ring-arc {
     stroke: CanvasText;
   }
 }

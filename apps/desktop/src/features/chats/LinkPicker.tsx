@@ -66,6 +66,7 @@ export function RecordChip({
           <RecordLabel record={record} />
         </span>
       ) : (
+        // The chip's own label, not a Button: the chip is the control's frame.
         <button
           type="button"
           aria-label={`Open ${name}`}
@@ -84,6 +85,7 @@ export function RecordChip({
           <RecordLabel record={record} />
         </button>
       )}
+      {/* The chip's 14px remove mark; an IconButton (32px) does not fit inside it. */}
       <button
         type="button"
         aria-label={`Remove the link to ${name}`}
@@ -195,6 +197,7 @@ export function LinkPicker({
           <ul className="chat-pick-results" aria-label="Results">
             {shown.map((record) => (
               <li key={`${record.kind}:${record.id}`}>
+                {/* A result row in the list, not a Button variant. */}
                 <button
                   type="button"
                   onClick={() => {

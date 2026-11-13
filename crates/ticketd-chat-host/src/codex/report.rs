@@ -6,6 +6,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::wire::{capitalized, text};
+
 use crate::{
     AppliesFrom, ContextUsage, EventKind, FileChange, FileChangeKind, HarnessSettings,
     NativeItemId, NativeTurnId, PermissionKind, Plan, PlanStep, PlanStepStatus, Setting,
@@ -58,10 +60,6 @@ pub(super) struct Reports {
     profiles: Listing,
     rerouted_to: Option<String>,
     pub overrides: Overrides,
-}
-
-fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str)
 }
 
 fn owned(value: &Value, key: &str) -> Option<String> {
@@ -141,13 +139,6 @@ fn per_file_counts(diff: &str) -> HashMap<String, (u32, u32)> {
 
 fn same_file(named: &str, diffed: &str) -> bool {
     named == diffed || named.ends_with(&format!("/{diffed}"))
-}
-
-fn capitalized(word: &str) -> String {
-    let mut chars = word.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(chars).collect()
-    })
 }
 
 /// A short rendering of a sandbox policy: its `type`.

@@ -21,6 +21,7 @@ pub mod step_kind;
 mod subscription;
 mod supervisor;
 pub mod testing;
+mod wire;
 
 pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter};
 pub use codex::CodexAdapter;

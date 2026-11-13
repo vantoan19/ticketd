@@ -3,8 +3,9 @@ import type {
   ContextUsage,
   PlanStep,
   TranscriptItem,
+  ItemOf,
 } from "@/features/chats/client";
-import { elapsed, reasoningShown } from "@/features/chats/model";
+import { duration, reasoningShown } from "@/features/chats/model";
 
 export { reasoningShown };
 
@@ -14,15 +15,10 @@ export { reasoningShown };
  * a value the harness did not report is left out.
  */
 
-type Of<K extends TranscriptItem["kind"]> = Extract<
-  TranscriptItem,
-  { kind: K }
->;
-
 /** "12s", "2m 13s"; `null` below one second, which is never said as "0s". */
-function duration(ms: number | null | undefined): string | null {
+function reportedTime(ms: number | null | undefined): string | null {
   if (ms == null || ms < 1000) return null;
-  return elapsed(ms);
+  return duration(ms);
 }
 
 export type ReasoningWords = {
@@ -35,14 +31,14 @@ export type ReasoningWords = {
 };
 
 /** A finished row: "Thought for 12s", or "Thought" without a time. */
-export function reasoningWords(item: Of<"reasoning">): ReasoningWords {
+export function reasoningWords(item: ItemOf<"reasoning">): ReasoningWords {
   if (item.state === "running") {
     const text = item.heading ? `Thinking · ${item.heading}` : "Thinking…";
     return { text, label: `Show reasoning, ${text}` };
   }
   const took =
     item.started_at != null && item.ended_at != null
-      ? duration(item.ended_at - item.started_at)
+      ? reportedTime(item.ended_at - item.started_at)
       : null;
   const text = took ? `Thought for ${took}` : "Thought";
   const outcome =
@@ -120,8 +116,8 @@ export function fileLabel(file: ChangedFile): string {
   return parts.join(", ");
 }
 
-/** A long path shortened in the middle, keeping its file name whole. */
-export function middle(path: string, max = 48): string {
+/** A long path shortened in the shortenedPath, keeping its file name whole. */
+export function shortenedPath(path: string, max = 48): string {
   if (path.length <= max) return path;
   const name = path.slice(path.lastIndexOf("/") + 1);
   const keep = Math.max(max - name.length - 1, 8);
@@ -156,7 +152,9 @@ export const clockTime = (ms: number) =>
   });
 
 /** The plan of the turn in progress, for the dock's pill. */
-export function runningPlan(items: TranscriptItem[]): Of<"plan"> | undefined {
+export function runningPlan(
+  items: TranscriptItem[],
+): ItemOf<"plan"> | undefined {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
     if (item?.kind === "plan")

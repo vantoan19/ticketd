@@ -28,9 +28,9 @@ import type {
   ChangedFile,
   ContextUsage,
   PlanStep,
-  TranscriptItem,
+  ItemOf,
 } from "@/features/chats/client";
-import { elapsed } from "@/features/chats/model";
+import { duration } from "@/features/chats/model";
 import {
   clockTime,
   contextWords,
@@ -39,7 +39,7 @@ import {
   fileKind,
   fileLabel,
   filesSummary,
-  middle,
+  shortenedPath,
   planCount,
   reasoningShown,
   reasoningWords,
@@ -51,11 +51,6 @@ import {
  * reasoning, its plan and changed files, and the session's context window.
  * Each draws only what was reported; nothing is drawn for what was not.
  */
-
-type Of<K extends TranscriptItem["kind"]> = Extract<
-  TranscriptItem,
-  { kind: K }
->;
 
 /** Its chevron shows on hover, focus or while open, as on every row. */
 function Chevron({ open }: { open: boolean }) {
@@ -77,7 +72,7 @@ function useNow(running: boolean) {
   return now;
 }
 
-export function ReasoningRow({ item }: { item: Of<"reasoning"> }) {
+export function ReasoningRow({ item }: { item: ItemOf<"reasoning"> }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const running = item.state === "running";
@@ -86,7 +81,7 @@ export function ReasoningRow({ item }: { item: Of<"reasoning"> }) {
   const words = reasoningWords(item);
   const since =
     running && item.started_at != null && now - item.started_at >= 1000
-      ? elapsed(now - item.started_at)
+      ? duration(now - item.started_at)
       : null;
   const line = (
     <>
@@ -113,6 +108,7 @@ export function ReasoningRow({ item }: { item: Of<"reasoning"> }) {
     return <div className="chat-steps chat-report-row">{line}</div>;
   return (
     <>
+      {/* A plain row, not a Button: the design draws the whole step line as the target. */}
       <button
         type="button"
         className="chat-steps chat-report-row"
@@ -193,9 +189,9 @@ export function PlanCard({
   readOnly,
   onSave,
 }: {
-  item: Of<"plan">;
+  item: ItemOf<"plan">;
   readOnly: boolean;
-  onSave: (plan: Of<"plan">) => void;
+  onSave: (plan: ItemOf<"plan">) => void;
 }) {
   const count = planCount(item.steps);
   if (item.state === "running" || count.total === 0) return null;
@@ -239,13 +235,14 @@ export function PlanCard({
  * The plan's only home while its turn runs: one line in the activity dock,
  * opening the steps. It never takes focus from the message box.
  */
-export function PlanPill({ item }: { item: Of<"plan"> }) {
+export function PlanPill({ item }: { item: ItemOf<"plan"> }) {
   const [open, setOpen] = useState(false);
   const count = planCount(item.steps);
   const now = currentStep(item.steps);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
+        {/* A full-width row under the response, not a Button variant (DESIGN: plan pill). */}
         <button
           type="button"
           className="chat-plan-pill"
@@ -287,7 +284,7 @@ function FileRow({
   const words = (
     <>
       <File size={16} aria-hidden />
-      <span className="chat-file-path">{middle(file.path)}</span>
+      <span className="chat-file-path">{shortenedPath(file.path)}</span>
       {kind && (
         <span
           className="chat-file-kind"
@@ -310,6 +307,7 @@ function FileRow({
         {file.kind === "deleted" ? (
           <div className="chat-file-main">{words}</div>
         ) : (
+          // A plain row, not a Button: the whole file row is the target.
           <button
             type="button"
             className="chat-file-main"
@@ -350,7 +348,7 @@ export function FilesSummary({
   commandEdits,
   onOpen,
 }: {
-  item: Of<"files">;
+  item: ItemOf<"files">;
   /** The turn also ran commands that edited files this list cannot name. */
   commandEdits: boolean;
   onOpen: (path: string) => Promise<void>;
@@ -364,6 +362,7 @@ export function FilesSummary({
   const more = item.files.length - shown.length;
   return (
     <div className="chat-files">
+      {/* A plain row, not a Button: the design draws the whole step line as the target. */}
       <button
         type="button"
         className="chat-steps chat-report-row"
@@ -437,14 +436,20 @@ export function ContextRing({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="chat-ring"
+        <Button
+          variant="ghost"
+          size={words.full ? "xs" : "icon-sm"}
           data-full={words.full ? "" : undefined}
           aria-label={words.label}
           onMouseDown={(event) => event.preventDefault()}
         >
-          <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true">
+          <svg
+            className="chat-ring"
+            viewBox="0 0 16 16"
+            width={16}
+            height={16}
+            aria-hidden="true"
+          >
             <circle className="chat-ring-track" cx="8" cy="8" r={RADIUS} />
             <circle
               className="chat-ring-arc"
@@ -455,7 +460,7 @@ export function ContextRing({
             />
           </svg>
           {full}
-        </button>
+        </Button>
       </PopoverTrigger>
       {/* Said once when the window passes 90%. */}
       <span className="sr-only" role="status">

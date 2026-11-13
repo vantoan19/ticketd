@@ -82,6 +82,17 @@ impl From<HostError> for ChatFailure {
 
 type Outcome<T> = Result<T, ChatFailure>;
 
+/// Work nothing waits on, such as marking a Chat seen while a view opens: a failure
+/// does not stop the caller, and it is written to the log rather than lost.
+pub fn log_failure<T>(what: &str, result: Outcome<T>) {
+    if let Err(failure) = result {
+        eprintln!(
+            "Chat: could not {what}: {} ({})",
+            failure.message, failure.code
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkKind {
@@ -915,7 +926,7 @@ impl Chats {
         self.focused.store(focused, Ordering::SeqCst);
         if focused {
             for chat_id in self.in_view() {
-                let _ = self.see(&chat_id).await;
+                log_failure("mark the Chat seen", self.mark_seen(&chat_id).await);
             }
         }
     }
@@ -929,7 +940,7 @@ impl Chats {
     }
 
     /// The person saw the Chat's outcome. Rows and counts follow when that changed.
-    async fn see(&self, chat_id: &str) -> Outcome<()> {
+    async fn mark_seen(&self, chat_id: &str) -> Outcome<()> {
         let host = self.host()?;
         let mut workspace = self.workspace()?;
         let before = workspace.chat(chat_id)?.seen_through;
@@ -942,7 +953,7 @@ impl Chats {
 
     /// Mark as read: clears an unseen outcome, never a live request.
     pub async fn mark_read(&self, chat_id: &str) -> Outcome<()> {
-        self.see(chat_id).await
+        self.mark_seen(chat_id).await
     }
 
     /// Mark as unread: the last turn reads as unseen until the Chat is next opened.
@@ -1160,7 +1171,7 @@ impl Chats {
     pub async fn open(self: &Arc<Self>, chat_id: &str, sink: Sink) -> Outcome<Opened> {
         let host = self.host()?;
         // Opening a Chat any way marks it seen. A view keeps working if that fails.
-        let _ = self.see(chat_id).await;
+        log_failure("mark the Chat seen", self.mark_seen(chat_id).await);
         let (attached, subscription) = host.attach(chat_id).await?;
         let workspace = self.workspace()?;
         let tracker = Tracker::from_items(&attached.snapshot.items);
@@ -1334,7 +1345,7 @@ impl Chats {
             };
             // A turn that ends while its Chat is in view is seen.
             if ended && self.focused.load(Ordering::SeqCst) {
-                let _ = self.see(&view.chat.id).await;
+                log_failure("mark the Chat seen", self.mark_seen(&view.chat.id).await);
             }
             let fresh = self.fresh(&view.chat.id);
             for record in records {
@@ -1846,6 +1857,44 @@ impl Chats {
     }
 }
 
+/// Extensions the system runs, rather than shows, when such a file is opened.
+const RUNNABLE: [&str; 17] = [
+    "app",
+    "applescript",
+    "bat",
+    "cmd",
+    "com",
+    "command",
+    "exe",
+    "jar",
+    "msi",
+    "pkg",
+    "ps1",
+    "py",
+    "rb",
+    "scpt",
+    "sh",
+    "tool",
+    "vbs",
+];
+
+/// Opening the file would run it: a program or script. Such a file is shown in its
+/// folder instead, so a click on a file name never starts something.
+pub fn runs_when_opened(path: &Path) -> bool {
+    let named = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| RUNNABLE.contains(&extension.to_ascii_lowercase().as_str()));
+    #[cfg(unix)]
+    let executable = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+    };
+    #[cfg(not(unix))]
+    let executable = false;
+    named || executable
+}
+
 /// `path` inside `folder`, resolved through links.
 fn file_in(folder: &Path, path: &str) -> Outcome<PathBuf> {
     let outside = || failed("that file is outside the Chat's folder");
@@ -1883,9 +1932,9 @@ fn file_in(folder: &Path, path: &str) -> Outcome<PathBuf> {
 pub fn overview_of(rows: &[Summary]) -> Overview {
     let mut overview = Overview::default();
     for row in rows {
-        let waits = row.status.rank.waits();
-        overview.needs_you += usize::from(waits);
-        overview.app_icon += usize::from(waits && !row.muted);
+        let needs_you = row.status.rank.needs_you();
+        overview.needs_you += usize::from(needs_you);
+        overview.app_icon += usize::from(needs_you && !row.muted);
         overview.unread += usize::from(row.status.unread());
         overview.working += usize::from(matches!(row.activity, "working" | "waiting"));
     }

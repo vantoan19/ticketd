@@ -90,13 +90,13 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
         ..facts(&chat(0), &live, None)
     });
     assert_eq!(approval.line(), "Approval needed · npm install");
-    assert!(approval.rank.waits());
+    assert!(approval.rank.needs_you());
 
     let live = idle();
     let failed = turn(3, ChatTurnState::Failed);
     let unseen = status(&facts(&chat(2), &live, Some(&failed)));
     assert_eq!(unseen.line(), "Failed · Codex stopped with an error");
-    assert!(unseen.rank.waits());
+    assert!(unseen.rank.needs_you());
     let seen = status(&facts(&chat(3), &live, Some(&failed)));
     assert_eq!((seen.rank, seen.word.as_str()), (Rank::Idle, "Failed"));
 

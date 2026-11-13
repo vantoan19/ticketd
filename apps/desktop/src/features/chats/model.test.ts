@@ -15,7 +15,7 @@ import {
   chatTime,
   composerControls,
   composerPlaceholder,
-  elapsed,
+  duration,
   problemNotice,
   mergeSteps,
   stepWords,
@@ -422,9 +422,12 @@ test("times read as now, minutes, hours, Yesterday, then a date", () => {
   expect(chatTime(new Date(2026, 10, 8, 9).toISOString(), now)).toBe("Nov 8");
 });
 
-test("elapsed time reads in seconds, then minutes and seconds", () => {
-  expect(elapsed(12_000)).toBe("12s");
-  expect(elapsed(134_000)).toBe("2m 14s");
+test("every time a Chat says reads the same: seconds, minutes and seconds, then hours and minutes", () => {
+  expect(duration(12_000)).toBe("12s");
+  expect(duration(134_000)).toBe("2m 14s");
+  // A live clock past an hour reads like a finished turn's time, not "64m 0s".
+  expect(duration(64 * 60_000)).toBe("1h 4m");
+  expect(duration(0)).toBe("1s");
 });
 
 test("an uncertain delivery is worded without assuming why", () => {

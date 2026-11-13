@@ -25,6 +25,7 @@ function Sentence({ change }: { change: RecordChange }) {
     return (
       <>
         Created{" "}
+        {/* Inline text, not a Button: it reads as a link inside the sentence. */}
         <button
           type="button"
           className="chat-records-ref chat-records-name"
@@ -35,6 +36,7 @@ function Sentence({ change }: { change: RecordChange }) {
       </>
     );
   const reference = (
+    // Inline text, not a Button: it reads as a link inside the sentence.
     <button
       type="button"
       className="chat-records-ref"
@@ -82,6 +84,7 @@ export function ReceiptRow({
         ))}
       </span>
       {rest > 0 && (
+        // Inline text, not a Button: it reads as a link inside the sentence.
         <button
           type="button"
           className="chat-records-ref chat-records-more"

@@ -6,6 +6,8 @@ use std::collections::{HashMap, VecDeque};
 
 use serde_json::Value;
 
+use crate::wire::{capitalized, text};
+
 use crate::{
     AppliesFrom, ContextCategory, ContextUsage, EventKind, FileChange, FileChangeKind,
     HarnessSettings, NativeItemId, NativeTurnId, PermissionKind, Plan, PlanStep, PlanStepStatus,
@@ -72,23 +74,12 @@ pub(super) struct Reports {
     models: Option<Vec<Value>>,
 }
 
-fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str)
-}
-
 fn status(name: &str) -> Option<PlanStepStatus> {
     Some(match name {
         "pending" => PlanStepStatus::Pending,
         "in_progress" => PlanStepStatus::InProgress,
         "completed" => PlanStepStatus::Completed,
         _ => return None,
-    })
-}
-
-fn capitalized(word: &str) -> String {
-    let mut chars = word.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(chars).collect()
     })
 }
 

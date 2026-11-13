@@ -41,7 +41,7 @@ export const currentOf = (setting: HarnessSetting) =>
   null;
 
 /** A change is on its way: held for the turn's end, or sent and not answered. */
-export const changing = (setting: HarnessSetting | null | undefined) =>
+export const changePending = (setting: HarnessSetting | null | undefined) =>
   setting?.change?.state === "held" || setting?.change?.state === "sent";
 
 /** A change the person asked for in this view, and what the host first said. */

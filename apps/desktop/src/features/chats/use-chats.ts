@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useState,
+} from "react";
 import {
   useChatClient,
   type ChatOverview,
@@ -82,10 +88,14 @@ export function useLinkedChats(link: LinkRef | null) {
     chats: ChatSummary[];
     error: string;
   } | null>(null);
+  // The link's Chats, read when the link changes (`key`).
+  const linkedChats = useEffectEvent(() => link && client.linkedTo(link));
   useEffect(() => {
-    if (!enabled || !link) return;
+    if (!enabled) return;
+    const asked = linkedChats();
+    if (!asked) return;
     let current = true;
-    client.linkedTo(link).then(
+    asked.then(
       (chats) => current && setState({ key, chats, error: "" }),
       (reason: unknown) =>
         current && setState({ key, chats: [], error: String(reason) }),
@@ -93,8 +103,6 @@ export function useLinkedChats(link: LinkRef | null) {
     return () => {
       current = false;
     };
-    // `key` names the link.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, enabled, key, revision, attempt]);
   return {
     list: state?.key === key ? state : null,

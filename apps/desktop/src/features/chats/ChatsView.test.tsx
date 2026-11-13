@@ -1281,9 +1281,9 @@ test("while its session opens the working line says so and counts, then reads as
   const client = await open(
     one({ id: "c1", title: "Limiter", activity: "working", opening: "resume" }),
   );
-  expect(working()).toBe("Resuming the Codex session… · 0s");
+  expect(working()).toBe("Resuming the Codex session…");
   act(() => client.patch("c1", { opening: "start" }));
-  expect(working()).toBe("Starting Codex… · 0s");
+  expect(working()).toBe("Starting Codex…");
   act(() =>
     client.patch("c1", {
       opening: null,

@@ -404,6 +404,11 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type TranscriptItem = z.infer<typeof transcriptItemSchema>;
+/** The transcript item of one kind: `ItemOf<"step">`. */
+export type ItemOf<K extends TranscriptItem["kind"]> = Extract<
+  TranscriptItem,
+  { kind: K }
+>;
 
 const contextSchema = z.object({
   /** Tokens in use. */

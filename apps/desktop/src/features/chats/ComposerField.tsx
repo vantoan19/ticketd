@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useRef,
@@ -190,14 +191,14 @@ export function ComposerField({
     box.current.setSelectionRange(caret, caret);
   });
 
-  // The box opened with a prefill: the caret waits after it.
-  useLayoutEffect(() => {
+  // The box opened with a prefill: the caret waits after it. Only the text the
+  // box opened with counts, so this runs once.
+  const caretAfterPrefill = useEffectEvent(() => {
     const field = box.current;
     if (autoFocus && field && text)
       field.setSelectionRange(text.length, text.length);
-    // Only the text the box opened with.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  });
+  useLayoutEffect(() => caretAfterPrefill(), []);
 
   const open =
     trigger && trigger.start !== dismissed && mentions ? trigger : null;
@@ -221,33 +222,36 @@ export function ComposerField({
               }))
           : null;
   const searches = Boolean(open && atHand === null);
-  useEffect(() => {
-    if (!open || !mentions || !searches) return;
-    let current = true;
+  // What the open trigger asks for, read when the trigger changes (`openKey`).
+  const search = useEffectEvent(() => {
+    if (!open || !mentions) return null;
     const folder = mentions.folder;
-    const search =
-      open.char === "#"
-        ? mentions
-            .records(query)
-            .then((found) =>
-              recordOptions(
-                [...found].sort(
-                  (a, b) =>
-                    Object.keys(RECORD_GROUPS).indexOf(a.kind) -
-                    Object.keys(RECORD_GROUPS).indexOf(b.kind),
-                ),
+    return open.char === "#"
+      ? mentions
+          .records(query)
+          .then((found) =>
+            recordOptions(
+              [...found].sort(
+                (a, b) =>
+                  Object.keys(RECORD_GROUPS).indexOf(a.kind) -
+                  Object.keys(RECORD_GROUPS).indexOf(b.kind),
               ),
-            )
-        : folder
-          ? folder.files(query).then((files) =>
-              files.map((file): Option => ({
-                id: file.path,
-                group: file.folder ? "folder" : "file",
-                insert: { kind: "path", text: file.path },
-              })),
-            )
-          : null;
-    search?.then(
+            ),
+          )
+      : folder
+        ? folder.files(query).then((files) =>
+            files.map((file): Option => ({
+              id: file.path,
+              group: file.folder ? "folder" : "file",
+              insert: { kind: "path", text: file.path },
+            })),
+          )
+        : null;
+  });
+  useEffect(() => {
+    if (!searches) return;
+    let current = true;
+    search()?.then(
       (options) =>
         current && setAnswer({ key: openKey, options, state: "ready" }),
       (reason: unknown) =>
@@ -262,8 +266,6 @@ export function ComposerField({
     return () => {
       current = false;
     };
-    // `openKey` names the trigger; `mentions` is read when it changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openKey, searches]);
   // A new trigger starts at its first option.
   const [activeFor, setActiveFor] = useState(openKey);

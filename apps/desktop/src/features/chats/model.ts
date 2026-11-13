@@ -8,6 +8,7 @@ import type {
   Step,
   StepTarget,
   TranscriptItem,
+  ItemOf,
 } from "@/features/chats/client";
 
 /**
@@ -86,7 +87,10 @@ export type StepWords = {
   detail: string;
 };
 
-/** "12s", "2m 13s", "10m", "1h 4m": how long something took. */
+/**
+ * "12s", "2m 13s", "10m", "1h 4m": how long something took or has run. The
+ * one way a Chat says a time; never "0s".
+ */
 export function duration(ms: number): string {
   const seconds = Math.max(1, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -220,23 +224,18 @@ export function mergeSteps(steps: Step[]): Step[] {
   return rows;
 }
 
-type Of<K extends TranscriptItem["kind"]> = Extract<
-  TranscriptItem,
-  { kind: K }
->;
-
 /** A reasoning row with no text leaves the list once it ends; one cut off stays. */
-export const reasoningShown = (item: Of<"reasoning">) =>
+export const reasoningShown = (item: ItemOf<"reasoning">) =>
   item.state !== "done" || Boolean(item.text?.trim());
 
 /** A plan whose turn ended with every step done: one row in the fold. */
-export const planFinished = (item: Of<"plan">) =>
+export const planFinished = (item: ItemOf<"plan">) =>
   item.state === "ended" &&
   item.steps.length > 0 &&
   item.steps.every((step) => step.status === "completed");
 
 /** A plan its turn ended without finishing, or whose stop did not confirm: a card. */
-export const planUnfinished = (item: Of<"plan">) =>
+export const planUnfinished = (item: ItemOf<"plan">) =>
   item.state !== "running" && item.steps.length > 0 && !planFinished(item);
 
 /** One row of a turn, in the order it happened. `kept` rows are never folded. */
@@ -249,18 +248,18 @@ export type TurnRow =
       decision?: string;
       kept?: false;
     }
-  | { kind: "response"; key: string; item: Of<"response">; kept?: false }
+  | { kind: "response"; key: string; item: ItemOf<"response">; kept?: false }
   | {
       kind: "record";
       key: string;
       change: RecordChange;
       kept?: false;
     }
-  | { kind: "receipt"; key: string; item: Of<"request">; kept: true }
-  | { kind: "note"; key: string; item: Of<"marker">; kept: true }
+  | { kind: "receipt"; key: string; item: ItemOf<"request">; kept: true }
+  | { kind: "note"; key: string; item: ItemOf<"marker">; kept: true }
   /** #367: a reasoning row, and a plan that finished every step. */
-  | { kind: "reasoning"; key: string; item: Of<"reasoning">; kept?: false }
-  | { kind: "plan"; key: string; item: Of<"plan">; kept?: false };
+  | { kind: "reasoning"; key: string; item: ItemOf<"reasoning">; kept?: false }
+  | { kind: "plan"; key: string; item: ItemOf<"plan">; kept?: false };
 
 /**
  * A turn, or one segment of it after a steer: your message's work through its end.
@@ -277,13 +276,13 @@ export type Turn = {
   label: string;
   rows: TurnRow[];
   /** The turn's last response, when no step follows it. */
-  final?: Of<"response">;
+  final?: ItemOf<"response">;
   /** Why the turn stopped: stopped, quit or failed. */
-  marker?: Of<"marker">;
+  marker?: ItemOf<"marker">;
   /** A plan the turn ended with unfinished: a card above the final response. */
-  plan?: Of<"plan">;
+  plan?: ItemOf<"plan">;
   /** The files the turn changed, below the response and stop marker. */
-  files?: Of<"files">;
+  files?: ItemOf<"files">;
   /** The turn ran commands that edited files the files row cannot list. */
   commandEdits?: boolean;
   /** Every item the turn holds, for the reading position. */
@@ -341,7 +340,7 @@ const time = (stamp: string | null | undefined) => {
 };
 
 /** "Answered · Fail open", "Expired · rm -rf dist": a request's receipt row. */
-export function receiptLine(request: Of<"request">) {
+export function receiptLine(request: ItemOf<"request">) {
   const subject = request.subject ?? request.title;
   if (request.state === "expired") return `Expired · ${subject}`;
   if (request.request === "question")
@@ -360,7 +359,7 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
   const all: Step[] = [];
   let steps: { key: string; step: Step }[] = [];
   /** An answered approval waiting for the step it allowed or declined. */
-  let approval: Of<"request"> | undefined;
+  let approval: ItemOf<"request"> | undefined;
   const flush = () => {
     const first = steps[0]?.key ?? "";
     mergeSteps(steps.map((entry) => entry.step)).forEach((step, index) =>
@@ -440,7 +439,7 @@ export function turns(
   chat: Pick<ChatState, "activity" | "problem">,
   now = Date.now(),
 ): TranscriptPart[] {
-  const timings = new Map<string, Of<"turn">>();
+  const timings = new Map<string, ItemOf<"turn">>();
   for (const item of items)
     if (item.kind === "turn") timings.set(item.turn_id, item);
   const parts: (TranscriptPart | Segment)[] = [];
@@ -494,16 +493,16 @@ export function turns(
     );
     const marker = lastOf(
       part.members,
-      (item): item is Of<"marker"> =>
+      (item): item is ItemOf<"marker"> =>
         item.kind === "marker" && item.reason !== "note",
     );
     const plan = lastOf(
       part.members,
-      (item): item is Of<"plan"> => item.kind === "plan",
+      (item): item is ItemOf<"plan"> => item.kind === "plan",
     );
     const files = lastOf(
       part.members,
-      (item): item is Of<"files"> =>
+      (item): item is ItemOf<"files"> =>
         item.kind === "files" && item.state === "ended",
     );
     const commandEdits = steps.some(
@@ -607,7 +606,7 @@ export function firstNew(items: TranscriptItem[], seen: string | undefined) {
 export function unseenFrom(items: TranscriptItem[]) {
   const ended = lastOf(
     items,
-    (item): item is Of<"turn"> =>
+    (item): item is ItemOf<"turn"> =>
       item.kind === "turn" && item.outcome !== "active",
   );
   if (!ended) return undefined;
@@ -658,14 +657,14 @@ export function contextLabel(chat: ChatState) {
 }
 
 /** Waits for the person: approval, question, or a failure not yet seen. */
-export const waits = (status: ChatStatus) =>
+export const needsYou = (status: ChatStatus) =>
   status.rank === "approval" ||
   status.rank === "question" ||
   status.rank === "failed";
 
 /** The row's one emphasis (title weight 500): it waits, or holds something unseen. */
 export const emphasised = (status: ChatStatus) =>
-  waits(status) || status.unseen;
+  needsYou(status) || status.unseen;
 
 /** A turn is in progress, so it can be stopped. */
 export function isLive(chat: ChatState) {
@@ -939,14 +938,6 @@ export function chatTime(timestamp: string, now = Date.now()): string {
   if (new Date(now - 86_400_000).toDateString() === then.toDateString())
     return "Yesterday";
   return then.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-/** "12s", "2m 14s": how long the current step has run. */
-export function elapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  return seconds < 60
-    ? `${seconds}s`
-    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 /** KiB or MiB to one decimal, as the truncation note states sizes. */

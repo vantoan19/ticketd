@@ -1778,6 +1778,28 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
 }
 
 #[test]
+fn a_program_or_script_is_shown_in_its_folder_instead_of_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = |name: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, "echo hi").unwrap();
+        path
+    };
+    assert!(!runs_when_opened(&file("limiter.ts")));
+    assert!(!runs_when_opened(&file("notes.md")));
+    assert!(runs_when_opened(&file("deploy.command")));
+    assert!(runs_when_opened(&file("setup.sh")));
+    assert!(runs_when_opened(&file("install.BAT")));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let check = file("check");
+        std::fs::set_permissions(&check, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(runs_when_opened(&check));
+    }
+}
+
+#[test]
 fn a_file_opens_only_inside_the_chat_folder() {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("work");

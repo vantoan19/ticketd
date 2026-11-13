@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { ChatState, HarnessSetting } from "@/features/chats/client";
 import {
-  changing,
+  changePending,
   currentOf,
   effortBars,
   labelOf,
@@ -188,7 +188,7 @@ export function ComposerControls({
             aria-keyshortcuts="Meta+Shift+M Control+Shift+M"
           >
             {modelFace}
-            {changing(model) || changing(effort) ? (
+            {changePending(model) || changePending(effort) ? (
               <LoaderCircle size={12} className="chat-spin" aria-hidden />
             ) : (
               <ChevronDown aria-hidden />
@@ -293,7 +293,7 @@ export function ComposerControls({
             aria-label={`Permissions: ${permissionLabel}`}
           >
             {permissionFace}
-            {changing(permission) ? (
+            {changePending(permission) ? (
               <LoaderCircle size={12} className="chat-spin" aria-hidden />
             ) : (
               <ChevronDown aria-hidden />

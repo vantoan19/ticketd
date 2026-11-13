@@ -1546,7 +1546,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             .collect(),
         retention: retention(chat),
         activity,
-        needs_you: status.rank.waits(),
+        needs_you: status.rank.needs_you(),
         problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { TranscriptItem } from "@/features/chats/client";
 import {
   filesSummary,
-  middle,
+  shortenedPath,
   reasoningWords,
   tokens,
 } from "@/features/chats/reports";
@@ -70,6 +70,6 @@ test("token counts and long paths read short", () => {
   expect(tokens(1_000_000)).toBe("1M");
   expect(tokens(999)).toBe("999");
   expect(
-    middle("src/a/very/deep/folder/tree/that/goes/on/and/on/limiter.ts"),
+    shortenedPath("src/a/very/deep/folder/tree/that/goes/on/and/on/limiter.ts"),
   ).toBe("src/a/very/deep/folder/tree/that/goes…/limiter.ts");
 });

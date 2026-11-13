@@ -30,7 +30,7 @@ pub enum Rank {
 
 impl Rank {
     /// Waits for the person: counted on the sidebar and the app icon, notified at once.
-    pub fn waits(self) -> bool {
+    pub fn needs_you(self) -> bool {
         matches!(self, Self::Approval | Self::Question | Self::Failed)
     }
 }
@@ -272,7 +272,7 @@ impl Notifier {
         for row in rows {
             let key = (row.status.rank, row.status.line());
             let announces =
-                row.status.rank.waits() || (row.status.rank == Rank::Done && row.status.unseen);
+                row.status.rank.needs_you() || (row.status.rank == Rank::Done && row.status.unseen);
             let quiet = !announces || in_view.contains(row.id) || row.muted || !enabled;
             if quiet && self.shown.remove(row.id) {
                 alerts.push(Alert::Withdraw {

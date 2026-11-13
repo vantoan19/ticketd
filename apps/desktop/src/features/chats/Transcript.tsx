@@ -54,6 +54,7 @@ import {
   type RecordChange,
   type Step,
   type TranscriptItem,
+  type ItemOf,
 } from "@/features/chats/client";
 import {
   FilesSummary,
@@ -63,7 +64,6 @@ import {
 import {
   binarySize,
   duration,
-  elapsed,
   plainOutput,
   receiptLine,
   stepWords,
@@ -79,16 +79,11 @@ import { OutputBox } from "@/features/chats/OutputBox";
 import { ReceiptRow } from "@/features/chats/ReceiptRow";
 import { useReading } from "@/features/chats/use-transcript-scroll";
 
-type Of<K extends TranscriptItem["kind"]> = Extract<
-  TranscriptItem,
-  { kind: K }
->;
-
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
-  saveAsDocument: (response: Of<"response">) => void;
+  saveAsDocument: (response: ItemOf<"response">) => void;
   /** Saves a plan its turn left unfinished, as a checklist. */
-  savePlan: (plan: Of<"plan">) => void;
+  savePlan: (plan: ItemOf<"plan">) => void;
   /** Opens a file the turn changed; rejects with the reason it could not. */
   openFile: (path: string) => Promise<void>;
 };
@@ -117,7 +112,7 @@ const sentAt = (stamp: string) => {
  * Your message, exactly as sent, on the right. Past four lines it folds behind
  * Show more. Its time and Copy show on hover or focus.
  */
-function UserMessage({ item }: { item: Of<"user"> }) {
+function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const caption = DELIVERY_CAPTION[item.delivery];
   const { copied, error, copy } = useCopy();
   const text = useRef<HTMLDivElement>(null);
@@ -173,7 +168,7 @@ function Response({
   readOnly,
   actions,
 }: {
-  item: Of<"response">;
+  item: ItemOf<"response">;
   harness: string;
   readOnly: boolean;
   actions: TranscriptActions;
@@ -421,6 +416,7 @@ export function StepRow({
     </RowLine>
   );
   const row = detail ? (
+    // A plain row, not a Button: the design draws the whole step line as the target.
     <button
       type="button"
       className="chat-steps"
@@ -503,6 +499,7 @@ function RecordStep({ change }: { change: RecordChange }) {
         <>
           Created the Document{" "}
           {openDocument ? (
+            // Inline text, not a Button: it reads as a link inside the sentence.
             <button
               type="button"
               className="chat-record-link"
@@ -525,7 +522,7 @@ function RecordStep({ change }: { change: RecordChange }) {
 }
 
 /** An answered question or an expired request, in regular weight with no fill. */
-function Receipt({ item }: { item: Of<"request"> }) {
+function Receipt({ item }: { item: ItemOf<"request"> }) {
   return (
     <div className="chat-steps chat-receipt" data-anchor="">
       <RowLine
@@ -540,7 +537,7 @@ function Receipt({ item }: { item: Of<"request"> }) {
 }
 
 /** What ticketd says, not the harness: a smaller muted line with a marker. */
-function Note({ item }: { item: Of<"marker"> }) {
+function Note({ item }: { item: ItemOf<"marker"> }) {
   return (
     <p className="chat-line chat-note" data-anchor="">
       <Info size={14} aria-hidden />
@@ -708,6 +705,7 @@ function TurnView({
         data-seen={turn.ids.at(-1)}
       >
         {showRow && (
+          // A plain row, not a Button: the turn's whole fold line is the target.
           <button
             ref={rowButton}
             id={rowId}
@@ -794,7 +792,7 @@ function TurnView({
   );
 }
 
-function markerText(item: Of<"marker">, harness: string) {
+function markerText(item: ItemOf<"marker">, harness: string) {
   const detail = item.message ? ` ${item.message}` : "";
   switch (item.reason) {
     case "stopped":
@@ -814,7 +812,7 @@ function StopMarker({
   item,
   harness,
 }: {
-  item: Of<"marker">;
+  item: ItemOf<"marker">;
   harness: string;
 }) {
   return (
@@ -928,7 +926,10 @@ function WorkingLine({
         ) : (
           label
         )}
-        {fromShown && <span aria-hidden="true"> · {elapsed(now - shown)}</span>}
+        {/* Like the working line, no clock before a second has passed: never "0s". */}
+        {fromShown && now - shown >= 1000 && (
+          <span aria-hidden="true"> · {duration(now - shown)}</span>
+        )}
       </span>
     </div>
   );
