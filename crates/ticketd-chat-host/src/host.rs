@@ -349,8 +349,11 @@ impl ChatHost {
     /// be steered runs. Returns once it is held to send; delivery is reported as usual.
     pub async fn send_queued_now(&self, chat_id: &str, message_id: &str) -> Result<(), HostError> {
         let message_id = message_id.to_owned();
-        self.ask(chat_id, |reply| Command::SendQueuedNow { message_id, reply })
-            .await
+        self.ask(chat_id, |reply| Command::SendQueuedNow {
+            message_id,
+            reply,
+        })
+        .await
     }
 
     pub async fn respond(
