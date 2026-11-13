@@ -1733,7 +1733,14 @@ impl Supervisor {
                 if self.active.as_ref().is_some_and(|a| a.turn_id == turn_id) {
                     observations.extend(self.agent_changes());
                 }
+                // A turn the person stopped is theirs to have stopped, even when the
+                // harness ends it as completed (Codex can, once interrupted).
+                let stopped = self.stop.is_some()
+                    && self.active.as_ref().is_some_and(|a| a.turn_id == turn_id);
                 let (state, detail, problem, problem_resets_at) = match outcome {
+                    TurnOutcome::Completed if stopped => {
+                        (ChatTurnState::Interrupted, None, None, None)
+                    }
                     TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
                     TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None, None),
                     TurnOutcome::Failed(problem) => (
