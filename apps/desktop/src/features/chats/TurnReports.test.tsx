@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -238,7 +239,7 @@ test("changed files sit below the response, open in their app, and say why one d
   expect(screen.getByText("Not confirmed")).toBeTruthy();
 });
 
-test("the context ring sits before Stop and says when the window is nearly full", async () => {
+test("the context count sits before Stop, reads as tokens, and turns to a percentage from 80%", async () => {
   const context = (used: number) => ({
     used,
     window: 200_000,
@@ -255,21 +256,35 @@ test("the context ring sits before Stop and says when the window is nearly full"
     }),
     items: [you],
   });
-  const ring = screen.getByRole("button", {
+  const count = screen.getByRole("button", {
     name: "Context window: 62% used, 124k of 200k tokens",
   });
-  expect(ring.textContent).toBe("");
+  expect(count.textContent).toBe("124k");
   // Fixed before Stop, so Send leads the row.
   const stop = screen.getByRole("button", { name: "Stop" });
   expect(
-    ring.compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_FOLLOWING,
+    count.compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  fireEvent.click(ring);
-  expect(await screen.findByText("Context 124k of 200k")).toBeTruthy();
-  expect(screen.getByText("Compacts at 167k")).toBeTruthy();
+  // It opens the Chat's one context popover, at its Context group.
+  fireEvent.click(count);
+  const popover = await screen.findByRole("dialog", { name: "Chat context" });
+  const group = within(popover).getByRole("group", { name: "Context" });
+  expect(group.textContent).toContain("124k / 200k");
+  expect(group.textContent).toContain("62% used · Compacts near 167k");
+  // Esc closes it and the person is back in the message box.
+  fireEvent.keyDown(popover, { key: "Escape" });
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Chat context" })).toBeNull(),
+  );
+  expect(document.activeElement).toBe(
+    screen.getByRole("textbox", { name: /Codex$/ }),
+  );
 
-  client.patch("c1", { context: context(184_000) });
-  expect(await screen.findByText("92% full")).toBeTruthy();
+  act(() => client.patch("c1", { context: context(164_000) }));
+  expect(
+    (await screen.findByRole("button", { name: /^Context window: 82%/ }))
+      .textContent,
+  ).toBe("82% context");
 });
 
 test("while reasoning runs it is the turn's one spinner: no working line under it", async () => {

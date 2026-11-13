@@ -132,6 +132,17 @@ export function tokens(count: number): string {
   return String(count);
 }
 
+/** A category's size: one decimal below 100k ("3.2k", "0.3k"), so sizes compare. */
+export function preciseTokens(count: number): string {
+  if (count >= 100_000) return tokens(count);
+  return `${(count / 1000).toFixed(1)}k`;
+}
+
+/** When the person's last message was sent: a context report older than it says when it is from. */
+export function lastAsk(items: TranscriptItem[]): string | undefined {
+  return [...items].reverse().find((item) => item.kind === "user")?.at;
+}
+
 export function contextWords(context: ContextUsage) {
   const percent = Math.min(
     100,
@@ -139,7 +150,8 @@ export function contextWords(context: ContextUsage) {
   );
   return {
     percent,
-    full: percent >= 90,
+    /** From 80% the count says the share, with the attention dot. */
+    full: percent >= 80,
     label: `Context window: ${percent}% used, ${tokens(context.used)} of ${tokens(context.window)} tokens`,
     headline: `Context ${tokens(context.used)} of ${tokens(context.window)}`,
   };
