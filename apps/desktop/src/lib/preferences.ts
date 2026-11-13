@@ -13,6 +13,8 @@ const preferencesSchema = z.object({
   notifyReminders: z.boolean().catch(false),
   /** The Experimental Chat switch. The desktop backend is told at startup. */
   chat: z.boolean().catch(false),
+  /** Settings > Chat > Notify me about Chats. On by default. */
+  notifyChats: z.boolean().catch(true),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -29,6 +31,7 @@ const DEFAULTS: Preferences = {
   followCreated: true,
   notifyReminders: false,
   chat: false,
+  notifyChats: true,
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

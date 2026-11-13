@@ -2,7 +2,7 @@ import type {
   ChatChange,
   ChatSnapshot,
   ChatState,
-  ChatSummary,
+  ChatStatus,
   HarnessStatus,
   Problem,
   ProblemKind,
@@ -11,7 +11,6 @@ import type {
   StepTarget,
   TranscriptItem,
 } from "@/features/chats/client";
-import { plainText } from "@/features/documents/graph-text";
 
 /**
  * Applies one change-log entry to the snapshot it follows. Returns "resync"
@@ -232,53 +231,6 @@ export function changeLine(change: RecordChange) {
   return `Created the Document "${change.title}"`;
 }
 
-const PROBLEM_LINES: Record<ProblemKind, string> = {
-  not_installed: "Not sent",
-  incompatible: "Not sent",
-  unavailable: "Not sent",
-  probe_failed: "Not sent",
-  not_signed_in: "Not sent",
-  not_subscription: "Not on a subscription",
-  sign_in_unknown: "Sign-in not checked",
-  usage_limit: "Stopped: usage limit reached",
-  sandbox_unavailable: "Stopped: sandbox unavailable",
-  uncertain_delivery: "Needs your decision",
-  folder_missing: "Folder missing",
-  history_lost: "Session unavailable",
-  session_in_use: "Session in use elsewhere",
-  stop_unconfirmed: "Stop not confirmed",
-  failed: "Failed",
-};
-
-/** Row wording for a problem that is why the last turn stopped, where it differs. */
-const PAST_PROBLEM_LINES: Partial<Record<ProblemKind, string>> = {
-  not_signed_in: "Stopped: not signed in",
-  session_in_use: "Stopped: session was in use elsewhere",
-};
-
-/** The second line of a Chat's list row. */
-export function summaryLine(chat: ChatSummary): string {
-  if (chat.problem)
-    return (
-      (chat.problem_past && PAST_PROBLEM_LINES[chat.problem]) ||
-      PROBLEM_LINES[chat.problem]
-    );
-  if (chat.activity === "waiting") return "Waiting for you";
-  if (chat.activity === "working") return "Working…";
-  if (chat.activity === "failed") return "Failed";
-  if (chat.activity === "interrupted")
-    return chat.interruption === "stopped"
-      ? "You stopped this turn"
-      : chat.interruption === "quit"
-        ? "Stopped when ticketd quit"
-        : chat.interruption === "unconfirmed"
-          ? "Stop not confirmed"
-          : "Interrupted";
-  if (chat.last_change) return changeLine(chat.last_change);
-  // The preview is the raw last response, which is Markdown.
-  return (chat.preview && plainText(chat.preview)) || "Idle";
-}
-
 /**
  * Problems that keep the Chat from taking a new message until they are resolved.
  * Only one observed now blocks; why the last turn stopped (`past`) never does.
@@ -320,29 +272,15 @@ export function harnessUsable(status: HarnessStatus["status"]) {
   );
 }
 
-/** Problems that are an install or sign-in step: shown on the row, never counted. */
-const SETUP: ProblemKind[] = [
-  "not_installed",
-  "incompatible",
-  "unavailable",
-  "probe_failed",
-  "not_signed_in",
-  "not_subscription",
-  "sign_in_unknown",
-];
+/** Waits for the person: approval, question, or a failure not yet seen. */
+export const waits = (status: ChatStatus) =>
+  status.rank === "approval" ||
+  status.rank === "question" ||
+  status.rank === "failed";
 
-/**
- * Whether a Chat counts in the sidebar: it waits for an answer, its delivery
- * is uncertain, or it Failed. The host computes the same rule for its rows.
- */
-export function needsYou(
-  activity: ChatState["activity"],
-  problem: ProblemKind | undefined,
-) {
-  if (activity === "waiting" || problem === "uncertain_delivery") return true;
-  if (problem && SETUP.includes(problem)) return false;
-  return activity === "failed" || problem === "failed";
-}
+/** The row's one emphasis (title weight 500): it waits, or holds something unseen. */
+export const emphasised = (status: ChatStatus) =>
+  waits(status) || status.unseen;
 
 /** A turn is in progress, so it can be stopped. */
 export function isLive(chat: ChatState) {

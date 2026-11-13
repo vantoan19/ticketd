@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DialogShell } from "@/components/ui/dialog-shell";
-import { useChatClient, type ChatOverview } from "@/features/chats/client";
-import { ChatFeatureContext } from "@/features/chats/use-chats";
+import {
+  useChatClient,
+  type ChatOverview,
+  type OpenRequest,
+} from "@/features/chats/client";
+import {
+  ChatFeatureContext,
+  NO_CHAT_OVERVIEW,
+} from "@/features/chats/use-chats";
+import { usePreferences } from "@/lib/preferences";
 import "@/features/chats/chats.css";
 
 /**
@@ -12,11 +20,13 @@ import "@/features/chats/chats.css";
 export function ChatProvider({ children }: { children: ReactNode }) {
   const client = useChatClient();
   const [enabled, setEnabledState] = useState(false);
-  const [overview, setOverview] = useState<ChatOverview>({
-    needs_you: 0,
-    working: 0,
-  });
+  const [overview, setOverview] = useState<ChatOverview>(NO_CHAT_OVERVIEW);
   const [revision, setRevision] = useState(0);
+  const [openRequest, setOpenRequest] = useState<{
+    request: OpenRequest;
+    n: number;
+  } | null>(null);
+  const { notifyChats } = usePreferences();
   const [quitting, setQuitting] = useState<number | null>(null);
 
   useEffect(() => {
@@ -46,17 +56,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     };
     client.overview().then(apply, () => {});
     const stop = client.subscribeOverview(apply);
+    const stopOpen = client.onOpenRequested(
+      (request) =>
+        current &&
+        setOpenRequest((last) => ({ request, n: (last?.n ?? 0) + 1 })),
+    );
     return () => {
       current = false;
       stop();
+      stopOpen();
     };
   }, [client, enabled]);
+
+  // The backend starts with notifications on; it is told the person's choice.
+  useEffect(() => {
+    if (enabled) void client.setNotify(notifyChats).catch(() => {});
+  }, [client, enabled, notifyChats]);
 
   const feature = useMemo(
     () => ({
       enabled,
-      overview: enabled ? overview : { needs_you: 0, working: 0 },
+      overview: enabled ? overview : NO_CHAT_OVERVIEW,
       revision,
+      openRequest,
       setEnabled: async (value: boolean) => {
         try {
           await client.setEnabled(value);
@@ -69,7 +91,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [client, enabled, overview, revision],
+    [client, enabled, overview, revision, openRequest],
   );
   const answerQuit = (quit: boolean) => {
     setQuitting(null);

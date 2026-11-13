@@ -12,6 +12,7 @@ import {
   harnessStatusSchema,
   linkedRecordSchema,
   settingChangeSchema,
+  openRequestSchema,
   type ChatChange,
   type ChatClient,
 } from "@/features/chats/client";
@@ -278,6 +279,12 @@ export function createHostChatClient(
           title,
         }),
       ),
+    markRead: (id) => run("chat_mark_read", { chatId: id }),
+    markUnread: (id) => run("chat_mark_unread", { chatId: id }),
+    setMuted: (id, muted) => run("chat_set_muted", { chatId: id, muted }),
+    setNotify: (enabled) => run("chat_set_notify", { enabled }),
+    onOpenRequested: (listener) =>
+      subscribeTo("chat-open-requested", openRequestSchema, listener),
     onQuitRequested: (listener) =>
       subscribeTo(
         "chat-quit-requested",

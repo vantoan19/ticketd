@@ -71,6 +71,27 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format 67: what the person has seen of each Chat, and whether it is muted. Chats
+/// that already exist count as seen through their last turn, so upgrading marks
+/// nothing unread and announces nothing.
+/// Like every migration step it may run again over a schema that already has it.
+pub(crate) fn migrate_attention(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'seen_through')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN seen_through INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE chats ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
+             UPDATE chats SET seen_through = COALESCE((SELECT MAX(position) FROM chat_turns WHERE chat_id = chats.id), 0);",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 67;")?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
@@ -130,7 +151,19 @@ pub struct Chat {
     pub links: Vec<ChatLink>,
     /// The turn last recorded as active. The host owns whether a process is behind it.
     pub active_turn: Option<ChatTurn>,
+    /// The position of the last ended turn the person has seen: a turn that ended at a
+    /// later position is unseen.
+    pub seen_through: i64,
+    /// The person turned this Chat's notifications off.
+    pub muted: bool,
     pub created_at: String,
+}
+
+impl Chat {
+    /// Whether `turn` ended and the person has not seen it since.
+    pub fn unseen(&self, turn: &ChatTurn) -> bool {
+        turn.state != ChatTurnState::Active && turn.position > self.seen_through
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -538,6 +571,9 @@ pub struct ChatSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+// A change carries one record and lives only while a view applies it; boxing the Chat
+// would cost every reader a deref for no measurable saving.
+#[allow(clippy::large_enum_variant)]
 pub enum ChatRecord {
     Chat(Chat),
     Item(ChatItem),
@@ -639,7 +675,8 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
         .query_row(
             "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
-                    (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1)
+                    (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
+                    seen_through, muted
              FROM chats WHERE id = ?1",
             [id],
             |row| {
@@ -655,6 +692,8 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
                     created_at: row.get(8)?,
                     effective_settings: row.get(9)?,
                     native_session_id: row.get(10)?,
+                    seen_through: row.get(11)?,
+                    muted: row.get(12)?,
                     links: Vec::new(),
                     active_turn: None,
                 })
@@ -1498,6 +1537,55 @@ impl Workspace {
             connection.execute(
                 "UPDATE chats SET trashed = ?2 WHERE id = ?1",
                 params![id, trashed],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// The person saw the Chat's outcome: every turn that has ended is seen. Changes
+    /// nothing, and logs nothing, when nothing ended unseen.
+    pub fn mark_chat_seen(&mut self, id: &str) -> Result<Chat, Error> {
+        let chat = self.chat(id)?;
+        match self.last_ended_turn(id)? {
+            Some(through) if through > chat.seen_through => self.set_seen_through(id, through),
+            _ => Ok(chat),
+        }
+    }
+
+    /// Mark as unread: the last ended turn reads as unseen again. A Chat with no ended
+    /// turn has nothing to mark.
+    pub fn mark_chat_unread(&mut self, id: &str) -> Result<Chat, Error> {
+        let chat = self.chat(id)?;
+        match self.last_ended_turn(id)? {
+            Some(through) if chat.seen_through >= through => self.set_seen_through(id, through - 1),
+            _ => Ok(chat),
+        }
+    }
+
+    /// Mute stops the Chat's notifications and its share of the app-icon count.
+    pub fn set_chat_muted(&mut self, id: &str, muted: bool) -> Result<Chat, Error> {
+        self.update_chat(id, |connection| {
+            connection.execute(
+                "UPDATE chats SET muted = ?2 WHERE id = ?1",
+                params![id, muted],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn last_ended_turn(&self, id: &str) -> Result<Option<i64>, Error> {
+        Ok(self.connection.query_row(
+            "SELECT MAX(position) FROM chat_turns WHERE chat_id = ?1 AND state <> 'active'",
+            [id],
+            |row| row.get(0),
+        )?)
+    }
+
+    fn set_seen_through(&mut self, id: &str, through: i64) -> Result<Chat, Error> {
+        self.update_chat(id, |connection| {
+            connection.execute(
+                "UPDATE chats SET seen_through = ?2 WHERE id = ?1",
+                params![id, through],
             )?;
             Ok(())
         })
