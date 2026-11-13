@@ -241,6 +241,23 @@ event, from the first step of the Automation as it is now; the finished run stay
 as history. The run view draws a run from the definition the run keeps, so it shows
 the steps as they were even after the Automation is edited.
 
+A run that ends as Needs attention needs the person until they act on it: the core
+counts it for the sidebar and adds an Attention inbox entry (kind `automation_run`)
+on its ticket, whether or not the ticket is followed. Run again, Dismiss and taking
+the run over clear that and mark the entry read; opening the run or reading the
+entry does not. Dismiss leaves the run as it ended.
+
+The person takes a run over in the Chat of one of its agent steps.
+`ChatHost::send` and `ChatHost::stop` are the person's actions, so both ask the
+core first: a message makes the Chat an ordinary one in the Chat list, and a run
+that was Running or needed attention ends as Taken over, with the step it was on
+ended there and nothing after it run. Stop takes over only a Running run, since
+nothing is going in the Chat of one that ended; that is also why stopping a run
+from the run view, which ends the run before it interrupts the Chat, stays Needs
+attention. A Completed run stays Completed when the person replies in its Chat.
+The run's own first message goes through a path that takes nothing over. Retention
+deletes a run with the Chats it still owns, so a Chat the person took over is kept.
+
 A Run agent step is an ordinary Chat, created in the step's folder, linked to the
 ticket and owned by the run (`chats.automation_run_id`), which keeps it out of the
 Chat list. The host opens its harness with an `Unattended` request: the agent's

@@ -64,7 +64,7 @@ impl ChatHost {
         // Subscribed before the send, so no step of the turn is missed.
         let mut changed = self.changed();
         let command_id = format!("{chat_id}:first");
-        self.send(chat_id, Some(&command_id), text, SendMode::Auto)
+        self.submit(chat_id, Some(&command_id), text, SendMode::Auto)
             .await?;
         let waiting = async {
             loop {

@@ -84,6 +84,7 @@ impl Workspace {
             &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?2, ended_at = {NOW} WHERE automation_id = ?1 AND status IN ('queued', 'running')"),
             params![id, TURNED_OFF],
         )?;
+        crate::automation_runs::announce(&transaction)?;
         transaction.commit()?;
         Ok(chats)
     }
