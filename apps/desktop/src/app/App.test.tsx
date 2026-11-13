@@ -1012,6 +1012,43 @@ async function renderBulk(handlers: Record<string, unknown>) {
   });
 }
 
+test("a failed refresh keeps saved tickets and shows its actionable cause until recovery", async () => {
+  let missing = false;
+  const cause =
+    "cannot reopen workspace at /data/ticketd/workspace.sqlite3: unable to open database file. Restore the workspace file or make its folder available, then retry";
+  await renderBulk({
+    find_tickets: () => {
+      if (missing) throw new Error(cause);
+      return [bulkTicket(1)];
+    },
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  missing = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText(/Can’t refresh/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("alert").textContent).toContain(cause);
+  expect(screen.getByText(/Can’t refresh/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+
+  missing = false;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText(/Can’t refresh/)).toBeNull();
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+});
+
 test("shows the bulk bar only while tickets are selected and applies one status change", async () => {
   let tickets = [bulkTicket(1), bulkTicket(2)];
   await renderBulk({

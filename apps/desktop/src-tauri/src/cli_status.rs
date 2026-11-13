@@ -7,7 +7,7 @@ use ticketd_chat_host::cli::{self, CliStatus};
 pub async fn check_cli(app: tauri::AppHandle) -> Result<CliStatus, String> {
     let app_version = app.package_info().version.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let workspace = ticketd_core::Workspace::open_default()
+        let workspace = crate::open_workspace()
             .and_then(|workspace| workspace.workspace_info())
             .ok()
             .map(|info| PathBuf::from(info.path));

@@ -231,7 +231,9 @@ export function TicketListPane({
             label="Refresh"
             disabled={sourceRefresh.running}
             onClick={() =>
-              void (configuredSources.length > 0 ? refreshSources() : refresh())
+              void (configuredSources.length > 0
+                ? refreshSources()
+                : refresh({ reportFailure: true }))
             }
           >
             <RefreshCw />
@@ -292,7 +294,11 @@ export function TicketListPane({
             <p role="status" className="refresh-failed">
               Can’t refresh. Showing the last{" "}
               {workspace.layout === "board" ? "board" : "list"}.{" "}
-              <Button variant="link" size="sm" onClick={() => void refresh()}>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => void refresh({ reportFailure: true })}
+              >
                 Retry
               </Button>
             </p>
@@ -319,7 +325,7 @@ export function TicketListPane({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => void refresh()}
+                      onClick={() => void refresh({ reportFailure: true })}
                     >
                       Retry
                     </Button>
