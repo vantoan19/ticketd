@@ -127,6 +127,8 @@ export const chatStatusSchema = z.object({
   unseen: z.boolean(),
   /** "Approval needed", "Working"; for Idle, the plain last line. */
   word: z.string(),
+  /** The word naming the rank, for one-line summaries: Idle after a reply says "Done". */
+  label: z.string().nullish(),
   detail: z.string().nullish(),
 });
 export type ChatStatus = z.infer<typeof chatStatusSchema>;

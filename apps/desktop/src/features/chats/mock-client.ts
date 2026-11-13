@@ -175,7 +175,7 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     rank: ChatStatus["rank"],
     word: string,
     detail?: string | null,
-  ): ChatStatus => ({ rank, unseen, word, detail: detail ?? null });
+  ): ChatStatus => ({ rank, unseen, word, label: word, detail: detail ?? null });
   const pending = items.find(
     (item): item is Extract<TranscriptItem, { kind: "request" }> =>
       item.kind === "request" && item.state === "pending",
@@ -239,7 +239,7 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     (response && plainText(response.text)) ||
     null;
   if (unseen && response) return make("done", "Done", line);
-  return make("idle", line ?? "Idle");
+  return line ? { ...make("idle", line), label: "Done" } : make("idle", "Idle");
 }
 
 /** A Chat state with quiet defaults, so a test or fixture spells out only what matters. */

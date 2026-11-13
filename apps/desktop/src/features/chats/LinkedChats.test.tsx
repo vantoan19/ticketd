@@ -113,6 +113,32 @@ test("the Chats line names how many and the top-ranked status, and opens a Chat 
   });
 });
 
+test("a Chat marked unread after its reply says Done on the line, not the reply", async () => {
+  const client = show([
+    {
+      chat: chatState({ id: "a", title: "Tidy limiter", links: [ticket] }),
+      items: [
+        {
+          id: "r1",
+          at,
+          kind: "response",
+          text: "Appended verified to hello.txt, then ran ls.",
+          state: "complete",
+        },
+      ],
+    },
+  ]);
+  await client.markUnread("a");
+  const line = await screen.findByRole("button", { name: "Chats: 1, Done" });
+  expect(line.textContent).toBe("1 Chat·Done");
+  // The menu is one flat row per Chat: mark, title, then the status word.
+  fireEvent.keyDown(line, { key: "Enter" });
+  const item = await screen.findByRole("menuitem", {
+    name: "Tidy limiter, Codex, Done",
+  });
+  expect(item.textContent).toBe("Tidy limiterDone");
+});
+
 test("Chat about this ticket asks for New Chat with the ticket and its Project's folder", async () => {
   show([]);
   fireEvent.click(

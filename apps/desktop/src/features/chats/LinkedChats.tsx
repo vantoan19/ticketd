@@ -10,7 +10,7 @@ import {
 import { RailSection } from "@/features/tickets/RailSection";
 import { ChatStatus } from "@/features/chats/ChatStatus";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { chatCount, emphasised } from "@/features/chats/model";
+import { chatCount, emphasised, statusLabel } from "@/features/chats/model";
 import { useChatFeature, useLinkedChats } from "@/features/chats/use-chats";
 import {
   topChat,
@@ -54,7 +54,7 @@ export function LinkedChats({
         <Button
           variant={chip ? "outline" : "ghost"}
           size="sm"
-          aria-label={`Chats: ${chats.length}${top ? `, ${top.status.word}` : ""}`}
+          aria-label={`Chats: ${chats.length}${top ? `, ${statusLabel(top.status)}` : ""}`}
         >
           <span className="linked-chats-line">
             <span>{chatCount(chats.length)}</span>
@@ -62,7 +62,11 @@ export function LinkedChats({
               <>
                 <span aria-hidden="true">·</span>
                 <ChatStatus
-                  status={{ ...top.status, detail: null }}
+                  status={{
+                    ...top.status,
+                    word: statusLabel(top.status),
+                    detail: null,
+                  }}
                   activity={top.activity}
                 />
               </>
@@ -71,11 +75,15 @@ export function LinkedChats({
           <ChevronRight aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent
+        align="start"
+        collisionPadding={8}
+        className="linked-chats-menu"
+      >
         {chats.map((chat) => (
           <DropdownMenuItem
             key={chat.id}
-            aria-label={`${chat.title}, ${chat.harness_name}, ${chat.status.word}`}
+            aria-label={`${chat.title}, ${chat.harness_name}, ${statusLabel(chat.status)}`}
             onSelect={() =>
               requestChat({
                 kind: "open",
@@ -96,7 +104,14 @@ export function LinkedChats({
               data-attention={emphasised(chat.status) ? "" : undefined}
             >
               <span className="linked-chats-item-title">{chat.title}</span>
-              <ChatStatus status={chat.status} activity={chat.activity} />
+              <ChatStatus
+                status={{
+                  ...chat.status,
+                  word: statusLabel(chat.status),
+                  detail: null,
+                }}
+                activity={chat.activity}
+              />
             </span>
           </DropdownMenuItem>
         ))}

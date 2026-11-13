@@ -197,24 +197,35 @@ blockquote.chat-quote {
 .linked-chats-line .chat-status {
   min-width: 0;
 }
+.linked-chats-line .chat-status-word {
+  flex: 0 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .linked-chats-note {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
+/* The menu fits the window: flat rows of mark, title and status word. */
+.linked-chats-menu {
+  max-width: min(360px, var(--radix-dropdown-menu-content-available-width));
+}
 .linked-chats-mark {
-  align-self: flex-start;
-  margin-top: 2px;
   color: var(--muted-foreground);
 }
 .linked-chats-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-  max-width: 320px;
 }
 .linked-chats-item-title {
+  flex: 1;
   overflow: hidden;
+  min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -222,8 +233,10 @@ blockquote.chat-quote {
   font-weight: 500;
 }
 .linked-chats-item .chat-status {
+  flex: none;
+}
+.linked-chats-item .chat-status-word {
   color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 
 /* The records receipt row under a response: 28px, step-row anatomy. */

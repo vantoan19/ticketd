@@ -964,3 +964,6 @@ const ANSI = new RegExp(
 
 /** A step's output as plain text: ANSI colour is stripped. */
 export const plainOutput = (output: string) => output.replace(ANSI, "");
+
+/** The word naming a Chat's rank, for one-line summaries such as a ticket's Chats line. */
+export const statusLabel = (status: ChatStatus) => status.label ?? status.word;
