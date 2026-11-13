@@ -18,8 +18,8 @@ use ticketd_chat_host::{
     WorkspaceOpener, harness_key, problem_kind,
 };
 use ticketd_core::{
-    BackupCheck, Chat, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter,
-    ChatMessage, ChatRecord, ChatRole, ChatTurnState, NewChat, Workspace,
+    BackupCheck, Chat, ChatDelivery, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter,
+    ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent, ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -569,6 +569,22 @@ fn surroundings(
                     == ChatInputStanding::Queued
             })
             .map(|message| Queued {
+                refused_steer: message
+                    .attempts
+                    .last()
+                    .filter(|attempt| {
+                        attempt.intent == ChatSubmissionIntent::Steer
+                            && matches!(
+                                attempt.delivery,
+                                ChatDelivery::Rejected | ChatDelivery::NotDelivered
+                            )
+                    })
+                    .map(|attempt| {
+                        attempt
+                            .detail
+                            .clone()
+                            .unwrap_or("the harness did not take it".to_owned())
+                    }),
                 id: message.id,
                 text: message.text,
             })

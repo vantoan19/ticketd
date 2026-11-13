@@ -375,6 +375,9 @@ pub struct Steering {
 pub struct Queued {
     pub id: String,
     pub text: String,
+    /// It was sent to steer the running turn and the harness did not take it: why, as
+    /// the host recorded it. The card says "Couldn't steer; queued".
+    pub refused_steer: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

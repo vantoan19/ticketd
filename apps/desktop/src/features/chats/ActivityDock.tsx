@@ -189,8 +189,15 @@ function QueueCard({
   const [sending, setSending] = useState(false);
   return (
     <li className="chat-queue-card">
-      <span id={textId} className="chat-queue-text">
-        {queued.text}
+      <span className="chat-queue-main">
+        <span id={textId} className="chat-queue-text">
+          {queued.text}
+        </span>
+        {queued.refused_steer && (
+          <span className="chat-queue-note">
+            Couldn't steer; queued · {queued.refused_steer}
+          </span>
+        )}
       </span>
       {sending ? (
         <span className="chat-queue-sending">Sending…</span>

@@ -430,6 +430,28 @@ async fn a_decided_approval_folds_into_the_step_it_answered_and_no_other() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_steer_the_harness_refused_waits_in_the_queue_saying_why() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let reply = f.fake.hold_next_submit();
+    f.chats.send(&id, "also this", SendMode::Auto).await.unwrap();
+    settle().await;
+    reply
+        .send(SubmitReply::Reject("a tool is still running".to_owned()))
+        .unwrap();
+    settle().await;
+    let (opened, _) = f.open(&id).await;
+    let queued: Vec<_> = opened
+        .snapshot
+        .chat
+        .queue
+        .iter()
+        .map(|queued| (queued.text.as_str(), queued.refused_steer.as_deref()))
+        .collect();
+    assert_eq!(queued, [("also this", Some("a tool is still running"))]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_view_reopens_with_what_the_person_read_through() {
     let f = Fixture::new().await;
     let id = f.chat().await;

@@ -1411,7 +1411,7 @@ impl Supervisor {
             .is_some_and(|runtime| runtime.generation == dispatch.generation);
         match outcome {
             DispatchOutcome::NotSent(refusal) => {
-                let detail = format!("{refusal:?}");
+                let detail = refusal.reason().to_owned();
                 self.record(vec![ChatObservation::SubmissionNotDelivered {
                     attempt_id,
                     detail: Some(detail.clone()),

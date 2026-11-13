@@ -515,7 +515,14 @@ export const chatStateSchema = z.object({
   /** Stop was asked for and the turn has not ended; Stop waits. Not set once unconfirmed. */
   stopping: z.boolean().default(false),
   links: z.array(linkedRecordSchema),
-  queue: z.array(z.object({ id: z.string(), text: z.string() })),
+  queue: z.array(
+    z.object({
+      id: z.string(),
+      text: z.string(),
+      /** Sent to steer, and the harness did not take it: the host's reason. */
+      refused_steer: z.string().nullish(),
+    }),
+  ),
   queue_paused: z.boolean(),
   /** The live session's context window; absent until the harness reports it. */
   context: contextSchema.nullish(),

@@ -201,6 +201,27 @@ test("a harness that cannot be steered reads Queue, with no caret", async () => 
   noButton("Send now");
 });
 
+test("a steer the harness refused is a queue card that says so and why", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      queue: [
+        {
+          id: "q1",
+          text: "also cover the admin login",
+          refused_steer: "a tool is still running",
+        },
+      ],
+    }),
+  );
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(
+    within(queue).getByText("Couldn't steer; queued · a tool is still running"),
+  ).toBeTruthy();
+});
+
 test("Esc stops the turn and pauses the queue, which waits for Resume", async () => {
   const client = await open(
     one({

@@ -233,6 +233,19 @@ pub enum Refusal {
     RuntimeClosed,
 }
 
+impl Refusal {
+    /// Why a command was not sent, as a person reads it after "because".
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::StaleGeneration { .. } => "the harness session had been replaced",
+            Self::TurnMismatch { .. } => "the turn it was meant for had ended",
+            Self::UnknownRequest => "the request was no longer open",
+            Self::Unsupported => "the harness can't do that here",
+            Self::RuntimeClosed => "the harness session had closed",
+        }
+    }
+}
+
 /// Submission evidence available when `submit` returns. It never describes task
 /// completion; the terminal outcome is [`EventKind::TurnEnded`].
 #[derive(Debug, Clone, PartialEq, Eq)]

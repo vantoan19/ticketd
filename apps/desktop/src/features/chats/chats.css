@@ -951,12 +951,23 @@ button.chat-file:focus-visible,
   border-radius: var(--radius);
   color: var(--foreground);
 }
-.chat-queue-text {
+/* The card's words: its text, then why a refused steer waits here. */
+.chat-queue-main {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-queue-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chat-queue-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .chat-queue-actions {
   display: flex;
