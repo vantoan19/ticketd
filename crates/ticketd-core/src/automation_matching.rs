@@ -1,18 +1,25 @@
 //! Whether a Workspace event starts an Automation. No SQL: the caller reads the
 //! ticket's facts and hands them in.
 
+use serde_json::{Value, json};
+
 use crate::automations::{AutomationDefinition, Condition, Trigger};
 use crate::events::{WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
+
+/// The `source` of a ticket that no external tracker owns.
+pub(crate) const LOCAL_SOURCE: &str = "local";
 
 /// What the conditions test, read from the ticket as it is when the event is matched.
 pub(crate) struct TicketFacts {
     pub project_id: Option<String>,
+    /// The provider that owns the ticket ("github"), or `LOCAL_SOURCE`.
+    pub source: String,
     pub tags: Vec<String>,
 }
 
 /// An Automation's own changes never start an Automation, which is what keeps
 /// Automations from looping. Otherwise the event must match the trigger and every
-/// condition.
+/// condition. A change that sync brought in counts like one made here.
 pub(crate) fn matches(
     definition: &AutomationDefinition,
     event: &WorkspaceEvent,
@@ -21,27 +28,26 @@ pub(crate) fn matches(
     if event.actor == WorkspaceActor::Automation {
         return false;
     }
+    let is = |kind| event.kind == kind;
+    let was = |field: &str| changed(&event.previous, field);
+    let now = |field: &str| changed(&event.current, field);
     let triggered = match &definition.trigger {
-        Some(Trigger::TagAdded { tag }) => {
-            event.kind == WorkspaceEventType::TicketTagAdded
-                && event
-                    .current
-                    .as_ref()
-                    .and_then(|current| current["tag"].as_str())
-                    == Some(tag.as_str())
+        Some(Trigger::TicketCreated) => is(WorkspaceEventType::TicketCreated),
+        Some(Trigger::TicketUpdated) => is(WorkspaceEventType::TicketUpdated),
+        Some(Trigger::StatusChanged { to, from }) => {
+            is(WorkspaceEventType::TicketStatusChanged)
+                && to.is_some_and(|to| now("status") == Some(&json!(to)))
+                && from.is_none_or(|from| was("status") == Some(&json!(from)))
         }
-        // The other event triggers are matched from #392 on; schedules and by-hand
-        // Automations do not start from the log at all.
-        Some(
-            Trigger::TicketCreated
-            | Trigger::TicketUpdated
-            | Trigger::StatusChanged { .. }
-            | Trigger::TagRemoved { .. }
-            | Trigger::ActivityCreated
-            | Trigger::Schedule { .. }
-            | Trigger::ByHand,
-        )
-        | None => false,
+        Some(Trigger::TagAdded { tag }) => {
+            is(WorkspaceEventType::TicketTagAdded) && now("tag") == Some(&json!(tag))
+        }
+        Some(Trigger::TagRemoved { tag }) => {
+            is(WorkspaceEventType::TicketTagRemoved) && was("tag") == Some(&json!(tag))
+        }
+        Some(Trigger::ActivityCreated) => is(WorkspaceEventType::ActivityCreated),
+        // Schedules and by-hand Automations do not start from the log at all.
+        Some(Trigger::Schedule { .. } | Trigger::ByHand) | None => false,
     };
     triggered
         && definition
@@ -52,9 +58,12 @@ pub(crate) fn matches(
                     .project_id
                     .as_ref()
                     .is_some_and(|project| any_of.contains(project)),
+                Condition::Source { any_of } => any_of.contains(&ticket.source),
                 Condition::Tag { tag, has } => ticket.tags.contains(tag) == *has,
-                // Nothing can set a source condition yet (#392); until it is matched, an
-                // Automation narrowed by one starts nothing rather than too much.
-                Condition::Source { .. } => false,
             })
+}
+
+/// One field of an event's previous or current values.
+fn changed<'a>(values: &'a Option<Value>, field: &str) -> Option<&'a Value> {
+    values.as_ref().and_then(|values| values.get(field))
 }

@@ -39,19 +39,30 @@ export type AutomationAgent = z.infer<typeof automationAgentSchema>;
  * the record can hold are kept as they arrive, so saving never drops them.
  */
 const triggerSchema = z.union([
-  z.object({ kind: z.literal("tag_added"), tag: z.string() }),
-  z.looseObject({
-    kind: z.enum([
-      "ticket_created",
-      "ticket_updated",
-      "status_changed",
-      "tag_removed",
-      "activity_created",
-      "schedule",
-      "by_hand",
-    ]),
+  z.object({
+    kind: z.enum(["ticket_created", "ticket_updated", "activity_created"]),
   }),
+  z.object({
+    kind: z.literal("status_changed"),
+    /** null until chosen; the Automation cannot be switched on without it. */
+    to: statusSchema.nullable(),
+    /** null is any status. */
+    from: statusSchema.nullable(),
+  }),
+  z.object({ kind: z.enum(["tag_added", "tag_removed"]), tag: z.string() }),
+  z.looseObject({ kind: z.enum(["schedule", "by_hand"]) }),
 ]);
+export type AutomationTrigger = z.infer<typeof triggerSchema>;
+
+/** `source` holds provider ids ("github") and "local". */
+const conditionSchema = z.union([
+  z.object({
+    kind: z.enum(["project", "source"]),
+    any_of: z.array(z.string()),
+  }),
+  z.object({ kind: z.literal("tag"), tag: z.string(), has: z.boolean() }),
+]);
+export type AutomationCondition = z.infer<typeof conditionSchema>;
 const stepSchema = z.union([
   z.looseObject({
     id: z.string(),
@@ -92,7 +103,8 @@ const automationDefinitionSchema = z.object({
   name: z.string(),
   /** null until the person chooses what starts it. */
   trigger: triggerSchema.nullable(),
-  conditions: z.array(z.unknown()),
+  /** Narrow the trigger; every one must match. */
+  conditions: z.array(conditionSchema),
   /** In the order they run. */
   steps: z.array(stepSchema),
 });

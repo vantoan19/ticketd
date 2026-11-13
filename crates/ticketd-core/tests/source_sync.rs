@@ -1994,3 +1994,68 @@ fn the_first_import_logs_no_workspace_events_and_later_inbound_changes_log_as_sy
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].actor, WorkspaceActor::Person);
 }
+
+#[test]
+fn a_change_a_refresh_brings_in_starts_an_automation_narrowed_to_that_source() {
+    use ticketd_core::{
+        AutomationAgentSettings, AutomationDefinition, Condition, Step, StepAction, Trigger,
+    };
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "From the tracker"), true);
+    f.refresh();
+    let local = f.workspace.create_ticket("Local").unwrap();
+    let agent = f
+        .workspace
+        .create_automation_agent(AutomationAgentSettings::default())
+        .unwrap();
+    let mut done_from = |source: &str| {
+        let automation = f
+            .workspace
+            .create_automation(AutomationDefinition {
+                name: "Closed".into(),
+                trigger: Some(Trigger::StatusChanged {
+                    to: Some(Status::Done),
+                    from: None,
+                }),
+                conditions: vec![Condition::Source {
+                    any_of: vec![source.into()],
+                }],
+                steps: vec![Step {
+                    id: "review".into(),
+                    action: StepAction::RunAgent {
+                        agent_id: Some(agent.id.clone()),
+                        execution_folder: Some("/work/app".into()),
+                        on_failure: None,
+                    },
+                }],
+            })
+            .unwrap();
+        f.workspace
+            .set_automation_enabled(&automation.id, true)
+            .unwrap();
+        automation.id
+    };
+    let [from_fake, from_local] = ["fake", "local"].map(&mut done_from);
+
+    // The tracker closes its issue; a person closes the local ticket.
+    f.set_state(1, closed(ClosureReason::Completed));
+    f.refresh_at("2026-02-02T00:00:00Z");
+    let done = TicketPatch {
+        status: Some(Status::Done),
+        ..Default::default()
+    };
+    f.workspace.change_ticket(&local.reference, done).unwrap();
+
+    f.workspace.queue_automation_runs().unwrap();
+    let started = |automation: &str| {
+        f.workspace
+            .automation_runs(automation)
+            .unwrap()
+            .into_iter()
+            .map(|run| run.ticket.unwrap().id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(started(&from_fake), [f.ticket(1).id]);
+    assert_eq!(started(&from_local), [local.id]);
+}

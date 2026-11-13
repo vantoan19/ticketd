@@ -222,7 +222,12 @@ many are running as the device's "Runs at once" setting allows (2 unless changed
 at most 10; read on every pass, so a change counts from the next run). The core
 holds the rules: an event with actor `automation` matches
 nothing, a ticket has one active run per Automation (a partial unique index), and a
-run keeps the Automation definition it was created with. Matching and the run state
+run keeps the Automation definition it was created with. Each of the six event types
+is a trigger, and an event with actor `sync` matches like one with actor `person`.
+Conditions are tested against the ticket as it is when the event is matched, not as
+it was when the event was logged: its project, its tags, and its source, which is
+the provider that owns it now (`github`) or `local`, the same rule as the ticket
+list's source filter. Matching and the run state
 machine are functions with no SQL: the state machine takes the run's steps and how
 the step it was on ended, and answers with the next step or how the run ends.
 Runs are local to the device, kept 90 days, and a run left Running by a process

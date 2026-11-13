@@ -92,6 +92,8 @@ beforeEach(() => {
         return [];
       case "automation_agent_list":
         return agents;
+      case "list_projects":
+        return [];
       case "automation_run_list":
         return runs;
       case "automation_create": {
