@@ -102,6 +102,18 @@ pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, S
         .map_err(|error| error.to_string())
 }
 
+/// A step's text with its fields filled in from the ticket changed most recently,
+/// and `tag` for the tag from the event. `None` while the Workspace has no ticket.
+#[tauri::command]
+pub fn automation_text_preview(
+    text: String,
+    tag: Option<String>,
+) -> Result<Option<String>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.preview_automation_text(&text, tag.as_deref()))
+        .map_err(|error| error.to_string())
+}
+
 /// A run as the Runs list shows it. The run view (#393) reads the whole run.
 #[derive(serde::Serialize)]
 pub struct ListedRun {

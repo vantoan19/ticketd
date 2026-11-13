@@ -126,7 +126,9 @@ impl Workspace {
                 .map(drop),
             StepChange::PostUpdate { text } => self
                 .run_fields(&run)
-                .and_then(|fields| self.add_activity(reference, &resolve(text, &fields), Some(name)))
+                .and_then(|fields| {
+                    self.add_activity(reference, &resolve(text, &fields), Some(name))
+                })
                 .map(drop),
         };
         crate::events::set_actor(&self.connection, own_actor)?;

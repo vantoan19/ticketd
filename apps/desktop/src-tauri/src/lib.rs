@@ -1479,8 +1479,8 @@ pub fn run() -> Result<(), tauri::Error> {
         })
         .setup(move |app| {
             let version = app.package_info().version.to_string();
-            let chat = chat_commands::ChatBridge::new(version.clone());
-            automation_runner::start(chat.chats(), version);
+            let chat = chat_commands::ChatBridge::new(version);
+            automation_runner::start(chat.chats(), app.handle().clone());
             tauri::Manager::manage(app, chat);
             start_periodic_refresh(coordinator);
             sync.start(started, sync_commands::at_launch);
@@ -1534,6 +1534,7 @@ pub fn run() -> Result<(), tauri::Error> {
             automation_commands::automation_delete,
             automation_commands::automation_set_enabled,
             automation_commands::automation_run_list,
+            automation_commands::automation_text_preview,
             attachment_commands::attachment_upload_limit,
             attachment_commands::attachment_workspace_id,
             attachment_commands::set_attachment_upload_limit,

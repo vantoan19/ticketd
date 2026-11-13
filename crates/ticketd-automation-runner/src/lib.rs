@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use ticketd_chat_host::{ChatHost, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
-    AutomationAgent, AutomationRun, ChatLink, ChatLinkKind, Error, NewChat, RunAction, StepAction,
-    StepOutcome,
+    AutomationAgent, AutomationNotification, AutomationRun, ChatLink, ChatLinkKind, Error, NewChat,
+    RunAction, StepAction, StepOutcome,
 };
 
 pub use first_message::first_message;
@@ -36,6 +36,10 @@ pub struct TicketdCli {
     pub folders: Vec<PathBuf>,
 }
 
+/// Shows a desktop notification, or says why it could not. The host supplies it: the
+/// runner knows what to say, not how a desktop shows it.
+pub type Notifier = Arc<dyn Fn(AutomationNotification) -> Result<(), String> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Runner {
     inner: Arc<Inner>,
@@ -45,6 +49,7 @@ struct Inner {
     open_workspace: WorkspaceOpener,
     host: ChatHost,
     cli: TicketdCli,
+    notifier: Notifier,
 }
 
 impl Runner {
@@ -54,6 +59,7 @@ impl Runner {
         open_workspace: WorkspaceOpener,
         host: ChatHost,
         cli: TicketdCli,
+        notifier: Notifier,
     ) -> Result<Self, Error> {
         open_workspace()?.end_running_automation_runs(RESTARTED)?;
         Ok(Self {
@@ -61,6 +67,7 @@ impl Runner {
                 open_workspace,
                 host,
                 cli,
+                notifier,
             }),
         })
     }
@@ -124,9 +131,21 @@ impl Runner {
                 ..
             } => self.run_agent(run, step_id, agent_id, folder).await,
             StepAction::RunAgent { .. } => failed("This step has no agent or no folder."),
-            StepAction::ChangeTicket { .. } | StepAction::Notify { .. } | StepAction::If { .. } => {
-                failed("This kind of step cannot run yet.")
+            // A change the core refuses is the step's failure, in the core's words.
+            StepAction::ChangeTicket { .. } => (self.inner.open_workspace)()?
+                .apply_automation_change(&run.id, step_id)
+                .map(|()| StepOutcome::Completed),
+            StepAction::Notify { .. } => {
+                let notification =
+                    (self.inner.open_workspace)()?.automation_notification(&run.id, step_id)?;
+                match (self.inner.notifier)(notification) {
+                    Ok(()) => Ok(StepOutcome::Completed),
+                    Err(reason) => {
+                        failed(&format!("The notification could not be shown. {reason}"))
+                    }
+                }
             }
+            StepAction::If { .. } => failed("This kind of step cannot run yet."),
         }
     }
 

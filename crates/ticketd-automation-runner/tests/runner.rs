@@ -90,7 +90,7 @@ impl Fixture {
             executable: Some(PathBuf::from("/opt/ticketd/ticketd")),
             folders: vec![dir.path().to_owned()],
         };
-        let runner = Runner::new(opener(&path), host, cli).unwrap();
+        let runner = Runner::new(opener(&path), host, cli, Arc::new(|_| Ok(()))).unwrap();
         Self {
             _dir: dir,
             path,
@@ -399,7 +399,13 @@ async fn a_run_left_running_when_ticketd_closed_needs_attention_at_the_next_star
 
     // A new process: a new host and runner over the same Workspace.
     let host = ChatHost::new(opener(&f.path), Vec::new()).unwrap();
-    Runner::new(opener(&f.path), host, TicketdCli::default()).unwrap();
+    Runner::new(
+        opener(&f.path),
+        host,
+        TicketdCli::default(),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
 
     assert_eq!(
         f.needs_attention(),
