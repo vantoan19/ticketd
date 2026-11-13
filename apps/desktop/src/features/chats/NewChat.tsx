@@ -181,7 +181,6 @@ export function NewChat({
   const [folder, setFolder] = useState<string | null>(
     () => start?.folder ?? null,
   );
-  const [shared, setShared] = useState(0);
   const [links, setLinks] = useState<LinkedRecord[]>(() =>
     start ? [start.ticket] : [],
   );
@@ -260,16 +259,6 @@ export function NewChat({
       current = false;
     };
   }, [client, probe]);
-  useEffect(() => {
-    let current = true;
-    (folder ? client.folderUse(folder) : Promise.resolve(0)).then(
-      (count) => current && setShared(count),
-      () => current && setShared(0),
-    );
-    return () => {
-      current = false;
-    };
-  }, [client, folder]);
   // The folder's Project, for its icon on the folder button.
   const [projectOf, setProjectOf] = useState<{
     folder: string;
@@ -542,13 +531,6 @@ export function NewChat({
           {folderMissing && (
             <p className="chat-fine">
               Project folder isn’t on this computer; using a ticketd folder.
-            </p>
-          )}
-          {shared > 0 && (
-            <p className="chat-fine">
-              {shared === 1
-                ? "1 other Chat uses this folder."
-                : `${shared} other Chats use this folder.`}
             </p>
           )}
           {harness?.problem && (
