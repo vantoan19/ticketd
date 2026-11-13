@@ -1093,6 +1093,11 @@ impl Workspace {
             }
         }
         let mut applied = Applied::default();
+        // Workspace events: what a source brings in is logged with actor `sync`, and a
+        // source that has never been read successfully (its first import) logs nothing.
+        // A first run that fails partway stays silent on the next one too.
+        let logged = crate::events::head(&transaction)?;
+        let own_actor = crate::events::actor(&transaction)?;
         for issue in &gathered.issues {
             if replaced.contains(&issue.reference.identity.provider)
                 && ticket_for_identity(&transaction, &issue.reference.identity)?.is_none()
@@ -1103,6 +1108,19 @@ impl Workspace {
                 issue.reference.identity.provider.clone(),
                 issue.reference.identity.id.clone(),
             );
+            let read_before: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM source_status WHERE provider = ?1 AND last_refreshed_at IS NOT NULL)",
+                [&key.0],
+                |row| row.get(0),
+            )?;
+            crate::events::set_actor(
+                &transaction,
+                Some(if read_before {
+                    crate::events::Acting::Sync
+                } else {
+                    crate::events::Acting::Silent
+                }),
+            )?;
             apply_issue(
                 &transaction,
                 issue,
@@ -1111,6 +1129,8 @@ impl Workspace {
                 &mut applied,
             )?;
         }
+        crate::events::set_actor(&transaction, own_actor)?;
+        crate::events::fold_into_creation(&transaction, logged)?;
         for (provider, seen) in &gathered.discovery {
             if replaced.contains(provider) {
                 continue;

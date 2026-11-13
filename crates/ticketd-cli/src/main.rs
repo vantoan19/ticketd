@@ -1174,6 +1174,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     {
         workspace.act_for_chat(chat.trim())?;
     }
+    // Run inside an Automation run: what this command writes cannot trigger Automations.
+    if std::env::var(ticketd_core::AUTOMATION_RUN_ID_VARIABLE)
+        .is_ok_and(|run| !run.trim().is_empty())
+    {
+        workspace.act_for_automation()?;
+    }
     let text = match command {
         Command::Attachment { command } => attachment_command(&mut workspace, command)?,
         Command::Document { command } => match command {
