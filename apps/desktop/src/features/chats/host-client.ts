@@ -186,6 +186,11 @@ export function createHostChatClient(
         await call("chat_harness_options", { harnessId }),
       ),
     pickFolder: () => bridge.pickFolder(),
+    projectFolder: async (projectId) =>
+      z
+        .array(z.object({ id: z.string(), path: z.string() }))
+        .parse(await call("list_projects"))
+        .find((project) => project.id === projectId)?.path || null,
     folderProject: async (path) =>
       projectRefSchema
         .nullable()

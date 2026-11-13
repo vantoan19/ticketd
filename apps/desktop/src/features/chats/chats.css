@@ -728,10 +728,11 @@ button.chat-file-name:focus-visible,
   color: var(--disabled-foreground);
 }
 /* The harness's controls (#368) on the left; Stop and the send button stay
-   pinned at the end and never collapse. */
+   pinned at the end and never collapse. One line at every width: the leading
+   controls truncate instead of the end group wrapping (STATIC-6). */
 .chat-composer-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -753,17 +754,48 @@ button.chat-file-name:focus-visible,
   min-width: 0;
 }
 .chat-controls > [data-control] {
-  gap: 6px;
-  color: var(--muted-foreground);
-}
-.chat-controls > [data-control="model"] {
   flex-shrink: 1;
+  gap: 6px;
   min-width: 0;
+  color: var(--muted-foreground);
 }
 .chat-control-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* The effort's word beside its bars ("Medium"). */
+.chat-control-effort {
+  flex: none;
+  color: var(--muted-foreground);
+}
+/* Held places while the harness or its models are still being asked: still,
+   not pulsing, since nothing moves unless the person moved it. */
+.chat-skeleton {
+  display: block;
+  flex: none;
+  border-radius: var(--radius-segment);
+  background: var(--accent);
+}
+.chat-control-skeleton {
+  width: 72px;
+  height: 12px;
+}
+.chat-control-mark {
+  width: 14px;
+  height: 14px;
+}
+.chat-stop-mark {
+  width: 10px !important;
+  height: 10px !important;
+}
+/* Below a 460px composer Permissions keeps only its shield and the effort
+   only its bars, so one row holds picker, Permissions, Stop and Send. */
+@container (max-width: 459px) {
+  .chat-permission-label,
+  [data-control] .chat-control-effort {
+    display: none;
+  }
 }
 .effort-glyph rect {
   fill: var(--disabled-foreground);
@@ -864,10 +896,17 @@ button.chat-file-name:focus-visible,
 .chat-picker-harness[data-dim] > span:not(.harness-mark) {
   color: var(--muted-foreground);
 }
+/* One height for every tab and while models load, so the tabs never move
+   under the pointer (STATIC-7, LIVE-10); only the model list scrolls. */
 .chat-picker-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  height: min(
+    272px,
+    calc(var(--radix-popover-content-available-height, 400px) - 88px)
+  );
+  min-height: 160px;
 }
 .chat-picker-label {
   color: var(--muted-foreground);
@@ -877,11 +916,30 @@ button.chat-file-name:focus-visible,
 }
 .chat-picker-models {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 2px;
-  max-height: 264px;
+  min-height: 0;
   margin: 0 -8px;
   overflow-y: auto;
+}
+.chat-picker-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chat-picker-models > [data-slot="button"] {
+  align-self: flex-start;
+  margin-left: 2px;
+  color: var(--muted-foreground);
+}
+.chat-picker-skeleton-model {
+  flex: none;
+  height: 40px;
+  margin: 0 8px;
+}
+.chat-picker-skeleton-row {
+  height: 28px;
 }
 .chat-picker-model {
   display: flex;
@@ -923,19 +981,31 @@ button.chat-file-name:focus-visible,
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+/* Effort sits above the models, always in view; its segments share the
+   width and never push past the popover's edge. */
 .chat-picker-effort {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--header-boundary);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--header-boundary);
 }
 .chat-picker-effort > [data-slot="segmented-control"] {
   display: flex;
+  min-width: 0;
 }
 .chat-picker-effort > [data-slot="segmented-control"] > * {
   flex: 1 1 0;
   justify-content: center;
+  min-width: 0;
+  padding-inline: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-picker-body > .chat-picker-note {
+  flex: none;
 }
 .chat-picker-note {
   color: var(--muted-foreground);
@@ -1185,11 +1255,32 @@ button.chat-file-name:focus-visible,
   letter-spacing: -0.6px;
   text-align: center;
 }
-.chat-harness-checking {
+/* New Chat's folder button and menu: "Folder: repo", recent folders with
+   where they are, and the scratch folder. */
+.chat-folder-prefix {
+  color: var(--muted-foreground);
+}
+.chat-folder-option {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-folder-option-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-folder-option-line > svg {
+  margin-left: auto;
+}
+.chat-folder-option small {
+  overflow: hidden;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
-  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-chips {
   display: flex;
