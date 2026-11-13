@@ -294,7 +294,13 @@ function LinkedRecords({
 const isMessage = (item: TranscriptItem) =>
   item.kind === "user" || item.kind === "response";
 
-function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
+function Conversation({
+  snapshot,
+  focusRequest,
+}: {
+  snapshot: ChatSnapshot;
+  focusRequest: boolean;
+}) {
   const client = useChatClient();
   const { chat, items } = snapshot;
   const id = chat.id;
@@ -371,6 +377,10 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
   const pending = items.filter(
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
+  );
+  // Opened from a notification: the request waiting then takes focus, once.
+  const [notifiedRequest] = useState(() =>
+    focusRequest ? pending[0]?.id : undefined,
   );
   const question = pending.find(
     (item) => item.request === "question" && item.free_text,
@@ -573,6 +583,10 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
               <div className="chat-seat">
                 <ActivityDock
                   chat={chat}
+                  focusRequest={
+                    notifiedRequest !== undefined &&
+                    pending[0]?.id === notifiedRequest
+                  }
                   requests={pending}
                   {...(plan && { plan: <PlanPill item={plan} /> })}
                   dockRef={dock}
@@ -701,6 +715,7 @@ export function ChatDetail({
   onReturn,
   onClose,
   crumb,
+  focusRequest = false,
 }: {
   id: string;
   /** The person asked for the full width. */
@@ -712,6 +727,8 @@ export function ChatDetail({
   onClose: () => void;
   /** Back to where the Chat was opened from, such as its ticket. */
   crumb?: ReactNode;
+  /** Opened from a notification: a pending request's title takes focus once shown. */
+  focusRequest?: boolean;
 }) {
   const client = useChatClient();
   const { snapshot, error } = useChat(id);
@@ -805,7 +822,13 @@ export function ChatDetail({
           </p>
         )}
       </div>
-      {snapshot && <Conversation key={id} snapshot={snapshot} />}
+      {snapshot && (
+        <Conversation
+          key={id}
+          snapshot={snapshot}
+          focusRequest={focusRequest}
+        />
+      )}
     </section>
   );
 }

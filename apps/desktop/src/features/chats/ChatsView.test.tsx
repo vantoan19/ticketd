@@ -772,6 +772,17 @@ test("a row's actions mark it unread or read and mute it, and say a refusal", as
   expect(await screen.findByText("The workspace is read-only.")).toBeTruthy();
 });
 
+test("a clicked notification about a request focuses that request's title", async () => {
+  const client = await open([
+    ...one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
+    ...one({ id: "c2", title: "Other" }),
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: /^Other/ }));
+  act(() => client.requestOpen({ chat_id: "c1", retention: "active" }));
+  const title = await screen.findByRole("heading", { name: /wants to run/ });
+  await waitFor(() => expect(document.activeElement).toBe(title));
+});
+
 test("a clicked notification opens its Chat under its own list", async () => {
   const client = await open([]);
   await act(async () => {

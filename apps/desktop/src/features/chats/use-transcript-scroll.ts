@@ -2,7 +2,6 @@ import {
   createContext,
   useContext,
   useEffect,
-  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -81,13 +80,18 @@ export function useTranscriptScroll(
   const anchor = useRef<Anchor>(null);
   const opened = useRef("");
   const told = useRef<string | undefined>(undefined);
-  const read = useEffectEvent((box: HTMLElement) => {
+  // The latest `onRead`, for scroll and resize callbacks that outlive a render.
+  const onReadRef = useRef(onRead);
+  useLayoutEffect(() => {
+    onReadRef.current = onRead;
+  });
+  const read = (box: HTMLElement) => {
     const last = note(box, anchor);
     if (last && last !== told.current) {
       told.current = last;
-      onRead(last);
+      onReadRef.current(last);
     }
-  });
+  };
 
   // The opening position, before the first paint. The marker is placed once and
   // stays until the reader sends or leaves, so this runs only when the Chat opens.
