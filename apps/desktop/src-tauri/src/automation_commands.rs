@@ -104,15 +104,35 @@ pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, S
         .map_err(|error| error.to_string())
 }
 
-/// A run as the Runs list shows it. The run view reads the whole run.
+/// A run as a list shows it. The run view reads the whole run.
 #[derive(serde::Serialize)]
 pub struct ListedRun {
     id: String,
+    automation_id: String,
+    /// The Automation's name when the run was created.
+    automation_name: String,
     status: AutomationRunStatus,
     /// Why it needs attention.
     reason: Option<String>,
+    /// It needs attention and the person has not yet acted on it.
+    needs_you: bool,
     ticket: Option<AutomationRunTicket>,
     created_at: String,
+}
+
+fn listed(runs: Vec<AutomationRun>) -> Vec<ListedRun> {
+    runs.into_iter()
+        .map(|run| ListedRun {
+            id: run.id,
+            automation_id: run.automation_id,
+            automation_name: run.definition.name,
+            status: run.status,
+            reason: run.reason,
+            needs_you: run.needs_you,
+            ticket: run.ticket,
+            created_at: run.created_at,
+        })
+        .collect()
 }
 
 /// An Automation's runs on this device, newest first.
@@ -120,17 +140,16 @@ pub struct ListedRun {
 pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_runs(&automation_id))
-        .map(|runs| {
-            runs.into_iter()
-                .map(|run| ListedRun {
-                    id: run.id,
-                    status: run.status,
-                    reason: run.reason,
-                    ticket: run.ticket,
-                    created_at: run.created_at,
-                })
-                .collect()
-        })
+        .map(listed)
+        .map_err(|error| error.to_string())
+}
+
+/// The runs that acted on a ticket, newest first.
+#[tauri::command]
+pub fn automation_run_list_for_ticket(reference: String) -> Result<Vec<ListedRun>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.ticket_automation_runs(&reference))
+        .map(listed)
         .map_err(|error| error.to_string())
 }
 
@@ -168,10 +187,19 @@ pub async fn automation_run_stop(
     Ok(stopped)
 }
 
-/// Queues a new run for the event that started a finished one.
+/// Queues a new run for the event that started a finished one, which then no
+/// longer needs the person.
 #[tauri::command]
 pub fn automation_run_again(id: String) -> Result<AutomationRun, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.run_automation_again(&id))
+        .map_err(|error| error.to_string())
+}
+
+/// The person wants nothing more from a run that needs attention.
+#[tauri::command]
+pub fn automation_run_dismiss(id: String) -> Result<AutomationRun, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.dismiss_automation_run(&id))
         .map_err(|error| error.to_string())
 }
