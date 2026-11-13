@@ -105,10 +105,14 @@ pub fn suggest(records: &Records) -> Vec<Suggestion> {
             at: ticket.updated_at.clone(),
         })
         .collect();
-    found.extend(with(Status::InReview).take(1).map(|ticket| Suggestion::Review {
-        ticket: record(ticket),
-        at: ticket.updated_at.clone(),
-    }));
+    found.extend(
+        with(Status::InReview)
+            .take(1)
+            .map(|ticket| Suggestion::Review {
+                ticket: record(ticket),
+                at: ticket.updated_at.clone(),
+            }),
+    );
     if let Some(newest) = records.unread.first() {
         let mut seen = HashSet::new();
         let links = records
@@ -203,10 +207,7 @@ mod tests {
             skip: HashSet::from(["id-T-3".to_owned()]),
             ..Records::default()
         };
-        assert_eq!(
-            refs(&suggest(&records)),
-            ["continue T-1", "continue T-2"]
-        );
+        assert_eq!(refs(&suggest(&records)), ["continue T-1", "continue T-2"]);
     }
 
     #[test]
@@ -229,6 +230,9 @@ mod tests {
         let [Suggestion::Triage { count, links, at }] = found.as_slice() else {
             panic!("expected one triage suggestion, got {found:?}");
         };
-        assert_eq!((*count, links.len(), at.as_str()), (2, 1, "2026-11-13T00:00:00Z"));
+        assert_eq!(
+            (*count, links.len(), at.as_str()),
+            (2, 1, "2026-11-13T00:00:00Z")
+        );
     }
 }

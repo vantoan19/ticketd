@@ -1693,14 +1693,18 @@ impl Chats {
         }
         let project_id = folder.and_then(|folder| {
             let folder = Path::new(folder);
-            workspace.list_projects().ok()?.into_iter().find_map(|project| {
-                project
-                    .paths
-                    .iter()
-                    .chain(std::iter::once(&project.path))
-                    .any(|path| !path.is_empty() && folder.starts_with(path))
-                    .then_some(project.id)
-            })
+            workspace
+                .list_projects()
+                .ok()?
+                .into_iter()
+                .find_map(|project| {
+                    project
+                        .paths
+                        .iter()
+                        .chain(std::iter::once(&project.path))
+                        .any(|path| !path.is_empty() && folder.starts_with(path))
+                        .then_some(project.id)
+                })
         });
         let tickets = workspace
             .list_tickets()?
