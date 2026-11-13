@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 import type {
   ChatSnapshot,
-  Problem,
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
@@ -17,13 +16,19 @@ import {
   composerControls,
   composerPlaceholder,
   elapsed,
-  harnessUsable,
-  hasComposer,
   problemNotice,
   mergeSteps,
   stepWords,
 } from "@/features/chats/model";
-import { chatState } from "@/features/chats/mock-client";
+import {
+  chatState,
+  hostProblem,
+  type ProblemInput,
+} from "@/features/chats/mock-client";
+
+/** The notice for a problem as the host would send it for Codex. */
+const noticeOf = (problem: ProblemInput, harness = "Codex") =>
+  problemNotice(hostProblem(problem, harness), harness);
 
 const at = "2026-11-10T10:00:00Z";
 const snapshot = (): ChatSnapshot => ({
@@ -324,7 +329,7 @@ test("the placeholder says what sending will do", () => {
 });
 
 test("only a problem observed now disables Send; why the last turn stopped does not", () => {
-  const withProblem = (problem: Problem) =>
+  const withProblem = (problem: ProblemInput) =>
     composerControls(
       chatState({ id: "c1", title: "x", activity: "failed", problem }),
       "hi",
@@ -347,66 +352,57 @@ test("only a problem observed now disables Send; why the last turn stopped does 
       send: "send",
       enabled: true,
     });
-  const composer = (problem: Problem) =>
-    hasComposer(chatState({ id: "c1", title: "x", problem }));
-  expect(composer({ kind: "history_lost" })).toBe(false);
-  expect(composer({ kind: "history_lost", past: true })).toBe(true);
 });
 
 test("a past failure is told as the last turn's, with Check again only where a probe can tell", () => {
-  const signIn = problemNotice(
-    { kind: "not_signed_in", past: true, command: "codex login" },
-    "Codex",
-  );
+  const signIn = noticeOf({
+    kind: "not_signed_in",
+    past: true,
+    command: "codex login",
+  });
   expect(signIn.body).toMatch(/^The last turn stopped because/);
   expect(signIn.actions).toEqual(["copy-command", "check"]);
   for (const kind of ["usage_limit", "session_in_use"] as const) {
-    const notice = problemNotice({ kind, past: true }, "Codex");
+    const notice = noticeOf({ kind, past: true });
     expect(notice.actions, kind).toEqual([]);
     expect(notice.body, kind).toMatch(/last turn/);
   }
-  const sandbox = problemNotice(
-    { kind: "sandbox_unavailable", past: true },
-    "Codex",
-  );
+  const sandbox = noticeOf({ kind: "sandbox_unavailable", past: true });
   expect(sandbox.actions).toEqual(["help"]);
   expect(sandbox.body).toMatch(/last turn/);
   // Met now, the same kinds keep Check again and say nothing of a last turn.
-  const live = problemNotice({ kind: "session_in_use" }, "Codex");
+  const live = noticeOf({ kind: "session_in_use" });
   expect(live.actions).toEqual(["check"]);
   expect(live.body).not.toMatch(/last turn/);
 });
 
 test("a usage limit says when it resets, or says that the provider did not", () => {
   const at = new Date(2026, 10, 12, 15, 0).getTime() / 1000;
-  const told = problemNotice(
-    { kind: "usage_limit", message: "You've hit your limit.", resets_at: at },
-    "Codex",
-  ).body;
+  const told = noticeOf({
+    kind: "usage_limit",
+    message: "You've hit your limit.",
+    resets_at: at,
+  }).body;
   expect(told).toContain("You've hit your limit.");
   expect(told).toContain("It says the limit resets on Nov 12 at 3:00 PM.");
   expect(told).not.toContain("didn't say");
 
-  const untold = problemNotice(
-    { kind: "usage_limit", message: "You've hit your limit." },
-    "Codex",
-  ).body;
+  const untold = noticeOf({
+    kind: "usage_limit",
+    message: "You've hit your limit.",
+  }).body;
   expect(untold).toContain("You've hit your limit.");
   expect(untold).toContain("It didn't say when the limit resets.");
-  expect(problemNotice({ kind: "usage_limit" }, "Codex").body).toContain(
+  expect(noticeOf({ kind: "usage_limit" }).body).toContain(
     "It didn't say when the limit resets.",
   );
 });
 
 test("a refused resend is said first, and the first attempt stays unconfirmed", () => {
-  const notice = problemNotice(
-    {
-      kind: "uncertain_delivery",
-      message:
-        "You asked to send it again and Codex did not accept that: busy.",
-    },
-    "Codex",
-  );
+  const notice = noticeOf({
+    kind: "uncertain_delivery",
+    message: "You asked to send it again and Codex did not accept that: busy.",
+  });
   expect(notice.body).toMatch(
     /^You asked to send it again and Codex did not accept that: busy\. /,
   );
@@ -431,20 +427,14 @@ test("elapsed time reads in seconds, then minutes and seconds", () => {
   expect(elapsed(134_000)).toBe("2m 14s");
 });
 
-test("an uncertain delivery is worded without assuming why, and a set-aside harness status is usable", () => {
-  const notice = problemNotice({ kind: "uncertain_delivery" }, "Codex");
+test("an uncertain delivery is worded without assuming why", () => {
+  const notice = noticeOf({ kind: "uncertain_delivery" });
   expect(notice.body).not.toMatch(/connection dropped/);
   expect(notice.actions).toEqual(["resend", "discard"]);
-  expect(harnessUsable("not_subscription")).toBe(true);
-  expect(harnessUsable("sign_in_unknown")).toBe(true);
-  expect(harnessUsable("not_signed_in")).toBe(false);
 });
 
 test("a missing folder is told without claiming a restore happened", () => {
-  const notice = problemNotice(
-    { kind: "folder_missing", path: "/work/app" },
-    "Codex",
-  );
+  const notice = noticeOf({ kind: "folder_missing", path: "/work/app" });
   expect(notice.body).toBe(
     "`/work/app` wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.",
   );
@@ -453,7 +443,7 @@ test("a missing folder is told without claiming a restore happened", () => {
 });
 
 test("a missing ticketd component is a reinstall notice, not an update of the harness", () => {
-  const notice = problemNotice(
+  const notice = noticeOf(
     {
       kind: "unavailable",
       message: "ticketd's Claude bridge is missing. Reinstall ticketd.",
@@ -621,7 +611,10 @@ test("an unconfirmed stop stays open, says so, and running rows read Not confirm
         timing("active"),
         did("s1", ran("npm run db:migrate", "running")),
       ],
-      { activity: "working", problem: { kind: "stop_unconfirmed" } },
+      {
+        activity: "working",
+        problem: hostProblem({ kind: "stop_unconfirmed" }, "Codex"),
+      },
       Date.parse("2026-11-10T10:00:40Z"),
     ),
   );
@@ -727,7 +720,7 @@ test("an unseen Chat opened for the first time marks its last ended turn New", (
 });
 
 test("a stop that was not confirmed is one notice, and Stop itself is the retry", () => {
-  expect(problemNotice({ kind: "stop_unconfirmed" }, "Codex")).toEqual({
+  expect(noticeOf({ kind: "stop_unconfirmed" })).toEqual({
     tone: "neutral",
     title: "Stop not confirmed",
     body: "Codex may still be running.",

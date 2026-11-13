@@ -204,6 +204,25 @@ pub struct ChatLive {
     pub settings: Option<Box<LiveSettings>>,
 }
 
+impl ChatLive {
+    /// A Chat with nothing running and nothing asked.
+    pub fn idle() -> Self {
+        Self {
+            activity: Activity::Idle,
+            running: false,
+            opening: None,
+            steering: None,
+            delivery_unconfirmed: false,
+            sending: Vec::new(),
+            interactions: Vec::new(),
+            stop: None,
+            problem: None,
+            context: None,
+            settings: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextReport {
     pub usage: ContextUsage,

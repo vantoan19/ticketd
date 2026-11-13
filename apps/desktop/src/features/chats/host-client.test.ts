@@ -24,6 +24,7 @@ const chat = {
   queue_paused: false,
   unseen: false,
   muted: false,
+  has_composer: true,
 };
 const response = (text: string) => ({
   id: "m1",

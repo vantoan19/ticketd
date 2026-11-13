@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use ticketd_chat_host::{
     Activity, ChatHost, ChatLive, ChatProblem, ChatUpdate, ContextSource, HarnessAdapter,
     HostError, Inspection, InteractionAnswer, InteractionKind, LoginState, ProblemKind,
-    QuestionAnswer, ResumeMode, SendMode, Subscription, UnconfirmedCleanup, WorkspaceOpener,
-    harness_key, problem_kind,
+    QuestionAnswer, ResumeMode, SendMode, SettingKey, Subscription, UnconfirmedCleanup,
+    WorkspaceOpener, harness_key, problem_kind,
 };
 use ticketd_core::{
     BackupCheck, Chat, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter,
@@ -23,13 +23,15 @@ use ticketd_core::{
 };
 use tokio::sync::oneshot;
 
-use crate::chat_attention::Rank;
 use crate::chat_reports::{self, SettingChangeView};
+use crate::chat_view::HarnessFound;
 use crate::chat_view::{
     self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, ProjectRef, Queued, Summary,
     Surroundings, Tracker, harness_name,
 };
 use crate::folder_probe;
+use ticketd_chat_host::attention::Rank;
+use ticketd_chat_host::conditions::{ChatProblemKind, HarnessState, HarnessWord};
 
 /// History read to build a list row. A Chat's latest outcome is near its end.
 const SUMMARY_ITEMS: usize = 50;
@@ -244,7 +246,13 @@ pub struct Overview {
 pub struct HarnessStatus {
     pub id: &'static str,
     pub name: &'static str,
-    pub status: &'static str,
+    pub status: HarnessState,
+    /// Chats can be started on it.
+    pub usable: bool,
+    /// What New Chat and the header say beside it when it is not ready.
+    pub word: Option<HarnessWord>,
+    /// What New Chat's notice tells when it is not ready.
+    pub problem: Option<chat_view::Problem>,
     pub message: Option<String>,
     pub command: Option<String>,
     pub help_url: Option<String>,
@@ -319,21 +327,25 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             login,
             ..
         } => match login {
-            LoginState::SignedIn => ("ready", found(executable, version), None),
+            LoginState::SignedIn => (HarnessState::Ready, found(executable, version), None),
             // Usable, but never shown as plain ready: the person sees how it bills
             // before the first message goes out.
             LoginState::NonSubscription => (
-                "not_subscription",
+                HarnessState::NotSubscription,
                 format!(
                     "{}. It is signed in with an API key or cloud provider, not a subscription; {name} bills usage there.",
                     found(executable, version)
                 ),
                 sign_in,
             ),
-            LoginState::SignedOut => ("not_signed_in", found(executable, version), sign_in),
+            LoginState::SignedOut => (
+                HarnessState::NotSignedIn,
+                found(executable, version),
+                sign_in,
+            ),
             // Not every harness can be asked; it says so itself when a Chat starts.
             LoginState::Unknown => (
-                "sign_in_unknown",
+                HarnessState::SignInUnknown,
                 format!(
                     "{}. ticketd cannot check whether it is signed in; {name} reports that when a Chat starts.",
                     found(executable, version)
@@ -346,7 +358,7 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             version,
             requirement,
         } => (
-            "incompatible",
+            HarnessState::Incompatible,
             format!(
                 "Found {name} {} at `{}`. ticketd needs {requirement}.",
                 version
@@ -356,24 +368,42 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             ),
             None,
         ),
-        Inspection::NotInstalled => ("not_installed", format!("{name} was not found"), None),
-        Inspection::ProbeFailed { reason } => ("unknown", reason.clone(), None),
+        Inspection::NotInstalled => (
+            HarnessState::NotInstalled,
+            format!("{name} was not found"),
+            None,
+        ),
+        Inspection::ProbeFailed { reason } => (HarnessState::Unknown, reason.clone(), None),
     };
-    HarnessStatus {
-        id,
-        name,
-        status,
+    let found = HarnessFound {
         message: Some(message),
         command,
         // Shown where the person has something to install or update.
-        help_url: matches!(status, "not_installed" | "incompatible")
-            .then(|| chat_view::help_url(id).map(str::to_owned))
-            .flatten(),
+        help_url: matches!(
+            status,
+            HarnessState::NotInstalled | HarnessState::Incompatible
+        )
+        .then(|| chat_view::help_url(id).map(str::to_owned))
+        .flatten(),
         path: match &inspection {
             Inspection::Installed { executable, .. }
             | Inspection::Incompatible { executable, .. } => Some(executable.display().to_string()),
             Inspection::NotInstalled | Inspection::ProbeFailed { .. } => None,
         },
+    };
+    HarnessStatus {
+        id,
+        name,
+        status,
+        usable: status.usable(),
+        word: status.word(),
+        problem: status
+            .problem_kind()
+            .map(|kind| chat_view::Problem::for_harness(name, kind, &found)),
+        message: found.message,
+        command: found.command,
+        help_url: found.help_url,
+        path: found.path,
         version: match &inspection {
             Inspection::Installed { version, .. } | Inspection::Incompatible { version, .. } => {
                 version
@@ -383,12 +413,6 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             Inspection::NotInstalled | Inspection::ProbeFailed { .. } => None,
         },
     }
-}
-
-/// Whether Chats can be started on a harness with this status. A sign-in ticketd could
-/// not confirm as a subscription does not block; it is shown.
-fn usable(status: &str) -> bool {
-    matches!(status, "ready" | "not_subscription" | "sign_in_unknown")
 }
 
 /// A ticket status as the interface names it.
@@ -750,7 +774,7 @@ impl Chats {
     fn live(&self, chat_id: &str) -> ChatLive {
         self.started_host()
             .and_then(|host| host.live().remove(chat_id))
-            .unwrap_or_else(chat_view::idle)
+            .unwrap_or_else(ChatLive::idle)
     }
 
     pub fn enabled(&self) -> bool {
@@ -946,7 +970,7 @@ impl Chats {
             let live = live
                 .as_ref()
                 .and_then(|live| live.get(&chat.id).cloned())
-                .unwrap_or_else(chat_view::idle);
+                .unwrap_or_else(ChatLive::idle);
             summaries.push(chat_view::summary(
                 &chat,
                 &live,
@@ -1006,7 +1030,19 @@ impl Chats {
                 Err(_) => HarnessStatus {
                     id,
                     name,
-                    status: "unavailable",
+                    status: HarnessState::Unavailable,
+                    usable: false,
+                    word: HarnessState::Unavailable.word(),
+                    problem: Some(chat_view::Problem::for_harness(
+                        name,
+                        ChatProblemKind::Unavailable,
+                        &HarnessFound {
+                            message: Some(self.unavailable(id)),
+                            command: None,
+                            help_url: None,
+                            path: None,
+                        },
+                    )),
                     message: Some(self.unavailable(id)),
                     command: None,
                     help_url: None,
@@ -1530,7 +1566,7 @@ impl Chats {
             .find(|(id, _)| *id == chat.harness)
             .ok_or_else(|| failed(format!("unknown harness '{}'", chat.harness)))?;
         let status = harness_status(id, name, host.inspect(id).await?);
-        if !usable(status.status) {
+        if !status.usable {
             return Err(failed(status.message.unwrap_or_default()));
         }
         if matches!(
@@ -1543,7 +1579,7 @@ impl Chats {
             // A sign-in the probe cannot see is not shown to be in order by it.
             let signed_out =
                 turn.problem.as_deref().map(problem_kind) == Some(ProblemKind::LoginRequired);
-            if signed_out && status.status == "sign_in_unknown" {
+            if signed_out && status.status == HarnessState::SignInUnknown {
                 return Err(failed(status.message.unwrap_or_default()));
             }
             lock(&self.checked).insert(chat_id.to_owned(), turn.id.clone());
@@ -1752,12 +1788,10 @@ impl Chats {
     pub async fn change_setting(
         &self,
         chat_id: &str,
-        setting: &str,
+        setting: SettingKey,
         value: &str,
     ) -> Outcome<SettingChangeView> {
-        let key = chat_reports::setting_key(setting)
-            .ok_or_else(|| failed(format!("there is no setting named {setting}")))?;
-        let state = self.host()?.change_setting(chat_id, key, value).await?;
+        let state = self.host()?.change_setting(chat_id, setting, value).await?;
         Ok(chat_reports::change_view(value, &state))
     }
 
@@ -1776,8 +1810,7 @@ impl Chats {
         &self,
         folder: Option<&str>,
         linked: &[String],
-    ) -> Outcome<Vec<crate::chat_suggestions::Suggestion>> {
-        use crate::chat_suggestions::{Candidate, Records, Unread, suggest};
+    ) -> Outcome<Vec<chat_view::Suggestion>> {
         let workspace = self.workspace()?;
         let mut skip: HashSet<String> = linked.iter().cloned().collect();
         if let Some(host) = self.started_host() {
@@ -1796,47 +1829,11 @@ impl Chats {
                 );
             }
         }
-        let project_id = folder.and_then(|folder| {
-            let folder = Path::new(folder);
-            workspace
-                .list_projects()
-                .ok()?
-                .into_iter()
-                .find_map(|project| {
-                    project
-                        .paths
-                        .iter()
-                        .chain(std::iter::once(&project.path))
-                        .any(|path| !path.is_empty() && folder.starts_with(path))
-                        .then_some(project.id)
-                })
-        });
-        let tickets = workspace
-            .list_tickets()?
+        Ok(workspace
+            .chat_suggestions(folder.map(Path::new), skip)?
             .into_iter()
-            .map(|ticket| Candidate {
-                id: ticket.id,
-                reference: ticket.reference,
-                title: ticket.title,
-                status: ticket.status,
-                project_id: ticket.project_id,
-                updated_at: ticket.updated_at,
-            })
-            .collect();
-        let unread = workspace
-            .inbox_page(100, 0, true)?
-            .into_iter()
-            .map(|entry| Unread {
-                reference: entry.reference,
-                timestamp: entry.timestamp,
-            })
-            .collect();
-        Ok(suggest(&Records {
-            tickets,
-            unread,
-            project_id,
-            skip,
-        }))
+            .map(chat_view::Suggestion::from)
+            .collect())
     }
 
     /// A file in the Chat's folder, for the system to open: one a step named

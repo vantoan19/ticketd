@@ -8,16 +8,15 @@ use ticketd_chat_host::records::{
     ReasoningRecord,
 };
 use ticketd_chat_host::{
-    AppliesFrom, ChatLive, LiveSettings, PermissionKind, Setting, SettingChangeState, SettingKey,
-    SettingOutcome, StopState,
+    AppliesFrom, ChatLive, LiveSettings, PermissionKind, PlanStepStatus, Setting,
+    SettingChangeState, SettingKey, SettingOutcome, StopState,
 };
 use ticketd_core::{Chat, ChatTool, ChatToolState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlanStepView {
     pub text: String,
-    /// `pending`, `in_progress` or `completed`.
-    pub status: String,
+    pub status: PlanStepStatus,
     pub active_label: Option<String>,
 }
 
@@ -149,7 +148,10 @@ pub fn plan_document(tool: &ChatTool, chat_title: &str, date: &str) -> Option<St
         text.push_str("\n\n");
     }
     for step in &plan.steps {
-        let mark = if step.status == "completed" { "x" } else { " " };
+        let mark = match step.status {
+            PlanStepStatus::Completed => "x",
+            PlanStepStatus::Pending | PlanStepStatus::InProgress => " ",
+        };
         text.push_str(&format!("- [{mark}] {}\n", step.text));
     }
     Some(text)
@@ -336,16 +338,6 @@ pub fn change_view(value: &str, state: &SettingChangeState) -> SettingChangeView
         state,
         reason,
     }
-}
-
-/// The setting a view names.
-pub fn setting_key(name: &str) -> Option<SettingKey> {
-    Some(match name {
-        "model" => SettingKey::Model,
-        "effort" => SettingKey::Effort,
-        "permission" => SettingKey::Permission,
-        _ => return None,
-    })
 }
 
 #[cfg(test)]

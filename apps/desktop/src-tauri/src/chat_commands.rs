@@ -13,14 +13,13 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 use ticketd_chat_host::{
-    BRIDGE_SIDECAR_NAME, ClaudeAdapter, CodexAdapter, ContextSource, HarnessAdapter, SendMode, cli,
-    context,
+    BRIDGE_SIDECAR_NAME, ClaudeAdapter, CodexAdapter, ContextSource, HarnessAdapter, SendMode,
+    SettingKey, cli, context,
 };
 use ticketd_core::ChatListFilter;
 
 use tauri_plugin_opener::OpenerExt;
 
-use crate::chat_attention::{Alert, Notifier, Row, badge_text};
 use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
@@ -28,6 +27,7 @@ use crate::chats::{
     LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
     close_action, quit_action, tray_tooltip,
 };
+use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
 const OVERVIEW_EVENT: &str = "chat-overview";
@@ -463,13 +463,10 @@ pub async fn chat_send_queued_now(
 pub async fn chat_change_setting(
     bridge: State<'_, ChatBridge>,
     chat_id: String,
-    setting: String,
+    setting: SettingKey,
     value: String,
 ) -> Outcome<SettingChangeView> {
-    bridge
-        .chats
-        .change_setting(&chat_id, &setting, &value)
-        .await
+    bridge.chats.change_setting(&chat_id, setting, &value).await
 }
 
 /// Opens a file in the Chat's folder (a step's file, or one a turn changed) in the
@@ -621,7 +618,7 @@ pub async fn chat_suggestions(
     bridge: State<'_, ChatBridge>,
     folder: Option<String>,
     linked: Vec<String>,
-) -> Outcome<Vec<crate::chat_suggestions::Suggestion>> {
+) -> Outcome<Vec<crate::chat_view::Suggestion>> {
     bridge.chats.suggestions(folder.as_deref(), &linked)
 }
 

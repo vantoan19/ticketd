@@ -75,7 +75,6 @@ import {
   composerPlaceholder,
   firstNew,
   unseenFrom,
-  hasComposer,
   isLive,
   problemNotice,
   requestLabel,
@@ -389,7 +388,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     setHeldFor(question && draftHeld() ? question.id : undefined);
   }
   const answering = Boolean(question) && heldFor !== question?.id;
-  const stoppable = isLive(chat) && !chat.stopping && hasComposer(chat);
+  const stoppable = isLive(chat) && !chat.stopping && chat.has_composer;
   const stop = () => quietly(client.stop(id));
   /** Esc stops the turn, unless a menu, dialog or picker is open to take it first. */
   const onPaneKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -567,7 +566,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                 onAction={onNotice}
               />
             )}
-            {hasComposer(chat) && (
+            {chat.has_composer && (
               <div className="chat-seat">
                 <ActivityDock
                   chat={chat}

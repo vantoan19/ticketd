@@ -2,16 +2,13 @@
 mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
-mod chat_attention;
 mod chat_commands;
 mod chat_reports;
-mod chat_suggestions;
 mod chat_view;
 mod chats;
 mod cli_status;
 mod drive_commands;
 mod folder_probe;
-mod step_kind;
 mod sync_commands;
 mod sync_scheduler;
 

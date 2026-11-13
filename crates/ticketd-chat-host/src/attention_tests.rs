@@ -1,7 +1,9 @@
 use super::*;
-use ticketd_chat_host::LiveInteraction;
+use crate::LiveInteraction;
 
-use crate::chat_view::idle;
+fn idle() -> ChatLive {
+    ChatLive::idle()
+}
 
 fn chat(seen_through: i64) -> Chat {
     Chat {
@@ -74,7 +76,7 @@ fn a_finished_turn_is_done_until_seen_then_idle_in_words() {
 #[test]
 fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     let mut live = idle();
-    live.activity = ticketd_chat_host::Activity::WaitingForYou;
+    live.activity = crate::Activity::WaitingForYou;
     live.interactions.push(LiveInteraction {
         interaction_id: "i".to_owned(),
         kind: InteractionKind::Approval {
@@ -116,7 +118,7 @@ fn a_turn_the_person_stopped_is_idle_and_a_setup_step_is_words_only() {
     // Marked unread: the blue dot on its own words.
     assert!(unseen.unread());
     let setup = status(&Facts {
-        problem: Some(("not_installed", false)),
+        problem: Some((ChatProblemKind::NotInstalled, false)),
         ..facts(&chat(0), &live, None)
     });
     assert_eq!((setup.rank, setup.word.as_str()), (Rank::Idle, "Not sent"));

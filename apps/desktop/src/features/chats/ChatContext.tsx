@@ -27,7 +27,7 @@ import {
   type HarnessStatus,
 } from "@/features/chats/client";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { contextLabel, folderLabel, harnessWord } from "@/features/chats/model";
+import { contextLabel, folderLabel } from "@/features/chats/model";
 
 /** The folder's Project icon, else the folder; a missing folder says so. */
 function FolderLead({ chat }: { chat: ChatState }) {
@@ -55,7 +55,7 @@ function HarnessSection({ chat }: { chat: ChatState }) {
       current = false;
     };
   }, [client, chat.harness.id, checks]);
-  const word = status && harnessWord(status.status);
+  const word = status?.word;
   const found = [status?.version, status?.path].filter(Boolean);
   return (
     <section>

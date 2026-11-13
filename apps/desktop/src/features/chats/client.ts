@@ -47,6 +47,10 @@ export type ProblemKind = z.infer<typeof problemKindSchema>;
 /** Why a Chat cannot continue as it is, with what the person needs to recover. */
 export const problemSchema = z.object({
   kind: problemKindSchema,
+  /** The notice's title, worded by the host in the harness's name. */
+  title: z.string(),
+  /** Observed now, it keeps the Chat from taking a new message (the host decides). */
+  blocks_send: z.boolean(),
   /** The host's plain explanation, for kinds whose wording depends on what was observed. */
   message: z.string().nullish(),
   /** A terminal command to copy, such as the harness's own sign-in. */
@@ -182,6 +186,12 @@ export const harnessStatusSchema = z.object({
     "sign_in_unknown",
     "unknown",
   ]),
+  /** Chats can be started on it (the host decides). */
+  usable: z.boolean(),
+  /** The word shown beside its name when it isn't ready; `dot` when it needs the person. */
+  word: z.object({ word: z.string(), dot: z.boolean() }).nullish(),
+  /** What New Chat's notice tells when it isn't ready. */
+  problem: problemSchema.nullish(),
   /** What was found or why the probe is uncertain: executable, version, requirement. */
   message: z.string().nullish(),
   command: z.string().nullish(),
@@ -507,6 +517,8 @@ export const chatStateSchema = z.object({
     .nullish(),
   unseen: z.boolean(),
   muted: z.boolean(),
+  /** There is something to type into: not in trash, and the folder and session are there. */
+  has_composer: z.boolean(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 

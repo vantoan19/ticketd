@@ -3,9 +3,7 @@ import type {
   ChatSnapshot,
   ChatState,
   ChatStatus,
-  HarnessStatus,
   Problem,
-  ProblemKind,
   RecordChange,
   Step,
   StepTarget,
@@ -631,72 +629,9 @@ export function changeLine(change: RecordChange) {
   return `Created the Document "${change.title}"`;
 }
 
-/**
- * Problems that keep the Chat from taking a new message until they are resolved.
- * Only one observed now blocks; why the last turn stopped (`past`) never does.
- */
-const BLOCKING: ProblemKind[] = [
-  "not_installed",
-  "incompatible",
-  "unavailable",
-  "not_signed_in",
-  "usage_limit",
-  "sandbox_unavailable",
-  "uncertain_delivery",
-  "session_in_use",
-];
-/** Problems under which there is nothing to type into. */
-const NO_COMPOSER: ProblemKind[] = ["folder_missing", "history_lost"];
-
-export function blocksSend(problem: Problem | null | undefined) {
-  return Boolean(problem && !problem.past && BLOCKING.includes(problem.kind));
-}
-
-export function hasComposer(chat: ChatState) {
-  const problem = chat.problem;
-  return (
-    chat.retention !== "trashed" &&
-    !(problem && !problem.past && NO_COMPOSER.includes(problem.kind))
-  );
-}
-
-/**
- * Whether a Chat can be started on a harness with this status. A sign-in that is
- * not a subscription, or that ticketd could not check, does not block: it is shown.
- */
-export function harnessUsable(status: HarnessStatus["status"]) {
-  return (
-    status === "ready" ||
-    status === "not_subscription" ||
-    status === "sign_in_unknown"
-  );
-}
-
-/**
- * A harness that is not ready, as one word beside its name. `dot`: it needs
- * the person (a sign-in, an update, a check); a word without one is a fact.
- */
-export function harnessWord(
-  status: HarnessStatus["status"],
-): { word: string; dot: boolean } | null {
-  switch (status) {
-    case "ready":
-      return null;
-    case "not_signed_in":
-      return { word: "Not signed in", dot: true };
-    case "incompatible":
-    case "unavailable":
-      return { word: "Can't be used", dot: true };
-    case "unknown":
-      return { word: "Couldn't check", dot: true };
-    case "not_subscription":
-      return { word: "Not on a subscription", dot: true };
-    case "not_installed":
-      return { word: "Not installed", dot: false };
-    case "sign_in_unknown":
-      return { word: "Sign-in not checked", dot: false };
-  }
-}
+/** The host says the problem keeps the Chat from taking a new message. */
+export const blocksSend = (problem: Problem | null | undefined) =>
+  Boolean(problem?.blocks_send);
 
 /** A managed folder is named by an id; it reads as the folder ticketd keeps. */
 export const folderLabel = (folder: ChatState["folder"]) =>
@@ -826,8 +761,9 @@ export type Notice = {
 };
 
 /**
- * The notice for a problem. Wording for the states the design drew is the
- * design's; the rest (spec table 21.6) say what was observed as plainly.
+ * The notice for a problem. The host titles it; the body says what to do.
+ * Wording for the states the design drew is the design's; the rest (spec
+ * table 21.6) say what was observed as plainly.
  */
 export function problemNotice(problem: Problem, harness: string): Notice {
   const said = problem.message ? ` ${problem.message}` : "";
@@ -840,34 +776,34 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       if (past)
         return {
           tone: "neutral",
-          title: `${harness} wasn't signed in`,
+          title: problem.title,
           body: `The last turn stopped because ${harness} wasn't signed in. Run ${signIn} in a terminal and sign in, then check again or send your message. ticketd never asks for your password or keys.${said}`,
           actions: problem.command ? ["copy-command", "check"] : ["check"],
         };
       return {
         tone: "neutral",
-        title: `${harness} isn't signed in`,
+        title: problem.title,
         body: `Run ${signIn} in a terminal and sign in, then check again. ticketd never asks for your password or keys.${said}`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_subscription":
       return {
         tone: "neutral",
-        title: `${harness} isn't using a subscription`,
+        title: problem.title,
         body: `${problem.message ?? `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "sign_in_unknown":
       return {
         tone: "neutral",
-        title: `ticketd can't check ${harness}'s sign-in`,
+        title: problem.title,
         body: `${problem.message ?? `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_installed":
       return {
         tone: "neutral",
-        title: `${harness} isn't installed`,
+        title: problem.title,
         body: `ticketd couldn't find ${harness} on this computer. Install it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Install guide",
@@ -875,7 +811,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "incompatible":
       return {
         tone: "neutral",
-        title: `This ${harness} version can't be used`,
+        title: problem.title,
         body: `${problem.message ?? `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Update guide",
@@ -883,21 +819,21 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "unavailable":
       return {
         tone: "neutral",
-        title: `${harness} isn't available`,
+        title: problem.title,
         body: `${problem.message ?? `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
         actions: ["check"],
       };
     case "probe_failed":
       return {
         tone: "neutral",
-        title: `ticketd couldn't check ${harness}`,
+        title: problem.title,
         body: `It may still work.${said} Check again before sending.`,
         actions: ["check"],
       };
     case "usage_limit":
       return {
         tone: "neutral",
-        title: `${harness} reached your usage limit`,
+        title: problem.title,
         body: [
           problem.message,
           resetTime(problem.resets_at)
@@ -914,7 +850,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "sandbox_unavailable":
       return {
         tone: "error",
-        title: `${harness} can't run commands here`,
+        title: problem.title,
         body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
@@ -922,7 +858,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "uncertain_delivery":
       return {
         tone: "neutral",
-        title: `Did ${harness} get your message?`,
+        title: problem.title,
         // With a message, a resend the person asked for was not accepted.
         body: problem.message
           ? `${problem.message} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
@@ -932,14 +868,14 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "folder_missing":
       return {
         tone: "neutral",
-        title: "This Chat's folder is missing",
+        title: problem.title,
         body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.`,
         actions: ["check", "pick-folder"],
       };
     case "history_lost":
       return {
         tone: "neutral",
-        title: `${harness} no longer has this conversation`,
+        title: problem.title,
         body: "You can still read it here. To keep going, resume in a fresh session and choose which history to give it.",
         actions: ["resume"],
       };
@@ -947,13 +883,13 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       if (past)
         return {
           tone: "neutral",
-          title: `This ${harness} session was open somewhere else`,
+          title: problem.title,
           body: `The last turn stopped because of that. Close it there before you send again.${said}`,
           actions: [],
         };
       return {
         tone: "neutral",
-        title: `This ${harness} session is open somewhere else`,
+        title: problem.title,
         body: `Close it there, then check again. Nothing was sent.${said}`,
         actions: ["check"],
       };
@@ -961,14 +897,14 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       // Stop stays enabled as the retry, so the notice offers nothing else.
       return {
         tone: "neutral",
-        title: "Stop not confirmed",
+        title: problem.title,
         body: `${harness} may still be running.`,
         actions: [],
       };
     case "failed":
       return {
         tone: "error",
-        title: `${harness} stopped with an error`,
+        title: problem.title,
         body: `${problem.message ?? "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
         actions: ["check"],
       };

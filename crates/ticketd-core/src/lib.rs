@@ -97,10 +97,12 @@ pub use attachments::{
     DEFAULT_ATTACHMENT_LIMIT,
 };
 mod change_token;
+mod chat_suggestions;
 mod chats;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
 };
+pub use chat_suggestions::{ChatSuggestion, SuggestedTicket};
 pub use chats::{
     CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE,
     CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatAgentChange,

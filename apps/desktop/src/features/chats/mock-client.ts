@@ -16,9 +16,11 @@ import {
   type LinkedRecord,
   type Suggestion,
   type OpenRequest,
+  type Problem,
+  type ProblemKind,
   type TranscriptItem,
 } from "@/features/chats/client";
-import { changeLine, harnessUsable } from "@/features/chats/model";
+import { changeLine } from "@/features/chats/model";
 import { plainText } from "@/features/documents/graph-text";
 
 /** Words for a condition that holds now and is not a failure; as the host says them. */
@@ -32,6 +34,135 @@ const CONDITION_WORDS: Partial<Record<string, string>> = {
   history_lost: "Session unavailable",
   session_in_use: "Session in use elsewhere",
 };
+
+/** As the host's `ChatProblemKind::blocks_send`. */
+const BLOCKS_SEND = new Set<ProblemKind>([
+  "not_installed",
+  "incompatible",
+  "unavailable",
+  "not_signed_in",
+  "usage_limit",
+  "sandbox_unavailable",
+  "uncertain_delivery",
+  "session_in_use",
+]);
+/** As the host's `ChatProblemKind::removes_composer`. */
+const NO_COMPOSER = new Set<ProblemKind>(["folder_missing", "history_lost"]);
+
+/** A problem as a test spells it; the fake host fills in what the real one decides. */
+export type ProblemInput = Omit<Problem, "title" | "blocks_send"> &
+  Partial<Pick<Problem, "title" | "blocks_send">>;
+
+/** As the host's `ChatProblemKind::title`. */
+function problemTitle(kind: ProblemKind, harness: string, past: boolean) {
+  switch (kind) {
+    case "not_signed_in":
+      return past
+        ? `${harness} wasn't signed in`
+        : `${harness} isn't signed in`;
+    case "not_subscription":
+      return `${harness} isn't using a subscription`;
+    case "sign_in_unknown":
+      return `ticketd can't check ${harness}'s sign-in`;
+    case "not_installed":
+      return `${harness} isn't installed`;
+    case "incompatible":
+      return `This ${harness} version can't be used`;
+    case "unavailable":
+      return `${harness} isn't available`;
+    case "probe_failed":
+      return `ticketd couldn't check ${harness}`;
+    case "usage_limit":
+      return `${harness} reached your usage limit`;
+    case "sandbox_unavailable":
+      return `${harness} can't run commands here`;
+    case "uncertain_delivery":
+      return `Did ${harness} get your message?`;
+    case "folder_missing":
+      return "This Chat's folder is missing";
+    case "history_lost":
+      return `${harness} no longer has this conversation`;
+    case "session_in_use":
+      return past
+        ? `This ${harness} session was open somewhere else`
+        : `This ${harness} session is open somewhere else`;
+    case "stop_unconfirmed":
+      return "Stop not confirmed";
+    case "failed":
+      return `${harness} stopped with an error`;
+  }
+}
+
+/** A problem as the host sends it, worded for `harness`. */
+export function hostProblem(problem: ProblemInput, harness: string): Problem {
+  return {
+    title: problemTitle(problem.kind, harness, Boolean(problem.past)),
+    blocks_send: !problem.past && BLOCKS_SEND.has(problem.kind),
+    ...problem,
+  };
+}
+
+/** A harness status as a test spells it; the fake host fills in the rest. */
+export type HarnessInput = Omit<HarnessStatus, "usable" | "word" | "problem"> &
+  Partial<Pick<HarnessStatus, "usable" | "word">> & {
+    problem?: Partial<ProblemInput> | null;
+  };
+
+const HARNESS_WORDS: Record<
+  HarnessStatus["status"],
+  HarnessStatus["word"] | null
+> = {
+  ready: null,
+  not_signed_in: { word: "Not signed in", dot: true },
+  incompatible: { word: "Can't be used", dot: true },
+  unavailable: { word: "Can't be used", dot: true },
+  unknown: { word: "Couldn't check", dot: true },
+  not_subscription: { word: "Not on a subscription", dot: true },
+  not_installed: { word: "Not installed", dot: false },
+  sign_in_unknown: { word: "Sign-in not checked", dot: false },
+};
+
+/** As the host's `HarnessState`: usable, its word, and New Chat's notice. */
+export function harnessStatus(input: HarnessInput): HarnessStatus {
+  const { problem, ...rest } = input;
+  const kind: ProblemKind | null =
+    input.status === "ready"
+      ? null
+      : input.status === "unknown"
+        ? "probe_failed"
+        : input.status;
+  return {
+    usable: ["ready", "not_subscription", "sign_in_unknown"].includes(
+      input.status,
+    ),
+    word: HARNESS_WORDS[input.status],
+    problem:
+      kind &&
+      hostProblem(
+        {
+          kind,
+          message: input.message,
+          command: input.command,
+          help_url: input.help_url,
+          path: input.path,
+          ...problem,
+        },
+        input.name,
+      ),
+    ...rest,
+  };
+}
+
+/** What the host derives from a Chat's state: whether there is a composer. */
+function settled(chat: ChatState): ChatState {
+  const problem = chat.problem;
+  return {
+    ...chat,
+    has_composer:
+      chat.retention !== "trashed" &&
+      !(problem && !problem.past && NO_COMPOSER.has(problem.kind)),
+  };
+}
 
 /**
  * The host's ranked status (spec 21.3), simplified for fixtures: the mock has no
@@ -112,35 +243,43 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
 
 /** A Chat state with quiet defaults, so a test or fixture spells out only what matters. */
 export function chatState(
-  over: Partial<Omit<ChatState, "steering" | "folder" | "harness">> & {
+  over: Partial<
+    Omit<ChatState, "steering" | "folder" | "harness" | "problem">
+  > & {
     id: string;
     title: string;
     harness?: Partial<ChatState["harness"]>;
     folder?: Partial<ChatState["folder"]>;
     steering?: Partial<ChatState["steering"]>;
+    problem?: ProblemInput | null;
   },
 ): ChatState {
-  return chatStateSchema.parse({
-    retention: "active",
-    activity: "idle",
-    links: [],
-    queue: [],
-    queue_paused: false,
-    // A failure in a fixture has not been seen yet.
-    unseen: over.activity === "failed",
-    muted: false,
-    ...over,
-    harness: { id: "codex", name: "Codex", ...over.harness },
-    folder: {
-      path: "~/code/web-app",
-      name: "web-app",
-      managed: false,
-      missing: false,
-      shared_with: [],
-      ...over.folder,
-    },
-    steering: { available: true, ...over.steering },
-  });
+  const harness = { id: "codex", name: "Codex", ...over.harness };
+  return settled(
+    chatStateSchema.parse({
+      retention: "active",
+      activity: "idle",
+      links: [],
+      queue: [],
+      queue_paused: false,
+      // A failure in a fixture has not been seen yet.
+      unseen: over.activity === "failed",
+      muted: false,
+      has_composer: true,
+      ...over,
+      problem: over.problem && hostProblem(over.problem, harness.name),
+      harness,
+      folder: {
+        path: "~/code/web-app",
+        name: "web-app",
+        managed: false,
+        missing: false,
+        shared_with: [],
+        ...over.folder,
+      },
+      steering: { available: true, ...over.steering },
+    }),
+  );
 }
 
 export type MockChat = {
@@ -163,10 +302,15 @@ export type MockChatClient = ChatClient & {
   /** Adds a transcript item, or replaces the one with the same id. */
   push(id: string, item: TranscriptItem): void;
   streamText(id: string, itemId: string, text: string): void;
-  patch(id: string, change: Partial<ChatState>): void;
+  patch(
+    id: string,
+    change: Partial<Omit<ChatState, "problem">> & {
+      problem?: ProblemInput | null;
+    },
+  ): void;
   /** Loses the next `count` changes on the way to subscribers. */
   dropChanges(id: string, count: number): void;
-  setHarnesses(harnesses: HarnessStatus[]): void;
+  setHarnesses(harnesses: HarnessInput[]): void;
   requestQuit(): void;
   /** As if the person clicked the Chat's system notification. */
   requestOpen(request: OpenRequest): void;
@@ -182,7 +326,7 @@ export type MockChatClient = ChatClient & {
   nextFolder: string | null;
 };
 
-const READY: HarnessStatus[] = [
+const READY: HarnessInput[] = [
   { id: "claude-code", name: "Claude Code", status: "ready" },
   { id: "codex", name: "Codex", status: "ready" },
 ];
@@ -195,7 +339,7 @@ export function createMockChatClient(
   seed: {
     enabled?: boolean;
     chats?: MockChat[];
-    harnesses?: HarnessStatus[];
+    harnesses?: HarnessInput[];
     records?: LinkedRecord[];
     /** What New Chat suggests; linked tickets are left out as the host does. */
     suggestions?: Suggestion[];
@@ -211,7 +355,7 @@ export function createMockChatClient(
   const now = seed.now ?? "2026-11-10T10:00:00Z";
   const logLimit = seed.logLimit ?? 1000;
   let enabled = seed.enabled ?? false;
-  let harnesses = seed.harnesses ?? READY;
+  let harnesses = (seed.harnesses ?? READY).map(harnessStatus);
   let created = 0;
   const requests = new Map<string, string>();
   const dropping = new Map<string, number>();
@@ -328,8 +472,20 @@ export function createMockChatClient(
     else entry.items[index] = item;
     emit(entry, { kind: "item", item });
   };
-  const patch = (id: string, change: Partial<ChatState>) => {
+  const patch = (
+    id: string,
+    asked: Partial<Omit<ChatState, "problem">> & {
+      problem?: ProblemInput | null;
+    },
+  ) => {
     const entry = get(id);
+    const { problem, ...rest } = asked;
+    let change: Partial<ChatState> = rest;
+    if (problem !== undefined)
+      change = {
+        ...change,
+        problem: problem && hostProblem(problem, entry.chat.harness.name),
+      };
     // A turn that ends while nobody follows the Chat is unseen.
     const ended =
       live(entry.chat) &&
@@ -337,7 +493,7 @@ export function createMockChatClient(
       !live({ ...entry.chat, ...change });
     if (ended && entry.listeners.size === 0)
       change = { unseen: true, ...change };
-    entry.chat = chatStateSchema.parse({ ...entry.chat, ...change });
+    entry.chat = settled(chatStateSchema.parse({ ...entry.chat, ...change }));
     emit(entry, { kind: "chat", chat: entry.chat });
   };
   let ids = 0;
@@ -422,7 +578,7 @@ export function createMockChatClient(
       emit(entry, { kind: "text", item_id: itemId, text });
     },
     dropChanges: (id, count) => void dropping.set(id, count),
-    setHarnesses: (next) => void (harnesses = next),
+    setHarnesses: (next) => void (harnesses = next.map(harnessStatus)),
     requestOpen(request) {
       for (const listener of [...openListeners]) listener(request);
     },
@@ -454,7 +610,7 @@ export function createMockChatClient(
         .length,
     async createChat(input) {
       const harness = harnesses.find((item) => item.id === input.harness_id);
-      if (!harness || !harnessUsable(harness.status))
+      if (!harness?.usable)
         throw new ChatError("failed", "The harness is not ready.");
       // A repeated request finds the Chat the first try created.
       const existing = requests.get(input.command_id);
@@ -599,8 +755,7 @@ export function createMockChatClient(
     async checkAgain(id) {
       const { chat } = get(id);
       const harness = harnesses.find((item) => item.id === chat.harness.id);
-      if (harness && harnessUsable(harness.status))
-        patch(id, { activity: "idle", problem: null });
+      if (harness?.usable) patch(id, { activity: "idle", problem: null });
     },
     async setFolder(id, path) {
       const { chat } = get(id);
@@ -612,7 +767,10 @@ export function createMockChatClient(
           managed: false,
           missing: false,
         },
-        problem: chat.problem?.kind === "folder_missing" ? null : chat.problem,
+        problem:
+          chat.problem?.kind === "folder_missing"
+            ? null
+            : (chat.problem ?? null),
         activity: "idle",
       });
     },

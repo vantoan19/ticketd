@@ -192,7 +192,8 @@ pub struct QuestionAnswer {
 }
 
 /// One harness setting a person can choose for the session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SettingKey {
     Model,
     Effort,
@@ -414,7 +415,8 @@ pub struct PlanStep {
     pub active_label: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlanStepStatus {
     Pending,
     InProgress,

@@ -4,11 +4,9 @@
 //! the view fills the box and links the records the person picks.
 use std::cmp::Reverse;
 use std::collections::HashSet;
+use std::path::Path;
 
-use serde::Serialize;
-use ticketd_core::Status;
-
-use crate::chat_view::LinkedRecord;
+use crate::{Error, Status, Workspace};
 
 /// At most this many suggestions show.
 const MOST: usize = 3;
@@ -19,7 +17,7 @@ const TRIAGE_LINKS: usize = 20;
 
 /// A ticket as the suggestions weigh it.
 #[derive(Debug, Clone)]
-pub struct Candidate {
+struct Candidate {
     pub id: String,
     pub reference: String,
     pub title: String,
@@ -31,14 +29,14 @@ pub struct Candidate {
 
 /// One unread Inbox entry: the ticket it is about and when it arrived.
 #[derive(Debug, Clone)]
-pub struct Unread {
+struct Unread {
     pub reference: String,
     pub timestamp: String,
 }
 
 /// What the suggestions are chosen from.
 #[derive(Debug, Default)]
-pub struct Records {
+struct Records {
     pub tickets: Vec<Candidate>,
     /// Newest first.
     pub unread: Vec<Unread>,
@@ -48,43 +46,92 @@ pub struct Records {
     pub skip: HashSet<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Suggestion {
+/// A ticket a suggestion links.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuggestedTicket {
+    pub id: String,
+    pub reference: String,
+    pub title: String,
+    pub status: Status,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatSuggestion {
     Continue {
-        ticket: LinkedRecord,
+        ticket: SuggestedTicket,
         at: Option<String>,
     },
     Review {
-        ticket: LinkedRecord,
+        ticket: SuggestedTicket,
         at: Option<String>,
     },
     /// `count` unread entries about the linked tickets; `at` is the newest.
     Triage {
         count: usize,
-        links: Vec<LinkedRecord>,
+        links: Vec<SuggestedTicket>,
         at: String,
     },
 }
 
-fn record(ticket: &Candidate) -> LinkedRecord {
-    LinkedRecord::Ticket {
+fn record(ticket: &Candidate) -> SuggestedTicket {
+    SuggestedTicket {
         id: ticket.id.clone(),
         reference: ticket.reference.clone(),
         title: ticket.title.clone(),
-        status: match ticket.status {
-            Status::Todo => "Todo",
-            Status::InProgress => "In progress",
-            Status::InReview => "In review",
-            Status::Done => "Done",
-            Status::Canceled => "Canceled",
-            Status::Duplicate => "Duplicate",
-        }
-        .to_owned(),
+        status: ticket.status,
     }
 }
 
-pub fn suggest(records: &Records) -> Vec<Suggestion> {
+impl Workspace {
+    /// New Chat's suggestions for `folder` (`None`: a folder ticketd keeps): the
+    /// tickets of the Project whose checkout holds it come first. `skip` names tickets
+    /// not to suggest: those already linked, and those a working Chat is linked to.
+    pub fn chat_suggestions(
+        &self,
+        folder: Option<&Path>,
+        skip: HashSet<String>,
+    ) -> Result<Vec<ChatSuggestion>, Error> {
+        let project_id = match folder {
+            Some(folder) => self.list_projects()?.into_iter().find_map(|project| {
+                project
+                    .paths
+                    .iter()
+                    .chain(std::iter::once(&project.path))
+                    .any(|path| !path.is_empty() && folder.starts_with(path))
+                    .then_some(project.id)
+            }),
+            None => None,
+        };
+        let tickets = self
+            .list_tickets()?
+            .into_iter()
+            .map(|ticket| Candidate {
+                id: ticket.id,
+                reference: ticket.reference,
+                title: ticket.title,
+                status: ticket.status,
+                project_id: ticket.project_id,
+                updated_at: ticket.updated_at,
+            })
+            .collect();
+        let unread = self
+            .inbox_page(100, 0, true)?
+            .into_iter()
+            .map(|entry| Unread {
+                reference: entry.reference,
+                timestamp: entry.timestamp,
+            })
+            .collect();
+        Ok(suggest(&Records {
+            tickets,
+            unread,
+            project_id,
+            skip,
+        }))
+    }
+}
+
+fn suggest(records: &Records) -> Vec<ChatSuggestion> {
     // The folder's Project first, then the most recently changed.
     let mut open: Vec<&Candidate> = records
         .tickets
@@ -98,9 +145,9 @@ pub fn suggest(records: &Records) -> Vec<Suggestion> {
         )
     });
     let with = |status: Status| open.iter().filter(move |ticket| ticket.status == status);
-    let mut found: Vec<Suggestion> = with(Status::InProgress)
+    let mut found: Vec<ChatSuggestion> = with(Status::InProgress)
         .take(CONTINUE_MOST)
-        .map(|ticket| Suggestion::Continue {
+        .map(|ticket| ChatSuggestion::Continue {
             ticket: record(ticket),
             at: ticket.updated_at.clone(),
         })
@@ -108,7 +155,7 @@ pub fn suggest(records: &Records) -> Vec<Suggestion> {
     found.extend(
         with(Status::InReview)
             .take(1)
-            .map(|ticket| Suggestion::Review {
+            .map(|ticket| ChatSuggestion::Review {
                 ticket: record(ticket),
                 at: ticket.updated_at.clone(),
             }),
@@ -129,7 +176,7 @@ pub fn suggest(records: &Records) -> Vec<Suggestion> {
             .take(TRIAGE_LINKS)
             .map(record)
             .collect();
-        found.push(Suggestion::Triage {
+        found.push(ChatSuggestion::Triage {
             count: records.unread.len(),
             links,
             at: newest.timestamp.clone(),
@@ -154,20 +201,13 @@ mod tests {
         }
     }
 
-    fn refs(found: &[Suggestion]) -> Vec<String> {
+    fn refs(found: &[ChatSuggestion]) -> Vec<String> {
         found
             .iter()
             .map(|suggestion| match suggestion {
-                Suggestion::Continue {
-                    ticket: LinkedRecord::Ticket { reference, .. },
-                    ..
-                } => format!("continue {reference}"),
-                Suggestion::Review {
-                    ticket: LinkedRecord::Ticket { reference, .. },
-                    ..
-                } => format!("review {reference}"),
-                Suggestion::Triage { count, .. } => format!("triage {count}"),
-                other => format!("{other:?}"),
+                ChatSuggestion::Continue { ticket, .. } => format!("continue {}", ticket.reference),
+                ChatSuggestion::Review { ticket, .. } => format!("review {}", ticket.reference),
+                ChatSuggestion::Triage { count, .. } => format!("triage {count}"),
             })
             .collect()
     }
@@ -227,7 +267,7 @@ mod tests {
             ..Records::default()
         };
         let found = suggest(&records);
-        let [Suggestion::Triage { count, links, at }] = found.as_slice() else {
+        let [ChatSuggestion::Triage { count, links, at }] = found.as_slice() else {
             panic!("expected one triage suggestion, got {found:?}");
         };
         assert_eq!(
