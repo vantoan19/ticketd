@@ -2007,3 +2007,63 @@ fn changes_arriving_through_sync_are_logged_as_workspace_events_by_sync() {
         )]
     );
 }
+
+#[test]
+fn a_tag_arriving_through_sync_starts_the_automation_like_one_added_here() {
+    use ticketd_core::{
+        AutomationAgentSettings, AutomationDefinition, Step, StepAction, Trigger, WorkspaceActor,
+    };
+
+    let mut devices = devices();
+    let [arriving, local] =
+        ["Arriving", "Local"].map(|title| devices.workspaces[0].create_ticket(title).unwrap());
+    devices.sync(0);
+    devices.sync(1);
+    let b = &mut devices.workspaces[1];
+    let agent = b
+        .create_automation_agent(AutomationAgentSettings::default())
+        .unwrap();
+    let automation = b
+        .create_automation(AutomationDefinition {
+            name: "Triage".into(),
+            trigger: Some(Trigger::TagAdded {
+                tag: "ready-for-triage".into(),
+            }),
+            conditions: Vec::new(),
+            steps: vec![Step {
+                id: "triage".into(),
+                action: StepAction::RunAgent {
+                    agent_id: Some(agent.id),
+                    execution_folder: Some("/work/app".into()),
+                    on_failure: None,
+                },
+            }],
+        })
+        .unwrap();
+    b.set_automation_enabled(&automation.id, true).unwrap();
+
+    // One tag is added on the other desktop and arrives; one is added here.
+    devices.workspaces[0]
+        .add_tag(&arriving.reference, "ready-for-triage")
+        .unwrap();
+    devices.sync(0);
+    devices.sync(1);
+    let b = &mut devices.workspaces[1];
+    b.add_tag(&local.reference, "ready-for-triage").unwrap();
+
+    b.queue_automation_runs().unwrap();
+    let mut started: Vec<_> = b
+        .automation_runs(&automation.id)
+        .unwrap()
+        .into_iter()
+        .map(|run| (run.ticket.unwrap().id, run.event.actor))
+        .collect();
+    started.sort_by_key(|(_, actor)| *actor == WorkspaceActor::Person);
+    assert_eq!(
+        started,
+        [
+            (arriving.id, WorkspaceActor::Sync),
+            (local.id, WorkspaceActor::Person)
+        ]
+    );
+}

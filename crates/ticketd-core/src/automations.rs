@@ -291,6 +291,16 @@ fn problems(definition: &AutomationDefinition, agents: &HashSet<String>) -> Vec<
         },
         Some(_) => None,
     };
+    // Conditions are part of the trigger's card, so the first one without a value is
+    // what the trigger needs once it is itself set up.
+    let condition_needs = |condition: &Condition| match condition {
+        Condition::Project { any_of } if any_of.is_empty() => Some("A condition needs a project"),
+        Condition::Source { any_of } if any_of.is_empty() => Some("A condition needs a source"),
+        Condition::Tag { tag, .. } if blank(tag) => Some("A condition needs a tag"),
+        Condition::Project { .. } | Condition::Source { .. } | Condition::Tag { .. } => None,
+    };
+    let trigger_needs =
+        trigger_needs.or_else(|| definition.conditions.iter().find_map(condition_needs));
     if let Some(message) = trigger_needs {
         found.push(AutomationProblem {
             step_id: Some(AUTOMATION_TRIGGER_ID.to_owned()),

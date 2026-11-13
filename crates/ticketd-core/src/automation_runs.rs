@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::automation_matching::{TicketFacts, matches};
+use crate::automation_matching::{LOCAL_SOURCE, TicketFacts, matches};
 use crate::automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
 use crate::automations::{AutomationDefinition, Step};
 use crate::chats::{Chat, NewChat};
@@ -236,7 +236,22 @@ fn facts(connection: &Connection, ticket_id: &str) -> Result<TicketFacts, Error>
     let tags = statement
         .query_map([ticket_id], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
-    Ok(TicketFacts { project_id, tags })
+    // The same rule as the ticket list's source filter: a ticket whose ownership was
+    // taken back is local.
+    let source = connection
+        .query_row(
+            "SELECT i.provider FROM external_ownership o JOIN external_identities i ON i.ticket_id = o.ticket_id
+             WHERE o.ticket_id = ?1 AND o.authority = 'external'",
+            [ticket_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or_else(|| LOCAL_SOURCE.to_owned());
+    Ok(TicketFacts {
+        project_id,
+        source,
+        tags,
+    })
 }
 
 /// Removes finished runs created more than 90 days before `now`, with the Chats they

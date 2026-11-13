@@ -329,6 +329,44 @@ fn an_unfinished_automation_says_what_it_needs_and_cannot_be_switched_on() {
 }
 
 #[test]
+fn a_condition_without_a_value_is_one_thing_the_trigger_still_needs() {
+    use ticketd_core::Condition;
+
+    let (_dir, mut workspace) = workspace();
+    let (finished, _agent) = triage(&mut workspace);
+    let mut needs = |conditions: Vec<Condition>| {
+        problems(
+            &mut workspace,
+            AutomationDefinition {
+                conditions,
+                ..finished.clone()
+            },
+        )
+    };
+    let tag = |tag: &str| Condition::Tag {
+        tag: tag.into(),
+        has: true,
+    };
+    let (projects, sources) = (
+        Condition::Project { any_of: Vec::new() },
+        Condition::Source { any_of: Vec::new() },
+    );
+
+    assert_eq!(
+        needs(vec![tag("bug"), projects.clone(), tag(" ")]),
+        found(&[("trigger", "A condition needs a project")])
+    );
+    assert_eq!(
+        needs(vec![tag(" "), projects]),
+        found(&[("trigger", "A condition needs a tag")])
+    );
+    assert_eq!(
+        needs(vec![sources]),
+        found(&[("trigger", "A condition needs a source")])
+    );
+}
+
+#[test]
 fn the_reason_an_automation_cannot_be_switched_on_names_the_step() {
     let (_dir, mut workspace) = workspace();
     let (finished, _agent) = triage(&mut workspace);
