@@ -24,6 +24,7 @@ tauri-plugin-dialog.workspace = true
 tauri-plugin-notification.workspace = true
 tauri-plugin-single-instance.workspace = true
 ticketd-chat-host.workspace = true
+ticketd-automation-runner.workspace = true
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
 ticketd-core.workspace = true

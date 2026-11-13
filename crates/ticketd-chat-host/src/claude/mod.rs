@@ -2,9 +2,11 @@
 //! stdio, always driving the user's installed official Claude Code.
 //!
 //! Claude Code keeps its own sign-in, settings, instructions, skills, plugins, hooks,
-//! MCP servers and permission mode. The adapter passes only the working directory,
-//! the executable it found and the session to resume. It never reads credentials and
-//! never asks for permissions to be skipped.
+//! MCP servers and permission mode. For a person's Chat the adapter passes only the
+//! working directory, the executable it found and the session to resume. For an
+//! unattended session (an Automation run) it also passes the agent's model, allowed
+//! tools and turn limit, and Claude Code denies what is not allowed instead of
+//! asking. It never reads credentials and never asks for permissions to be skipped.
 
 mod runtime;
 mod session;
@@ -14,13 +16,13 @@ mod tests;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::install::{LaunchEnvironment, Os, parse_version};
-use crate::stdio::spawn;
+use crate::stdio::{Serving, spawn};
 use crate::{
     Capabilities, Capability, Harness, HarnessAdapter, Inspection, LoginState, OpenRequest,
-    OpenedRuntime, Problem, ProblemKind, ProviderDetail,
+    OpenedRuntime, Problem, ProblemKind, ProviderDetail, Unattended,
 };
 
 use runtime::Options;
@@ -76,7 +78,7 @@ impl HarnessAdapter for ClaudeAdapter {
         let Some(executable) = self.executable() else {
             return Inspection::NotInstalled;
         };
-        match spawn(&self.bridge, &[], None) {
+        match spawn(&self.bridge, &[], Serving::Nothing) {
             Ok(io) => runtime::probe(io, &executable, Options::default()).await,
             Err(error) => Inspection::ProbeFailed {
                 reason: self.bridge_problem(&error).message,
@@ -86,7 +88,7 @@ impl HarnessAdapter for ClaudeAdapter {
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
         let executable = self.executable().ok_or_else(not_installed)?;
-        let io = spawn(&self.bridge, &[], Some(&request.chat_id))
+        let io = spawn(&self.bridge, &[], Serving::of(&request))
             .map_err(|error| self.bridge_problem(&error))?;
         runtime::open_over(io, &request, &executable, Options::default()).await
     }
@@ -104,6 +106,51 @@ impl ClaudeAdapter {
             resets_at: None,
         }
     }
+}
+
+/// What the bridge is told for an unattended session. Claude Code runs in its
+/// "don't ask" permission mode: a tool on `allowed_tools` runs, anything else is
+/// denied without a prompt. The tools of a switch that is off are also disallowed
+/// outright, so an allow rule in the person's own Claude Code settings cannot bring
+/// them back.
+// ponytail: commands are matched by Claude Code's prefix rules, so an allow rule for
+// a command in the person's own settings still applies to an agent that may run only
+// the ticketd CLI. Close that with a PreToolUse hook in the bridge if it matters.
+pub(super) fn unattended_options(unattended: &Unattended) -> Value {
+    let tools = &unattended.tools;
+    let (mut allowed, mut disallowed) = (Vec::new(), Vec::new());
+    for (on, names) in [
+        (tools.read_files, ["Read", "Glob", "Grep"].as_slice()),
+        (tools.edit_files, &["Edit", "Write", "NotebookEdit"]),
+        (tools.use_web, &["WebFetch", "WebSearch"]),
+    ] {
+        let list = if on { &mut allowed } else { &mut disallowed };
+        list.extend(names.iter().map(|name| (*name).to_owned()));
+    }
+    // The ticketd CLI is always allowed, under its name and under the path the
+    // Chat's context gives the agent, bare or quoted.
+    allowed.push("Bash(ticketd:*)".to_owned());
+    if let Some(cli) = &unattended.ticketd_cli {
+        let cli = cli.to_string_lossy();
+        allowed.push(format!("Bash({cli}:*)"));
+        allowed.push(format!("Bash(\"{cli}\":*)"));
+    }
+    match (tools.run_commands, tools.allowed_commands.as_slice()) {
+        (false, _) => {}
+        (true, []) => allowed.push("Bash".to_owned()),
+        (true, commands) => {
+            allowed.extend(commands.iter().map(|command| format!("Bash({command}:*)")));
+        }
+    }
+    let mut options = json!({
+        "allowed_tools": allowed,
+        "disallowed_tools": disallowed,
+        "max_turns": unattended.turn_limit,
+    });
+    if let Some(model) = &unattended.model {
+        options["model"] = json!(model);
+    }
+    options
 }
 
 fn not_installed() -> Problem {

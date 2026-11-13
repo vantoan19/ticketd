@@ -17,6 +17,7 @@ mod stdio;
 mod subscription;
 mod supervisor;
 pub mod testing;
+mod unattended;
 
 pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter};
 pub use codex::CodexAdapter;
@@ -25,3 +26,4 @@ pub use host::*;
 pub use subscription::{
     ChatUpdate, SUBSCRIBER_BACKLOG_BYTES, SUBSCRIBER_BACKLOG_ITEMS, Subscription,
 };
+pub use unattended::TurnEnd;

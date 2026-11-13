@@ -33,7 +33,7 @@ use crate::{
     InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
     Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
-    SubmissionId, SubmissionKind, Subscription, ToolStatus, TurnOutcome,
+    SubmissionId, SubmissionKind, Subscription, ToolStatus, TurnOutcome, Unattended,
 };
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
@@ -161,6 +161,8 @@ pub(crate) struct Supervisor {
     open_workspace: WorkspaceOpener,
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
+    /// Set for the Chat of an Automation run: every session opens with these settings.
+    unattended: Option<Unattended>,
     board: Arc<Board>,
     commands: mpsc::Receiver<Command>,
     done: mpsc::UnboundedSender<Done>,
@@ -231,6 +233,7 @@ impl Supervisor {
         adapter: Option<Arc<dyn HarnessAdapter>>,
         context: Option<ContextSource>,
         board: Arc<Board>,
+        unattended: Option<Unattended>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
@@ -239,6 +242,7 @@ impl Supervisor {
             open_workspace,
             adapter,
             context,
+            unattended,
             board,
             commands,
             done,
@@ -739,6 +743,7 @@ impl Supervisor {
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
             session,
+            unattended: self.unattended.clone(),
         };
         self.opening = Some(Opening {
             generation,

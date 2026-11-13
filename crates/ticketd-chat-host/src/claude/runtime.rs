@@ -326,14 +326,19 @@ impl Connection {
             }
             Inspection::NotInstalled => return Err(super::not_installed()),
         };
-        // Only the folder, the executable and the session to resume are passed.
-        // Model, permission mode, tools and instructions stay Claude Code's own.
+        // For a person's Chat only the folder, the executable and the session to
+        // resume are passed: model, permission mode, tools and instructions stay
+        // Claude Code's own. An unattended session is told what it may do.
         let mut open = json!({
             "cmd": "open",
             "generation": self.generation.0,
             "cwd": request.working_directory.to_string_lossy(),
             "claude_executable": claude.to_string_lossy(),
         });
+        if let Some(unattended) = &request.unattended {
+            open["unattended"] = super::unattended_options(unattended);
+            self.state().session.unattended = true;
+        }
         let resuming = match &request.session {
             SessionStart::New => false,
             SessionStart::Resume(session) => {

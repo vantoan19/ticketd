@@ -150,7 +150,7 @@ impl StepAction {
     }
 
     /// The lists of steps under this one, in the order they run.
-    fn paths(&self) -> Vec<&Vec<Step>> {
+    pub(crate) fn paths(&self) -> Vec<&Vec<Step>> {
         match self {
             Self::RunAgent { on_failure, .. }
             | Self::ChangeTicket { on_failure, .. }
@@ -370,7 +370,7 @@ fn step_needs(
     }
 }
 
-fn find_step<'a>(steps: &'a [Step], id: &str) -> Option<&'a Step> {
+pub(crate) fn find_step<'a>(steps: &'a [Step], id: &str) -> Option<&'a Step> {
     steps.iter().find_map(|step| {
         if step.id == id {
             return Some(step);
@@ -596,7 +596,7 @@ pub(crate) fn switch_off_unfinished(connection: &Connection) -> Result<(), Error
     Ok(())
 }
 
-fn one(connection: &Connection, id: &str) -> Result<Automation, Error> {
+pub(crate) fn one(connection: &Connection, id: &str) -> Result<Automation, Error> {
     load(connection, Some(id))?
         .pop()
         .ok_or_else(|| Error::AutomationNotFound(id.to_owned()))

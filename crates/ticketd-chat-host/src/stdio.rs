@@ -187,16 +187,38 @@ fn strip_terminal_codes(text: &str) -> String {
     out
 }
 
+/// Whom a harness process serves, which is all ticketd adds to its environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Serving<'a> {
+    /// A probe: no Chat and no run.
+    Nothing,
+    Chat(&'a str),
+    /// The Chat of an Automation run.
+    Run {
+        chat_id: &'a str,
+        run_id: &'a str,
+    },
+}
+
+impl<'a> Serving<'a> {
+    pub(crate) fn of(request: &'a crate::OpenRequest) -> Self {
+        match &request.unattended {
+            Some(unattended) => Self::Run {
+                chat_id: &request.chat_id,
+                run_id: &unattended.run_id,
+            },
+            None => Self::Chat(&request.chat_id),
+        }
+    }
+}
+
 /// Starts `executable` on piped stdio with the launch environment unchanged, so the
 /// harness finds its own configuration and sign-in. A runtime for a Chat also gets
-/// that Chat's ID (and nothing else) in `CHAT_ID_VARIABLE`; the commands the harness
-/// runs inherit it.
-pub(crate) fn spawn(
-    executable: &Path,
-    arguments: &[&str],
-    chat_id: Option<&str>,
-) -> io::Result<Io> {
-    let mut child = command(executable, arguments, chat_id).spawn()?;
+/// that Chat's ID in `CHAT_ID_VARIABLE`, and one for an Automation run the run's ID
+/// in `AUTOMATION_RUN_ID_VARIABLE`, and nothing else; the commands the harness runs
+/// inherit them.
+pub(crate) fn spawn(executable: &Path, arguments: &[&str], serving: Serving) -> io::Result<Io> {
+    let mut child = command(executable, arguments, serving).spawn()?;
     let missing = || io::Error::other("the process has no standard streams");
     Ok(Io {
         stdin: Box::new(child.stdin.take().ok_or_else(missing)?),
@@ -206,7 +228,7 @@ pub(crate) fn spawn(
     })
 }
 
-fn command(executable: &Path, arguments: &[&str], chat_id: Option<&str>) -> Command {
+fn command(executable: &Path, arguments: &[&str], serving: Serving) -> Command {
     let mut command = Command::new(executable);
     command
         .args(arguments)
@@ -214,11 +236,21 @@ fn command(executable: &Path, arguments: &[&str], chat_id: Option<&str>) -> Comm
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    match chat_id {
-        Some(id) => command.env(ticketd_core::CHAT_ID_VARIABLE, id),
-        // A probe serves no Chat; it must not pass on an ID ticketd itself inherited.
-        None => command.env_remove(ticketd_core::CHAT_ID_VARIABLE),
+    let (chat_id, run_id) = match serving {
+        Serving::Nothing => (None, None),
+        Serving::Chat(chat_id) => (Some(chat_id), None),
+        Serving::Run { chat_id, run_id } => (Some(chat_id), Some(run_id)),
     };
+    // What is not served is removed: an ID ticketd itself inherited must not pass on.
+    for (variable, value) in [
+        (ticketd_core::CHAT_ID_VARIABLE, chat_id),
+        (ticketd_core::AUTOMATION_RUN_ID_VARIABLE, run_id),
+    ] {
+        match value {
+            Some(value) => command.env(variable, value),
+            None => command.env_remove(variable),
+        };
+    }
     hide_console(&mut command);
     command
 }
@@ -327,15 +359,37 @@ mod tests {
     /// credits that Chat; a probe carries none.
     #[test]
     fn a_chat_runtime_is_started_with_its_chat_id_and_a_probe_without() {
-        let variable = |chat_id| {
-            command(Path::new("harness"), &[], chat_id)
+        let variable = |serving| {
+            command(Path::new("harness"), &[], serving)
                 .as_std()
                 .get_envs()
                 .find(|(name, _)| *name == OsStr::new(ticketd_core::CHAT_ID_VARIABLE))
                 .map(|(_, value)| value.map(OsStr::to_owned))
         };
-        assert_eq!(variable(Some("chat-1")), Some(Some("chat-1".into())));
-        assert_eq!(variable(None), Some(None));
+        assert_eq!(
+            variable(Serving::Chat("chat-1")),
+            Some(Some("chat-1".into()))
+        );
+        assert_eq!(variable(Serving::Nothing), Some(None));
+    }
+
+    /// The agent of an Automation run carries the run's ID, so the ticketd CLI it runs
+    /// logs its writes as an Automation's; a person's Chat carries none.
+    #[test]
+    fn only_the_chat_of_an_automation_run_is_started_with_the_run_id() {
+        let variable = |serving| {
+            command(Path::new("harness"), &[], serving)
+                .as_std()
+                .get_envs()
+                .find(|(name, _)| *name == OsStr::new(ticketd_core::AUTOMATION_RUN_ID_VARIABLE))
+                .map(|(_, value)| value.map(OsStr::to_owned))
+        };
+        let run = Serving::Run {
+            chat_id: "chat-1",
+            run_id: "run-1",
+        };
+        assert_eq!(variable(run), Some(Some("run-1".into())));
+        assert_eq!(variable(Serving::Chat("chat-1")), Some(None));
     }
 
     #[test]

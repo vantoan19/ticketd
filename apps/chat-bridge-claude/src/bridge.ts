@@ -219,6 +219,19 @@ export function createBridge(deps: BridgeDeps) {
         requestDecision(state, toolName, input, context),
       stderr: deps.diagnostic,
       ...(command.resume_session_id && { resume: command.resume_session_id }),
+      ...(command.unattended && {
+        permissionMode: "dontAsk" as const,
+        allowedTools: command.unattended.allowed_tools,
+        disallowedTools: command.unattended.disallowed_tools,
+        maxTurns: command.unattended.max_turns,
+        ...(command.unattended.model && { model: command.unattended.model }),
+        // "Don't ask" denies before this is reached. Should a request arrive
+        // anyway, it is denied here: nobody is there for the host to ask.
+        canUseTool: async () => ({
+          behavior: "deny" as const,
+          message: "This tool is not among the agent's allowed tools.",
+        }),
+      }),
     };
     let opening: Session;
     try {

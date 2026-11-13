@@ -47,6 +47,20 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     resume_session_id: z.string().min(1).optional(),
     // No permission mode can be passed: Claude Code's own setting applies, and the
     // bridge can never be asked to skip permissions.
+    /**
+     * Set for the Chat of an Automation run, where nobody can approve. The session
+     * runs in the "don't ask" permission mode: a tool on `allowed_tools` runs and
+     * anything else is denied without a prompt.
+     */
+    unattended: z
+      .strictObject({
+        /** Omitted for Claude Code's default model. */
+        model: z.string().min(1).optional(),
+        allowed_tools: z.array(z.string().min(1)),
+        disallowed_tools: z.array(z.string().min(1)),
+        max_turns: z.number().int().positive(),
+      })
+      .optional(),
   }),
   z.strictObject({
     id,

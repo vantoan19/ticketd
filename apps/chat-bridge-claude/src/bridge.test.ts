@@ -270,6 +270,40 @@ describe("open", () => {
     expect(h.queries).toHaveLength(0);
   });
 
+  it("runs an unattended session without asking and denies what is not allowed", async () => {
+    const h = harness();
+    const fake = await h.open(1, {
+      unattended: {
+        model: "claude-test",
+        allowed_tools: ["Read", "Bash(ticketd:*)"],
+        disallowed_tools: ["Edit", "Write"],
+        max_turns: 40,
+      },
+    });
+    expect(fake.options).toMatchObject({
+      permissionMode: "dontAsk",
+      allowedTools: ["Read", "Bash(ticketd:*)"],
+      disallowedTools: ["Edit", "Write"],
+      maxTurns: 40,
+      model: "claude-test",
+    });
+    expect(fake.options).not.toHaveProperty("allowDangerouslySkipPermissions");
+
+    // A request that still reaches the bridge is denied here, never sent to the host.
+    const asked = fake.askPermission("Bash", { command: "rm -rf build" });
+    await expect(asked.result).resolves.toMatchObject({ behavior: "deny" });
+    expect(h.named("permission_request")).toHaveLength(0);
+  });
+
+  it("leaves the model to Claude Code when an unattended session names none", async () => {
+    const h = harness();
+    const fake = await h.open(1, {
+      unattended: { allowed_tools: [], disallowed_tools: [], max_turns: 5 },
+    });
+    expect(fake.options).not.toHaveProperty("model");
+    expect(fake.options.permissionMode).toBe("dontAsk");
+  });
+
   it("requires the host to name the Claude Code executable", async () => {
     const h = harness();
     await h.send({ cmd: "open", generation: 1, cwd: CWD });

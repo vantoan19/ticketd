@@ -189,16 +189,22 @@ impl Connection {
 
     async fn open_thread(&self, request: &OpenRequest) -> Result<Capabilities, Problem> {
         self.initialize().await?;
-        // Only the working directory is passed. Model, approval policy, sandbox and
-        // instructions stay whatever the user's Codex configuration says.
+        // For a person's Chat only the working directory is passed: model, approval
+        // policy, sandbox and instructions stay whatever their Codex configuration
+        // says. An unattended session is told what it may do, again with every turn.
         let cwd = request.working_directory.to_string_lossy();
-        let (method, params) = match &request.session {
+        let (method, mut params) = match &request.session {
             SessionStart::New => ("thread/start", json!({"cwd": cwd})),
             SessionStart::Resume(thread) => (
                 "thread/resume",
                 json!({"threadId": thread.0, "cwd": cwd, "excludeTurns": true}),
             ),
         };
+        if let Some(unattended) = &request.unattended {
+            let (thread, turn) = super::unattended_params(unattended);
+            merge(&mut params, thread);
+            self.state().session.turn_overrides = Some(turn);
+        }
         let result = match self.call(method, |_| Ok((params, Call::OpenThread))).await {
             CallOutcome::Reply(result) => result,
             CallOutcome::Error(error) if method == "thread/resume" => {
@@ -396,6 +402,13 @@ fn resume_problem(error: &RpcError) -> Problem {
     }
 }
 
+/// Adds the fields of `extra` to `params`; both are JSON objects.
+fn merge(params: &mut Value, extra: Value) {
+    if let (Some(params), Value::Object(extra)) = (params.as_object_mut(), extra) {
+        params.extend(extra);
+    }
+}
+
 /// Starts the handshake and a new or resumed thread over an already spawned process.
 pub(super) async fn open_over(
     io: Io,
@@ -508,10 +521,13 @@ impl HarnessRuntime for CodexRuntime {
                 let input = json!([{"type": "text", "text": text, "text_elements": []}]);
                 let prepared = match kind {
                     SubmissionKind::StartTurn if active.is_some() => return mismatch,
-                    SubmissionKind::StartTurn => (
-                        json!({"threadId": thread, "clientUserMessageId": id.0, "input": input}),
-                        Call::StartTurn(id.clone()),
-                    ),
+                    SubmissionKind::StartTurn => {
+                        let mut turn = json!({"threadId": thread, "clientUserMessageId": id.0, "input": input});
+                        if let Some(overrides) = session.turn_overrides.clone() {
+                            merge(&mut turn, overrides);
+                        }
+                        (turn, Call::StartTurn(id.clone()))
+                    }
                     SubmissionKind::Steer { .. } if !self.steering => {
                         return Err(Refusal::Unsupported);
                     }

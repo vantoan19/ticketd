@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
     Harness, HarnessAdapter, Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind,
-    SteeringBehavior, Subscription,
+    SteeringBehavior, Subscription, Unattended,
 };
 
 /// Provisional bounds, to be measured in #267.
@@ -244,6 +244,9 @@ struct Inner {
     board: Arc<Board>,
     adapters: HashMap<&'static str, Arc<dyn HarnessAdapter>>,
     chats: Mutex<HashMap<String, mpsc::Sender<Command>>>,
+    /// The settings of each Chat that is running unattended, read when its
+    /// supervisor starts.
+    unattended: Mutex<HashMap<String, Unattended>>,
     quitting: AtomicBool,
     /// Set while the workspace is being replaced by a backup. Checked where `quitting`
     /// is, so every clone of the host refuses to start or reach a supervisor.
@@ -282,6 +285,7 @@ impl ChatHost {
                     .map(|adapter| (harness_key(adapter.harness()), adapter))
                     .collect(),
                 chats: Mutex::new(HashMap::new()),
+                unattended: Mutex::new(HashMap::new()),
                 quitting: AtomicBool::new(false),
                 restoring: AtomicBool::new(false),
                 off: AtomicBool::new(false),
@@ -512,7 +516,32 @@ impl ChatHost {
             adapter,
             self.inner.context.clone(),
             self.inner.board.clone(),
+            self.unattended().get(&chat.id).cloned(),
         )
+    }
+
+    fn unattended(&self) -> MutexGuard<'_, HashMap<String, Unattended>> {
+        self.inner
+            .unattended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Sets or clears how the Chat's next supervisor opens its harness.
+    pub(crate) fn set_unattended(&self, chat_id: &str, unattended: Option<Unattended>) {
+        match unattended {
+            Some(unattended) => self.unattended().insert(chat_id.to_owned(), unattended),
+            None => self.unattended().remove(chat_id),
+        };
+    }
+
+    /// Takes the Chat's supervisor out of the host, for the caller to shut down.
+    pub(crate) fn forget(&self, chat_id: &str) -> Option<mpsc::Sender<Command>> {
+        self.chats().remove(chat_id)
+    }
+
+    pub(crate) fn workspace(&self) -> Result<Workspace, HostError> {
+        Ok((self.inner.open_workspace)()?)
     }
 
     fn chats(&self) -> MutexGuard<'_, HashMap<String, mpsc::Sender<Command>>> {
@@ -533,6 +562,8 @@ pub fn problem_key(kind: ProblemKind) -> &'static str {
         ProblemKind::NativeHistoryUnavailable => "native_history_unavailable",
         ProblemKind::SessionInUse => "session_in_use",
         ProblemKind::PermissionUnavailable => "permission_unavailable",
+        ProblemKind::TurnLimitReached => "turn_limit_reached",
+        ProblemKind::ToolDenied => "tool_denied",
         ProblemKind::Other => "other",
     }
 }
@@ -547,6 +578,8 @@ pub fn problem_kind(key: &str) -> ProblemKind {
         ProblemKind::NativeHistoryUnavailable,
         ProblemKind::SessionInUse,
         ProblemKind::PermissionUnavailable,
+        ProblemKind::TurnLimitReached,
+        ProblemKind::ToolDenied,
     ]
     .into_iter()
     .find(|kind| problem_key(*kind) == key)

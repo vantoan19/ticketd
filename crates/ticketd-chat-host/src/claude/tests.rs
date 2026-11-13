@@ -41,6 +41,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
+        unattended: None,
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
     let (opened, ()) = tokio::join!(opening, peer.play());
@@ -704,7 +705,7 @@ async fn the_built_bridge_answers_hello() {
         eprintln!("skipped: {} has not been built", bridge.display());
         return;
     }
-    let mut io = spawn(&bridge, &[], None).expect("the bridge starts");
+    let mut io = spawn(&bridge, &[], crate::stdio::Serving::Nothing).expect("the bridge starts");
     let hello = b"{\"id\":\"t1\",\"cmd\":\"hello\",\"protocol\":1}\n";
     io.stdin.write_all(hello).await.expect("stdin");
     io.stdin.flush().await.expect("stdin");
@@ -760,4 +761,102 @@ async fn closing_kills_a_process_that_stopped_reading_its_input_within_the_bound
     let outcome = timeout(crate::WRITE_TIMEOUT, writing).await;
     let outcome = outcome.expect("the write gives up").expect("the task ends");
     assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
+}
+
+/// An agent that may read files and run `npm test`, on a named model.
+fn reader_that_tests() -> crate::Unattended {
+    crate::Unattended {
+        run_id: "run-1".into(),
+        model: Some("claude-test".into()),
+        tools: ticketd_core::AutomationAgentTools {
+            read_files: true,
+            edit_files: false,
+            run_commands: true,
+            allowed_commands: vec!["npm test".into()],
+            use_web: false,
+        },
+        turn_limit: 40,
+        ticketd_cli: Some(PathBuf::from("/opt/ticketd/ticketd")),
+        ticketd_folders: Vec::new(),
+    }
+}
+
+#[test]
+fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else() {
+    let mut unattended = reader_that_tests();
+    unattended.model = None;
+    unattended.ticketd_cli = None;
+    unattended.tools = ticketd_core::AutomationAgentTools {
+        read_files: false,
+        edit_files: false,
+        run_commands: false,
+        allowed_commands: vec!["npm test".into()],
+        use_web: false,
+    };
+
+    assert_eq!(
+        super::unattended_options(&unattended),
+        json!({
+            "allowed_tools": ["Bash(ticketd:*)"],
+            "disallowed_tools": [
+                "Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"
+            ],
+            "max_turns": 40,
+        })
+    );
+
+    // Running commands with no list allows any command.
+    unattended.tools.run_commands = true;
+    unattended.tools.allowed_commands.clear();
+    let options = super::unattended_options(&unattended);
+    assert_eq!(options["allowed_tools"], json!(["Bash(ticketd:*)", "Bash"]));
+}
+
+/// The open command carries the agent's model, tools and turn limit (the fixture
+/// checks the frame), and the two endings only an unattended session has are told
+/// apart: the turn limit, and a tool Claude Code denied.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_and_denial() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("unattended"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(reader_that_tests()),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+    let mut opened = opened.expect("the session opens");
+    drain(&mut opened.events).await;
+
+    let mut ended = async |peer: &mut Peer, id: &str| {
+        submit(
+            peer,
+            &opened.runtime,
+            start_turn(id, if id == "sub-1" { "Go" } else { "Again" }),
+        )
+        .await;
+        match drain(&mut opened.events).await.pop() {
+            Some(EventKind::TurnEnded {
+                outcome: crate::TurnOutcome::Failed(problem),
+                ..
+            }) => (problem.kind, problem.message),
+            other => panic!("a failed turn, got {other:?}"),
+        }
+    };
+
+    assert_eq!(
+        ended(&mut peer, "sub-1").await.0,
+        ProblemKind::TurnLimitReached
+    );
+    // The agent ended its turn itself, but without the tool it was denied.
+    assert_eq!(
+        ended(&mut peer, "sub-2").await,
+        (
+            ProblemKind::ToolDenied,
+            "Claude Code was denied Write.".to_owned()
+        )
+    );
 }

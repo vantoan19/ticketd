@@ -14,6 +14,7 @@ import type {
   Automation,
   AutomationAgent,
   AutomationDefinition,
+  AutomationRun,
 } from "@/features/automations/client";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
@@ -67,9 +68,11 @@ const automation = (patch: Partial<Automation>): Automation => ({
 /** The fake Workspace, changed by the same commands the page sends. */
 let automations: Automation[] = [];
 let agents: AutomationAgent[] = [];
+let runs: AutomationRun[] = [];
 beforeEach(() => {
   automations = [];
   agents = [TRIAGE];
+  runs = [];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { id, definition, enabled } = (args ?? {}) as {
       id?: string;
@@ -87,6 +90,8 @@ beforeEach(() => {
         return automations;
       case "automation_agent_list":
         return agents;
+      case "automation_run_list":
+        return runs;
       case "automation_create": {
         const created = automation({ id: `automation-${automations.length}` });
         automations = [created, ...automations];
@@ -402,4 +407,68 @@ test("an agent used by a step cannot be deleted, and its menu names the Automati
   expect(item.textContent).toContain(
     "Used by Triage new tickets. Change that step first.",
   );
+});
+
+const TRIAGE_TAGGED = automation({
+  name: "Triage new tickets",
+  trigger: { kind: "tag_added", tag: "ready-for-triage" },
+  steps: [runAgent("step-1", "agent-1", "C:\\code\\web-app")],
+  enabled: true,
+});
+
+test("the Runs view lists the Automation's runs by day, each with its ticket, status and time", async () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  runs = [
+    {
+      id: "run-2",
+      status: "needs_attention",
+      reason: "The agent reached its limit of 40 turns before finishing.",
+      ticket: { id: "t-2", reference: "T-ZB8", title: "Login form flickers" },
+      created_at: ago(0),
+    },
+    {
+      id: "run-1",
+      status: "completed",
+      reason: null,
+      ticket: { id: "t-1", reference: "T-ZB4", title: "Add a logout endpoint" },
+      created_at: ago(5 * 86_400_000),
+    },
+  ];
+  await openFirst([TRIAGE_TAGGED]);
+
+  fireEvent.click(screen.getByRole("radio", { name: "Runs" }));
+
+  const today = await screen.findByRole("list", { name: "Runs, Today" });
+  expect(screen.queryByRole("application", { name: "Steps" })).toBeNull();
+  expect(within(today).getAllByRole("listitem")).toHaveLength(1);
+  const latest = within(today).getByRole("listitem");
+  expect(latest.textContent).toContain("T-ZB8 Login form flickers");
+  expect(latest.textContent).toContain("Needs attention");
+  expect(latest.textContent).toContain(
+    "The agent reached its limit of 40 turns before finishing.",
+  );
+  expect(within(latest).getByText("now")).toBeTruthy();
+
+  // The older run sits under its own day.
+  const lists = screen.getAllByRole("list", { name: /^Runs, / });
+  expect(lists).toHaveLength(2);
+  expect(lists[1]!.textContent).toContain("T-ZB4 Add a logout endpoint");
+  expect(lists[1]!.textContent).toContain("Completed");
+
+  // Back to the flow.
+  fireEvent.click(screen.getByRole("radio", { name: "Steps" }));
+  await screen.findByRole("application", { name: "Steps" });
+});
+
+test("an Automation that has not run yet says so", async () => {
+  await openFirst([TRIAGE_TAGGED]);
+
+  fireEvent.click(screen.getByRole("radio", { name: "Runs" }));
+
+  await screen.findByText("No runs yet");
+  expect(
+    screen.getByText(
+      "It runs the next time a ticket is tagged ready-for-triage.",
+    ),
+  ).toBeTruthy();
 });

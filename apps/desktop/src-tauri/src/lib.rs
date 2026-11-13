@@ -3,6 +3,7 @@ mod agent_skills;
 mod attachment_commands;
 mod attachment_media;
 mod automation_commands;
+mod automation_runner;
 mod chat_commands;
 mod chat_view;
 mod chats;
@@ -1478,7 +1479,9 @@ pub fn run() -> Result<(), tauri::Error> {
         })
         .setup(move |app| {
             let version = app.package_info().version.to_string();
-            tauri::Manager::manage(app, chat_commands::ChatBridge::new(version));
+            let chat = chat_commands::ChatBridge::new(version.clone());
+            automation_runner::start(chat.chats(), version);
+            tauri::Manager::manage(app, chat);
             start_periodic_refresh(coordinator);
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
@@ -1530,6 +1533,7 @@ pub fn run() -> Result<(), tauri::Error> {
             automation_commands::automation_update,
             automation_commands::automation_delete,
             automation_commands::automation_set_enabled,
+            automation_commands::automation_run_list,
             attachment_commands::attachment_upload_limit,
             attachment_commands::attachment_workspace_id,
             attachment_commands::set_attachment_upload_limit,

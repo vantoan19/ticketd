@@ -52,6 +52,49 @@
   gap: 4px;
 }
 
+/* --- An Automation's runs: a list under day headings. --- */
+.chat-pane > .detail-header .chat-head-title + [data-slot="segmented-control"] {
+  flex: none;
+  margin-left: 12px;
+}
+.auto-group {
+  margin: 0;
+  padding: 12px 16px 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: var(--text-caption-line);
+}
+.auto-runs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* A run opens nothing yet, so its row does not answer the pointer. */
+.chat-row[data-static]:hover {
+  background: transparent;
+}
+.auto-ref {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+.auto-list-foot {
+  flex: none;
+  margin: 0;
+  padding: 12px 16px 16px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.auto-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
 /* --- The detail header: what is left to finish, and the on switch. --- */
 .auto-left,
 .auto-on {

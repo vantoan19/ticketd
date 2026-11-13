@@ -32,7 +32,7 @@ The core is a shared library, not a shared running process. A background daemon,
 
 ## Source layout
 
-The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
+The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crates/ticketd-chat-host`, `crates/ticketd-automation-runner`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
 
 ## Module responsibilities
 
@@ -210,6 +210,37 @@ A harness process started for an Automation run also gets the run's ID in
 `TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
 change it makes as a Workspace event with actor `automation`, and such events never
 trigger Automations. The value itself is not stored.
+
+### Automation runs
+
+`crates/ticketd-automation-runner` owns the loop and depends only on the core and
+the Chat host, so it is tested without the desktop. The desktop calls one pass at
+start and every five seconds while Chat is on. A pass asks the core to queue a run
+for each Workspace event after a switched-on Automation's cursor that matches its
+trigger and conditions, and to start queued runs, oldest event first, until two are
+running. The core holds the rules: an event with actor `automation` matches
+nothing, a ticket has one active run per Automation (a partial unique index), and a
+run keeps the Automation definition it was created with. Matching and the run state
+machine are functions with no SQL: the state machine takes the run's steps and how
+the step it was on ended, and answers with the next step or how the run ends.
+Runs are local to the device, kept 90 days, and a run left Running by a process
+that is gone ends as Needs attention when the next one starts; nothing retries.
+
+A Run agent step is an ordinary Chat, created in the step's folder, linked to the
+ticket and owned by the run (`chats.automation_run_id`), which keeps it out of the
+Chat list. The host opens its harness with an `Unattended` request: the agent's
+model, allowed tools and turn limit. An adapter given one never asks for approval
+and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
+permission mode with the allowed tools as its allowlist and the tools of each
+switch that is off disallowed. Codex runs with approval policy `never` and a
+sandbox set from the allowed tools: read-only unless editing is allowed, no
+network unless the web is. Codex reads files and runs commands inside that sandbox
+whatever the switches say, has no turn limit to set, and cannot run the ticketd
+CLI's writes from a read-only sandbox. `ChatHost::run_unattended` sends the first
+message, stops a turn still going at the agent's time limit, reports how the turn
+ended (finished, turn limit, time limit, tool denied, crashed, or another failure)
+and closes the harness process. An unattended harness that asks for approval
+anyway is stopped and counted as denied.
 
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process

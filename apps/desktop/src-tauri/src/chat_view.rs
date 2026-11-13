@@ -672,7 +672,9 @@ fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) ->
         ProblemKind::NativeHistoryUnavailable => "history_lost",
         ProblemKind::SessionInUse => "session_in_use",
         ProblemKind::PermissionUnavailable => "sandbox_unavailable",
-        ProblemKind::Other => "failed",
+        // Only a run's Chat ends this way, and the run says why; in the Chat itself
+        // the message is enough.
+        ProblemKind::TurnLimitReached | ProblemKind::ToolDenied | ProblemKind::Other => "failed",
     };
     Problem {
         kind,

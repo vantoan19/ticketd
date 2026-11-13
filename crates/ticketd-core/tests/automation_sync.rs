@@ -3,8 +3,9 @@
 #![allow(clippy::unwrap_used)] // Setup and sync runs that fail must fail the test.
 
 use ticketd_core::{
-    AgentHarness, Automation, AutomationAgentSettings, AutomationDefinition, Error, Step,
-    StepAction, SyncKind, SyncRecord, SyncValue, Trigger, Workspace,
+    AgentHarness, Automation, AutomationAgentSettings, AutomationDefinition, AutomationRunStatus,
+    Error, NewChat, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind, SyncRecord,
+    SyncValue, Trigger, Workspace,
     sync::{
         RecordKind, SyncChoice, SyncReport, SyncResolution,
         remote::{FakeRemote, RemoteStorage},
@@ -683,4 +684,118 @@ fn a_workspace_in_the_previous_format_starts_syncing_the_automations_it_has() {
     assert_eq!(other.automation_agent(&agent).unwrap().id, agent);
     // Deleted before it ever synced: it arrives as deleted.
     assert_eq!(other.automations().unwrap(), []);
+}
+
+#[test]
+fn an_arrived_automation_starts_no_run_until_it_is_switched_on_here() {
+    let mut devices = devices();
+    let (automation, _agent) = devices.shared_automation();
+    let b = &mut devices.workspaces[1];
+    let tag = |workspace: &mut Workspace, title: &str| {
+        let ticket = workspace.create_ticket(title).unwrap();
+        workspace.add_tag(&ticket.reference, "bug").unwrap();
+    };
+
+    tag(b, "Crash on save");
+    assert_eq!(b.queue_automation_runs().unwrap(), 0);
+
+    // On from here: what was tagged while it was off stays without a run.
+    b.set_automation_enabled(&automation, true).unwrap();
+    assert_eq!(b.queue_automation_runs().unwrap(), 0);
+    tag(b, "Crash on open");
+    assert_eq!(b.queue_automation_runs().unwrap(), 1);
+    assert_eq!(b.automation_runs(&automation).unwrap().len(), 1);
+}
+
+#[test]
+fn a_run_and_its_chat_stay_on_the_desktop_that_made_them() {
+    let mut devices = devices();
+    let (automation, _agent) = devices.shared_automation();
+    let b = &mut devices.workspaces[1];
+    b.set_automation_enabled(&automation, true).unwrap();
+    let ticket = b.create_ticket("Crash on save").unwrap();
+    b.add_tag(&ticket.reference, "bug").unwrap();
+    devices.settle();
+    let before = files(&devices.workspaces[0]);
+
+    // A whole run on the second desktop: queued, started, its Chat, ended.
+    let b = &mut devices.workspaces[1];
+    assert_eq!(b.queue_automation_runs().unwrap(), 1);
+    let run = b.start_automation_runs(2).unwrap().remove(0);
+    b.advance_automation_run(&run.id, None).unwrap();
+    b.create_automation_run_chat(
+        &run.id,
+        "triage",
+        NewChat {
+            title: None,
+            harness: "codex".into(),
+            execution_folder: "C:\\code\\web-app".into(),
+            folder_managed: false,
+            links: Vec::new(),
+        },
+    )
+    .unwrap();
+    b.advance_automation_run(&run.id, Some(StepOutcome::Completed))
+        .unwrap();
+
+    // None of it waits to upload, and nothing of it reaches the first desktop.
+    assert_eq!(b.dirty_records().unwrap().len(), 0);
+    devices.settle();
+    let [a, b] = &devices.workspaces[..] else {
+        unreachable!()
+    };
+    assert_eq!(files(a), before);
+    assert_eq!(files(b), before);
+    assert_eq!(a.automation_runs(&automation).unwrap(), []);
+    assert_eq!(a.automation_cursor(&automation).unwrap(), None);
+    assert_eq!(b.automation_runs(&automation).unwrap().len(), 1);
+}
+
+#[test]
+fn a_run_in_progress_finishes_on_its_own_steps_when_an_edit_from_elsewhere_switches_it_off() {
+    let mut devices = devices();
+    let (automation, _agent) = devices.shared_automation();
+    let b = &mut devices.workspaces[1];
+    b.set_automation_enabled(&automation, true).unwrap();
+    let ticket = b.create_ticket("Crash on save").unwrap();
+    b.add_tag(&ticket.reference, "bug").unwrap();
+    b.queue_automation_runs().unwrap();
+    let run = b.start_automation_runs(2).unwrap().remove(0);
+    let started = b.advance_automation_run(&run.id, None).unwrap();
+
+    // The first desktop takes the agent off the step, which leaves it unfinished.
+    let a = &mut devices.workspaces[0];
+    let mut edited = only(a).definition;
+    edited.steps = vec![Step {
+        id: "triage".into(),
+        action: StepAction::RunAgent {
+            agent_id: None,
+            execution_folder: Some("C:\\code\\web-app".into()),
+            on_failure: None,
+        },
+    }];
+    a.update_automation(&automation, edited).unwrap();
+    devices.settle();
+
+    let b = &mut devices.workspaces[1];
+    assert!(!only(b).enabled);
+    assert_eq!(
+        started,
+        RunAction::RunStep {
+            step_id: "triage".into()
+        }
+    );
+    // The run still has the step as it was, and ends as any other run.
+    let kept = b.automation_run(&run.id).unwrap();
+    assert_eq!(kept.definition, run.definition);
+    assert_eq!(kept.status, AutomationRunStatus::Running);
+    assert_eq!(
+        b.advance_automation_run(&run.id, Some(StepOutcome::Completed))
+            .unwrap(),
+        RunAction::End(RunEnd::Completed)
+    );
+    // Off here, so a new tag starts nothing.
+    let next = b.create_ticket("Crash on open").unwrap();
+    b.add_tag(&next.reference, "bug").unwrap();
+    assert_eq!(b.queue_automation_runs().unwrap(), 0);
 }

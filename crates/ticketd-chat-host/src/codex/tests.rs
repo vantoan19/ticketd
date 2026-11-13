@@ -44,6 +44,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
+        unattended: None,
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
     (peer, opened)
@@ -747,5 +748,75 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
             session.notification(routine, &json!({})).is_empty(),
             "{routine}"
         );
+    }
+}
+
+fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
+    crate::Unattended {
+        run_id: "run-1".into(),
+        model: Some("gpt-test".into()),
+        tools: ticketd_core::AutomationAgentTools {
+            read_files: true,
+            edit_files,
+            run_commands: true,
+            allowed_commands: Vec::new(),
+            use_web,
+        },
+        turn_limit: 40,
+        ticketd_cli: None,
+        ticketd_folders: vec![PathBuf::from("/data/ticketd")],
+    }
+}
+
+#[test]
+fn an_unattended_sandbox_follows_the_allowed_tools_and_is_never_full_access() {
+    for (edit_files, use_web) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (thread, turn) = super::unattended_params(&unattended(edit_files, use_web));
+        assert_eq!(thread["approvalPolicy"], "never");
+        assert_eq!(turn["approvalPolicy"], "never");
+        let policy = &turn["sandboxPolicy"];
+        assert_eq!(policy["networkAccess"], use_web);
+        if edit_files {
+            assert_eq!(thread["sandbox"], "workspace-write");
+            assert_eq!(policy["type"], "workspaceWrite");
+            assert_eq!(policy["writableRoots"], json!(["/data/ticketd"]));
+        } else {
+            assert_eq!(thread["sandbox"], "read-only");
+            assert_eq!(
+                policy,
+                &json!({"type": "readOnly", "networkAccess": use_web})
+            );
+        }
+    }
+}
+
+/// The fixture checks that the thread and every turn are started with approvals off
+/// and the sandbox; a command Codex declines then fails the turn as a denied tool.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("unattended"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(unattended(true, false)),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let mut opened = opened.expect("the thread opens");
+    drain(&mut opened.events).await;
+
+    submit(&mut peer, &opened.runtime, start_turn("sub-1", "Go")).await;
+
+    match drain(&mut opened.events).await.pop() {
+        Some(EventKind::TurnEnded {
+            outcome: TurnOutcome::Failed(problem),
+            ..
+        }) => {
+            assert_eq!(problem.kind, ProblemKind::ToolDenied);
+            assert!(problem.message.contains("curl example.com"), "{problem:?}");
+        }
+        other => panic!("a failed turn, got {other:?}"),
     }
 }
