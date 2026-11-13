@@ -204,6 +204,10 @@ export function RunView({
       <ChatDetail
         key={chat}
         id={chat}
+        notice={
+          run?.steps.some((step) => step.chat_id === chat && step.chat_owned) &&
+          `A run of ${automationName}. Reply to take it over; it moves to your Chats.`
+        }
         expanded={expanded}
         single={single}
         onExpand={onExpand}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import {
   AlarmClock,
   Check,
@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Bell,
   Inbox as InboxIcon,
+  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -22,6 +23,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ListHeader } from "@/components/ui/list-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
+import { RunNavigation } from "@/features/automations/navigation";
 import { inboxClient } from "@/lib/api/inbox";
 import { StatusIcon } from "./StatusIcon";
 import {
@@ -73,6 +75,7 @@ async function fetchEntries(
 function EntryIcon({ entry }: { entry: Entry }) {
   if (entry.kind === "reminder") return <AlarmClock aria-hidden="true" />;
   if (entry.kind === "activity") return <MessageSquare aria-hidden="true" />;
+  if (entry.kind === "automation_run") return <Workflow aria-hidden="true" />;
   if (entry.kind === "status")
     return <StatusIcon status={entry.to_value} decorative />;
   return entry.kind.startsWith("relationship:") ||
@@ -200,6 +203,7 @@ export function Inbox({
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
   const changeVersion = useWorkspaceChange();
+  const openRun = useContext(RunNavigation);
   const sync = useSyncEntries(revision);
   const [reviewing, setReviewing] = useState<ConflictSummary | null>(null);
   const reload = () => setTick((value) => value + 1);
@@ -331,6 +335,9 @@ export function Inbox({
                         // A deleted update still opens with its id, so the ticket says it is gone.
                         if (e.kind === "activity")
                           select(e.reference, e.from_value);
+                        // Reading the entry is not acting on the run: it opens.
+                        else if (e.kind === "automation_run" && openRun)
+                          openRun(e.from_value);
                         else select(e.reference);
                       }}
                     >

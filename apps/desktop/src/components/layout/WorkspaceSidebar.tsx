@@ -216,6 +216,12 @@ export function WorkspaceSidebar({
     waiting > 0
       ? `Chats · ${waiting} ${waiting === 1 ? "needs" : "need"} you`
       : "Chats";
+  // Ended as Needs attention, and not yet run again, taken over or dismissed.
+  const runsWaiting = counts?.runs_needing_you ?? 0;
+  const automationsLabel =
+    runsWaiting > 0
+      ? `Automations · ${runsWaiting} ${runsWaiting === 1 ? "run needs" : "runs need"} you`
+      : "Automations";
   const archivedPlans = plans.filter((e) => e.archived).length;
   return (
     <Sidebar
@@ -376,10 +382,17 @@ export function WorkspaceSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={view === "automations"}
-                  tooltip="Automations"
+                  tooltip={automationsLabel}
+                  aria-label={automationsLabel}
                   onClick={() => setView("automations")}
                 >
                   <Workflow size={16} /> Automations
+                  {runsWaiting > 0 && (
+                    <span className="sidebar-count" aria-hidden="true">
+                      <StatusDot tone="attention" />
+                      {runsWaiting}
+                    </span>
+                  )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
@@ -390,6 +403,9 @@ export function WorkspaceSidebar({
         </span>
         <span role="status" className="sr-only">
           {waiting > 0 ? chatsLabel : ""}
+        </span>
+        <span role="status" className="sr-only">
+          {chat.enabled && runsWaiting > 0 ? automationsLabel : ""}
         </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">
