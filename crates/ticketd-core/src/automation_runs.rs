@@ -453,6 +453,9 @@ impl Workspace {
     /// its last run is still going starts none. A schedule counts from when it was
     /// first seen on, so switching one on never fires it at once. Returns how many
     /// runs were created.
+    // ponytail: a schedule changed by Workspace sync keeps counting from where the
+    // old one was, so it can fire once early; clear `schedule_from` when sync
+    // applies a changed trigger if that is ever noticed.
     pub fn queue_scheduled_automation_runs(&mut self, now: Option<&str>) -> Result<usize, Error> {
         let now = match now {
             Some(now) => chrono::NaiveDateTime::parse_from_str(now, LOCAL_TIME)
