@@ -9,7 +9,8 @@ use ticketd_automation_runner::{RUNS_AT_ONCE, Runner, TicketdCli};
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
-    InteractionKind, InteractionRequest, NativeRequestId, NativeTurnId, Problem, ProblemKind, TurnOutcome, WorkspaceOpener,
+    InteractionKind, InteractionRequest, NativeRequestId, NativeTurnId, Problem, ProblemKind,
+    TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,

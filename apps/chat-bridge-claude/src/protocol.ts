@@ -50,7 +50,8 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     /**
      * Set for the Chat of an Automation run, where nobody can approve. The session
      * runs in the "don't ask" permission mode: a tool on `allowed_tools` runs and
-     * anything else is denied without a prompt.
+     * anything else is denied without a prompt. The person's own Claude Code
+     * settings files are not loaded, so nothing in them adds to `allowed_tools`.
      */
     unattended: z
       .strictObject({

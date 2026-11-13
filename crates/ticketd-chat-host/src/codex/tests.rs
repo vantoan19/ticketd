@@ -774,10 +774,8 @@ fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
 #[test]
 fn an_unattended_sandbox_writes_to_the_steps_folder_and_the_workspace_data_folder_only() {
     for (edit_files, use_web) in [(false, false), (false, true), (true, false), (true, true)] {
-        let (thread, turn) = super::unattended_params(
-            &unattended(edit_files, use_web),
-            Path::new("/work/chat-1"),
-        );
+        let (thread, turn) =
+            super::unattended_params(&unattended(edit_files, use_web), Path::new("/work/chat-1"));
         assert_eq!(
             thread,
             json!({"approvalPolicy": "never", "sandbox": "workspace-write", "model": "gpt-test"})
