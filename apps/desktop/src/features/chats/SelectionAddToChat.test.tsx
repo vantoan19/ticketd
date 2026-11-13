@@ -92,7 +92,9 @@ test("a triple-clicked last paragraph, whose selection ends at the next block, s
   render(
     <ChatClientContext value={client}>
       <ChatProvider>
-        <div {...chatSource("T-KQ12 · Description", { kind: "ticket", id: "t1" })}>
+        <div
+          {...chatSource("T-KQ12 · Description", { kind: "ticket", id: "t1" })}
+        >
           <p>Lock the account after five tries.</p>
         </div>
         <section>
@@ -127,7 +129,9 @@ test("a selection running past the source into other text is not offered", async
   render(
     <ChatClientContext value={client}>
       <ChatProvider>
-        <div {...chatSource("T-KQ12 · Description", { kind: "ticket", id: "t1" })}>
+        <div
+          {...chatSource("T-KQ12 · Description", { kind: "ticket", id: "t1" })}
+        >
           <p>Lock the account after five tries.</p>
         </div>
         <p>Subtickets</p>

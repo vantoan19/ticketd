@@ -224,7 +224,6 @@ export function SelectionAddToChat() {
           <DropdownMenuContent
             align="start"
             collisionPadding={8}
-            className="linked-chats-menu"
             onCloseAutoFocus={(event) => {
               // Escape returns to the text the quote came from.
               event.preventDefault();

@@ -219,19 +219,17 @@ blockquote.chat-quote {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
-/* The menu fits the window: flat rows of mark, title and status word. */
-.linked-chats-menu {
-  max-width: min(360px, var(--radix-dropdown-menu-content-available-width));
-}
 .linked-chats-mark {
   color: var(--muted-foreground);
 }
+/* A flat row of mark, title and status word; the menu fits the window. */
 .linked-chats-item {
   display: flex;
   flex: 1;
   align-items: center;
   gap: 12px;
   min-width: 0;
+  max-width: min(320px, calc(100vw - 64px));
 }
 .linked-chats-item-title {
   flex: 1;

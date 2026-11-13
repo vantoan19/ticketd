@@ -445,7 +445,10 @@ async fn a_turn_the_person_stopped_is_interrupted_even_when_the_harness_says_com
     f.send("first").await;
     f.host.stop(&f.chat.id).await.unwrap();
     settle().await;
-    assert!(matches!(f.fake.written().last(), Some(Written::Interrupt(_))));
+    assert!(matches!(
+        f.fake.written().last(),
+        Some(Written::Interrupt(_))
+    ));
     // Codex can end an interrupted turn as `completed`.
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     assert_eq!(f.turns()[0].state, ChatTurnState::Interrupted);

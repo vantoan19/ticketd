@@ -75,11 +75,7 @@ export function LinkedChats({
           <ChevronRight aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        collisionPadding={8}
-        className="linked-chats-menu"
-      >
+      <DropdownMenuContent align="start" collisionPadding={8}>
         {chats.map((chat) => (
           <DropdownMenuItem
             key={chat.id}

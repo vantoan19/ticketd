@@ -178,7 +178,13 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     rank: ChatStatus["rank"],
     word: string,
     detail?: string | null,
-  ): ChatStatus => ({ rank, unseen, word, label: word, detail: detail ?? null });
+  ): ChatStatus => ({
+    rank,
+    unseen,
+    word,
+    label: word,
+    detail: detail ?? null,
+  });
   const pending = items.find(
     (item): item is Extract<TranscriptItem, { kind: "request" }> =>
       item.kind === "request" && item.state === "pending",

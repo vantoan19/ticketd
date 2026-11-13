@@ -314,7 +314,10 @@ test("a queued message can be sent now, alone, or moved back into the message bo
 test("an approval's reason sets its `code spans` in mono, without the backticks", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [
-      { ...approval, reason: "Allow appending the `verified` line to hello.txt?" },
+      {
+        ...approval,
+        reason: "Allow appending the `verified` line to hello.txt?",
+      },
     ]),
   );
   const reason = document.querySelector(".chat-request-reason")!;

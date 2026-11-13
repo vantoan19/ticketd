@@ -314,7 +314,10 @@ test("a message that the pane later narrows to more than four lines offers Show 
   expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   const box = document.querySelector<HTMLElement>(".chat-you > div")!;
   Object.defineProperty(box, "clientHeight", { configurable: true, value: 80 });
-  Object.defineProperty(box, "scrollHeight", { configurable: true, value: 100 });
+  Object.defineProperty(box, "scrollHeight", {
+    configurable: true,
+    value: 100,
+  });
   act(() => watching.get(box)?.([], {} as unknown as ResizeObserver));
   expect(screen.getByRole("button", { name: "Show more" })).toBeTruthy();
 });
