@@ -1105,6 +1105,19 @@ test("what the agent changed in ticketd is a step row, verb first", async () => 
   expect(within(body).getAllByText("T-12")[0]?.dataset.slot).toBe("reference");
 });
 
+test("/ at the start of a message lists the harness's own commands", async () => {
+  await open(
+    one({
+      id: "cmds",
+      title: "Limiter",
+      commands: [{ name: "review", description: "Review a pull request" }],
+    }),
+  );
+  type("/rev");
+  expect(await screen.findByText("Codex commands")).toBeTruthy();
+  expect(screen.getByRole("option", { name: /review/ })).toBeTruthy();
+});
+
 test("a sent message keeps its mentions as links and its quotes as quotes", async () => {
   const t14 = {
     kind: "ticket" as const,

@@ -1403,7 +1403,7 @@ impl Chats {
                     continue;
                 }
                 Some(ChatUpdate::Live(live)) => {
-                    let held_before = std::mem::replace(&mut view.live, live).sending;
+                    let held_before = std::mem::replace(&mut view.live, *live).sending;
                     // Whether a stored request can still be answered is live state.
                     let mut records = view.tracker.dependents();
                     // Input the host began or stopped holding to send reads differently.

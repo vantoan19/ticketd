@@ -20,7 +20,8 @@ import {
   type ContentBlock,
   type ErrorInfo,
   type InputEvidence,
-  type ModelOption,
+  type CommandOption,
+  ModelOption,
   type RejectionCode,
   type ToolOutcome,
 } from "./protocol";
@@ -36,6 +37,8 @@ export interface SdkQuery extends AsyncIterable<unknown> {
   initializationResult(): Promise<{
     claude_code_version?: string;
     models?: unknown[];
+    // The SDK lists them as SlashCommand objects: name, description, argumentHint.
+    commands?: unknown[];
   }>;
   close(): void;
   // Settings and context, from SDK 0.3.322's `Query`.
@@ -167,6 +170,12 @@ export function toolOutcome(result: Json): ToolOutcome | null {
     };
   }
   return null;
+}
+
+function commandOption(command: Json): CommandOption[] {
+  const name = text(command.name);
+  if (!name) return [];
+  return [{ name, description: text(command.description) || null }];
 }
 
 function modelOption(model: Json): ModelOption[] {
@@ -346,6 +355,9 @@ export function createBridge(deps: BridgeDeps) {
           generation: opening.generation,
           claude_code_version: init.claude_code_version ?? null,
           models: (init.models ?? []).filter(isObject).flatMap(modelOption),
+          commands: (init.commands ?? [])
+            .filter(isObject)
+            .flatMap(commandOption),
         });
         reportContextUsage(opening);
       },

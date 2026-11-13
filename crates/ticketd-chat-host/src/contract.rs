@@ -406,6 +406,8 @@ pub enum EventKind {
     Compacted,
     /// The session's choosable settings and their current values, replacing the earlier.
     SettingsState(HarnessSettings),
+    /// The slash commands the harness lists for the session, replacing the earlier.
+    CommandsListed(Vec<HarnessCommand>),
     /// Provider traffic the adapter does not model. Never completion or approval.
     Unknown {
         summary: String,
@@ -472,6 +474,14 @@ pub struct ContextUsage {
 pub struct ContextCategory {
     pub name: String,
     pub tokens: u64,
+}
+
+/// A slash command the harness offers, as the composer's `/` menu lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessCommand {
+    /// Without its slash: "review".
+    pub name: String,
+    pub description: Option<String>,
 }
 
 /// The settings a harness reports for the session. `None` is a setting it did not

@@ -426,6 +426,15 @@ pub struct ChatState {
     pub read_through: Option<String>,
     /// Linked records now in the trash: a mention of one reads "(in Trash)".
     pub trashed_links: Vec<String>,
+    /// The slash commands the live session's harness lists, for the `/` menu.
+    pub commands: Vec<CommandView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommandView {
+    /// Without its slash: "review".
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1655,6 +1664,14 @@ pub fn chat_state(
         has_composer,
         read_through: chat.read_through.clone(),
         trashed_links: around.trashed_links.clone(),
+        commands: live
+            .commands
+            .iter()
+            .map(|command| CommandView {
+                name: command.name.clone(),
+                description: command.description.clone(),
+            })
+            .collect(),
     }
 }
 

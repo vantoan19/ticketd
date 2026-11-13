@@ -117,6 +117,12 @@ export type ModelOption = {
   effort_levels: string[];
 };
 
+export type CommandOption = {
+  /** Without its slash: "review". */
+  name: string;
+  description: string | null;
+};
+
 /** What a tool's structured result says, for the tools whose result is shown. */
 export type ToolOutcome =
   | {
@@ -173,6 +179,8 @@ type EventBody =
       generation: number;
       claude_code_version: string | null;
       models: ModelOption[];
+      /** The slash commands Claude Code lists for the session, in its order. */
+      commands: CommandOption[];
     }
   | {
       event: "session_info";

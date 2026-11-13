@@ -555,6 +555,10 @@ export const chatStateSchema = z.object({
   has_composer: z.boolean(),
   /** Linked records now in the trash: a mention of one reads "(in Trash)". */
   trashed_links: z.array(z.string()).default([]),
+  /** The slash commands the live session's harness lists; `/` opens only with some. */
+  commands: z
+    .array(z.object({ name: z.string(), description: z.string().nullish() }))
+    .default([]),
   /** The last transcript item the person had in view, kept by the host: the New marker goes after it. */
   read_through: z.string().nullish(),
 });

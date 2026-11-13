@@ -368,9 +368,18 @@ function Conversation({
           files: (query: string) => client.folderFiles(folder.path, query),
         },
       }),
+      commands: chat.commands,
       harness,
     }),
-    [client, chat.links, folder.missing, folder.name, folder.path, harness],
+    [
+      client,
+      chat.links,
+      chat.commands,
+      folder.missing,
+      folder.name,
+      folder.path,
+      harness,
+    ],
   );
   /** Remounts the composer with the draft after Edit moved a queued message into it. */
   const [edits, setEdits] = useState(0);

@@ -898,6 +898,37 @@ async fn thinking_the_plan_files_and_context_carry_only_what_claude_code_reporte
 }
 
 #[test]
+fn the_slash_commands_claude_code_lists_reach_the_host() {
+    use super::session::Session;
+    let mut session = Session::default();
+    let init = json!({"models": [], "commands": [
+        {"name": "review", "description": "Review a pull request"},
+        {"name": "compact", "description": null},
+        {"name": "", "description": "nameless"},
+    ]});
+    let listed = session
+        .initialized(&init)
+        .into_iter()
+        .find_map(|event| match event {
+            EventKind::CommandsListed(commands) => Some(commands),
+            _ => None,
+        });
+    assert_eq!(
+        listed,
+        Some(vec![
+            crate::HarnessCommand {
+                name: "review".to_owned(),
+                description: Some("Review a pull request".to_owned()),
+            },
+            crate::HarnessCommand {
+                name: "compact".to_owned(),
+                description: None,
+            },
+        ])
+    );
+}
+
+#[test]
 fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
     use super::session::Session;
     let mut session = Session::default();
@@ -906,7 +937,10 @@ fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
         {"value": "haiku", "resolved_model": null, "display_name": "Haiku", "description": "", "effort_levels": []},
     ]});
     assert!(
-        session.initialized(&models).is_none(),
+        !session
+            .initialized(&models)
+            .iter()
+            .any(|event| matches!(event, EventKind::SettingsState(_))),
         "nothing in effect yet"
     );
     let info = |mode: &str| json!({"model": "claude-opus-test", "permission_mode": mode, "effort": "medium"});

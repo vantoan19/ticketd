@@ -8,10 +8,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
-    InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
-    SubmissionId, ToolStatus, TurnOutcome, reset_time,
+    ApprovalDecision, DeliveryEvidence, EventKind, HarnessCommand, InteractionAnswer,
+    InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
+    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question,
+    Refusal, SubmissionId, ToolStatus, TurnOutcome, reset_time,
 };
 
 use super::report::{PLAN_TOOLS, Reports};
@@ -207,9 +207,28 @@ impl Session {
         events.extend(self.reports.session_info(event));
     }
 
-    /// `session_initialized`: the session's choosable settings.
-    pub fn initialized(&mut self, event: &Value) -> Option<EventKind> {
-        self.reports.initialized(event)
+    /// `session_initialized`: the session's choosable settings and slash commands.
+    pub fn initialized(&mut self, event: &Value) -> Vec<EventKind> {
+        let mut events: Vec<EventKind> = self.reports.initialized(event).into_iter().collect();
+        // A bridge that does not list commands says nothing about them.
+        let Some(listed) = event["commands"].as_array() else {
+            return events;
+        };
+        let commands = listed
+            .iter()
+            .filter_map(|command| {
+                Some(HarnessCommand {
+                    name: text(command, "name")
+                        .filter(|name| !name.is_empty())?
+                        .to_owned(),
+                    description: text(command, "description")
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_owned),
+                })
+            })
+            .collect();
+        events.insert(0, EventKind::CommandsListed(commands));
+        events
     }
 
     fn delta(&mut self, event: &Value, events: &mut Vec<EventKind>) {

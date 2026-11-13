@@ -235,6 +235,14 @@ pub(crate) fn brief(kind: &EventKind) -> String {
             usage.compacts_at
         ),
         EventKind::Compacted => "compacted".to_owned(),
+        EventKind::CommandsListed(commands) => format!(
+            "commands {}",
+            commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
         EventKind::SettingsState(settings) => {
             let one = |name: &str, setting: &Option<crate::Setting>| match setting {
                 None => String::new(),

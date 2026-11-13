@@ -30,7 +30,7 @@ use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
     ReasoningRecord,
 };
-use crate::{HarnessSettings, SettingChange, SettingKey, SettingOutcome};
+use crate::{HarnessCommand, HarnessSettings, SettingChange, SettingKey, SettingOutcome};
 
 /// Now, in milliseconds since the Unix epoch.
 fn now_millis() -> i64 {
@@ -146,6 +146,7 @@ struct Runtime {
     compacted_at: Option<i64>,
     settings: Option<HarnessSettings>,
     setting_changes: Vec<LiveSettingChange>,
+    commands: Vec<HarnessCommand>,
 }
 
 struct Opening {
@@ -1369,6 +1370,7 @@ impl Supervisor {
                     compacted_at: None,
                     settings: None,
                     setting_changes: Vec::new(),
+                    commands: Vec::new(),
                 });
                 if opening.preamble.is_some() {
                     self.preamble = opening.preamble;
@@ -1863,6 +1865,11 @@ impl Supervisor {
                     runtime.settings = Some(settings);
                 }
             }
+            EventKind::CommandsListed(commands) => {
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.commands = commands;
+                }
+            }
             EventKind::Unknown { summary, .. } => self.harness_notice(summary),
         }
     }
@@ -2112,6 +2119,11 @@ impl Supervisor {
                     changes: runtime.setting_changes.clone(),
                 }))
             }),
+            commands: self
+                .runtime
+                .as_ref()
+                .map(|runtime| runtime.commands.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -2156,7 +2168,7 @@ impl Supervisor {
         let live = self.live();
         if self.last_live.as_ref() != Some(&live) {
             for subscriber in &self.subscribers {
-                subscriber.push(ChatUpdate::Live(live.clone()));
+                subscriber.push(ChatUpdate::Live(Box::new(live.clone())));
             }
             self.last_live = Some(live);
         }

@@ -33,7 +33,7 @@ export type ComposerMentions = {
   /** The folder `@` lists; absent when there is none to read yet. */
   folder?: { name: string; files: (query: string) => Promise<FolderFile[]> };
   /** The harness's own commands, when it lists them; `/` opens only then. */
-  commands?: { name: string; description?: string | null }[];
+  commands?: { name: string; description?: string | null | undefined }[];
   harness: string;
 };
 

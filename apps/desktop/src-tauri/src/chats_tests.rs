@@ -463,6 +463,28 @@ async fn a_steer_the_harness_refused_waits_in_the_queue_saying_why() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_harness_s_slash_commands_reach_the_composer() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(EventKind::CommandsListed(vec![
+        ticketd_chat_host::HarnessCommand {
+            name: "review".to_owned(),
+            description: Some("Review a pull request".to_owned()),
+        },
+    ]))
+    .await;
+    let (opened, _) = f.open(&id).await;
+    let commands: Vec<_> = opened
+        .snapshot
+        .chat
+        .commands
+        .iter()
+        .map(|command| (command.name.as_str(), command.description.as_deref()))
+        .collect();
+    assert_eq!(commands, [("review", Some("Review a pull request"))]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_view_reopens_with_what_the_person_read_through() {
     let f = Fixture::new().await;
     let id = f.chat().await;
