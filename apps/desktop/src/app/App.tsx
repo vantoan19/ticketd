@@ -86,6 +86,12 @@ function AppContent() {
     setSeenChatOpen(chat.openRequest.n);
     setViewState("chats");
   }
+  // A Chat asked for from a ticket shows the Chats screen; it opens the Chat itself.
+  const [seenChatRequest, setSeenChatRequest] = useState(0);
+  if (chat.chatRequest && chat.chatRequest.n !== seenChatRequest) {
+    setSeenChatRequest(chat.chatRequest.n);
+    setViewState("chats");
+  }
   const [newChatRequest, setNewChatRequest] = useState(0);
   const [attachmentPreview, setAttachmentPreview] = useState<Attachment | null>(
     null,

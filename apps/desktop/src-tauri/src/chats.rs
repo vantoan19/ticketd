@@ -412,6 +412,77 @@ fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, tick
     Ok(links)
 }
 
+/// A file or folder offered by the composer's `@` menu, relative to the Chat's folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FolderFile {
+    /// With `/` separators on every platform, as the composer inserts it.
+    pub path: String,
+    pub folder: bool,
+}
+
+/// Folders a mention never needs: version control, dependencies and build output.
+const SKIPPED_FOLDERS: [&str; 6] = [
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "__pycache__",
+    "vendor",
+];
+/// Bounds one search, so a home folder answers as quickly as a repository.
+const FILES_VISITED: usize = 20_000;
+const FILES_FOUND: usize = 20;
+
+/// Files and folders under `root` whose path contains `query` (case-insensitive),
+/// shallowest first, then by path. Hidden entries and `SKIPPED_FOLDERS` are left out.
+pub fn folder_files(root: &Path, query: &str) -> Vec<FolderFile> {
+    let needle = query.trim().to_lowercase();
+    let mut found = Vec::new();
+    let mut visited = 0;
+    let mut level = vec![PathBuf::new()];
+    while !level.is_empty() && visited < FILES_VISITED {
+        let mut next = Vec::new();
+        let mut matches = Vec::new();
+        for relative in level {
+            let Ok(entries) = std::fs::read_dir(root.join(&relative)) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                visited += 1;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
+                if name.starts_with('.') || (folder && SKIPPED_FOLDERS.contains(&name.as_str())) {
+                    continue;
+                }
+                let path = relative.join(&name);
+                let shown = path
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if shown.to_lowercase().contains(&needle) {
+                    matches.push(FolderFile {
+                        path: shown,
+                        folder,
+                    });
+                }
+                if folder {
+                    next.push(path);
+                }
+            }
+        }
+        matches.sort_by(|a, b| a.path.cmp(&b.path));
+        found.extend(matches);
+        if found.len() >= FILES_FOUND {
+            break;
+        }
+        next.sort();
+        level = next;
+    }
+    found.truncate(FILES_FOUND);
+    found
+}
+
 /// Every Chat outside the trash, read once per request for what Chats share.
 fn folder_users(workspace: &Workspace) -> Result<Vec<Chat>, ticketd_core::Error> {
     let mut chats = workspace.list_chats(ChatListFilter::Active)?;
@@ -1211,6 +1282,68 @@ impl Chats {
         text_argument(text, "The message")?;
         self.host()?.send(chat_id, None, text, mode).await?;
         Ok(())
+    }
+
+    /// Sends or queues a message after linking the records it mentions or quotes, so the
+    /// harness is told about them with this message (spec 21.4). A record that cannot be
+    /// linked refuses the message; links made before the refusal stay, as harmless as
+    /// linking them by hand.
+    pub async fn send_linking(
+        &self,
+        chat_id: &str,
+        text: &str,
+        mode: SendMode,
+        links: &[LinkRef],
+    ) -> Outcome<()> {
+        text_argument(text, "The message")?;
+        let host = self.host()?;
+        let present = self.workspace()?.chat(chat_id)?.links;
+        let mut added = false;
+        for link in links {
+            let link = ChatLink::from(link.clone());
+            if present
+                .iter()
+                .any(|old| old.kind == link.kind && old.id == link.id)
+            {
+                continue;
+            }
+            self.workspace()?.set_chat_link(chat_id, link, true)?;
+            added = true;
+        }
+        if added {
+            host.links_changed(chat_id).await?;
+        }
+        self.send(chat_id, text, mode).await
+    }
+
+    /// What the composer's `@` menu offers from a Chat's folder.
+    pub fn files(&self, path: &str, query: &str) -> Outcome<Vec<FolderFile>> {
+        self.host()?;
+        let folder = folder_argument(path)?;
+        Ok(folder_files(Path::new(&folder), query))
+    }
+
+    /// The Chats outside the trash linked to one record, for the record's own page.
+    pub fn linked_to(&self, link: &LinkRef) -> Outcome<Vec<Summary>> {
+        self.host()?;
+        let link = ChatLink::from(link.clone());
+        let workspace = self.workspace()?;
+        let mut ids = HashSet::new();
+        for filter in [ChatListFilter::Active, ChatListFilter::Archived] {
+            for chat in workspace.list_chats(filter)? {
+                if chat
+                    .links
+                    .iter()
+                    .any(|old| old.kind == link.kind && old.id == link.id)
+                {
+                    ids.insert(chat.id);
+                }
+            }
+        }
+        let mut rows = self.summaries(ChatListFilter::Active)?;
+        rows.extend(self.summaries(ChatListFilter::Archived)?);
+        rows.retain(|row| ids.contains(&row.id));
+        Ok(rows)
     }
 
     pub async fn remove_queued(&self, chat_id: &str, message_id: &str) -> Outcome<()> {

@@ -9,8 +9,11 @@ import {
   ChatFeatureContext,
   NO_CHAT_OVERVIEW,
 } from "@/features/chats/use-chats";
+import { SelectionAddToChat } from "@/features/chats/SelectionAddToChat";
+import type { ChatRequest } from "@/features/chats/ticket-chat";
 import { usePreferences } from "@/lib/preferences";
 import "@/features/chats/chats.css";
+import "@/features/chats/ticket-chats.css";
 
 /**
  * Holds what every screen needs to know about Chat: whether it is on, how
@@ -24,6 +27,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [revision, setRevision] = useState(0);
   const [openRequest, setOpenRequest] = useState<{
     request: OpenRequest;
+    n: number;
+  } | null>(null);
+  const [chatRequest, setChatRequest] = useState<{
+    request: ChatRequest;
     n: number;
   } | null>(null);
   const { notifyChats } = usePreferences();
@@ -79,6 +86,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       overview: enabled ? overview : NO_CHAT_OVERVIEW,
       revision,
       openRequest,
+      chatRequest,
+      requestChat: (request: ChatRequest) =>
+        setChatRequest((last) => ({ request, n: (last?.n ?? 0) + 1 })),
       setEnabled: async (value: boolean) => {
         try {
           await client.setEnabled(value);
@@ -91,7 +101,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [client, enabled, overview, revision, openRequest],
+    [client, enabled, overview, revision, openRequest, chatRequest],
   );
   const answerQuit = (quit: boolean) => {
     setQuitting(null);
@@ -100,6 +110,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   return (
     <ChatFeatureContext value={feature}>
       {children}
+      <SelectionAddToChat />
       <DialogShell
         open={quitting !== null}
         onOpenChange={(open) => {

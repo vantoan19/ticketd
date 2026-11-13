@@ -44,7 +44,20 @@ import {
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
 import { Composer } from "@/features/chats/Composer";
-import { arrivals, drafts } from "@/features/chats/drafts";
+import type { ComposerMentions } from "@/features/chats/ComposerField";
+import { ComposerQuotes } from "@/features/chats/ComposerQuote";
+import {
+  arrivals,
+  drafts,
+  draftTokens,
+  tokensOf,
+} from "@/features/chats/drafts";
+import {
+  clearQuotes,
+  quoteLinks,
+  quotedMessage,
+  useQuotes,
+} from "@/features/chats/quotes";
 import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
 import { runningPlan } from "@/features/chats/reports";
 import { ContextRing, PlanPill } from "@/features/chats/TurnReports";
@@ -320,6 +333,28 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     .find((item) => item.kind === "user")?.at;
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const dock = useRef<HTMLDivElement>(null);
+  const { quotes, remove: removeQuote } = useQuotes(id);
+  // A quote added from elsewhere puts the person in the box after it.
+  const quoteCount = useRef(quotes.length);
+  useEffect(() => {
+    if (quotes.length > quoteCount.current) messageBox.current?.focus();
+    quoteCount.current = quotes.length;
+  }, [quotes.length]);
+  const folder = chat.folder;
+  const mentions = useMemo<ComposerMentions>(
+    () => ({
+      records: (query) => client.searchRecords(query),
+      linked: chat.links,
+      ...(!folder.missing && {
+        folder: {
+          name: folder.name,
+          files: (query: string) => client.folderFiles(folder.path, query),
+        },
+      }),
+      harness,
+    }),
+    [client, chat.links, folder.missing, folder.name, folder.path, harness],
+  );
   /** Remounts the composer with the draft after Edit moved a queued message into it. */
   const [edits, setEdits] = useState(0);
   const pending = items.filter(
@@ -535,21 +570,43 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                   autoFocus={edits > 0}
                   placeholder={composerPlaceholder(chat, answering)}
                   initialText={drafts.get(id) ?? ""}
-                  onText={(text) => {
+                  initialTokens={tokensOf(id)}
+                  onText={(text, tokens) => {
                     drafts.set(id, text);
+                    draftTokens.set(id, { text, tokens });
                     if (!text.trim()) setHeldFor(undefined);
                   }}
+                  mentions={mentions}
+                  above={
+                    <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
+                  }
                   controls={(text) => composerControls(chat, text, answering)}
-                  onSend={(text) =>
+                  onSend={(text, links) =>
                     run(
                       sent(
                         answering && question
                           ? client.answer(id, question.id, { text })
-                          : client.send(id, text),
+                          : client
+                              .send(id, quotedMessage(quotes, text), [
+                                ...links,
+                                ...quoteLinks(quotes),
+                              ])
+                              .then(() => clearQuotes(id)),
                       ),
                     )
                   }
-                  onQueue={(text) => run(sent(client.queue(id, text)))}
+                  onQueue={(text, links) =>
+                    run(
+                      sent(
+                        client
+                          .queue(id, quotedMessage(quotes, text), [
+                            ...links,
+                            ...quoteLinks(quotes),
+                          ])
+                          .then(() => clearQuotes(id)),
+                      ),
+                    )
+                  }
                   {...(pending.length > 0 && {
                     onArrowUpFromEmpty: () => focusLastChoice(dock.current),
                   })}
@@ -600,6 +657,7 @@ export function ChatDetail({
   onExpand,
   onReturn,
   onClose,
+  crumb,
 }: {
   id: string;
   /** The person asked for the full width. */
@@ -609,6 +667,8 @@ export function ChatDetail({
   onExpand: () => void;
   onReturn: () => void;
   onClose: () => void;
+  /** Back to where the Chat was opened from, such as its ticket. */
+  crumb?: ReactNode;
 }) {
   const client = useChatClient();
   const { snapshot, error } = useChat(id);
@@ -623,7 +683,8 @@ export function ChatDetail({
     <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
       <div className="detail-header">
         <div className="detail-title-group">
-          {single && (
+          {crumb}
+          {!crumb && single && (
             <IconButton label="Back to Chats" onClick={onReturn}>
               <ArrowLeft aria-hidden />
             </IconButton>

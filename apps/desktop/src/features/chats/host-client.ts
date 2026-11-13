@@ -9,6 +9,7 @@ import {
   chatSnapshotSchema,
   chatSummarySchema,
   createdChatSchema,
+  folderFileSchema,
   harnessStatusSchema,
   linkedRecordSchema,
   settingChangeSchema,
@@ -235,8 +236,16 @@ export function createHostChatClient(
         close(feed);
       };
     },
-    send: (id, text) => run("chat_send", { chatId: id, text, queue: false }),
-    queue: (id, text) => run("chat_send", { chatId: id, text, queue: true }),
+    send: (id, text, links = []) =>
+      run("chat_send", { chatId: id, text, queue: false, links }),
+    queue: (id, text, links = []) =>
+      run("chat_send", { chatId: id, text, queue: true, links }),
+    linkedTo: async (link) =>
+      z.array(chatSummarySchema).parse(await call("chat_linked_to", { link })),
+    folderFiles: async (folder, query) =>
+      z
+        .array(folderFileSchema)
+        .parse(await call("chat_files", { path: folder, query })),
     removeQueued: (id, queuedId) =>
       run("chat_remove_queued", { chatId: id, queuedId }),
     resumeQueue: (id) => run("chat_resume_queue", { chatId: id }),

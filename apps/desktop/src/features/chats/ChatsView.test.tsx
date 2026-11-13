@@ -1055,6 +1055,42 @@ test("what the agent changed in ticketd is a step row, verb first", async () => 
   expect(within(body).getAllByText("T-12")[0]?.dataset.slot).toBe("reference");
 });
 
+test("a finished turn's record changes are one receipt row under it, whose more opens the fold", async () => {
+  // Its own Chat: fold toggles are remembered by Chat for the session.
+  await open(
+    one({ id: "receipt", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          {
+            kind: "status",
+            reference: "T-12",
+            title: "Rate-limit failed login attempts",
+            from: "In progress",
+            to: "In review",
+          },
+          { kind: "update", reference: "T-12", excerpt: "Limiter is in" },
+          { kind: "document", document_id: "d9", title: "Reset email copy" },
+        ],
+      }),
+    ]),
+  );
+  // Outside the folded turn: two sentences whose references open, then 1 more.
+  expect(screen.queryByRole("group", { name: "Worked for 30s" })).toBeNull();
+  expect(screen.getAllByRole("button", { name: "T-12" })).toHaveLength(2);
+  expect(document.querySelector(".chat-records-items")?.textContent).toBe(
+    "Moved T-12 to In review · Posted an update on T-12",
+  );
+  fireEvent.click(button("1 more"));
+  expect(
+    screen.getByRole("group", { name: "Worked for 30s" }).textContent,
+  ).toContain("Created the Document “Reset email copy”");
+});
+
 /** Sizes a transcript as a browser would, which jsdom does not. */
 function sized(scroller: HTMLElement, height: number, content: number) {
   Object.defineProperty(scroller, "clientHeight", {
