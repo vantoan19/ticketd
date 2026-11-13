@@ -385,7 +385,8 @@ pub fn show_window(app: &AppHandle) {
     app.remove_tray_by_id(TRAY_ID);
 }
 
-/// Whether closing the window now hides it and keeps Chats working, instead of quitting.
+/// Whether closing the window now hides it and keeps Chats and Automations going,
+/// instead of quitting.
 /// The page asks before it starts its own way out.
 #[tauri::command]
 pub fn close_keeps_running(bridge: State<'_, ChatBridge>) -> bool {
@@ -403,7 +404,11 @@ fn page_close_keeps_running(bridge: &ChatBridge) -> bool {
 
 fn keeps_running(bridge: &ChatBridge) -> bool {
     !bridge.quit_confirmed.load(Ordering::SeqCst)
-        && close_action(bridge.chats.enabled(), bridge.chats.working()) == CloseAction::KeepRunning
+        && close_action(
+            bridge.chats.enabled(),
+            bridge.chats.working(),
+            bridge.chats.automations_on(),
+        ) == CloseAction::KeepRunning
 }
 
 /// Quit was asked for while Chats are working and the person has not confirmed: shows
