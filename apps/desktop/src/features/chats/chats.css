@@ -785,9 +785,10 @@ button.chat-file-name:focus-visible,
   width: 14px;
   height: 14px;
 }
-.chat-stop-mark {
-  width: 10px !important;
-  height: 10px !important;
+/* Beats the icon button's 16px svg rule by specificity, not !important. */
+.chat-composer-end .chat-stop-mark.chat-stop-mark {
+  width: 10px;
+  height: 10px;
 }
 /* Below a 460px composer Permissions keeps only its shield and the effort
    only its bars, so one row holds picker, Permissions, Stop and Send. */
@@ -917,7 +918,7 @@ button.chat-file-name:focus-visible,
   gap: 8px;
   height: min(
     272px,
-    calc(var(--radix-popover-content-available-height, 400px) - 88px)
+    calc(var(--radix-popover-content-available-height) - 88px)
   );
   min-height: 160px;
 }
