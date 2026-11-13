@@ -128,18 +128,22 @@ type ModelRow = SettingOption & { runs_as?: string | null | undefined };
 const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /**
- * A row as the list names it: an alias row by the model it runs ("Opus 5.5",
- * tagged Default), and no description that only repeats the name (LIVE-10).
+ * A row as the list names it: an alias row by the model it runs ("Opus 5.5"),
+ * and no description that only repeats the name (LIVE-10). Only the harness's
+ * default is tagged Default, once: a default that names no model reads
+ * "Default" and needs no tag (LIVE2-4).
  */
 function rowOf(option: ModelRow) {
-  const name = option.runs_as ?? option.label;
+  const name =
+    option.runs_as ??
+    (option.is_default ? shortName(option.label) : option.label);
   const description = option.description ?? "";
   const repeats =
     squash(description).includes(squash(name)) ||
     squash(description).includes(squash(option.label));
   return {
     name,
-    tagged: option.is_default || option.runs_as != null,
+    tagged: option.is_default && squash(name) !== "default",
     description: repeats ? "" : description,
   };
 }
@@ -623,7 +627,7 @@ function PermissionPicker({
       <DropdownMenuContent
         align="start"
         side="top"
-        className="w-72"
+        className="w-72 chat-perm-menu"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           inputRef.current?.focus();
@@ -646,8 +650,11 @@ function PermissionPicker({
             ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <p className="chat-pick-note">
-          Set for this Chat only. Your {harness} settings are unchanged.
+        <p
+          className="chat-pick-note"
+          title={`Your ${harness} settings are unchanged.`}
+        >
+          This Chat only
         </p>
       </DropdownMenuContent>
     </DropdownMenu>

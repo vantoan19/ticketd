@@ -1765,7 +1765,7 @@ test("a Project is linked like a ticket or Document and has no page to open", as
   );
 });
 
-test("a managed folder reads as the Scratch folder, and its path has no verbatim prefix", async () => {
+test("a managed folder reads as the Scratch folder, and its popover says ticketd keeps it", async () => {
   await open(
     one({
       id: "c1",
@@ -1783,8 +1783,14 @@ test("a managed folder reads as the Scratch folder, and its path has no verbatim
   );
   fireEvent.click(button("Folder Scratch folder"));
   const popover = await screen.findByRole("dialog", { name: "Chat context" });
-  expect(popover.textContent).toContain(String.raw`C:\ws`);
-  expect(popover.textContent).not.toContain("?");
+  // LIVE2-6: the scratch path means nothing to read; Copy path still gives it.
+  expect(popover.textContent).toContain("Kept by ticketd for this Chat");
+  expect(popover.textContent).not.toContain("workspace.sqlite3");
+  expect(
+    within(popover).getByRole("button", { name: "Copy path" }),
+  ).toBeTruthy();
+  // The popover takes focus itself, not its first button.
+  expect(document.activeElement).toBe(popover);
 });
 
 test("an incompatible harness notice keeps the full stop with the path", async () => {
@@ -1981,6 +1987,46 @@ test("the picker keeps the default and the latest models, moves between harnesse
   localStorage.clear();
 });
 
+test("LIVE2-4: only the harness's default is tagged Default, and only once", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  const row = (id: string, label: string, more = {}) => ({
+    id,
+    label,
+    is_default: false,
+    allowed: true,
+    efforts: [],
+    ...more,
+  });
+  client.options.set("claude-code", {
+    harness_id: "claude-code",
+    models: [
+      row("default", "Default (recommended)", {
+        is_default: true,
+        description: "For your toughest challenges",
+      }),
+      row("fable", "fable", { runs_as: "Fable 5.2" }),
+      row("opus", "Opus 5.5"),
+    ],
+  });
+  client.setHarnesses([
+    { id: "claude-code", name: "Claude Code", status: "ready" },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Claude Code, model/ }),
+  );
+  const radios = await screen.findAllByRole("radio", {
+    name: /Default|Fable|Opus/,
+  });
+  expect(radios.map((radio) => radio.textContent)).toEqual([
+    "DefaultFor your toughest challenges",
+    "Fable 5.2",
+    "Opus 5.5",
+  ]);
+  localStorage.clear();
+});
+
 test("linking a Project with a folder in New Chat starts the Chat there", async () => {
   localStorage.clear();
   const client = await open([]);
@@ -2149,11 +2195,7 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   expect(button(picker)).toBeTruthy();
 
   openMenu("Permissions: Accept edits");
-  expect(
-    await screen.findByText(
-      "Set for this Chat only. Your Claude Code settings are unchanged.",
-    ),
-  ).toBeTruthy();
+  expect(await screen.findByText("This Chat only")).toBeTruthy();
   expect(
     screen.queryByRole("menuitemradio", { name: /Full access/ }),
   ).toBeNull();

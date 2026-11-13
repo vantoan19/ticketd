@@ -84,7 +84,9 @@ function FolderGroup({ chat }: { chat: ChatState }) {
           {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
         </IconButton>
       </div>
-      <PathText path={folder.path} />
+      {/* A folder ticketd keeps says so; its scratch path means nothing to
+          read, and Copy still gives it (LIVE2-6). */}
+      {!folder.managed && <PathText path={folder.path} />}
       {branch &&
         (branch.name ? (
           <p className="chat-pop-branch">
@@ -167,10 +169,16 @@ function HarnessGroup({ chat }: { chat: ChatState }) {
           )}
         </span>
       </div>
-      {found.length > 0 && (
+      {found.length > 0 ? (
         <small className="chat-mono chat-pop-truncate">
           {found.join(" · ")}
         </small>
+      ) : (
+        // The version line's place while the first check runs, so the
+        // popover does not grow when it answers (LIVE2-7).
+        status === undefined && (
+          <span className="chat-skeleton chat-pop-skeleton-line" aria-hidden />
+        )
       )}
       {!ready && status !== undefined && (
         <Button
@@ -243,7 +251,8 @@ function ContextGroup({
           className="chat-pop-meter-fill"
           style={{ width: `${words.percent}%` }}
         />
-        {compactsAt != null && (
+        {/* The compaction point only matters once it is near (LIVE2-6). */}
+        {compactsAt != null && words.full && (
           <span
             className="chat-pop-meter-tick"
             style={{ left: `${compactsAt}%` }}
@@ -442,7 +451,18 @@ export function ChatContext({
           <ChevronDown aria-hidden />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" aria-label="Chat context" className="w-70">
+      <PopoverContent
+        align="end"
+        aria-label="Chat context"
+        className="w-70"
+        // Focus the popover, not its first button: a ring on Copy read as a
+        // selected state (LIVE2-6). Tab still reaches every control.
+        tabIndex={-1}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (event.currentTarget as HTMLElement | null)?.focus();
+        }}
+      >
         <ContextPanel chat={chat} asOf={asOf} />
       </PopoverContent>
     </Popover>
