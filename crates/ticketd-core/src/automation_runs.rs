@@ -16,6 +16,8 @@ use crate::{Error, Workspace};
 const RETENTION_DAYS: i64 = 90;
 /// Events read from the log per query while matching.
 const EVENT_BATCH: u32 = 500;
+/// Why a run the person stopped needs attention, and why its step did not finish.
+const STOPPED: &str = "You stopped this run.";
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -453,6 +455,62 @@ impl Workspace {
         )?;
         transaction.commit()?;
         Ok(ended)
+    }
+
+    /// Ends a Queued or Running run as Needs attention because the person stopped
+    /// it. The step it was on is marked Failed and nothing after it runs, its
+    /// failure path included: the outcome its executor reports later is refused.
+    pub fn stop_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        let ended = transaction.execute(
+            &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?2, ended_at = {NOW} WHERE id = ?1 AND status IN ('queued', 'running')"),
+            params![run_id, STOPPED],
+        )?;
+        if ended == 0 {
+            // Says so when there is no such run.
+            one(&transaction, run_id)?;
+            return Err(Error::AutomationRun("the run has already ended".into()));
+        }
+        transaction.execute(
+            &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE run_id = ?1 AND status = 'running'"),
+            params![run_id, STOPPED],
+        )?;
+        let run = one(&transaction, run_id)?;
+        transaction.commit()?;
+        Ok(run)
+    }
+
+    /// Queues a new run for the Workspace event that started a finished run. It
+    /// begins at the first step of the Automation as it is now, so a fix made since
+    /// counts; the finished run stays as it ended. Refused while the ticket has an
+    /// active run of the Automation.
+    pub fn run_automation_again(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        let run = one(&transaction, run_id)?;
+        if matches!(
+            run.status,
+            AutomationRunStatus::Queued | AutomationRunStatus::Running
+        ) {
+            return Err(Error::AutomationRun("the run has not ended yet".into()));
+        }
+        let definition = crate::automations::one(&transaction, &run.automation_id)?.definition;
+        let id = Uuid::new_v4().to_string();
+        // The active-run index refuses a second run for the ticket.
+        let created = transaction.execute(
+            "INSERT OR IGNORE INTO automation_runs (id, automation_id, event_id, event, ticket_id, definition, status)
+             SELECT ?2, automation_id, event_id, event, ticket_id, ?3, 'queued' FROM automation_runs WHERE id = ?1",
+            params![run_id, id, serde_json::to_string(&definition)?],
+        )?;
+        if created == 0 {
+            return Err(Error::AutomationRun(
+                "a run of this Automation is already going for the ticket".into(),
+            ));
+        }
+        let again = one(&transaction, &id)?;
+        transaction.commit()?;
+        Ok(again)
     }
 
     pub fn automation_run(&self, id: &str) -> Result<AutomationRun, Error> {

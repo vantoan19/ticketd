@@ -43,6 +43,7 @@ import {
   type TriggerChoice,
 } from "@/features/automations/FlowCanvas";
 import { RunsList } from "@/features/automations/RunsList";
+import { RunView } from "@/features/automations/RunView";
 import {
   RunAgentFields,
   StepPanel,
@@ -91,6 +92,8 @@ export function AutomationEditor({
   const [draft, setDraft] = useState(() => definitionOf(automation));
   /** The flow being edited, or what running it has done. */
   const [view, setView] = useState<"steps" | "runs">("steps");
+  /** The run open in place of the Automation; closing it returns to the runs. */
+  const [openRun, setOpenRun] = useState<string | null>(null);
   /** The card whose panel is open: a step's id, or the trigger's. */
   const [selected, setSelected] = useState<string | null>(null);
   /** The name being typed in the Rename dialog; null while it is closed. */
@@ -144,6 +147,23 @@ export function AutomationEditor({
   };
 
   const title = draft.name.trim() || "New Automation";
+  if (openRun)
+    return (
+      <RunView
+        key={openRun}
+        id={openRun}
+        automationName={title}
+        agents={agents}
+        expanded={expanded}
+        single={single}
+        onExpand={onExpand}
+        onReturn={onReturn}
+        onClose={onClose}
+        onBack={() => setOpenRun(null)}
+        onOpenRun={setOpenRun}
+        onFail={onFail}
+      />
+    );
   const left = automation.problems.length;
   const step = draft.steps.find((item) => item.id === selected);
   const openAgent = agents.find((agent) => agent.id === agentOpen);
@@ -259,7 +279,7 @@ export function AutomationEditor({
         </div>
       </div>
       {view === "runs" ? (
-        <RunsList automation={automation} onFail={onFail} />
+        <RunsList automation={automation} onOpen={setOpenRun} onFail={onFail} />
       ) : (
         <div className="flow-body" data-panel={panel ? undefined : "none"}>
           <FlowCanvas
