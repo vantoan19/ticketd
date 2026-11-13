@@ -233,6 +233,23 @@ the step it was on ended, and answers with the next step or how the run ends.
 Runs are local to the device, kept 90 days, and a run left Running by a process
 that is gone ends as Needs attention when the next one starts; nothing retries.
 
+A schedule and Run now start a run without going through the event log. Such a run
+has no ticket and no event, and an Automation has at most one of them Queued or
+Running. A schedule is every N hours, or a time of day on chosen weekdays, in the
+computer's local time. The same pass asks the core which schedules have come due:
+each Automation that is on keeps, on this device, the local time its schedule counts
+from (`automation_device_state.schedule_from`), set when the schedule is first seen
+on, when it fires, and cleared when the trigger changes. A schedule is due when it
+had a time to run after that and up to now, so however many times were missed while
+ticketd was not running, the first pass after the start fires it once. One that
+comes due while its last run is still going is skipped. Whether a schedule is due is
+a function of the schedule and two local times, with no SQL and no clock. An
+Automation run by hand is never on, so it never keeps ticketd in the tray; Run now
+queues its run, which the next pass starts. Change ticket and If steps need a
+ticket: an Automation that starts on a schedule or by hand and holds one is
+unfinished, so it cannot be switched on or run. An agent in a run without a ticket
+is told so in its first message, and a Notify me step there opens the run.
+
 The person can stop a Queued or Running run, which ends it as Needs attention: the
 core marks the step it was on Failed and refuses the outcome its executor reports
 later, so not even the step's failure path runs, and the desktop interrupts the
@@ -243,7 +260,9 @@ the steps as they were even after the Automation is edited.
 
 A run that ends as Needs attention needs the person until they act on it: the core
 counts it for the sidebar and adds an Attention inbox entry (kind `automation_run`)
-on its ticket, whether or not the ticket is followed. Run again, Dismiss and taking
+on its ticket, whether or not the ticket is followed. A run without a ticket is
+counted and listed under Needs you the same way, with no inbox entry: an entry
+belongs to a ticket. Run again, Dismiss and taking
 the run over clear that and mark the entry read; opening the run or reading the
 entry does not. Dismiss leaves the run as it ended.
 

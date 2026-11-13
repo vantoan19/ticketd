@@ -34,9 +34,31 @@ const automationAgentSchema = automationAgentSettingsSchema.extend({
 });
 export type AutomationAgent = z.infer<typeof automationAgentSchema>;
 
+/** The days of the week, in the order of the week, as the core names them. */
+export const WEEKDAYS = [
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+] as const;
+const scheduleSchema = z.discriminatedUnion("kind", [
+  /** 0 until a number is given; the Automation cannot be switched on with it. */
+  z.object({ kind: z.literal("every_hours"), hours: z.number().int().min(0) }),
+  /** `time` is a local time of day, "HH:MM". */
+  z.object({
+    kind: z.literal("weekly"),
+    time: z.string(),
+    weekdays: z.array(z.enum(WEEKDAYS)),
+  }),
+]);
+export type AutomationSchedule = z.infer<typeof scheduleSchema>;
+
 /**
- * The trigger and step kinds this page can set up are spelled out. The others
- * the record can hold are kept as they arrive, so saving never drops them.
+ * The step kinds this page can set up are spelled out. The others the record
+ * can hold are kept as they arrive, so saving never drops them.
  */
 const triggerSchema = z.union([
   z.object({
@@ -50,9 +72,18 @@ const triggerSchema = z.union([
     from: statusSchema.nullable(),
   }),
   z.object({ kind: z.enum(["tag_added", "tag_removed"]), tag: z.string() }),
-  z.looseObject({ kind: z.enum(["schedule", "by_hand"]) }),
+  z.object({ kind: z.literal("schedule"), schedule: scheduleSchema }),
+  /** Only when the person presses Run now. */
+  z.object({ kind: z.literal("by_hand") }),
 ]);
 export type AutomationTrigger = z.infer<typeof triggerSchema>;
+
+/** A schedule and Run now start a run without a ticket. */
+export function startsWithoutTicket(
+  trigger: AutomationTrigger | null,
+): boolean {
+  return trigger?.kind === "schedule" || trigger?.kind === "by_hand";
+}
 
 /** `source` holds provider ids ("github") and "local". */
 const conditionSchema = z.union([
@@ -326,6 +357,10 @@ export const automationsClient = {
     return automationRunDetailSchema.parse(
       await invoke("automation_run_again", { id }),
     );
+  },
+  /** "Run now": queues a run of an Automation that is run by hand. */
+  async runNow(automationId: string): Promise<void> {
+    await invoke("automation_run_now", { id: automationId });
   },
   /** The person wants nothing more from a run that needs attention. */
   async dismissRun(id: string): Promise<void> {

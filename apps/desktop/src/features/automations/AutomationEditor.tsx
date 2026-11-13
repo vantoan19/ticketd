@@ -7,9 +7,7 @@ import {
   Maximize2,
   Minimize2,
   SquarePen,
-  Tag,
   X,
-  Zap,
 } from "lucide-react";
 import {
   Alert,
@@ -37,6 +35,7 @@ import { TRIGGER_ID } from "@/features/automations/canvas-layout";
 import {
   automationsClient,
   definitionOf,
+  startsWithoutTicket,
   type Automation,
   type AutomationAgent,
   type AutomationAgentSettings,
@@ -46,7 +45,11 @@ import {
   type AutomationTrigger,
 } from "@/features/automations/client";
 import { conditionsLine } from "@/features/automations/automation-text";
-import { TRIGGER_KINDS } from "@/features/automations/flow-cards";
+import {
+  CARD_ICONS,
+  TRIGGER_KINDS,
+  triggerCard,
+} from "@/features/automations/flow-cards";
 import {
   FlowCanvas,
   type StepChoice,
@@ -73,6 +76,11 @@ const NEW_TRIGGERS: Record<TriggerChoice, AutomationTrigger> = {
   tag_added: { kind: "tag_added", tag: "" },
   tag_removed: { kind: "tag_removed", tag: "" },
   activity_created: { kind: "activity_created" },
+  schedule: {
+    kind: "schedule",
+    schedule: { kind: "weekly", time: "09:00", weekdays: ["mon"] },
+  },
+  by_hand: { kind: "by_hand" },
 };
 
 /**
@@ -172,9 +180,19 @@ export function AutomationEditor({
     });
   const chooseTrigger = (kind: TriggerChoice) => {
     // Choosing the kind it already has keeps what was set on it.
-    if (draft.trigger?.kind !== kind) change({ trigger: NEW_TRIGGERS[kind] });
+    if (draft.trigger?.kind !== kind) {
+      const trigger = NEW_TRIGGERS[kind];
+      change({
+        trigger,
+        // Conditions are about a ticket; a run that has none could match nothing.
+        ...(startsWithoutTicket(trigger) && { conditions: [] }),
+      });
+    }
     setSelected(TRIGGER_ID);
   };
+  const runNow = () =>
+    // The run it queues is where the person looks next.
+    automationsClient.runNow(automation.id).then(() => setView("runs"), onFail);
   const addStep = (index: number, kind: StepChoice) => {
     const id = crypto.randomUUID();
     const step: AutomationStep =
@@ -186,7 +204,14 @@ export function AutomationEditor({
             on_failure: null,
           }
         : kind === "notify"
-          ? { id, kind, text: "", opens: "ticket", on_failure: null }
+          ? {
+              id,
+              kind,
+              text: "",
+              // Without a ticket there is only the run to open.
+              opens: startsWithoutTicket(draft.trigger) ? "run" : "ticket",
+              on_failure: null,
+            }
           : {
               id,
               kind,
@@ -235,29 +260,26 @@ export function AutomationEditor({
   const step = draft.steps.find((item) => item.id === selected);
   const openAgent = agents.find((agent) => agent.id === agentOpen);
   const trigger = draft.trigger;
+  const TriggerIcon = CARD_ICONS[triggerCard(trigger).icon];
   const panel =
     selected === TRIGGER_ID && trigger && trigger.kind in NEW_TRIGGERS ? (
       <StepPanel
         key={selected}
         title={TRIGGER_KINDS[trigger.kind]}
-        icon={
-          "tag" in trigger ? (
-            <Tag size={16} aria-hidden />
-          ) : (
-            <Zap size={16} aria-hidden />
-          )
-        }
+        icon={<TriggerIcon size={16} aria-hidden />}
         onClose={closePanel}
       >
         <TriggerFields
           trigger={trigger}
           onChange={(next) => change({ trigger: next })}
         />
-        <ConditionRows
-          conditions={draft.conditions}
-          projects={projects}
-          onChange={(conditions) => change({ conditions })}
-        />
+        {!startsWithoutTicket(trigger) && (
+          <ConditionRows
+            conditions={draft.conditions}
+            projects={projects}
+            onChange={(conditions) => change({ conditions })}
+          />
+        )}
       </StepPanel>
     ) : step?.kind === "run_agent" ? (
       <StepPanel
@@ -342,24 +364,38 @@ export function AutomationEditor({
               {left === 1 ? "1 step left" : `${left} steps left`}
             </span>
           )}
-          <label className="auto-on">
-            <Switch
-              aria-label="On for this desktop"
+          {trigger?.kind === "by_hand" ? (
+            // Nothing starts it but the person, so there is nothing to switch on.
+            <Button
+              variant="outline"
+              size="sm"
+              className="mx-2"
+              disabled={left > 0}
               {...(left > 0 && { "aria-describedby": `${headingId}-left` })}
-              ref={onSwitch}
-              checked={automation.enabled}
-              disabled={left > 0 && !automation.enabled}
-              onCheckedChange={setEnabled}
-            />
-            {automation.enabled ? "On" : "Off"}
-            <TurnOffMenu
-              runs={turningOff}
-              onClose={() => setTurningOff(null)}
-              onReturnFocus={() => onSwitch.current?.focus()}
-              onTurnOff={() => onSetEnabled(false)}
-              onStopAndTurnOff={onStopAndTurnOff}
-            />
-          </label>
+              onClick={() => void runNow()}
+            >
+              Run now
+            </Button>
+          ) : (
+            <label className="auto-on">
+              <Switch
+                aria-label="On for this desktop"
+                {...(left > 0 && { "aria-describedby": `${headingId}-left` })}
+                ref={onSwitch}
+                checked={automation.enabled}
+                disabled={left > 0 && !automation.enabled}
+                onCheckedChange={setEnabled}
+              />
+              {automation.enabled ? "On" : "Off"}
+              <TurnOffMenu
+                runs={turningOff}
+                onClose={() => setTurningOff(null)}
+                onReturnFocus={() => onSwitch.current?.focus()}
+                onTurnOff={() => onSetEnabled(false)}
+                onStopAndTurnOff={onStopAndTurnOff}
+              />
+            </label>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton label="Automation actions">

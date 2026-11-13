@@ -2056,7 +2056,7 @@ fn a_tag_arriving_through_sync_starts_the_automation_like_one_added_here() {
         .automation_runs(&automation.id)
         .unwrap()
         .into_iter()
-        .map(|run| (run.ticket.unwrap().id, run.event.actor))
+        .map(|run| (run.ticket.unwrap().id, run.event.unwrap().actor))
         .collect();
     started.sort_by_key(|(_, actor)| *actor == WorkspaceActor::Person);
     assert_eq!(

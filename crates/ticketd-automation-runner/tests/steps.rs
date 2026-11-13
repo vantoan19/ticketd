@@ -198,7 +198,7 @@ async fn steps_run_in_order_each_on_the_ticket_the_one_before_left() {
     assert_eq!(shown[0].run_id, run.id);
 
     // Everything the steps changed is the Automation's, so nothing starts from it.
-    let after_tagging = run.event.id;
+    let after_tagging = run.event.as_ref().unwrap().id;
     let events = core.workspace_events_after(after_tagging, 100).unwrap();
     assert_eq!(events.len(), 4);
     assert!(
