@@ -90,6 +90,66 @@
   justify-content: center;
   padding: 24px;
 }
+/* The empty page: New Automation, then the examples to start from. */
+.auto-start {
+  flex-direction: column;
+  gap: 32px;
+  overflow-y: auto;
+}
+.auto-start > [data-slot="empty-state"] {
+  flex: none;
+}
+.auto-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+}
+.auto-starters-label {
+  margin: 0 0 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-align: center;
+}
+.auto-starter {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  column-gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  text-align: left;
+}
+.auto-starter:hover {
+  background: var(--recessed);
+}
+.auto-starter:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.auto-starter > svg {
+  grid-row: 1 / span 2;
+  color: var(--muted-foreground);
+}
+.auto-starter > svg:last-child {
+  grid-column: 3;
+}
+.auto-starter-title {
+  grid-column: 2;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.auto-starter-sub {
+  grid-column: 2;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
 
 /* --- The detail header: what is left to finish, and the on switch. --- */
 .auto-left,

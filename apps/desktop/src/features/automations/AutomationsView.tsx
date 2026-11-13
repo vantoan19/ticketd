@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Plus, SquarePen, Tag, Workflow, Zap } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  CalendarClock,
+  FlaskConical,
+  History,
+  Plus,
+  SquarePen,
+  Tag,
+  Workflow,
+  Zap,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
@@ -19,13 +30,44 @@ import {
   type AutomationAgent,
   type AutomationAgentSettings,
   type AutomationDefinition,
+  type AutomationExample,
+  type ListedRun,
 } from "@/features/automations/client";
+import { AllRunsList } from "@/features/automations/RunsList";
+import { RunView } from "@/features/automations/RunView";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import "@/features/chats/chats.css";
 import "@/features/automations/automations.css";
 
-type Tab = "automations" | "agents";
+type Tab = "automations" | "agents" | "runs";
+const TAB_NAMES = {
+  automations: { title: "Automations", list: "Automation list" },
+  agents: { title: "Agents", list: "Agent list" },
+  runs: { title: "Runs", list: "Run list" },
+} as const;
+
+/** What the empty page offers to start from. The core holds what each creates. */
+const EXAMPLES = [
+  {
+    example: "triage_tagged_tickets",
+    icon: Tag,
+    title: "Triage tagged tickets",
+    sub: "When a ticket is tagged, an agent triages it.",
+  },
+  {
+    example: "verify_ready_for_testing",
+    icon: FlaskConical,
+    title: "Verify what is ready for testing",
+    sub: "An agent checks the work, then the ticket moves on.",
+  },
+  {
+    example: "weekly_summary",
+    icon: CalendarClock,
+    title: "Weekly summary",
+    sub: "Every Monday, an agent writes up the week.",
+  },
+] as const satisfies { example: AutomationExample; [key: string]: unknown }[];
 
 /** The list pane's 360px plus the detail pane's 480px: below this one pane shows. */
 const STACK_MIN_WIDTH = 840;
@@ -55,18 +97,21 @@ function startedBy(trigger: Automation["trigger"]) {
 
 /**
  * The Automations screen, in the Chats list-and-detail split. The list header
- * switches between Automations and Agents; either opens beside the list and is
- * edited in place.
+ * switches between Automations, Agents and Runs. An Automation or an agent
+ * opens beside the list and is edited in place; a run opens on its own view.
  */
 export function AutomationsView() {
   const [tab, setTab] = useState<Tab>("automations");
   /** null until the first load answers. */
   const [automations, setAutomations] = useState<Automation[] | null>(null);
   const [agents, setAgents] = useState<AutomationAgent[] | null>(null);
+  /** Every run, newest first. Loaded on any tab: the Runs tab marks one that needs the person. */
+  const [runs, setRuns] = useState<ListedRun[] | null>(null);
   /** What is open in each list; the other tab keeps its own. */
   const [openIds, setOpenIds] = useState<Record<Tab, string | null>>({
     automations: null,
     agents: null,
+    runs: null,
   });
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
@@ -82,9 +127,11 @@ export function AutomationsView() {
       Promise.all([
         automationsClient.automations(),
         automationsClient.agents(),
-      ]).then(([foundAutomations, foundAgents]) => {
+        automationsClient.allRuns(),
+      ]).then(([foundAutomations, foundAgents, foundRuns]) => {
         setAutomations(foundAutomations);
         setAgents(foundAgents);
+        setRuns(foundRuns);
         setError("");
       }, fail),
     [fail],
@@ -101,6 +148,7 @@ export function AutomationsView() {
     tab === "automations"
       ? automations?.find((a) => a.id === openId)
       : undefined;
+  const openRun = tab === "runs" ? openId : null;
   const close = () => {
     setExpanded(false);
     setOpenId(null);
@@ -148,12 +196,14 @@ export function AutomationsView() {
       (current) =>
         current?.map((item) => (item.id === saved.id ? saved : item)) ?? null,
     );
-  const createAutomation = () =>
-    automationsClient.createAutomation().then((automation) => {
+  /** Lists a new Automation first and opens it. */
+  const added = (created: Promise<Automation>) =>
+    created.then((automation) => {
       setAutomations((current) => [automation, ...(current ?? [])]);
       setTab("automations");
       setOpenIds((current) => ({ ...current, automations: automation.id }));
     }, fail);
+  const createAutomation = () => added(automationsClient.createAutomation());
   const saveAutomation = (id: string, definition: AutomationDefinition) => {
     const save = ++saves.current;
     setAutomations(
@@ -185,25 +235,24 @@ export function AutomationsView() {
     }, fail);
 
   const listPane = (
-    <section
-      className="ticket-list chat-pane"
-      aria-label={tab === "agents" ? "Agent list" : "Automation list"}
-    >
+    <section className="ticket-list chat-pane" aria-label={TAB_NAMES[tab].list}>
       <ListHeader
         hideTitle
-        title={tab === "agents" ? "Agents" : "Automations"}
+        title={TAB_NAMES[tab].title}
         actions={
           tab === "agents" ? (
             <IconButton label="New agent" onClick={() => void createAgent()}>
               <SquarePen aria-hidden />
             </IconButton>
           ) : (
-            <IconButton
-              label="New Automation"
-              onClick={() => void createAutomation()}
-            >
-              <SquarePen aria-hidden />
-            </IconButton>
+            tab === "automations" && (
+              <IconButton
+                label="New Automation"
+                onClick={() => void createAutomation()}
+              >
+                <SquarePen aria-hidden />
+              </IconButton>
+            )
           )
         }
       >
@@ -225,6 +274,15 @@ export function AutomationsView() {
               label: "Agents",
               ...(agents && { count: agents.length }),
             },
+            {
+              value: "runs",
+              label: "Runs",
+              // ponytail: any run still Needs attention; follow the count the
+              // sidebar uses once dismissing a run exists.
+              ...(runs?.some((run) => run.status === "needs_attention") && {
+                attention: "a run needs you",
+              }),
+            },
           ]}
         />
       </ListHeader>
@@ -233,7 +291,9 @@ export function AutomationsView() {
           {error}
         </p>
       )}
-      {tab === "automations" ? (
+      {tab === "runs" ? (
+        runs && <AllRunsList runs={runs} openId={openRun} onOpen={setOpenId} />
+      ) : tab === "automations" ? (
         <>
           {automations?.length === 0 && (
             <p className="chat-list-empty">No Automations yet.</p>
@@ -319,6 +379,9 @@ export function AutomationsView() {
       onChange={(definition) => saveAutomation(openAutomation.id, definition)}
       onSetEnabled={(enabled) => void setEnabled(openAutomation.id, enabled)}
       onStopAndTurnOff={() => void stopAndTurnOff(openAutomation.id)}
+      onDuplicate={() =>
+        void added(automationsClient.duplicateAutomation(openAutomation.id))
+      }
       onDelete={() => void deleteAutomation(openAutomation.id)}
       onCreateAgent={() =>
         addAgent().catch((reason: unknown) => {
@@ -330,12 +393,42 @@ export function AutomationsView() {
       onDeleteAgent={(id) => void deleteAgent(id)}
       onFail={fail}
     />
+  ) : openRun ? (
+    <RunView
+      key={openRun}
+      id={openRun}
+      automationName={
+        runs?.find((run) => run.id === openRun)?.automation_name.trim() ||
+        "New Automation"
+      }
+      agents={agents ?? []}
+      {...paneProps}
+      onBack={close}
+      onOpenRun={setOpenId}
+      onFail={fail}
+    />
   ) : (
     <section
       className="ticket-detail chat-pane"
-      aria-label={tab === "agents" ? "No agent open" : "No Automation open"}
+      aria-label={
+        tab === "agents"
+          ? "No agent open"
+          : tab === "runs"
+            ? "No run open"
+            : "No Automation open"
+      }
     >
-      {tab === "agents" ? (
+      {tab === "runs" ? (
+        runs?.length === 0 ? (
+          <EmptyState
+            icon={<History />}
+            title="No runs yet"
+            description="Every run of every Automation on this desktop shows here."
+          />
+        ) : (
+          <p className="chat-list-empty">Open a run to see its steps.</p>
+        )
+      ) : tab === "agents" ? (
         agents?.length === 0 ? (
           <EmptyState
             icon={<Bot />}
@@ -352,17 +445,41 @@ export function AutomationsView() {
           <p className="chat-list-empty">Open an agent, or make a new one.</p>
         )
       ) : automations?.length === 0 ? (
-        <EmptyState
-          icon={<Workflow />}
-          title="Automations run steps when something happens to a ticket"
-          description="Choose what starts it, then add a step that runs one of your agents."
-          action={
-            <Button size="sm" onClick={() => void createAutomation()}>
-              <Plus aria-hidden />
-              New Automation
-            </Button>
-          }
-        />
+        <div className="auto-empty auto-start">
+          <EmptyState
+            icon={<Workflow />}
+            title="Let agents act on tickets for you"
+            description="An Automation runs steps when a ticket changes: tag a ticket, and a triage agent picks it up."
+            action={
+              <Button size="sm" onClick={() => void createAutomation()}>
+                <Plus aria-hidden />
+                New Automation
+              </Button>
+            }
+          />
+          <div
+            className="auto-starters"
+            role="group"
+            aria-label="Start from an example"
+          >
+            <p className="auto-starters-label">Or start from an example</p>
+            {EXAMPLES.map(({ example, icon: Icon, title, sub }) => (
+              <button
+                key={example}
+                type="button"
+                className="auto-starter"
+                onClick={() =>
+                  void added(automationsClient.createExample(example))
+                }
+              >
+                <Icon size={16} aria-hidden />
+                <span className="auto-starter-title">{title}</span>
+                <span className="auto-starter-sub">{sub}</span>
+                <ArrowRight size={16} aria-hidden />
+              </button>
+            ))}
+          </div>
+        </div>
       ) : (
         <p className="chat-list-empty">
           Open an Automation, or make a new one.
@@ -370,7 +487,7 @@ export function AutomationsView() {
       )}
     </section>
   );
-  const open = openAgent ?? openAutomation;
+  const open = openAgent ?? openAutomation ?? openRun;
   return (
     <div ref={workspaceRef} className="plan-workspace">
       {single ? (

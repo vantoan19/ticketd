@@ -5,6 +5,7 @@ import {
   History,
   LoaderCircle,
   UserRound,
+  Workflow,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -12,10 +13,12 @@ import {
   automationsClient,
   type Automation,
   type AutomationRun,
+  type ListedRun,
 } from "@/features/automations/client";
 import {
   RUN_STATUS_LABELS,
   runsByDay,
+  runsByNeed,
 } from "@/features/automations/runs-model";
 import { chatTime } from "@/features/chats/model";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
@@ -38,6 +41,108 @@ export function RunMark({ status }: { status: AutomationRun["status"] }) {
     case "taken_over":
       return <UserRound size={14} aria-hidden />;
   }
+}
+
+/** One run as a row: the ticket it acts on, when, and where it stands. */
+function RunRow({
+  run,
+  current = false,
+  automationName,
+  onOpen,
+}: {
+  run: AutomationRun;
+  /** It is the run open beside the list. */
+  current?: boolean;
+  /** Named on the row where runs of several Automations are listed. */
+  automationName?: string;
+  onOpen: (runId: string) => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className="chat-row"
+        aria-current={current ? "true" : undefined}
+        onClick={() => onOpen(run.id)}
+        {...(run.status === "needs_attention" && { "data-attention": "" })}
+      >
+        <span className="chat-row-mark">
+          <RunMark status={run.status} />
+        </span>
+        <span className="chat-row-title">
+          {run.ticket ? (
+            <>
+              <span className="auto-ref">{run.ticket.reference}</span>{" "}
+              {run.ticket.title}
+            </>
+          ) : (
+            "No ticket"
+          )}
+        </span>
+        <time className="chat-row-time" dateTime={run.created_at}>
+          {chatTime(run.created_at)}
+        </time>
+        <span className="chat-row-sub">
+          <span>
+            {run.status === "needs_attention" ? (
+              <strong>{RUN_STATUS_LABELS[run.status]}</strong>
+            ) : (
+              RUN_STATUS_LABELS[run.status]
+            )}
+          </span>
+          {automationName === undefined ? (
+            run.reason && <span title={run.reason}>{run.reason}</span>
+          ) : (
+            <span className="auto-row-start">
+              <Workflow size={12} aria-hidden />
+              {automationName.trim() || "New Automation"}
+            </span>
+          )}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+const KEPT = "Runs are kept for 90 days, on this desktop only.";
+
+/**
+ * The runs of every Automation, under what they ask of the person: going now,
+ * waiting on them, or over. `runs` arrive newest first.
+ */
+export function AllRunsList({
+  runs,
+  openId,
+  onOpen,
+}: {
+  runs: ListedRun[];
+  openId: string | null;
+  onOpen: (runId: string) => void;
+}) {
+  if (runs.length === 0) return <p className="chat-list-empty">No runs yet.</p>;
+  return (
+    <>
+      <div className="chat-rows">
+        {runsByNeed(runs).map((group) => (
+          <section key={group.label} aria-label={group.label}>
+            <h3 className="auto-group">{group.label}</h3>
+            <ul className="auto-runs" aria-label={`Runs, ${group.label}`}>
+              {group.runs.map((run) => (
+                <RunRow
+                  key={run.id}
+                  run={run}
+                  current={run.id === openId}
+                  automationName={run.automation_name}
+                  onOpen={onOpen}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+      <p className="auto-list-foot">{KEPT}</p>
+    </>
+  );
 }
 
 /**
@@ -90,55 +195,13 @@ export function RunsList({
             <h3 className="auto-group">{day.label}</h3>
             <ul className="auto-runs" aria-label={`Runs, ${day.label}`}>
               {day.runs.map((run) => (
-                <li key={run.id}>
-                  <button
-                    type="button"
-                    className="chat-row"
-                    onClick={() => onOpen(run.id)}
-                    {...(run.status === "needs_attention" && {
-                      "data-attention": "",
-                    })}
-                  >
-                    <span className="chat-row-mark">
-                      <RunMark status={run.status} />
-                    </span>
-                    <span className="chat-row-title">
-                      {run.ticket ? (
-                        <>
-                          <span className="auto-ref">
-                            {run.ticket.reference}
-                          </span>{" "}
-                          {run.ticket.title}
-                        </>
-                      ) : (
-                        "No ticket"
-                      )}
-                    </span>
-                    <time className="chat-row-time" dateTime={run.created_at}>
-                      {chatTime(run.created_at)}
-                    </time>
-                    <span className="chat-row-sub">
-                      <span>
-                        {run.status === "needs_attention" ? (
-                          <strong>{RUN_STATUS_LABELS[run.status]}</strong>
-                        ) : (
-                          RUN_STATUS_LABELS[run.status]
-                        )}
-                      </span>
-                      {run.reason && (
-                        <span title={run.reason}>{run.reason}</span>
-                      )}
-                    </span>
-                  </button>
-                </li>
+                <RunRow key={run.id} run={run} onOpen={onOpen} />
               ))}
             </ul>
           </section>
         ))}
       </div>
-      <p className="auto-list-foot">
-        Runs are kept for 90 days, on this desktop only.
-      </p>
+      <p className="auto-list-foot">{KEPT}</p>
     </>
   );
 }

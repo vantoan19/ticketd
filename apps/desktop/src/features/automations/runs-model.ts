@@ -109,3 +109,22 @@ export function runsByDay(runs: AutomationRun[], now = Date.now()): RunDay[] {
   }
   return days;
 }
+
+const NEED_GROUPS = [
+  ["Now", ["queued", "running"]],
+  ["Needs you", ["needs_attention"]],
+  ["Earlier", ["completed", "taken_over"]],
+] as const satisfies [string, AutomationRun["status"][]][];
+
+/**
+ * Runs under what they ask of the person: going now, waiting on them, or over.
+ * Each group keeps the order `runs` arrive in; an empty group is left out.
+ */
+export function runsByNeed<Run extends AutomationRun>(runs: Run[]) {
+  return NEED_GROUPS.map(([label, statuses]) => ({
+    label,
+    runs: runs.filter((run) =>
+      (statuses as readonly string[]).includes(run.status),
+    ),
+  })).filter((group) => group.runs.length > 0);
+}

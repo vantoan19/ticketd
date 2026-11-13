@@ -3,7 +3,11 @@ import type {
   AutomationRun,
   AutomationRunDetail,
 } from "@/features/automations/client";
-import { runsByDay, stepStates } from "@/features/automations/runs-model";
+import {
+  runsByDay,
+  runsByNeed,
+  stepStates,
+} from "@/features/automations/runs-model";
 
 /** An agent step with a failure path, then an If with a step on each path. */
 const BRANCHING = [
@@ -116,5 +120,32 @@ test("runs are grouped by the local day they started on, newest day first", () =
     ["Today", ["a", "b"]],
     ["Yesterday", ["c"]],
     ["Nov 11", ["d", "e"]],
+  ]);
+});
+
+test("every run is grouped by whether it is going, needs the person, or is over, in the order given", () => {
+  const of = (id: string, status: AutomationRun["status"]) => ({
+    ...run(id, "2026-11-14T10:00:00Z"),
+    status,
+  });
+
+  const groups = runsByNeed([
+    of("a", "completed"),
+    of("b", "queued"),
+    of("c", "needs_attention"),
+    of("d", "running"),
+    of("e", "taken_over"),
+  ]);
+
+  expect(
+    groups.map((group) => [group.label, group.runs.map((item) => item.id)]),
+  ).toEqual([
+    ["Now", ["b", "d"]],
+    ["Needs you", ["c"]],
+    ["Earlier", ["a", "e"]],
+  ]);
+  // A group with nothing in it is left out.
+  expect(runsByNeed([of("a", "completed")]).map((g) => g.label)).toEqual([
+    "Earlier",
   ]);
 });
