@@ -582,3 +582,25 @@ fn the_previous_format_gains_run_storage_without_losing_records() {
     triage(&mut workspace);
     assert_eq!(started(&mut workspace).status, AutomationRunStatus::Running);
 }
+
+#[test]
+fn an_automation_this_build_cannot_read_does_not_stop_the_others() {
+    let (dir, mut workspace) = workspace();
+    let unreadable = triage(&mut workspace);
+    let readable = triage(&mut workspace);
+    // As a newer ticketd on another device would leave it.
+    let db = rusqlite::Connection::open(dir.path().join("runs.sqlite3")).unwrap();
+    db.execute(
+        "UPDATE automations SET definition = json_set(definition, '$.schema_version', 99) WHERE id = ?1",
+        [&unreadable.id],
+    )
+    .unwrap();
+    drop(db);
+    let cursor = workspace.automation_cursor(&unreadable.id).unwrap();
+    tagged(&mut workspace, "Fix login");
+
+    assert_eq!(workspace.queue_automation_runs().unwrap(), 1);
+    assert_eq!(runs(&workspace, &readable).len(), 1);
+    // Its events wait for a build that can read it.
+    assert_eq!(workspace.automation_cursor(&unreadable.id).unwrap(), cursor);
+}

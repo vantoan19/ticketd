@@ -280,7 +280,13 @@ impl Workspace {
         };
         let mut created = 0;
         for (automation_id, mut cursor) in cursors {
-            let definition = crate::automations::one(&transaction, &automation_id)?.definition;
+            let definition = match crate::automations::one(&transaction, &automation_id) {
+                Ok(automation) => automation.definition,
+                // A definition this build cannot read (made by a newer ticketd) is
+                // left where it is, cursor and all, and the others still run.
+                Err(Error::InvalidAutomation(_)) => continue,
+                Err(error) => return Err(error),
+            };
             let snapshot = serde_json::to_string(&definition)?;
             loop {
                 let events = crate::events::after(&transaction, cursor, EVENT_BATCH)?;
