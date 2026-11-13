@@ -1,12 +1,13 @@
-//! What a run's Change ticket and Notify me steps do. A Change ticket step writes as
-//! the Automation, so its change starts no Automation; text is stored with field
-//! references and they are resolved here, when the step runs.
+//! What a run's Change ticket, Notify me and If steps do. A Change ticket step writes
+//! as the Automation, so its change starts no Automation; text is stored with field
+//! references and they are resolved here, when the step runs; an If reads the ticket
+//! when it runs.
 
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::automation_runs::AutomationRun;
-use crate::automations::{NotifyTarget, StepAction, StepChange};
+use crate::automations::{Check, NotifyTarget, StepAction, StepChange};
 use crate::events::{Acting, WorkspaceEventType};
 use crate::{Error, TicketPatch, Workspace};
 
@@ -133,6 +134,24 @@ impl Workspace {
         };
         crate::events::set_actor(&self.connection, own_actor)?;
         changed
+    }
+
+    /// Whether the run's ticket, as it is now, passes every check of the If step
+    /// `step_id`: Yes when it does, No otherwise.
+    pub fn automation_if_passes(&self, run_id: &str, step_id: &str) -> Result<bool, Error> {
+        let run = self.automation_run(run_id)?;
+        let Some(StepAction::If { checks, .. }) = run.step(step_id).map(|step| &step.action) else {
+            return Err(Error::AutomationRun("the step is not an If".into()));
+        };
+        let Some(ticket) = &run.ticket else {
+            return Err(Error::AutomationRun("the run has no ticket".into()));
+        };
+        let ticket = self.show_ticket(&ticket.reference)?;
+        Ok(checks.iter().all(|check| match check {
+            Check::Tag { tag, has } => ticket.tags.contains(tag) == *has,
+            Check::Status { status, is } => (ticket.status == *status) == *is,
+            Check::Project { project_id, is } => (ticket.project_id == *project_id) == *is,
+        }))
     }
 
     /// The notification the Notify me step `step_id` of a run shows, with the fields
