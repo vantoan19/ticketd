@@ -41,6 +41,12 @@ missing. `npm run desktop -- dev` manages its own frontend development server
 and uses the bridge that `npm run build` produced; `npm run desktop -- build`
 rebuilds both first.
 
+Agents hosted in a Chat reach records through the `ticketd` CLI. The app looks
+for it on PATH, then beside its own executable, then in the usual install
+folders, and gives the agent its absolute path. In development,
+`cargo build -p ticketd-cli` puts `target/debug/ticketd` beside the desktop
+executable, which is enough.
+
 ## Use a disposable workspace
 
 Normal application commands can create or migrate your real workspace. Set an
