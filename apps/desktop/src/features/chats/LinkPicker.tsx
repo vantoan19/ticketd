@@ -126,8 +126,8 @@ export function LinkPicker({
   const [results, setResults] = useState<LinkedRecord[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
-    // Search is by name: nothing is listed until something is typed.
-    if (!open || !query.trim()) return;
+    // Opened with nothing typed, the host lists recent records (LIVE-12).
+    if (!open) return;
     let current = true;
     client.searchRecords(query).then(
       (found) => {
@@ -142,7 +142,7 @@ export function LinkPicker({
     };
   }, [client, open, query]);
   const typed = query.trim() !== "";
-  const shown = (typed ? results : []).filter(
+  const shown = results.filter(
     (record) =>
       !linked.some(
         (known) => known.kind === record.kind && known.id === record.id,
@@ -194,7 +194,13 @@ export function LinkPicker({
               Search failed: {error}
             </p>
           )}
-          <ul className="chat-pick-results" aria-label="Results">
+          {!typed && shown.length > 0 && (
+            <p className="chat-picker-label">Recent</p>
+          )}
+          <ul
+            className="chat-pick-results"
+            aria-label={typed ? "Results" : "Recent"}
+          >
             {shown.map((record) => (
               <li key={`${record.kind}:${record.id}`}>
                 {/* A result row in the list, not a Button variant. */}

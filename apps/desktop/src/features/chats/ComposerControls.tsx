@@ -1,4 +1,11 @@
-import { useEffect, useState, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Check, ChevronDown, LoaderCircle, Shield } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { Button } from "@/components/ui/button";
@@ -42,6 +49,7 @@ import { HarnessMark } from "@/features/chats/HarnessMark";
 import {
   effortsOf,
   modelOf,
+  startOf,
   withModel,
   type Pick,
 } from "@/features/chats/harness-pick";
@@ -87,11 +95,13 @@ export function EffortGlyph({
 const NEXT_MESSAGE = "From your next message";
 /** The segment that leaves effort to the harness when it names no default. */
 const OWN = "";
+/** Rows shown before "More models": the default, the current one, then the harness's order. */
+const SHORT_LIST = 6;
 
 /** "Default (recommended)" reads as "Default" in the trigger; the menu says it all. */
 const shortName = (label: string) => label.replace(/\s*\([^)]*\)$/, "");
 
-/** The harnesses ticketd hosts, as a Chat's picker lists the ones it doesn't use. */
+/** The harnesses ticketd hosts. */
 const HARNESSES: PickerHarness[] = [
   { id: "claude-code", name: "Claude Code", ready: true },
   { id: "codex", name: "Codex", ready: true },
@@ -113,13 +123,65 @@ const pickerHarness = (status: HarnessStatus): PickerHarness => ({
   ready: status.usable,
 });
 
+type ModelRow = SettingOption & { runs_as?: string | null | undefined };
+
+const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * A row as the list names it: an alias row by the model it runs ("Opus 5.5",
+ * tagged Default), and no description that only repeats the name (LIVE-10).
+ */
+function rowOf(option: ModelRow) {
+  const name = option.runs_as ?? option.label;
+  const description = option.description ?? "";
+  const repeats =
+    squash(description).includes(squash(name)) ||
+    squash(description).includes(squash(option.label));
+  return {
+    name,
+    tagged: option.is_default || option.runs_as != null,
+    description: repeats ? "" : description,
+  };
+}
+
+/**
+ * The rows the list shows: a row that only repeats what an alias runs is
+ * hidden, and past six only the default, the current one and the first others
+ * in the harness's order show until "More models".
+ */
+function shortList(
+  models: ModelRow[],
+  current: string | null,
+  all: boolean,
+): { rows: ModelRow[]; more: number } {
+  const aliased = new Set(
+    models.flatMap((option) => (option.runs_as ? [option.runs_as] : [])),
+  );
+  const rows = models.filter(
+    (option) =>
+      option.id === current || option.runs_as || !aliased.has(option.label),
+  );
+  if (all || rows.length <= SHORT_LIST) return { rows, more: 0 };
+  const kept = new Set(
+    rows
+      .filter((option) => option.is_default || option.id === current)
+      .map((option) => option.id),
+  );
+  for (const option of rows) {
+    if (kept.size >= SHORT_LIST) break;
+    kept.add(option.id);
+  }
+  const shown = rows.filter((option) => kept.has(option.id));
+  return { rows: shown, more: rows.length - shown.length };
+}
+
 /**
  * The composer's one picker for harness, model and effort (#368, after T3
- * Code): the trigger shows the harness's mark, the model and the effort bars;
- * its popover lists the harnesses, the chosen harness's models with their
- * descriptions and a Default tag, and the model's efforts as one row. What it
- * lists is only what the harness reported. A Chat keeps its harness: the
- * others show, and say to start a new Chat. Cmd/Ctrl+Shift+M opens it.
+ * Code): the trigger shows the harness's mark, the model, the effort bars and
+ * its word; its popover has the harness tabs, the effort row, then the
+ * models. The popover keeps one height whatever the tab or loading state, so
+ * nothing moves under the pointer. A Chat keeps its harness: only its tab
+ * shows. Cmd/Ctrl+Shift+M opens it.
  */
 export function HarnessPicker({
   harnesses,
@@ -135,6 +197,7 @@ export function HarnessPicker({
   changeable,
   reason,
   empty,
+  loading = false,
   pending = false,
   note,
   notice,
@@ -147,7 +210,7 @@ export function HarnessPicker({
   locked: boolean;
   onHarness?: (id: string) => void;
   /** `runs_as` names what an alias row runs, for the trigger. */
-  models: (SettingOption & { runs_as?: string | null | undefined })[];
+  models: ModelRow[];
   /** The model in effect or picked; `null` is the one the harness marks default. */
   model: string | null;
   efforts: SettingOption[];
@@ -160,6 +223,8 @@ export function HarnessPicker({
   reason?: string | null | undefined;
   /** Why the harness listed no models: only its Default is offered. */
   empty?: string | null | undefined;
+  /** The harness is being asked for its models: skeleton rows hold the space. */
+  loading?: boolean;
   /** A change was sent and not yet answered: the spinner. */
   pending?: boolean;
   note?: string | null | undefined;
@@ -170,11 +235,13 @@ export function HarnessPicker({
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
   // New Chat hides its own copy of a harness's notice while the popover shows it.
   useEffect(() => onOpenChange?.(open), [open, onOpenChange]);
   const [viewed, setViewed] = useState(harnessId);
+  const tabList = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
       if (
         event.key.toLowerCase() === "m" &&
         event.shiftKey &&
@@ -197,18 +264,23 @@ export function HarnessPicker({
   // The trigger names what will run: an alias row by the model it runs.
   const modelLabel = shown
     ? (shown.runs_as ?? shortName(shown.label))
-    : "Default";
+    : loading
+      ? ""
+      : "Default";
   const effortLabel =
     efforts.find((option) => option.id === effortId)?.label ?? "";
   const name = [
     harness?.name,
-    `model ${modelLabel}`,
+    `model ${modelLabel || "Default"}`,
     effortLabel && `effort ${effortLabel}`,
   ]
     .filter(Boolean)
     .join(", ");
-  const tab = harnesses.find((item) => item.id === viewed) ?? harness;
-  const elsewhere = tab && tab.id !== harnessId;
+  // A Chat keeps its harness: only its own tab (STATIC-14).
+  const tabs = locked
+    ? harnesses.filter((item) => item.id === harnessId)
+    : harnesses;
+  const tab = tabs.find((item) => item.id === viewed) ?? harness;
   const segments = [
     ...(defaultEffort ? [] : [{ value: OWN, label: "Default" }]),
     ...efforts.map((option) => ({
@@ -217,13 +289,42 @@ export function HarnessPicker({
       disabled: !changeable || !option.allowed,
     })),
   ];
+  const { rows, more } = shortList(models, shown?.id ?? null, all);
+  const choose = (id: string) => {
+    setViewed(id);
+    if (!locked) onHarness?.(id);
+  };
+  // Left and Right move between harnesses, and choose the one they land on.
+  const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const index = tabs.findIndex((item) => item.id === tab?.id);
+    const next =
+      event.key === "ArrowRight"
+        ? (index + 1) % tabs.length
+        : event.key === "ArrowLeft"
+          ? (index - 1 + tabs.length) % tabs.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? tabs.length - 1
+              : -1;
+    const target = tabs[next];
+    if (!target) return;
+    event.preventDefault();
+    choose(target.id);
+    tabList.current
+      ?.querySelector<HTMLButtonElement>(`[data-harness="${target.id}"]`)
+      ?.focus();
+  };
 
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (next) setViewed(harnessId);
+        if (next) {
+          setViewed(harnessId);
+          setAll(false);
+        }
       }}
     >
       <PopoverTrigger asChild>
@@ -241,8 +342,15 @@ export function HarnessPicker({
             dim={harness ? !harness.ready : false}
             decorative
           />
-          <span className="chat-control-label">{modelLabel}</span>
+          {modelLabel ? (
+            <span className="chat-control-label">{modelLabel}</span>
+          ) : (
+            <span className="chat-skeleton chat-control-skeleton" aria-hidden />
+          )}
           {bars && <EffortGlyph {...bars} />}
+          {bars && effortLabel && (
+            <span className="chat-control-effort">{effortLabel}</span>
+          )}
           {pending ? (
             <LoaderCircle size={12} className="chat-spin" aria-hidden />
           ) : (
@@ -262,22 +370,23 @@ export function HarnessPicker({
       >
         <div className="chat-picker">
           <div
+            ref={tabList}
             className="chat-picker-harnesses"
             role="tablist"
             aria-label="Harness"
+            onKeyDown={onTabKey}
           >
-            {harnesses.map((item) => (
+            {tabs.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 role="tab"
+                data-harness={item.id}
                 className="chat-picker-harness"
                 aria-selected={item.id === tab?.id}
+                tabIndex={item.id === tab?.id ? 0 : -1}
                 data-dim={item.ready ? undefined : ""}
-                onClick={() => {
-                  setViewed(item.id);
-                  if (!locked) onHarness?.(item.id);
-                }}
+                onClick={() => choose(item.id)}
               >
                 <HarnessMark
                   harness={item.id}
@@ -291,72 +400,108 @@ export function HarnessPicker({
             ))}
           </div>
           <div className="chat-picker-body" role="tabpanel">
-            {elsewhere && locked ? (
-              <p className="chat-picker-note">
-                A Chat keeps its harness. Start a new Chat to use {tab.name}.
-              </p>
-            ) : tab && !tab.ready && notice ? (
+            {tab && !tab.ready && notice ? (
               notice(tab.id)
             ) : (
               <>
-                <p className="chat-picker-label" id="chat-picker-model">
-                  Model
-                </p>
-                <RadioGroup.Root
-                  className="chat-picker-models"
-                  aria-labelledby="chat-picker-model"
-                  value={shown?.id ?? OWN}
-                  onValueChange={onModel}
-                  disabled={!changeable}
-                >
-                  {models.length === 0 ? (
-                    <RadioGroup.Item value={OWN} className="chat-picker-model">
-                      <span className="chat-picker-model-line">
-                        <span>Default</span>
-                        <Check aria-hidden />
-                      </span>
-                      <small>
-                        {empty ?? `${harness?.name ?? "It"} chooses its model.`}
-                      </small>
-                    </RadioGroup.Item>
-                  ) : (
-                    models.map((option) => (
-                      <RadioGroup.Item
-                        key={option.id}
-                        value={option.id}
-                        disabled={!option.allowed}
-                        className="chat-picker-model"
-                      >
-                        <span className="chat-picker-model-line">
-                          <span>{option.label}</span>
-                          {/* Claude Code names its default row "Default" already. */}
-                          {option.is_default &&
-                            !option.label.startsWith("Default") && (
-                              <small>Default</small>
-                            )}
-                          {option.id === shown?.id && <Check aria-hidden />}
-                        </span>
-                        {option.description && (
-                          <small>{option.description}</small>
-                        )}
-                      </RadioGroup.Item>
-                    ))
-                  )}
-                </RadioGroup.Root>
-                {efforts.length > 0 && (
+                {(loading || efforts.length > 0) && (
                   <div className="chat-picker-effort">
                     <p className="chat-picker-label" id="chat-picker-effort">
                       Effort
                     </p>
-                    <SegmentedControl
-                      compact
-                      aria-labelledby="chat-picker-effort"
-                      value={effortId ?? OWN}
-                      onValueChange={(value) =>
-                        onEffort(value === OWN ? null : value)
-                      }
-                      options={segments}
-                    />
+                    {loading ? (
+                      <span
+                        className="chat-skeleton chat-picker-skeleton-row"
+                        aria-hidden
+                      />
+                    ) : (
+                      <SegmentedControl
+                        compact
+                        aria-labelledby="chat-picker-effort"
+                        value={effortId ?? OWN}
+                        onValueChange={(value) =>
+                          onEffort(value === OWN ? null : value)
+                        }
+                        options={segments}
+                      />
+                    )}
+                  </div>
+                )}
+                <p className="chat-picker-label" id="chat-picker-model">
+                  Model
+                </p>
+                {loading ? (
+                  <div
+                    className="chat-picker-models"
+                    role="status"
+                    aria-label={empty ?? "Asking for its models…"}
+                  >
+                    {[0, 1, 2].map((index) => (
+                      <span
+                        key={index}
+                        className="chat-skeleton chat-picker-skeleton-model"
+                        aria-hidden
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="chat-picker-models">
+                    <RadioGroup.Root
+                      className="chat-picker-model-list"
+                      aria-labelledby="chat-picker-model"
+                      value={shown?.id ?? OWN}
+                      onValueChange={onModel}
+                      disabled={!changeable}
+                    >
+                      {models.length === 0 ? (
+                        <RadioGroup.Item
+                          value={OWN}
+                          className="chat-picker-model"
+                        >
+                          <span className="chat-picker-model-line">
+                            <span>Default</span>
+                            <Check aria-hidden />
+                          </span>
+                          <small>
+                            {empty ??
+                              `${harness?.name ?? "It"} chooses its model.`}
+                          </small>
+                        </RadioGroup.Item>
+                      ) : (
+                        rows.map((option) => {
+                          const row = rowOf(option);
+                          return (
+                            <RadioGroup.Item
+                              key={option.id}
+                              value={option.id}
+                              disabled={!option.allowed}
+                              className="chat-picker-model"
+                            >
+                              <span className="chat-picker-model-line">
+                                <span>{row.name}</span>
+                                {row.tagged && <small>Default</small>}
+                                {option.id === shown?.id && (
+                                  <Check aria-hidden />
+                                )}
+                              </span>
+                              {row.description && (
+                                <small>{row.description}</small>
+                              )}
+                            </RadioGroup.Item>
+                          );
+                        })
+                      )}
+                    </RadioGroup.Root>
+                    {more > 0 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => setAll(true)}
+                      >
+                        More models ({more})
+                      </Button>
+                    )}
                   </div>
                 )}
                 {(reason ?? note) && (
@@ -387,7 +532,7 @@ function ReadOnly({
             type="button"
             variant="ghost"
             size="sm"
-            data-control=""
+            data-control="permission"
             readOnly
             aria-disabled="true"
           >
@@ -417,9 +562,9 @@ function OptionLine({ option }: { option: Option }) {
 }
 
 /**
- * The small Permissions trigger beside the picker. `value` null before a
- * session is the harness's own setting, offered as "Default". Full access is
- * never offered.
+ * The small Permissions trigger beside the picker. It always names the mode
+ * that applies ("Ask before edits"), never a bare "Default" (STATIC-13). Full
+ * access is never offered. Below a 460px composer only its shield shows.
  */
 function PermissionPicker({
   setting,
@@ -432,16 +577,18 @@ function PermissionPicker({
   setting: HarnessSetting;
   value: string | null;
   harness: string;
-  onChange: (value: string | null) => void;
+  onChange: (value: string) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
-  /** New Chat: no session yet, so "Default" leaves the harness's own setting. */
+  /** New Chat: no session yet, so no option is the session's own. */
   before?: boolean;
 }) {
-  const label = value ? labelOf(setting, value) : "Default";
+  const shown =
+    value ?? setting.options.find((option) => option.is_default)?.id ?? null;
+  const label = shown ? labelOf(setting, shown) : "Permissions";
   const face = (
     <>
       <Shield aria-hidden />
-      <span className="chat-control-label">{label}</span>
+      <span className="chat-control-label chat-permission-label">{label}</span>
     </>
   );
   if (!setting.changeable)
@@ -460,7 +607,7 @@ function PermissionPicker({
           type="button"
           variant="ghost"
           size="sm"
-          data-control=""
+          data-control="permission"
           aria-label={`Permissions: ${label}`}
         >
           {face}
@@ -481,25 +628,9 @@ function PermissionPicker({
         }}
       >
         <DropdownMenuLabel>Permissions</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={value ?? OWN}
-          onValueChange={(next) => onChange(next === OWN ? null : next)}
-        >
-          {before && (
-            <DropdownMenuRadioItem value={OWN}>
-              <OptionLine
-                option={{
-                  id: OWN,
-                  label: "Default",
-                  description: `As your ${harness} settings say`,
-                  is_default: false,
-                  allowed: true,
-                }}
-              />
-            </DropdownMenuRadioItem>
-          )}
+        <DropdownMenuRadioGroup value={shown ?? ""} onValueChange={onChange}>
           {setting.options
-            .filter((option) => option.allowed || option.id === value)
+            .filter((option) => option.allowed || option.id === shown)
             .map((option) => (
               <DropdownMenuRadioItem
                 key={option.id}
@@ -524,8 +655,9 @@ function PermissionPicker({
 /**
  * A Chat's control row: the picker on its harness, whose models and efforts
  * are what the live session reported, and Permissions. Before the session
- * reports, the picker shows the harness and says so. A choice applies from the
- * next message; while it is pending the chevron is a spinner and the value
+ * reports, a Chat started here shows what New Chat started it with, so the
+ * triggers do not change as the session starts (LIVE-6). A choice applies from
+ * the next message; while it is pending the chevron is a spinner and the value
  * shown is the one in effect.
  */
 export function ComposerControls({
@@ -539,26 +671,39 @@ export function ComposerControls({
 }) {
   const model = chat.settings?.model;
   const effort = chat.settings?.effort;
-  const permission = chat.settings?.permission;
+  const reported = chat.settings?.permission;
+  const start = model || effort ? undefined : startOf(chat.id);
+  const permission =
+    reported ??
+    (start?.pick.permission && start.options.permission
+      ? {
+          ...start.options.permission,
+          current: start.pick.permission,
+          changeable: false,
+          reason: `From ${chat.harness.name}'s first message`,
+        }
+      : null);
   const held =
     changeHeld(model) || changeHeld(effort) || changeHeld(permission);
-  // The others only say to start a new Chat, so their state is not asked for.
   const tabs = [
     { id: chat.harness.id, name: chat.harness.name, ready: true },
     ...HARNESSES.filter((item) => item.id !== chat.harness.id),
   ];
   const changeable = Boolean(model?.changeable || effort?.changeable);
   const permissionId = permission ? shownOf(permission) : null;
+  const starting = `${chat.harness.name} lists its models once the Chat's session starts.`;
   return (
     <div className="chat-controls" role="group" aria-label="Harness settings">
       <HarnessPicker
         harnesses={tabs}
         harnessId={chat.harness.id}
         locked
-        models={model?.options ?? []}
-        model={model ? shownOf(model) : null}
-        efforts={effort?.options ?? []}
-        effort={effort ? shownOf(effort) : null}
+        models={model?.options ?? start?.options.models ?? []}
+        model={model ? shownOf(model) : (start?.pick.model ?? null)}
+        efforts={
+          effort?.options ?? (start ? effortsOf(start.options, start.pick) : [])
+        }
+        effort={effort ? shownOf(effort) : (start?.pick.effort ?? null)}
         onModel={(id) => onChange("model", id)}
         onEffort={(id) => id && onChange("effort", id)}
         changeable={changeable}
@@ -569,7 +714,7 @@ export function ComposerControls({
               : (model?.reason ??
                 effort?.reason ??
                 `Set in ${chat.harness.name}'s settings`)
-            : `${chat.harness.name} lists its models once the Chat's session starts.`
+            : starting
         }
         empty={
           model ? null : `${chat.harness.name} hasn't reported its model yet.`
@@ -584,7 +729,7 @@ export function ComposerControls({
           setting={permission}
           value={permissionId}
           harness={chat.harness.name}
-          onChange={(value) => value && onChange("permission", value)}
+          onChange={(value) => onChange("permission", value)}
           inputRef={inputRef}
         />
       )}
@@ -595,7 +740,9 @@ export function ComposerControls({
 /**
  * New Chat's control row, before any session: the picker over every harness,
  * with the models, efforts and permission modes each one reported to the host.
- * A harness that reported none offers only its Default and says so.
+ * A harness that reported none offers only its Default and says so. Before the
+ * harnesses are known (`harnessId` null) the row holds its place with a
+ * disabled picker, so nothing moves when they arrive (LIVE-11).
  */
 export function NewChatControls({
   harnesses,
@@ -609,7 +756,7 @@ export function NewChatControls({
   inputRef,
 }: {
   harnesses: HarnessStatus[];
-  harnessId: string;
+  harnessId: string | null;
   onHarness: (id: string) => void;
   /** What the chosen harness reported; `undefined` while it is being asked. */
   options: HarnessOptions | undefined;
@@ -619,9 +766,27 @@ export function NewChatControls({
   onOpenChange?: (open: boolean) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
+  if (!harnessId)
+    return (
+      <div className="chat-controls" role="group" aria-label="Harness settings">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-control="model"
+          disabled
+          aria-label="Checking which harnesses are installed…"
+        >
+          <span className="chat-skeleton chat-control-mark" aria-hidden />
+          <span className="chat-skeleton chat-control-skeleton" aria-hidden />
+          <ChevronDown aria-hidden />
+        </Button>
+      </div>
+    );
   const harness = harnesses.find((item) => item.id === harnessId);
   const name = harness?.name ?? harnessId;
   const permission = options?.permission;
+  const loading = !options && Boolean(harness?.usable);
   return (
     <div className="chat-controls" role="group" aria-label="Harness settings">
       <HarnessPicker
@@ -636,6 +801,7 @@ export function NewChatControls({
         onModel={(id) => onPick(withModel(options, pick, id))}
         onEffort={(id) => onPick({ ...pick, effort: id })}
         changeable={Boolean(options?.models.length)}
+        loading={loading}
         empty={
           options
             ? `${name} didn't list its models${options.unavailable ? `: ${options.unavailable.replace(/\.$/, "")}` : ""}. It uses its default.`

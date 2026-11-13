@@ -127,8 +127,9 @@ export function Composer({
           else if (state.enabled) submit(primary);
         }}
       />
-      {/* The harness's own controls lead; short of room, the end group wraps
-          to a second line, still at the end. */}
+      {/* The harness's own controls lead and give up width first; the row
+          never wraps, so the composer keeps one height as a turn starts and
+          ends (STATIC-6). */}
       <div className="chat-composer-row">
         {leading}
         <div className="chat-composer-end">
@@ -136,15 +137,19 @@ export function Composer({
           {onStop && (
             <IconButton
               type="button"
-              variant="outline"
+              variant="ghost"
               label="Stop"
               shortcut="Esc"
               aria-keyshortcuts="Escape"
               disabled={stopping}
               onClick={onStop}
             >
-              {/* Filled, the stop sign does not read as an empty checkbox. */}
-              <Square fill="currentColor" aria-hidden />
+              {/* Filled and small, the stop sign does not read as a checkbox. */}
+              <Square
+                className="chat-stop-mark"
+                fill="currentColor"
+                aria-hidden
+              />
             </IconButton>
           )}
           <SendButton
