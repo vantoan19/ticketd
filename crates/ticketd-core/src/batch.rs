@@ -93,7 +93,11 @@ impl Workspace {
                 .execute_batch("ROLLBACK TO batch; RELEASE batch");
             return Err(error);
         }
-        let result = self.apply_batch_inner(operations, follow_created);
+        let result = crate::events::head(&self.connection).and_then(|logged| {
+            let tickets = self.apply_batch_inner(operations, follow_created)?;
+            crate::events::fold_into_creation(&self.connection, logged)?;
+            Ok(tickets)
+        });
         match result {
             Ok(tickets) => {
                 if let Err(error) = self.connection.execute_batch("RELEASE batch") {

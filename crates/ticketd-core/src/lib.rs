@@ -98,6 +98,7 @@ pub use attachments::{
 };
 mod change_token;
 mod chats;
+mod events;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
 };
@@ -111,12 +112,13 @@ pub use chats::{
     ChatSubmissionAttempt, ChatSubmissionIntent, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
     NewChat,
 };
+pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Readiness, Status};
 pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 66;
+pub const FORMAT_VERSION: i64 = 67;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -916,6 +918,9 @@ impl Workspace {
         }
         if version < 66 {
             chats::migrate(&transaction)?;
+        }
+        if version < 67 {
+            events::migrate(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

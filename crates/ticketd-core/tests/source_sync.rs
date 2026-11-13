@@ -1930,3 +1930,67 @@ fn lifecycle_events_compare_instants_not_timestamp_text() {
     );
     assert!(f.conversation(1).iter().any(|entry| matches!(entry, ConversationEntry::Event { id, event, .. } if id == "close" && event == "closed_completed")));
 }
+
+#[test]
+fn the_first_import_logs_no_workspace_events_and_later_inbound_changes_log_as_sync() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    assert_eq!(f.workspace.workspace_events_after(0, 100).unwrap(), []);
+
+    f.publish(issue(1, "Retitled"), true);
+    f.set_state(1, closed(ClosureReason::Completed));
+    f.publish(issue(2, "Arrived later"), true);
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    let events = f.workspace.workspace_events_after(0, 100).unwrap();
+    assert!(
+        events
+            .iter()
+            .all(|event| event.actor == WorkspaceActor::Sync),
+        "{events:?}"
+    );
+    let of = |number: u32| {
+        let id = f.ticket(number).id;
+        events
+            .iter()
+            .filter(|event| event.ticket_id == id)
+            .map(|event| (event.kind, event.previous.clone(), event.current.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        of(1),
+        [
+            (
+                WorkspaceEventType::TicketUpdated,
+                Some(json!({"title": "Original", "body": "Body of Original"})),
+                Some(json!({"title": "Retitled", "body": "Body of Retitled"}))
+            ),
+            (
+                WorkspaceEventType::TicketStatusChanged,
+                Some(json!({"status": "Todo"})),
+                Some(json!({"status": "Done"}))
+            ),
+        ]
+    );
+    assert_eq!(
+        of(2),
+        [(
+            WorkspaceEventType::TicketCreated,
+            None,
+            Some(json!({
+                "title": "Arrived later", "body": "Body of Arrived later", "status": "Todo",
+                "project_id": null, "plan_id": null,
+            }))
+        )]
+    );
+
+    // The refresh's actor does not outlive it: the same connection writes as a person again.
+    let head = f.workspace.workspace_event_head().unwrap();
+    f.workspace.add_tag("T-KQ2", "backend").unwrap();
+    let after = f.workspace.workspace_events_after(head, 100).unwrap();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].actor, WorkspaceActor::Person);
+}
