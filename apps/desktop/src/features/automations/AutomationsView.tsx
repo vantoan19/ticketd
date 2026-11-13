@@ -173,6 +173,11 @@ export function AutomationsView() {
       putAutomation(saved);
       setError("");
     }, fail);
+  const stopAndTurnOff = (id: string) =>
+    automationsClient.stopAndTurnOff(id).then((saved) => {
+      putAutomation(saved);
+      setError("");
+    }, fail);
   const deleteAutomation = (id: string) =>
     automationsClient.deleteAutomation(id).then(() => {
       setAutomations((current) => current?.filter((a) => a.id !== id) ?? null);
@@ -313,6 +318,7 @@ export function AutomationsView() {
       {...paneProps}
       onChange={(definition) => saveAutomation(openAutomation.id, definition)}
       onSetEnabled={(enabled) => void setEnabled(openAutomation.id, enabled)}
+      onStopAndTurnOff={() => void stopAndTurnOff(openAutomation.id)}
       onDelete={() => void deleteAutomation(openAutomation.id)}
       onCreateAgent={() =>
         addAgent().catch((reason: unknown) => {

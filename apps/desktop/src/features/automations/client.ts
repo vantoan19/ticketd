@@ -149,6 +149,29 @@ export const automationsClient = {
       await invoke("automation_set_enabled", { id, enabled }),
     );
   },
+  /**
+   * "Stop it and turn off": off for this device, with its runs in progress
+   * ended as Needs attention.
+   */
+  async stopAndTurnOff(id: string): Promise<Automation> {
+    return automationSchema.parse(
+      await invoke("automation_stop_and_turn_off", { id }),
+    );
+  },
+  /** How many runs execute at once on this desktop. */
+  async runsAtOnce(): Promise<number> {
+    return limitSchema.parse(await invoke("automation_runs_at_once"));
+  },
+  async setRunsAtOnce(runs: number): Promise<void> {
+    await invoke("set_automation_runs_at_once", { runs });
+  },
+  /** Whether the system starts ticketd when the person signs in. */
+  async startsAtLogin(): Promise<boolean> {
+    return z.boolean().parse(await invoke("start_at_login"));
+  },
+  async setStartsAtLogin(enabled: boolean): Promise<void> {
+    await invoke("set_start_at_login", { enabled });
+  },
   /** An Automation's runs on this desktop, newest first. */
   async runs(automationId: string): Promise<AutomationRun[]> {
     return z

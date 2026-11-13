@@ -104,10 +104,17 @@
   white-space: nowrap;
 }
 .auto-on {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   margin: 0 8px;
+}
+/* Where the turn-off menu opens: over the switch and its label, never clicked. */
+.auto-on-anchor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 /* --- The editor: the canvas beside the step panel. --- */
