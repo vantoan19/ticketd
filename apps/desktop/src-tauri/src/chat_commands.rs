@@ -488,6 +488,22 @@ pub fn chat_open_file(
         .map_err(|error| open_failure(&path, &error.to_string()))
 }
 
+/// Opens the Chat's own folder in the file manager (Finder, File Explorer, Files).
+#[tauri::command]
+pub fn chat_open_folder(
+    app: AppHandle,
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+) -> Outcome<()> {
+    let path = bridge.chats.folder(&chat_id)?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|error| ChatFailure {
+            code: "failed",
+            message: format!("Couldn't open the folder: {error}"),
+        })
+}
+
 /// "Couldn't open limiter.ts. No app on this computer opens .ts files."
 fn open_failure(path: &std::path::Path, error: &str) -> ChatFailure {
     let name = path.file_name().map_or_else(

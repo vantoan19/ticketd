@@ -268,7 +268,19 @@ export function createMockChatClient(
     return chatSummarySchema.parse({
       id: chat.id,
       title: chat.title,
+      harness_id: chat.harness.id,
       harness_name: chat.harness.name,
+      project:
+        chat.folder.project ??
+        chat.links
+          .filter((link) => link.kind === "project")
+          .map(({ id, title }) => ({ id, title }))[0] ??
+        null,
+      tickets: chat.links.flatMap((link) =>
+        link.kind === "ticket"
+          ? [{ reference: link.reference, status: link.status }]
+          : [],
+      ),
       // As the host: a managed folder's name is an id, so the row leaves it out.
       folder_name:
         chat.folder.missing || chat.folder.managed ? null : chat.folder.name,
@@ -676,6 +688,9 @@ export function createMockChatClient(
         },
       });
       return change;
+    },
+    async openFolder(id) {
+      client.openedFiles.push(get(id).chat.folder.path);
     },
     async openFile(id, path) {
       // As the host: only inside the Chat's folder, relative or absolute.

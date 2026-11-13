@@ -281,6 +281,7 @@ export function createHostChatClient(
         await call("chat_change_setting", { chatId: id, setting, value }),
       ),
     openFile: (id, path) => run("chat_open_file", { chatId: id, path }),
+    openFolder: (id) => run("chat_open_folder", { chatId: id }),
     saveAsDocument: async (id, responseId, title) =>
       z.string().parse(
         await call("chat_save_as_document", {

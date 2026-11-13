@@ -17,6 +17,7 @@ use ticketd_core::{
 };
 
 use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
+use crate::folder_probe::Branch;
 use crate::step_kind::{self, Kind, Variant};
 
 pub const HARNESSES: [(&str, &str); 2] = [("claude-code", "Claude Code"), ("codex", "Codex")];
@@ -252,6 +253,49 @@ pub struct Folder {
     pub managed: bool,
     pub missing: bool,
     pub shared_with: Vec<String>,
+    /// The git branch checked out in the folder, read now; `None` outside a repository.
+    pub branch: Option<BranchView>,
+    /// The Project whose folder holds the Chat's, else the first linked Project.
+    pub project: Option<ProjectRef>,
+}
+
+/// `branch` (with its name), `detached` (with the short commit) or `unreadable`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BranchView {
+    pub kind: &'static str,
+    pub name: Option<String>,
+}
+
+impl From<&Branch> for BranchView {
+    fn from(branch: &Branch) -> Self {
+        match branch {
+            Branch::Named(name) => Self {
+                kind: "branch",
+                name: Some(name.clone()),
+            },
+            Branch::Detached(commit) => Self {
+                kind: "detached",
+                name: Some(commit.clone()),
+            },
+            Branch::Unreadable => Self {
+                kind: "unreadable",
+                name: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProjectRef {
+    pub id: String,
+    pub title: String,
+}
+
+/// A linked ticket as a list row's context item names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TicketRef {
+    pub reference: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -305,9 +349,14 @@ pub struct ChatState {
 pub struct Summary {
     pub id: String,
     pub title: String,
+    pub harness_id: String,
     pub harness_name: String,
     pub folder_name: Option<String>,
     pub first_ticket: Option<String>,
+    /// The Chat's Project, as the header names its folder's Project.
+    pub project: Option<ProjectRef>,
+    /// The linked tickets, in link order.
+    pub tickets: Vec<TicketRef>,
     pub retention: &'static str,
     pub activity: &'static str,
     pub needs_you: bool,
@@ -342,6 +391,9 @@ pub struct Surroundings {
     pub shared_with: Vec<String>,
     pub links: Vec<LinkedRecord>,
     pub queue: Vec<Queued>,
+    pub project: Option<ProjectRef>,
+    /// Read only for an open Chat; list rows do not show it.
+    pub branch: Option<Branch>,
     /// The failed turn after which the person checked the harness again and it was
     /// usable; its failure is no longer told as a problem.
     pub checked_turn: Option<String>,
@@ -1291,6 +1343,8 @@ pub fn chat_state(
             managed: chat.folder_managed,
             missing: around.folder_missing,
             shared_with: around.shared_with.clone(),
+            branch: around.branch.as_ref().map(BranchView::from),
+            project: around.project.clone(),
         },
         retention: retention(chat),
         activity,
@@ -1373,6 +1427,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
     Summary {
         id: chat.id.clone(),
         title: title(chat),
+        harness_id: chat.harness.clone(),
         harness_name: harness.to_owned(),
         // A managed folder is named by an id and never shared: the row leaves it out.
         folder_name: (!around.folder_missing && !chat.folder_managed)
@@ -1381,6 +1436,20 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             LinkedRecord::Ticket { reference, .. } => Some(reference.clone()),
             LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,
         }),
+        project: around.project.clone(),
+        tickets: around
+            .links
+            .iter()
+            .filter_map(|link| match link {
+                LinkedRecord::Ticket {
+                    reference, status, ..
+                } => Some(TicketRef {
+                    reference: reference.clone(),
+                    status: status.clone(),
+                }),
+                LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,
+            })
+            .collect(),
         retention: retention(chat),
         activity,
         needs_you: status.rank.waits(),

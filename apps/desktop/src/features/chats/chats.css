@@ -117,6 +117,39 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* One context item: the first ticket's status icon, reference and "+N", or
+   the Project's icon and name. */
+.chat-row-sub > .chat-row-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-row-context > svg {
+  flex: none;
+}
+.chat-row-context-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The harness's official mark, 14px in a 16px box (#368). */
+.harness-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.harness-mark svg {
+  fill: currentColor;
+}
+.harness-mark > svg[class*="lucide"] {
+  fill: none;
+}
+.harness-mark[data-dim] {
+  color: var(--disabled-foreground);
+}
 /* Line 2: the dot or spinner, the status word, then the detail, which truncates first. */
 .chat-status {
   display: flex;
@@ -179,10 +212,59 @@
 /* A narrow pane keeps the header on one line: the trigger keeps its chevron
    and accessible name, as the ticket header keeps the reminder's bell. */
 @container ticket-detail (max-width: 460px) {
-  .chat-pane .detail-title-group > button {
+  .chat-pane .detail-title-group > button:not([data-context]) {
     flex: none;
   }
-  .chat-pane .detail-title-group > button > span {
+  .chat-pane .detail-title-group > button:not([data-context]) > span {
+    display: none;
+  }
+}
+/* The header's one context button (#368) sits before the actions and alone
+   shortens: the branch in the middle first, then it moves into the popover
+   below 600px; below 460px only the icon, the shared count and the chevron. */
+.chat-head-mark {
+  color: var(--foreground);
+}
+.chat-pane .detail-title-group > [data-context] {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+.chat-context-name,
+.chat-context-missing {
+  flex: none;
+}
+.chat-context-missing {
+  color: var(--foreground);
+}
+.chat-context-branch,
+.chat-context-shared {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 6px;
+}
+.chat-context-shared {
+  flex: none;
+}
+.chat-context-branch > .chat-mono {
+  min-width: 8ch;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container ticket-detail (max-width: 599px) {
+  .chat-context-branch {
+    display: none;
+  }
+}
+@container ticket-detail (max-width: 459px) {
+  .chat-context-name,
+  .chat-context-missing {
     display: none;
   }
 }
@@ -648,12 +730,80 @@ button.chat-file:focus-visible,
    pinned at the end and never collapse. */
 .chat-composer-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
 }
-.chat-composer-row .chat-spacer {
+.chat-composer-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+/* The model and permission triggers (#368). Below a 420px composer the model
+   keeps its name and drops the bars; Permissions always keeps its label. */
+.chat-controls {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.chat-controls > [data-control] {
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+.chat-controls > [data-control="model"] {
+  flex-shrink: 1;
+  min-width: 0;
+}
+.chat-control-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.effort-glyph rect {
+  fill: var(--disabled-foreground);
+}
+.effort-glyph rect[data-on] {
+  fill: var(--foreground);
+}
+@container (max-width: 419px) {
+  [data-control] .effort-glyph {
+    display: none;
+  }
+}
+.chat-pick-option {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-pick-option-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+.chat-pick-option-line small,
+.chat-pick-option-note,
+.chat-pick-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-pick-option-line small {
+  margin-left: auto;
+}
+.effort-glyph-slot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.chat-pick-note {
+  padding: 6px 8px;
 }
 .chat-send {
   display: flex;
@@ -879,6 +1029,62 @@ button.chat-file:focus-visible,
   letter-spacing: -0.6px;
   text-align: center;
 }
+/* New Chat's harness choice: 48px radio rows (#368). */
+.chat-harnesses {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-harness {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: left;
+}
+.chat-harness:hover {
+  background: var(--recessed);
+}
+.chat-harness:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.chat-harness-radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1.5px var(--control-boundary);
+}
+/* aria-checked: the tooltip trigger takes over data-state. */
+.chat-harness[aria-checked="true"] .chat-harness-radio {
+  box-shadow: inset 0 0 0 4px var(--ring);
+}
+.chat-harness-name {
+  flex: 1;
+  min-width: 0;
+}
+.chat-harness-word {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-harness-checking {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-align: center;
+}
 .chat-chips {
   display: flex;
   flex-wrap: wrap;
@@ -893,15 +1099,56 @@ button.chat-file:focus-visible,
 }
 .chat-linked > div {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   width: 100%;
   max-width: 600px;
   margin: 0 auto;
 }
+/* One line of chips: those that wrap below it are clipped and counted into
+   "N more". The inset keeps focus rings inside the clip. */
+.chat-linked-line {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  height: 36px;
+  margin: -4px;
+  padding: 4px;
+  overflow: hidden;
+}
+.chat-linked-all {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-linked-all h3 {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+}
+.chat-linked-all ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-linked-all .chat-chip {
+  display: flex;
+  max-width: none;
+}
+.chat-linked-all .chat-chip > button:last-child {
+  position: static;
+  opacity: 1;
+}
 .chat-chip {
+  position: relative;
   display: inline-flex;
+  flex: none;
   align-items: center;
   max-width: 280px;
   height: 28px;
@@ -919,18 +1166,31 @@ button.chat-file:focus-visible,
   gap: 6px;
   min-width: 0;
   height: 100%;
-  padding: 0 4px 0 8px;
+  padding: 0 8px;
   border-radius: var(--radius);
 }
+/* Remove shows on hover or focus, over the chip's end. */
 .chat-chip > button:last-child {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: none;
   width: 24px;
   height: 100%;
   border-radius: var(--radius);
+  background: var(--surface);
   color: var(--muted-foreground);
+  opacity: 0;
+}
+.chat-chip:hover > button:last-child,
+.chat-chip:focus-within > button:last-child {
+  opacity: 1;
+}
+.chat-chip > button:last-child:hover {
+  background: var(--accent);
+  color: var(--foreground);
 }
 .chat-chip button:focus-visible {
   outline: none;
@@ -944,12 +1204,60 @@ button.chat-file:focus-visible,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Every value wraps: a long path or harness report never runs past the edge (#307). */
 .chat-pop {
   display: flex;
   flex-direction: column;
   gap: 16px;
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
+  overflow-wrap: anywhere;
+}
+.chat-pop-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--foreground);
+}
+.chat-pop-line > svg,
+.chat-pop-line > .harness-mark {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.chat-pop-truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-pop-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.chat-pop-path > .path-text {
+  flex: 1;
+  min-width: 0;
+}
+.chat-pop-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.chat-pop-status > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-pop code {
+  color: var(--foreground);
 }
 .chat-pop section {
   display: flex;

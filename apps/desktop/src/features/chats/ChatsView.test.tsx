@@ -549,13 +549,9 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   );
   expect(screen.getAllByText("Drafted the copy.").length).toBeGreaterThan(0);
   expect(screen.queryByLabelText("Message Codex")).toBeNull();
-  expect(button("Harness and folder").textContent).toBe(
-    "Codex · reset-email (missing)",
+  expect(button("Folder reset-email, missing").textContent).toBe(
+    "reset-emailmissing",
   );
-  // The folder name is what shortens; the marker never is (U23).
-  const marker = within(button("Harness and folder")).getByText("(missing)");
-  expect(marker.closest(".truncate")).toBeNull();
-  expect(marker.className).toContain("shrink-0");
   // The path reads like the folder popover's: one line, not a code block.
   const notice = screen.getByRole("alert");
   expect(within(notice).getByTitle("~/ticketd/chats/reset-email")).toBeTruthy();
@@ -564,7 +560,7 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   client.nextFolder = "~/code/emails";
   fireEvent.click(button("Pick another folder…"));
   expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
-  expect(button("Harness and folder").textContent).toBe("Codex · emails");
+  expect(button("Folder emails").textContent).toBe("emails");
 });
 
 test("lost native history resumes the same Chat in a fresh session with chosen history", async () => {
@@ -710,7 +706,12 @@ test("the list says which Chats need the person, in words as well as the dot", a
   expect(waiting.textContent).toContain(
     "Approval needed\u00a0· npm install @pagerduty/pdjs",
   );
-  expect(waiting.textContent).toContain("T-13 · web-app");
+  // One context item: the first ticket, not the folder (#368).
+  expect(waiting.textContent).toContain("T-13");
+  expect(waiting.textContent).not.toContain("web-app");
+  expect(waiting.getAttribute("aria-current")).toBe("true");
+  // Read in order: title, harness, status, context.
+  expect(waiting.textContent?.startsWith("Alert on-call, Codex,")).toBe(true);
   expect(waiting.getAttribute("aria-current")).toBe("true");
   expect(waiting.hasAttribute("data-attention")).toBe(true);
   const working = rows.getByRole("button", { name: /^Limiter/ });
@@ -1186,9 +1187,20 @@ test("a response is saved as a Document only when asked", async () => {
   expect(client.savedDocuments).toEqual(["Login rate limiter"]);
 });
 
+/** With no links there is no chip row: the Chat actions menu links one. */
+const linkFromMenu = async () => {
+  openMenu("Chat actions");
+  fireEvent.click(
+    await screen.findByRole("menuitem", {
+      name: "Link a ticket, Document or Project…",
+    }),
+  );
+};
+
 test("records are linked by title and unlinked from their chip", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
-  fireEvent.click(button("Link a ticket, Document or Project"));
+  expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull();
+  await linkFromMenu();
   fireEvent.change(
     await screen.findByLabelText("Search tickets, Documents and Projects"),
     { target: { value: "wait" } },
@@ -1208,26 +1220,48 @@ test("records are linked by title and unlinked from their chip", async () => {
     }),
   );
   await waitFor(() =>
-    expect(links.queryByRole("button", { name: /Open T-14/ })).toBeNull(),
+    expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull(),
   );
 });
 
-test("the folder popover names the other Chats sharing the folder", async () => {
-  await open(
+test("the context popover holds the harness, folder, branch and the other Chats sharing the folder", async () => {
+  const client = await open(
     one({
       id: "c1",
       title: "Limiter",
       harness: { permissions: "Uses your Codex settings." },
-      folder: { shared_with: ["Alert on-call"] },
+      folder: {
+        shared_with: ["Alert on-call"],
+        branch: { kind: "branch", name: "rate-limit-logins" },
+        project: { id: "p1", title: "Web App" },
+      },
     }),
   );
-  fireEvent.click(button("Harness and folder"));
-  const popover = await screen.findByRole("dialog", {
-    name: "Harness and folder",
-  });
+  client.setHarnesses([
+    {
+      id: "codex",
+      name: "Codex",
+      status: "ready",
+      version: "0.167.2",
+      path: "/usr/local/bin/codex",
+    },
+  ]);
+  const context = button(
+    "Folder web-app, branch rate-limit-logins, Project Web App, used by 1 other Chat",
+  );
+  // The Project's letter tile, the folder, the branch, the shared count.
+  expect(context.textContent).toBe("Wweb-apprate-limit-logins1");
+  fireEvent.click(context);
+  const popover = await screen.findByRole("dialog", { name: "Chat context" });
+  expect(await within(popover).findByText("Signed in")).toBeTruthy();
+  expect(popover.textContent).toContain("0.167.2 · /usr/local/bin/codex");
   expect(popover.textContent).toContain("~/code/web-app");
-  expect(popover.textContent).toContain("Also used by Alert on-call");
-  expect(popover.textContent).toContain("Uses your Codex settings.");
+  expect(popover.textContent).toContain("Other Chats hereAlert on-call");
+  expect(popover.textContent).toContain("ProjectWWeb App");
+  // The harness's own settings sentence is #367's, not this popover's (#307).
+  expect(popover.textContent).not.toContain("Uses your Codex settings.");
+  fireEvent.click(within(popover).getByRole("button", { name: /^Open in / }));
+  await waitFor(() => expect(client.openedFiles).toEqual(["~/code/web-app"]));
 });
 
 test("after reopening the window the view says it is catching up while work continues", async () => {
@@ -1395,7 +1429,7 @@ test("New Chat says how the harness is signed in before the first message is sen
 
 test("a Project is linked like a ticket or Document and has no page to open", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
-  fireEvent.click(button("Link a ticket, Document or Project"));
+  await linkFromMenu();
   fireEvent.change(
     await screen.findByLabelText("Search tickets, Documents and Projects"),
     { target: { value: "store" } },
@@ -1411,7 +1445,9 @@ test("a Project is linked like a ticket or Document and has no page to open", as
       name: "Remove the link to the Project Storefront",
     }),
   );
-  await waitFor(() => expect(links.queryByText("Storefront")).toBeNull());
+  await waitFor(() =>
+    expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull(),
+  );
 });
 
 test("a managed folder reads as the ticketd folder, and its path has no verbatim prefix", async () => {
@@ -1426,16 +1462,12 @@ test("a managed folder reads as the ticketd folder, and its path has no verbatim
       },
     }),
   );
-  expect(button("Harness and folder").textContent).toBe(
-    "Codex · ticketd folder",
-  );
+  expect(button("Folder ticketd folder").textContent).toBe("ticketd folder");
   expect(screen.getByRole("list", { name: "Chats" }).textContent).not.toContain(
     "f4f684bc",
   );
-  fireEvent.click(button("Harness and folder"));
-  const popover = await screen.findByRole("dialog", {
-    name: "Harness and folder",
-  });
+  fireEvent.click(button("Folder ticketd folder"));
+  const popover = await screen.findByRole("dialog", { name: "Chat context" });
   expect(popover.textContent).toContain(String.raw`C:\ws`);
   expect(popover.textContent).not.toContain("?");
 });
@@ -1461,23 +1493,133 @@ test("an incompatible harness notice keeps the full stop with the path", async (
 
 test("the link picker asks for a name before it lists anything", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
-  fireEvent.click(button("Link a ticket, Document or Project"));
+  await linkFromMenu();
   expect(
     await screen.findByText("Type part of a name to find it."),
   ).toBeTruthy();
   expect(screen.queryByText("Nothing left to link.")).toBeNull();
 });
 
-test("New Chat says it is checking the harnesses until the probe answers", async () => {
-  await open([]);
+test("New Chat says it is checking the harnesses until the probe answers, then offers each as a radio", async () => {
+  const client = await open([]);
+  client.setHarnesses([
+    { id: "claude-code", name: "Claude Code", status: "ready" },
+    {
+      id: "codex",
+      name: "Codex",
+      status: "not_signed_in",
+      command: "codex login",
+    },
+  ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   expect(
-    screen.getByRole("button", {
-      name: "Harness: checking which are installed",
-    }).textContent,
-  ).toBe("Checking…");
+    screen
+      .getByText("Checking which harnesses are installed…")
+      .getAttribute("role"),
+  ).toBe("status");
+  const group = await screen.findByRole("radiogroup", { name: "Harness" });
+  const ready = within(group).getByRole("radio", { name: "Claude Code" });
+  expect(ready.getAttribute("aria-checked")).toBe("true");
+  // A harness that isn't ready says so in one word; its notice holds the actions.
+  const codex = within(group).getByRole("radio", {
+    name: "Codex, Not signed in",
+  });
+  fireEvent.click(codex);
+  expect(codex.getAttribute("aria-checked")).toBe("true");
   expect(
-    (await screen.findByRole("button", { name: "Harness: Claude Code" }))
-      .textContent,
-  ).toBe("Claude Code");
+    await screen.findByRole("button", { name: "Copy command" }),
+  ).toBeTruthy();
+});
+
+const option = (id: string, label: string, is_default = false) => ({
+  id,
+  label,
+  is_default,
+  allowed: true,
+});
+
+test("the composer's two triggers change model, effort and permissions; a refusal is one dock line", async () => {
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      harness: { id: "claude-code", name: "Claude Code" },
+      settings: {
+        model: {
+          current: "opus",
+          options: [
+            option("opus", "Opus 5.5", true),
+            option("sonnet", "Sonnet 5"),
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+        effort: {
+          current: "high",
+          options: [
+            option("low", "Low"),
+            option("medium", "Medium"),
+            option("high", "High", true),
+            option("max", "Max"),
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+        permission: {
+          current: "accept_edits",
+          options: [
+            option("ask", "Ask before edits", true),
+            option("accept_edits", "Accept edits"),
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+      },
+    }),
+  );
+  const asked: string[] = [];
+  client.changeSetting = async (_id, setting, value) => {
+    asked.push(`${setting}=${value}`);
+    return {
+      value,
+      state: "refused",
+      reason: "it isn't available on your plan",
+    };
+  };
+  expect(button("Model Opus 5.5, effort High").textContent).toBe("Opus 5.5");
+  expect(button("Permissions: Accept edits").textContent).toBe("Accept edits");
+
+  openMenu("Model Opus 5.5, effort High");
+  expect(await screen.findByText("From your next message")).toBeTruthy();
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: /^Sonnet 5/ }),
+  );
+  expect(
+    await screen.findByText(
+      "Claude Code didn't switch to Sonnet 5: it isn't available on your plan.",
+    ),
+  ).toBeTruthy();
+  // The value in effect stays on the trigger.
+  expect(button("Model Opus 5.5, effort High")).toBeTruthy();
+
+  openMenu("Permissions: Accept edits");
+  expect(
+    await screen.findByText(
+      "Set for this Chat only. Your Claude Code settings are unchanged.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("menuitemradio", { name: /Full access/ }),
+  ).toBeNull();
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: /^Ask before edits/ }),
+  );
+  await waitFor(() =>
+    expect(asked).toEqual(["model=sonnet", "permission=ask"]),
+  );
+});
+
+test("a harness that has not reported its settings draws no triggers", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  expect(screen.queryByRole("group", { name: "Harness settings" })).toBeNull();
 });

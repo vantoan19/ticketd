@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Ellipsis } from "lucide-react";
 import {
   DropdownMenu,
@@ -30,8 +31,11 @@ export function ChatActionsMenu({
   onOpenChange,
   onCloseAutoFocus,
   onResult,
+  onLink,
 }: {
   chat: ActionTarget;
+  /** Where the menu can link a record: the Chat header, whose Chat may have no chip row. */
+  onLink?: () => void;
   /** "Actions for {title}" in rows, "Chat actions" in the header. */
   label: string;
   open?: boolean;
@@ -47,6 +51,8 @@ export function ChatActionsMenu({
         onResult(reason instanceof Error ? reason.message : String(reason)),
     );
   const trashed = chat.retention === "trashed";
+  // The link picker opens as the menu closes; focus stays with the picker.
+  const linking = useRef(false);
   return (
     <DropdownMenu
       {...(open !== undefined && { open })}
@@ -59,7 +65,11 @@ export function ChatActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        {...(onCloseAutoFocus && { onCloseAutoFocus })}
+        onCloseAutoFocus={(event) => {
+          if (linking.current) event.preventDefault();
+          else onCloseAutoFocus?.(event);
+          linking.current = false;
+        }}
       >
         <DropdownMenuItem
           onSelect={() =>
@@ -77,6 +87,16 @@ export function ChatActionsMenu({
         >
           {chat.muted ? "Unmute notifications" : "Mute notifications"}
         </DropdownMenuItem>
+        {onLink && !trashed && (
+          <DropdownMenuItem
+            onSelect={() => {
+              linking.current = true;
+              onLink();
+            }}
+          >
+            Link a ticket, Document or Project…
+          </DropdownMenuItem>
+        )}
         {!trashed && <DropdownMenuSeparator />}
         {chat.retention === "active" && (
           <DropdownMenuItem onSelect={() => act(client.archive(chat.id))}>

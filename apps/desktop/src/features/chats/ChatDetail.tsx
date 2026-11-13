@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -9,7 +10,6 @@ import {
 import {
   ArrowLeft,
   ArrowUpRight,
-  ChevronDown,
   Maximize2,
   Minimize2,
   Trash2,
@@ -39,10 +39,18 @@ import {
   useChatClient,
   type ChatSnapshot,
   type ChatState,
+  type LinkedRecord,
   type Problem,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
+import { ChatContext } from "@/features/chats/ChatContext";
+import { ComposerControls } from "@/features/chats/ComposerControls";
+import {
+  settingLine,
+  type AskedChange,
+} from "@/features/chats/composer-settings";
+import { HarnessMark } from "@/features/chats/HarnessMark";
 import { Composer } from "@/features/chats/Composer";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
@@ -199,85 +207,87 @@ export function ProblemNotice({
   );
 }
 
-function HarnessAndFolder({ chat }: { chat: ChatState }) {
-  // A managed folder is named by an id; it reads as the folder ticketd keeps,
-  // as New Chat calls it.
-  const folder = chat.folder.managed ? "ticketd folder" : chat.folder.name;
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="xs"
-          className="min-w-0 shrink"
-          aria-label="Harness and folder"
-        >
-          <span className="truncate">
-            {chat.harness.name} · {folder}
-          </span>
-          {/* The folder name shortens before the marker does. The leading space
-              keeps the text whole; the negative margin narrows the gap to one. */}
-          {chat.folder.missing && (
-            <span className="-ml-1 shrink-0"> (missing)</span>
-          )}
-          <ChevronDown aria-hidden />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-75"
-        aria-label="Harness and folder"
-      >
-        <div className="chat-pop">
-          <section>
-            <h3>Harness</h3>
-            <p>{chat.harness.name}</p>
-            {chat.harness.permissions && (
-              <small>{chat.harness.permissions}</small>
-            )}
-          </section>
-          <section>
-            <h3>Folder</h3>
-            <PathText path={chat.folder.path} />
-            {chat.folder.missing && <small>Not found on this computer</small>}
-            {chat.folder.managed && (
-              <small>Kept by ticketd for this Chat</small>
-            )}
-            {chat.folder.shared_with.length > 0 && (
-              <small>Also used by {chat.folder.shared_with.join(", ")}</small>
-            )}
-          </section>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function LinkedRecords({ chat }: { chat: ChatState }) {
+/**
+ * The Chat's linked records on one line; what does not fit folds into
+ * "N more", which lists them all. With no links there is no row: the Chat
+ * actions menu links one.
+ */
+function LinkedRecords({
+  chat,
+  onFailure,
+}: {
+  chat: ChatState;
+  onFailure: (failure: string) => void;
+}) {
   const client = useChatClient();
+  const line = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState(0);
+  const links = chat.links;
+  // Chips that wrapped below the first line are clipped; count them.
+  useLayoutEffect(() => {
+    const element = line.current;
+    if (!element) return;
+    const measure = () => {
+      const chips = [...element.children] as HTMLElement[];
+      const top = chips[0]?.offsetTop ?? 0;
+      setHidden(chips.filter((chip) => chip.offsetTop > top).length);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [links]);
+  const settle = (action: Promise<void>) =>
+    void action.then(
+      () => onFailure(""),
+      (reason: unknown) =>
+        onFailure(reason instanceof Error ? reason.message : String(reason)),
+    );
+  const remove = (record: LinkedRecord) =>
+    settle(client.removeLink(chat.id, { kind: record.kind, id: record.id }));
+  const add = (record: LinkedRecord) =>
+    settle(client.addLink(chat.id, { kind: record.kind, id: record.id }));
+  if (links.length === 0) return null;
   return (
     <div className="chat-linked">
       <div role="group" aria-label="Linked records">
-        {chat.links.map((record) => (
-          <RecordChip
-            key={`${record.kind}:${record.id}`}
-            record={record}
-            backLabel={`Back to ${chat.title}`}
-            onRemove={() =>
-              void client
-                .removeLink(chat.id, { kind: record.kind, id: record.id })
-                .catch(() => {})
-            }
-          />
-        ))}
-        <LinkPicker
-          linked={chat.links}
-          onPick={(record) =>
-            void client
-              .addLink(chat.id, { kind: record.kind, id: record.id })
-              .catch(() => {})
-          }
-        />
+        <div ref={line} className="chat-linked-line">
+          {links.map((record) => (
+            <RecordChip
+              key={`${record.kind}:${record.id}`}
+              record={record}
+              backLabel={`Back to ${chat.title}`}
+              onRemove={() => remove(record)}
+            />
+          ))}
+        </div>
+        {hidden > 0 && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="xs">
+                {hidden} more
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" aria-label="Linked records">
+              <div className="chat-linked-all">
+                <h3>Linked records</h3>
+                <ul>
+                  {links.map((record) => (
+                    <li key={`${record.kind}:${record.id}`}>
+                      <RecordChip
+                        record={record}
+                        backLabel={`Back to ${chat.title}`}
+                        onRemove={() => remove(record)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
+        <LinkPicker linked={links} onPick={add} />
       </div>
     </div>
   );
@@ -302,6 +312,9 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     plan?: boolean;
   } | null>(null);
   const [saved, setSaved] = useState("");
+  /** A model, effort or permission change asked for here, until the next send. */
+  const [asked, setAsked] = useState<AskedChange | null>(null);
+  const changeLine = settingLine(chat, asked);
   /** Runs a command; a refusal is said once, and the view keeps the host's state. */
   const run = (action: Promise<unknown>) =>
     action.then(
@@ -427,6 +440,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
   const sent = <T,>(action: Promise<T>) => {
     follow();
     setNewFrom(undefined);
+    setAsked(null);
     return action;
   };
   const messageCount = items.filter(isMessage).length;
@@ -451,7 +465,9 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
   };
   return (
     <div className="chat-body" onKeyDown={onPaneKey}>
-      {!trashed && !picked && <LinkedRecords chat={chat} />}
+      {!trashed && !picked && (
+        <LinkedRecords chat={chat} onFailure={setFailure} />
+      )}
       <div className="chat-reading">
         <ReadingContext value={reading}>
           <div
@@ -496,6 +512,11 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
               ? "Stopping…"
               : turnStatus(chat, items)}
         </div>
+        {changeLine && (
+          <p className="chat-fine" role="alert">
+            {changeLine}
+          </p>
+        )}
         {failure && (
           <p className="chat-fine" role="alert">
             {failure}
@@ -612,6 +633,26 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                   })}
                   {...(isLive(chat) && { onStop: stop })}
                   stopping={chat.stopping}
+                  leading={
+                    <ComposerControls
+                      chat={chat}
+                      inputRef={messageBox}
+                      onChange={(setting, value) =>
+                        void client.changeSetting(id, setting, value).then(
+                          (outcome) => {
+                            setFailure("");
+                            setAsked({ setting, outcome });
+                          },
+                          (reason: unknown) =>
+                            setFailure(
+                              reason instanceof Error
+                                ? reason.message
+                                : String(reason),
+                            ),
+                        )
+                      }
+                    />
+                  }
                   {...(chat.context && {
                     beforeStop: (
                       <ContextRing
@@ -673,6 +714,7 @@ export function ChatDetail({
   const client = useChatClient();
   const { snapshot, error } = useChat(id);
   const [failure, setFailure] = useState("");
+  const [linking, setLinking] = useState(false);
   const chat = snapshot?.chat;
   const retain = (action: Promise<void>) =>
     void action.then(
@@ -693,10 +735,17 @@ export function ChatDetail({
               <ArrowLeft aria-hidden />
             </IconButton>
           )}
+          {chat && (
+            <HarnessMark
+              harness={chat.harness.id}
+              name={chat.harness.name}
+              className="chat-head-mark"
+            />
+          )}
           <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
             {chat?.title ?? "Chat"}
           </h2>
-          {chat && <HarnessAndFolder chat={chat} />}
+          {chat && <ChatContext chat={chat} />}
         </div>
         <div className="detail-actions">
           {chat?.retention === "archived" && (
@@ -714,11 +763,24 @@ export function ChatDetail({
             </Button>
           )}
           {chat && chat.retention !== "trashed" && (
-            <ChatActionsMenu
-              chat={chat}
-              label="Chat actions"
-              onResult={setFailure}
-            />
+            <>
+              <ChatActionsMenu
+                chat={chat}
+                label="Chat actions"
+                onResult={setFailure}
+                onLink={() => setLinking(true)}
+              />
+              <LinkPicker
+                linked={chat.links}
+                open={linking}
+                onOpenChange={setLinking}
+                onPick={(record) =>
+                  retain(
+                    client.addLink(id, { kind: record.kind, id: record.id }),
+                  )
+                }
+              />
+            </>
           )}
           {expanded ? (
             <IconButton label="Show beside the list" onClick={onReturn}>

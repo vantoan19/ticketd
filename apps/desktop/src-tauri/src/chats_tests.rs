@@ -13,6 +13,8 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{ChatDelivery, ChatSubmissionIntent};
 
+use crate::chat_view::BranchView;
+
 use super::*;
 
 struct Fixture {
@@ -767,7 +769,13 @@ async fn api_key_and_unknown_sign_in_are_their_own_statuses_with_an_explanation(
         harness_status("claude-code", "Claude Code", inspection)
     };
 
-    assert_eq!(status(LoginState::SignedIn).status, "ready");
+    let ready = status(LoginState::SignedIn);
+    assert_eq!(ready.status, "ready");
+    // The context popover's "1.0 · harness" (#368).
+    assert_eq!(
+        (ready.version.as_deref(), ready.path.as_deref()),
+        (Some("1.0"), Some("harness"))
+    );
     let api_key = status(LoginState::NonSubscription);
     assert_eq!(api_key.status, "not_subscription");
     assert!(api_key.message.unwrap().contains("not a subscription"));
@@ -962,6 +970,61 @@ async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the
     f.chats.set_link(&id, link(), false).await.unwrap();
     let (opened, _) = f.open(&id).await;
     assert!(opened.snapshot.chat.links.is_empty());
+}
+
+/// #368: the header names the folder's Project and branch; a list row names the
+/// harness, the Project and the linked tickets.
+#[tokio::test(start_paused = true)]
+async fn a_chat_names_its_folders_project_and_branch_and_its_row_names_its_tickets() {
+    let f = Fixture::new().await;
+    let folder = f.dir.path().join("web-app");
+    std::fs::create_dir_all(folder.join(".git")).unwrap();
+    std::fs::write(
+        folder.join(".git/HEAD"),
+        "ref: refs/heads/rate-limit-logins\n",
+    )
+    .unwrap();
+    let project = f
+        .core()
+        .create_project("Web App", folder.to_str().unwrap())
+        .unwrap();
+    let first = f.core().create_ticket("Rate-limit failed logins").unwrap();
+    let second = f.core().create_ticket("Show the wait").unwrap();
+    let mut input = f.input("first");
+    input.folder = Some(folder.to_string_lossy().into_owned());
+    input.links = [&first, &second]
+        .map(|ticket| LinkRef {
+            kind: LinkKind::Ticket,
+            id: ticket.id.clone(),
+        })
+        .to_vec();
+    let id = f.chats.create(input).await.unwrap().chat_id;
+    settle().await;
+
+    let (opened, _) = f.open(&id).await;
+    let named = Some(ProjectRef {
+        id: project.id.clone(),
+        title: "Web App".to_owned(),
+    });
+    assert_eq!(opened.snapshot.chat.folder.project, named);
+    assert_eq!(
+        opened.snapshot.chat.folder.branch,
+        Some(BranchView {
+            kind: "branch",
+            name: Some("rate-limit-logins".to_owned())
+        })
+    );
+
+    let rows = f.chats.list(ChatListFilter::Active).unwrap();
+    let row = rows.iter().find(|row| row.id == id).unwrap();
+    assert_eq!(row.harness_id, "codex");
+    assert_eq!(row.project, named);
+    let references: Vec<&str> = row.tickets.iter().map(|t| t.reference.as_str()).collect();
+    assert_eq!(
+        references,
+        [first.reference.as_str(), second.reference.as_str()]
+    );
+    assert_eq!(row.tickets[0].status, "Todo");
 }
 
 fn failure(kind: ProblemKind) -> Problem {
@@ -1557,6 +1620,7 @@ fn an_incompatible_harness_says_what_was_found_and_needed_once() {
         Some("Found Codex 0.150.0 at `/opt/bin/codex`. ticketd needs Codex 0.162.1 or newer.")
     );
     assert_eq!(status.path.as_deref(), Some("/opt/bin/codex"));
+    assert_eq!(status.version.as_deref(), Some("0.150.0"));
     assert_eq!(version_number("2.1.322 (Claude Code)"), "2.1.322");
 }
 

@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { RailSection } from "@/features/tickets/RailSection";
 import { ChatStatus } from "@/features/chats/ChatStatus";
+import { HarnessMark } from "@/features/chats/HarnessMark";
 import { chatCount, emphasised } from "@/features/chats/model";
 import { useChatFeature, useLinkedChats } from "@/features/chats/use-chats";
 import {
@@ -84,7 +85,12 @@ export function LinkedChats({
               })
             }
           >
-            {/* The harness mark's place (#368). */}
+            <HarnessMark
+              harness={chat.harness_id}
+              name={chat.harness_name}
+              className="linked-chats-mark"
+              decorative
+            />
             <span
               className="linked-chats-item"
               data-attention={emphasised(chat.status) ? "" : undefined}
