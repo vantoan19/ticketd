@@ -221,6 +221,12 @@ export function createBridge(deps: BridgeDeps) {
       ...(command.resume_session_id && { resume: command.resume_session_id }),
       ...(command.unattended && {
         permissionMode: "dontAsk" as const,
+        // The agent's allowlist is the whole of what it may do, so none of the
+        // person's user, project or local settings are loaded: an allow rule there
+        // would widen it. This also leaves out their hooks, CLAUDE.md, and any
+        // sign-in or environment set through those files. Settings an
+        // administrator manages still apply.
+        settingSources: [],
         allowedTools: command.unattended.allowed_tools,
         disallowedTools: command.unattended.disallowed_tools,
         maxTurns: command.unattended.max_turns,
