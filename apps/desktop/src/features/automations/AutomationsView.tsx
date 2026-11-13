@@ -251,7 +251,13 @@ export function AutomationsView() {
                   </span>
                   <span className="chat-row-time" />
                   <span className="chat-row-sub">
-                    <span>{automation.enabled ? "On" : "Off"}</span>
+                    <span>
+                      {automation.arrived_off
+                        ? "Off on this desktop"
+                        : automation.enabled
+                          ? "On"
+                          : "Off"}
+                    </span>
                     {startedBy(automation.trigger)}
                   </span>
                 </button>
