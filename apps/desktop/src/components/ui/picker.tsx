@@ -44,7 +44,10 @@ export function Picker<T extends string>({
         aria-label={`${label}: ${current}`}
       >
         {icon ?? <span className="text-muted-foreground">{label}</span>}
-        <SelectValue />
+        <SelectValue>
+          {/* The value is a flex container; ellipsis belongs on its text child. */}
+          <span className="min-w-0 truncate">{current}</span>
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {options.map((o) => (
