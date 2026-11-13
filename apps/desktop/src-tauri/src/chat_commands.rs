@@ -21,8 +21,8 @@ use ticketd_core::ChatListFilter;
 use crate::chat_attention::{Alert, Notifier, Row, badge_text};
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
-    Answer, ChatFailure, Chats, CloseAction, Created, HarnessStatus, HistorySelection, LinkRef,
-    NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
+    Answer, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus, HistorySelection,
+    LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
     close_action, quit_action, tray_tooltip,
 };
 
@@ -402,13 +402,34 @@ pub async fn chat_send(
     chat_id: String,
     text: String,
     queue: bool,
+    links: Option<Vec<LinkRef>>,
 ) -> Outcome<()> {
     let mode = if queue {
         SendMode::Queue
     } else {
         SendMode::Auto
     };
-    bridge.chats.send(&chat_id, &text, mode).await
+    let links = links.unwrap_or_default();
+    bridge
+        .chats
+        .send_linking(&chat_id, &text, mode, &links)
+        .await
+}
+
+/// Files and folders for the composer's `@` menu.
+#[tauri::command]
+pub async fn chat_files(
+    bridge: State<'_, ChatBridge>,
+    path: String,
+    query: String,
+) -> Outcome<Vec<FolderFile>> {
+    bridge.chats.files(&path, &query)
+}
+
+/// The Chats linked to one record, for its page; refetched when the overview changes.
+#[tauri::command]
+pub async fn chat_linked_to(bridge: State<'_, ChatBridge>, link: LinkRef) -> Outcome<Vec<Summary>> {
+    bridge.chats.linked_to(&link)
 }
 
 #[tauri::command]

@@ -1573,3 +1573,70 @@ async fn a_turn_that_ends_out_of_view_is_unread_until_the_chat_is_opened() {
     f.chats.set_focused(false).await;
     assert!(f.chats.in_view().is_empty());
 }
+
+#[test]
+fn files_for_a_mention_are_found_by_name_in_the_folder_without_build_output_or_hidden_folders() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for path in [
+        "src/auth/limiter.ts",
+        "src/limits.md",
+        "node_modules/x/limiter.js",
+        ".git/limiter",
+        "README.md",
+    ] {
+        let file = root.join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "").unwrap();
+    }
+    let found = folder_files(root, "limit");
+    let paths: Vec<_> = found.iter().map(|file| file.path.as_str()).collect();
+    assert_eq!(paths, ["src/limits.md", "src/auth/limiter.ts"]);
+    assert!(!found[0].folder);
+    // Nothing typed lists what is nearest the top first, folders included.
+    let top = folder_files(root, "");
+    assert_eq!(top[0].path, "README.md");
+    assert!(top.iter().any(|file| file.path == "src" && file.folder));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_it_is_sent() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    let link = || LinkRef {
+        kind: LinkKind::Ticket,
+        id: ticket.id.clone(),
+    };
+    let id = f.chat().await;
+    let other = f.chat().await;
+    assert!(f.chats.linked_to(&link()).unwrap().is_empty());
+
+    f.chats
+        .send_linking(&id, "Look at it", SendMode::Queue, &[link()])
+        .await
+        .unwrap();
+    let linked = f.chats.linked_to(&link()).unwrap();
+    assert_eq!(
+        linked.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        [id.as_str()]
+    );
+    assert_eq!(f.core().chat(&id).unwrap().links.len(), 1);
+    assert!(f.core().chat(&other).unwrap().links.is_empty());
+
+    // A record that cannot be linked refuses the message before anything is queued.
+    let gone = LinkRef {
+        kind: LinkKind::Document,
+        id: "no-such-document".to_owned(),
+    };
+    let refused = f
+        .chats
+        .send_linking(&other, "And this", SendMode::Queue, &[gone])
+        .await;
+    assert!(refused.is_err());
+    let (opened, _) = f.open(&other).await;
+    assert!(opened.snapshot.chat.queue.is_empty());
+
+    // A trashed Chat is never listed on the ticket.
+    f.chats.set_retention(&id, Retention::Trash).await.unwrap();
+    assert!(f.chats.linked_to(&link()).unwrap().is_empty());
+}
