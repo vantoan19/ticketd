@@ -115,6 +115,8 @@ test("reasoning reads how long it took and opens its text; one without text leav
       reply,
     ],
   });
+  // Reasoning folds with the turn's steps.
+  fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
   const row = screen.getByRole("button", {
     name: "Show reasoning, thought for 12 seconds",
   });
@@ -167,6 +169,7 @@ test("a finished plan is one row in its turn", async () => {
       reply,
     ],
   });
+  fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
   expect(screen.getByText("Plan · 2 of 2 done")).toBeTruthy();
   expect(screen.queryByRole("region", { name: /^Plan/ })).toBeNull();
 });

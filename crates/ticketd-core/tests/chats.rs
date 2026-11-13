@@ -3,7 +3,7 @@ use ticketd_core::{
     CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatDeliveryDecision,
     ChatInputStanding, ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind,
     ChatListFilter, ChatMessage, ChatObservation, ChatRecord, ChatSessionOrigin,
-    ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, FORMAT_VERSION, NewChat, Workspace,
+    ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat, Workspace,
 };
 
 const CHAT_TABLES: &str = "DROP TABLE chat_record_writes; DROP TABLE chat_changes; DROP TABLE chat_notices; DROP TABLE chat_interactions; DROP TABLE chat_tools; DROP TABLE chat_submission_attempts; DROP TABLE chat_messages; DROP TABLE chat_turns; DROP TABLE chat_sessions; DROP TABLE chat_links; DROP TABLE chats;";
@@ -322,6 +322,8 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
         panic!("expected the tool");
     };
     assert!(tool.output_truncated);
+    // A running step's clock counts from when the host recorded the call.
+    assert!(tool.started_at.is_some());
     // The end of the output is what is kept: it is where a command says how it went.
     let kept = tool.output.as_ref().unwrap();
     assert!(kept.len() <= CHAT_TOOL_OUTPUT_LIMIT && kept.len() > CHAT_TOOL_OUTPUT_LIMIT - 4);
@@ -1558,7 +1560,8 @@ fn upgrading_counts_every_existing_turn_as_seen() {
     start_turn(&mut workspace, &chat, "Hello", "turn-1");
     end_turn(&mut workspace, &chat, "turn-1");
     drop(workspace);
-    let previous = FORMAT_VERSION - 1;
+    // Format 67 added what the person has seen of each Chat.
+    let previous = 66;
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(&format!(
         "ALTER TABLE chats DROP COLUMN seen_through; ALTER TABLE chats DROP COLUMN muted; PRAGMA user_version = {previous};"

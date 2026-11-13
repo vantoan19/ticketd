@@ -45,7 +45,113 @@ const claude = {
   permissions: "Uses your Claude Code settings. It asks before editing files.",
 };
 
+/** A turn that ran, was steered, and finished: it reads result-first. */
+const inTurn = (item: TranscriptItem): TranscriptItem => ({
+  ...item,
+  turn_id: "ft",
+});
+const testOutput = Array.from(
+  { length: 30 },
+  (_, line) => `  ✓ limiter case ${line + 1}`,
+).join("\n");
+const finishedTurn: TranscriptItem[] = [
+  inTurn(you("f1", "Sketch a limiter that won't lock out shared office IPs.")),
+  {
+    id: "turn:ft",
+    at: minutesAgo(9),
+    kind: "turn",
+    turn_id: "ft",
+    started_at: minutesAgo(9),
+    ended_at: minutesAgo(9 - 133 / 60),
+    outcome: "completed",
+  },
+  inTurn(
+    reply(
+      "f2",
+      "I read the spec and T-12. I'll add a sliding-window limiter keyed by account and IP.",
+    ),
+  ),
+  inTurn({
+    id: "f3",
+    at,
+    kind: "steps",
+    steps: ["login.ts", "session.ts", "limiter.ts"].map((file) => ({
+      kind: "read",
+      target: `src/auth/${file}`,
+      targets: [{ text: `src/auth/${file}` }],
+    })),
+  }),
+  inTurn({
+    id: "f4",
+    at,
+    kind: "records",
+    changes: [
+      {
+        kind: "status",
+        reference: "T-12",
+        title: t12.title,
+        from: "Todo",
+        to: "In progress",
+      },
+    ],
+  }),
+  inTurn({
+    id: "f5",
+    at,
+    kind: "request",
+    request: "approval",
+    title: "Codex asked for approval",
+    subject: "npm run test:all",
+    options: [],
+    free_text: false,
+    state: "answered",
+    outcome: "You allowed this for this session",
+  }),
+  inTurn({
+    id: "f6",
+    at,
+    kind: "steps",
+    steps: [
+      {
+        kind: "run",
+        target: "npm run test:all",
+        command: "npm run test:all",
+        folder: "auth-service",
+        state: "failed",
+        exit_code: 1,
+        output: `${testOutput}\n  ✕ resets the window\n\nTests  1 failed | 30 passed`,
+      },
+      {
+        kind: "edit",
+        target: "src/auth/limiter.ts",
+        targets: [{ text: "src/auth/limiter.ts" }],
+      },
+      {
+        kind: "run",
+        target: "npm run test:all",
+        command: "npm run test:all",
+        output: "Tests  31 passed",
+      },
+    ],
+  }),
+  inTurn(
+    reply(
+      "f7",
+      "The limiter is in. Failed logins are now limited per account and per IP in a sliding 15-minute window, and `npm run test:all` passes.",
+    ),
+  ),
+];
+
 const chats: MockChat[] = [
+  {
+    updated_at: minutesAgo(1),
+    chat: chatState({
+      id: "finished",
+      title: "Sketch a limiter for shared IPs",
+      links: [t12],
+    }),
+    items: finishedTurn,
+  },
   {
     updated_at: minutesAgo(0),
     chat: chatState({
@@ -132,6 +238,13 @@ const chats: MockChat[] = [
             exit_code: 1,
             output: "FAIL  src/auth/limiter.test.ts\n  ✕ resets the window",
             truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
+          },
+          {
+            kind: "run",
+            target: "npm run test:all",
+            command: "npm run test:all",
+            state: "running",
+            started_at: minutesAgo(0.2),
           },
         ],
       },

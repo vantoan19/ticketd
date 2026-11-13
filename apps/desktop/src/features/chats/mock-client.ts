@@ -365,6 +365,7 @@ export function createMockChatClient(
         id: nextId("user"),
         at: now,
         kind: "user",
+        steer: true,
         text,
         delivery: "delivered",
       });
@@ -518,6 +519,9 @@ export function createMockChatClient(
         ...request,
         state: "answered",
         outcome: option ? `You chose "${option.label}"` : "You answered",
+        ...(request.request === "question" && {
+          answer: option?.label ?? ("text" in answer ? answer.text : ""),
+        }),
         resolved_at: now,
       });
       patch(id, { activity: "working" });

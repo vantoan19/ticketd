@@ -639,9 +639,9 @@ A **step row** is one 28px line, `[icon] Verb target · suffix`:
 - **Suffix:** at most one: a clock ("12s"), a diffstat ("+12 −4", 12px mono, muted), "No matches", or an outcome word at weight 500: Failed, Declined, Not finished, Not confirmed. Rows are never grayed, and nothing is parsed from output.
 - **Targets:** one or two are named ("`a` and `b`"), three or more counted ("Read 6 files"). Paths are relative to the Chat's folder, with `~` outside it; a search reads "for `pattern` in `scope`", a web search "for “query”", a page `host/path`, and a command its first line without shell wrappers.
 - **Merging:** consecutive steps of one kind and outcome merge ("Read 6 files"); commands never merge.
-- **Detail:** a row opens one thing; a command opens one `code-block` box with its output and Copy, then a muted "Exit 1 · in {folder}".
+- **Detail:** a row opens one thing; a command opens one `code-block` box with its output and Copy, then a muted "Exit 1 · in {folder}". The box is at most 12 lines tall, scrolls inside, mounts only when opened and opens at the output's last line; the `$` is never copied.
 
-An answered approval folds into its step row, with a tooltip such as "You allowed this for this session"; only questions ("Answered · …") and expiries ("Expired · …") leave receipt rows.
+An answered approval folds into its step row, with a tooltip such as "You allowed this for this session"; only questions ("Answered · …") and expiries ("Expired · …") leave receipt rows. An approval no step followed keeps a receipt ("Allowed · …", "Declined · …"). When a turn ends, a step still running reads "Not finished", or "Not confirmed" after an unconfirmed stop. A turn someone is reading in, or that holds focus, folds once it leaves the view; the person's own toggles win for the session.
 
 **Below the response** come 28px step-style rows, in order and only when needed: the stop marker, changed files ("3 files changed · +53 −12"), then records, verb first ("Moved T-KQ12 to In review · Posted an update on T-KQ12"). References are mono and underlined everywhere.
 
@@ -656,7 +656,7 @@ What a harness did not report is not drawn: no row, pill, card, files row or rin
 
 ### Scroll and the New marker
 
-The transcript follows only while you are at the bottom. Scrolling up stops following; reaching the bottom, sending, or "Jump to latest" (an outline button above the dock) resumes it. Otherwise the first visible item keeps its place. A divider with the unread dot and "New" marks the first item that arrived while you were away; your own messages never count.
+The transcript follows only while you are at the bottom. Scrolling up stops following; reaching the bottom, sending, or "Jump to latest" (an outline button above the dock) resumes it. Otherwise the first visible item keeps its place. A divider with the unread dot and "New" marks the first item that arrived while you were away; your own messages never count. A Chat opens at the bottom when everything new fits, otherwise with the marker a quarter down; the marker stays until you send or leave. With nothing new it reopens where you left it this session. Opening or closing a row keeps that row in place.
 
 ### Activity dock and composer
 

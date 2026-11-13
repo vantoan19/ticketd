@@ -90,11 +90,13 @@ export function ReasoningRow({ item }: { item: Of<"reasoning"> }) {
       : null;
   const line = (
     <>
-      {running ? (
-        <LoaderCircle size={12} className="chat-spin" aria-hidden />
-      ) : (
-        <Brain size={16} aria-hidden />
-      )}
+      <span className="chat-row-icon" aria-hidden="true">
+        {running ? (
+          <LoaderCircle size={12} className="chat-spin" />
+        ) : (
+          <Brain size={16} />
+        )}
+      </span>
       <span className="chat-step-words">
         {words.text}
         {since && <span aria-hidden="true"> · {since}</span>}
@@ -200,7 +202,9 @@ export function PlanCard({
   if (item.state === "ended" && count.done === count.total)
     return (
       <div className="chat-steps chat-report-row">
-        <ListTodo size={16} aria-hidden />
+        <span className="chat-row-icon" aria-hidden="true">
+          <ListTodo size={16} />
+        </span>
         <span className="chat-step-words">Plan · {count.text}</span>
       </div>
     );
@@ -367,7 +371,9 @@ export function FilesSummary({
         aria-controls={open ? id : undefined}
         onClick={() => setOpen(!open)}
       >
-        <FileDiff size={16} aria-hidden />
+        <span className="chat-row-icon" aria-hidden="true">
+          <FileDiff size={16} />
+        </span>
         <span className="chat-step-words">
           {summary.text}
           {summary.counts && (

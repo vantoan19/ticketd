@@ -1,7 +1,18 @@
 import { expect, test } from "vitest";
-import type { ChatSnapshot, Problem, Step } from "@/features/chats/client";
+import type {
+  ChatSnapshot,
+  Problem,
+  Step,
+  TranscriptItem,
+} from "@/features/chats/client";
 import {
   applyChange,
+  firstNew,
+  unseenFrom,
+  receiptLine,
+  turns,
+  type TranscriptPart,
+  type Turn,
   chatTime,
   composerControls,
   composerPlaceholder,
@@ -452,6 +463,267 @@ test("a missing ticketd component is a reinstall notice, not an update of the ha
   expect(notice.title).toBe("Claude Code isn't available");
   expect(notice.body).not.toMatch(/Update it/);
   expect(notice.actions).toEqual(["check"]);
+});
+
+const you = (id: string, when: string, steer = false): TranscriptItem => ({
+  id,
+  at: when,
+  kind: "user",
+  text: id,
+  delivery: "delivered",
+  ...(steer && { steer }),
+});
+const timing = (
+  outcome: Extract<TranscriptItem, { kind: "turn" }>["outcome"],
+  ended?: string,
+): TranscriptItem => ({
+  id: "turn:t1",
+  at: "2026-11-10T10:00:00Z",
+  kind: "turn",
+  turn_id: "t1",
+  started_at: "2026-11-10T10:00:00Z",
+  ...(ended && { ended_at: ended }),
+  outcome,
+});
+const did = (id: string, ...steps: Step[]): TranscriptItem => ({
+  id,
+  at: "",
+  kind: "steps",
+  turn_id: "t1",
+  steps,
+});
+const said = (id: string, text = id): TranscriptItem => ({
+  id,
+  at: "",
+  kind: "response",
+  text,
+  state: "complete",
+  turn_id: "t1",
+});
+const read = (path: string): Step => ({
+  kind: "read",
+  target: path,
+  targets: [{ text: path }],
+});
+const ran = (command: string, state?: Step["state"]): Step => ({
+  kind: "run",
+  target: command,
+  command,
+  ...(state && { state }),
+});
+const idle = { activity: "idle", problem: null } as const;
+const turnsOf = (parts: TranscriptPart[]) =>
+  parts.flatMap((part) => (part.kind === "turn" ? [part.turn] : []));
+const rowWords = (turn: Turn) =>
+  turn.rows.map((row) =>
+    row.kind === "step"
+      ? stepWords(row.step).label
+      : row.kind === "response"
+        ? row.item.text
+        : row.kind,
+  );
+
+test("a finished turn folds its work under one row and keeps the final response outside", () => {
+  const parts = turns(
+    [
+      you("u1", at),
+      timing("completed", "2026-11-10T10:02:13Z"),
+      did("s1", read("a.ts")),
+      did("s2", read("b.ts")),
+      said("r1", "Reading done."),
+      did("s3", ran("npm test", "failed")),
+      said("r2", "Fixed."),
+      {
+        id: "rec1",
+        at: "",
+        kind: "records",
+        turn_id: "t1",
+        changes: [
+          { kind: "update", reference: "T-1", excerpt: "Fixed the limiter" },
+        ],
+      },
+    ],
+    idle,
+  );
+  expect(parts.map((part) => part.kind)).toEqual(["item", "turn"]);
+  const [turn] = turnsOf(parts);
+  expect(turn?.live).toBe(false);
+  expect(turn?.label).toBe("Worked for 2m 13s · 1 failed");
+  expect(turn?.final?.text).toBe("Fixed.");
+  // Steps merge across the items they came in; records are step rows too.
+  expect(rowWords(turn!)).toEqual([
+    "Read a.ts and b.ts",
+    "Reading done.",
+    "Run npm test, Failed",
+    "record",
+  ]);
+});
+
+test("a response is final only when no step follows it", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:30Z"),
+        said("r1"),
+        did("s1", read("a.ts")),
+      ],
+      idle,
+    ),
+  );
+  expect(turn?.final).toBeUndefined();
+  expect(rowWords(turn!)).toEqual(["r1", "Read a.ts"]);
+});
+
+test("a steer starts a new segment that continues the turn", () => {
+  const segments = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:02:13Z"),
+        did("s1", read("a.ts")),
+        you("u2", "2026-11-10T10:01:25Z", true),
+        did("s2", read("b.ts")),
+        said("r1"),
+      ],
+      idle,
+    ),
+  );
+  expect(segments.map((turn) => turn.label)).toEqual([
+    "Worked for 1m 25s",
+    "Continued for 48s",
+  ]);
+});
+
+test("a stopped turn names how it ended, counts what did not finish, and keeps its marker below", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("stopped", "2026-11-10T10:00:40Z"),
+        did("s1", ran("npm run db:migrate", "running")),
+        { id: "t1", at: "", kind: "marker", reason: "stopped", turn_id: "t1" },
+      ],
+      idle,
+    ),
+  );
+  expect(turn?.label).toBe("Stopped after 40s · 1 not finished");
+  expect(turn?.marker?.reason).toBe("stopped");
+  // A step still running when its turn ended did not finish.
+  expect(rowWords(turn!)).toEqual(["Run npm run db:migrate, Not finished"]);
+});
+
+test("an unconfirmed stop stays open, says so, and running rows read Not confirmed", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("active"),
+        did("s1", ran("npm run db:migrate", "running")),
+      ],
+      { activity: "working", problem: { kind: "stop_unconfirmed" } },
+      Date.parse("2026-11-10T10:00:40Z"),
+    ),
+  );
+  expect(turn?.live).toBe(false);
+  expect(turn?.unconfirmed).toBe(true);
+  // Its own outcome is not counted again.
+  expect(turn?.label).toBe("Stop not confirmed after 40s");
+  expect(rowWords(turn!)).toEqual(["Run npm run db:migrate, Not confirmed"]);
+});
+
+test("a running turn shows its rows as they come, with nothing folded", () => {
+  const [turn] = turnsOf(
+    turns(
+      [you("u1", at), timing("active"), did("s1", ran("npm test", "running"))],
+      { activity: "working", problem: null },
+    ),
+  );
+  expect(turn?.live).toBe(true);
+  expect(rowWords(turn!)).toEqual(["Running npm test"]);
+});
+
+test("an answered approval folds into its step; questions and expiries keep receipt rows", () => {
+  const request = {
+    at: "",
+    kind: "request",
+    turn_id: "t1",
+    title: "Codex asked",
+    options: [] as never[],
+    free_text: false,
+  } as const;
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:10Z"),
+        {
+          ...request,
+          id: "q1",
+          request: "approval",
+          subject: "npm test",
+          state: "answered",
+          outcome: "You allowed this for this session",
+        },
+        did("s1", ran("npm test")),
+        {
+          ...request,
+          id: "q2",
+          request: "question",
+          subject: "Fail open?",
+          state: "answered",
+          answer: "Fail open",
+        },
+        {
+          ...request,
+          id: "q3",
+          request: "approval",
+          subject: "rm -rf dist",
+          state: "expired",
+        },
+      ],
+      idle,
+    ),
+  );
+  expect(turn?.rows).toMatchObject([
+    { kind: "step", decision: "You allowed this for this session" },
+    { kind: "receipt", kept: true },
+    { kind: "receipt", kept: true },
+  ]);
+  expect(
+    turn?.rows.map((row) => row.kind === "receipt" && receiptLine(row.item)),
+  ).toEqual([false, "Answered · Fail open", "Expired · rm -rf dist"]);
+});
+
+test("older history with no timing reads without a duration", () => {
+  const [turn] = turnsOf(
+    turns([you("u1", at), did("s1", read("a.ts")), said("r1")], idle),
+  );
+  expect(turn?.label).toBe("Worked");
+  expect(turn?.final?.id).toBe("r1");
+});
+
+test("the New marker goes above the first item after the last one seen, never your own message", () => {
+  const items = [
+    you("u1", at),
+    said("r1"),
+    you("u2", at),
+    timing("active"),
+    did("s1", read("a.ts")),
+  ];
+  expect(firstNew(items, "r1")).toBe("s1");
+  expect(firstNew(items, "s1")).toBeUndefined();
+  expect(firstNew(items, undefined)).toBeUndefined();
+});
+
+test("an unseen Chat opened for the first time marks its last ended turn New", () => {
+  const items = [
+    you("u1", at),
+    timing("completed", "2026-11-10T10:00:30Z"),
+    said("r1"),
+  ];
+  expect(unseenFrom(items)).toBe("r1");
+  expect(unseenFrom([you("u1", at), timing("active")])).toBeUndefined();
 });
 
 test("a stop that was not confirmed is one notice, and Stop itself is the retry", () => {

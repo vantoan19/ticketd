@@ -427,6 +427,7 @@ mod tests {
             state: ChatToolState::Completed,
             output: None,
             output_truncated: false,
+            started_at: None,
         };
         assert_eq!(
             plan_document(&tool, "Rate limits", "Nov 13, 2026").as_deref(),

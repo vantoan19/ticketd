@@ -4,7 +4,9 @@ import type {
   PlanStep,
   TranscriptItem,
 } from "@/features/chats/client";
-import { elapsed } from "@/features/chats/model";
+import { elapsed, reasoningShown } from "@/features/chats/model";
+
+export { reasoningShown };
 
 /**
  * How the views of #367 word what the host reported about a turn's reasoning,
@@ -58,10 +60,6 @@ export function reasoningWords(item: Of<"reasoning">): ReasoningWords {
     label: `Show reasoning, ${spoken}${outcome ? `, ${outcome.toLowerCase()}` : ""}`,
   };
 }
-
-/** A reasoning row with no text leaves the list once it ends; one cut off stays. */
-export const reasoningShown = (item: Of<"reasoning">) =>
-  item.state !== "done" || Boolean(item.text?.trim());
 
 export function planCount(steps: PlanStep[]) {
   const done = steps.filter((step) => step.status === "completed").length;
@@ -156,55 +154,6 @@ export const clockTime = (ms: number) =>
     hour: "numeric",
     minute: "2-digit",
   });
-
-/**
- * Moves each finished turn's files row below what ends its turn (the response
- * and any stop marker), where #362 places it, and says whether the turn ran
- * commands that edited files the row cannot list.
- */
-export function placeFiles(items: TranscriptItem[]) {
-  const placed: TranscriptItem[] = [];
-  const commandEdits = new Set<string>();
-  let turn: TranscriptItem[] = [];
-  let files: Of<"files">[] = [];
-  let edited = false;
-  const flush = () => {
-    let end = turn.length;
-    for (let index = turn.length - 1; index >= 0; index -= 1) {
-      const item = turn[index];
-      if (
-        item?.kind === "response" ||
-        (item?.kind === "marker" && item.reason !== "note")
-      ) {
-        end = index + 1;
-        break;
-      }
-    }
-    placed.push(...turn.slice(0, end), ...files, ...turn.slice(end));
-    if (edited) for (const row of files) commandEdits.add(row.id);
-    turn = [];
-    files = [];
-    edited = false;
-  };
-  for (const item of items) {
-    if (item.kind === "user") flush();
-    if (item.kind === "files") files.push(item);
-    else turn.push(item);
-    if (
-      item.kind === "steps" &&
-      item.steps.some(
-        (step) =>
-          Boolean(step.command) &&
-          (step.kind === "edit" ||
-            step.kind === "create" ||
-            step.kind === "delete"),
-      )
-    )
-      edited = true;
-  }
-  flush();
-  return { items: placed, commandEdits };
-}
 
 /** The plan of the turn in progress, for the dock's pill. */
 export function runningPlan(items: TranscriptItem[]): Of<"plan"> | undefined {
