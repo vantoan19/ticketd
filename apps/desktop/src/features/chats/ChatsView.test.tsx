@@ -874,7 +874,7 @@ test("each step reads as what it did, and opens to its output", async () => {
   ).toBeTruthy();
 });
 
-test("what the agent changed in ticketd is listed where it happened", async () => {
+test("what the agent changed in ticketd is one receipt row under the response, its records open", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [
       {
@@ -889,16 +889,26 @@ test("what the agent changed in ticketd is listed where it happened", async () =
             from: "In progress",
             to: "In review",
           },
+          { kind: "update", reference: "T-12", excerpt: "Limiter is in" },
           { kind: "document", document_id: "d9", title: "Reset email copy" },
         ],
       },
     ]),
   );
-  const block = within(
-    screen.getByRole("list", { name: "Updated in ticketd" }),
-  );
-  expect(block.getByText("In progress → In review")).toBeTruthy();
-  expect(block.getByText("Document created")).toBeTruthy();
+  // Verb first; the references are links; the third change folds under "1 more".
+  expect(screen.getAllByRole("button", { name: "T-12" })).toHaveLength(2);
+  expect(
+    screen.getAllByText((_, node) =>
+      Boolean(
+        node?.classList.contains("chat-receipt-items") &&
+          node.textContent ===
+            "Moved T-12 to In review · Posted an update on T-12",
+      ),
+    ),
+  ).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Reset email copy" })).toBeNull();
+  fireEvent.click(button("1 more"));
+  expect(button("Reset email copy")).toBeTruthy();
   expect(
     screen.getByText('Created the Document "Reset email copy"'),
   ).toBeTruthy();

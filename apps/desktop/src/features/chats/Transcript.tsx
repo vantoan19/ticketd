@@ -7,21 +7,17 @@ import {
   Clock,
   Copy,
   FilePlus2,
-  FileText,
   Info,
   LoaderCircle,
-  MessageSquareText,
   Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Reference } from "@/components/ui/reference";
 import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
-import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { ReceiptRow } from "@/features/chats/ReceiptRow";
 import type {
   ChatState,
-  RecordChange,
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
@@ -226,38 +222,6 @@ function Steps({ item, harness }: { item: Of<"steps">; harness: string }) {
   );
 }
 
-function RecordRow({ change }: { change: RecordChange }) {
-  if (change.kind === "status")
-    return (
-      <li>
-        <StatusIcon status={change.to} decorative />
-        <span className="chat-rec-main">
-          <Reference>{change.reference}</Reference> {change.title}
-        </span>
-        <span className="chat-rec-what">
-          {change.from} → {change.to}
-        </span>
-      </li>
-    );
-  if (change.kind === "update")
-    return (
-      <li>
-        <MessageSquareText size={16} aria-hidden />
-        <span className="chat-rec-main">
-          <Reference>{change.reference}</Reference> “{change.excerpt}”
-        </span>
-        <span className="chat-rec-what">Update posted</span>
-      </li>
-    );
-  return (
-    <li>
-      <FileText size={16} aria-hidden />
-      <span className="chat-rec-main">{change.title}</span>
-      <span className="chat-rec-what">Document created</span>
-    </li>
-  );
-}
-
 const receiptTime = (timestamp: string) => {
   const date = new Date(timestamp);
   return Number.isNaN(date.getTime())
@@ -363,18 +327,8 @@ const Item = memo(function Item({
     case "steps":
       return <Steps item={item} harness={harness} />;
     case "records":
-      return (
-        <div className="chat-records">
-          <span className="chat-fine" id={`records-${item.id}`}>
-            Updated in ticketd
-          </span>
-          <ul aria-labelledby={`records-${item.id}`}>
-            {item.changes.map((change, index) => (
-              <RecordRow key={index} change={change} />
-            ))}
-          </ul>
-        </div>
-      );
+      // Below the response, after the files row (#367); never folded.
+      return <ReceiptRow changes={item.changes} />;
     case "request":
       // Pending requests live in the activity dock (#363), not here.
       return item.state === "pending" ? null : <RequestCard item={item} />;

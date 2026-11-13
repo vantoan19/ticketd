@@ -117,6 +117,14 @@
 }
 
 /* A quote: a muted source line over two clamped lines beside a 2px rule. */
+.chat-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .chat-quote {
   display: flex;
   flex-direction: column;
@@ -248,8 +256,20 @@
 .chat-receipt-ref:hover {
   color: var(--interactive);
 }
+/* A Document is named in sans; only references are mono. */
+.chat-receipt-name {
+  font-family: inherit;
+  font-size: inherit;
+}
 .chat-receipt-more {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted-foreground);
+  font-family: inherit;
+  font-size: inherit;
+  text-decoration: none;
 }
 .chat-receipt-fold {
   margin: 0;
