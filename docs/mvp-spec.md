@@ -1328,6 +1328,10 @@ execution or create a Project. Multiple Chats may run concurrently, including in
 the same directory; show shared-directory use. No automatic isolation or worktree
 management is implied. Each Chat has at most one active turn.
 
+A Chat can start from a ticket, linked to it, with its Project's folder offered and
+an unsent prompt; nothing is sent until the person sends it. Ticket detail lists the
+ticket's Chats with their observed status.
+
 While New Chat's message box is empty it may suggest up to three starts from local
 records: continuing the In progress tickets changed last (at most two), reviewing
 the latest In review ticket, and triaging the Inbox when anything is unread. The
@@ -1418,6 +1422,8 @@ Links supply lightweight references; the agent fetches current record contents o
 demand through ticketd capabilities. Links do not replace native working-directory
 instructions. Preserve the user's harness settings, repository instructions,
 skills, plugins, hooks and MCP configuration under native trust/permission rules.
+Records mentioned with # or quoted are linked when the message is sent or queued.
+A quote is a copy; agents still read current records through ticketd.
 
 Use native permission modes and render native approvals/questions. ticketd adds no
 human-only gate for changing tickets or statuses. Agents can create and update

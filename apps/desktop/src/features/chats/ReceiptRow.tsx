@@ -1,0 +1,96 @@
+import { Fragment, useContext } from "react";
+import { ChevronRight, FileText, MessageSquareText } from "lucide-react";
+import { DocumentNavigation } from "@/features/documents/navigation";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { TicketNavigation } from "@/features/tickets/navigation";
+import type { RecordChange } from "@/features/chats/client";
+
+/** Whole sentences shown on the row before the rest folds under `N more`. */
+const SHOWN = 2;
+
+/** A status change shows its new status's icon, as ticket history does. */
+function ChangeIcon({ change }: { change: RecordChange }) {
+  if (change.kind === "status")
+    return <StatusIcon status={change.to} size={16} decorative />;
+  if (change.kind === "update")
+    return <MessageSquareText size={16} aria-hidden />;
+  return <FileText size={16} aria-hidden />;
+}
+
+/** One verb-first sentence; the record in it opens. */
+function Sentence({ change }: { change: RecordChange }) {
+  const openTicket = useContext(TicketNavigation);
+  const openDocument = useContext(DocumentNavigation);
+  if (change.kind === "document")
+    return (
+      <>
+        Created{" "}
+        <button
+          type="button"
+          className="chat-records-ref chat-records-name"
+          onClick={() => openDocument?.(change.document_id)}
+        >
+          {change.title}
+        </button>
+      </>
+    );
+  const reference = (
+    <button
+      type="button"
+      className="chat-records-ref"
+      onClick={() => openTicket?.(change.reference)}
+    >
+      {change.reference}
+    </button>
+  );
+  return change.kind === "status" ? (
+    <>
+      Moved {reference} to {change.to}
+    </>
+  ) : (
+    <>Posted an update on {reference}</>
+  );
+}
+
+/**
+ * What the agent changed in ticketd during a turn, as one 28px row under the
+ * response (after the files row): the first change's icon, then verb-first
+ * sentences joined by ` · `, at most two, then `N more`, which opens the
+ * turn's fold, where every change is a step row. Never folded itself, and
+ * shown also when the turn failed or was stopped.
+ */
+export function ReceiptRow({
+  changes,
+  onMore,
+}: {
+  changes: RecordChange[];
+  /** Opens the turn's fold. */
+  onMore: () => void;
+}) {
+  const first = changes[0];
+  if (!first) return null;
+  const rest = changes.length - SHOWN;
+  return (
+    <div className="chat-records">
+      <ChangeIcon change={first} />
+      <span className="chat-records-items">
+        {changes.slice(0, SHOWN).map((change, index) => (
+          <Fragment key={index}>
+            {index > 0 && " · "}
+            <Sentence change={change} />
+          </Fragment>
+        ))}
+      </span>
+      {rest > 0 && (
+        <button
+          type="button"
+          className="chat-records-ref chat-records-more"
+          onClick={onMore}
+        >
+          {rest} more
+          <ChevronRight size={14} aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}

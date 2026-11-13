@@ -4,10 +4,12 @@ import {
   type ChatOverview,
   type ChatSnapshot,
   type ChatSummary,
+  type LinkRef,
   type OpenRequest,
   type Retention,
 } from "@/features/chats/client";
 import { applyChange } from "@/features/chats/model";
+import type { ChatRequest } from "@/features/chats/ticket-chat";
 
 export type ChatFeature = {
   /** The Experimental switch; false until the host has answered. */
@@ -18,6 +20,10 @@ export type ChatFeature = {
   revision: number;
   /** The last clicked Chat notification; `n` rises with each click. */
   openRequest: { request: OpenRequest; n: number } | null;
+  /** The last Chat asked for from a ticket; `n` rises with each request. */
+  chatRequest: { request: ChatRequest; n: number } | null;
+  /** Shows a Chat, or New Chat about a ticket, on the Chats screen. */
+  requestChat: (request: ChatRequest) => void;
 };
 
 export const NO_CHAT_OVERVIEW: ChatOverview = {
@@ -33,6 +39,8 @@ export const ChatFeatureContext = createContext<ChatFeature>({
   overview: NO_CHAT_OVERVIEW,
   revision: 0,
   openRequest: null,
+  chatRequest: null,
+  requestChat: () => {},
 });
 export const useChatFeature = () => useContext(ChatFeatureContext);
 
@@ -58,6 +66,40 @@ export function useChatList(scope: Retention) {
   }, [client, scope, revision]);
   // Another scope's rows are never shown under this scope's title.
   return state?.scope === scope ? state : null;
+}
+
+/**
+ * The Chats linked to one record, kept current: refetched whenever the host
+ * says any summary changed. `retry` asks again after a failure.
+ */
+export function useLinkedChats(link: LinkRef | null) {
+  const client = useChatClient();
+  const { enabled, revision } = useChatFeature();
+  const [attempt, setAttempt] = useState(0);
+  const key = link ? `${link.kind}:${link.id}` : "";
+  const [state, setState] = useState<{
+    key: string;
+    chats: ChatSummary[];
+    error: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!enabled || !link) return;
+    let current = true;
+    client.linkedTo(link).then(
+      (chats) => current && setState({ key, chats, error: "" }),
+      (reason: unknown) =>
+        current && setState({ key, chats: [], error: String(reason) }),
+    );
+    return () => {
+      current = false;
+    };
+    // `key` names the link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, enabled, key, revision, attempt]);
+  return {
+    list: state?.key === key ? state : null,
+    retry: () => setAttempt((count) => count + 1),
+  };
 }
 
 /**
