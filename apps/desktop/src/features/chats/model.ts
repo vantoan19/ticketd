@@ -302,8 +302,10 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: `${harness} isn't installed`,
-        body: `ticketd couldn't find ${harness} on this computer. Install it, then check again. What you typed is kept.`,
-        actions: ["help", "check"],
+        body: `ticketd couldn't find ${harness} on this computer. Install it, then ${problem.command ? `run ${signIn} in a terminal and sign in, then ` : ""}check again. What you typed is kept.`,
+        actions: problem.command
+          ? ["help", "copy-command", "check"]
+          : ["help", "check"],
         help: "Install guide",
       };
     case "incompatible":

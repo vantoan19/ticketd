@@ -375,6 +375,30 @@ async fn an_uncertain_submission_waits_for_the_person_and_is_resent_only_when_th
     assert_eq!(again.unwrap_err().code, "stale");
 }
 
+#[test]
+fn missing_harness_guidance_includes_install_help_and_its_own_sign_in_command() {
+    for (id, name, command, help) in [
+        (
+            "codex",
+            "Codex",
+            "codex login",
+            "https://developers.openai.com/codex/cli",
+        ),
+        (
+            "claude-code",
+            "Claude Code",
+            "claude /login",
+            "https://code.claude.com/docs/en/setup",
+        ),
+    ] {
+        let status = harness_status(id, name, Inspection::NotInstalled);
+        assert_eq!(status.status, "not_installed");
+        assert_eq!(status.command.as_deref(), Some(command));
+        assert_eq!(status.help_url.as_deref(), Some(help));
+        assert!(!usable(status.status));
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_fresh_session_starts_with_the_history_the_person_selected_and_replays_nothing() {
     let f = Fixture::new().await;
