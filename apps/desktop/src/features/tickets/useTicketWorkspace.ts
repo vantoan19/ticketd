@@ -22,6 +22,7 @@ import {
 } from "@/lib/workspace-change";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
+type RefreshOptions = { reportFailure?: boolean };
 type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
 /**
  * A mention being followed. It is not `ready` until the selected ticket has been
@@ -157,93 +158,97 @@ export function useTicketWorkspace(
   );
   const board = useTicketBoard(filterArgs, layout === "board", workspaceChange);
   const refreshBoard = board.refresh;
-  const refresh = useCallback(async () => {
-    const request = ++generation.current;
-    let timeout = 0;
-    try {
-      // A search lists newest first, like Trash; every other list is grouped by
-      // status, so it pages through workflow order.
-      // What the scope alone would list, so a filtered list can say "N of M".
-      const unfiltered: FindFilter = {
-        ...filterArgs,
-        query: "",
-        plan: scopePlan || null,
-        status: scopeKind === "progress" ? "In progress" : null,
-        tags: [],
-        availability: scopeKind === "ready" ? "Ready" : null,
-        family: null,
-        order: "Workflow",
-      };
-      const scoped =
-        JSON.stringify({ ...unfiltered, order: 0 }) ===
-        JSON.stringify({ ...filterArgs, order: 0 });
-      const result = await Promise.race([
-        Promise.all([
-          trash ? client.listTrash() : client.findTickets(filterArgs),
-          client.listProjects(),
-          client.listPlans(),
-          trash ? Promise.resolve(null) : client.countTickets(filterArgs),
-          // Source counts only decorate the filter, so they never fail the list.
-          trash
-            ? Promise.resolve(null)
-            : client.countBySource(filterArgs).catch(() => null),
-          trash || scoped
-            ? Promise.resolve(null)
-            : client.countTickets(unfiltered).catch(() => null),
-          layout === "board" ? refreshBoard() : Promise.resolve(),
-        ]),
-        new Promise<never>((_, reject) => {
-          timeout = window.setTimeout(
-            () => reject(new Error("Timed out")),
-            5000,
+  const refresh = useCallback(
+    async (options?: RefreshOptions) => {
+      const request = ++generation.current;
+      let timeout = 0;
+      try {
+        // A search lists newest first, like Trash; every other list is grouped by
+        // status, so it pages through workflow order.
+        // What the scope alone would list, so a filtered list can say "N of M".
+        const unfiltered: FindFilter = {
+          ...filterArgs,
+          query: "",
+          plan: scopePlan || null,
+          status: scopeKind === "progress" ? "In progress" : null,
+          tags: [],
+          availability: scopeKind === "ready" ? "Ready" : null,
+          family: null,
+          order: "Workflow",
+        };
+        const scoped =
+          JSON.stringify({ ...unfiltered, order: 0 }) ===
+          JSON.stringify({ ...filterArgs, order: 0 });
+        const result = await Promise.race([
+          Promise.all([
+            trash ? client.listTrash() : client.findTickets(filterArgs),
+            client.listProjects(),
+            client.listPlans(),
+            trash ? Promise.resolve(null) : client.countTickets(filterArgs),
+            // Source counts only decorate the filter, so they never fail the list.
+            trash
+              ? Promise.resolve(null)
+              : client.countBySource(filterArgs).catch(() => null),
+            trash || scoped
+              ? Promise.resolve(null)
+              : client.countTickets(unfiltered).catch(() => null),
+            layout === "board" ? refreshBoard() : Promise.resolve(),
+          ]),
+          new Promise<never>((_, reject) => {
+            timeout = window.setTimeout(
+              () => reject(new Error("Timed out")),
+              5000,
+            );
+          }),
+        ]);
+        if (request !== generation.current) return;
+        const found = result[3];
+        if (!trash && found && offset > 0 && offset >= found.total) {
+          // The page this view was on no longer exists (its last tickets left the
+          // result): go to the last page that does instead of showing an empty list
+          // under a non-zero total.
+          setOffset(
+            found.total === 0
+              ? 0
+              : Math.floor((found.total - 1) / PAGE_SIZE) * PAGE_SIZE,
           );
-        }),
-      ]);
-      if (request !== generation.current) return;
-      const found = result[3];
-      if (!trash && found && offset > 0 && offset >= found.total) {
-        // The page this view was on no longer exists (its last tickets left the
-        // result): go to the last page that does instead of showing an empty list
-        // under a non-zero total.
-        setOffset(
-          found.total === 0
-            ? 0
-            : Math.floor((found.total - 1) / PAGE_SIZE) * PAGE_SIZE,
-        );
-        return;
+          return;
+        }
+        listLoaded.current = true;
+        setPollTick((value) => value + 1);
+        setQueryError(false);
+        setRefreshFailed(false);
+        setError("");
+        // The same data again changes nothing, so views are not told to reload.
+        const snapshot = JSON.stringify([trash, offset, result]);
+        if (snapshot === lastSnapshot.current) return;
+        lastSnapshot.current = snapshot;
+        setTickets(result[0]);
+        setLoadedOffset(offset);
+        setCounts(result[3]);
+        setSourceCounts(result[4]);
+        setScopeTotal(result[5]?.total ?? null);
+        setProjects(result[1]);
+        setPlans(result[2]);
+        setRevision((value) => value + 1);
+      } catch (reason) {
+        if (request !== generation.current) return;
+        lastSnapshot.current = "";
+        if (listLoaded.current) setRefreshFailed(true);
+        else setQueryError(true);
+        // Polling keeps the saved list quiet; an explicit retry explains its failure.
+        if (!listLoaded.current || options?.reportFailure) {
+          setError(
+            `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
+          );
+        }
+      } finally {
+        window.clearTimeout(timeout);
+        if (request === generation.current) setLoading(false);
       }
-      listLoaded.current = true;
-      setPollTick((value) => value + 1);
-      setQueryError(false);
-      setRefreshFailed(false);
-      setError("");
-      // The same data again changes nothing, so views are not told to reload.
-      const snapshot = JSON.stringify([trash, offset, result]);
-      if (snapshot === lastSnapshot.current) return;
-      lastSnapshot.current = snapshot;
-      setTickets(result[0]);
-      setLoadedOffset(offset);
-      setCounts(result[3]);
-      setSourceCounts(result[4]);
-      setScopeTotal(result[5]?.total ?? null);
-      setProjects(result[1]);
-      setPlans(result[2]);
-      setRevision((value) => value + 1);
-    } catch (reason) {
-      if (request !== generation.current) return;
-      lastSnapshot.current = "";
-      if (listLoaded.current) setRefreshFailed(true);
-      else {
-        setQueryError(true);
-        setError(
-          `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
-        );
-      }
-    } finally {
-      window.clearTimeout(timeout);
-      if (request === generation.current) setLoading(false);
-    }
-  }, [trash, offset, scopeKind, scopePlan, filterArgs, layout, refreshBoard]);
+    },
+    [trash, offset, scopeKind, scopePlan, filterArgs, layout, refreshBoard],
+  );
   useEffect(() => {
     let active = true;
     void sourcesClient.list().then(
@@ -343,7 +348,7 @@ export function useTicketWorkspace(
         errorAt: new Date().toISOString(),
       });
     }
-    await refresh();
+    await refresh({ reportFailure: true });
   }
   function setSource(next: string) {
     setSourceFilter(next);

@@ -60,7 +60,7 @@ test("adds and removes a verification result", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   expect(await screen.findByText("Unit tests passed")).toBeTruthy();
   fireEvent.pointerDown(
-    screen.getByRole("button", { name: "Actions for Tests" }),
+    await screen.findByRole("button", { name: "Actions for Tests" }),
     { button: 0, ctrlKey: false },
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));

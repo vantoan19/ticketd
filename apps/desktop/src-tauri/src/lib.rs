@@ -9,6 +9,7 @@ mod cli_status;
 mod drive_commands;
 mod sync_commands;
 mod sync_scheduler;
+mod workspace_session;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
@@ -74,9 +75,8 @@ impl From<ticketd_core::Error> for BridgeFailure {
 
 /// Opens the workspace as the person using the desktop: their own changes do not notify them.
 fn open_workspace() -> Result<Workspace, ticketd_core::Error> {
-    let mut workspace = Workspace::open_default()?;
-    workspace.act_as_local_person()?;
-    Ok(workspace)
+    static SESSION: workspace_session::Session = workspace_session::Session::new();
+    SESSION.open(Workspace::open_default)
 }
 
 #[tauri::command]
@@ -140,7 +140,7 @@ fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), String
 }
 #[tauri::command]
 fn all_documents(offset: u32, include_support: bool) -> Result<Vec<DocumentSummary>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.all_documents_page(50, offset, include_support))
         .map_err(|e| e.to_string())
 }
@@ -322,7 +322,7 @@ fn inbox(
 }
 #[tauri::command]
 fn workspace_change_token() -> Result<i64, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.change_token())
         .map_err(|e| e.to_string())
 }

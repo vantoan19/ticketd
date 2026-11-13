@@ -8,7 +8,7 @@ fn ticket_survives_reopening_workspace() {
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("A useful outcome").unwrap();
     drop(workspace);
-    let workspace = Workspace::open(&path).unwrap();
+    let workspace = Workspace::open_existing(&path).unwrap();
     assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
     assert_eq!(workspace.list_tickets().unwrap(), vec![ticket]);
 }
@@ -205,7 +205,7 @@ fn version_one_workspace_upgrades_content_history_and_tags() {
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); INSERT INTO tickets (id, title, status) VALUES ('old-id', 'Existing', 'Todo'); PRAGMA user_version = 1;").unwrap();
     drop(connection);
-    let mut workspace = Workspace::open(&path).unwrap();
+    let mut workspace = Workspace::open_existing(&path).unwrap();
     workspace.add_tag("T-KQ1", "Bug").unwrap();
     let updated = workspace
         .change_ticket(
