@@ -89,6 +89,7 @@ class FakeQuery {
       claude_code_version: "2.1.322",
       models: initModels,
       commands: initCommands,
+      account: { subscriptionType: "max", tokenSource: "claude.ai" },
     };
   }
 
@@ -273,6 +274,7 @@ describe("options", () => {
     expect(h.named("options")).toEqual([
       expect.objectContaining({
         error: null,
+        account: expect.objectContaining({ subscription_type: "max" }),
         models: [
           expect.objectContaining({
             value: "default",

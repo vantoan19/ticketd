@@ -180,6 +180,13 @@ type EventBody =
       event: "options";
       id: string;
       models: ModelOption[];
+      /** How Claude Code describes its account (no credential), when it said. */
+      account: {
+        subscription_type: string | null;
+        token_source: string | null;
+        api_key_source: string | null;
+        api_provider: string | null;
+      } | null;
       error: string | null;
     }
   | {

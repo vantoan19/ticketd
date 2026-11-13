@@ -22,7 +22,7 @@ use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 use crate::{
     Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EVENT_BUFFER, EventKind,
     EventStream, HarnessOptions, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeRequestId, NoticeKind, OpenRequest, OpenedRuntime, Problem,
+    InterruptRequest, LoginState, NativeRequestId, NoticeKind, OpenRequest, OpenedRuntime, Problem,
     ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
     SessionStart, SettingChange, SettingKey, SettingOutcome, Submission, SubmissionId,
     SubmissionKind,
@@ -697,23 +697,98 @@ pub(super) async fn open_over(
     }
 }
 
-/// Has the bridge report on the installed Claude Code. Starts no session and reads
-/// no credential; the bridge is closed afterwards.
-pub(super) async fn probe(io: Io, claude: &Path, options: Options) -> Inspection {
+/// Has the bridge report on the installed Claude Code, then, when it can be used,
+/// what it offers. Starts no session that reaches a model and reads no credential:
+/// sign-in is what Claude Code itself says of its account while it initializes. The
+/// bridge is closed afterwards. The options are `None` when Claude Code can't be used.
+pub(super) async fn probe(
+    io: Io,
+    claude: &Path,
+    options: Options,
+) -> (Inspection, Option<Result<HarnessOptions, String>>) {
     let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
-    let inspection = match connection.handshake(claude).await {
-        Ok(inspection) => super::verdict(claude, &inspection),
-        Err(problem) => Inspection::ProbeFailed {
-            reason: problem.message,
+    let result = match connection.handshake(claude).await {
+        Ok(inspection) => match super::verdict(claude, &inspection) {
+            Inspection::Installed {
+                executable,
+                version,
+                login,
+                capabilities,
+            } => {
+                // Bounded: a slow start leaves sign-in "not checked".
+                let listed =
+                    tokio::time::timeout(crate::CHECK_TIMEOUT, ask_options(&connection, claude))
+                        .await
+                        .unwrap_or_else(|_| Err("Claude Code took too long to start".to_owned()));
+                let login = match &listed {
+                    Ok((_, account)) if login == LoginState::Unknown => *account,
+                    _ => login,
+                };
+                (
+                    Inspection::Installed {
+                        executable,
+                        version,
+                        login,
+                        capabilities,
+                    },
+                    Some(listed.map(|(options, _)| options)),
+                )
+            }
+            other => (other, None),
         },
+        Err(problem) => (
+            Inspection::ProbeFailed {
+                reason: problem.message,
+            },
+            None,
+        ),
     };
     connection.close().await;
-    inspection
+    result
 }
 
-/// Has the bridge ask the installed Claude Code which models it offers, through an
-/// SDK session that is given no prompt and is closed once it has initialized: nothing
-/// reaches a model. The bridge is closed afterwards.
+/// Asks the bridge for Claude Code's models through an SDK session that is given no
+/// prompt and is closed once it has initialized: nothing reaches a model. Also says
+/// how Claude Code reports its account.
+async fn ask_options(
+    connection: &Connection,
+    claude: &Path,
+) -> Result<(HarnessOptions, LoginState), String> {
+    let ask = json!({"cmd": "options", "claude_executable": claude.to_string_lossy()});
+    match connection.call(|_| Ok((ask, Kind::Plain))).await {
+        CallOutcome::Event(event) => match event["error"].as_str() {
+            Some(error) => Err(format!("Claude Code did not list its models: {error}")),
+            None => Ok((
+                super::report::listed_options(
+                    event["models"].as_array().map_or(&[][..], Vec::as_slice),
+                ),
+                account_login(&event["account"]),
+            )),
+        },
+        CallOutcome::Rejected(reason) => Err(reason),
+        _ => Err("the Claude bridge did not answer".to_owned()),
+    }
+}
+
+/// Sign-in as Claude Code describes its account (`AccountInfo`): a subscription is
+/// signed in; an API key or another provider bills elsewhere. Anything else is not
+/// a verdict.
+pub(super) fn account_login(account: &Value) -> LoginState {
+    let field = |name: &str| account[name].as_str().filter(|value| !value.is_empty());
+    if field("api_provider").is_some_and(|provider| provider != "firstParty") {
+        return LoginState::NonSubscription;
+    }
+    if field("subscription_type").is_some() {
+        return LoginState::SignedIn;
+    }
+    if field("api_key_source").is_some_and(|source| source != "none") {
+        return LoginState::NonSubscription;
+    }
+    LoginState::Unknown
+}
+
+/// Has the bridge list Claude Code's models, after the handshake. The bridge is
+/// closed afterwards.
 pub(super) async fn probe_options(
     io: Io,
     claude: &Path,
@@ -725,17 +800,9 @@ pub(super) async fn probe_options(
             .handshake(claude)
             .await
             .map_err(|problem| problem.message)?;
-        let ask = json!({"cmd": "options", "claude_executable": claude.to_string_lossy()});
-        match connection.call(|_| Ok((ask, Kind::Plain))).await {
-            CallOutcome::Event(event) => match event["error"].as_str() {
-                Some(error) => Err(format!("Claude Code did not list its models: {error}")),
-                None => Ok(super::report::listed_options(
-                    event["models"].as_array().map_or(&[][..], Vec::as_slice),
-                )),
-            },
-            CallOutcome::Rejected(reason) => Err(reason),
-            _ => Err("the Claude bridge did not answer".to_owned()),
-        }
+        ask_options(&connection, claude)
+            .await
+            .map(|(options, _)| options)
     }
     .await;
     connection.close().await;

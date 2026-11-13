@@ -316,6 +316,8 @@ export function createBridge(deps: BridgeDeps) {
     };
     let query: SdkQuery | undefined;
     let models: ModelOption[] = [];
+    let account: Extract<BridgeEventBody, { event: "options" }>["account"] =
+      null;
     let error: string | null = null;
     try {
       query = deps.query({
@@ -334,13 +336,21 @@ export function createBridge(deps: BridgeDeps) {
       });
       const init = await query.initializationResult();
       models = (init.models ?? []).filter(isObject).flatMap(modelOption);
+      const info: unknown = (init as { account?: unknown }).account;
+      if (isObject(info))
+        account = {
+          subscription_type: text(info.subscriptionType),
+          token_source: text(info.tokenSource),
+          api_key_source: text(info.apiKeySource),
+          api_provider: text(info.apiProvider),
+        };
     } catch (cause) {
       error = errorInfo(cause).message;
     } finally {
       abort.abort();
       query?.close();
     }
-    emit({ event: "options", id: command.id, models, error });
+    emit({ event: "options", id: command.id, models, account, error });
   }
 
   function open(command: Extract<Command, { cmd: "open" }>) {

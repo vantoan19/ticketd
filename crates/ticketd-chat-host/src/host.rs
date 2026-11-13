@@ -29,6 +29,9 @@ pub const ADAPTER_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const _: () = assert!(ADAPTER_CLOSE_TIMEOUT.as_millis() < CLOSE_TIMEOUT.as_millis());
 /// How long one write to a harness may take before the harness counts as not reading.
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a harness check waits for sign-in and its options before it reports
+/// what it found without them.
+pub const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a written new turn may go without any confirmation before its delivery is
 /// recorded as uncertain and the Chat stops showing as working. Provisional (#267).
 pub const DELIVERY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(120);

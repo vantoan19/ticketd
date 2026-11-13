@@ -686,6 +686,31 @@ async fn the_login_probe_reads_the_account_kind_and_closes_the_process() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_codex_slow_to_start_is_not_checked_rather_than_checking_forever() {
+    let (mut peer, io) = pipes();
+    // Codex takes the request and never answers.
+    peer.load(
+        &fixture!("login")
+            .lines()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let slow = Options {
+        rpc_timeout: Duration::from_secs(600),
+        ..options()
+    };
+
+    let (login, ()) = tokio::join!(probe_login(io, slow), async {
+        peer.play().await;
+        assert!(peer.stdin_closed().await);
+        peer.exit(0);
+    });
+
+    assert_eq!(login, LoginState::Unknown);
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_options_probe_lists_every_page_of_models_with_their_efforts_and_closes() {
     let (mut peer, io) = pipes();
     peer.load(fixture!("options"));

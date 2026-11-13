@@ -670,7 +670,7 @@ async fn inspection_judges_the_pairing_without_opening_a_session() {
     peer.load(fixture!("inspect"));
 
     let probing = probe(io, Path::new(CLAUDE), Options::default());
-    let (inspection, ()) = tokio::join!(probing, async {
+    let ((inspection, offered), ()) = tokio::join!(probing, async {
         peer.play().await;
         assert!(peer.stdin_closed().await);
         peer.exit(0);
@@ -687,10 +687,33 @@ async fn inspection_judges_the_pairing_without_opening_a_session() {
     };
     assert_eq!(executable, PathBuf::from(CLAUDE));
     assert_eq!(version.as_deref(), Some("2.1.322"));
-    // Sign-in is Claude Code's business; steering is unvalidated, so not offered.
-    assert_eq!(login, LoginState::Unknown);
+    // Sign-in is what Claude Code says of its account; steering is unvalidated.
+    assert_eq!(login, LoginState::SignedIn);
+    assert!(
+        offered.is_some_and(|listed| listed.is_ok()),
+        "the check lists its options too"
+    );
     assert!(matches!(capabilities.steering, Capability::Unknown { .. }));
     assert!(capabilities.native_resume.behavior().is_some());
+}
+
+#[test]
+fn sign_in_is_read_from_how_claude_code_describes_its_account() {
+    use super::runtime::account_login;
+    let login = |account: Value| account_login(&account);
+    assert_eq!(
+        login(json!({"subscription_type": "pro"})),
+        LoginState::SignedIn
+    );
+    assert_eq!(
+        login(json!({"api_key_source": "ANTHROPIC_API_KEY"})),
+        LoginState::NonSubscription
+    );
+    assert_eq!(
+        login(json!({"api_provider": "bedrock"})),
+        LoginState::NonSubscription
+    );
+    assert_eq!(login(Value::Null), LoginState::Unknown);
 }
 
 #[test]

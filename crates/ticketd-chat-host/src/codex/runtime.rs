@@ -450,16 +450,23 @@ pub(super) async fn open_over(
 /// thread; the process is closed afterwards.
 pub(super) async fn probe_login(io: Io, options: Options) -> LoginState {
     let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
-    let login = match connection.initialize().await {
-        Ok(()) => match connection
-            .request("account/read", json!({"refreshToken": false}))
-            .await
-        {
-            CallOutcome::Reply(account) => login_state(&account),
-            _ => LoginState::Unknown,
-        },
-        Err(_) => LoginState::Unknown,
+    let read = async {
+        match connection.initialize().await {
+            Ok(()) => match connection
+                .request("account/read", json!({"refreshToken": false}))
+                .await
+            {
+                CallOutcome::Reply(account) => login_state(&account),
+                _ => LoginState::Unknown,
+            },
+            Err(_) => LoginState::Unknown,
+        }
     };
+    // A Codex that is slow to start (its MCP servers, say) is "not checked", not a
+    // check that never ends.
+    let login = timeout(crate::CHECK_TIMEOUT, read)
+        .await
+        .unwrap_or(LoginState::Unknown);
     connection.close().await;
     login
 }
