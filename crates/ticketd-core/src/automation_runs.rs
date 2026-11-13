@@ -147,13 +147,13 @@ pub(crate) fn migrate_attention(connection: &Connection) -> Result<(), Error> {
             "ALTER TABLE automation_runs ADD COLUMN attention_cleared INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
-    connection.execute_batch("PRAGMA user_version = 72;")?;
+    connection.execute_batch("PRAGMA user_version = 73;")?;
     Ok(())
 }
 
 /// Adds an Attention inbox entry, on its ticket, for each run that needs the person
 /// and has none yet. Called wherever a run ends as Needs attention.
-fn announce(connection: &Connection) -> Result<(), Error> {
+pub(crate) fn announce(connection: &Connection) -> Result<(), Error> {
     connection.execute(
         &format!(
             "INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value, editing_agent)

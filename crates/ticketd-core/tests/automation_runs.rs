@@ -819,20 +819,24 @@ fn a_run_that_completed_or_is_still_going_does_not_need_you() {
 #[test]
 fn a_run_the_person_stopped_or_ticketd_left_behind_needs_them_too() {
     let (_dir, mut workspace) = workspace();
-    triage(&mut workspace);
+    let automation = triage(&mut workspace);
     let (stopped, _chat) = on_agent_step(&mut workspace);
     workspace.stop_automation_run(&stopped.id).unwrap();
     let (left, _chat) = on_agent_step(&mut workspace);
     workspace.end_running_automation_runs("closed").unwrap();
+    let (turned_off, _chat) = on_agent_step(&mut workspace);
+    workspace
+        .stop_and_turn_off_automation(&automation.id)
+        .unwrap();
 
-    assert_eq!(needing_you(&workspace), 2);
+    assert_eq!(needing_you(&workspace), 3);
     let inbox = workspace.inbox(10, 0).unwrap();
     assert_eq!(
         inbox
             .iter()
             .map(|entry| &entry.from_value)
             .collect::<Vec<_>>(),
-        [&left.id, &stopped.id]
+        [&turned_off.id, &left.id, &stopped.id]
     );
 }
 
@@ -1055,7 +1059,7 @@ fn the_previous_format_keeps_its_runs_and_the_ones_needing_attention_still_need_
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 71;",
+        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 72;",
     )
     .unwrap();
     drop(db);

@@ -16,6 +16,7 @@ import {
   splitMatch,
   type SettingsEntry,
 } from "@/features/settings/settings-search";
+import { useChatFeature } from "@/features/chats/use-chats";
 import { useSources } from "@/features/settings/sources/use-sources";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
@@ -51,6 +52,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 export function SearchPage() {
   const { query, setQuery, openPage } = useSettingsState();
   const { entries: sources } = useSources();
+  const chat = useChatFeature();
   const input = useRef<HTMLInputElement>(null);
   const statusId = useId();
   // Search opens to its input, not its title.
@@ -60,14 +62,17 @@ export function SearchPage() {
     const pages = new Map<SettingsPageId, PageInfo>(
       SETTINGS_SECTIONS.map((section) => [section.id, section]),
     );
-    const entries: SettingsEntry[] = [...SETTINGS_ENTRIES];
+    // Automations settings are found only while Chat shows them.
+    const entries: SettingsEntry[] = SETTINGS_ENTRIES.filter(
+      (entry) => entry.section !== "automations" || chat.enabled,
+    );
     for (const { connector } of sources) {
       const section = sourceSection(connector.provider, connector.name);
       pages.set(section.id, section);
       entries.push(...sourceEntries(connector.provider, connector.name));
     }
     return { pages, entries };
-  }, [sources]);
+  }, [sources, chat.enabled]);
 
   const hits = searchSettings(
     query,

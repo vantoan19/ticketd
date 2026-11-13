@@ -99,12 +99,12 @@ test("the Show Chat row explains itself and the notice links to About", async ()
   ).toBeTruthy();
   expect(
     screen.getByText(
-      "Adds Chats to the sidebar, where you start and follow conversations with your agent.",
+      "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
     ),
   ).toBeTruthy();
   expect(
     screen.getByText(
-      "Turning Chat off hides it and keeps your Chats. Running Chats are stopped first, after you confirm.",
+      "Turning Chat off hides Chats and Automations and keeps them. Running Chats and runs are stopped first, after you confirm.",
     ),
   ).toBeTruthy();
   fireEvent.click(

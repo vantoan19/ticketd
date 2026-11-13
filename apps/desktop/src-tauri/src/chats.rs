@@ -639,6 +639,13 @@ impl Chats {
             .count()
     }
 
+    /// Whether any Automation is on for this device. One that is keeps ticketd in the
+    /// tray when the window closes, since Automations run only in this process.
+    pub fn automations_on(&self) -> bool {
+        self.workspace()
+            .is_ok_and(|workspace| workspace.any_automation_on().unwrap_or(false))
+    }
+
     /// Before the workspace is replaced by a backup: stops every running Chat, so no
     /// harness keeps working against records that are about to change, and refuses new
     /// work until `finish_restore`. Returns the Chats whose harness could not be
@@ -1449,12 +1456,14 @@ impl Chats {
 pub enum CloseAction {
     /// As before Chat existed: the window closes and the app exits.
     Exit,
-    /// The window is hidden and Chats keep running in this process.
+    /// The window is hidden; Chats and Automations keep running in this process.
     KeepRunning,
 }
 
-pub fn close_action(enabled: bool, working: usize) -> CloseAction {
-    if enabled && working > 0 {
+/// ticketd stays for a Chat that is working and for an Automation that is on, which
+/// may start a run at any time. With Chat off neither runs.
+pub fn close_action(enabled: bool, working: usize, automations_on: bool) -> CloseAction {
+    if enabled && (working > 0 || automations_on) {
         CloseAction::KeepRunning
     } else {
         CloseAction::Exit

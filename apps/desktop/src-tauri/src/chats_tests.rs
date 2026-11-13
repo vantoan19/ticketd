@@ -107,7 +107,7 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
     assert!(f.chats.create(f.input("first")).await.is_err());
     assert_eq!(f.chats.working(), 0);
     assert_eq!(
-        close_action(f.chats.enabled(), f.chats.working()),
+        close_action(f.chats.enabled(), f.chats.working(), false),
         CloseAction::Exit
     );
 
@@ -116,7 +116,7 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
     assert_eq!(f.chats.working(), 1);
     assert_eq!(f.chats.overview().unwrap().working, 1);
     assert_eq!(
-        close_action(f.chats.enabled(), f.chats.working()),
+        close_action(f.chats.enabled(), f.chats.working(), false),
         CloseAction::KeepRunning
     );
 
@@ -133,12 +133,56 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
 
 #[test]
 fn closing_keeps_chats_running_only_when_some_are_working_and_quit_asks_before_stopping_them() {
-    assert_eq!(close_action(false, 0), CloseAction::Exit);
-    assert_eq!(close_action(true, 0), CloseAction::Exit);
-    assert_eq!(close_action(true, 2), CloseAction::KeepRunning);
+    assert_eq!(close_action(false, 0, false), CloseAction::Exit);
+    assert_eq!(close_action(true, 0, false), CloseAction::Exit);
+    assert_eq!(close_action(true, 2, false), CloseAction::KeepRunning);
     assert_eq!(quit_action(0, false), QuitAction::Quit);
     assert_eq!(quit_action(2, false), QuitAction::Confirm(2));
     assert_eq!(quit_action(2, true), QuitAction::Quit);
+}
+
+#[tokio::test(start_paused = true)]
+async fn closing_keeps_ticketd_in_the_tray_while_an_automation_is_on() {
+    let f = Fixture::new().await;
+    let closing = || {
+        close_action(
+            f.chats.enabled(),
+            f.chats.working(),
+            f.chats.automations_on(),
+        )
+    };
+    assert_eq!(closing(), CloseAction::Exit);
+
+    // No Chat is working: the Automation alone keeps ticketd running.
+    let mut core = f.core();
+    let automation = core
+        .create_automation(ticketd_core::AutomationDefinition {
+            name: "Triage".into(),
+            trigger: Some(ticketd_core::Trigger::TagAdded {
+                tag: "triage".into(),
+            }),
+            conditions: Vec::new(),
+            steps: vec![ticketd_core::Step {
+                id: "notify".into(),
+                action: ticketd_core::StepAction::Notify {
+                    text: "Tagged".into(),
+                    opens: ticketd_core::NotifyTarget::Ticket,
+                    on_failure: None,
+                },
+            }],
+        })
+        .unwrap();
+    core.set_automation_enabled(&automation.id, true).unwrap();
+    assert_eq!(closing(), CloseAction::KeepRunning);
+
+    core.set_automation_enabled(&automation.id, false).unwrap();
+    assert_eq!(closing(), CloseAction::Exit);
+}
+
+#[test]
+fn an_automation_that_is_on_does_not_keep_ticketd_running_while_chat_is_off() {
+    // With Chat off nothing runs Automations, so there is nothing to stay for.
+    assert_eq!(close_action(false, 0, true), CloseAction::Exit);
 }
 
 #[test]

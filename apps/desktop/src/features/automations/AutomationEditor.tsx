@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
@@ -20,6 +20,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -31,11 +32,13 @@ import { Switch } from "@/components/ui/switch";
 import { AgentForm } from "@/features/automations/AgentForm";
 import { TRIGGER_ID } from "@/features/automations/canvas-layout";
 import {
+  automationsClient,
   definitionOf,
   type Automation,
   type AutomationAgent,
   type AutomationAgentSettings,
   type AutomationDefinition,
+  type AutomationRun,
   type AutomationStep,
 } from "@/features/automations/client";
 import {
@@ -68,6 +71,7 @@ export function AutomationEditor({
   onOpenRun: setOpenRun,
   onChange,
   onSetEnabled,
+  onStopAndTurnOff,
   onDelete,
   onCreateAgent,
   onSaveAgent,
@@ -86,6 +90,8 @@ export function AutomationEditor({
   onOpenRun: (id: string | null) => void;
   onChange: (definition: AutomationDefinition) => void;
   onSetEnabled: (enabled: boolean) => void;
+  /** Off, with the runs in progress ended as Needs attention. */
+  onStopAndTurnOff: () => void;
   onDelete: () => void;
   /** Makes a new agent; resolves to nothing when that failed. */
   onCreateAgent: () => Promise<AutomationAgent | undefined>;
@@ -107,6 +113,21 @@ export function AutomationEditor({
   const [deletingStep, setDeletingStep] = useState<string | null>(null);
   /** The agent open over the editor, to set up or change. */
   const [agentOpen, setAgentOpen] = useState<string | null>(null);
+  /** The runs in progress, while the person is asked how to switch off. */
+  const [turningOff, setTurningOff] = useState<AutomationRun[] | null>(null);
+  const onSwitch = useRef<HTMLButtonElement>(null);
+
+  const setEnabled = (enabled: boolean) => {
+    if (enabled) return onSetEnabled(true);
+    // Stopping an agent is a decision: with a run in progress, ask first.
+    automationsClient.runs(automation.id).then((runs) => {
+      const active = runs.filter(
+        (run) => run.status === "queued" || run.status === "running",
+      );
+      if (active.length > 0) setTurningOff(active);
+      else onSetEnabled(false);
+    }, onFail);
+  };
 
   const change = (patch: Partial<AutomationDefinition>) => {
     const next = { ...draft, ...patch };
@@ -242,11 +263,19 @@ export function AutomationEditor({
             <Switch
               aria-label="On for this desktop"
               {...(left > 0 && { "aria-describedby": `${headingId}-left` })}
+              ref={onSwitch}
               checked={automation.enabled}
               disabled={left > 0 && !automation.enabled}
-              onCheckedChange={onSetEnabled}
+              onCheckedChange={setEnabled}
             />
             {automation.enabled ? "On" : "Off"}
+            <TurnOffMenu
+              runs={turningOff}
+              onClose={() => setTurningOff(null)}
+              onReturnFocus={() => onSwitch.current?.focus()}
+              onTurnOff={() => onSetEnabled(false)}
+              onStopAndTurnOff={onStopAndTurnOff}
+            />
           </label>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -405,5 +434,83 @@ export function AutomationEditor({
         </SheetContent>
       </Sheet>
     </section>
+  );
+}
+
+/**
+ * Asked when an Automation is switched off with runs in progress. It opens
+ * under the switch; closing it any other way than by a choice keeps the
+ * Automation on.
+ */
+function TurnOffMenu({
+  runs,
+  onClose,
+  onReturnFocus,
+  onTurnOff,
+  onStopAndTurnOff,
+}: {
+  /** The runs in progress; null while nothing is asked. */
+  runs: AutomationRun[] | null;
+  onClose: () => void;
+  onReturnFocus: () => void;
+  onTurnOff: () => void;
+  onStopAndTurnOff: () => void;
+}) {
+  const one = runs?.length === 1;
+  const reference = one ? runs[0]?.ticket?.reference : undefined;
+  return (
+    <DropdownMenu
+      open={runs !== null}
+      onOpenChange={(open) => !open && onClose()}
+    >
+      {/* The switch opens the menu; this only gives it a place. */}
+      <DropdownMenuTrigger asChild>
+        <span className="auto-on-anchor" aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        // The anchor has no name to lend the menu.
+        aria-labelledby={undefined}
+        aria-label="Turn off"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          onReturnFocus();
+        }}
+      >
+        <DropdownMenuLabel>
+          {one
+            ? "A run is in progress"
+            : `${runs?.length ?? 0} runs are in progress`}
+        </DropdownMenuLabel>
+        <DropdownMenuItem onSelect={onTurnOff}>
+          <span className="flow-menu-item-text">
+            <span>
+              {one
+                ? "Turn off after it finishes"
+                : "Turn off after they finish"}
+            </span>
+            <small>
+              {one
+                ? `The run${reference ? ` on ${reference}` : ""} completes; no new runs start`
+                : "The runs complete; no new runs start"}
+            </small>
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onStopAndTurnOff}>
+          <span className="flow-menu-item-text">
+            <span>
+              {one ? "Stop it and turn off" : "Stop them and turn off"}
+            </span>
+            <small>
+              {one
+                ? "The run ends now as Needs attention"
+                : "The runs end now as Needs attention"}
+            </small>
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem>Keep it on</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

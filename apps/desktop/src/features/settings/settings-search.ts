@@ -171,9 +171,24 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Show Chat",
     description:
-      "Adds Chats to the sidebar, where you start and follow conversations with your agent.",
-    keywords: "chat claude codex ai experimental sidebar conversations",
+      "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
+    keywords:
+      "chat claude codex ai experimental sidebar conversations automations",
     section: "chat",
+  },
+  {
+    title: "Runs at once",
+    description:
+      "Runs beyond this wait in a queue, in the order their events happened.",
+    keywords: "automation automations concurrency parallel limit queue agents",
+    section: "automations",
+  },
+  {
+    title: "Start ticketd when you sign in",
+    description: "Automations run only while ticketd is running.",
+    keywords:
+      "automation automations login startup autostart launch background tray boot",
+    section: "automations",
   },
   {
     title: "Google Drive",
