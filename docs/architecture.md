@@ -232,11 +232,17 @@ Chat list. The host opens its harness with an `Unattended` request: the agent's
 model, allowed tools and turn limit. An adapter given one never asks for approval
 and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
-switch that is off disallowed. Codex runs with approval policy `never` and a
-sandbox set from the allowed tools: read-only unless editing is allowed, no
-network unless the web is. Codex reads files and runs commands inside that sandbox
-whatever the switches say, has no turn limit to set, and cannot run the ticketd
-CLI's writes from a read-only sandbox. `ChatHost::run_unattended` sends the first
+switch that is off disallowed. It loads none of the person's user, project or
+local Claude Code settings, so an allow rule there cannot widen the allowlist;
+that also leaves out their hooks, `CLAUDE.md` and anything else those files set.
+The ticketd CLI is allowed in both of Claude Code's shells, Bash and PowerShell,
+by name and by path. Codex runs with approval policy `never` and a
+`workspaceWrite` sandbox whose only writable places are the step's folder and the
+folder holding the Workspace, with no network unless the web is allowed. Codex
+reads files and runs commands inside that sandbox whatever the switches say and
+has no turn limit to set, so the agent editor shows those as fixed for Codex; a
+read-only sandbox would stop the ticketd CLI recording the agent's result, so
+"Edit files" does not apply to Codex either. `ChatHost::run_unattended` sends the first
 message, stops a turn still going at the agent's time limit, reports how the turn
 ended (finished, turn limit, time limit, tool denied, crashed, or another failure)
 and closes the harness process. An unattended harness that asks for approval

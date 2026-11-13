@@ -211,3 +211,49 @@ test("deleting an agent asks first, then removes it from the list", async () => 
   );
   expect(screen.getByText("An agent is who a step runs")).toBeTruthy();
 });
+
+test("with Codex chosen, the switches it cannot enforce are fixed on and the turn limit is not applied; Claude Code brings the agent's own choices back", async () => {
+  await open(undefined, [
+    {
+      id: "a1",
+      ...DEFAULTS,
+      name: "Triage",
+      harness: "codex",
+      tools: { ...DEFAULTS.tools, read_files: false },
+    } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = await screen.findByRole("region", { name: "Triage" });
+  const control = (role: "switch" | "spinbutton", name: string) =>
+    within(form).getByRole(role, { name }) as HTMLButtonElement;
+
+  for (const name of ["Read files", "Edit files", "Run commands"]) {
+    expect(control("switch", name).getAttribute("aria-checked")).toBe("true");
+    expect(control("switch", name).disabled).toBe(true);
+  }
+  // Codex has no list of commands to allow.
+  expect(
+    within(form).queryByRole("textbox", { name: "Allowed commands" }),
+  ).toBeNull();
+  // The web is the one switch Codex's sandbox follows.
+  expect(control("switch", "Use the web").disabled).toBe(false);
+  expect(control("switch", "Use the web").getAttribute("aria-checked")).toBe(
+    "false",
+  );
+  expect(within(form).getByText(/Codex applies its own sandbox/)).toBeTruthy();
+  expect(control("spinbutton", "Turns").disabled).toBe(true);
+  expect(within(form).getByText("Not applied with Codex")).toBeTruthy();
+  expect(control("spinbutton", "Minutes").disabled).toBe(false);
+
+  fireEvent.click(within(form).getByRole("radio", { name: /Claude Code/ }));
+
+  for (const name of ["Read files", "Edit files", "Run commands"]) {
+    expect(control("switch", name).getAttribute("aria-checked")).toBe("false");
+    expect(control("switch", name).disabled).toBe(false);
+  }
+  expect(within(form).queryByText(/Codex applies its own sandbox/)).toBeNull();
+  expect(control("spinbutton", "Turns").disabled).toBe(false);
+  // What Codex showed as fixed was never saved over the agent's own choices.
+  await waitFor(() => expect(stored[0]?.harness).toBe("claude-code"));
+  expect(stored[0]?.tools).toEqual({ ...DEFAULTS.tools, read_files: false });
+});
