@@ -57,10 +57,7 @@ export function insertToken(
   const spaced = /^\s/.test(after) ? pick.text : `${pick.text} `;
   const next = text.slice(0, trigger.start) + spaced + after;
   const shift = spaced.length - (caret - trigger.start);
-  const token = place(
-    { ...pick, start: 0, end: 0 } as Token,
-    trigger.start,
-  );
+  const token = place({ ...pick, start: 0, end: 0 } as Token, trigger.start);
   const moved = tokens
     .filter((item) => item.end <= trigger.start || item.start >= caret)
     .map((item) =>
@@ -155,7 +152,8 @@ export function linksOf(tokens: Token[]): LinkRef[] {
     if (
       token.kind === "record" &&
       !links.some(
-        (link) => link.kind === token.record.kind && link.id === token.record.id,
+        (link) =>
+          link.kind === token.record.kind && link.id === token.record.id,
       )
     )
       links.push({ kind: token.record.kind, id: token.record.id });

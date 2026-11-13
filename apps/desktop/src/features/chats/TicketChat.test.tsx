@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ChatClientContext, type LinkedRecord } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
@@ -46,7 +52,9 @@ test("Chat about this ticket prefills New Chat and sends nothing until the perso
   });
   expect(box.value).toBe("Work on T-KQ12: Login rate limits");
   expect(screen.getByRole("button", { name: "Back to T-KQ12" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Folder: /work/api" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Folder: /work/api" }),
+  ).toBeTruthy();
   expect(create).not.toHaveBeenCalled();
 
   await waitFor(() =>

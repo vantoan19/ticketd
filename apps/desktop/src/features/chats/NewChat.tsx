@@ -247,7 +247,8 @@ export function NewChat({
                 links: [...chosen, ...mentioned, ...quoteLinks(quotes)].filter(
                   (link, index, all) =>
                     all.findIndex(
-                      (other) => other.kind === link.kind && other.id === link.id,
+                      (other) =>
+                        other.kind === link.kind && other.id === link.id,
                     ) === index,
                 ),
                 message,

@@ -9,6 +9,7 @@ import {
   ChatFeatureContext,
   NO_CHAT_OVERVIEW,
 } from "@/features/chats/use-chats";
+import { SelectionAddToChat } from "@/features/chats/SelectionAddToChat";
 import type { ChatRequest } from "@/features/chats/ticket-chat";
 import { usePreferences } from "@/lib/preferences";
 import "@/features/chats/chats.css";
@@ -109,6 +110,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   return (
     <ChatFeatureContext value={feature}>
       {children}
+      <SelectionAddToChat />
       <DialogShell
         open={quitting !== null}
         onOpenChange={(open) => {

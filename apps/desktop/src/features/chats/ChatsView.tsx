@@ -1,11 +1,5 @@
 import { useContext, useLayoutEffect, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  BellOff,
-  Check,
-  Ellipsis,
-  SquarePen,
-} from "lucide-react";
+import { ArrowLeft, BellOff, Check, Ellipsis, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reference } from "@/components/ui/reference";
 import { TicketNavigation } from "@/features/tickets/navigation";
@@ -146,7 +140,6 @@ function TicketCrumb({ reference }: { reference: string }) {
     <Button
       variant="ghost"
       size="xs"
-      className="chat-crumb"
       aria-label={`Back to ${reference}`}
       onClick={() => openTicket?.(reference)}
     >
@@ -195,7 +188,11 @@ export function ChatsView({
       });
     } else {
       setScope("active");
-      setOpen({ kind: "new", start: request.start, n: chatRequest.n });
+      setOpen({
+        kind: "new",
+        ...(request.start && { start: request.start }),
+        n: chatRequest.n,
+      });
     }
   }
   if (seenRequest !== newChatRequest) {

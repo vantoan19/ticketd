@@ -45,11 +45,15 @@ const approval: TranscriptItem = {
   state: "pending",
 };
 
-let requested: unknown = null;
+/** The last Chat request, written out where the test can read it. */
 function Requests() {
-  requested = useChatFeature().chatRequest?.request ?? null;
-  return null;
+  const request = useChatFeature().chatRequest?.request ?? null;
+  return <output aria-label="Requested">{JSON.stringify(request)}</output>;
 }
+const requested = () =>
+  JSON.parse(
+    screen.getByRole("status", { name: "Requested" }).textContent || "null",
+  ) as unknown;
 
 function show(chats: MockChat[]) {
   const client = createMockChatClient({ enabled: true, chats });
@@ -101,7 +105,7 @@ test("the Chats line names how many and the top-ranked status, and opens a Chat 
   });
   expect(screen.queryByText("Unrelated")).toBeNull();
   fireEvent.click(item);
-  expect(requested).toEqual({
+  expect(requested()).toEqual({
     kind: "open",
     chatId: "b",
     retention: "active",
@@ -115,7 +119,7 @@ test("Chat about this ticket asks for New Chat with the ticket and its Project's
     await screen.findByRole("button", { name: "Chat about this ticket" }),
   );
   await waitFor(() =>
-    expect(requested).toEqual({
+    expect(requested()).toEqual({
       kind: "new",
       start: { ticket, folder: "/work/api" },
     }),

@@ -901,8 +901,8 @@ test("what the agent changed in ticketd is one receipt row under the response, i
     screen.getAllByText((_, node) =>
       Boolean(
         node?.classList.contains("chat-receipt-items") &&
-          node.textContent ===
-            "Moved T-12 to In review · Posted an update on T-12",
+        node.textContent ===
+          "Moved T-12 to In review · Posted an update on T-12",
       ),
     ),
   ).toHaveLength(1);

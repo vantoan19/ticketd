@@ -16,11 +16,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { ReceiptRow } from "@/features/chats/ReceiptRow";
-import type {
-  ChatState,
-  Step,
-  TranscriptItem,
-} from "@/features/chats/client";
+import type { ChatState, Step, TranscriptItem } from "@/features/chats/client";
 import {
   binarySize,
   elapsed,

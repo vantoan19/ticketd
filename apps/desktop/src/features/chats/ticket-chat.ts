@@ -19,7 +19,7 @@ export type ChatRequest =
       /** The ticket it was opened from: its crumb goes back there. */
       from?: string;
     }
-  | { kind: "new"; start: TicketStart };
+  | { kind: "new"; start?: TicketStart };
 
 /** The unsent prompt New Chat opens with: the ticket as a mention, then its title. */
 export function ticketPrompt(ticket: TicketRecord): {

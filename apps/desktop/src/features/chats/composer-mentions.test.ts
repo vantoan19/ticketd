@@ -24,7 +24,11 @@ describe("triggerAt", () => {
       start: 4,
       query: "log",
     });
-    expect(triggerAt("@src/a", 6)).toEqual({ char: "@", start: 0, query: "src/a" });
+    expect(triggerAt("@src/a", 6)).toEqual({
+      char: "@",
+      start: 0,
+      query: "src/a",
+    });
     expect(triggerAt("/rev", 4)).toEqual({ char: "/", start: 0, query: "rev" });
     expect(triggerAt("run /rev", 8)).toBeNull();
   });
@@ -75,7 +79,9 @@ describe("tokens", () => {
       { ...token, start: 6, end: 12 },
     ]);
     expect(reconcile("see T-KQ12 x", "see T-KQ1 x", [token])).toEqual([]);
-    expect(reconcile("see T-KQ12 x", "see T-KQ12 xy", [token])).toEqual([token]);
+    expect(reconcile("see T-KQ12 x", "see T-KQ12 xy", [token])).toEqual([
+      token,
+    ]);
   });
 
   it("is removed whole by Backspace or Delete and stepped over by the arrows", () => {

@@ -32,7 +32,7 @@ import { Duplicates } from "@/features/tickets/Duplicates";
 import { RecordHistory } from "@/features/sync-review/RecordHistory";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { externalSource } from "@/features/tickets/ticket-source";
-import { useChatAboutTicket } from "@/features/chats/LinkedChats";
+import { useChatAboutTicket } from "@/features/chats/use-ticket-chats";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import "./ticket-detail.css";
 

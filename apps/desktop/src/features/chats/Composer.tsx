@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useState, type ReactNode, type Ref } from "react";
 import { Square } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import type { LinkRef } from "@/features/chats/client";
@@ -66,15 +66,6 @@ export function Composer({
     setTokens(nextTokens);
     onText?.(next, nextTokens);
   };
-  // A prefilled box is focused with the caret after the text.
-  const box = useRef<HTMLTextAreaElement | null>(null);
-  useLayoutEffect(() => {
-    const field = box.current;
-    if (autoFocus && field && initialText)
-      field.setSelectionRange(initialText.length, initialText.length);
-    // Only the text the box opened with.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const state = controls(text);
   const submit = (
     action: ((text: string, links: LinkRef[]) => Promise<void>) | undefined,
@@ -104,11 +95,7 @@ export function Composer({
     >
       {above}
       <ComposerField
-        inputRef={(node) => {
-          box.current = node;
-          if (typeof inputRef === "function") inputRef(node);
-          else if (inputRef) inputRef.current = node;
-        }}
+        inputRef={inputRef}
         placeholder={placeholder}
         text={text}
         tokens={tokens}

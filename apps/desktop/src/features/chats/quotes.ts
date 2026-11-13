@@ -62,7 +62,10 @@ export function useQuotes(chatId: string) {
 /** The message the harness receives: each quote as a Markdown block quote, then the text. */
 export function quotedMessage(quotes: Quote[], text: string) {
   const blocks = quotes.map((quote) =>
-    [`> From ${quote.source}:`, ...quote.text.split("\n").map((line) => `> ${line}`)]
+    [
+      `> From ${quote.source}:`,
+      ...quote.text.split("\n").map((line) => `> ${line}`),
+    ]
       .join("\n")
       .replace(/> $/gm, ">"),
   );
@@ -80,3 +83,12 @@ export function quoteLinks(quotes: Quote[]): LinkRef[] {
       links.push(record);
   return links;
 }
+
+/**
+ * Marks rendered text that Add to chat may quote: a Document in Read mode, a
+ * ticket description not being edited, an update. Spread on its container.
+ */
+export const chatSource = (source: string, record: LinkRef) => ({
+  "data-chat-source": source,
+  "data-chat-record": `${record.kind}:${record.id}`,
+});

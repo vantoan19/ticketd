@@ -1,17 +1,25 @@
 import { Fragment, useContext, useId, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, MessageSquareText } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  MessageSquareText,
+} from "lucide-react";
 import { DocumentNavigation } from "@/features/documents/navigation";
-import { historyIcon } from "@/features/tickets/history-icon";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import type { RecordChange } from "@/features/chats/client";
 
 /** Whole sentences shown on the row before the rest folds under `N more`. */
 const SHOWN = 2;
 
-function changeIcon(change: RecordChange) {
-  if (change.kind === "status") return historyIcon("status", change.to);
-  if (change.kind === "update") return MessageSquareText;
-  return FileText;
+/** A status change shows its new status's icon, as ticket history does. */
+function ChangeIcon({ change }: { change: RecordChange }) {
+  if (change.kind === "status")
+    return <StatusIcon status={change.to} size={16} decorative />;
+  if (change.kind === "update")
+    return <MessageSquareText size={16} aria-hidden />;
+  return <FileText size={16} aria-hidden />;
 }
 
 /** One verb-first sentence; the record in it opens. */
@@ -60,12 +68,11 @@ export function ReceiptRow({ changes }: { changes: RecordChange[] }) {
   const foldId = useId();
   const first = changes[0];
   if (!first) return null;
-  const Icon = changeIcon(first);
   const rest = changes.length - SHOWN;
   return (
     <div className="chat-receipt-block">
       <div className="chat-receipt">
-        <Icon size={16} aria-hidden />
+        <ChangeIcon change={first} />
         <span className="chat-receipt-items">
           {changes.slice(0, SHOWN).map((change, index) => (
             <Fragment key={index}>
@@ -94,10 +101,9 @@ export function ReceiptRow({ changes }: { changes: RecordChange[] }) {
       {open && (
         <ul id={foldId} className="chat-receipt-fold">
           {changes.slice(SHOWN).map((change, index) => {
-            const RowIcon = changeIcon(change);
             return (
               <li key={index}>
-                <RowIcon size={16} aria-hidden />
+                <ChangeIcon change={change} />
                 <span>
                   <Sentence change={change} />
                 </span>

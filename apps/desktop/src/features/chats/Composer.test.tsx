@@ -49,7 +49,9 @@ test("a # mention inserts the record without sending, and the message links it w
   const { box, onSend } = setup();
   type(box, "Look at #rate");
   const option = await screen.findByRole("option", { name: /T-KQ12/ });
-  expect(screen.getByRole("combobox").getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByRole("combobox").getAttribute("aria-expanded")).toBe(
+    "true",
+  );
   expect(screen.getByText("Links when you send")).toBeTruthy();
   fireEvent.keyDown(box, { key: "Enter" });
   expect(onSend).not.toHaveBeenCalled();

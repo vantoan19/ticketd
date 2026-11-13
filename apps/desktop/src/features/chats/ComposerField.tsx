@@ -37,10 +37,11 @@ export type ComposerMentions = {
 };
 
 type Option = { id: string; insert: Insert; group: string };
-type Menu = {
-  trigger: Trigger;
+/** A search's answer, for the trigger `key` it was asked for. */
+type Answer = {
+  key: string;
   options: Option[];
-  state: "searching" | "ready" | "failed";
+  state: "ready" | "failed";
   error?: string;
 };
 
@@ -71,19 +72,31 @@ function replaceRange(
 ) {
   textarea.focus();
   textarea.setSelectionRange(start, end);
-  let done = false;
+  if (!browserEdit(replacement)) fallback();
+}
+
+function browserEdit(replacement: string) {
   try {
-    done =
+    return (
       typeof document.execCommand === "function" &&
       document.execCommand(
         replacement ? "insertText" : "delete",
         false,
         replacement,
-      );
+      )
+    );
   } catch {
-    done = false;
+    return false;
   }
-  if (!done) fallback();
+}
+
+/** Hands the box to the caller's ref as well as the field's own. */
+function shareNode(
+  ref: Ref<HTMLTextAreaElement> | undefined,
+  node: HTMLTextAreaElement | null,
+) {
+  if (typeof ref === "function") ref(node);
+  else if (ref) ref.current = node;
 }
 
 function OptionLabel({ option }: { option: Option }) {
@@ -162,7 +175,7 @@ export function ComposerField({
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   /** The trigger Escape closed; it stays closed until another one starts. */
   const [dismissed, setDismissed] = useState<number | null>(null);
-  const [menu, setMenu] = useState<Menu | null>(null);
+  const [answer, setAnswer] = useState<Answer | null>(null);
   const [active, setActive] = useState(0);
   const [announce, setAnnounce] = useState("");
   const removed = useRef<Token[]>([]);
@@ -177,40 +190,46 @@ export function ComposerField({
     box.current.setSelectionRange(caret, caret);
   });
 
+  // The box opened with a prefill: the caret waits after it.
+  useLayoutEffect(() => {
+    const field = box.current;
+    if (autoFocus && field && text)
+      field.setSelectionRange(text.length, text.length);
+    // Only the text the box opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const open =
     trigger && trigger.start !== dismissed && mentions ? trigger : null;
   const openKey = open ? `${open.char}${open.start}:${open.query}` : "";
+  const query = open?.query.trim() ?? "";
+  // Linked records and the harness's commands are at hand; only searches wait.
+  const atHand: Option[] | null =
+    !open || !mentions
+      ? null
+      : open.char === "#" && !query
+        ? recordOptions(mentions.linked, "Linked to this Chat")
+        : open.char === "/"
+          ? (mentions.commands ?? [])
+              .filter((command) =>
+                command.name.toLowerCase().includes(query.toLowerCase()),
+              )
+              .map((command) => ({
+                id: command.name,
+                group: command.description ?? "",
+                insert: { kind: "command", text: `/${command.name}` },
+              }))
+          : null;
+  const searches = Boolean(open && atHand === null);
   useEffect(() => {
-    if (!open || !mentions) {
-      setMenu(null);
-      return;
-    }
+    if (!open || !mentions || !searches) return;
     let current = true;
-    const show = (options: Option[]) => {
-      if (!current) return;
-      setMenu({ trigger: open, options, state: "ready" });
-      setActive(0);
-    };
-    const fail = (reason: unknown) =>
-      current &&
-      setMenu({
-        trigger: open,
-        options: [],
-        state: "failed",
-        error: reason instanceof Error ? reason.message : String(reason),
-      });
-    const query = open.query.trim();
-    if (open.char === "#") {
-      if (!query) show(recordOptions(mentions.linked, "Linked to this Chat"));
-      else {
-        setMenu((last) => ({
-          trigger: open,
-          options: last?.trigger.char === "#" ? last.options : [],
-          state: "searching",
-        }));
-        mentions.records(query).then(
-          (found) =>
-            show(
+    const folder = mentions.folder;
+    const search =
+      open.char === "#"
+        ? mentions
+            .records(query)
+            .then((found) =>
               recordOptions(
                 [...found].sort(
                   (a, b) =>
@@ -218,53 +237,54 @@ export function ComposerField({
                     Object.keys(RECORD_GROUPS).indexOf(b.kind),
                 ),
               ),
-            ),
-          fail,
-        );
-      }
-    } else if (open.char === "@") {
-      const folder = mentions.folder;
-      if (!folder) setMenu(null);
-      else
-        folder.files(query).then(
-          (files) =>
-            show(
-              files.map((file) => ({
+            )
+        : folder
+          ? folder.files(query).then((files) =>
+              files.map((file): Option => ({
                 id: file.path,
                 group: file.folder ? "folder" : "file",
                 insert: { kind: "path", text: file.path },
               })),
-            ),
-          fail,
-        );
-    } else {
-      const commands = mentions.commands ?? [];
-      const needle = query.toLowerCase();
-      show(
-        commands
-          .filter((command) => command.name.toLowerCase().includes(needle))
-          .map((command) => ({
-            id: command.name,
-            group: command.description ?? "",
-            insert: { kind: "command", text: `/${command.name}` },
-          })),
-      );
-    }
+            )
+          : null;
+    search?.then(
+      (options) =>
+        current && setAnswer({ key: openKey, options, state: "ready" }),
+      (reason: unknown) =>
+        current &&
+        setAnswer({
+          key: openKey,
+          options: [],
+          state: "failed",
+          error: reason instanceof Error ? reason.message : String(reason),
+        }),
+    );
     return () => {
       current = false;
     };
     // `openKey` names the trigger; `mentions` is read when it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openKey]);
+  }, [openKey, searches]);
+  // A new trigger starts at its first option.
+  const [activeFor, setActiveFor] = useState(openKey);
+  if (activeFor !== openKey) {
+    setActiveFor(openKey);
+    setActive(0);
+  }
 
   // `/` opens only when the harness lists commands; with none it is plain text.
   const commandsListed = (mentions?.commands?.length ?? 0) > 0;
+  const answered = answer?.key === openKey ? answer : null;
   const shown =
-    menu &&
     open &&
     !(open.char === "/" && !commandsListed) &&
     !(open.char === "@" && !mentions?.folder)
-      ? menu
+      ? {
+          trigger: open,
+          options: atHand ?? answered?.options ?? [],
+          state: atHand ? "ready" : (answered?.state ?? "searching"),
+          error: answered?.error,
+        }
       : null;
   const options = shown?.options ?? [];
 
@@ -404,7 +424,6 @@ export function ComposerField({
           : `${mentions?.harness ?? "Harness"} commands`,
       items: options.map((option, index) => ({ option, index })),
     });
-  const query = shown?.trigger.query.trim() ?? "";
   const empty =
     shown && shown.state !== "searching" && options.length === 0
       ? shown.state === "failed"
@@ -470,7 +489,10 @@ export function ComposerField({
             <p className="chat-menu-note">Searching…</p>
           )}
           {empty && (
-            <p className="chat-menu-note" role={shown.state === "failed" ? "alert" : undefined}>
+            <p
+              className="chat-menu-note"
+              role={shown.state === "failed" ? "alert" : undefined}
+            >
               {empty}
             </p>
           )}
@@ -495,8 +517,7 @@ export function ComposerField({
         <textarea
           ref={(node) => {
             box.current = node;
-            if (typeof inputRef === "function") inputRef(node);
-            else if (inputRef) inputRef.current = node;
+            shareNode(inputRef, node);
           }}
           rows={1}
           aria-label={placeholder}

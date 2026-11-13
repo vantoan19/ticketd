@@ -23,17 +23,20 @@ export function ComposerQuotes({
           <li key={quote.id} className="chat-quote">
             <div className="chat-quote-source">
               <span>{quote.source}</span>
-              <IconButton
-                type="button"
-                label="Remove quote"
-                className="chat-quote-remove"
-                onClick={() => onRemove(quote.id)}
-              >
-                <X aria-hidden />
-              </IconButton>
+              <span className="chat-quote-remove">
+                <IconButton
+                  type="button"
+                  label="Remove quote"
+                  onClick={() => onRemove(quote.id)}
+                >
+                  <X aria-hidden />
+                </IconButton>
+              </span>
             </div>
             <p className="chat-quote-text">{quote.text}</p>
-            {lines > 2 && <span className="chat-quote-lines">{lines} lines</span>}
+            {lines > 2 && (
+              <span className="chat-quote-lines">{lines} lines</span>
+            )}
           </li>
         );
       })}
