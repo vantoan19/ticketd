@@ -94,6 +94,25 @@ fn a_request_outranks_work_and_a_failure_waits_only_until_seen() {
     assert_eq!(approval.line(), "Approval needed · npm install");
     assert!(approval.rank.needs_you());
 
+    // A command is named as written, without the shell that wraps it.
+    let mut wrapped = idle();
+    wrapped.interactions.push(LiveInteraction {
+        interaction_id: "i".to_owned(),
+        kind: InteractionKind::Approval {
+            description: r#"/bin/zsh -lc "printf '%s\n' verified >> hello.txt""#.to_owned(),
+            reason: None,
+            decisions: Vec::new(),
+        },
+    });
+    let approval = status(&Facts {
+        activity: "waiting",
+        ..facts(&chat(0), &wrapped, None)
+    });
+    assert_eq!(
+        approval.line(),
+        r"Approval needed · printf '%s\n' verified >> hello.txt"
+    );
+
     let live = idle();
     let failed = turn(3, ChatTurnState::Failed);
     let unseen = status(&facts(&chat(2), &live, Some(&failed)));

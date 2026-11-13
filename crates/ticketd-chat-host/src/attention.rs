@@ -154,7 +154,8 @@ pub fn status(facts: &Facts<'_>) -> Status {
         InteractionKind::Question { .. } => None,
     });
     if let Some(description) = approval {
-        return make(Rank::Approval, "Approval needed", plain_start(description));
+        let command = crate::step_kind::unwrapped(description);
+        return make(Rank::Approval, "Approval needed", plain_start(&command));
     }
     let question = requests.iter().find_map(|request| match &request.kind {
         InteractionKind::Question { questions } => {

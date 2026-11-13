@@ -118,6 +118,12 @@ pub fn shell(command: &str) -> Shell {
 
 // -- wrappers ----------------------------------------------------------------------
 
+/// A command without the shell wrappers around it (`zsh -lc '…'`); any other text
+/// as it is.
+pub fn unwrapped(command: &str) -> String {
+    unwrap(command, 2)
+}
+
 /// Removes up to `depth` shell wrappers (`zsh -lc '…'`, `powershell -Command "…"`,
 /// `cmd /c …`). A wrapper whose quotes do not balance stays as it is.
 fn unwrap(command: &str, depth: usize) -> String {
