@@ -440,6 +440,109 @@ fn an_if_continues_down_the_path_it_chose_and_nested_paths_end_the_run() {
 }
 
 #[test]
+fn stopping_a_running_run_ends_it_needing_attention_without_its_failure_path() {
+    let (_dir, mut workspace) = workspace();
+    automation_on(&mut workspace, Vec::new(), |agent| {
+        vec![
+            run_agent("triage", agent, Some(vec![notify("tell-me-it-failed")])),
+            notify("never-reached"),
+        ]
+    });
+    let run = started(&mut workspace);
+    workspace.advance_automation_run(&run.id, None).unwrap();
+
+    let stopped = workspace.stop_automation_run(&run.id).unwrap();
+
+    assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(stopped.reason.as_deref(), Some("You stopped this run."));
+    assert!(stopped.ended_at.is_some());
+    // The step it was on did not finish, and nothing after it runs: not even the
+    // step's failure path.
+    assert_eq!(
+        stopped
+            .steps
+            .iter()
+            .map(|step| (step.step_id.as_str(), step.status, step.reason.as_deref()))
+            .collect::<Vec<_>>(),
+        [(
+            "triage",
+            AutomationStepStatus::Failed,
+            Some("You stopped this run.")
+        )]
+    );
+    // The agent's turn ends a moment later; its outcome no longer moves the run.
+    assert!(
+        workspace
+            .advance_automation_run(&run.id, Some(StepOutcome::Completed))
+            .is_err()
+    );
+    assert_eq!(workspace.automation_run(&run.id).unwrap(), stopped);
+    // A run that has ended cannot be stopped again.
+    assert!(workspace.stop_automation_run(&run.id).is_err());
+}
+
+#[test]
+fn stopping_a_queued_run_ends_it_before_any_step_runs() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    tagged(&mut workspace, "Fix login");
+    workspace.queue_automation_runs().unwrap();
+    let queued = runs(&workspace, &automation).remove(0);
+
+    let stopped = workspace.stop_automation_run(&queued.id).unwrap();
+
+    assert_eq!(stopped.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(stopped.steps, []);
+    assert_eq!(workspace.start_automation_runs(2).unwrap(), []);
+}
+
+#[test]
+fn running_again_queues_a_new_run_from_the_first_step_with_the_same_event() {
+    let (_dir, mut workspace) = workspace();
+    let automation = automation_on(&mut workspace, Vec::new(), |agent| {
+        vec![run_agent("triage", agent, None), notify("tell-me")]
+    });
+    let first = started(&mut workspace);
+    workspace.advance_automation_run(&first.id, None).unwrap();
+    // A run still going cannot be run again.
+    assert!(workspace.run_automation_again(&first.id).is_err());
+    workspace
+        .advance_automation_run(&first.id, failed("The agent's process ended."))
+        .unwrap();
+    // Nothing retries by itself.
+    assert_eq!(workspace.queue_automation_runs().unwrap(), 0);
+    assert_eq!(workspace.start_automation_runs(2).unwrap(), []);
+    // The person fixes the cause: the Automation is edited before the retry.
+    let mut fixed = automation.definition.clone();
+    fixed.steps.truncate(1);
+    workspace.update_automation(&automation.id, fixed).unwrap();
+
+    let again = workspace.run_automation_again(&first.id).unwrap();
+
+    assert_ne!(again.id, first.id);
+    assert_eq!(again.status, AutomationRunStatus::Queued);
+    assert_eq!(again.event, first.event);
+    assert_eq!(again.ticket, first.ticket);
+    assert_eq!(again.steps, []);
+    // It runs the Automation as it is now.
+    assert_eq!(again.definition.steps.len(), 1);
+    // The first run is history and stays as it ended.
+    let earlier = workspace.automation_run(&first.id).unwrap();
+    assert_eq!(earlier.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(earlier.definition.steps.len(), 2);
+    assert_eq!(runs(&workspace, &automation).len(), 2);
+    // The ticket has an active run now, so a second retry waits for it.
+    assert!(workspace.run_automation_again(&first.id).is_err());
+
+    let started = workspace.start_automation_runs(2).unwrap();
+    assert_eq!(started.len(), 1);
+    assert_eq!(
+        workspace.advance_automation_run(&again.id, None).unwrap(),
+        run_step("triage")
+    );
+}
+
+#[test]
 fn a_chat_owned_by_a_run_stays_out_of_the_chat_list() {
     let (_dir, mut workspace) = workspace();
     triage(&mut workspace);

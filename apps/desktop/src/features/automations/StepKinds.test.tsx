@@ -60,6 +60,32 @@ beforeEach(() => {
         return (text ?? "")
           .replaceAll("{{ticket.reference}}", "T-ZB5")
           .replaceAll("{{event.tag}}", tag ?? "");
+      case "automation_run_list":
+        return [];
+      case "automation_run_get": {
+        const now = new Date().toISOString();
+        const { enabled, arrived_off, problems, id, ...definition } = stored;
+        void [enabled, arrived_off, problems];
+        return {
+          id: "run-7",
+          automation_id: id,
+          status: "completed",
+          reason: null,
+          ticket: { id: "t-1", reference: "T-ZB5", title: "Fix login" },
+          created_at: now,
+          started_at: now,
+          ended_at: now,
+          definition,
+          steps: stored.steps.map((step) => ({
+            step_id: step.id,
+            status: "completed",
+            reason: null,
+            chat_id: null,
+            started_at: now,
+            ended_at: now,
+          })),
+        };
+      }
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -156,6 +182,44 @@ test("a field is inserted into a message as a named chip, saved as a plain refer
 
   fireEvent.click(within(panel).getByRole("radio", { name: "The run" }));
   await waitFor(() => expect(saved()).toMatchObject([{ opens: "run" }]));
+});
+
+test("a notification that opens the run shows that run, with what each step did and how it ended", async () => {
+  stored = {
+    ...stored,
+    steps: [
+      {
+        id: "done",
+        kind: "change_ticket",
+        change: { action: "set_status", status: "Done" },
+      },
+      {
+        id: "tell",
+        kind: "notify",
+        text: "{{ticket.reference}} is done",
+        opens: "run",
+      },
+    ],
+  };
+  render(
+    <ChatClientContext value={createMockChatClient()}>
+      <AutomationsView
+        runTarget={{ automationId: "automation-1", runId: "run-7" }}
+      />
+    </ChatClientContext>,
+  );
+
+  const steps = await screen.findByRole("application", { name: /Steps/ });
+  expect(
+    within(steps).getByRole("button", {
+      name: "Change ticket: Set status to Done, Completed",
+    }),
+  ).toBeTruthy();
+  expect(
+    within(steps).getByRole("button", {
+      name: "Notify me: Ticket reference is done, Completed",
+    }),
+  ).toBeTruthy();
 });
 
 test("Change ticket is unavailable, with the reason, when the Automation does not start from a ticket", async () => {

@@ -322,14 +322,18 @@ export function AutomationsView({
     />
   ) : openAutomation ? (
     <AutomationEditor
-      // A run to show opens the editor afresh, on its runs.
+      // A run to show opens the editor afresh, on that run.
       key={
         shownTarget?.automationId === openAutomation.id
           ? shownTarget.runId
           : openAutomation.id
       }
       automation={openAutomation}
-      startOnRuns={shownTarget?.automationId === openAutomation.id}
+      startOnRun={
+        shownTarget?.automationId === openAutomation.id
+          ? shownTarget.runId
+          : null
+      }
       agents={agents ?? []}
       {...paneProps}
       onChange={(definition) => saveAutomation(openAutomation.id, definition)}

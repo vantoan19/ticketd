@@ -1,10 +1,12 @@
 //! Commands for the Automations page. The rules live in the core; these translate.
 
+use tauri::State;
 use ticketd_core::{
-    Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition,
-    AutomationRunStatus, AutomationRunTicket,
+    Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationRun,
+    AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
 };
 
+use crate::chat_commands::ChatBridge;
 use crate::open_workspace;
 
 /// An agent as the Agents list shows it: with the Automations that use it, which
@@ -114,7 +116,7 @@ pub fn automation_text_preview(
         .map_err(|error| error.to_string())
 }
 
-/// A run as the Runs list shows it. The run view (#393) reads the whole run.
+/// A run as the Runs list shows it. The run view reads the whole run.
 #[derive(serde::Serialize)]
 pub struct ListedRun {
     id: String,
@@ -141,5 +143,47 @@ pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, Stri
                 })
                 .collect()
         })
+        .map_err(|error| error.to_string())
+}
+
+/// One run with the definition it executes and each step it reached.
+#[tauri::command]
+pub fn automation_run_get(id: String) -> Result<AutomationRun, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.automation_run(&id))
+        .map_err(|error| error.to_string())
+}
+
+/// Ends a run in progress as Needs attention, and interrupts the agent it was
+/// running: the core no longer takes that turn's outcome, so nothing waits for it.
+#[tauri::command]
+pub async fn automation_run_stop(
+    bridge: State<'_, ChatBridge>,
+    id: String,
+) -> Result<AutomationRun, String> {
+    let (stopped, chat_id) = open_workspace()
+        .and_then(|mut workspace| {
+            let chat_id = workspace
+                .automation_run(&id)?
+                .steps
+                .into_iter()
+                .find(|step| step.status == AutomationStepStatus::Running)
+                .and_then(|step| step.chat_id);
+            Ok((workspace.stop_automation_run(&id)?, chat_id))
+        })
+        .map_err(|error| error.to_string())?;
+    if let Some(chat_id) = chat_id {
+        // ponytail: an interrupt that fails leaves the agent to its turn and time
+        // limits; the run has ended either way.
+        let _ = bridge.chats().stop(&chat_id).await;
+    }
+    Ok(stopped)
+}
+
+/// Queues a new run for the event that started a finished one.
+#[tauri::command]
+pub fn automation_run_again(id: String) -> Result<AutomationRun, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.run_automation_again(&id))
         .map_err(|error| error.to_string())
 }
