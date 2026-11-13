@@ -9,8 +9,8 @@ use ticketd_automation_runner::{Notifier, Runner, TicketdCli};
 use ticketd_chat_host::{ChatHost, WorkspaceOpener};
 use ticketd_core::{
     AutomationDefinition, AutomationNotification, AutomationRun, AutomationRunStatus,
-    AutomationStepStatus, NotifyTarget, Status, Step, StepAction, StepChange, Ticket, Trigger,
-    Workspace, WorkspaceActor,
+    AutomationStepStatus, Check, NotifyTarget, Status, Step, StepAction, StepChange, Ticket,
+    Trigger, Workspace, WorkspaceActor,
 };
 
 const TAG: &str = "ready-for-testing";
@@ -237,6 +237,92 @@ async fn a_change_the_workspace_refuses_fails_the_run_and_the_steps_after_it_do_
     assert!(reason.contains(&ticket.reference), "{reason}");
     assert_eq!(run.steps[0].reason.as_deref(), Some(reason.as_str()));
     assert_eq!(f.shown(), []);
+}
+
+fn has_tag(id: &str, tag: &str, yes: Vec<Step>, no: Vec<Step>) -> Step {
+    Step {
+        id: id.into(),
+        action: StepAction::If {
+            checks: vec![Check::Tag {
+                tag: tag.into(),
+                has: true,
+            }],
+            yes,
+            no,
+        },
+    }
+}
+
+/// record → If verified? → Yes: [yes] / No: [If needs-fix? → Yes: [fix] / No: [neither]]
+fn branching(recorded: &str) -> Vec<Step> {
+    vec![
+        change(
+            "record",
+            StepChange::AddTag {
+                tag: recorded.into(),
+            },
+        ),
+        has_tag(
+            "verified?",
+            "verified",
+            vec![notify("yes", "Verified")],
+            vec![has_tag(
+                "needs-fix?",
+                "needs-fix",
+                vec![notify("fix", "Needs a fix")],
+                vec![notify("neither", "Nothing recorded")],
+            )],
+        ),
+    ]
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_if_takes_the_yes_path_on_what_an_earlier_step_of_the_run_recorded() {
+    let f = Fixture::new(branching("verified"), true);
+    f.tag("Fix login");
+
+    f.tick().await;
+
+    use AutomationStepStatus::Completed;
+    let run = f.run();
+    assert_eq!(run.status, AutomationRunStatus::Completed);
+    // The ticket had no "verified" tag when the run started.
+    assert_eq!(
+        steps(&run),
+        [
+            ("record", Completed),
+            ("verified?", Completed),
+            ("yes", Completed)
+        ]
+    );
+    assert_eq!(f.shown()[0].body, "Verified");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_if_takes_the_no_path_and_a_nested_if_chooses_again() {
+    for (recorded, last, body) in [
+        ("needs-fix", "fix", "Needs a fix"),
+        ("unrelated", "neither", "Nothing recorded"),
+    ] {
+        let f = Fixture::new(branching(recorded), true);
+        f.tag("Fix login");
+
+        f.tick().await;
+
+        use AutomationStepStatus::Completed;
+        let run = f.run();
+        assert_eq!(run.status, AutomationRunStatus::Completed);
+        assert_eq!(
+            steps(&run),
+            [
+                ("record", Completed),
+                ("verified?", Completed),
+                ("needs-fix?", Completed),
+                (last, Completed)
+            ]
+        );
+        assert_eq!(f.shown()[0].body, body);
+    }
 }
 
 #[tokio::test(start_paused = true)]

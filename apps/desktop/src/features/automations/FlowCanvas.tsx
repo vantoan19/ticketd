@@ -6,6 +6,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
   type Edge,
   type Node,
   type NodeProps,
@@ -42,6 +43,7 @@ import {
   END_SIZE,
   GAP,
   layoutFlow,
+  type FlowList,
 } from "@/features/automations/canvas-layout";
 import {
   startsWithoutTicket,
@@ -52,10 +54,13 @@ import {
 import {
   CARD_ICONS,
   cardName,
+  PATH_LABELS,
   stepCard,
   triggerCard,
   type Card,
 } from "@/features/automations/flow-cards";
+import { everyStep, flowSteps } from "@/features/automations/runs-model";
+import type { Project } from "@/lib/api/client";
 
 /** The triggers under "A ticket changes", in the order the menu offers them. */
 const TICKET_TRIGGERS = [
@@ -116,13 +121,16 @@ const NEEDS_TICKET =
   "Needs a ticket, and this Automation does not start from one";
 
 /** The step kinds this page can add and set up. */
-export type StepChoice = "run_agent" | "change_ticket" | "notify";
+export type StepChoice = "run_agent" | "change_ticket" | "notify" | "if";
 
 type Actions = {
   onSelect: (id: string) => void;
   onChooseTrigger: (kind: TriggerChoice) => void;
-  /** Adds a step of `kind` at `index` of the steps. */
-  onAddStep: (index: number, kind: StepChoice) => void;
+  /**
+   * Adds a step of `kind` at `index` of the steps of `list`: a path under a
+   * step, or the flow's own steps when absent.
+   */
+  onAddStep: (index: number, kind: StepChoice, list?: FlowList) => void;
   onDeleteStep: (id: string) => void;
 };
 type CanvasContext = Actions & {
@@ -264,11 +272,18 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
   );
 }
 
-type AddData = { index: number; after: string; end: boolean };
+type AddData = {
+  index: number;
+  list: FlowList | undefined;
+  /** What the + is called: where the step it adds goes. */
+  name: string;
+  end: boolean;
+};
 
 /** A place to add a step: on the line between two cards, or ending the path. */
 function AddNode({ data }: NodeProps<Node<AddData>>) {
   const { onAddStep, ticketless } = useActions();
+  const add = (kind: StepChoice) => onAddStep(data.index, kind, data.list);
   return (
     <>
       {data.end && (
@@ -278,18 +293,14 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             {/* Its own button: a round + that hides on a line until wanted. */}
-            <button
-              type="button"
-              className="flow-add"
-              aria-label={`Add a step after ${data.after}`}
-            >
+            <button type="button" className="flow-add" aria-label={data.name}>
               <Plus size={data.end ? 16 : 14} aria-hidden />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="w-70" aria-label="Add a step">
             <DropdownMenuItem
               className="items-start whitespace-normal"
-              onSelect={() => onAddStep(data.index, "run_agent")}
+              onSelect={() => add("run_agent")}
             >
               <Bot aria-hidden />
               <span className="flow-menu-item-text">
@@ -300,7 +311,7 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
             <DropdownMenuItem
               className="items-start whitespace-normal"
               disabled={ticketless}
-              onSelect={() => onAddStep(data.index, "change_ticket")}
+              onSelect={() => add("change_ticket")}
             >
               <SquarePen aria-hidden />
               <span className="flow-menu-item-text">
@@ -312,29 +323,29 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
                 </small>
               </span>
             </DropdownMenuItem>
-            {/* #394 adds If for an Automation that starts from a ticket. When it
-                merges, keep one If item: #394's, with `disabled={ticketless}`
-                and this reason, as Change ticket has above. */}
-            {ticketless && (
-              <DropdownMenuItem
-                className="items-start whitespace-normal"
-                disabled
-              >
-                <Split aria-hidden />
-                <span className="flow-menu-item-text">
-                  If
-                  <small>{NEEDS_TICKET}</small>
-                </span>
-              </DropdownMenuItem>
-            )}
             <DropdownMenuItem
               className="items-start whitespace-normal"
-              onSelect={() => onAddStep(data.index, "notify")}
+              onSelect={() => add("notify")}
             >
               <Bell aria-hidden />
               <span className="flow-menu-item-text">
                 Notify me
                 <small>Show a desktop notification</small>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="items-start whitespace-normal"
+              disabled={ticketless}
+              onSelect={() => add("if")}
+            >
+              <Split aria-hidden />
+              <span className="flow-menu-item-text">
+                If
+                <small>
+                  {ticketless
+                    ? NEEDS_TICKET
+                    : "Take one path or another, depending on the ticket"}
+                </small>
               </span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -346,12 +357,17 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
 
 const nodeTypes = { card: CardNode, add: AddNode };
 
-/** Brings the whole flow back into view when a step is added or removed. */
+/**
+ * Brings the whole flow back into view when a step is added or removed, and
+ * when the canvas changes width, as when a panel opens beside it: paths side
+ * by side are wide.
+ */
 function Refit({ shape }: { shape: string }) {
   const { fitView } = useReactFlow();
+  const width = useStore((state) => state.width);
   useEffect(() => {
     void fitView({ maxZoom: 1, padding: 0.2 });
-  }, [shape, fitView]);
+  }, [shape, width, fitView]);
   return null;
 }
 
@@ -364,12 +380,15 @@ export function FlowCanvas({
   definition,
   problems,
   agents,
+  projects,
   selected,
   only,
   notice,
   ...actions
 }: {
   definition: AutomationDefinition;
+  /** For the name of a project an If checks for. */
+  projects: Project[];
   /** The line the conditions add to the trigger's card. */
   only?: string | undefined;
   problems: Automation["problems"];
@@ -380,12 +399,14 @@ export function FlowCanvas({
   notice?: ReactNode;
 } & Actions) {
   const { trigger, steps } = definition;
-  const shape = steps.map((step) => step.id).join(" ");
+  const shape = everyStep(steps)
+    .map((step) => step.id)
+    .join(" ");
   const { nodes, edges } = useMemo(() => {
     const cards = new Map(
       [
         triggerCard(trigger, only),
-        ...steps.map((step) => stepCard(step, agents)),
+        ...everyStep(steps).map((step) => stepCard(step, agents, projects)),
       ].map((card) => [card.id, card]),
     );
     const cardOf = (id: string) => {
@@ -393,7 +414,7 @@ export function FlowCanvas({
       if (!card) throw new Error(`the layout placed an unknown card: ${id}`);
       return card;
     };
-    const layout = layoutFlow(steps.map((step) => ({ id: step.id })));
+    const layout = layoutFlow(flowSteps(steps));
     const nodes: Node[] = layout.items.map((item) => {
       const position = { x: item.x, y: item.y };
       if (item.kind === "card")
@@ -419,18 +440,25 @@ export function FlowCanvas({
         height: end ? END_SIZE : GAP,
         data: {
           index: item.index,
-          after: cardName(cardOf(item.after)),
+          list: item.list,
+          // The first place on a path is not after its step: it is on the path.
+          name:
+            item.list && item.index === 0
+              ? `Add a step on the ${PATH_LABELS[item.list.path]} path of ${cardName(cardOf(item.after))}`
+              : `Add a step after ${cardName(cardOf(item.after))}`,
           end,
         } satisfies AddData,
       };
     });
-    const edges: Edge[] = layout.edges.map((edge) => ({
+    const edges: Edge[] = layout.edges.map(({ path, ...edge }) => ({
       ...edge,
-      type: "straight",
+      // A line to a path bends to reach it, and says which path it is.
+      type: path ? "smoothstep" : "straight",
       focusable: false,
+      ...(path && { label: PATH_LABELS[path] }),
     }));
     return { nodes, edges };
-  }, [trigger, only, steps, agents, problems, selected]);
+  }, [trigger, only, steps, agents, projects, problems, selected]);
   const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
   const ticketless = startsWithoutTicket(trigger);
   const context = useMemo(
@@ -447,6 +475,8 @@ export function FlowCanvas({
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            // Let a flow with nested paths fit beside the panel.
+            minZoom={0.25}
             maxZoom={1.5}
             panOnScroll
             nodesDraggable={false}

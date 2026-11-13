@@ -114,6 +114,66 @@ test("an If puts its Yes and No paths side by side below it, and a failure path 
   ]);
 });
 
+test("in the editor a nested If gives every path its own +, and nothing is added after an If", () => {
+  const layout = layoutFlow([
+    { id: "agent" },
+    {
+      id: "outer",
+      yes: [{ id: "done" }],
+      // A new If: both paths still empty.
+      no: [{ id: "inner", yes: [], no: [] }],
+    },
+  ]);
+
+  expect(cards(layout)).toEqual({
+    // Over the middle of the Yes column (axis 120) and the nested If (552).
+    trigger: [216, 0],
+    agent: [216, 132],
+    outer: [216, 264],
+    done: [0, 416],
+    inner: [432, 416],
+  });
+  // Where a step can be added, in Tab order: the list it joins and the place
+  // in it. A path that holds an If ends there, so it has no + of its own.
+  expect(
+    layout.items.flatMap((item) =>
+      item.kind === "card"
+        ? []
+        : [
+            `${item.kind} ${item.list ? `${item.list.step}.${item.list.path}` : "flow"}[${item.index}] after ${item.after}`,
+          ],
+    ),
+  ).toEqual([
+    "add flow[0] after trigger",
+    "add flow[1] after agent",
+    "add outer.yes[0] after outer",
+    "end outer.yes[1] after done",
+    "add outer.no[0] after outer",
+    "end inner.yes[0] after inner",
+    "end inner.no[0] after inner",
+  ]);
+  // The two + of the empty If sit side by side, each under its own line.
+  expect(
+    layout.items.filter((item) => item.kind === "end").map((item) => item.x),
+  ).toEqual([104, 392, 680]);
+  expect(layout.edges.filter((edge) => edge.path)).toEqual([
+    { id: "outer>done", source: "outer", target: "done", path: "yes" },
+    { id: "outer>inner", source: "outer", target: "inner", path: "no" },
+    {
+      id: "inner>add-inner.yes-0",
+      source: "inner",
+      target: "add-inner.yes-0",
+      path: "yes",
+    },
+    {
+      id: "inner>add-inner.no-0",
+      source: "inner",
+      target: "add-inner.no-0",
+      path: "no",
+    },
+  ]);
+});
+
 test("a nested If widens its side, and the If above stays over the middle of its two paths", () => {
   const layout = layoutFlow(
     [

@@ -310,6 +310,13 @@ runner's host. The desktop shows it from the Rust side, not from the page, becau
 a run goes on while the window is hidden to the tray; a click brings the window
 back and the page opens the ticket or the Automation's runs.
 
+An If step is one core read, `automation_if_passes`: it tests the step's checks
+(tags, status, project) against the run's ticket as it is at that moment, so it
+sees what the steps before it and their agents recorded. The run goes down the
+Yes path when every check passes and down the No path otherwise. Paths never
+rejoin: the end of a path is the end of the run, and the editor places no step
+after an If.
+
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process
 recovery. Only a live request registry can answer approvals. Native resume failure

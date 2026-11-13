@@ -150,7 +150,10 @@ impl Runner {
                     }
                 }
             }
-            StepAction::If { .. } => failed("This kind of step cannot run yet."),
+            // The core reads the ticket now, so the answer follows what earlier steps did.
+            StepAction::If { .. } => (self.inner.open_workspace)()?
+                .automation_if_passes(&run.id, step_id)
+                .map(|yes| StepOutcome::Branched { yes }),
         }
     }
 

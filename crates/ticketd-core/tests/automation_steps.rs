@@ -1,7 +1,7 @@
 //! What the Change ticket and Notify me steps of a run do, through the Workspace.
 
 use ticketd_core::{
-    Automation, AutomationDefinition, AutomationRun, NotifyTarget, Status, Step, StepAction,
+    Automation, AutomationDefinition, AutomationRun, Check, NotifyTarget, Status, Step, StepAction,
     StepChange, StepOutcome, Ticket, TicketPatch, Trigger, Workspace, WorkspaceActor,
 };
 
@@ -284,4 +284,123 @@ fn a_preview_fills_in_the_text_with_the_ticket_changed_most_recently() {
             first.reference
         ))
     );
+}
+
+fn branch(id: &str, checks: Vec<Check>) -> Step {
+    Step {
+        id: id.into(),
+        action: StepAction::If {
+            checks,
+            yes: Vec::new(),
+            no: Vec::new(),
+        },
+    }
+}
+
+#[test]
+fn an_if_tests_the_ticket_as_it_is_when_asked_and_passes_when_every_check_does() {
+    let (_dir, mut workspace) = workspace();
+    automation_on(
+        &mut workspace,
+        vec![branch(
+            "passed",
+            vec![
+                Check::Tag {
+                    tag: "verified".into(),
+                    has: true,
+                },
+                Check::Status {
+                    status: Status::Done,
+                    is: true,
+                },
+            ],
+        )],
+    );
+    let (ticket, run) = started(&mut workspace, "Fix login");
+    assert!(!workspace.automation_if_passes(&run.id, "passed").unwrap());
+
+    // What an agent records after the run started is what the If reads.
+    workspace.add_tag(&ticket.reference, "verified").unwrap();
+    assert!(!workspace.automation_if_passes(&run.id, "passed").unwrap());
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    assert!(workspace.automation_if_passes(&run.id, "passed").unwrap());
+
+    workspace.remove_tag(&ticket.reference, "verified").unwrap();
+    assert!(!workspace.automation_if_passes(&run.id, "passed").unwrap());
+}
+
+#[test]
+fn an_if_checks_for_a_project_no_project_and_what_the_ticket_is_not() {
+    let (dir, mut workspace) = workspace();
+    let project = workspace
+        .create_project("Web", &dir.path().to_string_lossy())
+        .unwrap();
+    let in_project = |is| Check::Project {
+        project_id: Some(project.id.clone()),
+        is,
+    };
+    automation_on(
+        &mut workspace,
+        vec![
+            branch("in", vec![in_project(true)]),
+            branch("out", vec![in_project(false)]),
+            branch(
+                "none",
+                vec![Check::Project {
+                    project_id: None,
+                    is: true,
+                }],
+            ),
+            branch(
+                "open",
+                vec![
+                    Check::Status {
+                        status: Status::Done,
+                        is: false,
+                    },
+                    Check::Tag {
+                        tag: "blocked".into(),
+                        has: false,
+                    },
+                ],
+            ),
+        ],
+    );
+    let (ticket, run) = started(&mut workspace, "Fix login");
+    let passes = |workspace: &Workspace| {
+        ["in", "out", "none", "open"].map(|id| workspace.automation_if_passes(&run.id, id).unwrap())
+    };
+    assert_eq!(passes(&workspace), [false, true, true, true]);
+
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                project_id: Some(Some(project.id.clone())),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    workspace.add_tag(&ticket.reference, "blocked").unwrap();
+    assert_eq!(passes(&workspace), [true, false, false, false]);
+}
+
+#[test]
+fn only_an_if_step_of_a_run_can_be_asked() {
+    let (_dir, mut workspace) = workspace();
+    automation_on(
+        &mut workspace,
+        vec![notify("tell", "Hello", NotifyTarget::Ticket)],
+    );
+    let (_, run) = started(&mut workspace, "Fix login");
+    assert!(workspace.automation_if_passes(&run.id, "tell").is_err());
+    assert!(workspace.automation_if_passes(&run.id, "gone").is_err());
 }

@@ -26,7 +26,8 @@ import type {
 import {
   CARD_ICONS,
   cardName,
-  runCard,
+  PATH_LABELS,
+  stepCard,
   triggerCard,
   type Card,
 } from "@/features/automations/flow-cards";
@@ -40,7 +41,6 @@ import {
 
 /** A card in a run also says where the step stands, on a line of its own. */
 const RUN_CARD_HEIGHT = 96;
-const PATH_LABELS = { yes: "Yes", no: "No", failure: "If it fails" };
 
 /** The mark beside a step's status. The word is always there too. */
 export function StepMark({ state }: { state: StepState }) {
@@ -159,7 +159,7 @@ export function RunCanvas({
     const cards = new Map([
       [TRIGGER_ID, triggerCard(trigger)],
       ...everyStep(steps).map(
-        (step) => [step.id, runCard(step, agents)] as const,
+        (step) => [step.id, stepCard(step, agents)] as const,
       ),
     ]);
     const layout = layoutFlow(flowSteps(steps), RUN_CARD_HEIGHT);
