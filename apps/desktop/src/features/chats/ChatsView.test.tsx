@@ -1739,7 +1739,7 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   ).toBe("status");
   // No radios: the harness is the picker's, beside Send.
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Default",
+    name: "Claude Code, model Opus 5.5",
   });
   expect(screen.queryByRole("radiogroup", { name: "Harness" })).toBeNull();
   fireEvent.click(trigger);
@@ -1812,10 +1812,10 @@ test("New Chat starts from the harness's last pick and switching harness shows i
       { name: /Codex/ },
     ),
   );
-  // Its notice holds the fix, in the picker and on the page.
+  // Its notice holds the fix, once: in the picker while it is open.
   expect(
-    (await screen.findAllByRole("button", { name: "Copy command" })).length,
-  ).toBeGreaterThan(0);
+    await screen.findAllByRole("button", { name: "Copy command" }),
+  ).toHaveLength(1);
   localStorage.clear();
 });
 

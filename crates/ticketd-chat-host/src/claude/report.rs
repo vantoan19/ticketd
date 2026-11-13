@@ -560,6 +560,40 @@ fn permission_options() -> Vec<SettingOption> {
         .collect()
 }
 
+/// The name of the model an alias row runs: the listed row whose own id is the
+/// model the alias resolves to, else that model id read as its name
+/// ("claude-opus-5-5" is "Opus 5.5"). `None` for a row that is not an alias.
+fn runs_as(models: &[Value], entry: &Value) -> Option<String> {
+    let value = text(entry, "value")?;
+    let resolved = text(entry, "resolved_model").filter(|resolved| *resolved != value)?;
+    let listed = models.iter().find(|other| {
+        text(other, "value") != Some(value)
+            && (text(other, "value") == Some(resolved)
+                || text(other, "resolved_model") == Some(resolved))
+    });
+    let name = match listed.and_then(|other| text(other, "display_name")) {
+        Some(name) => Some(name.to_owned()),
+        None => model_name(resolved),
+    };
+    // A row already named after what it runs ("Sonnet 5") says nothing more.
+    name.filter(|name| Some(name.as_str()) != text(entry, "display_name"))
+}
+
+/// "claude-opus-5-5" as "Opus 5.5"; `None` for an id of another shape.
+fn model_name(id: &str) -> Option<String> {
+    let mut parts = id.strip_prefix("claude-")?.split('-');
+    let family = parts
+        .next()
+        .filter(|family| family.chars().all(char::is_alphabetic))?;
+    let version: Vec<&str> = parts
+        .take_while(|part| part.len() <= 2 && part.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+    if version.is_empty() {
+        return None;
+    }
+    Some(format!("{} {}", capitalized(family), version.join(".")))
+}
+
 /// What Claude Code offers before a session, from the models the bridge listed. Its
 /// permission mode is not known until a session starts (`current` is `None`): with no
 /// pick, the session keeps whatever Claude Code's own settings choose.
@@ -571,6 +605,7 @@ pub(super) fn listed_options(models: &[Value]) -> HarnessOptions {
                 Some(ModelChoice {
                     model: model_option(entry)?,
                     efforts: effort_options(entry),
+                    runs_as: runs_as(models, entry),
                 })
             })
             .collect(),

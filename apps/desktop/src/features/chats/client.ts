@@ -491,6 +491,8 @@ export const harnessOptionsSchema = z.object({
     settingOptionSchema.extend({
       /** Lowest first; `is_default` marks the model's own default, when said. */
       efforts: z.array(settingOptionSchema),
+      /** The model an alias row runs, by name ("Default" runs "Opus 5.5"). */
+      runs_as: z.string().nullish(),
     }),
   ),
   /** `current` is unset: before a session only the harness's own setting applies. */

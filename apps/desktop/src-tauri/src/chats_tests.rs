@@ -155,10 +155,12 @@ fn codex_options() -> ticketd_chat_host::HarnessOptions {
             ticketd_chat_host::ModelChoice {
                 model: offered("gpt-a", true),
                 efforts: Vec::new(),
+                runs_as: None,
             },
             ticketd_chat_host::ModelChoice {
                 model: offered("gpt-b", false),
                 efforts: vec![offered("low", false), offered("high", true)],
+                runs_as: None,
             },
         ],
         permission: None,

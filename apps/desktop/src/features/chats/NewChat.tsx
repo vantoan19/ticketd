@@ -101,6 +101,7 @@ export function NewChat({
     return { ...next, kept };
   });
   const [composerKey, setComposerKey] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [folderMissing, setFolderMissing] = useState(false);
   const { quotes, remove: removeQuote } = useQuotes(NEW_CHAT);
   /** null until the first probe answers: seconds, while each harness is asked. */
@@ -393,6 +394,7 @@ export function NewChat({
                         )
                       );
                     }}
+                    onOpenChange={setPickerOpen}
                     inputRef={input}
                   />
                 ),
@@ -551,7 +553,8 @@ export function NewChat({
                 : `${shared} other Chats use this folder.`}
             </p>
           )}
-          {harness?.problem && (
+          {/* While the picker is open it shows this notice itself. */}
+          {harness?.problem && !pickerOpen && (
             <ProblemNotice
               problem={harness.problem}
               harness={harness.name}

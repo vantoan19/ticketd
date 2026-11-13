@@ -4,4 +4,4 @@
 {"client":{"id":"c2","cmd":"inspect","claude_executable":"/opt/claude/bin/claude"}}
 {"server":{"v":1,"event":"inspection","id":"c2","claude_executable":"/opt/claude/bin/claude","claude_version":"2.1.322","sdk_version":"0.3.322","sdk_claude_code_version":"2.1.322","pairing":"matched","error":null}}
 {"client":{"id":"c3","cmd":"options","claude_executable":"/opt/claude/bin/claude"}}
-{"server":{"v":1,"event":"options","id":"c3","models":[{"value":"default","resolved_model":null,"display_name":"Default (recommended)","description":"Opus 5.5 for complex work","effort_levels":["low","medium","high","max"]},{"value":"sonnet","resolved_model":"claude-sonnet-5","display_name":"Sonnet 5","description":"","effort_levels":[]}],"error":null}}
+{"server":{"v":1,"event":"options","id":"c3","models":[{"value":"default","resolved_model":"claude-opus-5-5","display_name":"Default (recommended)","description":"Opus 5.5 for complex work","effort_levels":["low","medium","high","max"]},{"value":"sonnet","resolved_model":"claude-sonnet-5","display_name":"Sonnet 5","description":"","effort_levels":[]}],"error":null}}
