@@ -178,6 +178,8 @@ pub fn automation_run_again(id: String) -> Result<AutomationRun, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.run_automation_again(&id))
         .map_err(|error| error.to_string())
+}
+
 /// "Stop it and turn off": off for this device, with the Automation's active runs
 /// ended as Needs attention and their agents interrupted.
 #[tauri::command]
