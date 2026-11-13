@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ticketd_automation_runner::{RUNS_AT_ONCE, Runner, TicketdCli};
+use ticketd_automation_runner::{Runner, TicketdCli, stop_and_turn_off};
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
@@ -25,6 +25,7 @@ struct Fixture {
     _dir: tempfile::TempDir,
     path: PathBuf,
     fake: FakeAdapter,
+    host: ChatHost,
     runner: Runner,
     automation: Automation,
 }
@@ -112,11 +113,12 @@ impl Fixture {
             executable: Some(PathBuf::from("/opt/ticketd/ticketd")),
             folders: vec![dir.path().to_owned()],
         };
-        let runner = Runner::new(opener(&path), host, cli, Arc::new(|_| Ok(()))).unwrap();
+        let runner = Runner::new(opener(&path), host.clone(), cli, Arc::new(|_| Ok(()))).unwrap();
         Self {
             _dir: dir,
             path,
             fake,
+            host,
             runner,
             automation,
         }
@@ -418,7 +420,6 @@ async fn at_most_two_runs_execute_at_once_and_the_next_starts_when_one_ends() {
     use AutomationRunStatus::{NeedsAttention, Queued, Running};
 
     f.tick().await;
-    assert_eq!(RUNS_AT_ONCE, 2);
     assert_eq!(statuses(), [Running, Running, Queued]);
     // Another pass starts nothing while both slots are taken.
     f.tick().await;
@@ -456,4 +457,76 @@ async fn a_run_left_running_when_ticketd_closed_needs_attention_at_the_next_star
         f.needs_attention(),
         "ticketd closed while this run was going."
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_runs_at_once_setting_decides_how_many_runs_execute() {
+    let f = Fixture::new();
+    f.core().set_automation_runs_at_once(1).unwrap();
+    let _opens = [
+        f.fake.hold_next_open(),
+        f.fake.hold_next_open(),
+        f.fake.hold_next_open(),
+    ];
+    for title in ["First", "Second", "Third"] {
+        f.tag(title);
+    }
+    let statuses =
+        || -> Vec<AutomationRunStatus> { f.runs().iter().map(|run| run.status).collect() };
+    use AutomationRunStatus::{Queued, Running};
+
+    f.tick().await;
+    assert_eq!(statuses(), [Running, Queued, Queued]);
+
+    // A raised limit counts from the next pass; nothing restarts.
+    f.core().set_automation_runs_at_once(3).unwrap();
+    f.tick().await;
+    assert_eq!(statuses(), [Running, Running, Running]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_automation_switched_off_mid_run_lets_its_agent_finish_and_starts_nothing_new() {
+    let f = Fixture::new();
+    f.agent_working().await;
+
+    f.core()
+        .set_automation_enabled(&f.automation.id, false)
+        .unwrap();
+    f.tag("Tagged while off");
+    f.tick().await;
+    f.end_turn(TurnOutcome::Completed).await;
+
+    let runs = f.runs();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, AutomationRunStatus::Completed);
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|written| matches!(written, Written::Interrupt(_))),
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_it_and_turn_off_interrupts_the_agent_and_the_run_needs_attention() {
+    let f = Fixture::new();
+    f.agent_working().await;
+
+    stop_and_turn_off(&opener(&f.path), &f.host, &f.automation.id)
+        .await
+        .unwrap();
+    settle().await;
+
+    assert!(!f.core().automation(&f.automation.id).unwrap().enabled);
+    assert!(
+        f.fake
+            .written()
+            .iter()
+            .any(|written| matches!(written, Written::Interrupt(_))),
+    );
+    let reason = "You stopped this run when you turned the Automation off.";
+    assert_eq!(f.needs_attention(), reason);
+    // The interrupted turn's end changes nothing: the run has already ended.
+    f.end_turn(TurnOutcome::Interrupted).await;
+    assert_eq!(f.needs_attention(), reason);
 }

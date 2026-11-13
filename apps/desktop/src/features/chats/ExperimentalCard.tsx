@@ -66,7 +66,7 @@ export function ExperimentalCard() {
             variant="top"
             title="Show Chat"
             titleId="show-chat-title"
-            description="Adds Chats to the sidebar, where you start and follow conversations with your agent."
+            description="Adds Chats and Automations to the sidebar, where you start and follow your agents’ work."
             trailing={
               <Switch
                 aria-labelledby="show-chat-title"
@@ -76,8 +76,8 @@ export function ExperimentalCard() {
             }
           />
           <SettingsListFooter>
-            Turning Chat off hides it and keeps your Chats. Running Chats are
-            stopped first, after you confirm.
+            Turning Chat off hides Chats and Automations and keeps them. Running
+            Chats and runs are stopped first, after you confirm.
           </SettingsListFooter>
         </SettingsList>
         {failure && (

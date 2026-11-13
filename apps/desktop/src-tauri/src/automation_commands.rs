@@ -1,6 +1,10 @@
 //! Commands for the Automations page. The rules live in the core; these translate.
 
-use tauri::State;
+use std::sync::Arc;
+
+use tauri::{AppHandle, State};
+use tauri_plugin_autostart::ManagerExt;
+use ticketd_chat_host::WorkspaceOpener;
 use ticketd_core::{
     Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationRun,
     AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
@@ -186,4 +190,63 @@ pub fn automation_run_again(id: String) -> Result<AutomationRun, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.run_automation_again(&id))
         .map_err(|error| error.to_string())
+}
+
+/// "Stop it and turn off": off for this device, with the Automation's active runs
+/// ended as Needs attention and their agents interrupted.
+#[tauri::command]
+pub async fn automation_stop_and_turn_off(
+    bridge: State<'_, ChatBridge>,
+    id: String,
+) -> Result<Automation, String> {
+    let stopped = match bridge.chats().automation_host() {
+        Some(host) => {
+            let open: WorkspaceOpener = Arc::new(open_workspace);
+            ticketd_automation_runner::stop_and_turn_off(&open, &host, &id).await
+        }
+        // Chat is off: no agent is running, so there is only the record to change.
+        None => open_workspace()
+            .and_then(|mut workspace| workspace.stop_and_turn_off_automation(&id).map(drop)),
+    };
+    stopped
+        .and_then(|()| open_workspace()?.automation(&id))
+        .map_err(|error| error.to_string())
+}
+
+/// How many runs execute at once on this device.
+#[tauri::command]
+pub fn automation_runs_at_once() -> Result<usize, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.automation_runs_at_once())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_automation_runs_at_once(runs: usize) -> Result<(), String> {
+    open_workspace()
+        .and_then(|workspace| workspace.set_automation_runs_at_once(runs))
+        .map_err(|error| error.to_string())
+}
+
+/// Whether the system starts ticketd when the person signs in to this computer.
+#[tauri::command]
+pub fn start_at_login(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_start_at_login(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    // Asked only for a change: removing an entry that is not there is an error.
+    if autolaunch.is_enabled().map_err(|error| error.to_string())? == enabled {
+        return Ok(());
+    }
+    if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    }
+    .map_err(|error| error.to_string())
 }

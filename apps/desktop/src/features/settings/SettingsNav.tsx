@@ -2,6 +2,7 @@ import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import { StatusDot } from "@/components/ui/status-dot";
+import { useChatFeature } from "@/features/chats/use-chats";
 import { modifierKeyLabel } from "@/lib/platform";
 import {
   SETTINGS_GROUPS,
@@ -33,8 +34,12 @@ export function SettingsNav({
 }) {
   const { entries } = useSources();
   const { query, needsSetup } = useSettingsState();
+  const chat = useChatFeature();
   const items: NavItem[] = [
-    ...SETTINGS_SECTIONS,
+    // Automations are part of Chat: its switch shows and hides both.
+    ...SETTINGS_SECTIONS.filter(
+      (section) => section.id !== "automations" || chat.enabled,
+    ),
     ...entries.map(({ connector }) =>
       sourceSection(connector.provider, connector.name),
     ),
