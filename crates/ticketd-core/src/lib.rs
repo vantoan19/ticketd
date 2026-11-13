@@ -97,6 +97,9 @@ pub use attachments::{
     DEFAULT_ATTACHMENT_LIMIT,
 };
 mod automation_agents;
+mod automation_matching;
+mod automation_run_machine;
+mod automation_runs;
 mod automations;
 mod change_token;
 mod chats;
@@ -106,6 +109,11 @@ pub use activities::{
 };
 pub use automation_agents::{
     AgentHarness, AutomationAgent, AutomationAgentSettings, AutomationAgentTools,
+};
+pub use automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
+pub use automation_runs::{
+    AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
+    AutomationStepStatus,
 };
 pub use automations::{
     AUTOMATION_TRIGGER_ID, Automation, AutomationDefinition, AutomationProblem, Check, Condition,
@@ -127,7 +135,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 69;
+pub const FORMAT_VERSION: i64 = 70;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -225,6 +233,10 @@ pub enum Error {
     AutomationAgentInUse(String),
     #[error("Automation '{0}' was not found")]
     AutomationNotFound(String),
+    #[error("Automation run '{0}' was not found")]
+    AutomationRunNotFound(String),
+    #[error("Automation run: {0}")]
+    AutomationRun(String),
     #[error("invalid Automation: {0}")]
     InvalidAutomation(String),
     #[error("This Automation cannot be switched on yet. {0}.")]
@@ -948,6 +960,9 @@ impl Workspace {
         }
         if version < 69 {
             automations::migrate(&transaction)?;
+        }
+        if version < 70 {
+            automation_runs::migrate(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

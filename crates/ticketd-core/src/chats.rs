@@ -1308,6 +1308,31 @@ fn lose_contact(connection: &Connection, chat_id: &str, detail: &str) -> Result<
     trim(connection, chat_id)
 }
 
+/// Removes the Chats matching `filter` (a condition on `chats`) with every record
+/// they hold. Only run retention deletes a Chat; a person's Chats are trashed.
+pub(crate) fn delete_where(connection: &Connection, filter: &str) -> Result<(), Error> {
+    // Children before the rows they reference.
+    for table in [
+        "chat_record_writes",
+        "chat_changes",
+        "chat_notices",
+        "chat_interactions",
+        "chat_tools",
+        "chat_submission_attempts",
+        "chat_messages",
+        "chat_turns",
+        "chat_sessions",
+        "chat_links",
+    ] {
+        connection.execute(
+            &format!("DELETE FROM {table} WHERE chat_id IN (SELECT id FROM chats WHERE {filter})"),
+            [],
+        )?;
+    }
+    connection.execute(&format!("DELETE FROM chats WHERE {filter}"), [])?;
+    Ok(())
+}
+
 impl Workspace {
     /// One immediate transaction: records and their change entries commit together or not at all.
     fn chat_write<T>(
@@ -1409,8 +1434,9 @@ impl Workspace {
             ChatListFilter::Archived => "trashed = 0 AND archived = 1",
             ChatListFilter::Trashed => "trashed = 1",
         };
+        // A Chat owned by an Automation run is reached from its run, not from here.
         let mut statement = self.connection.prepare(&format!(
-            "SELECT id FROM chats WHERE {scope} ORDER BY (SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id"
+            "SELECT id FROM chats WHERE {scope} AND automation_run_id IS NULL ORDER BY (SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id"
         ))?;
         let ids = statement
             .query_map([], |row| row.get::<_, String>(0))?

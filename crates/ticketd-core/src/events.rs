@@ -240,6 +240,46 @@ fn parse<T: serde::de::DeserializeOwned>(text: String) -> Result<T, Error> {
     Ok(serde_json::from_value(serde_json::Value::String(text))?)
 }
 
+/// `Workspace::workspace_events_after`, for a caller inside a transaction.
+pub(crate) fn after(
+    connection: &Connection,
+    cursor: i64,
+    limit: u32,
+) -> Result<Vec<WorkspaceEvent>, Error> {
+    let mut statement = connection.prepare(
+        "SELECT id, type, at, ticket_id, previous, current, actor FROM workspace_events
+             WHERE id > ?1 ORDER BY id LIMIT ?2",
+    )?;
+    let rows = statement
+        .query_map(params![cursor, limit], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|(id, kind, at, ticket_id, previous, current, actor)| {
+            let values =
+                |text: Option<String>| text.map(|text| serde_json::from_str(&text)).transpose();
+            Ok(WorkspaceEvent {
+                id,
+                kind: parse(kind)?,
+                at,
+                ticket_id,
+                previous: values(previous)?,
+                current: values(current)?,
+                actor: parse(actor)?,
+            })
+        })
+        .collect()
+}
+
 impl Workspace {
     /// Events logged after `cursor` (an event id, 0 for the start), oldest first, at
     /// most `limit`. A reader keeps the id of the last event it handled as its cursor.
@@ -248,38 +288,7 @@ impl Workspace {
         cursor: i64,
         limit: u32,
     ) -> Result<Vec<WorkspaceEvent>, Error> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, type, at, ticket_id, previous, current, actor FROM workspace_events
-             WHERE id > ?1 ORDER BY id LIMIT ?2",
-        )?;
-        let rows = statement
-            .query_map(params![cursor, limit], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|(id, kind, at, ticket_id, previous, current, actor)| {
-                let values =
-                    |text: Option<String>| text.map(|text| serde_json::from_str(&text)).transpose();
-                Ok(WorkspaceEvent {
-                    id,
-                    kind: parse(kind)?,
-                    at,
-                    ticket_id,
-                    previous: values(previous)?,
-                    current: values(current)?,
-                    actor: parse(actor)?,
-                })
-            })
-            .collect()
+        after(&self.connection, cursor, limit)
     }
 
     /// The id of the newest event ever logged: where a reader that wants only what
@@ -296,8 +305,8 @@ impl Workspace {
     }
 
     /// The housekeeping a host runs at launch and once a day: removes replaced versions
-    /// older than 30 days and Workspace events logged more than 90 days before `now`
-    /// (the database clock when omitted).
+    /// older than 30 days, and Workspace events and finished Automation runs more than
+    /// 90 days before `now` (the database clock when omitted).
     pub fn upkeep(&mut self, now: Option<&str>) -> Result<(), Error> {
         self.expire_versions(now)?;
         let now = crate::source::clock(&self.connection, now)?;
@@ -305,6 +314,7 @@ impl Workspace {
             "DELETE FROM workspace_events WHERE julianday(at) < julianday(?1) - ?2",
             params![now, RETENTION_DAYS],
         )?;
+        crate::automation_runs::expire(&self.connection, &now)?;
         Ok(())
     }
 }

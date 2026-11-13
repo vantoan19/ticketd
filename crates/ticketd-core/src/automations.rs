@@ -150,7 +150,7 @@ impl StepAction {
     }
 
     /// The lists of steps under this one, in the order they run.
-    fn paths(&self) -> Vec<&Vec<Step>> {
+    pub(crate) fn paths(&self) -> Vec<&Vec<Step>> {
         match self {
             Self::RunAgent { on_failure, .. }
             | Self::ChangeTicket { on_failure, .. }
@@ -500,7 +500,7 @@ fn load(connection: &Connection, id: Option<&str>) -> Result<Vec<Automation>, Er
         .collect()
 }
 
-fn one(connection: &Connection, id: &str) -> Result<Automation, Error> {
+pub(crate) fn one(connection: &Connection, id: &str) -> Result<Automation, Error> {
     load(connection, Some(id))?
         .pop()
         .ok_or_else(|| Error::AutomationNotFound(id.to_owned()))
