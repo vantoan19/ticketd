@@ -1325,6 +1325,12 @@ the Chat. Chat identity, harness-session identity and editing-agent attribution
 remain distinct. A Chat keeps the harness it was created with; using another
 harness means starting a new Chat.
 
+New Chat chooses the harness, and may choose its model, effort and permission mode,
+before anything is sent. The choices offered are only those the installed harness
+reports when it is checked, without a prompt reaching a model; a harness that
+reports none starts with its own settings. The first turn runs on what was chosen.
+Full access is never offered.
+
 An execution folder is required but a Project is not. Offer an existing folder;
 otherwise use a persistent managed folder for the Chat. Context links do not move
 execution or create a Project. Multiple Chats may run concurrently, including in
