@@ -93,9 +93,15 @@ export function IfFields({
             : projectName(check.project_id, projects));
         return (
           // Rows have no identity of their own, and none is reordered.
-          <div key={index} className="flow-condition">
+          <div key={index} className="flow-condition flow-check">
             <strong>{label}</strong>
-            <div className="flow-condition-value">
+            <IconButton
+              label={`Remove check: ${words[0]?.toUpperCase()}${words.slice(1)}`}
+              onClick={() => onChange(checks.filter((_, at) => at !== index))}
+            >
+              <X aria-hidden />
+            </IconButton>
+            <div className="flow-condition-value flow-check-value">
               {check.kind === "tag" ? (
                 <>
                   <Whether
@@ -169,12 +175,6 @@ export function IfFields({
                 </>
               )}
             </div>
-            <IconButton
-              label={`Remove check: ${words[0]?.toUpperCase()}${words.slice(1)}`}
-              onClick={() => onChange(checks.filter((_, at) => at !== index))}
-            >
-              <X aria-hidden />
-            </IconButton>
           </div>
         );
       })}

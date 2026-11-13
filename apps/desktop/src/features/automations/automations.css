@@ -417,6 +417,18 @@
   flex: 1;
   min-width: 0;
 }
+/* A check has two controls, so they take a line of their own under its name:
+   "is" or "is not" as wide as its words, the value the rest. */
+.flow-check {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.flow-check-value {
+  grid-column: 1 / -1;
+}
+.flow-check-value > :first-child {
+  flex: none;
+  width: auto;
+}
 
 /* --- A run: the same canvas, read only, saying what happened. --- */
 .run-crumb {

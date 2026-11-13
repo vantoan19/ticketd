@@ -6,6 +6,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
   type Edge,
   type Node,
   type NodeProps,
@@ -318,12 +319,17 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
 
 const nodeTypes = { card: CardNode, add: AddNode };
 
-/** Brings the whole flow back into view when a step is added or removed. */
+/**
+ * Brings the whole flow back into view when a step is added or removed, and
+ * when the canvas changes width, as when a panel opens beside it: paths side
+ * by side are wide.
+ */
 function Refit({ shape }: { shape: string }) {
   const { fitView } = useReactFlow();
+  const width = useStore((state) => state.width);
   useEffect(() => {
     void fitView({ maxZoom: 1, padding: 0.2 });
-  }, [shape, fitView]);
+  }, [shape, width, fitView]);
   return null;
 }
 
@@ -432,6 +438,8 @@ export function FlowCanvas({
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            // Let a flow with nested paths fit beside the panel.
+            minZoom={0.25}
             maxZoom={1.5}
             panOnScroll
             nodesDraggable={false}
