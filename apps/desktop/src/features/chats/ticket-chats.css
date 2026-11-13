@@ -217,12 +217,6 @@
   font-size: var(--text-caption);
 }
 
-/* The crumb back to the ticket a Chat was opened from. */
-.chat-crumb {
-  flex: none;
-  margin-right: 4px;
-}
-
 /* The records receipt row under a response: 28px, step-row anatomy. */
 .chat-receipt {
   display: flex;
