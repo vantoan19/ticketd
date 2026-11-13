@@ -208,14 +208,13 @@ export function mergeSteps(steps: Step[]): Step[] {
       rows.push(step);
       continue;
     }
-    const {
-      output: _output,
-      result: _result,
-      truncated: _truncated,
-      ...rest
-    } = last;
+    // A merged row opens to its targets, so no one step's output comes with it.
+    const merged: Step = { ...last };
+    delete merged.output;
+    delete merged.result;
+    delete merged.truncated;
     rows[rows.length - 1] = {
-      ...rest,
+      ...merged,
       targets: [...(last.targets ?? []), ...(step.targets ?? [])],
       no_matches: Boolean(last.no_matches && step.no_matches),
     };
