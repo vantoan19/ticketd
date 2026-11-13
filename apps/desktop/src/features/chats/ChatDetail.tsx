@@ -71,7 +71,7 @@ import {
   type TranscriptActions,
 } from "@/features/chats/Transcript";
 import {
-  FollowingContext,
+  ReadingContext,
   lastSeen,
   useTranscriptScroll,
 } from "@/features/chats/use-transcript-scroll";
@@ -370,7 +370,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     );
   // Placed once when the Chat opens; it stays until the person sends or leaves.
   const [newFrom, setNewFrom] = useState(() => firstNew(items, lastSeen(id)));
-  const { root, content, marker, following, follows, follow, onScroll } =
+  const { root, content, marker, following, reading, follow, onScroll } =
     useTranscriptScroll(id);
   /** Sending resumes following and clears the New marker. */
   const sent = <T,>(action: Promise<T>) => {
@@ -402,7 +402,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
     <div className="chat-body" onKeyDown={onPaneKey}>
       {!trashed && !picked && <LinkedRecords chat={chat} />}
       <div className="chat-reading">
-        <FollowingContext value={follows}>
+        <ReadingContext value={reading}>
           <div
             ref={root}
             className="chat-scroll"
@@ -428,7 +428,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
               }
             />
           </div>
-        </FollowingContext>
+        </ReadingContext>
         <JumpToLatest
           shown={!following}
           onJump={(fromKeyboard) => {

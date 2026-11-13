@@ -23,9 +23,19 @@ const seenThrough = new Map<string, string>();
  */
 export const lastSeen = (chatId: string) => seenThrough.get(chatId);
 
-/** Whether the reader follows the end of the transcript; turn rows read it. */
-export const FollowingContext = createContext<() => boolean>(() => true);
-export const useFollowing = () => useContext(FollowingContext);
+/**
+ * What rows ask of the reading position: whether the reader follows the end, and
+ * to keep a row in place when the reader opens or closes it.
+ */
+export type Reading = {
+  follows: () => boolean;
+  keep: (element: Element) => void;
+};
+export const ReadingContext = createContext<Reading>({
+  follows: () => true,
+  keep: () => {},
+});
+export const useReading = () => useContext(ReadingContext);
 
 type Anchor = { element: Element; offset: number } | null;
 
@@ -146,12 +156,26 @@ export function useTranscriptScroll(chatId: string) {
     if (box) box.scrollTop = box.scrollHeight;
   };
 
+  /**
+   * The reader opened or closed `element`: it stays where it is, even at the
+   * bottom, so what they clicked does not move away from them.
+   */
+  const keep = (element: Element) => {
+    const box = root.current;
+    if (!box) return;
+    const offset =
+      element.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    anchor.current = { element, offset };
+    follows.current = false;
+    setFollowing(false);
+  };
+
   return {
     root,
     content,
     marker,
     following,
-    follows: () => follows.current,
+    reading: { follows: () => follows.current, keep },
     follow,
     onScroll,
   };

@@ -54,7 +54,7 @@ import {
   type TurnRow,
 } from "@/features/chats/model";
 import { OutputBox } from "@/features/chats/OutputBox";
-import { useFollowing } from "@/features/chats/use-transcript-scroll";
+import { useReading } from "@/features/chats/use-transcript-scroll";
 
 type Of<K extends TranscriptItem["kind"]> = Extract<
   TranscriptItem,
@@ -236,6 +236,7 @@ export function StepRow({
   live: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const reading = useReading();
   const id = useId();
   const described = useId();
   const words = stepWords(step);
@@ -287,7 +288,10 @@ export function StepRow({
       aria-controls={open ? id : undefined}
       aria-label={words.label}
       aria-describedby={decision ? described : undefined}
-      onClick={() => setOpen(!open)}
+      onClick={(event) => {
+        reading.keep(event.currentTarget);
+        setOpen(!open);
+      }}
     >
       {line}
       {open ? (
@@ -449,7 +453,7 @@ function TurnView({
 }) {
   const key = `${chatId}:${turn.key}`;
   const [toggled, setToggled] = useState(() => toggles.get(key));
-  const following = useFollowing();
+  const reading = useReading();
   const part = useRef<HTMLDivElement>(null);
   const rowButton = useRef<HTMLButtonElement>(null);
   const bodyId = useId();
@@ -462,18 +466,18 @@ function TurnView({
     if (turn.live || settled) return;
     const element = part.current;
     const scroller = element?.closest(".chat-scroll");
-    const reading =
+    const readingHere =
       element &&
       scroller &&
       (element.contains(document.activeElement) ||
-        (!following() &&
+        (!reading.follows() &&
           element.getBoundingClientRect().bottom >
             scroller.getBoundingClientRect().top &&
           element.getBoundingClientRect().top <
             scroller.getBoundingClientRect().bottom));
-    setHeld(Boolean(reading));
+    setHeld(Boolean(readingHere));
     setSettled(true);
-  }, [following, settled, turn.live]);
+  }, [reading, settled, turn.live]);
   useEffect(() => {
     const element = part.current;
     const scroller = element?.closest(".chat-scroll");
@@ -495,6 +499,8 @@ function TurnView({
     const next = !open;
     toggles.set(key, next);
     setToggled(next);
+    // The row stays where the reader clicked it.
+    if (rowButton.current) reading.keep(rowButton.current);
     // Collapsing with focus inside leaves focus on the row.
     if (!next) rowButton.current?.focus();
   };
@@ -879,13 +885,15 @@ export function Transcript({
           fromShown
         />
       ) : (
+        // After an unconfirmed stop the open turn row and the notice say it.
         working &&
-        !stepRuns && (
-          <WorkingLine
-            label={chat.doing?.label ?? "Working"}
-            {...(chat.doing ? { since: chat.doing.since } : {})}
-          />
-        )
+        !stepRuns &&
+        !parts.some((part) => part.kind === "turn" && part.turn.unconfirmed) &&
+        (chat.doing ? (
+          <WorkingLine label={chat.doing.label} since={chat.doing.since} />
+        ) : (
+          <WorkingLine label="Working…" />
+        ))
       )}
     </div>
   );
