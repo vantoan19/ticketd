@@ -804,7 +804,8 @@ button.chat-file-name:focus-visible,
   fill: var(--foreground);
 }
 @container (max-width: 419px) {
-  [data-control] .effort-glyph {
+  [data-control] .effort-glyph,
+  [data-control] > .lucide-chevron-down {
     display: none;
   }
 }
@@ -892,6 +893,18 @@ button.chat-file-name:focus-visible,
   background: var(--surface);
   box-shadow: var(--shadow-small);
   color: var(--foreground);
+}
+/* A Chat's one harness reads as a heading, not a lone segment. */
+.chat-picker-harnesses:has(> :only-child) {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+.chat-picker-harnesses > .chat-picker-harness:only-child {
+  padding-inline: 0;
+  background: none;
+  box-shadow: none;
+  font-weight: 500;
 }
 .chat-picker-harness[data-dim] > span:not(.harness-mark) {
   color: var(--muted-foreground);
