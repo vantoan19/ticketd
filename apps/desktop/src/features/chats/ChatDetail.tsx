@@ -33,7 +33,8 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { PathText } from "@/features/projects/PathText";
 import { withoutVerbatim } from "@/features/projects/paths";
 import { ActivityDock } from "@/features/chats/ActivityDock";
-import { focusLastChoice } from "@/features/chats/dock-focus";
+import { focusFirstChoice } from "@/features/chats/dock-focus";
+import { DockSlot } from "@/features/chats/DockSlot";
 import {
   ChatError,
   useChatClient,
@@ -295,6 +296,12 @@ function LinkedRecords({
 const isMessage = (item: TranscriptItem) =>
   item.kind === "user" || item.kind === "response";
 
+/** What takes an Esc before the Chat does: menus, popovers, dialogs, pickers. */
+const LAYER =
+  '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
+/** An Esc this soon after one that closed a layer never stops the turn. */
+const ESC_AFTER_LAYER_MS = 1000;
+
 function Conversation({
   snapshot,
   focusRequest,
@@ -355,6 +362,11 @@ function Conversation({
     .find((item) => item.kind === "user")?.at;
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const dock = useRef<HTMLDivElement>(null);
+  // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
+  // must not strand the keyboard on the page: the message box takes it.
+  useEffect(() => {
+    if (document.activeElement === document.body) messageBox.current?.focus();
+  }, []);
   const { quotes, remove: removeQuote } = useQuotes(id);
   // A quote added from elsewhere puts the person in the box after it.
   const quoteCount = useRef(quotes.length);
@@ -413,18 +425,34 @@ function Conversation({
   const answering = Boolean(question) && heldFor !== question?.id;
   const stoppable =
     isLive(chat) && !chat.stopping && !unconfirmedStart && chat.has_composer;
-  const stop = () => quietly(client.stop(id));
-  /** Esc stops the turn, unless a menu, dialog or picker is open to take it first. */
+  /** Stops the turn; the Stop button leaves, so the message box takes focus. */
+  const stop = () => {
+    messageBox.current?.focus();
+    quietly(client.stop(id));
+  };
+  // When a menu, popover or picker last took an Esc: the next Esc a moment
+  // later is the same habit (closing things), not a request to stop.
+  const layerClosedAt = useRef(-Infinity);
+  useEffect(() => {
+    const note = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && document.querySelector(LAYER))
+        layerClosedAt.current = performance.now();
+    };
+    document.addEventListener("keydown", note, true);
+    return () => document.removeEventListener("keydown", note, true);
+  }, []);
+  /**
+   * Esc stops the turn only from an empty message box or the transcript, and
+   * never just after it closed a menu or popover, or from a request in the dock.
+   */
   const onPaneKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
     if (event.defaultPrevented || !stoppable || picked) return;
-    const layer =
-      '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
-    if (
-      (event.target as Element).closest(layer) ||
-      document.querySelector(layer)
-    )
-      return;
+    const target = event.target as Element;
+    if (target.closest(LAYER) || document.querySelector(LAYER)) return;
+    if (performance.now() - layerClosedAt.current < ESC_AFTER_LAYER_MS) return;
+    if (target.closest(".chat-activity")) return;
+    if ((messageBox.current?.value ?? "").trim() !== "") return;
     event.preventDefault();
     stop();
   };
@@ -587,35 +615,39 @@ function Conversation({
           </p>
         ) : (
           <>
-            {chat.problem && (
-              <ProblemNotice
-                problem={chat.problem}
-                harness={harness}
-                onAction={onNotice}
-              />
-            )}
+            <DockSlot className="chat-dock-notice">
+              {chat.problem && (
+                <ProblemNotice
+                  problem={chat.problem}
+                  harness={harness}
+                  onAction={onNotice}
+                />
+              )}
+            </DockSlot>
             {chat.has_composer && (
               <div className="chat-seat">
-                <ActivityDock
-                  chat={chat}
-                  focusRequest={
-                    notifiedRequest !== undefined &&
-                    pending[0]?.id === notifiedRequest
-                  }
-                  requests={pending}
-                  {...(plan && { plan: <PlanPill item={plan} /> })}
-                  dockRef={dock}
-                  onAnswer={answer}
-                  onLeave={() => messageBox.current?.focus()}
-                  onSendNow={(queuedId) =>
-                    run(client.sendQueuedNow(id, queuedId)).then(() => {})
-                  }
-                  onEdit={edit}
-                  onRemove={(queuedId) =>
-                    quietly(client.removeQueued(id, queuedId))
-                  }
-                  onResume={() => quietly(client.resumeQueue(id))}
-                />
+                <DockSlot>
+                  <ActivityDock
+                    chat={chat}
+                    focusRequest={
+                      notifiedRequest !== undefined &&
+                      pending[0]?.id === notifiedRequest
+                    }
+                    requests={pending}
+                    {...(plan && { plan: <PlanPill item={plan} /> })}
+                    dockRef={dock}
+                    onAnswer={answer}
+                    onLeave={() => messageBox.current?.focus()}
+                    onSendNow={(queuedId) =>
+                      run(client.sendQueuedNow(id, queuedId)).then(() => {})
+                    }
+                    onEdit={edit}
+                    onRemove={(queuedId) =>
+                      quietly(client.removeQueued(id, queuedId))
+                    }
+                    onResume={() => quietly(client.resumeQueue(id))}
+                  />
+                </DockSlot>
                 <Composer
                   key={`${id}:${edits}`}
                   inputRef={messageBox}
@@ -660,7 +692,7 @@ function Conversation({
                     )
                   }
                   {...(pending.length > 0 && {
-                    onArrowUpFromEmpty: () => focusLastChoice(dock.current),
+                    onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
                   })}
                   {...(isLive(chat) && { onStop: stop })}
                   stopping={chat.stopping || unconfirmedStart}

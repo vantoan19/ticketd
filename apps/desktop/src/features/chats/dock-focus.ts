@@ -3,9 +3,12 @@ export const requestChoices = (root: HTMLElement) => [
   ...root.querySelectorAll<HTMLButtonElement>("[data-choice]"),
 ];
 
-/** Focuses the last choice of the request in the dock; false when there is none. */
-export function focusLastChoice(dock: HTMLElement | null) {
-  const last = dock ? requestChoices(dock).at(-1) : undefined;
-  last?.focus();
-  return Boolean(last);
+/**
+ * Focuses the first choice of the request in the dock, the safe default (Allow
+ * once before Deny); ↓ moves on through the rest. False when there is none.
+ */
+export function focusFirstChoice(dock: HTMLElement | null) {
+  const first = dock ? requestChoices(dock)[0] : undefined;
+  first?.focus();
+  return Boolean(first);
 }
