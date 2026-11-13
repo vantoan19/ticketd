@@ -1119,17 +1119,17 @@ button.chat-file-name:focus-visible,
   padding-bottom: 8px;
   border-bottom: 1px solid var(--header-boundary);
 }
+/* Every effort the harness lists shows: segments share the row and wrap to a
+   second line rather than clip one away (LIVE2-4). */
 .chat-picker-effort > [data-slot="segmented-control"] {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
 }
 .chat-picker-effort > [data-slot="segmented-control"] > * {
-  flex: 1 1 0;
+  flex: 1 0 auto;
   justify-content: center;
-  min-width: 0;
-  padding-inline: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding-inline: 6px;
   white-space: nowrap;
 }
 .chat-picker-body > .chat-picker-note {
