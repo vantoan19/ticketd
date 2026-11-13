@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Bell,
   Bot,
   Ellipsis,
   Maximize2,
   Minimize2,
+  SquarePen,
   Tag,
   X,
   Zap,
@@ -47,8 +49,13 @@ import { conditionsLine } from "@/features/automations/automation-text";
 import { TRIGGER_KINDS } from "@/features/automations/flow-cards";
 import {
   FlowCanvas,
+  type StepChoice,
   type TriggerChoice,
 } from "@/features/automations/FlowCanvas";
+import {
+  ChangeTicketFields,
+  NotifyFields,
+} from "@/features/automations/TicketStepFields";
 import { RunsList } from "@/features/automations/RunsList";
 import { RunView } from "@/features/automations/RunView";
 import { RunAgentFields, StepPanel } from "@/features/automations/StepPanel";
@@ -87,6 +94,7 @@ export function AutomationEditor({
   onChange,
   onSetEnabled,
   onStopAndTurnOff,
+  onDuplicate,
   onDelete,
   onCreateAgent,
   onSaveAgent,
@@ -107,6 +115,8 @@ export function AutomationEditor({
   onSetEnabled: (enabled: boolean) => void;
   /** Off, with the runs in progress ended as Needs attention. */
   onStopAndTurnOff: () => void;
+  /** Makes a copy, off, and opens it. */
+  onDuplicate: () => void;
   onDelete: () => void;
   /** Makes a new agent; resolves to nothing when that failed. */
   onCreateAgent: () => Promise<AutomationAgent | undefined>;
@@ -165,14 +175,25 @@ export function AutomationEditor({
     if (draft.trigger?.kind !== kind) change({ trigger: NEW_TRIGGERS[kind] });
     setSelected(TRIGGER_ID);
   };
-  const addStep = (index: number) => {
-    const step: AutomationStep = {
-      id: crypto.randomUUID(),
-      kind: "run_agent",
-      agent_id: null,
-      execution_folder: null,
-      on_failure: null,
-    };
+  const addStep = (index: number, kind: StepChoice) => {
+    const id = crypto.randomUUID();
+    const step: AutomationStep =
+      kind === "change_ticket"
+        ? {
+            id,
+            kind,
+            change: { action: "add_tag", tag: "" },
+            on_failure: null,
+          }
+        : kind === "notify"
+          ? { id, kind, text: "", opens: "ticket", on_failure: null }
+          : {
+              id,
+              kind,
+              agent_id: null,
+              execution_folder: null,
+              on_failure: null,
+            };
     change({
       steps: [
         ...draft.steps.slice(0, index),
@@ -261,6 +282,36 @@ export function AutomationEditor({
           onFail={onFail}
         />
       </StepPanel>
+    ) : step?.kind === "change_ticket" ? (
+      <StepPanel
+        key={step.id}
+        title="Change ticket"
+        icon={<SquarePen size={16} aria-hidden />}
+        onClose={closePanel}
+      >
+        <ChangeTicketFields
+          change={step.change ?? { action: "add_tag", tag: "" }}
+          automationName={title}
+          onChange={(next) => changeStep(step.id, { change: next })}
+        />
+      </StepPanel>
+    ) : step?.kind === "notify" ? (
+      <StepPanel
+        key={step.id}
+        title="Notify me"
+        icon={<Bell size={16} aria-hidden />}
+        onClose={closePanel}
+      >
+        <NotifyFields
+          text={step.text}
+          opens={step.opens}
+          automationName={title}
+          eventTag={
+            draft.trigger?.kind === "tag_added" ? draft.trigger.tag : null
+          }
+          onChange={(patch) => changeStep(step.id, patch)}
+        />
+      </StepPanel>
     ) : null;
 
   return (
@@ -318,6 +369,9 @@ export function AutomationEditor({
             <DropdownMenuContent align="end" aria-label="Automation actions">
               <DropdownMenuItem onSelect={() => setRenaming(draft.name)}>
                 Rename…
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onDuplicate}>
+                Duplicate
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

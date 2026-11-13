@@ -6,8 +6,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 use ticketd_chat_host::WorkspaceOpener;
 use ticketd_core::{
-    Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationRun,
-    AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
+    Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationExample,
+    AutomationRun, AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
 };
 
 use crate::chat_commands::ChatBridge;
@@ -82,6 +82,22 @@ pub fn automation_create() -> Result<Automation, String> {
         .map_err(|error| error.to_string())
 }
 
+/// One of the examples the empty page offers, as an Automation that is off.
+#[tauri::command]
+pub fn automation_create_example(example: AutomationExample) -> Result<Automation, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.create_example_automation(example))
+        .map_err(|error| error.to_string())
+}
+
+/// A copy of an Automation, off.
+#[tauri::command]
+pub fn automation_duplicate(id: String) -> Result<Automation, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.duplicate_automation(&id))
+        .map_err(|error| error.to_string())
+}
+
 /// Replaces the whole definition: renaming and reshaping are the same edit.
 #[tauri::command]
 pub fn automation_update(
@@ -108,12 +124,24 @@ pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, S
         .map_err(|error| error.to_string())
 }
 
+/// A step's text with its fields filled in from the ticket changed most recently,
+/// and `tag` for the tag from the event. `None` while the Workspace has no ticket.
+#[tauri::command]
+pub fn automation_text_preview(
+    text: String,
+    tag: Option<String>,
+) -> Result<Option<String>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.preview_automation_text(&text, tag.as_deref()))
+        .map_err(|error| error.to_string())
+}
+
 /// A run as a list shows it. The run view reads the whole run.
 #[derive(serde::Serialize)]
 pub struct ListedRun {
     id: String,
     automation_id: String,
-    /// The Automation's name when the run was created.
+    /// The Automation as it is called now.
     automation_name: String,
     status: AutomationRunStatus,
     /// Why it needs attention.
@@ -129,7 +157,7 @@ fn listed(runs: Vec<AutomationRun>) -> Vec<ListedRun> {
         .map(|run| ListedRun {
             id: run.id,
             automation_id: run.automation_id,
-            automation_name: run.definition.name,
+            automation_name: run.automation_name,
             status: run.status,
             reason: run.reason,
             needs_you: run.needs_you,
@@ -144,6 +172,15 @@ fn listed(runs: Vec<AutomationRun>) -> Vec<ListedRun> {
 pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_runs(&automation_id))
+        .map(listed)
+        .map_err(|error| error.to_string())
+}
+
+/// The runs of every Automation on this device, newest first.
+#[tauri::command]
+pub fn automation_run_list_all() -> Result<Vec<ListedRun>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.all_automation_runs())
         .map(listed)
         .map_err(|error| error.to_string())
 }

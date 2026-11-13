@@ -64,8 +64,21 @@ const VERIFY: Automation = {
       id: "passed",
       kind: "if",
       checks: [{ kind: "tag", tag: "verified", has: true }],
-      yes: [{ id: "tell-me", kind: "notify" }],
-      no: [{ id: "send-back", kind: "change_ticket" }],
+      yes: [
+        {
+          id: "tell-me",
+          kind: "notify",
+          text: "Verified {{ticket.reference}}",
+          opens: "run",
+        },
+      ],
+      no: [
+        {
+          id: "send-back",
+          kind: "change_ticket",
+          change: { action: "add_tag", tag: "needs-fix" },
+        },
+      ],
     },
   ],
   enabled: true,
@@ -114,6 +127,8 @@ beforeEach(() => {
     switch (command) {
       case "automation_list":
         return [VERIFY];
+      case "automation_run_list_all":
+        return [];
       case "automation_agent_list":
         return [VERIFIER];
       case "automation_run_list":
@@ -155,7 +170,8 @@ const openRun = async () => {
   const view = render(page(0));
   const rows = await screen.findByRole("list", { name: "Automations" });
   fireEvent.click(await within(rows).findByRole("button"));
-  fireEvent.click(await screen.findByRole("radio", { name: "Runs" }));
+  // The list header has a Runs view too; the second is the Automation's own.
+  fireEvent.click((await screen.findAllByRole("radio", { name: "Runs" }))[1]!);
   const today = await screen.findByRole("list", { name: "Runs, Today" });
   fireEvent.click(within(today).getAllByRole("button")[0]!);
   await screen.findByRole("application", { name: "Steps" });

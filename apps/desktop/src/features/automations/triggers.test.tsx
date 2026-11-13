@@ -67,6 +67,7 @@ const open = async (patch: Partial<Automation> = {}) => {
       onSetEnabled={nothing}
       onStopAndTurnOff={nothing}
       onDelete={nothing}
+      onDuplicate={nothing}
       onCreateAgent={async () => undefined}
       onSaveAgent={nothing}
       onDeleteAgent={nothing}

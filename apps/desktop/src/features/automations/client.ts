@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ticketStatuses } from "@/lib/statuses";
 
 const limitSchema = z.number().int().positive();
+const statusSchema = z.enum(ticketStatuses);
 
 export const automationAgentSettingsSchema = z.object({
   name: z.string(),
@@ -37,7 +38,6 @@ export type AutomationAgent = z.infer<typeof automationAgentSchema>;
  * The trigger and step kinds this page can set up are spelled out. The others
  * the record can hold are kept as they arrive, so saving never drops them.
  */
-const statusSchema = z.enum(ticketStatuses);
 const triggerSchema = z.union([
   z.object({
     kind: z.enum(["ticket_created", "ticket_updated", "activity_created"]),
@@ -72,10 +72,32 @@ const stepSchema = z.union([
   }),
   z.looseObject({
     id: z.string(),
-    kind: z.enum(["change_ticket", "notify", "if"]),
+    kind: z.literal("change_ticket"),
+    /** null until the person chooses what it changes. */
+    change: z
+      .discriminatedUnion("action", [
+        z.object({ action: z.literal("add_tag"), tag: z.string() }),
+        z.object({ action: z.literal("remove_tag"), tag: z.string() }),
+        z.object({ action: z.literal("set_status"), status: statusSchema }),
+        /** `text` may hold field references; see `automation-text.ts`. */
+        z.object({ action: z.literal("post_update"), text: z.string() }),
+      ])
+      .nullable(),
   }),
+  z.looseObject({
+    id: z.string(),
+    kind: z.literal("notify"),
+    /** May hold field references, like a posted update. */
+    text: z.string(),
+    /** What a click on the notification opens. */
+    opens: z.enum(["ticket", "run"]),
+  }),
+  z.looseObject({ id: z.string(), kind: z.literal("if") }),
 ]);
 export type AutomationStep = z.infer<typeof stepSchema>;
+export type StepChange = NonNullable<
+  Extract<AutomationStep, { kind: "change_ticket" }>["change"]
+>;
 
 const automationDefinitionSchema = z.object({
   name: z.string(),
@@ -129,6 +151,17 @@ const automationRunSchema = z.object({
 });
 export type AutomationRun = z.infer<typeof automationRunSchema>;
 
+/** A run in the list of every run: with the Automation it belongs to. */
+const listedRunSchema = automationRunSchema.extend({
+  automation_id: z.string(),
+  /** The Automation as it is called now. */
+  automation_name: z.string(),
+});
+export type ListedRun = z.infer<typeof listedRunSchema>;
+
+/** The examples the empty page offers, as the core names them. */
+export type AutomationExample =
+  "triage_tagged_tickets" | "verify_ready_for_testing" | "weekly_summary";
 /** A run as its ticket lists it: with the name of the Automation it ran. */
 const ticketRunSchema = automationRunSchema.extend({
   automation_name: z.string(),
@@ -195,6 +228,19 @@ export const automationsClient = {
   async createAutomation(): Promise<Automation> {
     return automationSchema.parse(await invoke("automation_create"));
   },
+  /**
+   * One of the examples, as an Automation that is off. A step whose agent does
+   * not exist yet comes back unfinished, saying so.
+   */
+  async createExample(example: AutomationExample): Promise<Automation> {
+    return automationSchema.parse(
+      await invoke("automation_create_example", { example }),
+    );
+  },
+  /** A copy of an Automation, off. */
+  async duplicateAutomation(id: string): Promise<Automation> {
+    return automationSchema.parse(await invoke("automation_duplicate", { id }));
+  },
   /** Replaces the whole definition: renaming and reshaping are the same edit. */
   async updateAutomation(
     id: string,
@@ -244,6 +290,22 @@ export const automationsClient = {
     return z
       .array(automationRunSchema)
       .parse(await invoke("automation_run_list", { automationId }));
+  },
+  /** The runs of every Automation on this desktop, newest first. */
+  async allRuns(): Promise<ListedRun[]> {
+    return z
+      .array(listedRunSchema)
+      .parse(await invoke("automation_run_list_all"));
+  },
+  /**
+   * A step's text with its fields filled in from the most recent ticket, and
+   * `tag` for the tag from the event. null while the Workspace has no ticket.
+   */
+  async previewText(text: string, tag: string | null): Promise<string | null> {
+    return z
+      .string()
+      .nullable()
+      .parse(await invoke("automation_text_preview", { text, tag }));
   },
   async run(id: string): Promise<AutomationRunDetail> {
     return automationRunDetailSchema.parse(

@@ -10,7 +10,12 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AutomationsView } from "@/features/automations/AutomationsView";
-import type { AutomationAgent } from "@/features/automations/client";
+import type {
+  Automation,
+  AutomationAgent,
+  ListedRun,
+} from "@/features/automations/client";
+import { RunNavigation } from "@/features/automations/navigation";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
 
@@ -20,6 +25,10 @@ window.ResizeObserver = class {
   unobserve() {}
   disconnect() {}
 };
+
+window.DOMMatrixReadOnly = class {
+  m22 = 1;
+} as unknown as typeof DOMMatrixReadOnly;
 
 const DEFAULTS = {
   name: "",
@@ -39,16 +48,54 @@ const DEFAULTS = {
 
 /** The agents the fake Workspace holds, changed by the same commands the page sends. */
 let stored: AutomationAgent[] = [];
+let automations: Automation[] = [];
+let runs: ListedRun[] = [];
 beforeEach(() => {
   stored = [];
+  automations = [];
+  runs = [];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
-    const { id, settings } = (args ?? {}) as {
+    const { id, settings, example } = (args ?? {}) as {
       id?: string;
       settings?: AutomationAgent;
+      example?: string;
+    };
+    const add = (created: Automation) => {
+      automations = [created, ...automations];
+      return created;
     };
     switch (command) {
       case "automation_list":
-        return [];
+        return automations;
+      case "automation_run_list_all":
+        return runs;
+      case "automation_run_get":
+        return {
+          ...runs.find((run) => run.id === id),
+          definition: { name: "", trigger: null, conditions: [], steps: [] },
+          started_at: null,
+          ended_at: null,
+          steps: [],
+        };
+      case "automation_create_example":
+        return add({
+          ...TRIAGE,
+          id: "example-1",
+          name: `Example ${example}`,
+          steps: [
+            {
+              id: "step-1",
+              kind: "run_agent",
+              agent_id: null,
+              execution_folder: null,
+            },
+          ],
+          problems: [
+            { step_id: "step-1", message: "Needs an agent and a folder" },
+          ],
+        });
+      case "automation_duplicate":
+        return add({ ...TRIAGE, id: "copy-1", name: `${TRIAGE.name} copy` });
       case "automation_agent_list":
         return stored;
       case "automation_agent_create": {
@@ -70,6 +117,37 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+const TRIAGE: Automation = {
+  id: "automation-1",
+  name: "Triage new tickets",
+  trigger: { kind: "tag_added", tag: "ready-for-triage" },
+  conditions: [],
+  steps: [],
+  enabled: false,
+  arrived_off: false,
+  problems: [],
+};
+const listed = (
+  id: string,
+  status: ListedRun["status"],
+  title: string,
+): ListedRun => ({
+  id,
+  automation_id: TRIAGE.id,
+  automation_name: TRIAGE.name,
+  status,
+  reason: null,
+  needs_you: status === "needs_attention",
+  ticket: { id, reference: `T-${id}`, title },
+  created_at: new Date().toISOString(),
+});
+const show = () =>
+  render(
+    <ChatClientContext value={createMockChatClient()}>
+      <AutomationsView />
+    </ChatClientContext>,
+  );
 
 const open = async (
   harnesses = createMockChatClient(),
@@ -256,4 +334,127 @@ test("with Codex chosen, the switches it cannot enforce are fixed on and the tur
   // What Codex showed as fixed was never saved over the agent's own choices.
   await waitFor(() => expect(stored[0]?.harness).toBe("claude-code"));
   expect(stored[0]?.tools).toEqual({ ...DEFAULTS.tools, read_files: false });
+});
+
+test("the Runs view lists every run under Now, Needs you and Earlier, naming its Automation, and opens the one chosen", async () => {
+  automations = [TRIAGE];
+  runs = [
+    listed("3", "running", "Show the wait time"),
+    listed("2", "needs_attention", "Login flickers"),
+    listed("1", "completed", "Rate-limit logins"),
+  ];
+  show();
+
+  // The tab says a run needs the person before it is opened.
+  const tab = await screen.findByRole("radio", { name: /^Runs/ });
+  await waitFor(() => expect(tab.textContent).toContain("needs you"));
+  fireEvent.click(tab);
+
+  const group = (name: string) =>
+    screen.getByRole("list", { name: `Runs, ${name}` }).textContent;
+  expect(group("Now")).toContain("Show the wait time");
+  expect(group("Needs you")).toContain("Login flickers");
+  expect(group("Needs you")).toContain("Triage new tickets");
+  expect(group("Earlier")).toContain("Rate-limit logins");
+
+  fireEvent.click(screen.getByRole("button", { name: /Login flickers/ }));
+
+  const heading = await screen.findByRole("heading", { name: /Run on T-2/ });
+  expect(heading.textContent).toContain("Triage new tickets");
+});
+
+test("a run the person dismissed is listed under Earlier and leaves the Runs tab unmarked", async () => {
+  runs = [
+    {
+      ...listed("1", "needs_attention", "Rate-limit logins"),
+      needs_you: false,
+    },
+  ];
+  show();
+  fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
+
+  await screen.findByRole("list", { name: "Runs, Earlier" });
+  expect(
+    screen.getByRole("radio", { name: /^Runs/ }).textContent,
+  ).not.toContain("needs you");
+});
+
+test("the empty page offers New Automation and three examples, and choosing one opens it with what it still needs", async () => {
+  show();
+
+  const examples = await screen.findByRole("group", {
+    name: "Start from an example",
+  });
+  expect(
+    within(examples)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual([
+    expect.stringContaining("Triage tagged tickets"),
+    expect.stringContaining("Verify what is ready for testing"),
+    expect.stringContaining("Weekly summary"),
+  ]);
+  expect(
+    screen.getAllByRole("button", { name: "New Automation" }).length,
+  ).toBeGreaterThan(1);
+
+  fireEvent.click(
+    within(examples).getByRole("button", { name: /Weekly summary/ }),
+  );
+
+  await screen.findByRole("heading", { name: "Example weekly_summary" });
+  expect(await screen.findByText("Needs an agent and a folder")).toBeTruthy();
+  expect(
+    (
+      screen.getByRole("switch", {
+        name: "On for this desktop",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+});
+
+test("Duplicate in an Automation’s menu makes a copy and opens it", async () => {
+  automations = [TRIAGE];
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Triage new tickets/ }),
+  );
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Automation actions" }),
+    { key: "Enter" },
+  );
+
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+
+  await screen.findByRole("heading", { name: "Triage new tickets copy" });
+  expect(
+    within(screen.getByRole("list", { name: "Automations" })).getAllByRole(
+      "button",
+    ),
+  ).toHaveLength(2);
+});
+
+test("a run chosen in the Runs view goes through the page's run navigation and opens beside the list", async () => {
+  runs = [listed("2", "needs_attention", "Login flickers")];
+  const navigate = vi.fn();
+  const page = (openRun: { id: string; key: number } | null) => (
+    <RunNavigation value={navigate}>
+      <ChatClientContext value={createMockChatClient()}>
+        <AutomationsView openRun={openRun} />
+      </ChatClientContext>
+    </RunNavigation>
+  );
+  const { rerender } = render(page(null));
+  fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Login flickers/ }),
+  );
+  expect(navigate).toHaveBeenCalledWith("2");
+  rerender(page({ id: "2", key: 1 }));
+
+  await screen.findByRole("heading", { name: /Run on T-2/ });
+  expect(
+    screen.getByRole("radio", { name: /^Runs/ }).getAttribute("aria-checked"),
+  ).toBe("true");
 });

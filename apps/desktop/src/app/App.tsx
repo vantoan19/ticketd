@@ -51,6 +51,7 @@ import {
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { AutomationsView } from "@/features/automations/AutomationsView";
 import { RunNavigation } from "@/features/automations/navigation";
+import { useAutomationNotifications } from "@/features/automations/useAutomationNotifications";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
 
@@ -262,24 +263,28 @@ function AppContent() {
     }
   };
   const bulk = useBulkEdit(refresh);
-  useReminderNotifications((reference) => {
+  const openNotifiedTicket = (reference: string) => {
     setInboxTarget(null);
     setSelected(reference);
     setView("tickets");
-  });
+  };
+  useReminderNotifications(openNotifiedTicket);
   const isMobile = useIsMobile();
-  /** The run a ticket or the Inbox asked to see, opened by the Automations page. */
+  /**
+   * The run a ticket, the Inbox or a notification asked to see, opened by the
+   * Automations page.
+   */
   const [runTarget, setRunTarget] = useState<{
     id: string;
     key: number;
   } | null>(null);
+  const openRun = (id: string) => {
+    setRunTarget({ id, key: Date.now() });
+    setView("automations");
+  };
+  useAutomationNotifications(chat.enabled, openNotifiedTicket, openRun);
   return (
-    <RunNavigation
-      value={(id) => {
-        setRunTarget({ id, key: Date.now() });
-        setView("automations");
-      }}
-    >
+    <RunNavigation value={openRun}>
       <ContextGraphNavigation.Provider value={(id) => navigate({ graph: id })}>
         <TicketNavigation.Provider
           value={(reference) => {

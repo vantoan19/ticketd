@@ -11,6 +11,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import {
+  Bell,
   Bot,
   CircleDot,
   CirclePlus,
@@ -18,6 +19,7 @@ import {
   MessageSquare,
   Pencil,
   Plus,
+  SquarePen,
   Tag,
 } from "lucide-react";
 import "@xyflow/react/dist/style.css";
@@ -87,15 +89,22 @@ const TICKET_TRIGGERS = [
 /** The trigger kinds this page can set up. */
 export type TriggerChoice = (typeof TICKET_TRIGGERS)[number]["kind"];
 
+/** The step kinds this page can add and set up. */
+export type StepChoice = "run_agent" | "change_ticket" | "notify";
+
 type Actions = {
   onSelect: (id: string) => void;
   onChooseTrigger: (kind: TriggerChoice) => void;
-  /** Adds a Run agent step at `index` of the steps. */
-  onAddStep: (index: number) => void;
+  /** Adds a step of `kind` at `index` of the steps. */
+  onAddStep: (index: number, kind: StepChoice) => void;
   onDeleteStep: (id: string) => void;
 };
-const ActionsContext = createContext<Actions | null>(null);
-function useActions(): Actions {
+type CanvasContext = Actions & {
+  /** The Automation starts without a ticket, so no step can change one. */
+  ticketless: boolean;
+};
+const ActionsContext = createContext<CanvasContext | null>(null);
+function useActions(): CanvasContext {
   const actions = use(ActionsContext);
   if (!actions) throw new Error("a flow node was drawn outside its canvas");
   return actions;
@@ -218,7 +227,7 @@ type AddData = { index: number; after: string; end: boolean };
 
 /** A place to add a step: on the line between two cards, or ending the path. */
 function AddNode({ data }: NodeProps<Node<AddData>>) {
-  const { onAddStep } = useActions();
+  const { onAddStep, ticketless } = useActions();
   return (
     <>
       {data.end && (
@@ -239,12 +248,37 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
           <DropdownMenuContent className="w-70" aria-label="Add a step">
             <DropdownMenuItem
               className="items-start whitespace-normal"
-              onSelect={() => onAddStep(data.index)}
+              onSelect={() => onAddStep(data.index, "run_agent")}
             >
               <Bot aria-hidden />
               <span className="flow-menu-item-text">
                 Run agent
                 <small>Start a Chat with one of your agents</small>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="items-start whitespace-normal"
+              disabled={ticketless}
+              onSelect={() => onAddStep(data.index, "change_ticket")}
+            >
+              <SquarePen aria-hidden />
+              <span className="flow-menu-item-text">
+                Change ticket
+                <small>
+                  {ticketless
+                    ? "Needs a ticket, and this Automation does not start from one"
+                    : "Add or remove a tag, set the status, or post an update"}
+                </small>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="items-start whitespace-normal"
+              onSelect={() => onAddStep(data.index, "notify")}
+            >
+              <Bell aria-hidden />
+              <span className="flow-menu-item-text">
+                Notify me
+                <small>Show a desktop notification</small>
               </span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -342,9 +376,11 @@ export function FlowCanvas({
     return { nodes, edges };
   }, [trigger, only, steps, agents, problems, selected]);
   const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
+  const ticketless =
+    trigger?.kind === "schedule" || trigger?.kind === "by_hand";
   const context = useMemo(
-    () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep }),
-    [onSelect, onChooseTrigger, onAddStep, onDeleteStep],
+    () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless }),
+    [onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless],
   );
   return (
     <div className="flow-canvas">

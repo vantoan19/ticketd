@@ -90,6 +90,66 @@
   justify-content: center;
   padding: 24px;
 }
+/* The empty page: New Automation, then the examples to start from. */
+.auto-start {
+  flex-direction: column;
+  gap: 32px;
+  overflow-y: auto;
+}
+.auto-start > [data-slot="empty-state"] {
+  flex: none;
+}
+.auto-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+}
+.auto-starters-label {
+  margin: 0 0 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-align: center;
+}
+.auto-starter {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  column-gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  text-align: left;
+}
+.auto-starter:hover {
+  background: var(--recessed);
+}
+.auto-starter:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.auto-starter > svg {
+  grid-row: 1 / span 2;
+  color: var(--muted-foreground);
+}
+.auto-starter > svg:last-child {
+  grid-column: 3;
+}
+.auto-starter-title {
+  grid-column: 2;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.auto-starter-sub {
+  grid-column: 2;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
 
 /* --- The detail header: what is left to finish, and the on switch. --- */
 .auto-left,
@@ -457,6 +517,58 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
+}
+
+/* Text that can hold ticket fields: an input (`ui-input`) whose fields are chips. */
+.flow-text {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.flow-text-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+.flow-field {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 1px;
+  padding: 0 6px;
+  border-radius: var(--radius-segment);
+  background: var(--accent);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: 18px;
+  white-space: nowrap;
+  user-select: all;
+}
+
+/* The notification as the desktop will show it. */
+.notify-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-panel);
+  background: var(--recessed);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  overflow-wrap: anywhere;
+}
+.notify-preview strong {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.notify-preview-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
 }
 
 /* A ticket's runs in its side panel: the Automation, then how the run ended. */
