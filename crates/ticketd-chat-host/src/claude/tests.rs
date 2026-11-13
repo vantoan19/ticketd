@@ -1104,3 +1104,22 @@ fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
         Some("Set in Claude Code's settings")
     );
 }
+
+/// LIVE2-11: a question names the AskUserQuestion tool use it was asked from, so
+/// that call's running row gives way to the question's card.
+#[test]
+fn a_question_names_the_tool_use_it_was_asked_from() {
+    use super::session::Session;
+    let mut session = Session::default();
+    let asked = json!({
+        "request_id": "q1",
+        "tool_use_id": "toolu_ask",
+        "questions": [{"question": "Which color?", "options": [{"label": "Blue"}]}],
+    });
+    let (events, _) = session.event("question_request", &asked).expect("modeled");
+    let item = events.iter().find_map(|event| match event {
+        EventKind::InteractionRequested(request) => Some(request.item.clone()),
+        _ => None,
+    });
+    assert_eq!(item, Some(Some(crate::NativeItemId::new("toolu_ask"))));
+}

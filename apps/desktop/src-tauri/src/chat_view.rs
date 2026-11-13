@@ -692,12 +692,12 @@ impl Tracker {
         &self.decided
     }
 
-    /// Whether an approval asked about this tool call still waits for the person.
+    /// Whether an approval or a question asked from this tool call still waits for
+    /// the person: the dock's card says it, so the call has no running row.
     pub fn awaits(&self, tool_id: &str) -> bool {
-        self.pending.values().any(|request| {
-            request.kind == ChatInteractionKind::Approval
-                && request.tool_id.as_deref() == Some(tool_id)
-        })
+        self.pending
+            .values()
+            .any(|request| request.tool_id.as_deref() == Some(tool_id))
     }
 
     /// A tool call of the latest turn, by its id.

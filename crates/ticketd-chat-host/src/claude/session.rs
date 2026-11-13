@@ -490,7 +490,8 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
-            item: None,
+            // The AskUserQuestion tool use it was asked from: its row waits with it.
+            item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::Question { questions },
             detail: None,
         }));
