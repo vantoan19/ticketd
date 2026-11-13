@@ -71,10 +71,12 @@ function RunPanel({
   const record = reached(selected);
   const state = stepStates(run).get(selected);
   const label = state && STEP_STATE_LABELS[state];
+  const failurePath = step && stepPaths(step).on_failure;
+  // A failure path with no steps on it leaves only the run's end to tell by.
   const handled =
     record?.status === "failed" &&
-    step &&
-    reached(stepPaths(step).on_failure?.[0]?.id);
+    failurePath &&
+    (failurePath[0] ? reached(failurePath[0].id) : run.status === "completed");
   return (
     <StepPanel
       key={selected}
