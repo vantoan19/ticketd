@@ -1335,6 +1335,12 @@ human questions. Display observed activity as Idle, Working, Waiting for you,
 Interrupted or Failed, with a specific explanation when needed. Saved history is
 not evidence that execution is still alive or that a requested task succeeded.
 
+Tool activity is told as what it did (read, search, edit, create, delete, run,
+web or other), the same for every harness. A shell command is classified only
+when its literal text makes the effect clear; anything else is shown as the
+command that ran. A step the person declined, one the turn ended before, and one
+whose outcome was not observed are each told as such, never as done or failed.
+
 Sending while work is active steers it when the effective harness capability
 supports the intended behavior; otherwise the input is visibly queued. Steering
 capabilities must describe effects such as interrupting tools. Provide explicit

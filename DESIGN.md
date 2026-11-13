@@ -637,6 +637,7 @@ A **step row** is one 28px line, `[icon] Verb target · suffix`:
 - **Icon:** one neutral 16px Lucide icon per kind: read `eye`, search `search`, edit `pencil`, create `square-plus`, delete `trash-2`, run `terminal`, web `globe`, other `wrench`. A running step shows the 12px spinner in its place.
 - **Words:** the verb in `muted-foreground`, the target in mono `foreground`. Only success takes the past tense: "Ran `npm test`", but "Run `npm test` · Failed".
 - **Suffix:** at most one: a clock ("12s"), a diffstat ("+12 −4", 12px mono, muted), "No matches", or an outcome word at weight 500: Failed, Declined, Not finished, Not confirmed. Rows are never grayed, and nothing is parsed from output.
+- **Targets:** one or two are named ("`a` and `b`"), three or more counted ("Read 6 files"). Paths are relative to the Chat's folder, with `~` outside it; a search reads "for `pattern` in `scope`", a web search "for “query”", a page `host/path`, and a command its first line without shell wrappers.
 - **Merging:** consecutive steps of one kind and outcome merge ("Read 6 files"); commands never merge.
 - **Detail:** a row opens one thing; a command opens one `code-block` box with its output and Copy, then a muted "Exit 1 · in {folder}".
 
