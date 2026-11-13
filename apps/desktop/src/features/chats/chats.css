@@ -461,7 +461,8 @@
   line-height: 22px;
 }
 /* A reply's headings are a step above its text, never display-sized: the
-   Chat's title stays the largest text on screen (LIVE2-10). */
+   Chat's title stays the largest text on screen (LIVE2-10). h1 is 16px and
+   the rest 14px/600, as the type scale has no 15px. */
 .chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6) {
   color: var(--foreground);
   font-size: var(--text-ui);
@@ -472,10 +473,6 @@
 .chat-ai .markdown-document h1 {
   font-size: 16px;
   line-height: 24px;
-}
-.chat-ai .markdown-document h2 {
-  font-size: 15px;
-  line-height: 22px;
 }
 /* A single line break in a reply is a new line, as in other chat apps. A hard
    break already ends in a newline, so its <br> is not drawn twice. */
