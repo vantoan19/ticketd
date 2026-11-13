@@ -108,6 +108,32 @@ pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Schema 72: a request keeps when it was asked and resolved, so a turn's time can
+/// leave out the time it waited on the person; a notice keeps whether the harness
+/// said it, so harness warnings fold with their turn while ticketd's own stay.
+pub(crate) fn migrate_request_times(connection: &Connection) -> Result<(), Error> {
+    let has = |table: &str, column: &str| -> Result<bool, Error> {
+        Ok(connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            params![table, column],
+            |row| row.get(0),
+        )?)
+    };
+    if !has("chat_interactions", "asked_at")? {
+        connection.execute_batch(
+            "ALTER TABLE chat_interactions ADD COLUMN asked_at TEXT;
+             ALTER TABLE chat_interactions ADD COLUMN resolved_at TEXT;",
+        )?;
+    }
+    if !has("chat_notices", "from_harness")? {
+        connection.execute_batch(
+            "ALTER TABLE chat_notices ADD COLUMN from_harness INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 72;")?;
+    Ok(())
+}
+
 /// Schema 71: Mark as unread is kept apart from an outcome the person has not seen,
 /// so a Chat they marked shows the blue dot on the words it had and never reads as
 /// a new Failed or Done that would notify.
@@ -507,6 +533,12 @@ pub struct ChatInteraction {
     pub response: Option<String>,
     /// For an approval, the tool call it was asked for, when the harness said.
     pub tool_id: Option<String>,
+    /// When it was asked and when it was answered or expired. `None` for requests
+    /// recorded before ticketd kept them.
+    #[serde(default)]
+    pub asked_at: Option<String>,
+    #[serde(default)]
+    pub resolved_at: Option<String>,
 }
 
 /// Changes listed for one turn at most; a turn that made more shows the first ones.
@@ -537,6 +569,9 @@ pub struct ChatNotice {
     pub position: i64,
     pub text: String,
     pub created_at: String,
+    /// Said by the harness (a warning, a retry), not by ticketd.
+    #[serde(default)]
+    pub from_harness: bool,
 }
 
 /// One entry of a Chat's history, ordered by `position`.
@@ -629,6 +664,9 @@ pub enum ChatObservation {
     Notice {
         notice_id: String,
         text: String,
+        /// Said by the harness rather than by ticketd.
+        #[serde(default)]
+        from_harness: bool,
     },
 }
 
@@ -896,7 +934,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Tool),
         "interaction" => connection
             .query_row(
-                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id FROM chat_interactions WHERE id = ?1",
+                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id, asked_at, resolved_at FROM chat_interactions WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatInteraction {
@@ -910,6 +948,8 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         response: row.get(7)?,
                         reason: row.get(8)?,
                         tool_id: row.get(9)?,
+                        asked_at: row.get(10)?,
+                        resolved_at: row.get(11)?,
                     })
                 },
             )
@@ -917,7 +957,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Interaction),
         "notice" => connection
             .query_row(
-                "SELECT id, position, text, created_at FROM chat_notices WHERE id = ?1",
+                "SELECT id, position, text, created_at, from_harness FROM chat_notices WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatNotice {
@@ -925,6 +965,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         position: row.get(1)?,
                         text: row.get(2)?,
                         created_at: row.get(3)?,
+                        from_harness: row.get(4)?,
                     })
                 },
             )
@@ -1113,7 +1154,9 @@ fn expire_interactions(
         .collect::<Result<Vec<_>, _>>()?;
     for id in pending {
         connection.execute(
-            "UPDATE chat_interactions SET state = 'expired' WHERE id = ?1",
+            &format!(
+                "UPDATE chat_interactions SET state = 'expired', resolved_at = {NOW} WHERE id = ?1"
+            ),
             [&id],
         )?;
         log(connection, chat_id, "interaction", &id)?;
@@ -1307,7 +1350,7 @@ fn observe(
             let reason: Option<String> =
                 reason.map(|reason| reason.chars().take(CHAT_NOTICE_LIMIT).collect());
             connection.execute(
-                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, tool_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9)",
+                &format!("INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, tool_id, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, {NOW})"),
                 params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason, tool_id],
             )?;
             Ok(())
@@ -1342,21 +1385,25 @@ fn observe(
                 )));
             }
             connection.execute(
-                "UPDATE chat_interactions SET state = ?2, response = ?3 WHERE id = ?1",
+                &format!("UPDATE chat_interactions SET state = ?2, response = ?3, resolved_at = {NOW} WHERE id = ?1"),
                 params![interaction_id, name(state)?, response],
             )?;
             log(connection, chat_id, "interaction", &interaction_id)?;
             Ok(())
         }
-        ChatObservation::Notice { notice_id, text } => {
+        ChatObservation::Notice {
+            notice_id,
+            text,
+            from_harness,
+        } => {
             if owned(connection, "chat_notices", chat_id, &notice_id)? {
                 return Ok(());
             }
             let text: String = text.chars().take(CHAT_NOTICE_LIMIT).collect();
             let position = log(connection, chat_id, "notice", &notice_id)?;
             connection.execute(
-                "INSERT INTO chat_notices (id, chat_id, position, text) VALUES (?1, ?2, ?3, ?4)",
-                params![notice_id, chat_id, position, text],
+                "INSERT INTO chat_notices (id, chat_id, position, text, from_harness) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![notice_id, chat_id, position, text, from_harness],
             )?;
             Ok(())
         }

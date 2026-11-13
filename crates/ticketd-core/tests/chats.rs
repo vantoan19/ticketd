@@ -327,6 +327,8 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
         panic!("expected the approval");
     };
     assert_eq!(asked.tool_id.as_deref(), Some("tool-1"));
+    // It keeps when it was asked and answered, so the turn's time can leave the wait out.
+    assert!(asked.asked_at.is_some() && asked.resolved_at.is_some());
     assert!(tool.output_truncated);
     // A running step's clock counts from when the host recorded the call.
     assert!(tool.started_at.is_some());
@@ -1106,6 +1108,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
                 ChatObservation::Notice {
                     notice_id: "n1".into(),
                     text: "x".repeat(CHAT_NOTICE_LIMIT + 10),
+                    from_harness: false,
                 },
                 ChatObservation::TurnEnded {
                     turn_id: "t1".into(),

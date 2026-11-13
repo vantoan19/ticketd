@@ -2077,17 +2077,22 @@ impl Supervisor {
             .as_mut()
             .is_none_or(|runtime| runtime.said.insert(text.clone()));
         if first {
-            self.notice(text);
+            self.record_notice(text, true);
         }
     }
 
     /// Keeps something worth telling the person that belongs to no other record. It is
     /// stored, so it is there for a view that attaches later.
     fn notice(&mut self, text: String) {
+        self.record_notice(text, false);
+    }
+
+    fn record_notice(&mut self, text: String, from_harness: bool) {
         let chat = self.chat_id.clone();
         let notice = ChatObservation::Notice {
             notice_id: Uuid::new_v4().to_string(),
             text,
+            from_harness,
         };
         // A storage failure is reported by `write` itself.
         let _ = self.write(|core| core.record_chat_observations(&chat, vec![notice]));

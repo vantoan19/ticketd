@@ -19,6 +19,7 @@ use ticketd_core::{
 };
 
 use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
+use crate::chat_ticketd::{self, Call};
 use crate::folder_probe::Branch;
 use ticketd_chat_host::step_kind::{self, Kind, Variant};
 
@@ -183,6 +184,12 @@ pub struct Step {
     /// What the person decided when the harness asked to take this step ("You declined
     /// this"): the approval folds into the step it was asked for.
     pub decision: Option<String>,
+    /// A command that only calls ticketd, as sentences ("Set T-MP4 to In progress").
+    /// `command` keeps exactly what runs.
+    pub ticketd: Option<Vec<Call>>,
+    /// The harness waits for the person to approve this step: the request card says it,
+    /// so the step has no row of its own until it is decided.
+    pub awaiting: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -258,6 +265,13 @@ pub enum Item {
         /// An answered approval: its decision is told on the step it was asked for, so
         /// it has no row of its own. Receipts are kept for questions and expiries.
         folded: bool,
+        /// When it was answered or expired; `at` is when it was asked. Absent from
+        /// requests recorded before ticketd kept them.
+        resolved_at: Option<String>,
+        /// Exactly what would run, when `subject` shows it shortened or as sentences.
+        command: Option<String>,
+        /// A command that only calls ticketd, as sentences after the title.
+        ticketd: Option<Vec<Call>>,
     },
     Marker {
         id: String,
@@ -592,11 +606,19 @@ impl Tracker {
                 self.last_response = Some(message.text.clone());
             }
             ChatItem::Interaction(interaction) => {
+                let was = self.pending.contains_key(&interaction.id);
                 if interaction.state == ChatInteractionState::Pending {
                     self.pending
                         .insert(interaction.id.clone(), interaction.clone());
                 } else {
                     self.pending.remove(&interaction.id);
+                }
+                // The step it asks about reads differently while it waits.
+                let waits = interaction.state == ChatInteractionState::Pending;
+                if let Some(tool_id) = &interaction.tool_id
+                    && was != waits
+                {
+                    self.refold.push(tool_id.clone());
                 }
                 if let (Some(tool_id), Some(decision)) =
                     (&interaction.tool_id, approval_outcome(interaction))
@@ -659,6 +681,14 @@ impl Tracker {
     /// What the person decided about the approval asked for each tool call.
     pub fn decided(&self) -> &Decided {
         &self.decided
+    }
+
+    /// Whether an approval asked about this tool call still waits for the person.
+    pub fn awaits(&self, tool_id: &str) -> bool {
+        self.pending.values().any(|request| {
+            request.kind == ChatInteractionKind::Approval
+                && request.tool_id.as_deref() == Some(tool_id)
+        })
     }
 
     /// A tool call of the latest turn, by its id.
@@ -732,6 +762,17 @@ fn approval_outcome(interaction: &ChatInteraction) -> Option<String> {
 /// what follows it inline (the command, or the files).
 fn asked_to(step: Option<&Step>) -> Option<(&'static str, &'static str, String)> {
     let step = step?;
+    if step.ticketd.is_some() {
+        // The view says the sentences after "wants to"; the subject keeps the command.
+        return Some(("wants to", "asked to", step.target.clone()));
+    }
+    if step.variant == Some("plan") {
+        return Some((
+            "wants to write its plan",
+            "asked to write its plan",
+            String::new(),
+        ));
+    }
     let targets = || {
         step.targets
             .iter()
@@ -770,7 +811,13 @@ fn request(
     };
     let pending = state == "pending";
     let prompt = Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty());
+    let plan = step.is_some_and(|step| step.variant == Some("plan"));
     let (title, subject) = match (approval, asked_to(step.filter(|_| approval))) {
+        // Its plan's path is the harness's own; the title says what it is.
+        (true, Some((wants, asked, _))) if plan => (
+            format!("{harness} {}", if pending { wants } else { asked }),
+            None,
+        ),
         (true, Some((wants, asked, what))) => (
             format!("{harness} {}", if pending { wants } else { asked }),
             Some(what).filter(|what| !what.is_empty()).or(prompt),
@@ -826,11 +873,9 @@ fn request(
     });
     Item::Request {
         id: interaction.id.clone(),
-        at: String::new(),
         turn_id: Some(interaction.turn_id.clone()),
         request: if approval { "approval" } else { "question" },
         title,
-        subject,
         reason: interaction
             .reason
             .clone()
@@ -841,6 +886,16 @@ fn request(
         outcome,
         answer: response.filter(|_| !approval).map(str::to_owned),
         folded: approval && state == "answered",
+        at: interaction.asked_at.clone().unwrap_or_default(),
+        resolved_at: interaction.resolved_at.clone(),
+        command: step
+            .filter(|_| approval)
+            .and_then(|step| step.command.clone())
+            .filter(|command| Some(command) != subject.as_ref()),
+        ticketd: step
+            .filter(|_| approval)
+            .and_then(|step| step.ticketd.clone()),
+        subject,
     }
 }
 
@@ -922,6 +977,8 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         added_lines: None,
         removed_lines: None,
         decision: None,
+        ticketd: None,
+        awaiting: false,
     };
     if tool.name == CONTEXT_RECORD_NAME {
         return vec![Step {
@@ -991,6 +1048,26 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
             .output
             .as_deref()
             .is_none_or(|output| output.trim().is_empty());
+        if let Some(calls) = step_kind::ticketd_calls(command) {
+            // Shown without ticketd's path or the variable naming it; what runs is kept.
+            let shown = calls
+                .iter()
+                .map(|args| step_kind::ticketd_command(args))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Step {
+                kind: "run",
+                target: shown,
+                command: Some(step_kind::unwrapped(command)),
+                ticketd: chat_ticketd::sentences(&calls),
+                exit_code,
+                folder: ran_in,
+                timed_out: state == "failed" && exit_code == Some(124),
+                duration_ms: number("durationMs"),
+                state,
+                ..base.clone()
+            };
+        }
         Step {
             kind: shell.kind.name(),
             variant: shell.variant.map(Variant::name),
@@ -1088,12 +1165,19 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
                     .and_then(|lines| lines[key].as_u64())
                     .and_then(|count| u32::try_from(count).ok())
             };
+            let plan = harness == "Claude Code" && file.is_some_and(|file| plan_file(file, folder));
             Step {
                 added_lines: lines("added"),
                 removed_lines: lines("removed"),
+                // Claude Code's plan lives in its own profile: "Wrote its plan".
+                variant: plan.then_some("plan"),
                 ..kind(
                     if created { "create" } else { "edit" },
-                    file.map(path).into_iter().collect(),
+                    if plan {
+                        Vec::new()
+                    } else {
+                        file.map(path).into_iter().collect()
+                    },
                 )
             }
         }
@@ -1105,6 +1189,24 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         (None, _) => base.clone(),
     };
     vec![step]
+}
+
+/// A plan Claude Code keeps in its own profile (`…/.claude/plans/name.md`), outside
+/// the Chat's folder: a step names it as "its plan", not by that path.
+fn plan_file(path: &str, folder: &str) -> bool {
+    let path = std::path::Path::new(path);
+    let outside = folder.is_empty() || !path.starts_with(folder);
+    let in_plans = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .is_some_and(|name| name == "plans");
+    let claude = path.components().any(|part| {
+        part.as_os_str()
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .contains("claude")
+    });
+    outside && in_plans && claude && path.extension().is_some_and(|ext| ext == "md")
 }
 
 /// A Codex file change: one row per kind of change, in the order each kind first
@@ -1267,6 +1369,7 @@ pub fn item(
                 .into_iter()
                 .map(|step| Step {
                     decision: tracker.decided().get(&tool.id).cloned(),
+                    awaiting: tracker.awaits(&tool.id),
                     ..step
                 })
                 .collect(),
@@ -1287,7 +1390,12 @@ pub fn item(
         ChatItem::Notice(notice) => Item::Marker {
             id: notice.id.clone(),
             at: notice.created_at.clone(),
-            reason: "note",
+            // What the harness said folds with its turn; ticketd's own notes stay.
+            reason: if notice.from_harness {
+                "warning"
+            } else {
+                "note"
+            },
             message: Some(notice.text.clone()),
             turn_id: None,
         },
@@ -2077,6 +2185,80 @@ mod tests {
         );
     }
 
+    /// LIVE-4: a ticketd call reads as a sentence; the exact command stays behind it,
+    /// and so does the approval asked for it. Claude Code's plan file is "its plan".
+    #[test]
+    fn ticketd_calls_and_plan_files_read_as_what_they_do() {
+        let bin = "/Users/me/ticketd/target/debug/ticketd";
+        let script = format!("T={bin}\n$T change T-MP4 --status \"In progress\"");
+        let input = json!({ "command": script }).to_string();
+        let step = one(&tool("Bash", &input, ChatToolState::Completed, None));
+        assert_eq!(step.kind, "run");
+        assert_eq!(
+            step.target,
+            r#"ticketd change T-MP4 --status "In progress""#
+        );
+        assert_eq!(step.command.as_deref(), Some(script.as_str()));
+        let calls = step.ticketd.clone().expect("told as a sentence");
+        assert_eq!(calls[0].verb, "set");
+
+        // An unknown call is shown as its command, without the path.
+        let input = json!({ "command": format!("{bin} skills install --harness codex") });
+        let other = one(&tool(
+            "Bash",
+            &input.to_string(),
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!(other.ticketd, None);
+        assert_eq!(other.target, "ticketd skills install --harness codex");
+
+        let interaction = ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: script.clone(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: Some("2026-11-13T10:00:00Z".to_owned()),
+            resolved_at: Some("2026-11-13T10:02:00Z".to_owned()),
+        };
+        let Item::Request {
+            title,
+            subject,
+            command,
+            ticketd,
+            at,
+            resolved_at,
+            ..
+        } = request(&interaction, &ChatLive::idle(), "Claude Code", Some(&step))
+        else {
+            panic!("a request");
+        };
+        assert_eq!(title, "Claude Code asked to");
+        assert_eq!(subject.as_deref(), Some(step.target.as_str()));
+        assert_eq!(command.as_deref(), Some(script.as_str()));
+        assert!(ticketd.is_some());
+        assert_eq!(at, "2026-11-13T10:00:00Z");
+        assert_eq!(resolved_at.as_deref(), Some("2026-11-13T10:02:00Z"));
+
+        let plan = json!({ "file_path": "/Users/me/.claude/plans/quiet-otter.md" });
+        let mut claude = chat(None);
+        claude.harness = "claude-code".to_owned();
+        let wrote = steps(
+            &tool("Write", &plan.to_string(), ChatToolState::Completed, None),
+            "Claude Code",
+            &claude,
+            Some("/Users/me"),
+        );
+        assert_eq!(wrote[0].variant, Some("plan"));
+        assert!(wrote[0].targets.is_empty());
+    }
+
     /// U4: the card shows what would run apart from why the harness asks.
     #[test]
     fn an_approval_shows_its_command_apart_from_its_reason() {
@@ -2091,6 +2273,8 @@ mod tests {
             state: ChatInteractionState::Answered,
             response: Some("deny".to_owned()),
             tool_id: None,
+            asked_at: None,
+            resolved_at: None,
         };
         let Item::Request {
             subject, reason, ..
@@ -2219,6 +2403,8 @@ mod tests {
             state: ChatInteractionState::Answered,
             response: Some("Fail open".to_owned()),
             tool_id: None,
+            asked_at: None,
+            resolved_at: None,
         };
         let Item::Request {
             answer, turn_id, ..

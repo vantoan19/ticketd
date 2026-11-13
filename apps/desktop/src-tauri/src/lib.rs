@@ -4,6 +4,7 @@ mod attachment_commands;
 mod attachment_media;
 mod chat_commands;
 mod chat_reports;
+mod chat_ticketd;
 mod chat_view;
 mod chats;
 mod cli_status;

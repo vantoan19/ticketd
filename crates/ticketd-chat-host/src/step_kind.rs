@@ -1084,9 +1084,183 @@ fn chain(effects: Vec<Effect>) -> (Kind, Option<Variant>, Vec<Target>) {
     )
 }
 
+// -- ticketd ------------------------------------------------------------------------
+
+/// The arguments of each ticketd CLI call a command makes, when that is all it does:
+/// ticketd named by its path, by `ticketd` on PATH, or by a variable a setup step set
+/// to it (`T=/…/ticketd; $T show T-1`). Leading `cd` and assignments are setup; a
+/// pipe into a program that only shows the output (`| head`) is allowed. Anything
+/// else — another command, a word that expands (`$(…)`), output written to a file —
+/// makes it `None`, so the command is shown as it is and nothing that runs is hidden.
+pub fn ticketd_calls(command: &str) -> Option<Vec<Vec<String>>> {
+    let script = unwrap(command, 2);
+    let tokens = lex(&script).ok()?;
+    let mut names: Vec<String> = Vec::new();
+    let mut calls = Vec::new();
+    for segment in segments(tokens) {
+        let (stage, viewers) = segment.stages.split_first()?;
+        if !viewers.iter().all(only_shows) {
+            return None;
+        }
+        if !stage
+            .redirects
+            .iter()
+            .all(|(op, target)| quiet(op, target.as_ref()))
+        {
+            return None;
+        }
+        let mut words: &[Word] = &stage.words;
+        if words.first().is_some_and(|word| word.text == "export") {
+            words = &words[1..];
+        }
+        // Leading assignments: a variable set to ticketd names it from here on.
+        let mut prefixed = false;
+        while let Some((first, rest)) = words.split_first() {
+            let Some((name, value)) = assignment(&first.text) else {
+                break;
+            };
+            if !first.literal {
+                return None;
+            }
+            if program_name(value) == "ticketd" {
+                names.push(name.to_owned());
+            }
+            prefixed = true;
+            words = rest;
+        }
+        let Some((program, args)) = words.split_first() else {
+            continue;
+        };
+        if program.literal && program.text == "cd" && !prefixed {
+            if args.iter().all(|word| word.literal) {
+                continue;
+            }
+            return None;
+        }
+        let named = if program.literal {
+            program_name(&program.text) == "ticketd"
+        } else {
+            let variable = program.text.strip_prefix('$')?;
+            let variable = variable
+                .strip_prefix('{')
+                .and_then(|inner| inner.strip_suffix('}'))
+                .unwrap_or(variable);
+            names.iter().any(|name| name == variable)
+        };
+        if !named || !args.iter().all(|word| word.literal) {
+            return None;
+        }
+        calls.push(args.iter().map(|word| word.text.clone()).collect());
+    }
+    (!calls.is_empty()).then_some(calls)
+}
+
+/// `NAME=value`: the name and the value.
+fn assignment(text: &str) -> Option<(&str, &str)> {
+    let (name, value) = text.split_once('=')?;
+    let valid = !name.is_empty()
+        && !name.starts_with(|c: char| c.is_ascii_digit())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    valid.then_some((name, value))
+}
+
+/// A pipeline stage that only shows what it is given: `head`, `tail`, `jq`, `cat`.
+fn only_shows(stage: &Simple) -> bool {
+    let Some((program, args)) = stage.words.split_first() else {
+        return false;
+    };
+    stage.redirects.iter().all(|(op, target)| quiet(op, target.as_ref()))
+        && stage.words.iter().all(|word| word.literal)
+        && matches!(
+            program_name(&program.text).as_str(),
+            "head" | "tail" | "jq" | "cat" | "less" | "more"
+        )
+        // `jq` reads files named after its filter; only stdin is shown.
+        && positional(&program_name(&program.text), args).len() <= 1
+}
+
+/// A ticketd call as a person would type it: `ticketd show T-1`.
+pub fn ticketd_command(args: &[String]) -> String {
+    let mut out = String::from("ticketd");
+    for arg in args {
+        out.push(' ');
+        let plain = !arg.is_empty()
+            && arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c));
+        if plain {
+            out.push_str(arg);
+        } else {
+            out.push('"');
+            out.push_str(&arg.replace('\\', "\\\\").replace('"', "\\\""));
+            out.push('"');
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Kind, Shell, Variant, shell};
+    use super::{Kind, Shell, Variant, shell, ticketd_calls, ticketd_command};
+
+    fn calls(command: &str) -> Option<Vec<String>> {
+        ticketd_calls(command).map(|calls| calls.iter().map(|args| args.join(" ")).collect())
+    }
+
+    /// LIVE-4: ticketd reads as ticketd however it was named; anything more is not.
+    #[test]
+    fn ticketd_calls_are_found_however_ticketd_is_named() {
+        let path = "/Users/me/ticketd/target/debug/ticketd";
+        let one = |text: &str| Some(vec![text.to_owned()]);
+        assert_eq!(
+            calls(&format!("{path} project show f33f")),
+            one("project show f33f")
+        );
+        assert_eq!(
+            calls(&format!("T={path}\n$T skills get chat; \"$T\" show T-MP4")),
+            Some(vec!["skills get chat".to_owned(), "show T-MP4".to_owned()])
+        );
+        assert_eq!(
+            calls(&format!(
+                r#"export T="{path}" && ${{T}} change T-MP4 --status "In progress" --agent claude-code"#
+            )),
+            one("change T-MP4 --status In progress --agent claude-code")
+        );
+        assert_eq!(
+            calls("/bin/zsh -lc 'ticketd show T-1 2>&1 | head -40'"),
+            one("show T-1")
+        );
+        assert_eq!(
+            calls("$T show T-1"),
+            None,
+            "a variable never set to ticketd is not ticketd"
+        );
+        assert_eq!(
+            calls(&format!(
+                "T={path}; $T activity add T-1 --brief-file - <<'EOF'\nDone.\nEOF"
+            )),
+            one("activity add T-1 --brief-file -")
+        );
+        for other in [
+            format!("{path} show T-1 && rm -rf dist"),
+            format!(r#"{path} show "$(whoami)""#),
+            format!("{path} export > out.json"),
+            format!("{path} show T-1 | sh"),
+            "ticketd-desktop show".to_owned(),
+            "npm test".to_owned(),
+        ] {
+            assert_eq!(calls(&other), None, "{other}");
+        }
+        assert_eq!(
+            ticketd_command(&[
+                "change".into(),
+                "T-1".into(),
+                "--status".into(),
+                "In progress".into()
+            ]),
+            r#"ticketd change T-1 --status "In progress""#
+        );
+    }
 
     /// The row a command reads as: its kind, variant, targets (with scope) and folder.
     fn row(command: &str) -> (Kind, Option<Variant>, Vec<String>, Option<String>) {
