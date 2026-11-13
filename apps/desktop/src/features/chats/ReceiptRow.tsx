@@ -1,10 +1,5 @@
-import { Fragment, useContext, useId, useState } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  MessageSquareText,
-} from "lucide-react";
+import { Fragment, useContext } from "react";
+import { ChevronRight, FileText, MessageSquareText } from "lucide-react";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
@@ -32,7 +27,7 @@ function Sentence({ change }: { change: RecordChange }) {
         Created{" "}
         <button
           type="button"
-          className="chat-receipt-ref chat-receipt-name"
+          className="chat-records-ref chat-records-name"
           onClick={() => openDocument?.(change.document_id)}
         >
           {change.title}
@@ -42,7 +37,7 @@ function Sentence({ change }: { change: RecordChange }) {
   const reference = (
     <button
       type="button"
-      className="chat-receipt-ref"
+      className="chat-records-ref"
       onClick={() => openTicket?.(change.reference)}
     >
       {change.reference}
@@ -60,57 +55,41 @@ function Sentence({ change }: { change: RecordChange }) {
 /**
  * What the agent changed in ticketd during a turn, as one 28px row under the
  * response (after the files row): the first change's icon, then verb-first
- * sentences joined by ` · `, at most two, then `N more`, which opens the rest
- * as rows. Shown also when the turn failed or was stopped.
+ * sentences joined by ` · `, at most two, then `N more`, which opens the
+ * turn's fold, where every change is a step row. Never folded itself, and
+ * shown also when the turn failed or was stopped.
  */
-export function ReceiptRow({ changes }: { changes: RecordChange[] }) {
-  const [open, setOpen] = useState(false);
-  const foldId = useId();
+export function ReceiptRow({
+  changes,
+  onMore,
+}: {
+  changes: RecordChange[];
+  /** Opens the turn's fold. */
+  onMore: () => void;
+}) {
   const first = changes[0];
   if (!first) return null;
   const rest = changes.length - SHOWN;
   return (
-    <div className="chat-receipt-block">
-      <div className="chat-receipt">
-        <ChangeIcon change={first} />
-        <span className="chat-receipt-items">
-          {changes.slice(0, SHOWN).map((change, index) => (
-            <Fragment key={index}>
-              {index > 0 && " · "}
-              <Sentence change={change} />
-            </Fragment>
-          ))}
-        </span>
-        {rest > 0 && (
-          <button
-            type="button"
-            className="chat-receipt-ref chat-receipt-more"
-            aria-expanded={open}
-            aria-controls={foldId}
-            onClick={() => setOpen(!open)}
-          >
-            {rest} more
-            {open ? (
-              <ChevronDown size={14} aria-hidden />
-            ) : (
-              <ChevronRight size={14} aria-hidden />
-            )}
-          </button>
-        )}
-      </div>
-      {open && (
-        <ul id={foldId} className="chat-receipt-fold">
-          {changes.slice(SHOWN).map((change, index) => {
-            return (
-              <li key={index}>
-                <ChangeIcon change={change} />
-                <span>
-                  <Sentence change={change} />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+    <div className="chat-records">
+      <ChangeIcon change={first} />
+      <span className="chat-records-items">
+        {changes.slice(0, SHOWN).map((change, index) => (
+          <Fragment key={index}>
+            {index > 0 && " · "}
+            <Sentence change={change} />
+          </Fragment>
+        ))}
+      </span>
+      {rest > 0 && (
+        <button
+          type="button"
+          className="chat-records-ref chat-records-more"
+          onClick={onMore}
+        >
+          {rest} more
+          <ChevronRight size={14} aria-hidden />
+        </button>
       )}
     </div>
   );
