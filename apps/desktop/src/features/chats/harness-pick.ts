@@ -119,6 +119,79 @@ export function offeredPick(
   return { model, effort, permission };
 }
 
+/**
+ * What New Chat starts with: exactly what its picker shows. A pick left unset
+ * shows the harness's listed default, so that default is sent by id; leaving it
+ * unset let the harness's own configuration choose something else (LIVE-7:
+ * Codex listed GPT-6.1-Sol at Medium and its config ran GPT-6-Luna at Max). An
+ * effort or permission stays unset only where the picker shows none chosen.
+ */
+export function startPick(
+  options: HarnessOptions | null | undefined,
+  pick: Pick,
+): Pick {
+  const offered = offeredPick(options, pick);
+  const model = modelOf(options, offered);
+  const effort =
+    offered.effort ??
+    model?.efforts.find((item) => item.is_default)?.id ??
+    null;
+  const permission = options?.permission?.changeable
+    ? (offered.permission ??
+      options.permission.options.find((item) => item.is_default && item.allowed)
+        ?.id ??
+      null)
+    : null;
+  return { model: model?.id ?? null, effort, permission };
+}
+
+/** What each Chat made in New Chat this run started with, for its triggers. */
+const started = new Map<string, { options: HarnessOptions; pick: Pick }>();
+
+/** Keeps a new Chat's start so its triggers show it until the session reports. */
+export function rememberStart(
+  chatId: string,
+  options: HarnessOptions,
+  pick: Pick,
+) {
+  started.set(chatId, { options, pick });
+}
+
+/** What New Chat started the Chat with, while the app has been open since. */
+export const startOf = (chatId: string) => started.get(chatId);
+
+const FOLDERS_KEY = "ticketd.chat-folders";
+const RECENT_FOLDERS = 5;
+
+/** Folders New Chat started in on this computer, most recent first. */
+export function recentFolders(): string[] {
+  try {
+    const parsed = z
+      .array(z.string())
+      .safeParse(JSON.parse(localStorage.getItem(FOLDERS_KEY) ?? "[]"));
+    return parsed.success ? parsed.data.slice(0, RECENT_FOLDERS) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Puts a folder first in New Chat's recent folders. A convenience only. */
+export function rememberFolder(path: string) {
+  try {
+    localStorage.setItem(
+      FOLDERS_KEY,
+      JSON.stringify(
+        [path, ...recentFolders().filter((item) => item !== path)].slice(
+          0,
+          RECENT_FOLDERS,
+        ),
+      ),
+    );
+  } catch {
+    // Remembering is a convenience; the Chat still starts there.
+  }
+}
+
 /** Choosing a model keeps the effort only when the new model takes it. */
 export function withModel(
   options: HarnessOptions | null | undefined,

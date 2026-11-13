@@ -830,6 +830,24 @@ export function isLive(chat: ChatState) {
 }
 
 /**
+ * The Chat as the view shows it: a message saved and not yet taken by an idle
+ * Chat means its turn is starting, so the composer and the working line go to
+ * "Starting" at once on Send instead of after the host's next report (LIVE-6).
+ */
+export function asStarting(
+  chat: ChatState,
+  items: readonly TranscriptItem[],
+): ChatState {
+  if (isLive(chat) || chat.problem || !chat.has_composer) return chat;
+  const sending = items.some(
+    (item) => item.kind === "user" && item.delivery === "sending",
+  );
+  return sending
+    ? { ...chat, activity: "working", opening: chat.opening ?? "start" }
+    : chat;
+}
+
+/**
  * The composer's send button. Its word is set by the turn, never by what is
  * typed or by a request: `send` with no turn running (or to answer an open
  * question from the message box), `steer` while a turn runs that the harness

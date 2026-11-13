@@ -1328,7 +1328,9 @@ harness means starting a new Chat.
 New Chat chooses the harness, and may choose its model, effort and permission mode,
 before anything is sent. The choices offered are only those the installed harness
 reports when it is checked, without a prompt reaching a model; a harness that
-reports none starts with its own settings. The first turn runs on what was chosen.
+reports none starts with its own settings. The first turn runs on what was chosen,
+and what New Chat shows as chosen is passed explicitly, including the harness's
+listed defaults, so the harness's own configuration cannot silently differ.
 Full access is never offered.
 
 An execution folder is required but a Project is not. Offer an existing folder;

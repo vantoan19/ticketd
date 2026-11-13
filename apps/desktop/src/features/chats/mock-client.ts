@@ -338,6 +338,8 @@ export type MockChatClient = ChatClient & {
   readThroughs: string[];
   /** The Project each folder belongs to, as the host would find it. */
   folderProjects: Map<string, ProjectRef>;
+  /** Each Project's folder, by Project id. */
+  projectFolders: Map<string, string>;
   /** Paths opened through a changed-files row or a step's file name, in order. */
   openedFiles: string[];
   /** What the next folder dialog returns. */
@@ -683,6 +685,7 @@ export function createMockChatClient(
     created: [],
     readThroughs: [],
     folderProjects: new Map(),
+    projectFolders: new Map(),
     nextFolder: null,
     push,
     patch,
@@ -733,6 +736,7 @@ export function createMockChatClient(
     },
     pickFolder: async () => client.nextFolder,
     folderProject: async (path) => client.folderProjects.get(path) ?? null,
+    projectFolder: async (id) => client.projectFolders.get(id) ?? null,
     folderUse: async (path) =>
       [...chats.values()].filter((entry) => entry.chat.folder.path === path)
         .length,

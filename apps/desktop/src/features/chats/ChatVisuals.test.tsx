@@ -282,7 +282,7 @@ test("New Chat's folder button shows the folder's Project icon", async () => {
   const folder = await screen.findByRole("button", {
     name: "Folder: /work/web-app",
   });
-  await waitFor(() => expect(folder.textContent).toBe("Wweb-app"));
+  await waitFor(() => expect(folder.textContent).toBe("WFolder: web-app"));
 });
 
 test("suggestions that fail to load say so and try again", async () => {

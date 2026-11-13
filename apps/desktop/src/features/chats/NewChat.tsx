@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   Folder,
   Maximize2,
@@ -12,6 +13,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
@@ -44,15 +46,36 @@ import { Suggestions } from "@/features/chats/Suggestions";
 import { NewChatControls } from "@/features/chats/ComposerControls";
 import {
   NO_PICK,
-  offeredPick,
+  recentFolders,
+  rememberFolder,
   rememberHarness,
   rememberPick,
   rememberedHarness,
   rememberedPick,
+  rememberStart,
+  startPick,
   type Pick,
 } from "@/features/chats/harness-pick";
 import { notificationClient } from "@/lib/api/notifications";
 import { loadPreferences } from "@/lib/preferences";
+
+/** The folder ticketd makes for a Chat when none is chosen. */
+const SCRATCH = "Scratch folder";
+
+/** A recent folder: its name, where it is, and a check on the current one. */
+function FolderLine({ path, current }: { path: string; current: boolean }) {
+  const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  const parent = path.slice(0, path.lastIndexOf(name)).replace(/[\\/]$/, "");
+  return (
+    <span className="chat-folder-option">
+      <span className="chat-folder-option-line">
+        <span>{name}</span>
+        {current && <Check aria-hidden />}
+      </span>
+      <small>{parent || path}</small>
+    </span>
+  );
+}
 
 /** The draft survives leaving and returning to New Chat while the app is open. */
 let draft = "";
@@ -103,6 +126,7 @@ export function NewChat({
   const [composerKey, setComposerKey] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [folderMissing, setFolderMissing] = useState(false);
+  const [recent] = useState(recentFolders);
   const { quotes, remove: removeQuote } = useQuotes(NEW_CHAT);
   /** null until the first probe answers: seconds, while each harness is asked. */
   const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null);
@@ -259,10 +283,11 @@ export function NewChat({
     };
   }, [client, harnessKey, probe]);
   const offered = harness ? options[harness.id] : undefined;
-  // The last pick for this harness, while the harness still offers it.
+  // The last pick for this harness while the harness still offers it, else
+  // its listed defaults: what the picker shows is what the first turn runs on.
   const [picks, setPicks] = useState<Record<string, Pick>>({});
   const pick = harness
-    ? offeredPick(offered, picks[harness.id] ?? rememberedPick(harness.id))
+    ? startPick(offered, picks[harness.id] ?? rememberedPick(harness.id))
     : NO_PICK;
   const choosePick = (next: Pick) => {
     if (!harness) return;
@@ -318,11 +343,6 @@ export function NewChat({
       <div className="chat-new">
         <div>
           <h2>What should we work on?</h2>
-          {!harnesses && (
-            <p className="chat-harness-checking" role="status">
-              Checking which harnesses are installed…
-            </p>
-          )}
           <div
             className="chat-new-composer"
             onKeyDown={(event) => {
@@ -359,35 +379,33 @@ export function NewChat({
                 send: "send",
                 enabled: ready && text.trim() !== "",
               })}
-              {...(harness && {
-                leading: (
-                  <NewChatControls
-                    harnesses={found}
-                    harnessId={harness.id}
-                    onHarness={(id) => {
-                      setHarnessId(id);
-                      rememberHarness(id);
-                    }}
-                    options={offered}
-                    pick={pick}
-                    onPick={choosePick}
-                    notice={(id) => {
-                      const other = found.find((item) => item.id === id);
-                      return (
-                        other?.problem && (
-                          <ProblemNotice
-                            problem={other.problem}
-                            harness={other.name}
-                            onAction={() => setProbe((count) => count + 1)}
-                          />
-                        )
-                      );
-                    }}
-                    onOpenChange={setPickerOpen}
-                    inputRef={input}
-                  />
-                ),
-              })}
+              leading={
+                <NewChatControls
+                  harnesses={found}
+                  harnessId={harness?.id ?? null}
+                  onHarness={(id) => {
+                    setHarnessId(id);
+                    rememberHarness(id);
+                  }}
+                  options={offered}
+                  pick={pick}
+                  onPick={choosePick}
+                  notice={(id) => {
+                    const other = found.find((item) => item.id === id);
+                    return (
+                      other?.problem && (
+                        <ProblemNotice
+                          problem={other.problem}
+                          harness={other.name}
+                          onAction={() => setProbe((count) => count + 1)}
+                        />
+                      )
+                    );
+                  }}
+                  onOpenChange={setPickerOpen}
+                  inputRef={input}
+                />
+              }
               onSend={async (typed, mentioned) => {
                 if (!harness) return;
                 const message = quotedMessage(quotes, typed);
@@ -408,7 +426,7 @@ export function NewChat({
                       ) === index,
                   ),
                   message,
-                  // The first turn runs on what was picked; unset keeps the harness's own.
+                  // The first turn runs on what the picker shows (LIVE-7).
                   ...(pick.model && { model: pick.model }),
                   ...(pick.effort && { effort: pick.effort }),
                   ...(pick.permission && { permission: pick.permission }),
@@ -426,6 +444,8 @@ export function NewChat({
                   });
                   // Answered: whatever is asked for next is a new request.
                   attempt.current = { id: crypto.randomUUID(), request: "" };
+                  if (offered) rememberStart(created.chat_id, offered, pick);
+                  if (folder) rememberFolder(folder);
                   clearQuotes(NEW_CHAT);
                   prefilled = null;
                   // The Chat exists but holds no message. It is opened with the
@@ -454,18 +474,43 @@ export function NewChat({
                 <Button
                   variant="ghost"
                   size="xs"
-                  aria-label={`Folder: ${folder ?? "a folder kept by ticketd"}`}
+                  title={folder ?? undefined}
+                  aria-label={`Folder: ${folder ?? SCRATCH}`}
                 >
                   {project ? (
                     <ProjectIcon project={project} />
                   ) : (
                     <Folder aria-hidden />
                   )}
-                  {folderName ?? "ticketd folder"}
+                  <span className="chat-folder-label">
+                    <span className="chat-folder-prefix">Folder:</span>{" "}
+                    {folderName ?? SCRATCH}
+                  </span>
                   <ChevronDown aria-hidden />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
+              <DropdownMenuContent align="start" className="w-72">
+                {[...new Set([...(folder ? [folder] : []), ...recent])].map(
+                  (path) => (
+                    <DropdownMenuItem
+                      key={path}
+                      title={path}
+                      onSelect={() => setFolder(path)}
+                    >
+                      <FolderLine path={path} current={path === folder} />
+                    </DropdownMenuItem>
+                  ),
+                )}
+                <DropdownMenuItem onSelect={() => setFolder(null)}>
+                  <span className="chat-folder-option">
+                    <span className="chat-folder-option-line">
+                      <span>{SCRATCH}</span>
+                      {folder === null && <Check aria-hidden />}
+                    </span>
+                    <small>A new empty folder kept by ticketd</small>
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onSelect={() =>
                     void client.pickFolder().then(
@@ -475,9 +520,6 @@ export function NewChat({
                   }
                 >
                   Choose a folder…
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setFolder(null)}>
-                  Use a folder kept by ticketd
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -493,7 +535,20 @@ export function NewChat({
             <LinkPicker
               withLabel
               linked={links}
-              onPick={(record) => setLinks([...links, record])}
+              onPick={(record) => {
+                setLinks([...links, record]);
+                // A linked Project's folder is where its work happens: chosen
+                // for the Chat unless a folder was already picked.
+                if (record.kind !== "project" || folder !== null) return;
+                void client.projectFolder(record.id).then(
+                  (path) => {
+                    if (!path) return;
+                    setFolder((chosen) => chosen ?? path);
+                    setLinkedNote(`Using ${record.title}'s folder.`);
+                  },
+                  () => {},
+                );
+              }}
             />
           </div>
         </div>
@@ -527,12 +582,14 @@ export function NewChat({
               onChoose={choose}
             />
           )}
+          {/* The check is said, not shown: the picker holds its place
+              meanwhile, so nothing moves when it ends (LIVE-11). */}
           <p className="sr-only" role="status">
-            {linkedNote}
+            {harnesses ? linkedNote : "Checking which harnesses are installed…"}
           </p>
           {folderMissing && (
             <p className="chat-fine">
-              Project folder isn’t on this computer; using a ticketd folder.
+              Project folder isn’t on this computer; using a scratch folder.
             </p>
           )}
           {/* While the picker is open it shows this notice itself. */}

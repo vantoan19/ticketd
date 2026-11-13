@@ -751,6 +751,8 @@ export interface ChatClient {
   folderUse(path: string): Promise<number>;
   /** The Project whose checkout holds `path`, for New Chat's folder button. */
   folderProject(path: string): Promise<ProjectRef | null>;
+  /** A Project's folder on this computer, for New Chat when it is linked; null without one. */
+  projectFolder(projectId: string): Promise<string | null>;
   /**
    * `folder: null` asks for a managed folder. `command_id` is a UUID made once
    * per request and repeated only when the very same request is sent again,

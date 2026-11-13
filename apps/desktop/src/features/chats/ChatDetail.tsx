@@ -76,6 +76,7 @@ import {
   composerPlaceholder,
   firstNew,
   unseenFrom,
+  asStarting,
   isLive,
   problemNotice,
   requestLabel,
@@ -309,9 +310,9 @@ function Conversation({
   focusRequest: boolean;
 }) {
   const client = useChatClient();
-  const { chat, items } = snapshot;
-  const id = chat.id;
-  const harness = chat.harness.name;
+  const { chat: reported, items } = snapshot;
+  const id = reported.id;
+  const harness = reported.harness.name;
   const [failure, setFailure] = useState(() => arrivals.get(id) ?? "");
   // Said once: the next time this Chat opens it starts without the reason.
   useEffect(() => void arrivals.delete(id), [id]);
@@ -325,7 +326,7 @@ function Conversation({
   const [saved, setSaved] = useState("");
   /** A model, effort or permission change asked for here, until the next send. */
   const [asked, setAsked] = useState<AskedChange | null>(null);
-  const changeLine = settingLine(chat, asked);
+  const changeLine = settingLine(reported, asked);
   /** Runs a command; a refusal is said once, and the view keeps the host's state. */
   const run = (action: Promise<unknown>) =>
     action.then(
@@ -351,6 +352,10 @@ function Conversation({
     }),
     [client, id],
   );
+  // A message just sent shows its turn starting at once (LIVE-6).
+  const chat = asStarting(reported, items);
+  /** Running only in this view so far: Stop waits for the host to know of the turn. */
+  const unconfirmedStart = chat !== reported;
   const plan = runningPlan(items);
   const turnStartedAt = [...items]
     .reverse()
@@ -418,7 +423,8 @@ function Conversation({
     setHeldFor(question && draftHeld() ? question.id : undefined);
   }
   const answering = Boolean(question) && heldFor !== question?.id;
-  const stoppable = isLive(chat) && !chat.stopping && chat.has_composer;
+  const stoppable =
+    isLive(chat) && !chat.stopping && !unconfirmedStart && chat.has_composer;
   /** Stops the turn; the Stop button leaves, so the message box takes focus. */
   const stop = () => {
     messageBox.current?.focus();
@@ -689,7 +695,7 @@ function Conversation({
                     onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
                   })}
                   {...(isLive(chat) && { onStop: stop })}
-                  stopping={chat.stopping}
+                  stopping={chat.stopping || unconfirmedStart}
                   leading={
                     <ComposerControls
                       chat={chat}
