@@ -105,6 +105,21 @@ const finishedTurn: TranscriptItem[] = [
           },
         ],
       },
+      {
+        kind: "run",
+        target:
+          'ticketd show T-12; ticketd change T-12 --status "In progress"; ticketd workspace',
+        command:
+          'T=/Users/me/ticketd/target/debug/ticketd; $T show T-12; echo ----; $T change T-12 --status "In progress"; $T workspace',
+        ticketd: [
+          { verb: "read", words: [{ text: "T-12", code: true }] },
+          {
+            verb: "set",
+            words: [{ text: "T-12", code: true }, { text: "to In progress" }],
+          },
+          { verb: "run", words: [{ text: "ticketd workspace", code: true }] },
+        ],
+      },
     ],
   }),
   inTurn({

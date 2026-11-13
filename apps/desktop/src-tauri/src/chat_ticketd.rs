@@ -1,14 +1,14 @@
 //! A ticketd CLI call as the sentence a person would say for it ("Set T-MP4 to In
 //! progress"), for the step row and the approval card. Only calls whose meaning is
-//! plain from their words are told; any other call is shown as its command, and the
-//! exact command is always one click away.
+//! plain from their words are told; any other call says "run `ticketd …`" with its
+//! words as they are, and the exact command is always one click away.
 use serde::Serialize;
 
 /// One ticketd call: a verb the view puts in the step's tense, and what follows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Call {
     /// `read`, `list`, `search`, `create`, `change`, `set`, `post`, `add`, `move`,
-    /// `restore`, `tag` or `untag`.
+    /// `restore`, `tag`, `untag`, or `run` for a call whose meaning is not plain.
     pub verb: &'static str,
     pub words: Vec<Word>,
 }
@@ -149,10 +149,42 @@ fn one(args: &[String]) -> Option<Call> {
     }
 }
 
-/// Every call as a sentence, or `None` when any one of them is not plain: then the
-/// command is shown instead, so nothing that runs goes unsaid.
+/// `--help` on any call reads its help, which changes nothing.
+fn help(args: &[String]) -> Option<Call> {
+    if !args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        return None;
+    }
+    let lead: Vec<String> = args
+        .iter()
+        .take_while(|arg| !arg.starts_with('-'))
+        .cloned()
+        .collect();
+    if lead.is_empty() {
+        return call("read", vec![text("the ticketd help")]);
+    }
+    call(
+        "read",
+        vec![
+            text("the help for"),
+            code(&ticketd_chat_host::step_kind::ticketd_command(&lead)),
+        ],
+    )
+}
+
+/// Every call as a sentence: a plain one as what it does, any other as "run
+/// `ticketd …`" with its words, so nothing that runs goes unsaid. `None` only when
+/// there are no calls.
 pub fn sentences(calls: &[Vec<String>]) -> Option<Vec<Call>> {
-    calls.iter().map(|args| one(args)).collect()
+    let said: Vec<Call> = calls
+        .iter()
+        .map(|args| {
+            help(args).or_else(|| one(args)).unwrap_or_else(|| Call {
+                verb: "run",
+                words: vec![code(&ticketd_chat_host::step_kind::ticketd_command(args))],
+            })
+        })
+        .collect();
+    (!said.is_empty()).then_some(said)
 }
 
 #[cfg(test)]
@@ -209,9 +241,18 @@ mod tests {
                 &["list", "--project", "f33f"],
                 Some("list tickets in Project f33f"),
             ),
-            (&["skills", "install", "--harness", "codex"], None),
-            (&["batch", "-"], None),
-            (&["show"], None),
+            (
+                &["skills", "install", "--harness", "codex"],
+                Some("run ticketd skills install --harness codex"),
+            ),
+            (&["batch", "-"], Some("run ticketd batch -")),
+            (&["show"], Some("run ticketd show")),
+            (&["workspace"], Some("run ticketd workspace")),
+            (
+                &["change", "--help"],
+                Some("read the help for ticketd change"),
+            ),
+            (&["--help"], Some("read the ticketd help")),
         ];
         for (command, expected) in cases {
             assert_eq!(said(command).as_deref(), *expected, "{command:?}");

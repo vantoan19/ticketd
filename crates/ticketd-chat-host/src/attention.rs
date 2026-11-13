@@ -161,7 +161,7 @@ pub fn status(facts: &Facts<'_>) -> Status {
                 .map(|args| crate::step_kind::ticketd_command(args))
                 .collect::<Vec<_>>()
                 .join("; "),
-            None => crate::step_kind::unwrapped(description),
+            None => crate::step_kind::shown_command(description),
         };
         return make(Rank::Approval, "Approval needed", plain_start(&command));
     }

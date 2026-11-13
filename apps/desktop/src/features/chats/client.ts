@@ -244,6 +244,7 @@ export const ticketdCallSchema = z.object({
     "restore",
     "tag",
     "untag",
+    "run",
   ]),
   words: z.array(ticketdWordSchema),
 });

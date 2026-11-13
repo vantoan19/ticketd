@@ -790,10 +790,28 @@ test("LIVE-4: a ticketd call reads as a sentence in the step's tense, records by
       ...(state && { state }),
     });
   expect(stepWords(ticketd("done")).label).toBe(
-    "Set T-MP4 to In progress and posted an update on T-MP4",
+    "Set T-MP4 to In progress, then posted an update on it",
   );
   expect(stepWords(ticketd("running")).label).toBe(
-    "Setting T-MP4 to In progress and posting an update on T-MP4",
+    "Setting T-MP4 to In progress, then posting an update on it",
+  );
+  // LIVE2-1: one sentence per call, a repeated verb said once, any other call as its words.
+  const compound = step({
+    kind: "run",
+    target:
+      "ticketd show T-MP4; ticketd show T-MP5; ticketd change T-MP4 --status Done; ticketd workspace",
+    ticketd: [
+      { verb: "read", words: [{ text: "T-MP4", code: true }] },
+      { verb: "read", words: [{ text: "T-MP5", code: true }] },
+      {
+        verb: "set",
+        words: [{ text: "T-MP4", code: true }, { text: "to Done" }],
+      },
+      { verb: "run", words: [{ text: "ticketd workspace", code: true }] },
+    ],
+  });
+  expect(stepWords(compound).label).toBe(
+    "Read T-MP4 and T-MP5, then set T-MP4 to Done, then ran ticketd workspace",
   );
   const project = step({
     kind: "run",

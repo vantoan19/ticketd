@@ -88,6 +88,7 @@ const TICKETD_VERBS: Record<
   restore: ["Restoring", "Restored", "Restore"],
   tag: ["Tagging", "Tagged", "Tag"],
   untag: ["Untagging", "Untagged", "Untag"],
+  run: ["Running", "Ran", "Run"],
 };
 
 /** Names a Project, Document or Plan by id; undefined when it is not known here. */
@@ -100,10 +101,12 @@ export const recordNamer =
     links.find((link) => link.kind === kind && link.id === id)?.title;
 
 /**
- * ticketd calls as one sentence: "Set `T-MP4` to In progress and post an update on
- * `T-MP4`". `tense` 0 is running, 1 done, 2 any other outcome or an approval; `lower`
- * starts with a lowercase verb, to follow "wants to". A record the view knows reads
- * by its title, any other by its id.
+ * ticketd calls as one sentence, one clause per call: "Read `T-MP4`, then set it to
+ * In progress". A verb is said once while it repeats ("Read `T-12` and `T-13`"), and
+ * a call on the reference the one before it named calls it "it". `tense` 0 is
+ * running, 1 done, 2 any other outcome or an approval; `lower` starts with a lowercase
+ * verb, to follow "wants to". A record the view knows reads by its title, any other
+ * by its id.
  */
 export function ticketdParts(
   calls: TicketdCall[],
@@ -112,15 +115,23 @@ export function ticketdParts(
   lower = false,
 ): StepWords["parts"] {
   const parts: StepWords["parts"] = [];
+  const reference = (call: TicketdCall | undefined) =>
+    call?.words.find((word) => word.code && !word.record)?.text;
   calls.forEach((call, index) => {
-    if (index > 0)
-      parts.push({
-        text: index === calls.length - 1 ? "and" : ",",
-      });
-    const verb = TICKETD_VERBS[call.verb][tense];
-    // "Read T-12 and Document d1": a verb is said once while it repeats.
-    if (calls[index - 1]?.verb !== call.verb)
+    const before = calls[index - 1];
+    const repeats = before?.verb === call.verb;
+    if (index > 0) {
+      if (repeats)
+        parts.push({
+          text: calls[index + 1]?.verb === call.verb ? "," : "and",
+        });
+      else parts.push({ text: "," }, { text: "then" });
+    }
+    if (!repeats) {
+      const verb = TICKETD_VERBS[call.verb][tense];
       parts.push({ text: index > 0 || lower ? verb.toLowerCase() : verb });
+    }
+    const it = !repeats && reference(call) === reference(before);
     for (const word of call.words) {
       const title = word.record ? name(word.record, word.text) : undefined;
       parts.push(
@@ -128,9 +139,11 @@ export function ticketdParts(
           ? { text: title }
           : word.record
             ? { text: word.text.slice(0, 8), code: true }
-            : word.code
-              ? { text: word.text, code: true }
-              : { text: word.text },
+            : word.code && it && word.text === reference(before)
+              ? { text: "it" }
+              : word.code
+                ? { text: word.text, code: true }
+                : { text: word.text },
       );
     }
   });

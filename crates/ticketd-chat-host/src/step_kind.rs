@@ -1137,6 +1137,13 @@ pub fn ticketd_calls(command: &str) -> Option<Vec<Vec<String>>> {
             }
             return None;
         }
+        // `echo ----` between calls only prints a separator into the output.
+        if program.literal && program.text == "echo" && !prefixed {
+            if viewers.is_empty() && args.iter().all(|word| word.literal) {
+                continue;
+            }
+            return None;
+        }
         let named = if program.literal {
             program_name(&program.text) == "ticketd"
         } else {
@@ -1177,6 +1184,34 @@ fn only_shows(stage: &Simple) -> bool {
         )
         // `jq` reads files named after its filter; only stdin is shown.
         && positional(&program_name(&program.text), args).len() <= 1
+}
+
+/// A command as a heading shows it: without its shell wrappers, and with ticketd
+/// named `ticketd` rather than by its absolute path. What runs is shown elsewhere.
+pub fn shown_command(command: &str) -> String {
+    let text = unwrap(command, 2);
+    let ends = |c: char| c.is_whitespace() || "'\";|&()<>`".contains(c);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    let mut boundary = true;
+    while let Some(c) = rest.chars().next() {
+        if boundary && (c == '/' || rest.starts_with("~/")) {
+            let len = rest.find(ends).unwrap_or(rest.len());
+            let path = &rest[..len];
+            if path.ends_with("/ticketd") || path.ends_with("/ticketd.exe") {
+                out.push_str("ticketd");
+            } else {
+                out.push_str(path);
+            }
+            rest = &rest[len..];
+            boundary = false;
+            continue;
+        }
+        out.push(c);
+        boundary = ends(c) || c == '=';
+        rest = &rest[c.len_utf8()..];
+    }
+    out
 }
 
 /// A ticketd call as a person would type it: `ticketd show T-1`.
@@ -1241,7 +1276,30 @@ mod tests {
             )),
             one("activity add T-1 --brief-file -")
         );
+        // LIVE2-1: a compound of ticketd calls and separator echoes is still ticketd.
+        assert_eq!(
+            calls(&format!(
+                "T={path}; $T skills get chat | head -80; echo ----; $T ticket get T-MP3 2>&1 || $T --help"
+            )),
+            Some(vec![
+                "skills get chat".to_owned(),
+                "ticket get T-MP3".to_owned(),
+                "--help".to_owned()
+            ])
+        );
+        assert_eq!(
+            calls(&format!(
+                "T={path}; $T change --help; $T activity add --help"
+            )),
+            Some(vec![
+                "change --help".to_owned(),
+                "activity add --help".to_owned()
+            ])
+        );
         for other in [
+            format!("{path} show T-1; echo \"$(whoami)\""),
+            format!("{path} show T-1; echo done > out.txt"),
+            format!("{path} show T-1; echo hi | sh"),
             format!("{path} show T-1 && rm -rf dist"),
             format!(r#"{path} show "$(whoami)""#),
             format!("{path} export > out.json"),
@@ -1260,6 +1318,23 @@ mod tests {
             ]),
             r#"ticketd change T-1 --status "In progress""#
         );
+    }
+
+    /// LIVE2-1: a heading never names ticketd by its absolute path.
+    #[test]
+    fn shown_commands_name_ticketd_without_its_path() {
+        use super::shown_command;
+        let path = "/Users/me/ticketd/target/debug/ticketd";
+        assert_eq!(
+            shown_command(&format!("T={path}; $T show T-1 | sh")),
+            "T=ticketd; $T show T-1 | sh"
+        );
+        assert_eq!(
+            shown_command(&format!("/bin/zsh -lc '\"{path}\" export > /tmp/out.json'")),
+            "\"ticketd\" export > /tmp/out.json"
+        );
+        assert_eq!(shown_command("cat /etc/hosts"), "cat /etc/hosts");
+        assert_eq!(shown_command("ls a/ticketd"), "ls a/ticketd");
     }
 
     /// The row a command reads as: its kind, variant, targets (with scope) and folder.

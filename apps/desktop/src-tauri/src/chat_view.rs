@@ -790,7 +790,7 @@ fn asked_to(step: Option<&Step>) -> Option<(&'static str, &'static str, String)>
             .join(", ")
     };
     match step.kind {
-        "run" => Some(("wants to run", "asked to run", step.command.clone()?)),
+        "run" => Some(("wants to run", "asked to run", step.target.clone())),
         "edit" | "create" => Some(("wants to edit", "asked to edit", targets())),
         "delete" => Some(("wants to delete", "asked to delete", targets())),
         _ => None,
@@ -1080,7 +1080,8 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         Step {
             kind: shell.kind.name(),
             variant: shell.variant.map(Variant::name),
-            target: shell.command.clone(),
+            // A heading names ticketd without its path; what runs is kept exactly.
+            target: step_kind::shown_command(&shell.command),
             targets,
             command: Some(shell.command),
             exit_code,
@@ -2211,7 +2212,7 @@ mod tests {
         let calls = step.ticketd.clone().expect("told as a sentence");
         assert_eq!(calls[0].verb, "set");
 
-        // An unknown call is shown as its command, without the path.
+        // An unknown call says its words, without the path.
         let input = json!({ "command": format!("{bin} skills install --harness codex") });
         let other = one(&tool(
             "Bash",
@@ -2219,8 +2220,43 @@ mod tests {
             ChatToolState::Completed,
             None,
         ));
-        assert_eq!(other.ticketd, None);
+        assert_eq!(other.ticketd.expect("said")[0].verb, "run");
         assert_eq!(other.target, "ticketd skills install --harness codex");
+
+        // LIVE2-1: a compound of ticketd calls is one sentence per call.
+        let compound = format!(
+            "T={bin}; $T skills get chat | head -80; echo ----; $T show T-MP3 2>&1 || $T --help"
+        );
+        let input = json!({ "command": compound });
+        let calls = one(&tool(
+            "Bash",
+            &input.to_string(),
+            ChatToolState::Completed,
+            None,
+        ))
+        .ticketd
+        .expect("said");
+        assert_eq!(
+            calls.iter().map(|call| call.verb).collect::<Vec<_>>(),
+            ["read", "read", "read"]
+        );
+
+        // Anything else stays the command, with ticketd's path left out of it.
+        let input = json!({ "command": format!("{bin} export | sh") });
+        let raw = one(&tool(
+            "Bash",
+            &input.to_string(),
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!(raw.ticketd, None);
+        assert_eq!(raw.target, "ticketd export | sh");
+        assert_eq!(
+            raw.command.as_deref(),
+            Some(format!("{bin} export | sh").as_str())
+        );
+        let (_, _, subject) = super::asked_to(Some(&raw)).expect("asked");
+        assert_eq!(subject, "ticketd export | sh");
 
         let interaction = ChatInteraction {
             id: "ask".to_owned(),
