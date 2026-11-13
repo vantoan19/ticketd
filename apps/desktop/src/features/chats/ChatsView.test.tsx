@@ -1838,6 +1838,36 @@ test("the composer's two triggers change model, effort and permissions; a refusa
   );
 });
 
+test("a change held for the turn's end shows the new value, From your next message", async () => {
+  await open(
+    one({
+      id: "held",
+      title: "Limiter",
+      activity: "working",
+      harness: { id: "codex", name: "Codex" },
+      settings: {
+        model: {
+          current: "opus",
+          options: [
+            option("opus", "Opus 5.5", true),
+            option("sonnet", "Sonnet 5"),
+          ],
+          changeable: true,
+          applies_from: "next_request",
+          change: { value: "sonnet", state: "held" },
+        },
+      },
+    }),
+  );
+  const trigger = button("Model Sonnet 5");
+  expect(trigger.textContent).toBe("Sonnet 5");
+  expect(trigger.querySelector(".chat-spin")).toBeNull();
+  expect(screen.getByText("From your next message")).toBeTruthy();
+  openMenu("Model Sonnet 5");
+  expect(await screen.findAllByText("From your next message")).toHaveLength(2);
+  expect(screen.queryByText("From the next request")).toBeNull();
+});
+
 test("a harness that has not reported its settings draws no triggers", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   expect(screen.queryByRole("group", { name: "Harness settings" })).toBeNull();

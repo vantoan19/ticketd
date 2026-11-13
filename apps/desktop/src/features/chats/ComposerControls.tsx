@@ -19,8 +19,9 @@ import {
 } from "@/components/ui/tooltip";
 import type { ChatState, HarnessSetting } from "@/features/chats/client";
 import {
+  changeHeld,
   changePending,
-  currentOf,
+  shownOf,
   effortBars,
   labelOf,
   type Setting,
@@ -149,14 +150,13 @@ export function ComposerControls({
     event.preventDefault();
     inputRef.current?.focus();
   };
-  const timing = model?.changeable ? model : effort;
-  const nextMessage = (setting: HarnessSetting | null | undefined) =>
-    setting?.applies_from === "next_request"
-      ? "From the next request"
-      : "From your next message";
+  // ticketd holds a change made during a turn until the turn ends, so whatever the
+  // harness's own timing, it applies from the person's next message.
+  const NEXT_MESSAGE = "From your next message";
 
-  const modelId = model ? currentOf(model) : null;
-  const effortId = effort ? currentOf(effort) : null;
+  const modelId = model ? shownOf(model) : null;
+  const effortId = effort ? shownOf(effort) : null;
+  const modelHeld = changeHeld(model) || changeHeld(effort);
   const bars = effort ? effortBars(effort.options, effortId) : null;
   const modelLabel = labelOf(model, modelId);
   const effortLabel = labelOf(effort, effortId);
@@ -253,7 +253,7 @@ export function ComposerControls({
             </DropdownMenuGroup>
           )}
           <DropdownMenuSeparator />
-          <p className="chat-pick-note">{nextMessage(timing)}</p>
+          <p className="chat-pick-note">{NEXT_MESSAGE}</p>
         </DropdownMenuContent>
       </DropdownMenu>
     ) : (
@@ -271,7 +271,7 @@ export function ComposerControls({
       </ReadOnly>
     ));
 
-  const permissionId = permission ? currentOf(permission) : null;
+  const permissionId = permission ? shownOf(permission) : null;
   const permissionLabel = labelOf(permission, permissionId);
   const permissionFace = (
     <>
@@ -345,6 +345,9 @@ export function ComposerControls({
   return (
     <div className="chat-controls" role="group" aria-label="Harness settings">
       {modelTrigger}
+      {(modelHeld || changeHeld(permission)) && (
+        <span className="chat-control-note">{NEXT_MESSAGE}</span>
+      )}
       {permissionTrigger}
     </div>
   );

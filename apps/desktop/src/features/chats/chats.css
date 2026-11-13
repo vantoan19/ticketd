@@ -805,6 +805,14 @@ button.chat-file:focus-visible,
 .chat-pick-note {
   padding: 6px 8px;
 }
+/* Beside a trigger whose change waits for the turn to end. */
+.chat-control-note {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
 .chat-send {
   display: flex;
   flex: none;
