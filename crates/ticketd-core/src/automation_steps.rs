@@ -75,11 +75,11 @@ impl Workspace {
             return Ok(Fields::default());
         };
         let ticket = self.show_ticket(&ticket.reference)?;
-        let values = match run.event.kind {
-            WorkspaceEventType::TicketTagAdded => run.event.current.as_ref(),
-            WorkspaceEventType::TicketTagRemoved => run.event.previous.as_ref(),
+        let values = run.event.as_ref().and_then(|event| match event.kind {
+            WorkspaceEventType::TicketTagAdded => event.current.as_ref(),
+            WorkspaceEventType::TicketTagRemoved => event.previous.as_ref(),
             _ => None,
-        };
+        });
         Ok(Fields {
             reference: ticket.reference,
             title: ticket.title,

@@ -1,9 +1,19 @@
 import type { ReactNode } from "react";
-import { Bell, Bot, Split, SquarePen, Tag, Zap } from "lucide-react";
+import {
+  Bell,
+  Bot,
+  CalendarClock,
+  Play,
+  Split,
+  SquarePen,
+  Tag,
+  Zap,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   folderName,
   projectName,
+  scheduleText,
   textInWords,
 } from "@/features/automations/automation-text";
 import { TRIGGER_ID } from "@/features/automations/canvas-layout";
@@ -45,7 +55,15 @@ export type Card = {
   /** The title as shown, when it is more than the words. */
   shown?: ReactNode;
   detail?: string;
-  icon: "trigger" | "tag" | "agent" | "change" | "notify" | "if";
+  icon:
+    | "trigger"
+    | "tag"
+    | "schedule"
+    | "hand"
+    | "agent"
+    | "change"
+    | "notify"
+    | "if";
   /** Nothing chosen yet: the card is a prompt. */
   unset: boolean;
   /** Which menu the card carries. */
@@ -84,6 +102,30 @@ export function triggerCard(
       menu: "change-trigger",
     };
   }
+  // Nothing narrows these two: a condition is about a ticket.
+  if (trigger.kind === "schedule") {
+    const { schedule } = trigger;
+    return {
+      id: TRIGGER_ID,
+      kind,
+      title: scheduleText(schedule),
+      icon: "schedule",
+      unset:
+        schedule.kind === "every_hours"
+          ? schedule.hours < 1
+          : schedule.weekdays.length === 0 || !schedule.time,
+      menu: "change-trigger",
+    };
+  }
+  if (trigger.kind === "by_hand")
+    return {
+      id: TRIGGER_ID,
+      kind,
+      title: "When you run it",
+      icon: "hand",
+      unset: false,
+      menu: "change-trigger",
+    };
   if (trigger.kind !== "tag_added" && trigger.kind !== "tag_removed")
     return {
       id: TRIGGER_ID,
@@ -222,6 +264,8 @@ export const cardName = (card: Card) => `${card.kind}: ${card.title}`;
 /** The icon a card leads with. */
 export const CARD_ICONS = {
   trigger: Zap,
+  schedule: CalendarClock,
+  hand: Play,
   tag: Tag,
   agent: Bot,
   change: SquarePen,

@@ -4,7 +4,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::automations::{Automation, AutomationDefinition, Step, StepAction, StepChange, Trigger};
+use crate::automations::{
+    Automation, AutomationDefinition, Schedule, Step, StepAction, StepChange, Trigger, Weekday,
+};
 use crate::{Error, Status, Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,9 +85,15 @@ impl Workspace {
                     }),
                 ],
             ),
-            // ponytail: no trigger until a schedule can be set up and fires; then
-            // this is `Schedule::Weekly` on Monday morning.
-            AutomationExample::WeeklySummary => (None, vec![run_agent]),
+            AutomationExample::WeeklySummary => (
+                Some(Trigger::Schedule {
+                    schedule: Schedule::Weekly {
+                        time: "09:00".to_owned(),
+                        weekdays: vec![Weekday::Mon],
+                    },
+                }),
+                vec![run_agent],
+            ),
         };
         self.create_automation(AutomationDefinition {
             name: example.name().to_owned(),

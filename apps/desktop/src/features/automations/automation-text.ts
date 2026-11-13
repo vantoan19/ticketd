@@ -1,7 +1,9 @@
 import {
   HARNESS_NAMES,
+  WEEKDAYS,
   type AutomationAgent,
   type AutomationCondition,
+  type AutomationSchedule,
 } from "@/features/automations/client";
 import { providerName } from "@/features/tickets/ticket-source";
 import type { Project } from "@/lib/api/client";
@@ -24,6 +26,46 @@ export function projectName(id: string, projects: Project[]): string {
   return (
     projects.find((project) => project.id === id)?.name ?? "a deleted project"
   );
+}
+
+const DAY_NAMES: Record<
+  (typeof WEEKDAYS)[number],
+  { short: string; long: string }
+> = {
+  mon: { short: "Mon", long: "Monday" },
+  tue: { short: "Tue", long: "Tuesday" },
+  wed: { short: "Wed", long: "Wednesday" },
+  thu: { short: "Thu", long: "Thursday" },
+  fri: { short: "Fri", long: "Friday" },
+  sat: { short: "Sat", long: "Saturday" },
+  sun: { short: "Sun", long: "Sunday" },
+};
+export const dayName = (day: (typeof WEEKDAYS)[number]) => DAY_NAMES[day].long;
+
+/**
+ * A schedule in words ("Mondays at 9:00", "Every 6 hours"), or what it still
+ * needs. Times read on the 24-hour clock, as they are stored.
+ */
+export function scheduleText(schedule: AutomationSchedule): string {
+  if (schedule.kind === "every_hours")
+    return schedule.hours < 1
+      ? "Choose how often"
+      : schedule.hours === 1
+        ? "Every hour"
+        : `Every ${schedule.hours} hours`;
+  const days = WEEKDAYS.filter((day) => schedule.weekdays.includes(day));
+  const [hour, minute] = schedule.time.split(":");
+  if (days.length === 0) return "Choose days";
+  if (!hour || !minute) return "Choose a time";
+  const on =
+    days.length === 7
+      ? "Every day"
+      : days.join() === "mon,tue,wed,thu,fri"
+        ? "Weekdays"
+        : days.length === 1 && days[0]
+          ? `${DAY_NAMES[days[0]].long}s`
+          : LIST.format(days.map((day) => DAY_NAMES[day].short));
+  return `${on} at ${Number(hour)}:${minute}`;
 }
 
 /**

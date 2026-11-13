@@ -126,6 +126,8 @@ function RunPanel({
             {run.started_at ? when(run.started_at) : "Not yet"}
             {run.definition.trigger?.kind === "tag_added" &&
               `, when ${run.definition.trigger.tag} was added`}
+            {run.definition.trigger?.kind === "schedule" && ", on its schedule"}
+            {run.definition.trigger?.kind === "by_hand" && ", by hand"}
           </dd>
           {run.started_at && run.ended_at && (
             <>

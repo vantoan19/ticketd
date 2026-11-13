@@ -567,6 +567,84 @@ fn an_edit_that_leaves_a_step_unfinished_switches_the_automation_off() {
 }
 
 #[test]
+fn starting_without_a_ticket_switches_off_an_automation_that_branches_and_it_cannot_run() {
+    let (_dir, mut workspace) = workspace();
+    let (finished, agent) = triage(&mut workspace);
+    let has = |tag: &str| {
+        vec![Check::Tag {
+            tag: tag.into(),
+            has: true,
+        }]
+    };
+    // An agent, then an If with a Change ticket on one path and an If on the other.
+    let mut steps = finished.steps.clone();
+    steps.push(step(
+        "outer",
+        StepAction::If {
+            checks: has("verified"),
+            yes: vec![step(
+                "close",
+                StepAction::ChangeTicket {
+                    change: Some(StepChange::SetStatus {
+                        status: Status::Done,
+                    }),
+                    on_failure: None,
+                },
+            )],
+            no: vec![step(
+                "inner",
+                StepAction::If {
+                    checks: has("needs-fix"),
+                    yes: vec![run_agent("fix", Some(&agent), Some("C:\\code"))],
+                    no: Vec::new(),
+                },
+            )],
+        },
+    ));
+    let branching = AutomationDefinition { steps, ..finished };
+    let automation = workspace.create_automation(branching.clone()).unwrap();
+    let on = workspace
+        .set_automation_enabled(&automation.id, true)
+        .unwrap();
+    assert!(on.enabled && on.problems.is_empty());
+
+    let by_hand = workspace
+        .update_automation(
+            &automation.id,
+            AutomationDefinition {
+                trigger: Some(Trigger::ByHand),
+                ..branching
+            },
+        )
+        .unwrap();
+
+    assert!(!by_hand.enabled);
+    let needs_ticket = "Needs a ticket, and this Automation does not start from one";
+    // Each step that needs the ticket says so, at any depth; the agents do not.
+    assert_eq!(
+        by_hand
+            .problems
+            .iter()
+            .map(|problem| (problem.step_id.as_deref(), problem.message.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (Some("outer"), needs_ticket),
+            (Some("close"), needs_ticket),
+            (Some("inner"), needs_ticket)
+        ]
+    );
+    // So no run without a ticket ever reaches an If.
+    assert!(matches!(
+        workspace.run_automation_now(&automation.id),
+        Err(Error::AutomationUnfinished(_))
+    ));
+    assert!(matches!(
+        workspace.set_automation_enabled(&automation.id, true),
+        Err(Error::AutomationUnfinished(_))
+    ));
+}
+
+#[test]
 fn an_agent_used_by_a_step_cannot_be_deleted_and_names_the_automation() {
     let (_dir, mut workspace) = workspace();
     let (finished, agent) = triage(&mut workspace);
@@ -722,11 +800,20 @@ fn each_example_holds_what_can_be_built_now_and_says_what_is_left() {
     );
     assert_eq!(
         example_needs(&mut workspace, AutomationExample::WeeklySummary),
-        ["Choose what starts it", "Needs an agent and a folder"]
+        ["Needs an agent and a folder"]
     );
-    let names: Vec<_> = workspace
-        .automations()
-        .unwrap()
+    let automations = workspace.automations().unwrap();
+    // The weekly summary runs on Mondays at 9:00.
+    assert_eq!(
+        automations[0].definition.trigger,
+        Some(Trigger::Schedule {
+            schedule: Schedule::Weekly {
+                time: "09:00".into(),
+                weekdays: vec![Weekday::Mon],
+            },
+        })
+    );
+    let names: Vec<_> = automations
         .into_iter()
         .map(|automation| automation.definition.name)
         .collect();

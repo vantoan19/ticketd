@@ -118,6 +118,7 @@ test("the trigger menu offers the six ticket triggers under A ticket changes", a
   expect(
     within(menu)
       .getAllByRole("menuitem")
+      .slice(0, 6)
       .map(
         (item) =>
           item.querySelector(".flow-menu-item-text")?.firstChild?.nodeValue,

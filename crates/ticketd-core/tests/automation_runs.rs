@@ -136,7 +136,10 @@ fn adding_the_trigger_tag_queues_one_run_for_the_ticket_and_the_event_is_read_on
         (run_ticket.reference.as_str(), run_ticket.title.as_str()),
         (ticket.reference.as_str(), "Fix login")
     );
-    assert_eq!(run.event.current, Some(serde_json::json!({ "tag": TAG })));
+    assert_eq!(
+        run.event.as_ref().unwrap().current,
+        Some(serde_json::json!({ "tag": TAG }))
+    );
     assert_eq!(run.steps, []);
     assert_eq!(
         workspace.automation_cursor(&automation.id).unwrap(),

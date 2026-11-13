@@ -48,7 +48,7 @@ fn automation_on(
 fn started(workspace: &mut Workspace, automation: &Automation) -> Vec<String> {
     workspace.queue_automation_runs().unwrap();
     let mut runs = workspace.automation_runs(&automation.id).unwrap();
-    runs.sort_by_key(|run| run.event.id);
+    runs.sort_by_key(|run| run.event.as_ref().map(|event| event.id));
     runs.into_iter()
         .map(|run| run.ticket.unwrap().reference)
         .collect()

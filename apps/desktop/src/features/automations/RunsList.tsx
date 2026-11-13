@@ -177,11 +177,15 @@ export function RunsList({
           icon={<History aria-hidden />}
           title="No runs yet"
           description={
-            !automation.enabled
-              ? "It runs once it is switched on for this desktop."
-              : tag
-                ? `It runs the next time a ticket is tagged ${tag}.`
-                : "It runs the next time its trigger happens."
+            automation.trigger?.kind === "by_hand"
+              ? "It runs when you press Run now."
+              : !automation.enabled
+                ? "It runs once it is switched on for this desktop."
+                : tag
+                  ? `It runs the next time a ticket is tagged ${tag}.`
+                  : automation.trigger?.kind === "schedule"
+                    ? "It runs the next time its schedule comes round."
+                    : "It runs the next time its trigger happens."
           }
         />
       </div>

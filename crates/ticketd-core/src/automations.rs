@@ -228,6 +228,14 @@ pub struct Automation {
     pub problems: Vec<AutomationProblem>,
 }
 
+impl Automation {
+    /// Whether it may be on: nothing is unfinished, and something other than the
+    /// person starts it.
+    fn can_be_on(&self) -> bool {
+        self.problems.is_empty() && self.definition.trigger != Some(Trigger::ByHand)
+    }
+}
+
 /// The definition as stored, apart from the name, which has its own column.
 #[derive(Serialize, Deserialize)]
 struct Stored {
@@ -268,6 +276,23 @@ pub(crate) fn migrate_sync(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format version 74: where a schedule counts from on this device. `schedule_from`
+/// is the local time a schedule that is on last fired, or was first looked at; it
+/// is NULL until then, and again after the trigger changes.
+pub(crate) fn migrate_schedule(connection: &Connection) -> Result<(), Error> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('automation_device_state') WHERE name = 'schedule_from')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection
+            .execute_batch("ALTER TABLE automation_device_state ADD COLUMN schedule_from TEXT;")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 74;")?;
+    Ok(())
+}
+
 fn blank(text: &str) -> bool {
     text.trim().is_empty()
 }
@@ -284,7 +309,10 @@ fn problems(definition: &AutomationDefinition, agents: &HashSet<String>) -> Vec<
         Some(Trigger::StatusChanged { to: None, .. }) => Some("Needs a status"),
         Some(Trigger::Schedule { schedule }) => match schedule {
             Schedule::EveryHours { hours: 0 } => Some("Needs a number of hours"),
-            Schedule::Weekly { time, weekdays } if blank(time) || weekdays.is_empty() => {
+            Schedule::Weekly { time, weekdays }
+                if crate::automation_schedule::time_of_day(time).is_none()
+                    || weekdays.is_empty() =>
+            {
                 Some("Needs a time and a weekday")
             }
             Schedule::EveryHours { .. } | Schedule::Weekly { .. } => None,
@@ -393,7 +421,7 @@ pub(crate) fn find_step<'a>(steps: &'a [Step], id: &str) -> Option<&'a Step> {
 }
 
 /// The first problem as a sentence that names its step.
-fn reason(definition: &AutomationDefinition, problem: &AutomationProblem) -> String {
+pub(crate) fn reason(definition: &AutomationDefinition, problem: &AutomationProblem) -> String {
     let label = match problem.step_id.as_deref() {
         None => return problem.message.clone(),
         Some(AUTOMATION_TRIGGER_ID) => "Trigger",
@@ -522,9 +550,10 @@ fn load(connection: &Connection, id: Option<&str>) -> Result<Vec<Automation>, Er
             Ok(Automation {
                 id,
                 problems: problems(&definition, &agents),
-                definition,
                 enabled,
-                arrived_off: arrived && !enabled,
+                // A by-hand Automation is never on, here or anywhere.
+                arrived_off: arrived && !enabled && definition.trigger != Some(Trigger::ByHand),
+                definition,
             })
         })
         .collect()
@@ -596,7 +625,7 @@ pub(crate) fn switch_off_unfinished(connection: &Connection) -> Result<(), Error
         [],
     )?;
     for automation in load(connection, None)? {
-        if automation.enabled && !automation.problems.is_empty() {
+        if automation.enabled && !automation.can_be_on() {
             connection.execute(
                 "DELETE FROM automation_device_state WHERE automation_id = ?1",
                 [&automation.id],
@@ -647,8 +676,9 @@ impl Workspace {
         self.create_automation(definition)
     }
 
-    /// Replaces the whole definition. An edit that leaves something unfinished
-    /// switches the Automation off here, so one that is on can always run.
+    /// Replaces the whole definition. An edit that leaves something unfinished, or
+    /// makes the Automation one that is run by hand, switches it off here, so one
+    /// that is on can always run.
     pub fn update_automation(
         &mut self,
         id: &str,
@@ -657,6 +687,17 @@ impl Workspace {
         let definition = tidied(definition)?;
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
+        // A schedule counts again from a change to what starts the Automation, so
+        // an old count never fires the new schedule at once. One that could not be
+        // read before counts as changed.
+        let trigger_kept = one(&transaction, id)
+            .is_ok_and(|before| before.definition.trigger == definition.trigger);
+        if !trigger_kept {
+            transaction.execute(
+                "UPDATE automation_device_state SET schedule_from = NULL WHERE automation_id = ?1",
+                [id],
+            )?;
+        }
         let changed = transaction.execute(
             "UPDATE automations SET name = ?2, definition = ?3 WHERE id = ?1 AND trashed = 0",
             params![id, definition.name, encode(&definition)?],
@@ -665,7 +706,7 @@ impl Workspace {
             return Err(Error::AutomationNotFound(id.to_owned()));
         }
         let mut automation = one(&transaction, id)?;
-        if automation.enabled && !automation.problems.is_empty() {
+        if automation.enabled && !automation.can_be_on() {
             transaction.execute(
                 "DELETE FROM automation_device_state WHERE automation_id = ?1",
                 [id],
@@ -705,7 +746,7 @@ impl Workspace {
     }
 
     /// Switches an Automation on or off for this device. Switching on is refused
-    /// while anything is unfinished, and starts from the Workspace events logged so
+    /// while anything is unfinished and for one that is run by hand, and starts from the Workspace events logged so
     /// far: what happened while it was off never starts a run.
     pub fn set_automation_enabled(&mut self, id: &str, enabled: bool) -> Result<Automation, Error> {
         let transaction = self.connection.savepoint()?;
@@ -717,6 +758,11 @@ impl Workspace {
                     &automation.definition,
                     problem,
                 )));
+            }
+            if automation.definition.trigger == Some(Trigger::ByHand) {
+                return Err(Error::InvalidAutomation(
+                    "an Automation you run by hand is not switched on; use Run now".into(),
+                ));
             }
             // Already on keeps its place in the log.
             transaction.execute(

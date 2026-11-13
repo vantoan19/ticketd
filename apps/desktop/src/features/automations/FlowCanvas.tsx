@@ -14,11 +14,13 @@ import {
 import {
   Bell,
   Bot,
+  CalendarClock,
   CircleDot,
   CirclePlus,
   Ellipsis,
   MessageSquare,
   Pencil,
+  Play,
   Plus,
   Split,
   SquarePen,
@@ -30,6 +32,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
@@ -42,10 +45,11 @@ import {
   layoutFlow,
   type FlowList,
 } from "@/features/automations/canvas-layout";
-import type {
-  Automation,
-  AutomationAgent,
-  AutomationDefinition,
+import {
+  startsWithoutTicket,
+  type Automation,
+  type AutomationAgent,
+  type AutomationDefinition,
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
@@ -92,8 +96,29 @@ const TICKET_TRIGGERS = [
     icon: MessageSquare,
   },
 ] as const;
+/** The triggers that start a run without a ticket, under their own heading. */
+const OTHER_TRIGGERS = [
+  {
+    kind: "schedule",
+    label: "On a schedule",
+    note: "Every few hours, or at a time on the days you choose",
+    icon: CalendarClock,
+  },
+  {
+    kind: "by_hand",
+    label: "When I run it",
+    note: "Only when you press Run now",
+    icon: Play,
+  },
+] as const;
 /** The trigger kinds this page can set up. */
-export type TriggerChoice = (typeof TICKET_TRIGGERS)[number]["kind"];
+export type TriggerChoice = (
+  typeof TICKET_TRIGGERS | typeof OTHER_TRIGGERS
+)[number]["kind"];
+
+/** Why a step that acts on the ticket cannot be added. */
+const NEEDS_TICKET =
+  "Needs a ticket, and this Automation does not start from one";
 
 /** The step kinds this page can add and set up. */
 export type StepChoice = "run_agent" | "change_ticket" | "notify" | "if";
@@ -140,6 +165,21 @@ function TriggerMenu({ children }: { children: ReactNode }) {
             <span className="flow-menu-item-text">
               {label}
               {"note" in rest && <small>{rest.note}</small>}
+            </span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Without a ticket</DropdownMenuLabel>
+        {OTHER_TRIGGERS.map(({ kind, label, note, icon: Icon }) => (
+          <DropdownMenuItem
+            key={kind}
+            className="items-start whitespace-normal"
+            onSelect={() => onChooseTrigger(kind)}
+          >
+            <Icon aria-hidden />
+            <span className="flow-menu-item-text">
+              {label}
+              <small>{note}</small>
             </span>
           </DropdownMenuItem>
         ))}
@@ -244,8 +284,6 @@ type AddData = {
 function AddNode({ data }: NodeProps<Node<AddData>>) {
   const { onAddStep, ticketless } = useActions();
   const add = (kind: StepChoice) => onAddStep(data.index, kind, data.list);
-  const needsTicket =
-    "Needs a ticket, and this Automation does not start from one";
   return (
     <>
       {data.end && (
@@ -280,7 +318,7 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
                 Change ticket
                 <small>
                   {ticketless
-                    ? needsTicket
+                    ? NEEDS_TICKET
                     : "Add or remove a tag, set the status, or post an update"}
                 </small>
               </span>
@@ -305,7 +343,7 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
                 If
                 <small>
                   {ticketless
-                    ? needsTicket
+                    ? NEEDS_TICKET
                     : "Take one path or another, depending on the ticket"}
                 </small>
               </span>
@@ -422,8 +460,7 @@ export function FlowCanvas({
     return { nodes, edges };
   }, [trigger, only, steps, agents, projects, problems, selected]);
   const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
-  const ticketless =
-    trigger?.kind === "schedule" || trigger?.kind === "by_hand";
+  const ticketless = startsWithoutTicket(trigger);
   const context = useMemo(
     () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless }),
     [onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless],

@@ -11,15 +11,19 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   CONDITION_SOURCES,
+  dayName,
   OR,
   projectName,
   sourceName,
 } from "@/features/automations/automation-text";
-import type {
-  AutomationCondition,
-  AutomationTrigger,
+import {
+  WEEKDAYS,
+  type AutomationCondition,
+  type AutomationSchedule,
+  type AutomationTrigger,
 } from "@/features/automations/client";
 import type { Project } from "@/lib/api/client";
 import { ticketStatuses } from "@/lib/statuses";
@@ -80,6 +84,120 @@ function TagField({
       />
       <p className="flow-panel-note">{note}</p>
     </div>
+  );
+}
+
+/** Each way to repeat as it is when first chosen. */
+const NEW_SCHEDULES: {
+  [Kind in AutomationSchedule["kind"]]: Extract<
+    AutomationSchedule,
+    { kind: Kind }
+  >;
+} = {
+  every_hours: { kind: "every_hours", hours: 6 },
+  weekly: { kind: "weekly", time: "09:00", weekdays: ["mon"] },
+};
+
+/**
+ * When a schedule runs: every few hours, or at a time on chosen weekdays, in
+ * this computer's time. There is nothing finer to set.
+ */
+function ScheduleFields({
+  schedule,
+  onChange,
+}: {
+  schedule: AutomationSchedule;
+  onChange: (schedule: AutomationSchedule) => void;
+}) {
+  const id = useId();
+  return (
+    <>
+      <div className="flow-panel-section">
+        <span aria-hidden="true">Repeat</span>
+        <div>
+          <SegmentedControl
+            aria-label="Repeat"
+            value={schedule.kind}
+            onValueChange={(kind) => onChange(NEW_SCHEDULES[kind])}
+            options={[
+              { value: "every_hours", label: "Every few hours" },
+              { value: "weekly", label: "At set times" },
+            ]}
+          />
+        </div>
+      </div>
+      {schedule.kind === "every_hours" ? (
+        <div className="flow-panel-section">
+          <label htmlFor={id}>Every</label>
+          <div className="flow-inline">
+            <Input
+              id={id}
+              type="number"
+              min={1}
+              aria-label="Hours"
+              // Nothing typed yet is stored as 0, which the card says it needs.
+              value={schedule.hours || ""}
+              onChange={(event) =>
+                onChange({
+                  ...schedule,
+                  hours: Math.max(
+                    0,
+                    Math.floor(event.target.valueAsNumber) || 0,
+                  ),
+                })
+              }
+            />
+            <span>{schedule.hours === 1 ? "hour" : "hours"}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="flow-panel-section">
+          <label htmlFor={id}>At</label>
+          <div className="flow-inline">
+            <Input
+              id={id}
+              type="time"
+              aria-label="Time"
+              value={schedule.time}
+              onChange={(event) =>
+                onChange({ ...schedule, time: event.target.value })
+              }
+            />
+            <span>on</span>
+          </div>
+          <div className="flow-days" role="group" aria-label="Days">
+            {WEEKDAYS.map((day) => {
+              const chosen = schedule.weekdays.includes(day);
+              return (
+                <Button
+                  key={day}
+                  variant={chosen ? "default" : "outline"}
+                  size="icon-sm"
+                  aria-pressed={chosen}
+                  aria-label={dayName(day)}
+                  onClick={() =>
+                    onChange({
+                      ...schedule,
+                      // Kept in the order of the week.
+                      weekdays: WEEKDAYS.filter((item) =>
+                        item === day
+                          ? !chosen
+                          : schedule.weekdays.includes(item),
+                      ),
+                    })
+                  }
+                >
+                  {dayName(day).charAt(0)}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <p className="flow-panel-note">
+        If ticketd is closed then, it runs once when ticketd next starts.
+      </p>
+    </>
   );
 }
 
@@ -164,6 +282,20 @@ export function TriggerFields({
       return (
         <p className="flow-panel-note">
           Starts when an update is posted on a ticket.
+        </p>
+      );
+    case "schedule":
+      return (
+        <ScheduleFields
+          schedule={trigger.schedule}
+          onChange={(schedule) => onChange({ ...trigger, schedule })}
+        />
+      );
+    case "by_hand":
+      return (
+        <p className="flow-panel-note">
+          Starts only when you press Run now. It runs without a ticket, so its
+          agent works from its instructions alone.
         </p>
       );
     default:

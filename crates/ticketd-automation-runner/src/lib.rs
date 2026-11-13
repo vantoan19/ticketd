@@ -69,11 +69,16 @@ impl Runner {
         })
     }
 
-    /// One pass of the loop: queue a run for each new matching event, then start
-    /// queued runs up to the limit. Started runs execute on tasks of their own, so
-    /// this returns at once; it must be called inside a Tokio runtime.
+    /// One pass of the loop: queue a run for each new matching event and each
+    /// schedule that has come due, then start queued runs up to the limit. The first
+    /// pass after a start is what fires a schedule missed while ticketd was not
+    /// running. Started runs execute on tasks of their own, so this returns at once;
+    /// it must be called inside a Tokio runtime.
     pub fn tick(&self) -> Result<(), Error> {
-        (self.inner.open_workspace)()?.queue_automation_runs()?;
+        let mut workspace = (self.inner.open_workspace)()?;
+        workspace.queue_automation_runs()?;
+        workspace.queue_scheduled_automation_runs(None)?;
+        drop(workspace);
         self.start_queued()
     }
 
