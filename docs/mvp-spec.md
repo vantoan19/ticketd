@@ -1328,6 +1328,13 @@ execution or create a Project. Multiple Chats may run concurrently, including in
 the same directory; show shared-directory use. No automatic isolation or worktree
 management is implied. Each Chat has at most one active turn.
 
+While New Chat's message box is empty it may suggest up to three starts from local
+records: continuing the In progress tickets changed last (at most two), reviewing
+the latest In review ticket, and triaging the Inbox when anything is unread. The
+chosen folder's Project comes first; tickets already linked, or linked to a working
+Chat, are skipped. Choosing one fills the message and links its records as one undo
+step; it never sends.
+
 ### 21.3. Conversation and lifetime
 
 The UI displays streamed responses, tool activity, native approval requests and
@@ -1419,6 +1426,9 @@ ordinary core workflows. External source authority and existing concurrency rule
 continue to apply. Provider events do not directly mutate domain records or bypass
 the CLI/core. Chat messages do not automatically become Activities or Documents;
 offer Save as Document for an assistant response.
+
+A file a step names opens in the computer's default app for its type. Only files
+inside the Chat's execution folder open; a file no longer there is shown as text.
 
 ### 21.5. Retention and recovery
 

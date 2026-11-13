@@ -2,8 +2,17 @@ import { useEffect, useState } from "react";
 import { AudioLines, File, FileVideo } from "lucide-react";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 
-/** Decorative only: the file's authored name and actions remain outside the thumbnail. */
-export function AttachmentThumbnail({ file }: { file: Attachment }) {
+/**
+ * Decorative only: the file's authored name and actions remain outside the thumbnail.
+ * `tile` is the 96×72 image tile a Chat message shows.
+ */
+export function AttachmentThumbnail({
+  file,
+  size = "icon",
+}: {
+  file: Attachment;
+  size?: "icon" | "tile";
+}) {
   const [image, setImage] = useState<{ id: string; url: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const candidate =
@@ -40,7 +49,11 @@ export function AttachmentThumbnail({ file }: { file: Attachment }) {
       ? AudioLines
       : File;
   return (
-    <span className="attachment-thumbnail" aria-hidden="true">
+    <span
+      className="attachment-thumbnail"
+      data-size={size === "tile" ? "tile" : undefined}
+      aria-hidden="true"
+    >
       {candidate && image?.id === file.id && failed !== file.id ? (
         <img
           src={image.url}

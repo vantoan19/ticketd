@@ -905,10 +905,12 @@ test("a finished turn folds under one row, its final response outside, and opens
     name: "Worked for 2m 13s · 1 failed",
   });
   expect(row.getAttribute("aria-controls")).toBe(body.id);
-  // A row with nothing to open is not a control.
+  // A row with nothing to open is not a control; its file name is.
   expect(
-    within(body).getByText("src/auth/limiter.ts").closest("button"),
-  ).toBeNull();
+    within(body)
+      .getByRole("button", { name: "Open src/auth/limiter.ts" })
+      .closest(".chat-steps")?.tagName,
+  ).toBe("DIV");
   const line = button("Run npm run test:all, Failed");
   fireEvent.click(line);
   expect(line.getAttribute("aria-expanded")).toBe("true");

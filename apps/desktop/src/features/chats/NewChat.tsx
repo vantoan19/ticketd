@@ -23,12 +23,15 @@ import {
   type HarnessStatus,
   type LinkedRecord,
   type ProblemKind,
+  type Suggestion,
 } from "@/features/chats/client";
 import { ProblemNotice } from "@/features/chats/ChatDetail";
 import { Composer } from "@/features/chats/Composer";
 import { carryIntoChat } from "@/features/chats/drafts";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import { harnessUsable } from "@/features/chats/model";
+import { suggestionFill } from "@/features/chats/suggestion-fill";
+import { Suggestions } from "@/features/chats/Suggestions";
 import { notificationClient } from "@/lib/api/notifications";
 import { loadPreferences } from "@/lib/preferences";
 
@@ -78,6 +81,60 @@ export function NewChat({
   const [links, setLinks] = useState<LinkedRecord[]>([]);
   const [failure, setFailure] = useState("");
   const [probe, setProbe] = useState(0);
+  // Suggestions show only while the box is empty. Choosing one refills the box
+  // (`fill` remounts the composer with the prompt) and links its records; both are
+  // one undo step, kept in `before`.
+  const [typed, setTyped] = useState(draft);
+  const [fill, setFill] = useState(0);
+  const [before, setBefore] = useState<{
+    text: string;
+    links: LinkedRecord[];
+    prompt: string;
+  } | null>(null);
+  const [linkedNote, setLinkedNote] = useState("");
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const box = input.current;
+    if (!fill || !box) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, [fill]);
+  const writeDraft = (text: string) => {
+    draft = text;
+    setTyped(text);
+  };
+  const choose = (suggestion: Suggestion) => {
+    const { prompt, links: chosen } = suggestionFill(suggestion);
+    const added = chosen.filter(
+      (record) =>
+        !links.some(
+          (item) => item.kind === record.kind && item.id === record.id,
+        ),
+    );
+    setBefore({ text: draft, links, prompt });
+    setLinks([...links, ...added]);
+    writeDraft(prompt);
+    setFill((count) => count + 1);
+    const names = added.map((record) =>
+      record.kind === "ticket" ? record.reference : record.title,
+    );
+    setLinkedNote(
+      names.length === 0
+        ? ""
+        : names.length <= 3
+          ? `Linked ${names.join(", ")}.`
+          : `Linked ${names.length} tickets.`,
+    );
+  };
+  const undoChoice = () => {
+    if (!before) return false;
+    setLinks(before.links);
+    writeDraft(before.text);
+    setBefore(null);
+    setLinkedNote("");
+    setFill((count) => count + 1);
+    return true;
+  };
   /**
    * Names a request to the host. It is repeated only when the very same request
    * is sent again after a failure, which then finds what the first try made; any
@@ -147,55 +204,77 @@ export function NewChat({
       <div className="chat-new">
         <div>
           <h2>What should we work on?</h2>
-          <Composer
-            autoFocus
-            placeholder="Describe a task or ask a question"
-            initialText={draft}
-            onText={(text) => (draft = text)}
-            controls={(text) => ({
-              send: "send",
-              enabled: ready && text.trim() !== "",
-            })}
-            onSend={async (message) => {
-              if (!harness) return;
-              const input = {
-                harness_id: harness.id,
-                folder,
-                links: links.map(({ kind, id }) => ({ kind, id })),
-                message,
-              };
-              const request = JSON.stringify(input);
-              if (attempt.current.request !== request)
-                attempt.current = { id: crypto.randomUUID(), request };
-              // Notifications are asked for with the first Chat message.
-              if (loadPreferences().notifyChats)
-                void notificationClient.requestPermission().catch(() => {});
-              try {
-                const created = await client.createChat({
-                  command_id: attempt.current.id,
-                  ...input,
-                });
-                // Answered: whatever is asked for next is a new request.
-                attempt.current = { id: crypto.randomUUID(), request: "" };
-                // The Chat exists but holds no message. It is opened with the
-                // unsent words in its composer, so they are sent there and no
-                // second Chat is made for them.
-                if (created.send_error)
-                  carryIntoChat(
-                    created.chat_id,
-                    message,
-                    `Your first message was not sent: ${created.send_error}. It is in the box below.`,
-                  );
-                setFailure("");
-                onCreated(created.chat_id);
-              } catch (reason) {
-                setFailure(
-                  `Could not start the Chat: ${reason instanceof Error ? reason.message : String(reason)}`,
-                );
-                throw reason;
-              }
+          <div
+            className="chat-new-composer"
+            onKeyDown={(event) => {
+              // Undo right after choosing a suggestion takes back the prompt
+              // and its links together.
+              if (
+                (event.metaKey || event.ctrlKey) &&
+                !event.shiftKey &&
+                event.key.toLowerCase() === "z" &&
+                before &&
+                typed === before.prompt &&
+                undoChoice()
+              )
+                event.preventDefault();
             }}
-          />
+          >
+            <Composer
+              key={fill}
+              autoFocus
+              inputRef={input}
+              placeholder="Describe a task or ask a question"
+              initialText={draft}
+              onText={(text) => {
+                writeDraft(text);
+                if (before && text !== before.prompt) setBefore(null);
+              }}
+              controls={(text) => ({
+                send: "send",
+                enabled: ready && text.trim() !== "",
+              })}
+              onSend={async (message) => {
+                if (!harness) return;
+                const input = {
+                  harness_id: harness.id,
+                  folder,
+                  links: links.map(({ kind, id }) => ({ kind, id })),
+                  message,
+                };
+                const request = JSON.stringify(input);
+                if (attempt.current.request !== request)
+                  attempt.current = { id: crypto.randomUUID(), request };
+                // Notifications are asked for with the first Chat message.
+                if (loadPreferences().notifyChats)
+                  void notificationClient.requestPermission().catch(() => {});
+                try {
+                  const created = await client.createChat({
+                    command_id: attempt.current.id,
+                    ...input,
+                  });
+                  // Answered: whatever is asked for next is a new request.
+                  attempt.current = { id: crypto.randomUUID(), request: "" };
+                  // The Chat exists but holds no message. It is opened with the
+                  // unsent words in its composer, so they are sent there and no
+                  // second Chat is made for them.
+                  if (created.send_error)
+                    carryIntoChat(
+                      created.chat_id,
+                      message,
+                      `Your first message was not sent: ${created.send_error}. It is in the box below.`,
+                    );
+                  setFailure("");
+                  onCreated(created.chat_id);
+                } catch (reason) {
+                  setFailure(
+                    `Could not start the Chat: ${reason instanceof Error ? reason.message : String(reason)}`,
+                  );
+                  throw reason;
+                }
+              }}
+            />
+          </div>
           <div className="chat-chips">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -272,6 +351,18 @@ export function NewChat({
           </div>
         </div>
         <div>
+          {typed.trim() === "" && (
+            <Suggestions
+              folder={folder}
+              linked={links.flatMap((record) =>
+                record.kind === "ticket" ? [record.id] : [],
+              )}
+              onChoose={choose}
+            />
+          )}
+          <p className="sr-only" role="status">
+            {linkedNote}
+          </p>
           {shared > 0 && (
             <p className="chat-fine">
               {shared === 1

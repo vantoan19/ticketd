@@ -595,7 +595,11 @@ export function ChatDetail({
       (reason: unknown) => setFailure(String(reason)),
     );
   return (
-    <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
+    <section
+      className="ticket-detail chat-pane"
+      aria-labelledby="chat-heading"
+      data-expanded={expanded ? "" : undefined}
+    >
       <div className="detail-header">
         <div className="detail-title-group">
           {single && (

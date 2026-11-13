@@ -1,9 +1,11 @@
 import {
   Fragment,
   memo,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -16,12 +18,21 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  Eye,
   FilePlus2,
   FileText,
+  Globe,
   Info,
   LoaderCircle,
   MessageSquareText,
+  Pencil,
+  Search,
   Square,
+  SquarePlus,
+  Terminal,
+  Trash2,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -35,17 +46,20 @@ import {
 } from "@/components/ui/tooltip";
 import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import type {
-  ChatState,
-  RecordChange,
-  Step,
-  TranscriptItem,
+import {
+  useChatClient,
+  type ChatState,
+  type RecordChange,
+  type Step,
+  type TranscriptItem,
 } from "@/features/chats/client";
 import {
   binarySize,
   duration,
   elapsed,
+  plainOutput,
   receiptLine,
   stepWords,
   targetLines,
@@ -53,6 +67,9 @@ import {
   type Turn,
   type TurnRow,
 } from "@/features/chats/model";
+import { FileName } from "@/features/chats/FileName";
+import { ChatFilesContext, shownNames } from "@/features/chats/files";
+import { ImageTiles } from "@/features/chats/ImageTiles";
 import { OutputBox } from "@/features/chats/OutputBox";
 import { useReading } from "@/features/chats/use-transcript-scroll";
 
@@ -75,19 +92,68 @@ const DELIVERY_CAPTION = {
   set_aside: "Not confirmed · set aside",
 } as const;
 
+/** "10:44": when your message was sent, as the hover line says it. */
+const sentAt = (stamp: string) => {
+  const date = new Date(stamp);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+};
+
+/**
+ * Your message, exactly as sent, on the right. Past four lines it folds behind
+ * Show more. Its time and Copy show on hover or focus.
+ */
 function UserMessage({ item }: { item: Of<"user"> }) {
   const caption = DELIVERY_CAPTION[item.delivery];
+  const { copied, error, copy } = useCopy();
+  const text = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  const [more, setMore] = useState(false);
+  useLayoutEffect(() => {
+    const box = text.current;
+    if (box && !more) setLong(box.scrollHeight > box.clientHeight + 1);
+  }, [item.text, more]);
+  const time = sentAt(item.at);
   return (
-    <>
-      <div
-        className="chat-you"
-        data-unsent={item.delivery === "delivered" ? undefined : ""}
-      >
-        <span className="sr-only">You: </span>
-        {item.text}
+    <div className="chat-you-part">
+      {item.images && item.images.length > 0 && (
+        <ImageTiles images={item.images} />
+      )}
+      <div className="chat-you">
+        <div ref={text} data-clamped={more ? undefined : ""}>
+          <span className="sr-only">You: </span>
+          {item.text}
+        </div>
       </div>
+      {long && (
+        <Button
+          variant="ghost"
+          size="xs"
+          aria-expanded={more}
+          onClick={() => setMore(!more)}
+        >
+          {more ? "Show less" : "Show more"}
+        </Button>
+      )}
       {caption && <div className="chat-caption">{caption}</div>}
-    </>
+      <div className="chat-you-actions">
+        {time && <span className="chat-fine">{time}</span>}
+        <IconButton
+          label="Copy message"
+          onClick={() => void copy("Message", item.text)}
+        >
+          {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+        </IconButton>
+        <span className="sr-only" role="status">
+          {copied && "Copied"}
+          {error}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -152,6 +218,24 @@ function useNow(on: boolean) {
   return now;
 }
 
+/** One neutral icon per step kind; the verb carries the meaning. */
+const STEP_ICONS: Record<Step["kind"], LucideIcon> = {
+  read: Eye,
+  search: Search,
+  edit: Pencil,
+  create: SquarePlus,
+  delete: Trash2,
+  run: Terminal,
+  web: Globe,
+  other: Wrench,
+};
+
+/** Whether a step's targets are files that can still be opened. */
+const opensFiles = (step: Step) =>
+  (step.kind === "read" && step.variant !== "list") ||
+  step.kind === "edit" ||
+  step.kind === "create";
+
 /** What an opened step row holds: its command and output, its targets or its output. */
 function StepDetail({
   id,
@@ -165,6 +249,14 @@ function StepDetail({
   const targets = step.targets ?? [];
   const words = stepWords(step);
   const command = step.kind === "run" ? step.command : undefined;
+  const { folder } = useContext(ChatFilesContext);
+  const [failure, setFailure] = useState("");
+  const files = opensFiles(step);
+  // A command says where it ran: its own folder, or the Chat's.
+  const detail =
+    command && !step.folder && folder
+      ? [words.detail, `in ${folder}`].filter(Boolean).join(" · ")
+      : words.detail;
   return (
     <div className="chat-steplist" id={command ? undefined : id}>
       {command ? (
@@ -173,7 +265,15 @@ function StepDetail({
         <ul>
           {targets.map((target, index) => (
             <li key={index}>
-              <code>{target.text}</code>
+              {files ? (
+                <FileName
+                  path={target.text}
+                  shown={target.text}
+                  onFailed={setFailure}
+                />
+              ) : (
+                <code>{target.text}</code>
+              )}
               {target.scope && (
                 <>
                   {" "}
@@ -185,9 +285,16 @@ function StepDetail({
           ))}
         </ul>
       ) : (
-        step.output && <pre className="chat-out">{step.output}</pre>
+        step.output && (
+          <pre className="chat-out">{plainOutput(step.output)}</pre>
+        )
       )}
-      {words.detail && <p className="chat-fine">{words.detail}</p>}
+      {failure && (
+        <p className="chat-fine" role="alert">
+          {failure}
+        </p>
+      )}
+      {detail && <p className="chat-fine">{detail}</p>}
       {step.result && <p className="chat-fine">{step.result}</p>}
       {step.truncated && (
         <p className="chat-fine">
@@ -245,18 +352,47 @@ export function StepRow({
   const started = step.started_at ? Date.parse(step.started_at) : NaN;
   const clock =
     running && now - started >= 1000 ? duration(now - started) : undefined;
+  const [failure, setFailure] = useState("");
+  const detail =
+    (step.kind === "run" && Boolean(step.command)) ||
+    Boolean(step.output) ||
+    (step.targets?.length ?? 0) > 2 ||
+    Boolean(words.detail || step.result || step.truncated);
+  // A row that opens is a button already, so its names cannot be buttons too.
+  const files = !detail && opensFiles(step) ? (step.targets ?? []) : [];
+  const names = shownNames(files.map((target) => target.text));
+  const Icon = STEP_ICONS[step.kind];
   const line = (
     <RowLine
       icon={
-        running ? <LoaderCircle size={12} className="chat-spin" /> : undefined
+        running ? (
+          <LoaderCircle size={12} className="chat-spin" />
+        ) : (
+          <Icon size={16} />
+        )
       }
     >
-      {words.parts.map((part, index) => (
-        <Fragment key={index}>
-          {index > 0 && " "}
-          {part.code ? <code>{part.text}</code> : part.text}
-        </Fragment>
-      ))}
+      {words.parts.map((part, index) => {
+        const file = part.code
+          ? files.findIndex((target) => target.text === part.text)
+          : -1;
+        return (
+          <Fragment key={index}>
+            {index > 0 && " "}
+            {file >= 0 ? (
+              <FileName
+                path={part.text}
+                shown={names[file] ?? part.text}
+                onFailed={setFailure}
+              />
+            ) : part.code ? (
+              <code>{part.text}</code>
+            ) : (
+              part.text
+            )}
+          </Fragment>
+        );
+      })}
       {words.suffix ? (
         <>
           <span aria-hidden> · </span>
@@ -274,11 +410,6 @@ export function StepRow({
       )}
     </RowLine>
   );
-  const detail =
-    (step.kind === "run" && Boolean(step.command)) ||
-    Boolean(step.output) ||
-    (step.targets?.length ?? 0) > 2 ||
-    Boolean(words.detail || step.result || step.truncated);
   const row = detail ? (
     <button
       type="button"
@@ -323,6 +454,11 @@ export function StepRow({
       ) : (
         row
       )}
+      {failure && (
+        <p className="chat-fine chat-step-alert" role="alert">
+          {failure}
+        </p>
+      )}
       {open && <StepDetail id={id} step={step} harness={harness} />}
     </>
   );
@@ -330,25 +466,47 @@ export function StepRow({
 
 /** A record the agent changed, as a step row: verb first, the reference in mono. */
 function RecordStep({ change }: { change: RecordChange }) {
-  const [icon, words] =
-    change.kind === "status"
-      ? [
-          <StatusIcon key="icon" status={change.to} decorative />,
-          <>
-            Moved <Reference>{change.reference}</Reference> to {change.to}
-          </>,
-        ]
-      : change.kind === "update"
-        ? [
-            <MessageSquareText key="icon" size={16} />,
-            <>
-              Posted an update on <Reference>{change.reference}</Reference>
-            </>,
-          ]
-        : [
-            <FileText key="icon" size={16} />,
-            <>Created the Document “{change.title}”</>,
-          ];
+  const openDocument = useContext(DocumentNavigation);
+  let icon: ReactNode;
+  let words: ReactNode;
+  switch (change.kind) {
+    case "status":
+      icon = <StatusIcon status={change.to} decorative />;
+      words = (
+        <>
+          Moved <Reference>{change.reference}</Reference> to {change.to}
+        </>
+      );
+      break;
+    case "update":
+      icon = <MessageSquareText size={16} />;
+      words = (
+        <>
+          Posted an update on <Reference>{change.reference}</Reference>
+        </>
+      );
+      break;
+    case "document":
+      icon = <FileText size={16} />;
+      // The title is the link, without quotes.
+      words = (
+        <>
+          Created the Document{" "}
+          {openDocument ? (
+            <button
+              type="button"
+              className="chat-record-link"
+              onClick={() => openDocument(change.document_id)}
+            >
+              {change.title}
+            </button>
+          ) : (
+            change.title
+          )}
+        </>
+      );
+      break;
+  }
   return (
     <div className="chat-steps" data-anchor="">
       <RowLine icon={icon}>{words}</RowLine>
@@ -786,6 +944,20 @@ export function Transcript({
 }) {
   const harness = chat.harness.name;
   const readOnly = chat.retention === "trashed";
+  const client = useChatClient();
+  const chatId = chat.id;
+  const folder = chat.folder.name;
+  const missing = chat.folder.missing;
+  const files = useMemo(
+    () => ({
+      folder,
+      // With the folder missing there is nothing to open.
+      ...(!missing && {
+        open: (path: string) => client.openFile(chatId, path),
+      }),
+    }),
+    [client, chatId, folder, missing],
+  );
   if (picked)
     return (
       <div className="chat-col" ref={contentRef}>
@@ -828,73 +1000,81 @@ export function Transcript({
   );
   const working = chat.activity === "working";
   return (
-    <div className="chat-col" ref={contentRef}>
-      {parts.map((part) => {
-        const marker = newFrom !== undefined &&
-          (part.kind === "turn"
-            ? part.turn.ids.includes(newFrom)
-            : part.item.id === newFrom) && (
-            <NewMarker key="new" markerRef={markerRef ?? null} />
-          );
-        return part.kind === "turn" ? (
-          <Fragment key={part.turn.key}>
-            {marker}
-            <TurnView
-              turn={part.turn}
-              chatId={chat.id}
-              harness={harness}
-              readOnly={readOnly}
-              actions={actions}
-              live={live}
-            />
-          </Fragment>
-        ) : (
-          <Fragment key={part.item.id}>
-            {marker}
-            <div className="chat-part" data-anchor="" data-seen={part.item.id}>
-              <Item
-                item={part.item}
+    <ChatFilesContext.Provider value={files}>
+      <div className="chat-col" ref={contentRef}>
+        {parts.map((part) => {
+          const marker = newFrom !== undefined &&
+            (part.kind === "turn"
+              ? part.turn.ids.includes(newFrom)
+              : part.item.id === newFrom) && (
+              <NewMarker key="new" markerRef={markerRef ?? null} />
+            );
+          return part.kind === "turn" ? (
+            <Fragment key={part.turn.key}>
+              {marker}
+              <TurnView
+                turn={part.turn}
+                chatId={chat.id}
                 harness={harness}
                 readOnly={readOnly}
                 actions={actions}
+                live={live}
               />
-            </div>
-          </Fragment>
-        );
-      })}
-      {chat.catching_up && (
-        <>
-          <div className="chat-skel chat-skel-long" aria-hidden="true" />
-          <div className="chat-skel chat-skel-short" aria-hidden="true" />
-        </>
-      )}
-      {chat.catching_up ? (
-        <WorkingLine label="Catching up…" />
-      ) : chat.activity === "waiting" ? (
-        <WorkingLine label="Waiting for you" spinner={false} />
-      ) : working && chat.stopping ? (
-        <WorkingLine label="Stopping…" spinner={!stepRuns} />
-      ) : working && chat.opening ? (
-        <WorkingLine
-          key="opening"
-          label={
-            chat.opening === "resume"
-              ? `Resuming the ${harness} session…`
-              : `Starting ${harness}…`
-          }
-          fromShown
-        />
-      ) : (
-        // After an unconfirmed stop the open turn row and the notice say it.
-        working &&
-        !stepRuns &&
-        !parts.some((part) => part.kind === "turn" && part.turn.unconfirmed) &&
-        (chat.doing ? (
-          <WorkingLine label={chat.doing.label} since={chat.doing.since} />
+            </Fragment>
+          ) : (
+            <Fragment key={part.item.id}>
+              {marker}
+              <div
+                className="chat-part"
+                data-anchor=""
+                data-seen={part.item.id}
+              >
+                <Item
+                  item={part.item}
+                  harness={harness}
+                  readOnly={readOnly}
+                  actions={actions}
+                />
+              </div>
+            </Fragment>
+          );
+        })}
+        {chat.catching_up && (
+          <>
+            <div className="chat-skel chat-skel-long" aria-hidden="true" />
+            <div className="chat-skel chat-skel-short" aria-hidden="true" />
+          </>
+        )}
+        {chat.catching_up ? (
+          <WorkingLine label="Catching up…" />
+        ) : chat.activity === "waiting" ? (
+          <WorkingLine label="Waiting for you" spinner={false} />
+        ) : working && chat.stopping ? (
+          <WorkingLine label="Stopping…" spinner={!stepRuns} />
+        ) : working && chat.opening ? (
+          <WorkingLine
+            key="opening"
+            label={
+              chat.opening === "resume"
+                ? `Resuming the ${harness} session…`
+                : `Starting ${harness}…`
+            }
+            fromShown
+          />
         ) : (
-          <WorkingLine label="Working…" />
-        ))
-      )}
-    </div>
+          // After an unconfirmed stop the open turn row and the notice say it.
+          working &&
+          !stepRuns &&
+          !parts.some(
+            (part) => part.kind === "turn" && part.turn.unconfirmed,
+          ) &&
+          (chat.doing ? (
+            <WorkingLine label={chat.doing.label} since={chat.doing.since} />
+          ) : (
+            <WorkingLine label="Working…" />
+          ))
+        )}
+      </div>
+    </ChatFilesContext.Provider>
   );
 }
