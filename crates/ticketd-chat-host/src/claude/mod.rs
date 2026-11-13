@@ -5,8 +5,9 @@
 //! MCP servers and permission mode. For a person's Chat the adapter passes only the
 //! working directory, the executable it found and the session to resume. For an
 //! unattended session (an Automation run) it also passes the agent's model, allowed
-//! tools and turn limit, and Claude Code denies what is not allowed instead of
-//! asking. It never reads credentials and never asks for permissions to be skipped.
+//! tools and turn limit; Claude Code denies what is not allowed instead of asking,
+//! and the person's own settings files are left out so they cannot allow more. It
+//! never reads credentials and never asks for permissions to be skipped.
 
 mod runtime;
 mod session;
@@ -110,12 +111,18 @@ impl ClaudeAdapter {
 
 /// What the bridge is told for an unattended session. Claude Code runs in its
 /// "don't ask" permission mode: a tool on `allowed_tools` runs, anything else is
-/// denied without a prompt. The tools of a switch that is off are also disallowed
-/// outright, so an allow rule in the person's own Claude Code settings cannot bring
-/// them back.
-// ponytail: commands are matched by Claude Code's prefix rules, so an allow rule for
-// a command in the person's own settings still applies to an agent that may run only
-// the ticketd CLI. Close that with a PreToolUse hook in the bridge if it matters.
+/// denied without a prompt. The bridge loads none of the person's own Claude Code
+/// settings for such a session, so this list is the whole of what the agent may do.
+/// The tools of a switch that is off are also disallowed outright, which takes them
+/// away from the agent: Claude Code would otherwise read files in the step's folder
+/// without needing a rule.
+///
+/// A command rule matches the command as the agent wrote it, up to the `*` (Claude
+/// Code's permissions documentation, "Bash" and "PowerShell"). The agent's main shell
+/// is PowerShell on Windows and Bash elsewhere, so each command is allowed in both.
+// ponytail: the rules for the CLI's path cover the ways an agent usually writes it.
+// One written another way (a path with `*` or parentheses, `/c/...` in Git Bash) is
+// denied and the step fails saying so; add the form here when one turns up.
 pub(super) fn unattended_options(unattended: &Unattended) -> Value {
     let tools = &unattended.tools;
     let (mut allowed, mut disallowed) = (Vec::new(), Vec::new());
@@ -128,18 +135,40 @@ pub(super) fn unattended_options(unattended: &Unattended) -> Value {
         list.extend(names.iter().map(|name| (*name).to_owned()));
     }
     // The ticketd CLI is always allowed, under its name and under the path the
-    // Chat's context gives the agent, bare or quoted.
-    allowed.push("Bash(ticketd:*)".to_owned());
-    if let Some(cli) = &unattended.ticketd_cli {
-        let cli = cli.to_string_lossy();
-        allowed.push(format!("Bash({cli}:*)"));
-        allowed.push(format!("Bash(\"{cli}\":*)"));
+    // Chat's context gives the agent, as each shell writes it.
+    let cli = unattended
+        .ticketd_cli
+        .as_ref()
+        .map(|cli| cli.to_string_lossy());
+    let mut bash = vec!["ticketd".to_owned()];
+    let mut powershell = bash.clone();
+    if let Some(cli) = &cli {
+        bash.extend([cli.to_string(), format!("\"{cli}\"")]);
+        if cli.contains('\\') {
+            // Git Bash also takes a Windows path with forward slashes.
+            let slashed = cli.replace('\\', "/");
+            bash.extend([slashed.clone(), format!("\"{slashed}\"")]);
+        }
+        powershell.extend([
+            cli.to_string(),
+            format!("& \"{cli}\""),
+            format!("& '{cli}'"),
+        ]);
     }
+    allowed.extend(bash.iter().map(|command| format!("Bash({command} *)")));
+    allowed.extend(
+        powershell
+            .iter()
+            .map(|command| format!("PowerShell({command} *)")),
+    );
+    const SHELLS: [&str; 2] = ["Bash", "PowerShell"];
     match (tools.run_commands, tools.allowed_commands.as_slice()) {
         (false, _) => {}
-        (true, []) => allowed.push("Bash".to_owned()),
+        (true, []) => allowed.extend(SHELLS.map(str::to_owned)),
         (true, commands) => {
-            allowed.extend(commands.iter().map(|command| format!("Bash({command}:*)")));
+            for command in commands {
+                allowed.extend(SHELLS.map(|shell| format!("{shell}({command} *)")));
+            }
         }
     }
     let mut options = json!({

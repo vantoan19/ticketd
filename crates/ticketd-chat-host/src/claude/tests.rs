@@ -797,7 +797,7 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
     assert_eq!(
         super::unattended_options(&unattended),
         json!({
-            "allowed_tools": ["Bash(ticketd:*)"],
+            "allowed_tools": ["Bash(ticketd *)", "PowerShell(ticketd *)"],
             "disallowed_tools": [
                 "Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"
             ],
@@ -809,7 +809,41 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
     unattended.tools.run_commands = true;
     unattended.tools.allowed_commands.clear();
     let options = super::unattended_options(&unattended);
-    assert_eq!(options["allowed_tools"], json!(["Bash(ticketd:*)", "Bash"]));
+    assert_eq!(
+        options["allowed_tools"],
+        json!([
+            "Bash(ticketd *)",
+            "PowerShell(ticketd *)",
+            "Bash",
+            "PowerShell"
+        ])
+    );
+}
+
+/// Claude Code matches a rule against the command as the agent wrote it, and on
+/// Windows the agent's main shell is PowerShell. So the ticketd CLI is allowed in
+/// both shells, under its name and under each way its path is written there.
+#[test]
+fn the_ticketd_cli_is_allowed_by_its_path_as_either_shell_writes_it() {
+    let mut unattended = reader_that_tests();
+    unattended.tools.run_commands = false;
+    unattended.tools.read_files = false;
+    unattended.ticketd_cli = Some(PathBuf::from(r"C:\Program Files\ticketd\ticketd.exe"));
+
+    assert_eq!(
+        super::unattended_options(&unattended)["allowed_tools"],
+        json!([
+            "Bash(ticketd *)",
+            r"Bash(C:\Program Files\ticketd\ticketd.exe *)",
+            r#"Bash("C:\Program Files\ticketd\ticketd.exe" *)"#,
+            "Bash(C:/Program Files/ticketd/ticketd.exe *)",
+            r#"Bash("C:/Program Files/ticketd/ticketd.exe" *)"#,
+            "PowerShell(ticketd *)",
+            r"PowerShell(C:\Program Files\ticketd\ticketd.exe *)",
+            r#"PowerShell(& "C:\Program Files\ticketd\ticketd.exe" *)"#,
+            r"PowerShell(& 'C:\Program Files\ticketd\ticketd.exe' *)",
+        ])
+    );
 }
 
 /// The open command carries the agent's model, tools and turn limit (the fixture

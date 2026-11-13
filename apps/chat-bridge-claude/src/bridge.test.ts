@@ -288,6 +288,9 @@ describe("open", () => {
       model: "claude-test",
     });
     expect(fake.options).not.toHaveProperty("allowDangerouslySkipPermissions");
+    // None of the person's user, project or local settings are loaded, so an allow
+    // rule there cannot widen what the agent may do.
+    expect(fake.options.settingSources).toEqual([]);
 
     // A request that still reaches the bridge is denied here, never sent to the host.
     const asked = fake.askPermission("Bash", { command: "rm -rf build" });
