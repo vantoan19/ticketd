@@ -979,7 +979,7 @@ async fn a_typed_failure_notices_and_reported_settings_reach_a_view_opened_after
     assert_eq!(shown.message.as_deref(), Some("said by the harness"));
     assert!(opened.snapshot.items.iter().any(|item| matches!(
         item,
-        Item::Marker { reason: "note", message: Some(text), .. } if text == "Reconnecting (2/5)"
+        Item::Marker { reason: "warning", message: Some(text), .. } if text == "Reconnecting (2/5)"
     )));
     let permissions = opened.snapshot.chat.harness.permissions.unwrap();
     assert!(permissions.contains("model m-1") && permissions.contains("permission mode default"));
@@ -1512,7 +1512,7 @@ async fn an_unavailable_capability_is_a_notice_line_and_never_hides_why_a_turn_s
     let (opened, _) = f.open(&id).await;
     assert!(opened.snapshot.items.iter().any(|item| matches!(
         item,
-        Item::Marker { reason: "note", message: Some(said), .. }
+        Item::Marker { reason: "warning", message: Some(said), .. }
             if said == "Codex could not start the MCP server github: exited with 1"
     )));
     assert_eq!(opened.snapshot.chat.problem, None);

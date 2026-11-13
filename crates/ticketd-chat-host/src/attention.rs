@@ -154,7 +154,15 @@ pub fn status(facts: &Facts<'_>) -> Status {
         InteractionKind::Question { .. } => None,
     });
     if let Some(description) = approval {
-        let command = crate::step_kind::unwrapped(description);
+        // A ticketd call reads without ticketd's path or the variable naming it.
+        let command = match crate::step_kind::ticketd_calls(description) {
+            Some(calls) => calls
+                .iter()
+                .map(|args| crate::step_kind::ticketd_command(args))
+                .collect::<Vec<_>>()
+                .join("; "),
+            None => crate::step_kind::unwrapped(description),
+        };
         return make(Rank::Approval, "Approval needed", plain_start(&command));
     }
     let question = requests.iter().find_map(|request| match &request.kind {

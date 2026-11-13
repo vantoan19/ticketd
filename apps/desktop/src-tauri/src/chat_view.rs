@@ -529,6 +529,8 @@ pub struct Tracker {
     open: HashMap<String, ChatMessage>,
     last_response: Option<String>,
     last_change: Option<ChatAgentChange>,
+    /// The turn `last_change` was made in.
+    last_change_turn: Option<String>,
     updated_at: Option<String>,
     /// Reasoning, plan and files records of the latest turn: how they read depends on
     /// whether it still runs.
@@ -603,6 +605,10 @@ impl Tracker {
                 } else {
                     self.open.insert(message.id.clone(), message.clone());
                 }
+                // A change from an earlier turn is not what the Chat last did.
+                if message.turn_id != self.last_change_turn {
+                    self.last_change = None;
+                }
                 self.last_response = Some(message.text.clone());
             }
             ChatItem::Interaction(interaction) => {
@@ -635,7 +641,10 @@ impl Tracker {
             }
             ChatItem::Tool(tool) => {
                 if let Some(changes) = agent_changes(tool) {
-                    self.last_change = changes.last().cloned().or(self.last_change.take());
+                    if let Some(change) = changes.last() {
+                        self.last_change = Some(change.clone());
+                        self.last_change_turn = Some(tool.turn_id.clone());
+                    }
                 }
                 // Only the latest turn's calls can still be asked about.
                 self.turn_tools
