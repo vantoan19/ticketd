@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { ticketStatuses } from "@/lib/statuses";
 
 const limitSchema = z.number().int().positive();
+const statusSchema = z.enum(ticketStatuses);
 
 export const automationAgentSettingsSchema = z.object({
   name: z.string(),
@@ -59,10 +61,32 @@ const stepSchema = z.union([
   }),
   z.looseObject({
     id: z.string(),
-    kind: z.enum(["change_ticket", "notify", "if"]),
+    kind: z.literal("change_ticket"),
+    /** null until the person chooses what it changes. */
+    change: z
+      .discriminatedUnion("action", [
+        z.object({ action: z.literal("add_tag"), tag: z.string() }),
+        z.object({ action: z.literal("remove_tag"), tag: z.string() }),
+        z.object({ action: z.literal("set_status"), status: statusSchema }),
+        /** `text` may hold field references; see `automation-text.ts`. */
+        z.object({ action: z.literal("post_update"), text: z.string() }),
+      ])
+      .nullable(),
   }),
+  z.looseObject({
+    id: z.string(),
+    kind: z.literal("notify"),
+    /** May hold field references, like a posted update. */
+    text: z.string(),
+    /** What a click on the notification opens. */
+    opens: z.enum(["ticket", "run"]),
+  }),
+  z.looseObject({ id: z.string(), kind: z.literal("if") }),
 ]);
 export type AutomationStep = z.infer<typeof stepSchema>;
+export type StepChange = NonNullable<
+  Extract<AutomationStep, { kind: "change_ticket" }>["change"]
+>;
 
 const automationDefinitionSchema = z.object({
   name: z.string(),
@@ -154,6 +178,16 @@ export const automationsClient = {
     return z
       .array(automationRunSchema)
       .parse(await invoke("automation_run_list", { automationId }));
+  },
+  /**
+   * A step's text with its fields filled in from the most recent ticket, and
+   * `tag` for the tag from the event. null while the Workspace has no ticket.
+   */
+  async previewText(text: string, tag: string | null): Promise<string | null> {
+    return z
+      .string()
+      .nullable()
+      .parse(await invoke("automation_text_preview", { text, tag }));
   },
   async agents(): Promise<AutomationAgent[]> {
     return z

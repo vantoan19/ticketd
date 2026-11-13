@@ -50,6 +50,10 @@ import {
 } from "@/lib/draft-recovery-context";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { AutomationsView } from "@/features/automations/AutomationsView";
+import {
+  useAutomationNotifications,
+  type RunTarget,
+} from "@/features/automations/useAutomationNotifications";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
 
@@ -261,10 +265,16 @@ function AppContent() {
     }
   };
   const bulk = useBulkEdit(refresh);
-  useReminderNotifications((reference) => {
+  const openNotifiedTicket = (reference: string) => {
     setInboxTarget(null);
     setSelected(reference);
     setView("tickets");
+  };
+  useReminderNotifications(openNotifiedTicket);
+  const [runTarget, setRunTarget] = useState<RunTarget | null>(null);
+  useAutomationNotifications(chat.enabled, openNotifiedTicket, (target) => {
+    setRunTarget(target);
+    setView("automations");
   });
   const isMobile = useIsMobile();
   return (
@@ -596,7 +606,7 @@ function AppContent() {
                           className="context-view-wrapper"
                           hidden={graphOrigin !== null}
                         >
-                          <AutomationsView />
+                          <AutomationsView runTarget={runTarget} />
                         </div>
                       )}
                       <TicketWorkspaceView

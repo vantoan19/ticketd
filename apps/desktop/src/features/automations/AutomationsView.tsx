@@ -20,6 +20,7 @@ import {
   type AutomationAgentSettings,
   type AutomationDefinition,
 } from "@/features/automations/client";
+import type { RunTarget } from "@/features/automations/useAutomationNotifications";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import "@/features/chats/chats.css";
@@ -58,7 +59,12 @@ function startedBy(trigger: Automation["trigger"]) {
  * switches between Automations and Agents; either opens beside the list and is
  * edited in place.
  */
-export function AutomationsView() {
+export function AutomationsView({
+  runTarget = null,
+}: {
+  /** The run a notification pointed to: its Automation opens on its runs. */
+  runTarget?: RunTarget | null;
+}) {
   const [tab, setTab] = useState<Tab>("automations");
   /** null until the first load answers. */
   const [automations, setAutomations] = useState<Automation[] | null>(null);
@@ -68,6 +74,15 @@ export function AutomationsView() {
     automations: null,
     agents: null,
   });
+  const [shownTarget, setShownTarget] = useState<RunTarget | null>(null);
+  if (runTarget && runTarget !== shownTarget) {
+    setShownTarget(runTarget);
+    setTab("automations");
+    setOpenIds((current) => ({
+      ...current,
+      automations: runTarget.automationId,
+    }));
+  }
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
   /** Counts saves, so only the answer to the latest one is taken. */
@@ -307,8 +322,14 @@ export function AutomationsView() {
     />
   ) : openAutomation ? (
     <AutomationEditor
-      key={openAutomation.id}
+      // A run to show opens the editor afresh, on its runs.
+      key={
+        shownTarget?.automationId === openAutomation.id
+          ? shownTarget.runId
+          : openAutomation.id
+      }
       automation={openAutomation}
+      startOnRuns={shownTarget?.automationId === openAutomation.id}
       agents={agents ?? []}
       {...paneProps}
       onChange={(definition) => saveAutomation(openAutomation.id, definition)}

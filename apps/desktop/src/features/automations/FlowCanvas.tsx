@@ -10,7 +10,16 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { Bot, Ellipsis, Plus, Tag, Workflow, Zap } from "lucide-react";
+import {
+  Bell,
+  Bot,
+  Ellipsis,
+  Plus,
+  SquarePen,
+  Tag,
+  Workflow,
+  Zap,
+} from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -22,7 +31,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import { folderName } from "@/features/automations/automation-text";
+import {
+  folderName,
+  textInWords,
+} from "@/features/automations/automation-text";
 import {
   CARD_HEIGHT,
   CARD_WIDTH,
@@ -42,15 +54,22 @@ import {
 /** The trigger kinds this page can set up. */
 export type TriggerChoice = "tag_added";
 
+/** The step kinds this page can add and set up. */
+export type StepChoice = "run_agent" | "change_ticket" | "notify";
+
 type Actions = {
   onSelect: (id: string) => void;
   onChooseTrigger: (kind: TriggerChoice) => void;
-  /** Adds a Run agent step at `index` of the steps. */
-  onAddStep: (index: number) => void;
+  /** Adds a step of `kind` at `index` of the steps. */
+  onAddStep: (index: number, kind: StepChoice) => void;
   onDeleteStep: (id: string) => void;
 };
-const ActionsContext = createContext<Actions | null>(null);
-function useActions(): Actions {
+type CanvasContext = Actions & {
+  /** The Automation starts without a ticket, so no step can change one. */
+  ticketless: boolean;
+};
+const ActionsContext = createContext<CanvasContext | null>(null);
+function useActions(): CanvasContext {
   const actions = use(ActionsContext);
   if (!actions) throw new Error("a flow node was drawn outside its canvas");
   return actions;
@@ -82,7 +101,7 @@ type Card = {
   /** The title as shown, when it is more than the words. */
   shown?: ReactNode;
   detail?: string;
-  icon: "trigger" | "tag" | "agent" | "step";
+  icon: "trigger" | "tag" | "agent" | "change" | "notify" | "step";
   /** Nothing chosen yet: the card is a prompt. */
   unset: boolean;
   /** Which menu the card carries. */
@@ -129,6 +148,42 @@ function triggerCard(trigger: AutomationDefinition["trigger"]): Card {
 
 function stepCard(step: AutomationStep, agents: AutomationAgent[]): Card {
   const kind = STEP_KINDS[step.kind];
+  if (step.kind === "change_ticket") {
+    const change = step.change;
+    const title =
+      change?.action === "add_tag"
+        ? change.tag.trim() && `Add tag ${change.tag.trim()}`
+        : change?.action === "remove_tag"
+          ? change.tag.trim() && `Remove tag ${change.tag.trim()}`
+          : change?.action === "set_status"
+            ? `Set status to ${change.status}`
+            : change?.action === "post_update"
+              ? change.text.trim() && "Post an update"
+              : "";
+    const detail =
+      change?.action === "post_update" ? textInWords(change.text) : "";
+    return {
+      id: step.id,
+      kind,
+      title: title || "Choose a change",
+      ...(detail && { detail }),
+      icon: "change",
+      unset: !title,
+      menu: "step",
+    };
+  }
+  if (step.kind === "notify") {
+    const message = textInWords(step.text);
+    return {
+      id: step.id,
+      kind,
+      title: message || "Write a message",
+      detail: step.opens === "run" ? "Opens the run" : "Opens the ticket",
+      icon: "notify",
+      unset: !message,
+      menu: "step",
+    };
+  }
   if (step.kind !== "run_agent")
     return {
       id: step.id,
@@ -188,9 +243,14 @@ type CardData = { card: Card; selected: boolean; needs: string | undefined };
 function CardNode({ data }: NodeProps<Node<CardData>>) {
   const { card, selected, needs } = data;
   const { onSelect, onDeleteStep } = useActions();
-  const Icon = { trigger: Zap, tag: Tag, agent: Bot, step: Workflow }[
-    card.icon
-  ];
+  const Icon = {
+    trigger: Zap,
+    tag: Tag,
+    agent: Bot,
+    change: SquarePen,
+    notify: Bell,
+    step: Workflow,
+  }[card.icon];
   const face = (
     <>
       <Icon size={16} aria-hidden />
@@ -273,7 +333,7 @@ type AddData = { index: number; after: string; end: boolean };
 
 /** A place to add a step: on the line between two cards, or ending the path. */
 function AddNode({ data }: NodeProps<Node<AddData>>) {
-  const { onAddStep } = useActions();
+  const { onAddStep, ticketless } = useActions();
   return (
     <>
       {data.end && (
@@ -294,12 +354,37 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
           <DropdownMenuContent className="w-70" aria-label="Add a step">
             <DropdownMenuItem
               className="items-start whitespace-normal"
-              onSelect={() => onAddStep(data.index)}
+              onSelect={() => onAddStep(data.index, "run_agent")}
             >
               <Bot aria-hidden />
               <span className="flow-menu-item-text">
                 Run agent
                 <small>Start a Chat with one of your agents</small>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="items-start whitespace-normal"
+              disabled={ticketless}
+              onSelect={() => onAddStep(data.index, "change_ticket")}
+            >
+              <SquarePen aria-hidden />
+              <span className="flow-menu-item-text">
+                Change ticket
+                <small>
+                  {ticketless
+                    ? "Needs a ticket, and this Automation does not start from one"
+                    : "Add or remove a tag, set the status, or post an update"}
+                </small>
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="items-start whitespace-normal"
+              onSelect={() => onAddStep(data.index, "notify")}
+            >
+              <Bell aria-hidden />
+              <span className="flow-menu-item-text">
+                Notify me
+                <small>Show a desktop notification</small>
               </span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -394,9 +479,11 @@ export function FlowCanvas({
     return { nodes, edges };
   }, [trigger, steps, agents, problems, selected]);
   const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
+  const ticketless =
+    trigger?.kind === "schedule" || trigger?.kind === "by_hand";
   const context = useMemo(
-    () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep }),
-    [onSelect, onChooseTrigger, onAddStep, onDeleteStep],
+    () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless }),
+    [onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless],
   );
   return (
     <div className="flow-canvas">
