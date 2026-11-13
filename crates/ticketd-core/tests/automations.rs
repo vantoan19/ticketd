@@ -722,11 +722,20 @@ fn each_example_holds_what_can_be_built_now_and_says_what_is_left() {
     );
     assert_eq!(
         example_needs(&mut workspace, AutomationExample::WeeklySummary),
-        ["Choose what starts it", "Needs an agent and a folder"]
+        ["Needs an agent and a folder"]
     );
-    let names: Vec<_> = workspace
-        .automations()
-        .unwrap()
+    let automations = workspace.automations().unwrap();
+    // The weekly summary runs on Mondays at 9:00.
+    assert_eq!(
+        automations[0].definition.trigger,
+        Some(Trigger::Schedule {
+            schedule: Schedule::Weekly {
+                time: "09:00".into(),
+                weekdays: vec![Weekday::Mon],
+            },
+        })
+    );
+    let names: Vec<_> = automations
         .into_iter()
         .map(|automation| automation.definition.name)
         .collect();

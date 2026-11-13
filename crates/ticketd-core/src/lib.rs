@@ -102,6 +102,7 @@ mod automation_examples;
 mod automation_matching;
 mod automation_run_machine;
 mod automation_runs;
+mod automation_schedule;
 mod automation_steps;
 mod automations;
 mod change_token;
@@ -140,7 +141,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 73;
+pub const FORMAT_VERSION: i64 = 74;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -244,7 +245,7 @@ pub enum Error {
     AutomationRun(String),
     #[error("invalid Automation: {0}")]
     InvalidAutomation(String),
-    #[error("This Automation cannot be switched on yet. {0}.")]
+    #[error("This Automation cannot run yet. {0}.")]
     AutomationUnfinished(String),
     #[error("duplicate would create a cycle or self-link")]
     DuplicateCycle,
@@ -977,6 +978,9 @@ impl Workspace {
         }
         if version < 73 {
             automation_runs::migrate_attention(&transaction)?;
+        }
+        if version < 74 {
+            automations::migrate_schedule(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

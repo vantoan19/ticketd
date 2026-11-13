@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::automation_matching::{LOCAL_SOURCE, TicketFacts, matches};
 use crate::automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
-use crate::automations::{AutomationDefinition, Step};
+use crate::automation_schedule::due;
+use crate::automations::{AutomationDefinition, Step, Trigger};
 use crate::chats::{Chat, NewChat};
 use crate::events::WorkspaceEvent;
 use crate::{Error, Workspace};
@@ -87,8 +88,9 @@ pub struct AutomationRun {
     pub automation_id: String,
     /// The Automation as it is called now, deleted or not.
     pub automation_name: String,
-    /// The Workspace event that started it.
-    pub event: WorkspaceEvent,
+    /// The Workspace event that started it. `None` when a schedule or Run now did:
+    /// nothing happened to a ticket, and the run has no ticket either.
+    pub event: Option<WorkspaceEvent>,
     pub ticket: Option<AutomationRunTicket>,
     /// The Automation as it was when the run was created. The run executes this, so
     /// a later edit never changes a run.
@@ -113,8 +115,10 @@ impl AutomationRun {
     }
 }
 
-/// `ticket_id` is nullable for the runs a schedule or "Run now" will start. The
-/// partial index is the rule that a ticket has one active run per Automation.
+/// `ticket_id` is NULL, and `event` the JSON `null`, for the runs a schedule or
+/// "Run now" starts. The partial index is the rule that a ticket has one active run
+/// per Automation; `queue_without_ticket` keeps the same rule for those runs, which
+/// the index cannot (to SQLite, one NULL differs from another).
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS automation_runs (id TEXT PRIMARY KEY, automation_id TEXT NOT NULL REFERENCES automations(id), event_id INTEGER NOT NULL, event TEXT NOT NULL, ticket_id TEXT REFERENCES tickets(id), definition TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL DEFAULT ({NOW}), started_at TEXT, ended_at TEXT);
@@ -330,6 +334,35 @@ fn facts(connection: &Connection, ticket_id: &str) -> Result<TicketFacts, Error>
     })
 }
 
+const ACTIVE_WITHOUT_TICKET: &str = "SELECT 1 FROM automation_runs WHERE automation_id = ?2 AND ticket_id IS NULL AND status IN ('queued', 'running')";
+
+/// Queues a run that has no ticket and no event, for a schedule or Run now, unless
+/// the Automation already has one going. It takes its place in the queue after the
+/// events logged so far. Returns the run's id when it was created.
+fn queue_without_ticket(
+    connection: &Connection,
+    automation_id: &str,
+    definition: &AutomationDefinition,
+) -> Result<Option<String>, Error> {
+    let id = Uuid::new_v4().to_string();
+    let created = connection.execute(
+        &format!(
+            "INSERT INTO automation_runs (id, automation_id, event_id, event, definition, status)
+             SELECT ?1, ?2, ?3, 'null', ?4, 'queued' WHERE NOT EXISTS ({ACTIVE_WITHOUT_TICKET})"
+        ),
+        params![
+            id,
+            automation_id,
+            crate::events::head(connection)?,
+            serde_json::to_string(definition)?
+        ],
+    )?;
+    Ok((created > 0).then_some(id))
+}
+
+/// How the local time is written where a schedule counts from.
+const LOCAL_TIME: &str = "%Y-%m-%dT%H:%M:%S";
+
 /// Removes finished runs created more than 90 days before `now`, with the Chats they
 /// still own. A Chat the person took over is no longer owned and stays.
 pub(crate) fn expire(connection: &Connection, now: &str) -> Result<(), Error> {
@@ -411,6 +444,88 @@ impl Workspace {
         }
         transaction.commit()?;
         Ok(created)
+    }
+
+    /// Queues a run for each switched-on Automation whose schedule has come due at
+    /// `now`, the computer's local time ("2026-11-16T09:00:00"; `None` reads the
+    /// clock). A schedule that came due several times since it was last looked at,
+    /// because ticketd was not running, starts one run. One that comes due while
+    /// its last run is still going starts none. A schedule counts from when it was
+    /// first seen on, so switching one on never fires it at once. Returns how many
+    /// runs were created.
+    pub fn queue_scheduled_automation_runs(&mut self, now: Option<&str>) -> Result<usize, Error> {
+        let now = match now {
+            Some(now) => chrono::NaiveDateTime::parse_from_str(now, LOCAL_TIME)
+                .map_err(|error| Error::AutomationRun(format!("'{now}' is not a time: {error}")))?,
+            None => chrono::Local::now().naive_local(),
+        };
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        let on = {
+            let mut statement = transaction
+                .prepare("SELECT automation_id, schedule_from FROM automation_device_state")?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let mut created = 0;
+        for (automation_id, since) in on {
+            let definition = match crate::automations::one(&transaction, &automation_id) {
+                Ok(automation) => automation.definition,
+                // As in matching: one this build cannot read is left alone.
+                Err(Error::InvalidAutomation(_)) => continue,
+                Err(error) => return Err(error),
+            };
+            let Some(Trigger::Schedule { schedule }) = &definition.trigger else {
+                continue;
+            };
+            let since = since
+                .and_then(|since| chrono::NaiveDateTime::parse_from_str(&since, LOCAL_TIME).ok());
+            // Seen on for the first time: it counts from now.
+            let fires = since.is_some_and(|since| due(schedule, since, now));
+            if since.is_some() && !fires {
+                continue;
+            }
+            if fires && queue_without_ticket(&transaction, &automation_id, &definition)?.is_some() {
+                created += 1;
+            }
+            transaction.execute(
+                "UPDATE automation_device_state SET schedule_from = ?2 WHERE automation_id = ?1",
+                params![automation_id, now.format(LOCAL_TIME).to_string()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(created)
+    }
+
+    /// "Run now": queues a run of an Automation that is run by hand. Refused while
+    /// anything in it is unfinished, and while a run of it is already going.
+    pub fn run_automation_now(&mut self, automation_id: &str) -> Result<AutomationRun, Error> {
+        let transaction = self.connection.savepoint()?;
+        crate::transaction_write_lock(&transaction)?;
+        let automation = crate::automations::one(&transaction, automation_id)?;
+        if automation.definition.trigger != Some(Trigger::ByHand) {
+            return Err(Error::AutomationRun(
+                "only an Automation you run by hand has Run now".into(),
+            ));
+        }
+        if let Some(problem) = automation.problems.first() {
+            return Err(Error::AutomationUnfinished(crate::automations::reason(
+                &automation.definition,
+                problem,
+            )));
+        }
+        let Some(id) = queue_without_ticket(&transaction, automation_id, &automation.definition)?
+        else {
+            return Err(Error::AutomationRun(
+                "a run of this Automation is already going".into(),
+            ));
+        };
+        let run = one(&transaction, &id)?;
+        transaction.commit()?;
+        Ok(run)
     }
 
     /// Moves Queued runs to Running, oldest triggering event first, until `limit`
@@ -591,18 +706,23 @@ impl Workspace {
             return Err(Error::AutomationRun("the run has not ended yet".into()));
         }
         let definition = crate::automations::one(&transaction, &run.automation_id)?.definition;
-        let id = Uuid::new_v4().to_string();
-        // The active-run index refuses a second run for the ticket.
-        let created = transaction.execute(
-            "INSERT OR IGNORE INTO automation_runs (id, automation_id, event_id, event, ticket_id, definition, status)
-             SELECT ?2, automation_id, event_id, event, ticket_id, ?3, 'queued' FROM automation_runs WHERE id = ?1",
-            params![run_id, id, serde_json::to_string(&definition)?],
-        )?;
-        if created == 0 {
+        let id = if run.ticket.is_some() {
+            let id = Uuid::new_v4().to_string();
+            // The active-run index refuses a second run for the ticket.
+            let created = transaction.execute(
+                "INSERT OR IGNORE INTO automation_runs (id, automation_id, event_id, event, ticket_id, definition, status)
+                 SELECT ?2, automation_id, event_id, event, ticket_id, ?3, 'queued' FROM automation_runs WHERE id = ?1",
+                params![run_id, id, serde_json::to_string(&definition)?],
+            )?;
+            (created > 0).then_some(id)
+        } else {
+            queue_without_ticket(&transaction, &run.automation_id, &definition)?
+        };
+        let Some(id) = id else {
             return Err(Error::AutomationRun(
-                "a run of this Automation is already going for the ticket".into(),
+                "a run of this Automation is already going".into(),
             ));
-        }
+        };
         answer(&transaction, run_id)?;
         let again = one(&transaction, &id)?;
         transaction.commit()?;

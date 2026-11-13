@@ -15,8 +15,8 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
-    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatLinkKind, ChatListFilter, Step,
-    StepAction, Ticket, Trigger, Workspace,
+    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatLinkKind, ChatListFilter,
+    Schedule, Step, StepAction, Ticket, Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -617,4 +617,82 @@ async fn replying_to_a_run_that_needs_attention_takes_it_over_in_an_ordinary_ses
     let opens = f.fake.opens();
     assert_eq!(opens.len(), 2);
     assert_eq!(opens[1].unattended, None);
+}
+
+impl Fixture {
+    /// Changes what starts the fixture's Automation.
+    #[allow(clippy::unwrap_used)]
+    fn started_by(&self, trigger: Trigger) {
+        let definition = AutomationDefinition {
+            trigger: Some(trigger),
+            ..self.automation.definition.clone()
+        };
+        self.core()
+            .update_automation(&self.automation.id, definition)
+            .unwrap();
+    }
+
+    /// What the agent of the one run was first told.
+    #[allow(clippy::panic)] // Anything but one submission fails the test.
+    fn first_message(&self) -> String {
+        let submitted = self.fake.written();
+        let [Written::Submit(submission)] = submitted.as_slice() else {
+            panic!("one submission, got {submitted:?}");
+        };
+        submission.text.clone()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn run_now_runs_the_agent_without_a_ticket() {
+    let f = Fixture::new();
+    f.started_by(Trigger::ByHand);
+    f.core().run_automation_now(&f.automation.id).unwrap();
+
+    f.tick().await;
+
+    // The agent is told there is no ticket, and nothing is passed off as one.
+    assert_eq!(
+        f.first_message(),
+        format!(
+            "{INSTRUCTIONS}\n\n---\n\
+             ticketd started this run because the person pressed Run now. No ticket started \
+             it: use the ticketd CLI to find the tickets your instructions are about.\n"
+        )
+    );
+    // Its Chat is named for the Automation and linked to nothing.
+    let chat = f.core().chat(&f.chat()).unwrap();
+    assert_eq!(chat.title.as_deref(), Some("Triage tagged tickets"));
+    assert_eq!(chat.links, []);
+    assert_eq!(f.listed_chats(), Vec::<String>::new());
+
+    f.end_turn(TurnOutcome::Completed).await;
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::Completed);
+    assert_eq!(run.ticket, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_schedule_missed_while_ticketd_was_closed_runs_once_at_the_first_pass() {
+    let f = Fixture::new();
+    f.started_by(Trigger::Schedule {
+        schedule: Schedule::EveryHours { hours: 1 },
+    });
+    // It was on and counting years ago, when ticketd last ran.
+    f.core()
+        .queue_scheduled_automation_runs(Some("2020-01-06T09:00:00"))
+        .unwrap();
+
+    f.tick().await;
+    f.tick().await;
+
+    assert_eq!(f.runs().len(), 1);
+    assert_eq!(
+        f.first_message(),
+        format!(
+            "{INSTRUCTIONS}\n\n---\n\
+             ticketd started this run on its schedule. No ticket started \
+             it: use the ticketd CLI to find the tickets your instructions are about.\n"
+        )
+    );
 }
