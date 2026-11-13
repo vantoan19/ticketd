@@ -1082,7 +1082,15 @@ test("while a turn runs its steps show as they start, and the working line only 
     ),
   );
   expect(button("Ran npm test")).toBeTruthy();
-  expect(working()).toMatch(/^Working for \d/);
+  // MOTION-9: the line waits a moment, so steps close together keep the slot.
+  expect(working()).toBeUndefined();
+  expect(
+    await waitFor(() => {
+      const line = working();
+      if (!line) throw new Error("not yet");
+      return line;
+    }),
+  ).toMatch(/^Working for \d/);
 });
 
 test("an answered approval folds into its step row, which says the decision", async () => {
@@ -1913,7 +1921,9 @@ test("a Chat started in New Chat keeps its picks on the triggers until the sessi
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Claude Code, model Opus 5.5, effort Default" }),
+    await screen.findByRole("button", {
+      name: "Claude Code, model Opus 5.5, effort Default",
+    }),
   );
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
   fireEvent.click(await screen.findByRole("radio", { name: "High" }));
@@ -1993,7 +2003,9 @@ test("New Chat on Claude Code sends the shown default model and permission mode,
     { id: "claude-code", name: "Claude Code", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  await screen.findByRole("button", { name: "Claude Code, model Opus 5.5, effort Default" });
+  await screen.findByRole("button", {
+    name: "Claude Code, model Opus 5.5, effort Default",
+  });
   // The permission trigger names the mode, not "Default".
   expect(button("Permissions: Ask before edits")).toBeTruthy();
   type("Add a limiter", "Describe a task or ask a question");

@@ -470,14 +470,23 @@ export function StepRow({
   const described = useId();
   const words = stepWords(step, useRecordName());
   const running = live && step.state === "running";
-  // MOTION-8: a step that finishes in view keeps its running verb's width, so a
-  // name after it does not slide under the pointer.
+  // MOTION-8: a step that finishes in view starts at its running verb's width,
+  // then eases to its own, so the name after it neither jumps nor leaves a gap.
   const verb = useRef<HTMLSpanElement>(null);
   const [verbWidth, setVerbWidth] = useState<number>();
+  const [eased, setEased] = useState(false);
   const verbText = words.parts[0]?.text;
   useLayoutEffect(() => {
-    if (running && verb.current) setVerbWidth(verb.current.offsetWidth);
+    if (running && verb.current) {
+      setVerbWidth(verb.current.offsetWidth);
+      setEased(false);
+    }
   }, [running, verbText]);
+  useEffect(() => {
+    if (running || verbWidth === undefined || eased) return;
+    const frame = requestAnimationFrame(() => setEased(true));
+    return () => cancelAnimationFrame(frame);
+  }, [running, verbWidth, eased]);
   const now = useNow(running && Boolean(step.started_at));
   const started = step.started_at ? Date.parse(step.started_at) : NaN;
   const clock =
@@ -513,7 +522,9 @@ export function StepRow({
               ref={verb}
               className="chat-step-verb"
               style={
-                verbWidth && !running ? { minWidth: verbWidth } : undefined
+                verbWidth && !running
+                  ? { minWidth: eased ? 0 : verbWidth }
+                  : undefined
               }
             >
               {part.text}
@@ -1142,6 +1153,34 @@ function WorkingLine({
   );
 }
 
+/** How long no step must run before the working line takes the slot. */
+const BETWEEN_STEPS_MS = 600;
+
+/**
+ * The working line, kept back while a step or reasoning row holds the spinner
+ * and for a moment after: steps that follow each other closely keep the slot,
+ * so the line does not flash between rows (MOTION-9). A turn whose first step
+ * has not started shows the line at once.
+ */
+function BetweenSteps({
+  running,
+  children,
+}: {
+  running: boolean;
+  children: ReactNode;
+}) {
+  const [shown, setShown] = useState(!running);
+  useEffect(() => {
+    if (running) {
+      setShown(false);
+      return;
+    }
+    const timer = setTimeout(() => setShown(true), BETWEEN_STEPS_MS);
+    return () => clearTimeout(timer);
+  }, [running]);
+  return shown && !running ? children : <WorkingSlot />;
+}
+
 /** The working line's place while a turn runs and the line is not shown. */
 function WorkingSlot() {
   return <div className="chat-working-slot" aria-hidden="true" />;
@@ -1360,19 +1399,20 @@ export function Transcript({
               />
             ) : // After an unconfirmed stop the open turn row and the notice say it.
             working &&
-              !stepRuns &&
               !parts.some(
                 (part) => part.kind === "turn" && part.turn.unconfirmed,
               ) ? (
-              chat.doing ? (
-                <WorkingLine
-                  label={chat.doing.label}
-                  since={chat.doing.since}
-                  items={items}
-                />
-              ) : (
-                <WorkingLine label="Working…" />
-              )
+              <BetweenSteps running={stepRuns}>
+                {chat.doing ? (
+                  <WorkingLine
+                    label={chat.doing.label}
+                    since={chat.doing.since}
+                    items={items}
+                  />
+                ) : (
+                  <WorkingLine label="Working…" />
+                )}
+              </BetweenSteps>
             ) : (
               // While a step row holds the spinner the line's place is kept,
               // so the end of the transcript does not bounce between rows.
