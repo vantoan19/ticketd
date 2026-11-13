@@ -24,7 +24,8 @@ use crate::{
     EventStream, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
     InterruptRequest, NativeRequestId, NoticeKind, OpenRequest, OpenedRuntime, Problem,
     ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
-    SessionStart, Submission, SubmissionId, SubmissionKind,
+    SessionStart, SettingChange, SettingKey, SettingOutcome, Submission, SubmissionId,
+    SubmissionKind,
 };
 
 use super::session::{Session, unknown};
@@ -64,6 +65,7 @@ enum Kind {
     Submit(SubmissionId),
     Respond(NativeRequestId),
     Interrupt,
+    Setting,
 }
 
 /// How the bridge settled a command. A dropped sender means the runtime was lost.
@@ -473,7 +475,7 @@ impl Connection {
         let id = event["id"].as_str().unwrap_or_default();
         let by_id = |command: &str, _: &Kind| command == id;
         match name {
-            "hello" | "inspection" | "interrupt_result" => {
+            "hello" | "inspection" | "interrupt_result" | "setting_result" => {
                 state.settle(by_id, Reply::Event(event.clone()));
             }
             // The SDK object exists; Claude Code has not answered yet.
@@ -483,6 +485,7 @@ impl Connection {
                     |_, kind| matches!(kind, Kind::Open),
                     Reply::Event(event.clone()),
                 );
+                return events(state.session.initialized(&event).into_iter().collect());
             }
             "input_handed_to_sdk" => {
                 let submission = event["submission_id"].as_str().unwrap_or_default();
@@ -629,7 +632,7 @@ fn rejected(state: &mut State, id: &str, event: &Value) -> Vec<EventKind> {
             }
             Vec::new()
         }
-        Kind::Plain | Kind::Open | Kind::Interrupt => {
+        Kind::Plain | Kind::Open | Kind::Interrupt | Kind::Setting => {
             waiter_gone(command.waiter, reason);
             Vec::new()
         }
@@ -816,6 +819,37 @@ impl HarnessRuntime for ClaudeRuntime {
             | CallOutcome::NotDelivered
             | CallOutcome::TimedOut
             | CallOutcome::Lost => InterruptOutcome::Unconfirmed,
+        }
+    }
+
+    /// Claude Code applies a change from its next request; the supervisor sends it
+    /// only between turns, so a turn never changes model part-way.
+    async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
+        if self.stale(change.generation).is_some() {
+            return SettingOutcome::Refused {
+                reason: "the session it was meant for has ended".to_owned(),
+            };
+        }
+        let kind = match change.setting {
+            SettingKey::Model => "model",
+            SettingKey::Effort => "effort",
+            SettingKey::Permission => "permission",
+        };
+        let command = json!({
+            "cmd": "set_setting",
+            "generation": self.connection.generation.0,
+            "setting": {"kind": kind, "value": change.value},
+        });
+        match self.connection.call(|_| Ok((command, Kind::Setting))).await {
+            CallOutcome::Event(event) if event["outcome"] == "applied" => SettingOutcome::Applied,
+            CallOutcome::Event(event) => SettingOutcome::Refused {
+                reason: reason(&event["message"]),
+            },
+            CallOutcome::Rejected(reason) => SettingOutcome::Refused { reason },
+            CallOutcome::Refused(_) | CallOutcome::NotDelivered => SettingOutcome::Refused {
+                reason: "the session has ended".to_owned(),
+            },
+            CallOutcome::TimedOut | CallOutcome::Lost => SettingOutcome::Unconfirmed,
         }
     }
 

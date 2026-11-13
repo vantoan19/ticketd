@@ -1,0 +1,26 @@
+{"note":"Hand-built from apps/chat-bridge-claude/src/protocol.ts (protocol 1, Agent SDK 0.3.322: thinking, tool_result outcome, context_usage, compacted, session_initialized models, set_setting). Not captured from a live session; every value is synthetic."}
+{"client":{"id":"c4","cmd":"submit","generation":7,"submission_id":"sub-1","text":"Add a limiter"}}
+{"server":{"v":1,"event":"input_handed_to_sdk","generation":7,"submission_id":"sub-1"}}
+{"mark":"the SDK took the input"}
+{"server":{"v":1,"event":"session_info","generation":7,"session_id":"sess-1","claude_code_version":"2.1.322","cwd":"/work/chat-1","model":"claude-opus-test","permission_mode":"default","effort":"high","capabilities":[]}}
+{"server":{"v":1,"event":"input_processing","generation":7,"submission_ids":["sub-1"]}}
+{"server":{"v":1,"event":"thinking","generation":7,"phase":"started","index":0,"redacted":false,"at":1730910000000,"parent_tool_use_id":null}}
+{"server":{"v":1,"event":"thinking","generation":7,"phase":"stopped","index":0,"redacted":false,"at":1730910012000,"parent_tool_use_id":null}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"thinking","text":"The handler has no limit."}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"thinking","generation":7,"phase":"started","index":1,"redacted":true,"at":1730910013000,"parent_tool_use_id":null}}
+{"server":{"v":1,"event":"thinking","generation":7,"phase":"stopped","index":1,"redacted":false,"at":1730910014000,"parent_tool_use_id":null}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"other","block_type":"redacted_thinking"}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"tool_use","id":"toolu_todo","name":"TodoWrite","input":{"todos":[{"content":"Read the handler","status":"completed","activeForm":"Reading the handler"},{"content":"Add the limiter","status":"in_progress","activeForm":"Adding the limiter"}]}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"tool_result","generation":7,"tool_use_id":"toolu_todo","parent_tool_use_id":null,"is_error":false,"text":"Todos have been modified","truncated":false,"outcome":null}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"tool_use","id":"toolu_edit","name":"Edit","input":{"file_path":"/work/chat-1/src/handler.ts","old_string":"a","new_string":"b"}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"tool_result","generation":7,"tool_use_id":"toolu_edit","parent_tool_use_id":null,"is_error":false,"text":"edited","truncated":false,"outcome":{"kind":"file","path":"/work/chat-1/src/handler.ts","change":null,"added_lines":2,"removed_lines":1}}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"tool_use","id":"toolu_write","name":"Write","input":{"file_path":"/work/chat-1/src/limiter.ts","content":"x"}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"tool_result","generation":7,"tool_use_id":"toolu_write","parent_tool_use_id":null,"is_error":false,"text":"created","truncated":false,"outcome":{"kind":"file","path":"/work/chat-1/src/limiter.ts","change":"create","added_lines":1,"removed_lines":0}}}
+{"server":{"v":1,"event":"assistant_content","generation":7,"uuid":"uuid-1","message_id":"msg_1","parent_tool_use_id":null,"blocks":[{"type":"tool_use","id":"toolu_bad","name":"Edit","input":{"file_path":"/work/chat-1/README.md","old_string":"zz","new_string":"y"}}],"error":null,"aborted":false}}
+{"server":{"v":1,"event":"tool_result","generation":7,"tool_use_id":"toolu_bad","parent_tool_use_id":null,"is_error":true,"text":"String not found","truncated":false,"outcome":null}}
+{"server":{"v":1,"event":"compacted","generation":7}}
+{"server":{"v":1,"event":"turn_result","generation":7,"correlation":"uuid","submission_ids":["sub-1"],"unmatched_uuids":[],"pending_submission_ids":[],"subtype":"success","is_error":false,"result_text":"Done.","errors":[],"stop_reason":"end_turn","terminal_reason":null,"denied_tool_names":[],"queued_turn_count":0,"num_turns":1,"duration_ms":12,"session_id":"sess-1"}}
+{"server":{"v":1,"event":"context_usage","generation":7,"total_tokens":124000,"max_tokens":200000,"categories":[{"name":"Messages","tokens":100000}],"compacts_at":167000}}
+{"mark":"the turn ended"}
+{"client":{"id":"c5","cmd":"set_setting","generation":7,"setting":{"kind":"model","value":"sonnet"}}}
+{"server":{"v":1,"event":"setting_result","id":"c5","generation":7,"outcome":"refused","message":"model not available"}}

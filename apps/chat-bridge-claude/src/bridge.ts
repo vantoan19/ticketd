@@ -20,7 +20,9 @@ import {
   type ContentBlock,
   type ErrorInfo,
   type InputEvidence,
+  type ModelOption,
   type RejectionCode,
+  type ToolOutcome,
 } from "./protocol";
 
 /** Characters kept from the end of one tool result; the host stores the last 1 MiB per output. */
@@ -31,8 +33,18 @@ export const MAX_UNMAPPED_JSON_CHARS = 4096;
 /** The part of an SDK query handle the bridge uses. The SDK's `Query` satisfies it. */
 export interface SdkQuery extends AsyncIterable<unknown> {
   interrupt(): Promise<{ still_queued: string[] } | undefined>;
-  initializationResult(): Promise<{ claude_code_version?: string }>;
+  initializationResult(): Promise<{
+    claude_code_version?: string;
+    models?: unknown[];
+  }>;
   close(): void;
+  // Settings and context, from SDK 0.3.322's `Query`.
+  setModel?(model?: string): Promise<void>;
+  setPermissionMode?(mode: "default" | "acceptEdits" | "plan"): Promise<void>;
+  applyFlagSettings?(settings: {
+    effortLevel: "low" | "medium" | "high" | "xhigh" | "max";
+  }): Promise<void>;
+  getContextUsage?(opts?: { detail?: "summary" | "full" }): Promise<unknown>;
 }
 
 export type QueryFn = (params: {
@@ -71,6 +83,8 @@ interface SessionState {
   inputQueue: SDKUserMessage[];
   wakeInput: (() => void) | undefined;
   requests: Map<string, PendingRequest>;
+  /** Content block indices of the thinking blocks being streamed. */
+  thinking: Set<number>;
   ended: boolean;
 }
 
@@ -84,6 +98,93 @@ const text = (value: unknown) => (typeof value === "string" ? value : null);
 const number = (value: unknown) => (typeof value === "number" ? value : null);
 const strings = (value: unknown) =>
   Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+
+const lineCount = (content: string) =>
+  content === "" ? 0 : content.replace(/\n$/, "").split("\n").length;
+
+/** Lines a reported patch adds and removes. */
+function patchCounts(hunks: unknown) {
+  if (!Array.isArray(hunks)) return null;
+  let added = 0;
+  let removed = 0;
+  for (const hunk of hunks) {
+    if (!isObject(hunk) || !Array.isArray(hunk.lines)) return null;
+    for (const line of strings(hunk.lines)) {
+      if (line.startsWith("+")) added += 1;
+      else if (line.startsWith("-")) removed += 1;
+    }
+  }
+  return { added, removed };
+}
+
+/**
+ * The part of a tool's structured result the host shows, recognized by shape:
+ * Edit/Write/MultiEdit report `filePath` and `structuredPatch`; the task tools
+ * report their task or tasks. Anything else is not forwarded.
+ */
+export function toolOutcome(result: Json): ToolOutcome | null {
+  const path = text(result.filePath);
+  if (path !== null && "structuredPatch" in result) {
+    const change =
+      result.type === "create" || result.type === "update" ? result.type : null;
+    const content = text(result.content);
+    const counts =
+      change === "create" && content !== null
+        ? { added: lineCount(content), removed: 0 }
+        : patchCounts(result.structuredPatch);
+    return {
+      kind: "file",
+      path,
+      change,
+      added_lines: counts?.added ?? null,
+      removed_lines: counts?.removed ?? null,
+    };
+  }
+  const task = isObject(result.task) ? result.task : null;
+  if (task && text(task.id) && text(task.subject)) {
+    return {
+      kind: "task_created",
+      task_id: text(task.id) ?? "",
+      subject: text(task.subject) ?? "",
+    };
+  }
+  if (Array.isArray(result.tasks)) {
+    return {
+      kind: "task_list",
+      tasks: result.tasks.filter(isObject).flatMap((entry) => {
+        const id = text(entry.id);
+        const subject = text(entry.subject);
+        const status = text(entry.status);
+        return id && subject && status ? [{ id, subject, status }] : [];
+      }),
+    };
+  }
+  if (text(result.taskId) && typeof result.success === "boolean") {
+    return {
+      kind: "task_updated",
+      task_id: text(result.taskId) ?? "",
+      success: result.success,
+    };
+  }
+  return null;
+}
+
+function modelOption(model: Json): ModelOption[] {
+  const value = text(model.value);
+  if (!value) return [];
+  return [
+    {
+      value,
+      resolved_model: text(model.resolvedModel),
+      display_name: text(model.displayName) ?? value,
+      description: text(model.description) ?? "",
+      effort_levels:
+        model.supportsEffort === false
+          ? []
+          : strings(model.supportedEffortLevels),
+    },
+  ];
+}
 
 const errorInfo = (error: unknown): ErrorInfo =>
   error instanceof Error
@@ -136,6 +237,8 @@ export function createBridge(deps: BridgeDeps) {
             return respond(current, command);
           case "interrupt":
             return interrupt(current, command);
+          case "set_setting":
+            return void setSetting(current, command);
           case "close":
             return endSession(current, "closed", null);
         }
@@ -204,6 +307,7 @@ export function createBridge(deps: BridgeDeps) {
       inputQueue: [],
       wakeInput: undefined,
       requests: new Map(),
+      thinking: new Set(),
       ended: false,
     };
     const options: Options = {
@@ -236,12 +340,15 @@ export function createBridge(deps: BridgeDeps) {
     });
     void readOutput(opening);
     opening.query.initializationResult().then(
-      (init) =>
+      (init) => {
         emit({
           event: "session_initialized",
           generation: opening.generation,
           claude_code_version: init.claude_code_version ?? null,
-        }),
+          models: (init.models ?? []).filter(isObject).flatMap(modelOption),
+        });
+        reportContextUsage(opening);
+      },
       (error: unknown) => {
         // A lost process also ends the output stream, which reports the loss.
         if (opening.ended) return;
@@ -475,6 +582,74 @@ export function createBridge(deps: BridgeDeps) {
     );
   }
 
+  async function setSetting(
+    current: Session,
+    command: Extract<Command, { cmd: "set_setting" }>,
+  ) {
+    const { query } = current;
+    const { setting } = command;
+    const apply =
+      setting.kind === "model"
+        ? query.setModel?.bind(query, setting.value)
+        : setting.kind === "effort"
+          ? query.applyFlagSettings?.bind(query, {
+              effortLevel: setting.value,
+            })
+          : query.setPermissionMode?.bind(query, setting.value);
+    const answer = (outcome: "applied" | "refused", message: string | null) =>
+      emit({
+        event: "setting_result",
+        id: command.id,
+        generation: current.generation,
+        outcome,
+        message,
+      });
+    if (!apply) return answer("refused", "this SDK cannot change it");
+    try {
+      await apply();
+      answer("applied", null);
+    } catch (error) {
+      answer("refused", errorInfo(error).message);
+    }
+  }
+
+  /** Asks Claude Code how full the window is; nothing is said when it cannot tell. */
+  function reportContextUsage(current: SessionState & { query?: SdkQuery }) {
+    const ask = current.query?.getContextUsage?.bind(current.query);
+    if (!ask) return;
+    ask({ detail: "summary" }).then(
+      (usage) => {
+        if (current.ended || !isObject(usage)) return;
+        const total = number(usage.totalTokens);
+        const max = number(usage.maxTokens);
+        if (total === null || max === null) return;
+        emit({
+          event: "context_usage",
+          generation: current.generation,
+          total_tokens: total,
+          max_tokens: max,
+          // Only what occupies the window: free space, the compaction reserve
+          // and deferred tool schemas are not in use.
+          categories: blocks(usage.categories)
+            .filter((row) => row.kind === "used")
+            .flatMap((row) => {
+              const name = text(row.name);
+              const tokens = number(row.tokens);
+              return name && tokens ? [{ name, tokens }] : [];
+            }),
+          compacts_at:
+            usage.isAutoCompactEnabled === true
+              ? number(usage.autoCompactThreshold)
+              : null,
+        });
+      },
+      (error: unknown) =>
+        deps.diagnostic(
+          `reading context usage failed: ${errorInfo(error).message}`,
+        ),
+    );
+  }
+
   const submissionIds = (current: Session, uuids: unknown) =>
     strings(uuids).flatMap(
       (uuid) => current.submissions.get(uuid)?.submissionId ?? [],
@@ -535,6 +710,10 @@ export function createBridge(deps: BridgeDeps) {
     const parent = text(message.parent_tool_use_id);
     switch (message.type) {
       case "system":
+        if (message.subtype === "compact_boundary") {
+          emit({ event: "compacted", generation });
+          return reportContextUsage(current);
+        }
         if (message.subtype !== "init") return unmapped(current, message);
         return emit({
           event: "session_info",
@@ -544,12 +723,47 @@ export function createBridge(deps: BridgeDeps) {
           cwd: text(message.cwd),
           model: text(message.model),
           permission_mode: text(message.permissionMode),
+          effort: text(message.effort),
           capabilities: strings(message.capabilities),
         });
       case "stream_event": {
         noteProcessing(current, message);
         const event = isObject(message.event) ? message.event : {};
         const delta = isObject(event.delta) ? event.delta : {};
+        const index = number(event.index);
+        const started = isObject(event.content_block)
+          ? text(event.content_block.type)
+          : null;
+        if (
+          event.type === "content_block_start" &&
+          (started === "thinking" || started === "redacted_thinking")
+        ) {
+          if (index !== null) current.thinking.add(index);
+          return emit({
+            event: "thinking",
+            generation,
+            phase: "started",
+            index,
+            redacted: started === "redacted_thinking",
+            at: Date.now(),
+            parent_tool_use_id: parent,
+          });
+        }
+        if (
+          event.type === "content_block_stop" &&
+          index !== null &&
+          current.thinking.delete(index)
+        ) {
+          return emit({
+            event: "thinking",
+            generation,
+            phase: "stopped",
+            index,
+            redacted: false,
+            at: Date.now(),
+            parent_tool_use_id: parent,
+          });
+        }
         if (event.type !== "content_block_delta") return;
         const body =
           delta.type === "text_delta"
@@ -586,6 +800,9 @@ export function createBridge(deps: BridgeDeps) {
         // Echoed and replayed user text is the host's own input; only tool
         // results carry new information.
         const inner = isObject(message.message) ? message.message : {};
+        const outcome = isObject(message.tool_use_result)
+          ? toolOutcome(message.tool_use_result)
+          : null;
         for (const block of blocks(inner.content)) {
           if (block.type !== "tool_result") continue;
           const full =
@@ -604,6 +821,7 @@ export function createBridge(deps: BridgeDeps) {
             is_error: block.is_error === true,
             text: full.slice(-MAX_TOOL_RESULT_CHARS),
             truncated: full.length > MAX_TOOL_RESULT_CHARS,
+            outcome,
           });
         }
         return;
@@ -700,6 +918,7 @@ export function createBridge(deps: BridgeDeps) {
       duration_ms: number(message.duration_ms),
       session_id: text(message.session_id),
     });
+    reportContextUsage(current);
   }
 
   function unmapped(current: Session, message: unknown) {

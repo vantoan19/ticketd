@@ -14,6 +14,8 @@ use crate::{
     SubmissionId, ToolStatus, TurnOutcome, reset_time,
 };
 
+use super::report::{PLAN_TOOLS, Reports};
+
 #[derive(Debug)]
 struct Turn {
     id: NativeTurnId,
@@ -49,6 +51,7 @@ pub(super) struct Session {
     streams: VecDeque<(i64, NativeItemId)>,
     /// When the limit Claude Code last reported as exhausted resets, if it said.
     limit_resets_at: Option<i64>,
+    reports: Reports,
 }
 
 fn text<'a>(event: &'a Value, field: &str) -> Option<&'a str> {
@@ -144,6 +147,12 @@ impl Session {
                 }
             }
             "delta" => self.delta(event, &mut events),
+            "thinking" => {
+                let turn = self.turn(&mut events);
+                events.extend(self.reports.thinking(&turn, event));
+            }
+            "context_usage" => events.extend(Reports::context(event)),
+            "compacted" => events.push(EventKind::Compacted),
             "assistant_content" => self.assistant_content(event, &mut events),
             "tool_result" => self.tool_result(event, &mut events),
             "permission_request" => self.permission_request(event, &mut events),
@@ -195,6 +204,12 @@ impl Session {
                 detail: Some(ProviderDetail::new("session_info", &settings.to_string())),
             });
         }
+        events.extend(self.reports.session_info(event));
+    }
+
+    /// `session_initialized`: the session's choosable settings.
+    pub fn initialized(&mut self, event: &Value) -> Option<EventKind> {
+        self.reports.initialized(event)
     }
 
     fn delta(&mut self, event: &Value, events: &mut Vec<EventKind>) {
@@ -253,13 +268,25 @@ impl Session {
                         text: text(block, "text").unwrap_or_default().to_owned(),
                     });
                 }
+                Some("thinking") if !from_sub_agent => {
+                    let said = text(block, "text").unwrap_or_default();
+                    events.push(self.reports.thinking_text(&turn, said));
+                }
                 Some("text" | "thinking") => {}
+                // Redacted thinking has no text to show; its block start was reported.
+                Some("other") if text(block, "block_type") == Some("redacted_thinking") => {}
                 Some("tool_use") => {
                     let Some(id) = text(block, "id") else {
                         events.push(unknown("a tool use without an id", "tool_use", block));
                         continue;
                     };
                     let title = text(block, "name").unwrap_or("tool").to_owned();
+                    // The plan has no step rows: its tools update the plan instead.
+                    if PLAN_TOOLS.contains(&title.as_str()) {
+                        events.extend(self.reports.plan_tool(&turn, id, &title, &block["input"]));
+                        continue;
+                    }
+                    let changed = self.reports.file_tool(&turn, id, &title, &block["input"]);
                     let detail = ProviderDetail::new("tool_use", &block["input"].to_string());
                     self.tools
                         .insert(id.to_owned(), (title.clone(), detail.clone()));
@@ -271,6 +298,7 @@ impl Session {
                         output: None,
                         detail: Some(detail),
                     });
+                    events.extend(changed);
                 }
                 _ => events.push(unknown(
                     "Claude Code sent content ticketd does not show",
@@ -283,6 +311,15 @@ impl Session {
 
     fn tool_result(&mut self, event: &Value, events: &mut Vec<EventKind>) {
         let failed = event["is_error"] == true;
+        let tool_use = text(event, "tool_use_id").unwrap_or_default();
+        if self.reports.is_plan_tool(tool_use) {
+            let turn = self.turn(events);
+            events.extend(
+                self.reports
+                    .plan_result(&turn, tool_use, failed, &event["outcome"]),
+            );
+            return;
+        }
         let declined = text(event, "tool_use_id").is_some_and(|id| self.declined.remove(id));
         let known = text(event, "tool_use_id").and_then(|id| Some((id, self.tools.get(id)?)));
         let (Some((id, (title, detail))), Some(turn)) = (known, self.active_turn()) else {
@@ -310,6 +347,11 @@ impl Session {
             output: Some(output),
             detail: Some(detail.clone()),
         });
+        let turn = turn.clone();
+        events.extend(
+            self.reports
+                .file_result(&turn, id, failed, &event["outcome"]),
+        );
     }
 
     fn permission_request(&mut self, event: &Value, events: &mut Vec<EventKind>) {
@@ -513,6 +555,7 @@ impl Session {
         self.tools.clear();
         self.declined.clear();
         self.streams.clear();
+        self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");
         // ponytail: how Claude Code reports an interrupted turn is unverified; any

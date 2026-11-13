@@ -1212,6 +1212,8 @@ pub fn idle() -> ChatLive {
         interactions: Vec::new(),
         stop: None,
         problem: None,
+        context: None,
+        settings: None,
     }
 }
 

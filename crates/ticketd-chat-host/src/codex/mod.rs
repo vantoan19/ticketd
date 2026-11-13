@@ -2,10 +2,12 @@
 //!
 //! Codex keeps its own sign-in, configuration, instructions, approval policy and
 //! sandbox. The adapter passes only the working directory and never reads
-//! credentials, overrides settings or chooses how the user is billed.
+//! credentials or chooses how the user is billed. It overrides the model or effort
+//! only when the person chose one in the Chat, from that Chat's next turn.
 
 mod discovery;
 mod mapping;
+mod report;
 mod rpc;
 mod runtime;
 #[cfg(test)]

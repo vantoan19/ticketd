@@ -6,6 +6,7 @@
 //! the executable it found and the session to resume. It never reads credentials and
 //! never asks for permissions to be skipped.
 
+mod report;
 mod runtime;
 mod session;
 #[cfg(test)]

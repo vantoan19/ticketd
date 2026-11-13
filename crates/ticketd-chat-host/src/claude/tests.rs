@@ -134,11 +134,14 @@ async fn handing_input_to_the_sdk_is_a_write_and_later_evidence_arrives_as_event
         [
             "session sess-1",
             "notice EffectiveSettings",
+            "settings model=claude-test[] permission=default[\"default\", \"acceptEdits\", \"plan\"]",
             "turn-started local-turn-1",
             "delta text-1 \"Here\"",
             &processing("sub-1", "local-turn-1"),
             "delta text-1 \" you go\"",
             "message text-1 \"Here you go\"",
+            // Thinking whose start the bridge did not report has no times.
+            "reasoning thinking-1 done None None Some(\"pondering\") None",
             "tool toolu_1 \"Bash\" Running None",
             "tool toolu_1 \"Bash\" Succeeded Some(\"a.txt\")",
             "message text-2 \"Done.\"",
@@ -201,6 +204,8 @@ async fn output_keeps_flowing_while_a_permission_or_question_waits_for_its_answe
             "turn-started local-turn-1",
             &processing("sub-1", "local-turn-1"),
             "tool toolu_1 \"Write\" Running None",
+            // Listed as soon as the edit starts; confirmed only by its result.
+            "files [\"Modified /work/chat-1/a.txt unconfirmed\"]",
             "approval 7-1 \"Write to a.txt\" None [Allow, Deny]",
             "delta text-1 \"Waiting\"",
         ]
@@ -794,4 +799,118 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
         .event("tool_result", &result("toolu_2"))
         .expect("modeled");
     assert_eq!(status(events), ToolStatus::Failed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn thinking_the_plan_files_and_context_carry_only_what_claude_code_reported() {
+    let (mut peer, runtime, mut events) = open().await;
+    peer.load(fixture!("reports"));
+    submit(&mut peer, &runtime, start_turn("sub-1", "Add a limiter")).await;
+    peer.play().await;
+
+    let seen = seen(&mut events).await;
+    let shown: Vec<&str> = seen
+        .iter()
+        .map(String::as_str)
+        .filter(|event| !event.starts_with("notice") && !event.starts_with("session"))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "settings model=claude-opus-test[] permission=default[\"default\", \"acceptEdits\", \"plan\"]",
+            "turn-started local-turn-1",
+            &processing("sub-1", "local-turn-1"),
+            "reasoning thinking-1 running Some(1730910000000) None None None",
+            "reasoning thinking-1 done Some(1730910000000) Some(1730910012000) None None",
+            "reasoning thinking-1 done Some(1730910000000) Some(1730910012000) Some(\"The handler has no limit.\") None",
+            // Redacted thinking is timed and has no text.
+            "reasoning thinking-2 running Some(1730910013000) None None None",
+            "reasoning thinking-2 done Some(1730910013000) Some(1730910014000) None None",
+            // The to-do list is the plan, never a step row.
+            "plan [\"Completed Read the handler (Reading the handler)\", \"InProgress Add the limiter (Adding the limiter)\"] None",
+            "tool toolu_edit \"Edit\" Running None",
+            "files [\"Modified /work/chat-1/src/handler.ts unconfirmed\"]",
+            "tool toolu_edit \"Edit\" Succeeded Some(\"edited\")",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\"]",
+            "tool toolu_write \"Write\" Running None",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Modified /work/chat-1/src/limiter.ts unconfirmed\"]",
+            "tool toolu_write \"Write\" Succeeded Some(\"created\")",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Added /work/chat-1/src/limiter.ts +1 -0\"]",
+            "tool toolu_bad \"Edit\" Running None",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Added /work/chat-1/src/limiter.ts +1 -0\", \"Modified /work/chat-1/README.md unconfirmed\"]",
+            "tool toolu_bad \"Edit\" Failed Some(\"String not found\")",
+            // A failed edit changed nothing.
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Added /work/chat-1/src/limiter.ts +1 -0\"]",
+            "compacted",
+            "turn-ended local-turn-1 Completed [\"sub-1\"]",
+            "context 124000 of 200000 [\"Messages 100000\"] Some(167000)",
+        ]
+    );
+
+    let refused = tokio::join!(
+        runtime.change_setting(crate::SettingChange {
+            generation: GENERATION,
+            setting: crate::SettingKey::Model,
+            value: "sonnet".to_owned(),
+        }),
+        peer.play()
+    )
+    .0;
+    assert_eq!(
+        refused,
+        crate::SettingOutcome::Refused {
+            reason: "model not available".to_owned()
+        }
+    );
+}
+
+#[test]
+fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
+    use super::session::Session;
+    let mut session = Session::default();
+    let models = json!({"models": [
+        {"value": "default", "resolved_model": "claude-opus-test", "display_name": "Default", "description": "Recommended", "effort_levels": ["low", "medium", "high"]},
+        {"value": "haiku", "resolved_model": null, "display_name": "Haiku", "description": "", "effort_levels": []},
+    ]});
+    assert!(
+        session.initialized(&models).is_none(),
+        "nothing in effect yet"
+    );
+    let info = |mode: &str| json!({"model": "claude-opus-test", "permission_mode": mode, "effort": "medium"});
+    let (events, _) = session
+        .event("session_info", &info("default"))
+        .expect("modeled");
+    let Some(EventKind::SettingsState(settings)) = events.last() else {
+        panic!("settings, got {events:?}");
+    };
+    // The model in effect is the option that resolves to it.
+    assert_eq!(
+        settings.model.as_ref().and_then(|m| m.current.as_deref()),
+        Some("default")
+    );
+    let effort = settings.effort.as_ref().expect("the model takes effort");
+    assert_eq!(effort.current.as_deref(), Some("medium"));
+    let permission = settings.permission.as_ref().expect("permission");
+    assert!(
+        permission
+            .options
+            .iter()
+            .all(|option| option.id != "bypassPermissions")
+    );
+
+    let (events, _) = session
+        .event("session_info", &info("bypassPermissions"))
+        .expect("modeled");
+    let Some(EventKind::SettingsState(settings)) = events.last() else {
+        panic!("settings, got {events:?}");
+    };
+    let permission = settings.permission.as_ref().expect("permission");
+    assert_eq!(
+        permission.unchangeable.as_deref(),
+        Some("Set in Claude Code's settings")
+    );
+    assert_eq!(
+        permission.refusal("acceptEdits").as_deref(),
+        Some("Set in Claude Code's settings")
+    );
 }
