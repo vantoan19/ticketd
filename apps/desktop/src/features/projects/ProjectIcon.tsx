@@ -12,28 +12,37 @@ type Look = { url: string; shape: boolean };
  */
 const looks = new Map<string, Promise<Look | null>>();
 
-/** Whether a corner of the image shows through: its shape then reads alone. */
+/** Below this share of opaque pixels, a favicon is a glyph on a clear ground. */
+const TILE = 0.75;
+
+/**
+ * Whether a 16px favicon (RGBA bytes) reads as its shape alone: mostly clear.
+ * A tile with rounded corners shows through at its corners yet is a picture.
+ */
+export function readsAsShape(rgba: Uint8ClampedArray): boolean {
+  let opaque = 0;
+  const pixels = rgba.length / 4;
+  for (let index = 3; index < rgba.length; index += 4)
+    if ((rgba[index] ?? 0) >= 128) opaque++;
+  return opaque < pixels * TILE;
+}
+
+/** Whether the image reads as its shape alone; see `readsAsShape`. */
 function transparent(url: string, svg: boolean): Promise<boolean> {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => {
       const canvas = document.createElement("canvas");
       canvas.width = canvas.height = 16;
-      let context: CanvasRenderingContext2D | null = null;
       try {
-        context = canvas.getContext("2d");
-      } catch {
+        const context = canvas.getContext("2d");
         // No canvas: guess from the format.
+        if (!context) return resolve(svg);
+        context.drawImage(image, 0, 0, 16, 16);
+        resolve(readsAsShape(context.getImageData(0, 0, 16, 16).data));
+      } catch {
+        resolve(svg);
       }
-      if (!context) return resolve(svg);
-      context.drawImage(image, 0, 0, 16, 16);
-      const alpha = (x: number, y: number) =>
-        context.getImageData(x, y, 1, 1).data[3] ?? 255;
-      resolve(
-        [alpha(0, 0), alpha(15, 0), alpha(0, 15), alpha(15, 15)].some(
-          (a) => a < 128,
-        ),
-      );
     };
     image.onerror = () => resolve(svg);
     image.src = url;
