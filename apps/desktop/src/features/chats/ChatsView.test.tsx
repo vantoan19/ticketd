@@ -1238,6 +1238,8 @@ test("scrolling up stops following; Jump to latest resumes it", async () => {
   // Following: the control is hidden and out of reach.
   expect(jump.hasAttribute("inert")).toBe(true);
   sized(scroller, 200, 1000);
+  scroller.scrollTop = 800;
+  fireEvent.scroll(scroller);
   scroller.scrollTop = 300;
   fireEvent.scroll(scroller);
   expect(jump.hasAttribute("inert")).toBe(false);
