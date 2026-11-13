@@ -15,8 +15,8 @@ use crate::{
     Capabilities, Capability, CloseOutcome, DispatchOutcome, EVENT_BUFFER, EventKind, Harness,
     HarnessAdapter, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
     InterruptRequest, LoginState, NativeRequestId, NativeTurnId, OpenRequest, OpenedRuntime,
-    Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SteeringBehavior,
-    Submission, SubmissionKind,
+    Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SettingChange,
+    SettingOutcome, SteeringBehavior, Submission, SubmissionKind,
 };
 
 /// What the fake harness does with a submission after it was written.
@@ -38,6 +38,7 @@ pub enum Written {
     Submit(Submission),
     Respond(InteractionResponse),
     Interrupt(InterruptRequest),
+    Setting(SettingChange),
     Close(RuntimeGeneration),
 }
 
@@ -417,6 +418,18 @@ impl HarnessRuntime for FakeRuntime {
             .interrupt_outcomes
             .pop_front()
             .unwrap_or(InterruptOutcome::Acknowledged)
+    }
+
+    /// The fake harness accepts every setting change that reaches it.
+    async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
+        let mut state = self.fake.state();
+        if state.live_for(self.generation, change.generation).is_err() {
+            return SettingOutcome::Refused {
+                reason: "the session has ended".to_owned(),
+            };
+        }
+        state.written.push(Written::Setting(change));
+        SettingOutcome::Applied
     }
 
     /// Closing a runtime that is no longer live reports the scripted outcome too.

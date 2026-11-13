@@ -120,13 +120,16 @@ function suggestedTitle(text: string) {
   return line.replace(/^[#>*\-\s]+/, "").slice(0, 80);
 }
 
-/** Saves one response through ordinary Document creation; nothing else is copied. */
+/** Saves one response, or a plan, through ordinary Document creation; nothing else is copied. */
 export function SaveDocumentDialog({
   response,
+  plan = false,
   onClose,
   onSave,
 }: {
   response: { id: string; text: string };
+  /** `response` is a turn's plan, saved as a checklist. */
+  plan?: boolean;
   onClose: () => void;
   onSave: (responseId: string, title: string) => Promise<void>;
 }) {
@@ -162,7 +165,9 @@ export function SaveDocumentDialog({
         />
       </div>
       <p className="chat-fine">
-        Saves this one response. The rest of the Chat isn’t copied.
+        {plan
+          ? "Saves this plan as a checklist; only finished steps are checked. The rest of the Chat isn’t copied."
+          : "Saves this one response. The rest of the Chat isn’t copied."}
       </p>
       {error && (
         <p className="chat-fine" role="alert">

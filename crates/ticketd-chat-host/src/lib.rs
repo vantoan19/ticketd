@@ -11,6 +11,7 @@ pub mod context;
 mod contract;
 mod host;
 mod install;
+pub mod records;
 #[cfg(test)]
 mod scripted;
 mod stdio;

@@ -43,6 +43,11 @@ import type {
   TranscriptItem,
 } from "@/features/chats/client";
 import {
+  FilesSummary,
+  PlanCard,
+  ReasoningRow,
+} from "@/features/chats/TurnReports";
+import {
   binarySize,
   duration,
   elapsed,
@@ -65,6 +70,10 @@ type Of<K extends TranscriptItem["kind"]> = Extract<
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
   saveAsDocument: (response: Of<"response">) => void;
+  /** Saves a plan its turn left unfinished, as a checklist. */
+  savePlan: (plan: Of<"plan">) => void;
+  /** Opens a file the turn changed; rejects with the reason it could not. */
+  openFile: (path: string) => Promise<void>;
 };
 
 const DELIVERY_CAPTION = {
@@ -425,6 +434,16 @@ function Row({
       return <Receipt item={row.item} />;
     case "note":
       return <Note item={row.item} />;
+    case "reasoning":
+      return <ReasoningRow item={row.item} />;
+    case "plan":
+      return (
+        <PlanCard
+          item={row.item}
+          readOnly={readOnly}
+          onSave={actions.savePlan}
+        />
+      );
   }
 }
 
@@ -567,6 +586,15 @@ function TurnView({
           )
         )}
       </div>
+      {turn.plan && (
+        <div data-anchor="">
+          <PlanCard
+            item={turn.plan}
+            readOnly={readOnly}
+            onSave={actions.savePlan}
+          />
+        </div>
+      )}
       {turn.final && (
         <div data-anchor="">
           <Response
@@ -582,6 +610,15 @@ function TurnView({
       {turn.marker && (
         <div className="chat-below" data-anchor="">
           <StopMarker item={turn.marker} harness={harness} />
+        </div>
+      )}
+      {turn.files && (
+        <div className="chat-below" data-anchor="">
+          <FilesSummary
+            item={turn.files}
+            commandEdits={turn.commandEdits ?? false}
+            onOpen={actions.openFile}
+          />
         </div>
       )}
       {!turn.live && changes.length > 0 && (
@@ -652,6 +689,21 @@ const Item = memo(function Item({
   actions: TranscriptActions;
 }) {
   switch (item.kind) {
+    case "reasoning":
+      return <ReasoningRow item={item} />;
+    case "plan":
+      // While its turn runs, the plan lives in the activity dock.
+      return (
+        <PlanCard item={item} readOnly={readOnly} onSave={actions.savePlan} />
+      );
+    case "files":
+      return (
+        <FilesSummary
+          item={item}
+          commandEdits={false}
+          onOpen={actions.openFile}
+        />
+      );
     case "user":
       return <UserMessage item={item} />;
     case "response":

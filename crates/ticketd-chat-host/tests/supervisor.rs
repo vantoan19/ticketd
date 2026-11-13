@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use ticketd_chat_host::records::{FILES_RECORD_NAME, PLAN_RECORD_NAME, REASONING_RECORD_NAME};
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities,
@@ -20,10 +21,15 @@ use ticketd_chat_host::{
     TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus, TurnOutcome, UnconfirmedCleanup,
     WorkspaceOpener, problem_kind,
 };
+use ticketd_chat_host::{
+    AppliesFrom, ContextUsage, FileChange, FileChangeKind, HarnessSettings, PermissionKind, Plan,
+    PlanStep, PlanStepStatus, Setting, SettingChange, SettingChangeState, SettingKey,
+    SettingOption, SettingOutcome,
+};
 use ticketd_core::{
     Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
-    ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatTurn, ChatTurnState, Error,
-    NewChat, Workspace,
+    ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurn,
+    ChatTurnState, Error, NewChat, Workspace,
 };
 
 struct Fixture {
@@ -1662,4 +1668,180 @@ async fn send_now_is_refused_during_a_turn_that_cannot_be_steered() {
 
     assert!(matches!(refused, Err(HostError::Working)));
     assert_eq!(f.queued(), ["later"]);
+}
+
+/// The tool records of the history whose name is `name`, as their stored JSON.
+fn records(f: &Fixture, name: &str) -> Vec<(String, ChatToolState, serde_json::Value)> {
+    f.items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == name => Some((
+                tool.id,
+                tool.state,
+                serde_json::from_str(&tool.input).unwrap(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn reasoning_plan_and_files_are_kept_with_their_turn_each_replacing_the_last() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("Add a limiter").await;
+    let reasoning = |running, text: Option<&str>| EventKind::ReasoningUpdated {
+        turn: turn_1(),
+        item: NativeItemId::new("rs-1"),
+        running,
+        started_at: Some(1_000),
+        ended_at: (!running).then_some(13_000),
+        text: text.map(str::to_owned),
+        heading: None,
+    };
+    let plan = |done| EventKind::PlanUpdated {
+        turn: turn_1(),
+        plan: Plan {
+            steps: vec![PlanStep {
+                text: "Add the limiter".to_owned(),
+                status: if done {
+                    PlanStepStatus::Completed
+                } else {
+                    PlanStepStatus::InProgress
+                },
+                active_label: None,
+            }],
+            explanation: None,
+        },
+    };
+    let files = |confirmed| EventKind::FilesChanged {
+        turn: turn_1(),
+        files: vec![FileChange {
+            path: "/work/app/src/limiter.ts".to_owned(),
+            kind: FileChangeKind::Added,
+            added_lines: Some(48),
+            removed_lines: Some(0),
+            confirmed,
+        }],
+    };
+
+    for event in [
+        reasoning(true, None),
+        reasoning(false, Some("The handler has no limit.")),
+        plan(false),
+        plan(true),
+        files(false),
+        files(true),
+    ] {
+        f.emit(event).await;
+    }
+
+    let [(_, state, kept)] = records(&f, REASONING_RECORD_NAME).try_into().unwrap();
+    assert_eq!(state, ChatToolState::Completed);
+    assert_eq!(kept["text"], "The handler has no limit.");
+    assert_eq!(kept["ended_at"], 13_000);
+    let [(_, _, kept)] = records(&f, PLAN_RECORD_NAME).try_into().unwrap();
+    assert_eq!(kept["steps"][0]["status"], "completed");
+    let [(_, _, kept)] = records(&f, FILES_RECORD_NAME).try_into().unwrap();
+    assert_eq!(kept["files"][0]["kind"], "added");
+    assert_eq!(kept["files"][0]["confirmed"], true);
+}
+
+fn settings(permission: &str) -> HarnessSettings {
+    let option = |id: &str, kind| SettingOption {
+        id: id.to_owned(),
+        label: id.to_owned(),
+        description: None,
+        is_default: false,
+        permission: kind,
+        allowed: true,
+    };
+    HarnessSettings {
+        model: Some(Setting {
+            current: Some("gpt-a".to_owned()),
+            options: vec![option("gpt-a", None), option("gpt-b", None)],
+            unchangeable: None,
+            applies_from: AppliesFrom::NextTurn,
+            answered_by: None,
+        }),
+        effort: None,
+        permission: Some(Setting {
+            current: Some(permission.to_owned()),
+            options: vec![
+                option("ask", Some(PermissionKind::Ask)),
+                option("full", Some(PermissionKind::FullAccess)),
+            ],
+            unchangeable: None,
+            applies_from: AppliesFrom::NextTurn,
+            answered_by: None,
+        }),
+    }
+}
+
+fn setting_changes(f: &Fixture) -> Vec<SettingChange> {
+    f.fake
+        .written()
+        .into_iter()
+        .filter_map(|written| match written {
+            Written::Setting(change) => Some(change),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_is_never_sent() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("Start").await;
+    f.emit(EventKind::SettingsState(settings("ask"))).await;
+    f.emit(EventKind::ContextUsage(ContextUsage {
+        used: 124_000,
+        window: 200_000,
+        categories: Vec::new(),
+        compacts_at: None,
+    }))
+    .await;
+    assert_eq!(f.live().await.context.unwrap().usage.used, 124_000);
+
+    let full = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "full")
+        .await
+        .unwrap();
+    let unknown = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Model, "gpt-z")
+        .await
+        .unwrap();
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Model, "gpt-b")
+        .await
+        .unwrap();
+    settle().await;
+
+    assert!(matches!(
+        full,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    assert!(matches!(
+        unknown,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    assert_eq!(held, SettingChangeState::Held);
+    // Nothing reaches the harness while the turn runs.
+    assert!(setting_changes(&f).is_empty());
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let sent = setting_changes(&f);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].value, "gpt-b");
+    let live = f.live().await;
+    let settings = live.settings.unwrap();
+    assert_eq!(
+        settings.reported.model.unwrap().current.as_deref(),
+        Some("gpt-b")
+    );
+    assert!(settings.changes.iter().any(|change| change.value == "gpt-b"
+        && change.state == SettingChangeState::Done(SettingOutcome::Applied)));
 }

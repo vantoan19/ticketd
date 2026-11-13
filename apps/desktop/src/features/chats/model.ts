@@ -227,6 +227,20 @@ type Of<K extends TranscriptItem["kind"]> = Extract<
   { kind: K }
 >;
 
+/** A reasoning row with no text leaves the list once it ends; one cut off stays. */
+export const reasoningShown = (item: Of<"reasoning">) =>
+  item.state !== "done" || Boolean(item.text?.trim());
+
+/** A plan whose turn ended with every step done: one row in the fold. */
+export const planFinished = (item: Of<"plan">) =>
+  item.state === "ended" &&
+  item.steps.length > 0 &&
+  item.steps.every((step) => step.status === "completed");
+
+/** A plan its turn ended without finishing, or whose stop did not confirm: a card. */
+export const planUnfinished = (item: Of<"plan">) =>
+  item.state !== "running" && item.steps.length > 0 && !planFinished(item);
+
 /** One row of a turn, in the order it happened. `kept` rows are never folded. */
 export type TurnRow =
   | {
@@ -245,7 +259,10 @@ export type TurnRow =
       kept?: false;
     }
   | { kind: "receipt"; key: string; item: Of<"request">; kept: true }
-  | { kind: "note"; key: string; item: Of<"marker">; kept: true };
+  | { kind: "note"; key: string; item: Of<"marker">; kept: true }
+  /** #367: a reasoning row, and a plan that finished every step. */
+  | { kind: "reasoning"; key: string; item: Of<"reasoning">; kept?: false }
+  | { kind: "plan"; key: string; item: Of<"plan">; kept?: false };
 
 /**
  * A turn, or one segment of it after a steer: your message's work through its end.
@@ -265,6 +282,12 @@ export type Turn = {
   final?: Of<"response">;
   /** Why the turn stopped: stopped, quit or failed. */
   marker?: Of<"marker">;
+  /** A plan the turn ended with unfinished: a card above the final response. */
+  plan?: Of<"plan">;
+  /** The files the turn changed, below the response and stop marker. */
+  files?: Of<"files">;
+  /** The turn ran commands that edited files the files row cannot list. */
+  commandEdits?: boolean;
   /** Every item the turn holds, for the reading position. */
   ids: string[];
 };
@@ -389,7 +412,12 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
     }
     if (item.kind === "response")
       rows.push({ kind: "response", key: item.id, item });
-    else if (item.kind === "records")
+    else if (item.kind === "reasoning") {
+      if (reasoningShown(item))
+        rows.push({ kind: "reasoning", key: item.id, item });
+    } else if (item.kind === "plan") {
+      if (planFinished(item)) rows.push({ kind: "plan", key: item.id, item });
+    } else if (item.kind === "records")
       item.changes.forEach((change, index) =>
         rows.push({ kind: "record", key: `${item.id}:${index}`, change }),
       );
@@ -471,6 +499,22 @@ export function turns(
       (item): item is Of<"marker"> =>
         item.kind === "marker" && item.reason !== "note",
     );
+    const plan = lastOf(
+      part.members,
+      (item): item is Of<"plan"> => item.kind === "plan",
+    );
+    const files = lastOf(
+      part.members,
+      (item): item is Of<"files"> =>
+        item.kind === "files" && item.state === "ended",
+    );
+    const commandEdits = steps.some(
+      (step) =>
+        Boolean(step.command) &&
+        (step.kind === "edit" ||
+          step.kind === "create" ||
+          step.kind === "delete"),
+    );
     // The final response is the last one, unless steps follow it.
     const lastWork = lastOf(
       rows,
@@ -516,6 +560,8 @@ export function turns(
           ),
           ...(final && { final }),
           ...(marker && { marker }),
+          ...(plan && planUnfinished(plan) && { plan }),
+          ...(files && { files, commandEdits }),
           ids: part.members.map((item) => item.id),
         },
       },

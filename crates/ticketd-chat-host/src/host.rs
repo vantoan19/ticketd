@@ -11,8 +11,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
-    Harness, HarnessAdapter, Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind,
-    SteeringBehavior, Subscription,
+    ContextUsage, Harness, HarnessAdapter, HarnessSettings, Inspection, InteractionAnswer,
+    InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome, SteeringBehavior,
+    Subscription,
 };
 
 /// Provisional bounds, to be measured in #267.
@@ -196,6 +197,43 @@ pub struct ChatLive {
     pub interactions: Vec<LiveInteraction>,
     pub stop: Option<StopState>,
     pub problem: Option<ChatProblem>,
+    /// The live session's last context report; a new session starts without one.
+    pub context: Option<ContextReport>,
+    /// The live session's settings, when its harness reported them. Boxed: it is
+    /// large and most updates do not carry it changed.
+    pub settings: Option<Box<LiveSettings>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextReport {
+    pub usage: ContextUsage,
+    /// When it was reported, in milliseconds since the Unix epoch.
+    pub at: i64,
+    /// When the session last compacted its context, if it did since it started.
+    pub compacted_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSettings {
+    pub reported: HarnessSettings,
+    /// The latest change the person asked for, per setting.
+    pub changes: Vec<LiveSettingChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSettingChange {
+    pub setting: SettingKey,
+    pub value: String,
+    pub state: SettingChangeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingChangeState {
+    /// Held while a turn runs; it is sent when the turn ends.
+    Held,
+    /// Sent to the harness; no answer yet.
+    Sent,
+    Done(SettingOutcome),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -366,6 +404,26 @@ impl ChatHost {
         self.ask(chat_id, |reply| Command::Respond {
             interaction_id,
             answer,
+            reply,
+        })
+        .await
+    }
+
+    /// Asks the live session to use `value` for `setting` from the next turn. While a
+    /// turn runs the change is held and sent when it ends, so every turn runs on one
+    /// set of settings. Returns where the change stands; later states are in
+    /// `ChatLive::settings`. A value the harness did not offer, or full access, is
+    /// refused without being sent.
+    pub async fn change_setting(
+        &self,
+        chat_id: &str,
+        setting: SettingKey,
+        value: &str,
+    ) -> Result<SettingChangeState, HostError> {
+        let value = value.to_owned();
+        self.ask(chat_id, |reply| Command::ChangeSetting {
+            setting,
+            value,
             reply,
         })
         .await

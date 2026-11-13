@@ -1424,7 +1424,8 @@ Documents, authored Activities, Implementation evidence and ticket statuses thro
 ordinary core workflows. External source authority and existing concurrency rules
 continue to apply. Provider events do not directly mutate domain records or bypass
 the CLI/core. Chat messages do not automatically become Activities or Documents;
-offer Save as Document for an assistant response.
+offer Save as Document for an assistant response, and for a plan a turn left
+unfinished, saved as a checklist in which only the completed steps are checked.
 
 ### 21.5. Retention and recovery
 

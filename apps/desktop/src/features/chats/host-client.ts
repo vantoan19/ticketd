@@ -12,6 +12,7 @@ import {
   folderFileSchema,
   harnessStatusSchema,
   linkedRecordSchema,
+  settingChangeSchema,
   openRequestSchema,
   type ChatChange,
   type ChatClient,
@@ -274,6 +275,11 @@ export function createHostChatClient(
     removeLink: (id, link) =>
       run("chat_set_link", { chatId: id, link, present: false }),
     resume: (id, history) => run("chat_resume", { chatId: id, history }),
+    changeSetting: async (id, setting, value) =>
+      settingChangeSchema.parse(
+        await call("chat_change_setting", { chatId: id, setting, value }),
+      ),
+    openFile: (id, path) => run("chat_open_file", { chatId: id, path }),
     saveAsDocument: async (id, responseId, title) =>
       z.string().parse(
         await call("chat_save_as_document", {

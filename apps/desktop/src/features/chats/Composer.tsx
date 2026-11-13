@@ -29,6 +29,7 @@ export function Composer({
   onQueue,
   onStop,
   stopping = false,
+  beforeStop,
   onArrowUpFromEmpty,
   inputRef,
   autoFocus = false,
@@ -53,6 +54,8 @@ export function Composer({
   onStop?: () => void;
   /** Stop was asked for and has not finished: Stop waits. */
   stopping?: boolean;
+  /** Fixed before Stop, so Send leads: the context ring (#367). */
+  beforeStop?: ReactNode;
   /** ↑ in an empty box: what is above it (a request's options) takes focus. */
   onArrowUpFromEmpty?: () => void;
   inputRef?: Ref<HTMLTextAreaElement>;
@@ -124,6 +127,7 @@ export function Composer({
       {/* The left of the row is for the harness's own controls (#368). */}
       <div className="chat-composer-row">
         <span className="chat-spacer" />
+        {beforeStop}
         {onStop && (
           <IconButton
             type="button"
