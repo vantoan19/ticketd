@@ -135,7 +135,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 70;
+pub const FORMAT_VERSION: i64 = 71;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -962,6 +962,9 @@ impl Workspace {
             automations::migrate(&transaction)?;
         }
         if version < 70 {
+            automations::migrate_sync(&transaction)?;
+        }
+        if version < 71 {
             automation_runs::migrate(&transaction)?;
         }
         let violations: i64 =

@@ -106,10 +106,20 @@ fn files_live_in_a_visible_folder_identified_by_properties_with_readable_names()
     let blob = named("diagram.png");
     assert_eq!(blob["parents"], json!([attachments["id"]]));
     assert_eq!(blob["appProperties"]["ticketdKind"], "attachment");
-    for name in ["documents", "plans", "projects"] {
+    for name in [
+        "documents",
+        "plans",
+        "projects",
+        "automations",
+        "automation_agents",
+    ] {
         assert_eq!(named(name)["parents"], json!([root["id"]]));
     }
-    assert_eq!(items.len(), 8, "one folder, five subfolders and two files");
+    assert_eq!(
+        items.len(),
+        10,
+        "one folder, seven subfolders and two files"
+    );
 }
 
 #[test]
@@ -134,7 +144,7 @@ fn an_expired_access_token_is_renewed_once_and_a_withdrawn_grant_asks_to_reconne
         put(&remote, &key("b"), None, b"b"),
         Err(RemoteError::Unauthorized)
     );
-    assert_eq!(sim.items().len(), 7, "nothing was written or removed");
+    assert_eq!(sim.items().len(), 9, "nothing was written or removed");
 }
 
 #[test]
@@ -160,8 +170,8 @@ fn listings_and_revisions_follow_every_page() {
     assert_eq!(listed, ["b", "c", "d", "e", "paged"]);
     assert_eq!(
         sim.count("GET", "pageToken="),
-        6,
-        "two more pages of six folders, four more of ten folder entries"
+        8,
+        "three more pages of eight folders, five more of twelve folder entries"
     );
     let revisions = remote.revisions(FOLDER, &ticket).unwrap();
     assert_eq!(revisions.len(), 5);

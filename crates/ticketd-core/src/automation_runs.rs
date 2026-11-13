@@ -118,7 +118,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     // Views refresh on the change token, so a run that starts or ends shows up.
     crate::change_token::track(connection, "automation_runs")?;
     crate::change_token::track(connection, "automation_run_steps")?;
-    connection.execute_batch("PRAGMA user_version = 70;")?;
+    connection.execute_batch("PRAGMA user_version = 71;")?;
     Ok(())
 }
 

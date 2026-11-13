@@ -568,7 +568,7 @@ fn the_previous_format_gains_run_storage_without_losing_records() {
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
         "DROP TABLE automation_run_steps; DROP TABLE automation_runs;
-         ALTER TABLE chats DROP COLUMN automation_run_id; PRAGMA user_version = 69;",
+         ALTER TABLE chats DROP COLUMN automation_run_id; PRAGMA user_version = 70;",
     )
     .unwrap();
     drop(db);

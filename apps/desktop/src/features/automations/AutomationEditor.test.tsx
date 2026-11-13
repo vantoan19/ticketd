@@ -60,6 +60,7 @@ const automation = (patch: Partial<Automation>): Automation => ({
   conditions: [],
   steps: [],
   enabled: false,
+  arrived_off: false,
   problems: [],
   ...patch,
 });
@@ -99,7 +100,7 @@ beforeEach(() => {
       case "automation_update":
         return change(definition ?? {});
       case "automation_set_enabled":
-        return change({ enabled: enabled ?? false });
+        return change({ enabled: enabled ?? false, arrived_off: false });
       case "automation_delete":
         automations = automations.filter((item) => item.id !== id);
         return null;
@@ -355,6 +356,39 @@ test("an Automation is renamed and deleted from its menu, and a step is deleted 
   await waitFor(() =>
     expect(screen.queryByRole("application", { name: "Steps" })).toBeNull(),
   );
+});
+
+test("an Automation synced from another desktop is off here until it is turned on here", async () => {
+  await openFirst([
+    automation({
+      name: "Weekly summary",
+      trigger: { kind: "tag_added", tag: "summary" },
+      steps: [runAgent("s1", "agent-1", "C:\\code\\web-app")],
+      arrived_off: true,
+    }),
+    automation({ id: "automation-2", name: "Made here" }),
+  ]);
+
+  // The list says why it is off; one made on this desktop is only "Off".
+  const rows = within(screen.getByRole("list", { name: "Automations" }));
+  expect(
+    rows.getByRole("button", { name: /Weekly summary/ }).textContent,
+  ).toContain("Off on this desktop");
+  expect(
+    rows.getByRole("button", { name: /Made here/ }).textContent,
+  ).not.toContain("Off on this desktop");
+
+  const bar = screen.getByRole("status");
+  expect(bar.textContent).toContain("Off on this desktop");
+  fireEvent.click(within(bar).getByRole("button", { name: "Turn on here" }));
+
+  await waitFor(() => expect(automations[0]?.enabled).toBe(true));
+  await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  expect(
+    screen
+      .getByRole("switch", { name: "On for this desktop" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
 });
 
 test("an agent used by a step cannot be deleted, and its menu names the Automation", async () => {

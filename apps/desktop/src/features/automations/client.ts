@@ -78,6 +78,8 @@ const automationSchema = automationDefinitionSchema.extend({
   id: z.string(),
   /** On for this device. */
   enabled: z.boolean(),
+  /** It was synced from another desktop and has not been turned on here since. */
+  arrived_off: z.boolean(),
   /**
    * Why it cannot be switched on yet, in the order the steps run. `step_id` is
    * the unfinished step, "trigger", or null for the Automation as a whole.

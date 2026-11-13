@@ -8,6 +8,13 @@ import {
   Tag,
   X,
 } from "lucide-react";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   DropdownMenu,
@@ -264,6 +271,29 @@ export function AutomationEditor({
             onChooseTrigger={chooseTrigger}
             onAddStep={addStep}
             onDeleteStep={setDeletingStep}
+            notice={
+              automation.arrived_off && (
+                <Alert size="compact" role="status">
+                  <AlertTitle>Off on this desktop</AlertTitle>
+                  <AlertDescription>
+                    Synced from your other desktop.
+                  </AlertDescription>
+                  <AlertActions>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={left > 0}
+                      {...(left > 0 && {
+                        "aria-describedby": `${headingId}-left`,
+                      })}
+                      onClick={() => onSetEnabled(true)}
+                    >
+                      Turn on here
+                    </Button>
+                  </AlertActions>
+                </Alert>
+              )
+            }
           />
           {panel}
         </div>
