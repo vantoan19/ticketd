@@ -1506,6 +1506,11 @@ pub fn run() -> Result<(), tauri::Error> {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Registered for the Rust API only: no capability grants the page its commands.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             drive_commands::drive_configuration,
             drive_commands::drive_reference,
@@ -1537,6 +1542,11 @@ pub fn run() -> Result<(), tauri::Error> {
             automation_commands::automation_run_get,
             automation_commands::automation_run_stop,
             automation_commands::automation_run_again,
+            automation_commands::automation_stop_and_turn_off,
+            automation_commands::automation_runs_at_once,
+            automation_commands::set_automation_runs_at_once,
+            automation_commands::start_at_login,
+            automation_commands::set_start_at_login,
             attachment_commands::attachment_upload_limit,
             attachment_commands::attachment_workspace_id,
             attachment_commands::set_attachment_upload_limit,

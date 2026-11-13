@@ -101,6 +101,9 @@ beforeEach(() => {
         return change(definition ?? {});
       case "automation_set_enabled":
         return change({ enabled: enabled ?? false, arrived_off: false });
+      case "automation_stop_and_turn_off":
+        runs = runs.map((run) => ({ ...run, status: "needs_attention" }));
+        return change({ enabled: false });
       case "automation_delete":
         automations = automations.filter((item) => item.id !== id);
         return null;
@@ -291,6 +294,95 @@ test("an unfinished step says what it needs and the Automation cannot be switche
         .getAttribute("aria-checked"),
     ).toBe("true"),
   );
+});
+
+const run = (patch: Partial<AutomationRun>): AutomationRun => ({
+  id: "run-1",
+  status: "running",
+  reason: null,
+  ticket: { id: "t1", reference: "T-ZB7", title: "Fix login" },
+  created_at: "2026-11-14T09:00:00.000Z",
+  ...patch,
+});
+const onSwitch = () =>
+  screen.getByRole("switch", { name: "On for this desktop" });
+const openRunning = async (active: AutomationRun[]) => {
+  await openFirst([
+    automation({
+      name: "Triage",
+      trigger: { kind: "tag_added", tag: "ready-for-triage" },
+      steps: [runAgent("s1", "agent-1", "C:\\code")],
+      enabled: true,
+    }),
+  ]);
+  runs = active;
+  fireEvent.click(onSwitch());
+};
+const sent = (command: string) =>
+  vi.mocked(invoke).mock.calls.filter(([name]) => name === command);
+
+test("switching off with no run in progress turns the Automation off without asking", async () => {
+  await openRunning([run({ status: "completed" })]);
+
+  await waitFor(() => expect(automations[0]?.enabled).toBe(false));
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("switching off mid-run asks, with turning off after the run finishes as the first choice", async () => {
+  await openRunning([run({})]);
+
+  const menu = await screen.findByRole("menu", { name: "Turn off" });
+  expect(menu.textContent).toContain("A run is in progress");
+  expect(
+    within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent),
+  ).toEqual([
+    "Turn off after it finishesThe run on T-ZB7 completes; no new runs start",
+    "Stop it and turn offThe run ends now as Needs attention",
+    "Keep it on",
+  ]);
+  // Nothing has changed while the question is open.
+  expect(automations[0]?.enabled).toBe(true);
+
+  fireEvent.click(
+    within(menu).getByRole("menuitem", { name: /Turn off after it finishes/ }),
+  );
+
+  await waitFor(() => expect(automations[0]?.enabled).toBe(false));
+  expect(sent("automation_stop_and_turn_off")).toEqual([]);
+  expect(runs[0]?.status).toBe("running");
+});
+
+test("Stop it and turn off ends the run and turns the Automation off", async () => {
+  await openRunning([run({}), run({ id: "run-2", status: "queued" })]);
+
+  const menu = await screen.findByRole("menu", { name: "Turn off" });
+  expect(menu.textContent).toContain("2 runs are in progress");
+  fireEvent.click(
+    within(menu).getByRole("menuitem", { name: /Stop them and turn off/ }),
+  );
+
+  await waitFor(() => expect(automations[0]?.enabled).toBe(false));
+  expect(sent("automation_stop_and_turn_off")).toEqual([
+    ["automation_stop_and_turn_off", { id: "automation-1" }],
+  ]);
+  expect(sent("automation_set_enabled")).toEqual([]);
+  await waitFor(() =>
+    expect(onSwitch().getAttribute("aria-checked")).toBe("false"),
+  );
+});
+
+test("Keep it on leaves the Automation on and its run going", async () => {
+  await openRunning([run({})]);
+
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Keep it on" }));
+
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(automations[0]?.enabled).toBe(true);
+  expect(sent("automation_set_enabled")).toEqual([]);
+  expect(sent("automation_stop_and_turn_off")).toEqual([]);
+  expect(onSwitch().getAttribute("aria-checked")).toBe("true");
 });
 
 test("a list row shows the name, On or Off, and the tag that starts it; a row that is off is muted", async () => {

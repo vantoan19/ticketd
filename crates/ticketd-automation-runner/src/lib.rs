@@ -20,9 +20,6 @@ use ticketd_core::{
 
 pub use first_message::first_message;
 
-/// How many runs execute at once. Fixed until Settings can change it.
-pub const RUNS_AT_ONCE: usize = 2;
-
 /// Why runs left Running by an earlier process ended.
 const RESTARTED: &str = "ticketd closed while this run was going.";
 
@@ -74,7 +71,10 @@ impl Runner {
     }
 
     fn start_queued(&self) -> Result<(), Error> {
-        let started = (self.inner.open_workspace)()?.start_automation_runs(RUNS_AT_ONCE)?;
+        // Read each time, so a change in Settings counts from the next run.
+        let mut workspace = (self.inner.open_workspace)()?;
+        let started = workspace.start_automation_runs(workspace.automation_runs_at_once()?)?;
+        drop(workspace);
         for run in started {
             let runner = self.clone();
             tokio::spawn(async move {
@@ -198,6 +198,23 @@ impl Runner {
             },
         })
     }
+}
+
+/// "Stop it and turn off": switches an Automation off on this device, ends its
+/// active runs as Needs attention and interrupts the agents they were running. The
+/// core refuses whatever those turns report afterwards, so nothing waits for them.
+pub async fn stop_and_turn_off(
+    open_workspace: &WorkspaceOpener,
+    host: &ChatHost,
+    automation_id: &str,
+) -> Result<(), Error> {
+    let chats = open_workspace()?.stop_and_turn_off_automation(automation_id)?;
+    for chat_id in chats {
+        // ponytail: an interrupt that fails leaves the agent to its turn and time
+        // limits; the run has ended either way.
+        let _ = host.stop(&chat_id).await;
+    }
+    Ok(())
 }
 
 /// Why the step failed, in plain words for the person.
