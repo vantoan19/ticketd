@@ -1457,6 +1457,7 @@ impl Supervisor {
                         ToolStatus::Running => ChatToolState::Running,
                         ToolStatus::Succeeded => ChatToolState::Completed,
                         ToolStatus::Failed => ChatToolState::Failed,
+                        ToolStatus::Declined => ChatToolState::Declined,
                     },
                     output,
                 };

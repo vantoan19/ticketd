@@ -7,6 +7,7 @@ mod chat_view;
 mod chats;
 mod cli_status;
 mod drive_commands;
+mod step_kind;
 mod sync_commands;
 mod sync_scheduler;
 

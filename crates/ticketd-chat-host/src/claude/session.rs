@@ -3,7 +3,7 @@
 //!
 //! Everything here is synchronous and runs on the protocol reader in arrival order.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::{Map, Value, json};
 
@@ -28,6 +28,8 @@ struct LiveRequest {
     /// For a question: whether each question takes several answers, by question id.
     /// `None` for a permission request.
     questions: Option<HashMap<String, bool>>,
+    /// For a permission request: the tool use it asks about.
+    tool_use: Option<String>,
     answered: bool,
 }
 
@@ -41,6 +43,8 @@ pub(super) struct Session {
     requests: HashMap<NativeRequestId, LiveRequest>,
     /// Name and input of each tool the open turn started, by tool-use id.
     tools: HashMap<String, (String, ProviderDetail)>,
+    /// Tool uses the person declined: their error result is the refusal, not a failure.
+    declined: HashSet<String>,
     /// Text blocks being streamed, oldest first, by content block index.
     streams: VecDeque<(i64, NativeItemId)>,
     /// When the limit Claude Code last reported as exhausted resets, if it said.
@@ -90,6 +94,7 @@ impl Session {
         self.turn = None;
         self.requests.clear();
         self.tools.clear();
+        self.declined.clear();
         self.streams.clear();
     }
 
@@ -277,6 +282,8 @@ impl Session {
     }
 
     fn tool_result(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        let failed = event["is_error"] == true;
+        let declined = text(event, "tool_use_id").is_some_and(|id| self.declined.remove(id));
         let known = text(event, "tool_use_id").and_then(|id| Some((id, self.tools.get(id)?)));
         let (Some((id, (title, detail))), Some(turn)) = (known, self.active_turn()) else {
             let payload = json!({"tool_use_id": event.get("tool_use_id")});
@@ -295,10 +302,10 @@ impl Session {
             turn: turn.clone(),
             item: NativeItemId::new(id),
             title: title.clone(),
-            status: if event["is_error"] == true {
-                ToolStatus::Failed
-            } else {
-                ToolStatus::Succeeded
+            status: match (failed, declined) {
+                (true, true) => ToolStatus::Declined,
+                (true, false) => ToolStatus::Failed,
+                (false, _) => ToolStatus::Succeeded,
             },
             output: Some(output),
             detail: Some(detail.clone()),
@@ -335,6 +342,7 @@ impl Session {
             request.clone(),
             LiveRequest {
                 questions: None,
+                tool_use: text(event, "tool_use_id").map(str::to_owned),
                 answered: false,
             },
         );
@@ -405,6 +413,7 @@ impl Session {
                         .map(|question| (question.id.clone(), question.multi_select))
                         .collect(),
                 ),
+                tool_use: None,
                 answered: false,
             },
         );
@@ -438,10 +447,16 @@ impl Session {
         if !gone {
             if let Some(live) = self.requests.get_mut(request) {
                 live.answered = false;
+                if let Some(tool_use) = &live.tool_use {
+                    self.declined.remove(tool_use);
+                }
             }
             return None;
         }
-        self.requests.remove(request)?;
+        let live = self.requests.remove(request)?;
+        if let Some(tool_use) = &live.tool_use {
+            self.declined.remove(tool_use);
+        }
         Some(EventKind::InteractionResolved {
             request: request.clone(),
             resolution: InteractionResolution::Withdrawn,
@@ -483,6 +498,11 @@ impl Session {
             _ => return Err(Refusal::Unsupported),
         };
         live.answered = true;
+        if answer == &InteractionAnswer::Approval(ApprovalDecision::Deny)
+            && let Some(tool_use) = &live.tool_use
+        {
+            self.declined.insert(tool_use.clone());
+        }
         Ok(decision)
     }
 
@@ -491,6 +511,7 @@ impl Session {
         let id = self.turn(events);
         let turn = self.turn.take();
         self.tools.clear();
+        self.declined.clear();
         self.streams.clear();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");

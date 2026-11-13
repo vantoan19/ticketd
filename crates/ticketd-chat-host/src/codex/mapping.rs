@@ -495,7 +495,8 @@ impl Session {
         completed: bool,
     ) -> EventKind {
         let status = match text(item, &["status"]) {
-            Some("failed" | "declined") => ToolStatus::Failed,
+            Some("failed") => ToolStatus::Failed,
+            Some("declined") => ToolStatus::Declined,
             Some("inProgress") => ToolStatus::Running,
             Some("completed") => ToolStatus::Succeeded,
             _ if completed => ToolStatus::Succeeded,
