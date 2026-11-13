@@ -1191,7 +1191,9 @@ impl Chats {
             .snapshot
             .items
             .iter()
-            .flat_map(|item| chat_view::items(item, &chat, &attached.live, fresh))
+            .flat_map(|item| {
+                chat_view::items(item, &chat, &attached.live, fresh, tracker.decided())
+            })
             .collect();
         let view = View {
             chat,
@@ -1284,6 +1286,8 @@ impl Chats {
                     if active != view.chat.active_turn.as_ref().map(|turn| turn.id.clone()) {
                         records.extend(view.tracker.dependents());
                     }
+                    // A decided approval is told on the step it was asked for.
+                    records.extend(view.tracker.refolded());
                     records
                 }
                 Some(ChatUpdate::Text {
@@ -1349,7 +1353,8 @@ impl Chats {
             }
             let fresh = self.fresh(&view.chat.id);
             for record in records {
-                for item in chat_view::items(&record, &view.chat, &view.live, fresh) {
+                let decided = view.tracker.decided();
+                for item in chat_view::items(&record, &view.chat, &view.live, fresh, decided) {
                     if !send(&mut view, json!({ "kind": "item", "item": item })) {
                         return;
                     }

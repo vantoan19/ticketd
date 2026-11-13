@@ -343,10 +343,7 @@ const time = (stamp: string | null | undefined) => {
 export function receiptLine(request: ItemOf<"request">) {
   const subject = request.subject ?? request.title;
   if (request.state === "expired") return `Expired · ${subject}`;
-  if (request.request === "question")
-    return `Answered · ${request.answer ?? subject}`;
-  // An approval with no step to fold into still says what was decided.
-  return `${request.outcome?.startsWith("You denied") ? "Declined" : "Allowed"} · ${subject}`;
+  return `Answered · ${request.answer ?? subject}`;
 }
 
 /**
@@ -358,25 +355,12 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
   const rows: TurnRow[] = [];
   const all: Step[] = [];
   let steps: { key: string; step: Step }[] = [];
-  /** An answered approval waiting for the step it allowed or declined. */
-  let approval: ItemOf<"request"> | undefined;
   const flush = () => {
     const first = steps[0]?.key ?? "";
     mergeSteps(steps.map((entry) => entry.step)).forEach((step, index) =>
       rows.push({ kind: "step", key: `${first}:${index}`, step }),
     );
     steps = [];
-  };
-  /** An approval no step followed keeps a receipt, so the decision is not lost. */
-  const unfolded = () => {
-    if (approval)
-      rows.push({
-        kind: "receipt",
-        key: approval.id,
-        item: approval,
-        kept: true,
-      });
-    approval = undefined;
   };
   for (const item of members) {
     if (item.kind === "steps") {
@@ -387,26 +371,17 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
             : original;
         all.push(step);
         const key = `${item.id}:${index}`;
-        if (approval) {
-          // A step that waited on a decision stands alone, so its tooltip is its own.
+        if (step.decision) {
+          // A step the person decided about stands alone, so its tooltip is its own.
           flush();
-          const decision = approval.outcome ?? receiptLine(approval);
-          rows.push({ kind: "step", key, step, decision });
-          approval = undefined;
+          rows.push({ kind: "step", key, step, decision: step.decision });
         } else steps.push({ key, step });
       });
       continue;
     }
     flush();
-    unfolded();
-    if (
-      item.kind === "request" &&
-      item.request === "approval" &&
-      item.state === "answered"
-    ) {
-      approval = item;
-      continue;
-    }
+    // The host told the decision on the step it was asked for.
+    if (item.kind === "request" && item.folded) continue;
     if (item.kind === "response")
       rows.push({ kind: "response", key: item.id, item });
     else if (item.kind === "reasoning") {
@@ -424,7 +399,6 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
       rows.push({ kind: "note", key: item.id, item, kept: true });
   }
   flush();
-  unfolded();
   return { rows, steps: all };
 }
 

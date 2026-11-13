@@ -9,7 +9,7 @@ use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
     ApprovalDecision, DeliveryEvidence, EventKind, InteractionRequest, NativeItemId,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind,
-    ProviderDetail, TurnOutcome,
+    ProviderDetail, ToolStatus, TurnOutcome,
 };
 use ticketd_core::{ChatDelivery, ChatSubmissionIntent};
 
@@ -278,6 +278,7 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
     f.emit(EventKind::InteractionRequested(InteractionRequest {
         request: NativeRequestId::new("approval-1"),
         turn: Some(turn()),
+        item: None,
         kind: InteractionKind::Approval {
             description: "Run cargo test".to_owned(),
             reason: None,
@@ -339,6 +340,93 @@ async fn a_view_follows_numbered_changes_in_ticketd_terms_and_answers_only_live_
     settle().await;
     let again = f.chats.answer(&id, request_id, allow()).await;
     assert_eq!(again.unwrap_err().code, "stale");
+}
+
+fn command_tool(item: &str, command: &str, status: ToolStatus) -> EventKind {
+    EventKind::ToolUpdated {
+        turn: turn(),
+        item: NativeItemId::new(item),
+        title: "commandExecution".to_owned(),
+        status,
+        output: None,
+        detail: Some(ProviderDetail::new(
+            "commandExecution",
+            &json!({ "command": command, "status": "inProgress" }).to_string(),
+        )),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_decided_approval_folds_into_the_step_it_answered_and_no_other() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(command_tool(
+        "cmd-1",
+        "rm -rf node_modules",
+        ToolStatus::Running,
+    ))
+    .await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: Some(turn()),
+        item: Some(NativeItemId::new("cmd-1")),
+        kind: InteractionKind::Approval {
+            description: "rm -rf node_modules".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+    let (opened, seen) = f.open(&id).await;
+    let request_id = opened
+        .snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Request { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let deny = Answer::Choice {
+        option_id: "deny".to_owned(),
+    };
+    f.chats.answer(&id, &request_id, deny).await.unwrap();
+    settle().await;
+    // The step it answered is shown again with the decision; the request is folded.
+    let changes = seen.lock().unwrap().clone();
+    let step = changes
+        .iter()
+        .rev()
+        .find(|change| change["item"]["kind"] == "steps")
+        .map(|change| change["item"]["steps"][0]["decision"].clone());
+    assert_eq!(step, Some(json!("You declined this")));
+    let request = changes
+        .iter()
+        .rev()
+        .find(|change| change["item"]["kind"] == "request")
+        .map(|change| change["item"]["folded"].clone());
+    assert_eq!(request, Some(json!(true)));
+
+    // A later step is not the one it answered, and a snapshot folds the same way.
+    f.emit(command_tool("cmd-2", "npm test", ToolStatus::Running))
+        .await;
+    let (opened, _) = f.open(&id).await;
+    let decisions: Vec<Option<String>> = opened
+        .snapshot
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Steps { steps, .. } => Some(steps[0].decision.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        decisions,
+        [Some("You declined this".to_owned()), None],
+        "{:?}",
+        opened.snapshot.items
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -728,6 +728,8 @@ export function createMockChatClient(
         ...request,
         state: "answered",
         outcome: option ? `You chose "${option.label}"` : "You answered",
+        // As the host: an approval's decision is told on its step.
+        folded: request.request === "approval",
         ...(request.request === "question" && {
           answer: option?.label ?? ("text" in answer ? answer.text : ""),
         }),

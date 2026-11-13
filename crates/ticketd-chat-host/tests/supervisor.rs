@@ -147,6 +147,7 @@ impl Fixture {
         self.emit(EventKind::InteractionRequested(InteractionRequest {
             request: NativeRequestId::new("approval-1"),
             turn: None,
+            item: None,
             kind: InteractionKind::Approval {
                 description: "Run cargo test".to_owned(),
                 reason: None,

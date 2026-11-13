@@ -255,6 +255,8 @@ const stepSchema = z.object({
     .nullish(),
   /** When the host recorded the call, for a running step's clock. */
   started_at: z.string().nullish(),
+  /** The decision on the approval the harness asked for this step ("You declined this"). */
+  decision: z.string().nullish(),
 });
 export type Step = z.infer<typeof stepSchema>;
 
@@ -356,6 +358,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** For an answered question, the answer as given. */
     answer: z.string().nullish(),
     resolved_at: z.string().nullish(),
+    /** An answered approval: the host tells its decision on the step it was asked for, so it has no row. */
+    folded: z.boolean().nullish(),
   }),
   z.object({
     ...item,

@@ -1975,6 +1975,10 @@ impl Supervisor {
             native_request_id: Some(request.request.0.clone()),
             prompt,
             reason,
+            tool_id: request
+                .item
+                .as_ref()
+                .map(|item| format!("{run}:{}", item.0)),
         });
         self.record(observations);
         self.interactions.insert(

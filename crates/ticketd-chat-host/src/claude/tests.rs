@@ -781,10 +781,17 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
         other => panic!("one tool update, got {other:?}"),
     };
     session.event("assistant_content", &tool_use("toolu_1"));
-    session.event(
-        "permission_request",
-        &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_1", "input": {"command": "rm -rf node_modules"}}),
-    );
+    let (asked, _) = session
+        .event(
+            "permission_request",
+            &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_1", "input": {"command": "rm -rf node_modules"}}),
+        )
+        .expect("modeled");
+    // The request names the tool use it is about, so its decision folds into that step.
+    assert!(asked.iter().any(|event| matches!(
+        event,
+        EventKind::InteractionRequested(request) if request.item == Some(crate::NativeItemId::new("toolu_1"))
+    )));
     let deny = InteractionAnswer::Approval(ApprovalDecision::Deny);
     session
         .answer(&NativeRequestId::new("req-1"), &deny)

@@ -639,7 +639,7 @@ test("a running turn shows its rows as they come, with nothing folded", () => {
   expect(rowWords(turn!)).toEqual(["Running npm test"]);
 });
 
-test("an answered approval folds into its step; questions and expiries keep receipt rows", () => {
+test("an answered approval folds into the step the host says it answered, never the next one; questions and expiries keep receipt rows", () => {
   const request = {
     at: "",
     kind: "request",
@@ -660,8 +660,13 @@ test("an answered approval folds into its step; questions and expiries keep rece
           subject: "npm test",
           state: "answered",
           outcome: "You allowed this for this session",
+          folded: true,
         },
-        did("s1", ran("npm test")),
+        did("s0", {
+          ...ran("npm test"),
+          decision: "You allowed this for this session",
+        }),
+        did("s1", ran("npm run lint")),
         {
           ...request,
           id: "q2",
@@ -683,12 +688,15 @@ test("an answered approval folds into its step; questions and expiries keep rece
   );
   expect(turn?.rows).toMatchObject([
     { kind: "step", decision: "You allowed this for this session" },
+    { kind: "step" },
     { kind: "receipt", kept: true },
     { kind: "receipt", kept: true },
   ]);
+  // The step after the decided one is not the one it answered.
+  expect(turn?.rows[1]).not.toHaveProperty("decision");
   expect(
     turn?.rows.map((row) => row.kind === "receipt" && receiptLine(row.item)),
-  ).toEqual([false, "Answered · Fail open", "Expired · rm -rf dist"]);
+  ).toEqual([false, false, "Answered · Fail open", "Expired · rm -rf dist"]);
 });
 
 test("older history with no timing reads without a duration", () => {

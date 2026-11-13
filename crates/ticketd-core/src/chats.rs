@@ -108,6 +108,21 @@ pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Schema 69: an approval remembers the tool call it was asked for, so its decision
+/// is told on that step and not on whichever step came next.
+pub(crate) fn migrate_interaction_tool(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_interactions') WHERE name = 'tool_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch("ALTER TABLE chat_interactions ADD COLUMN tool_id TEXT;")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 69;")?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
@@ -447,6 +462,8 @@ pub struct ChatInteraction {
     pub reason: Option<String>,
     pub state: ChatInteractionState,
     pub response: Option<String>,
+    /// For an approval, the tool call it was asked for, when the harness said.
+    pub tool_id: Option<String>,
 }
 
 /// Changes listed for one turn at most; a turn that made more shows the first ones.
@@ -557,6 +574,8 @@ pub enum ChatObservation {
         prompt: String,
         /// Cut to `CHAT_NOTICE_LIMIT` characters when stored.
         reason: Option<String>,
+        /// For an approval, the tool call it is about, when the harness said.
+        tool_id: Option<String>,
     },
     /// `state` is `Answered` or `Expired`.
     InteractionResolved {
@@ -832,7 +851,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Tool),
         "interaction" => connection
             .query_row(
-                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason FROM chat_interactions WHERE id = ?1",
+                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id FROM chat_interactions WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatInteraction {
@@ -845,6 +864,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         state: named(row, 6)?,
                         response: row.get(7)?,
                         reason: row.get(8)?,
+                        tool_id: row.get(9)?,
                     })
                 },
             )
@@ -1232,6 +1252,7 @@ fn observe(
             native_request_id,
             prompt,
             reason,
+            tool_id,
         } => {
             require_turn(connection, chat_id, &turn_id)?;
             if owned(connection, "chat_interactions", chat_id, &interaction_id)? {
@@ -1241,8 +1262,8 @@ fn observe(
             let reason: Option<String> =
                 reason.map(|reason| reason.chars().take(CHAT_NOTICE_LIMIT).collect());
             connection.execute(
-                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')",
-                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason],
+                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, tool_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9)",
+                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason, tool_id],
             )?;
             Ok(())
         }

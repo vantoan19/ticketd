@@ -176,6 +176,9 @@ pub struct Step {
     /// When the host recorded the call, for a running step's clock. Absent from calls
     /// recorded before ticketd kept it.
     pub started_at: Option<String>,
+    /// What the person decided when the harness asked to take this step ("You declined
+    /// this"): the approval folds into the step it was asked for.
+    pub decision: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -245,6 +248,9 @@ pub enum Item {
         outcome: Option<String>,
         /// For an answered question, the answer as given.
         answer: Option<String>,
+        /// An answered approval: its decision is told on the step it was asked for, so
+        /// it has no row of its own. Receipts are kept for questions and expiries.
+        folded: bool,
     },
     Marker {
         id: String,
@@ -465,6 +471,12 @@ pub struct Tracker {
     uncertain_text: Option<String>,
     /// Requests stored as pending; whether one can be answered is the host's live state.
     pending: HashMap<String, ChatInteraction>,
+    /// What the person decided about the approval asked for each tool call, by tool id.
+    decided: Decided,
+    /// The latest turn's tool calls, to show again when an approval for one is decided.
+    turn_tools: HashMap<String, ChatTool>,
+    /// Tool calls whose approval was just decided, to show again with the decision.
+    refold: Vec<String>,
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
     open: HashMap<String, ChatMessage>,
     last_response: Option<String>,
@@ -552,6 +564,13 @@ impl Tracker {
                 } else {
                     self.pending.remove(&interaction.id);
                 }
+                if let (Some(tool_id), Some(decision)) =
+                    (&interaction.tool_id, approval_outcome(interaction))
+                    && self.decided.get(tool_id) != Some(&decision)
+                {
+                    self.decided.insert(tool_id.clone(), decision);
+                    self.refold.push(tool_id.clone());
+                }
             }
             ChatItem::Tool(tool) if chat_reports::is_report(tool) => {
                 // Only the latest turn can still be running.
@@ -562,6 +581,10 @@ impl Tracker {
                 if let Some(changes) = agent_changes(tool) {
                     self.last_change = changes.last().cloned().or(self.last_change.take());
                 }
+                // Only the latest turn's calls can still be asked about.
+                self.turn_tools
+                    .retain(|_, kept| kept.turn_id == tool.turn_id);
+                self.turn_tools.insert(tool.id.clone(), tool.clone());
             }
             ChatItem::Session(_) | ChatItem::Notice(_) => {}
         }
@@ -599,6 +622,20 @@ impl Tracker {
         })
     }
 
+    /// What the person decided about the approval asked for each tool call.
+    pub fn decided(&self) -> &Decided {
+        &self.decided
+    }
+
+    /// Tool calls to show again because an approval asked for them was decided since
+    /// the last call. Calls of an earlier turn are not kept and read right on a resync.
+    pub fn refolded(&mut self) -> Vec<ChatItem> {
+        std::mem::take(&mut self.refold)
+            .iter()
+            .filter_map(|id| self.turn_tools.get(id).cloned().map(ChatItem::Tool))
+            .collect()
+    }
+
     /// Records whose display depends on the turn or on live state, to show again after
     /// either changed.
     pub fn dependents(&self) -> Vec<ChatItem> {
@@ -630,6 +667,26 @@ pub fn approval_decision(option_id: &str) -> Option<ApprovalDecision> {
     ]
     .into_iter()
     .find(|decision| approval_option(*decision).id == option_id)
+}
+
+/// What the person decided about the tool calls approvals were asked for, by tool id.
+pub type Decided = HashMap<String, String>;
+
+/// An answered approval's decision as its step's tooltip says it.
+fn approval_outcome(interaction: &ChatInteraction) -> Option<String> {
+    if interaction.kind != ChatInteractionKind::Approval
+        || interaction.state != ChatInteractionState::Answered
+    {
+        return None;
+    }
+    Some(
+        match interaction.response.as_deref()? {
+            "allow" => "You allowed this once",
+            "allow for session" => "You allowed this for this session",
+            _ => "You declined this",
+        }
+        .to_owned(),
+    )
 }
 
 fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Item {
@@ -679,11 +736,10 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         .response
         .as_deref()
         .filter(|_| state == "answered");
-    let outcome = response.map(|response| match response {
-        "allow" => "You allowed this once".to_owned(),
-        "allow for session" => "You allowed this for this session".to_owned(),
-        "deny" => "You denied this".to_owned(),
-        answer => format!("You answered: {answer}"),
+    let outcome = approval_outcome(interaction).or_else(|| {
+        response
+            .filter(|_| !approval)
+            .map(|answer| format!("You answered: {answer}"))
     });
     Item::Request {
         id: interaction.id.clone(),
@@ -701,6 +757,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str) -> Ite
         state,
         outcome,
         answer: response.filter(|_| !approval).map(str::to_owned),
+        folded: approval && state == "answered",
     }
 }
 
@@ -779,6 +836,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         result: cut,
         output: tool.output.clone(),
         started_at: tool.started_at.clone(),
+        decision: None,
     };
     if tool.name == CONTEXT_RECORD_NAME {
         return vec![Step {
@@ -998,6 +1056,7 @@ pub fn item(
     chat: &Chat,
     live: &ChatLive,
     fresh: Option<FreshHistory>,
+    decided: &Decided,
 ) -> Option<Item> {
     let harness = harness_name(&chat.harness);
     Some(match record {
@@ -1098,7 +1157,13 @@ pub fn item(
         ChatItem::Tool(tool) => Item::Steps {
             id: tool.id.clone(),
             at: String::new(),
-            steps: steps(tool, harness, chat, home_folder().as_deref()),
+            steps: steps(tool, harness, chat, home_folder().as_deref())
+                .into_iter()
+                .map(|step| Step {
+                    decision: decided.get(&tool.id).cloned(),
+                    ..step
+                })
+                .collect(),
             turn_id: Some(tool.turn_id.clone()),
         },
         ChatItem::Interaction(interaction) => request(interaction, live, harness),
@@ -1183,6 +1248,7 @@ pub fn items(
     chat: &Chat,
     live: &ChatLive,
     fresh: Option<FreshHistory>,
+    decided: &Decided,
 ) -> Vec<Item> {
     let timing = match record {
         ChatItem::Turn(turn) => Some(turn_item(turn)),
@@ -1190,7 +1256,7 @@ pub fn items(
     };
     timing
         .into_iter()
-        .chain(item(record, chat, live, fresh))
+        .chain(item(record, chat, live, fresh, decided))
         .collect()
 }
 
@@ -1568,8 +1634,8 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
 mod tests {
     use super::{
         Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatLive, ChatTool,
-        ChatToolState, ChatTurn, ChatTurnState, Item, STOPPED_BY_TICKETD, Step, items, opening,
-        request, steps,
+        ChatToolState, ChatTurn, ChatTurnState, Decided, Item, STOPPED_BY_TICKETD, Step, items,
+        opening, request, steps,
     };
     use serde_json::json;
     use ticketd_core::ChatItem;
@@ -1859,6 +1925,7 @@ mod tests {
             reason: Some("Allow creating hello.txt?".to_owned()),
             state: ChatInteractionState::Answered,
             response: Some("deny".to_owned()),
+            tool_id: None,
         };
         let Item::Request {
             subject, reason, ..
@@ -1894,7 +1961,7 @@ mod tests {
         );
         let mut stopping = ChatLive::idle();
         stopping.stop = Some(StopState::Unconfirmed);
-        let state = |chat: &Chat, live: &_| match item(&plan, chat, live, None) {
+        let state = |chat: &Chat, live: &_| match item(&plan, chat, live, None, &Decided::new()) {
             Some(Item::Plan { state, .. }) => state,
             other => panic!("a plan, got {other:?}"),
         };
@@ -1908,9 +1975,13 @@ mod tests {
             r#"{"running":true,"started_at":1,"ended_at":null,"text":null,"heading":null}"#,
             ChatToolState::Running,
         );
-        let Some(Item::Reasoning { state, .. }) =
-            item(&thinking, &chat(None), &ChatLive::idle(), None)
-        else {
+        let Some(Item::Reasoning { state, .. }) = item(
+            &thinking,
+            &chat(None),
+            &ChatLive::idle(),
+            None,
+            &Decided::new(),
+        ) else {
             panic!("reasoning");
         };
         assert_eq!(state, "not_finished");
@@ -1920,9 +1991,13 @@ mod tests {
             r#"{"files":[{"path":"src/limiter.ts","kind":"added","from":null,"added_lines":48,"removed_lines":0,"confirmed":true}]}"#,
             ChatToolState::Completed,
         );
-        let Some(Item::Files { files: shown, .. }) =
-            item(&files, &chat(None), &ChatLive::idle(), None)
-        else {
+        let Some(Item::Files { files: shown, .. }) = item(
+            &files,
+            &chat(None),
+            &ChatLive::idle(),
+            None,
+            &Decided::new(),
+        ) else {
             panic!("files");
         };
         assert_eq!(shown[0].path, "src/limiter.ts");
@@ -1945,6 +2020,7 @@ mod tests {
             reason: None,
             state: ChatInteractionState::Answered,
             response: Some("Fail open".to_owned()),
+            tool_id: None,
         };
         let Item::Request {
             answer, turn_id, ..
@@ -1971,8 +2047,14 @@ mod tests {
                 ended_at: Some("2026-11-10T10:00:40Z".to_owned()),
             })
         };
-        let outcome = |record: &ChatItem| match items(record, &chat(None), &ChatLive::idle(), None)
-            .as_slice()
+        let outcome = |record: &ChatItem| match items(
+            record,
+            &chat(None),
+            &ChatLive::idle(),
+            None,
+            &Decided::new(),
+        )
+        .as_slice()
         {
             [
                 Item::Turn {

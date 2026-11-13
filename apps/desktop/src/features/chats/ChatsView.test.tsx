@@ -306,17 +306,16 @@ test("a pending approval waits in the dock with its command inline, never in the
   expect(button("Steer")).toBeTruthy();
 });
 
-test("an approval is answered from the dock and becomes a receipt without buttons", async () => {
+test("an approval is answered from the dock and leaves no receipt row of its own", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
   );
   fireEvent.click(button("Allow once"));
-  // No step followed the approval, so it keeps a one-line receipt.
-  const receipt = await screen.findByText(
-    "Allowed · npm install @pagerduty/pdjs",
+  // Its decision is told on the step it was asked for, never as a receipt.
+  await waitFor(() =>
+    expect(screen.queryByRole("group", { name: /wants to run/ })).toBeNull(),
   );
-  expect(receipt.closest("button")).toBeNull();
-  expect(screen.queryByRole("group", { name: /wants to run/ })).toBeNull();
+  expect(screen.queryByText(/Allowed ·/)).toBeNull();
   // Answering returns focus to the message box.
   expect(document.activeElement).toBe(composer("Steer Codex"));
 });
@@ -1012,12 +1011,21 @@ test("an answered approval folds into its step row, which says the decision", as
         ...approval,
         state: "answered",
         outcome: "You allowed this for this session",
+        folded: true,
       }),
       inTurn({
         id: "s1",
         at,
         kind: "steps",
-        steps: [{ ...failedRun, state: "done", output: null, truncated: null }],
+        steps: [
+          {
+            ...failedRun,
+            state: "done",
+            output: null,
+            truncated: null,
+            decision: "You allowed this for this session",
+          },
+        ],
       }),
     ]),
   );

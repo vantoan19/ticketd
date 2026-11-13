@@ -587,6 +587,9 @@ pub enum ToolStatus {
 pub struct InteractionRequest {
     pub request: NativeRequestId,
     pub turn: Option<NativeTurnId>,
+    /// The tool item an approval is about, when the harness names it: its decision is
+    /// told on that step.
+    pub item: Option<NativeItemId>,
     pub kind: InteractionKind,
     pub detail: Option<ProviderDetail>,
 }

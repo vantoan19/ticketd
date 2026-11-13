@@ -391,6 +391,8 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
+            // The bridge names the tool use a permission is asked for.
+            item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::approval(
                 subject,
                 reason,
@@ -462,6 +464,7 @@ impl Session {
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
+            item: None,
             kind: InteractionKind::Question { questions },
             detail: None,
         }));
