@@ -88,6 +88,25 @@ const automationSchema = automationDefinitionSchema.extend({
 });
 export type Automation = z.infer<typeof automationSchema>;
 
+const automationRunSchema = z.object({
+  id: z.string(),
+  status: z.enum([
+    "queued",
+    "running",
+    "completed",
+    "needs_attention",
+    "taken_over",
+  ]),
+  /** Why it needs attention. */
+  reason: z.string().nullable(),
+  /** The ticket it acts on, as it is called now. */
+  ticket: z
+    .object({ id: z.string(), reference: z.string(), title: z.string() })
+    .nullable(),
+  created_at: z.string(),
+});
+export type AutomationRun = z.infer<typeof automationRunSchema>;
+
 /** What is sent back on a save: the Automation without what the core derives. */
 export function definitionOf(automation: Automation): AutomationDefinition {
   return automationDefinitionSchema.parse(automation);
@@ -127,6 +146,12 @@ export const automationsClient = {
     return automationSchema.parse(
       await invoke("automation_set_enabled", { id, enabled }),
     );
+  },
+  /** An Automation's runs on this desktop, newest first. */
+  async runs(automationId: string): Promise<AutomationRun[]> {
+    return z
+      .array(automationRunSchema)
+      .parse(await invoke("automation_run_list", { automationId }));
   },
   async agents(): Promise<AutomationAgent[]> {
     return z

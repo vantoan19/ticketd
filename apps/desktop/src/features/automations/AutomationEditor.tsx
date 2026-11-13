@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { AgentForm } from "@/features/automations/AgentForm";
@@ -34,6 +35,7 @@ import {
   FlowCanvas,
   type TriggerChoice,
 } from "@/features/automations/FlowCanvas";
+import { RunsList } from "@/features/automations/RunsList";
 import {
   RunAgentFields,
   StepPanel,
@@ -80,6 +82,8 @@ export function AutomationEditor({
 }) {
   const headingId = useId();
   const [draft, setDraft] = useState(() => definitionOf(automation));
+  /** The flow being edited, or what running it has done. */
+  const [view, setView] = useState<"steps" | "runs">("steps");
   /** The card whose panel is open: a step's id, or the trigger's. */
   const [selected, setSelected] = useState<string | null>(null);
   /** The name being typed in the Rename dialog; null while it is closed. */
@@ -186,6 +190,15 @@ export function AutomationEditor({
           <h2 id={headingId} className="chat-head-title" tabIndex={-1}>
             {title}
           </h2>
+          <SegmentedControl
+            aria-label="Show"
+            value={view}
+            onValueChange={setView}
+            options={[
+              { value: "steps", label: "Steps" },
+              { value: "runs", label: "Runs" },
+            ]}
+          />
         </div>
         <div className="detail-actions">
           {left > 0 && (
@@ -238,19 +251,23 @@ export function AutomationEditor({
           </IconButton>
         </div>
       </div>
-      <div className="flow-body" data-panel={panel ? undefined : "none"}>
-        <FlowCanvas
-          definition={draft}
-          problems={automation.problems}
-          agents={agents}
-          selected={panel ? selected : null}
-          onSelect={setSelected}
-          onChooseTrigger={chooseTrigger}
-          onAddStep={addStep}
-          onDeleteStep={setDeletingStep}
-        />
-        {panel}
-      </div>
+      {view === "runs" ? (
+        <RunsList automation={automation} onFail={onFail} />
+      ) : (
+        <div className="flow-body" data-panel={panel ? undefined : "none"}>
+          <FlowCanvas
+            definition={draft}
+            problems={automation.problems}
+            agents={agents}
+            selected={panel ? selected : null}
+            onSelect={setSelected}
+            onChooseTrigger={chooseTrigger}
+            onAddStep={addStep}
+            onDeleteStep={setDeletingStep}
+          />
+          {panel}
+        </div>
+      )}
       <DialogShell
         open={renaming !== null}
         onOpenChange={(open) => !open && setRenaming(null)}

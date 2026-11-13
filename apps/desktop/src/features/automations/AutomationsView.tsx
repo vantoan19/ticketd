@@ -76,7 +76,7 @@ export function AutomationsView() {
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
   const single = narrow || expanded;
 
-  const fail = (reason: unknown) => setError(String(reason));
+  const fail = useCallback((reason: unknown) => setError(String(reason)), []);
   const load = useCallback(
     () =>
       Promise.all([
@@ -87,7 +87,7 @@ export function AutomationsView() {
         setAgents(foundAgents);
         setError("");
       }, fail),
-    [],
+    [fail],
   );
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());

@@ -93,6 +93,11 @@ impl ChatBridge {
             quit_confirmed: AtomicBool::new(false),
         }
     }
+
+    /// For the Automation runner, which runs its agents on the same host.
+    pub fn chats(&self) -> Arc<Chats> {
+        self.chats.clone()
+    }
 }
 
 /// Tells the interface when Chat summaries change, from the host's own signal rather

@@ -1,6 +1,9 @@
 //! Commands for the Automations page. The rules live in the core; these translate.
 
-use ticketd_core::{Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition};
+use ticketd_core::{
+    Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition,
+    AutomationRunStatus, AutomationRunTicket,
+};
 
 use crate::open_workspace;
 
@@ -96,5 +99,35 @@ pub fn automation_delete(id: String) -> Result<(), String> {
 pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, String> {
     open_workspace()
         .and_then(|mut workspace| workspace.set_automation_enabled(&id, enabled))
+        .map_err(|error| error.to_string())
+}
+
+/// A run as the Runs list shows it. The run view (#393) reads the whole run.
+#[derive(serde::Serialize)]
+pub struct ListedRun {
+    id: String,
+    status: AutomationRunStatus,
+    /// Why it needs attention.
+    reason: Option<String>,
+    ticket: Option<AutomationRunTicket>,
+    created_at: String,
+}
+
+/// An Automation's runs on this device, newest first.
+#[tauri::command]
+pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.automation_runs(&automation_id))
+        .map(|runs| {
+            runs.into_iter()
+                .map(|run| ListedRun {
+                    id: run.id,
+                    status: run.status,
+                    reason: run.reason,
+                    ticket: run.ticket,
+                    created_at: run.created_at,
+                })
+                .collect()
+        })
         .map_err(|error| error.to_string())
 }

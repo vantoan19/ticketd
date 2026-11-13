@@ -4622,6 +4622,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tempfile",
+ "ticketd-automation-runner",
  "ticketd-chat-host",
  "ticketd-core",
  "tokio",

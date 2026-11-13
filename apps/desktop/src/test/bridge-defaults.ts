@@ -29,6 +29,7 @@ export function bridgeDefault(
       return [[], []];
     case "automation_agent_list":
     case "automation_list":
+    case "automation_run_list":
     case "list_projects":
     case "list_plans":
     case "find_tickets":

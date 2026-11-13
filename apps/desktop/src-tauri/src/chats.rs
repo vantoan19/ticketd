@@ -580,6 +580,12 @@ impl Chats {
         Ok(started)
     }
 
+    /// The host for Automation runs, or `None` while nothing may run: Chat is off,
+    /// a backup is being restored, or the host could not start.
+    pub fn automation_host(&self) -> Option<ChatHost> {
+        self.host().ok()
+    }
+
     /// Starts the host if Chat is on, so its change signal can be watched.
     pub fn start(&self) -> Outcome<()> {
         self.host().map(|_| ())
