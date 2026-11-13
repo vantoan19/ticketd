@@ -805,6 +805,142 @@ button.chat-file:focus-visible,
 .chat-pick-note {
   padding: 6px 8px;
 }
+/* The one picker for harness, model and effort (#368): harness tabs, then the
+   chosen harness's models, then its efforts in one row. */
+.chat-controls > [data-control="model"] > .harness-mark {
+  color: var(--foreground);
+}
+.chat-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.chat-picker-harnesses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+}
+.chat-picker-harness {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: var(--radius-segment);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.chat-picker-harness > span:not(.harness-mark) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-picker-harness small {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-picker-harness:hover {
+  color: var(--foreground);
+}
+.chat-picker-harness:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.chat-picker-harness[aria-selected="true"] {
+  background: var(--surface);
+  box-shadow: var(--shadow-small);
+  color: var(--foreground);
+}
+.chat-picker-harness[data-dim] > span:not(.harness-mark) {
+  color: var(--muted-foreground);
+}
+.chat-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-picker-label {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 500;
+}
+.chat-picker-models {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 264px;
+  margin: 0 -8px;
+  overflow-y: auto;
+}
+.chat-picker-model {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-segment);
+  text-align: left;
+}
+.chat-picker-model:enabled:hover,
+.chat-picker-model[data-state="checked"] {
+  background: var(--accent);
+}
+.chat-picker-model:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.chat-picker-model:disabled {
+  color: var(--disabled-foreground);
+}
+.chat-picker-model-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--foreground);
+}
+.chat-picker-model-line > small {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-picker-model-line > svg {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+}
+.chat-picker-model > small {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-picker-effort {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--header-boundary);
+}
+.chat-picker-effort > [data-slot="segmented-control"] {
+  display: flex;
+}
+.chat-picker-effort > [data-slot="segmented-control"] > * {
+  flex: 1 1 0;
+  justify-content: center;
+}
+.chat-picker-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
 /* Beside a trigger whose change waits for the turn to end. */
 .chat-control-note {
   flex: none;
@@ -1047,56 +1183,6 @@ button.chat-file:focus-visible,
   font-weight: 600;
   letter-spacing: -0.6px;
   text-align: center;
-}
-/* New Chat's harness choice: 48px radio rows (#368). */
-.chat-harnesses {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.chat-harness {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  height: 48px;
-  padding: 0 12px;
-  border-radius: var(--radius);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  text-align: left;
-}
-.chat-harness:hover {
-  background: var(--recessed);
-}
-.chat-harness:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-.chat-harness-radio {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-pill);
-  box-shadow: inset 0 0 0 1.5px var(--control-boundary);
-}
-/* aria-checked: the tooltip trigger takes over data-state. */
-.chat-harness[aria-checked="true"] .chat-harness-radio {
-  box-shadow: inset 0 0 0 4px var(--ring);
-}
-.chat-harness-name {
-  flex: 1;
-  min-width: 0;
-}
-.chat-harness-word {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-harness-checking {
   color: var(--muted-foreground);

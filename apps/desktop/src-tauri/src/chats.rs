@@ -1128,9 +1128,13 @@ impl Chats {
     /// Probes installation and sign-in again on every call.
     pub async fn harnesses(&self) -> Outcome<Vec<HarnessStatus>> {
         let host = self.host()?;
+        // Each check starts its harness: run them side by side, so the slower one
+        // does not hold up the other.
+        let (first, second) =
+            tokio::join!(host.inspect(HARNESSES[0].0), host.inspect(HARNESSES[1].0));
         let mut statuses = Vec::new();
-        for (id, name) in HARNESSES {
-            statuses.push(match host.inspect(id).await {
+        for ((id, name), inspected) in HARNESSES.into_iter().zip([first, second]) {
+            statuses.push(match inspected {
                 Ok(inspection) => {
                     let status = harness_status(id, name, inspection);
                     lock(&self.versions).insert(id, status.version.clone());
