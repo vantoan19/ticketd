@@ -333,25 +333,76 @@
   max-width: 600px;
   margin: 0 auto;
 }
+/* Your message: right-aligned on an accent fill, exactly as sent. Time and Copy
+   show under it on hover or focus. */
+.chat-you-part {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
 .chat-you {
-  align-self: flex-end;
   max-width: 82%;
   padding: 10px 14px;
   border-radius: var(--radius-panel);
-  background: var(--recessed);
+  background: var(--accent);
   color: var(--foreground);
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.chat-you[data-unsent] {
-  background: transparent;
-  box-shadow: var(--shadow-border-base);
+/* Four lines, then Show more. */
+.chat-you > [data-clamped] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.chat-you-more {
+  margin-right: -8px;
+}
+.chat-you-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  margin: -4px -8px -12px 0;
+  opacity: 0;
+}
+.chat-you-part:hover .chat-you-actions,
+.chat-you-actions:focus-within {
+  opacity: 1;
+}
+.chat-you-part .chat-caption {
+  margin-top: 0;
+}
+/* A message's images: one tile size, three, then "+N". */
+.chat-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.chat-tile {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 72px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+}
+.chat-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.chat-tile .attachment-thumbnail {
+  border-radius: var(--radius);
 }
 .chat-caption {
   align-self: flex-end;
-  margin-top: -14px;
 }
 .chat-caption,
 .chat-fine {
@@ -578,6 +629,47 @@ button.chat-steps:hover {
   font-family: var(--font-mono);
   font-size: var(--text-code);
   overflow-wrap: anywhere;
+}
+/* A file a step named: the mono name is the button. Short of room it truncates
+   in the middle, so its end and extension stay. */
+.chat-file {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border-radius: var(--radius);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+.chat-file-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-file-tail {
+  flex: none;
+}
+button.chat-file:hover {
+  background: var(--accent);
+}
+button.chat-file:focus-visible,
+.chat-record-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.chat-step-alert {
+  margin: 0 0 4px 24px;
+}
+/* A Document a turn created: its title is the link. */
+.chat-record-link {
+  border-radius: var(--radius);
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 /* An outcome is what the eye should find on a row: a word, never a colour. */
 .chat-steps [data-outcome] {
@@ -1324,4 +1416,79 @@ button.chat-steps:hover {
   .chat-new {
     padding-inline: 16px;
   }
+}
+
+/* Expanded: one centred 720px reading column, gutters of at least 48px, and
+   messages at 16/24. */
+.chat-pane[data-expanded] .chat-scroll {
+  padding-inline: 48px;
+}
+.chat-pane[data-expanded] .chat-dock {
+  padding-inline: 48px;
+}
+.chat-pane[data-expanded] .chat-col,
+.chat-pane[data-expanded] .chat-dock > * {
+  max-width: 720px;
+}
+.chat-pane[data-expanded] .chat-you {
+  max-width: min(82%, 560px);
+}
+.chat-pane[data-expanded] .chat-you,
+.chat-pane[data-expanded] .chat-ai {
+  font-size: var(--text-reading);
+  line-height: 24px;
+}
+/* New Chat's suggestions: up to three 36px rows under "Suggested". */
+.chat-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-suggestions h3 {
+  margin: 0 0 2px;
+  font-weight: 400;
+}
+.chat-suggestions ul {
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+.chat-suggestion {
+  width: 100%;
+  padding-inline: 8px;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: left;
+}
+.chat-suggestion > svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.chat-suggestion:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.chat-suggestion-words {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-suggestion-words .ui-reference {
+  margin-inline: 4px;
+}
+.chat-suggestion > span:not(.chat-suggestion-words):not(.chat-fine) {
+  flex: 1;
+}
+.chat-suggestion-skel {
+  width: 64%;
+  height: 12px;
+  margin: 12px 0;
+}
+.chat-suggestions-failed {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }

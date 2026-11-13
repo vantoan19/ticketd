@@ -1334,6 +1334,13 @@ A Chat can start from a ticket, linked to it, with its Project's folder offered 
 an unsent prompt; nothing is sent until the person sends it. Ticket detail lists the
 ticket's Chats with their observed status.
 
+While New Chat's message box is empty it may suggest up to three starts from local
+records: continuing the In progress tickets changed last (at most two), reviewing
+the latest In review ticket, and triaging the Inbox when anything is unread. The
+chosen folder's Project comes first; tickets already linked, or linked to a working
+Chat, are skipped. Choosing one fills the message and links its records as one undo
+step; it never sends.
+
 ### 21.3. Conversation and lifetime
 
 The UI displays streamed responses, tool activity, native approval requests and
@@ -1428,6 +1435,10 @@ continue to apply. Provider events do not directly mutate domain records or bypa
 the CLI/core. Chat messages do not automatically become Activities or Documents;
 offer Save as Document for an assistant response, and for a plan a turn left
 unfinished, saved as a checklist in which only the completed steps are checked.
+
+A file a step names, or a file a turn changed, opens in the computer's default app
+for its type. Only files inside the Chat's execution folder open, resolved through
+links; a file no longer there says so, and a step's name for it is shown as text.
 
 ### 21.5. Retention and recovery
 

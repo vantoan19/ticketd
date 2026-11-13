@@ -276,7 +276,7 @@ test("a queued message can be sent now, alone, or moved back into the message bo
 
   fireEvent.click(button("Send now"));
   expect(
-    await screen.findByText("then add tests", { selector: ".chat-you" }),
+    await screen.findByText("then add tests", { selector: ".chat-you *" }),
   ).toBeTruthy();
   const { chat } = await client.openChat("c1");
   expect(chat.queue).toEqual([]);
@@ -906,10 +906,12 @@ test("a finished turn folds under one row, its final response outside, and opens
     name: "Worked for 2m 13s · 1 failed",
   });
   expect(row.getAttribute("aria-controls")).toBe(body.id);
-  // A row with nothing to open is not a control.
+  // A row with nothing to open is not a control; its file name is.
   expect(
-    within(body).getByText("src/auth/limiter.ts").closest("button"),
-  ).toBeNull();
+    within(body)
+      .getByRole("button", { name: "Open src/auth/limiter.ts" })
+      .closest(".chat-steps")?.tagName,
+  ).toBe("DIV");
   const line = button("Run npm run test:all, Failed");
   fireEvent.click(line);
   expect(line.getAttribute("aria-expanded")).toBe("true");
@@ -1089,7 +1091,7 @@ test("a finished turn's record changes are one receipt row under it, whose more 
   fireEvent.click(button("1 more"));
   expect(
     screen.getByRole("group", { name: "Worked for 30s" }).textContent,
-  ).toContain("Created the Document “Reset email copy”");
+  ).toContain("Created the Document Reset email copy");
 });
 
 /** Sizes a transcript as a browser would, which jsdom does not. */
@@ -1510,9 +1512,11 @@ test("New Chat says it is checking the harnesses until the probe answers, then o
     },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  expect(screen.getByRole("status").textContent).toBe(
-    "Checking which harnesses are installed…",
-  );
+  expect(
+    screen
+      .getByText("Checking which harnesses are installed…")
+      .getAttribute("role"),
+  ).toBe("status");
   const group = await screen.findByRole("radiogroup", { name: "Harness" });
   const ready = within(group).getByRole("radio", { name: "Claude Code" });
   expect(ready.getAttribute("aria-checked")).toBe("true");

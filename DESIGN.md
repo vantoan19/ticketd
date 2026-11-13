@@ -633,7 +633,7 @@ A Chat (product specification section 21) opens in the detail pane: a 48px heade
 
 ### Transcript
 
-Your message is right-aligned on `accent`; a reply is full-width Markdown with no bubble. Expanded mode is a centered 720px column.
+Your message is right-aligned on `accent`, at most 82% wide, exactly as sent; past four lines it folds behind "Show more", and its time and Copy show on hover or focus. Its images are 96×72 tiles (the Attachment thumbnail's tile size), three then "+N", each opening the Attachment preview. A reply is full-width Markdown with no bubble. Expanded mode is a centered 720px column with gutters of at least 48px and messages at 16/24.
 
 A **turn** runs from your message to its end; a steer starts a new segment. While it runs, step rows appear as tools start; "Working for 1m 32s" shows only between steps. When it ends, its steps, reasoning and record changes fold under one muted row: "Worked for 2m 13s", "Continued for 48s", "Stopped after 40s" or "Failed after 8s", plus problem counts only when present (" · 1 failed"). Opened, steps indent 16px. The final response, question and expiry receipts, and ticketd notes such as sign-in problems are never folded. A turn whose stop was not confirmed stays open.
 
@@ -644,11 +644,16 @@ A **step row** is one 28px line, `[icon] Verb target · suffix`:
 - **Suffix:** at most one: a clock ("12s"), a diffstat ("+12 −4", 12px mono, muted), "No matches", or an outcome word at weight 500: Failed, Declined, Not finished, Not confirmed. Rows are never grayed, and nothing is parsed from output.
 - **Targets:** one or two are named ("`a` and `b`"), three or more counted ("Read 6 files"). Paths are relative to the Chat's folder, with `~` outside it; a search reads "for `pattern` in `scope`", a web search "for “query”", a page `host/path`, and a command its first line without shell wrappers.
 - **Merging:** consecutive steps of one kind and outcome merge ("Read 6 files"); commands never merge.
+- **File names:** in a row that does not open, a read, edited or created file's mono name is itself the button: no ring or icon, `accent` on hover, opening the file in the computer's default app. It shows its last part (with its folder when another file in the row shares the name) and, short of room, truncates in the middle so the extension stays. A file that is gone is plain text; a failure is a caption under the row ("Couldn't open limiter.ts. No app on this computer opens .ts files.").
 - **Detail:** a row opens one thing; a command opens one `code-block` box with its output and Copy, then a muted "Exit 1 · in {folder}". The box is at most 12 lines tall, scrolls inside, mounts only when opened and opens at the output's last line; the `$` is never copied.
 
 An answered approval folds into its step row, with a tooltip such as "You allowed this for this session"; only questions ("Answered · …") and expiries ("Expired · …") leave receipt rows. An approval no step followed keeps a receipt ("Allowed · …", "Declined · …"). When a turn ends, a step still running reads "Not finished", or "Not confirmed" after an unconfirmed stop. A turn someone is reading in, or that holds focus, folds once it leaves the view; the person's own toggles win for the session.
 
-**Below the response** come 28px step-style rows, in order and only when needed: the stop marker, changed files ("3 files changed · +53 −12"), then records, verb first ("Moved T-KQ12 to In review · Posted an update on T-KQ12"). References are mono and underlined everywhere.
+**Below the response** come 28px step-style rows, in order and only when needed: the stop marker, changed files ("3 files changed · +53 −12"), then records, verb first ("Moved T-KQ12 to In review · Posted an update on T-KQ12"). References are mono and underlined everywhere. A record row leads with the ticket's status icon; a created Document's title is its link, without quotes.
+
+### New Chat suggestions
+
+While the message box is empty, New Chat lists up to three suggestions under a muted "Suggested": 36px rows with the ticket's status icon (the Inbox icon for triage), the verb, Reference, title and a trailing time ("2h"): "Continue T-KQ14 …", "Review T-KQ12 …", "Triage the Inbox (3)". Placeholders appear only after 300ms; a failure reads "Couldn't load suggestions." with Try again; none shows nothing. Choosing one writes its prompt, links its records, says "Linked T-KQ14." in a status and puts the caret at the end; Cmd/Ctrl+Z right after takes both back. It never sends.
 
 ### Reasoning, plan, files and context
 

@@ -1733,3 +1733,35 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
     f.chats.set_retention(&id, Retention::Trash).await.unwrap();
     assert!(f.chats.linked_to(&link()).unwrap().is_empty());
 }
+
+#[test]
+fn a_file_opens_only_inside_the_chat_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("work");
+    std::fs::create_dir_all(folder.join("src")).unwrap();
+    std::fs::write(folder.join("src/limiter.ts"), "").unwrap();
+    std::fs::write(dir.path().join("secret.txt"), "").unwrap();
+    let code = |path: &str| file_in(&folder, path).unwrap_err().code;
+    // A step names it relative to the folder; a changed-files row, absolutely.
+    assert!(file_in(&folder, "src/limiter.ts").is_ok());
+    let absolute = folder.join("src/limiter.ts");
+    assert!(file_in(&folder, &absolute.to_string_lossy()).is_ok());
+    // No longer there.
+    let gone = file_in(&folder, "src/gone.ts").unwrap_err();
+    assert_eq!(gone.code, "gone");
+    assert_eq!(gone.message, "gone.ts is no longer in this folder.");
+    assert_eq!(code(&folder.join("src/gone.ts").to_string_lossy()), "gone");
+    // Out of the folder, as written or through a link.
+    assert_eq!(code("../secret.txt"), "failed");
+    assert_eq!(code("../missing.txt"), "failed");
+    assert_eq!(code("/etc/hosts"), "failed");
+    assert_eq!(
+        code(&dir.path().join("secret.txt").to_string_lossy()),
+        "failed"
+    );
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(dir.path().join("secret.txt"), folder.join("link.txt")).unwrap();
+        assert_eq!(code("link.txt"), "failed");
+    }
+}

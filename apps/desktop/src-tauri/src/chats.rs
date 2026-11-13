@@ -1761,8 +1761,6 @@ impl Chats {
         Ok(chat_reports::change_view(value, &state))
     }
 
-    /// A file the agent changed in this Chat, to open. Only files a turn reported
-    /// changing can be opened this way.
     /// The Chat's execution folder, to open in the file manager, when it exists.
     pub fn folder(&self, chat_id: &str) -> Outcome<PathBuf> {
         let path = PathBuf::from(self.workspace()?.chat(chat_id)?.execution_folder);
@@ -1772,33 +1770,116 @@ impl Chats {
         Ok(path)
     }
 
-    pub fn changed_file(&self, chat_id: &str, path: &str) -> Outcome<PathBuf> {
+    /// New Chat's suggestions for `folder` (`None`: a folder ticketd keeps), skipping
+    /// the tickets the person already linked and those a working Chat is linked to.
+    pub fn suggestions(
+        &self,
+        folder: Option<&str>,
+        linked: &[String],
+    ) -> Outcome<Vec<crate::chat_suggestions::Suggestion>> {
+        use crate::chat_suggestions::{Candidate, Records, Unread, suggest};
         let workspace = self.workspace()?;
-        let snapshot = workspace.chat_snapshot(chat_id, HISTORY_ITEMS)?;
-        let live = self.live(chat_id);
-        let named = snapshot.items.iter().any(|item| match item {
-            ChatItem::Tool(tool) => matches!(
-                chat_reports::report(tool, &snapshot.chat, &live, &str::to_owned),
-                Some(chat_reports::Report::Files { files, .. })
-                    if files.iter().any(|file| file.open_path == path)
-            ),
-            _ => false,
+        let mut skip: HashSet<String> = linked.iter().cloned().collect();
+        if let Some(host) = self.started_host() {
+            for (chat_id, live) in host.live() {
+                if live.activity == Activity::Idle {
+                    continue;
+                }
+                let Ok(chat) = workspace.chat(&chat_id) else {
+                    continue;
+                };
+                skip.extend(
+                    chat.links
+                        .into_iter()
+                        .filter(|link| link.kind == ChatLinkKind::Ticket)
+                        .map(|link| link.id),
+                );
+            }
+        }
+        let project_id = folder.and_then(|folder| {
+            let folder = Path::new(folder);
+            workspace
+                .list_projects()
+                .ok()?
+                .into_iter()
+                .find_map(|project| {
+                    project
+                        .paths
+                        .iter()
+                        .chain(std::iter::once(&project.path))
+                        .any(|path| !path.is_empty() && folder.starts_with(path))
+                        .then_some(project.id)
+                })
         });
-        if !named {
-            return Err(failed("that file is not one this Chat changed"));
-        }
-        let path = PathBuf::from(path);
-        if !path.exists() {
-            let name = path.file_name().map_or_else(
-                || path.display().to_string(),
-                |name| name.to_string_lossy().into_owned(),
-            );
-            return Err(failed(format!(
-                "Couldn't open {name}. It is no longer on this computer."
-            )));
-        }
-        Ok(path)
+        let tickets = workspace
+            .list_tickets()?
+            .into_iter()
+            .map(|ticket| Candidate {
+                id: ticket.id,
+                reference: ticket.reference,
+                title: ticket.title,
+                status: ticket.status,
+                project_id: ticket.project_id,
+                updated_at: ticket.updated_at,
+            })
+            .collect();
+        let unread = workspace
+            .inbox_page(100, 0, true)?
+            .into_iter()
+            .map(|entry| Unread {
+                reference: entry.reference,
+                timestamp: entry.timestamp,
+            })
+            .collect();
+        Ok(suggest(&Records {
+            tickets,
+            unread,
+            project_id,
+            skip,
+        }))
     }
+
+    /// A file in the Chat's folder, for the system to open: one a step named
+    /// (relative to the folder) or one a turn reported changing (absolute). A path
+    /// that resolves outside the folder, through `..` or a link, is refused; a file
+    /// that is no longer there fails as `gone`.
+    pub fn file_in_folder(&self, chat_id: &str, path: &str) -> Outcome<PathBuf> {
+        let chat = self.workspace()?.chat(chat_id)?;
+        file_in(Path::new(&chat.execution_folder), path)
+    }
+}
+
+/// `path` inside `folder`, resolved through links.
+fn file_in(folder: &Path, path: &str) -> Outcome<PathBuf> {
+    let outside = || failed("that file is outside the Chat's folder");
+    let candidate = folder.join(path);
+    let name = candidate.file_name().map_or_else(
+        || path.to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let gone = || ChatFailure {
+        code: "gone",
+        message: format!("{name} is no longer in this folder."),
+    };
+    if let (Ok(root), Ok(file)) = (folder.canonicalize(), candidate.canonicalize()) {
+        if !file.starts_with(&root) {
+            return Err(outside());
+        }
+        return if file.is_file() {
+            Ok(file)
+        } else {
+            Err(gone())
+        };
+    }
+    // Nothing is there to resolve: refuse what names a place outside the folder
+    // as written, and call the rest gone.
+    let climbs = Path::new(path)
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir));
+    if climbs || !candidate.starts_with(folder) {
+        return Err(outside());
+    }
+    Err(gone())
 }
 
 /// The counts the sidebar and the app icon show, from the rows outside the trash.

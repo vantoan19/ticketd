@@ -1022,3 +1022,14 @@ export function binarySize(bytes: number): string {
 
 /** "1 Chat", "2 Chats". */
 export const chatCount = (n: number) => count(n, "Chat");
+
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+/** Terminal colour, cursor and title codes, which a step's output box does not draw. */
+const ANSI = new RegExp(
+  `${ESC}\\[[0-9;?]*[ -/]*[@-~]|${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`,
+  "g",
+);
+
+/** A step's output as plain text: ANSI colour is stripped. */
+export const plainOutput = (output: string) => output.replace(ANSI, "");
