@@ -17,6 +17,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import {
   useChatClient,
+  type HarnessOptions,
   type HarnessStatus,
   type LinkedRecord,
   type Suggestion,
@@ -38,92 +39,20 @@ import {
 } from "@/features/chats/quotes";
 import { ticketPrompt, type TicketStart } from "@/features/chats/ticket-chat";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
-import { HarnessMark } from "@/features/chats/HarnessMark";
 import { suggestionFill } from "@/features/chats/suggestion-fill";
 import { Suggestions } from "@/features/chats/Suggestions";
-import { StatusDot } from "@/components/ui/status-dot";
+import { NewChatControls } from "@/features/chats/ComposerControls";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { RadioGroup } from "radix-ui";
+  NO_PICK,
+  offeredPick,
+  rememberHarness,
+  rememberPick,
+  rememberedHarness,
+  rememberedPick,
+  type Pick,
+} from "@/features/chats/harness-pick";
 import { notificationClient } from "@/lib/api/notifications";
 import { loadPreferences } from "@/lib/preferences";
-
-/**
- * The harness choice: one 48px radio per harness with its mark and name, and
- * a muted word only when it isn't ready. Arrow keys choose; the draft and the
- * composer stay where they are. What to do about a harness is in the notice.
- */
-function HarnessRadios({
-  harnesses,
-  value,
-  onChange,
-}: {
-  harnesses: HarnessStatus[] | null;
-  value: string;
-  onChange: (id: string) => void;
-}) {
-  if (!harnesses)
-    return (
-      <p className="chat-harness-checking" role="status">
-        Checking which harnesses are installed…
-      </p>
-    );
-  if (harnesses.length === 0) return null;
-  return (
-    <TooltipProvider delayDuration={400}>
-      <RadioGroup.Root
-        className="chat-harnesses"
-        aria-label="Harness"
-        value={value}
-        onValueChange={onChange}
-      >
-        {harnesses.map((item) => {
-          const word = item.word;
-          return (
-            <Tooltip key={item.id}>
-              <TooltipTrigger asChild>
-                <RadioGroup.Item
-                  value={item.id}
-                  className="chat-harness"
-                  aria-label={word ? `${item.name}, ${word.word}` : item.name}
-                >
-                  <span className="chat-harness-radio" aria-hidden="true">
-                    <RadioGroup.Indicator />
-                  </span>
-                  <HarnessMark
-                    harness={item.id}
-                    name={item.name}
-                    dim={item.status === "not_installed"}
-                    decorative
-                  />
-                  <span className="chat-harness-name">{item.name}</span>
-                  {word && (
-                    <span className="chat-harness-word">
-                      {word.dot && <StatusDot tone="attention" />}
-                      {word.word}
-                    </span>
-                  )}
-                </RadioGroup.Item>
-              </TooltipTrigger>
-              <TooltipContent>
-                {[
-                  item.version && `${item.name} ${item.version}`,
-                  "A Chat keeps its harness",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </RadioGroup.Root>
-    </TooltipProvider>
-  );
-}
 
 /** The draft survives leaving and returning to New Chat while the app is open. */
 let draft = "";
@@ -305,12 +234,51 @@ export function NewChat({
     };
   }, [client, start?.folder]);
   const found = harnesses ?? [];
+  // The one chosen here, else the last one used while it can still be, else the
+  // first that can be used, in the host's order.
+  const remembered = rememberedHarness();
   const harness =
     found.find((item) => item.id === harnessId) ??
-    found.find((item) => item.status === "ready") ??
+    found.find((item) => item.id === remembered && item.usable) ??
     found.find((item) => item.usable) ??
     found[0];
   const ready = harness?.usable ?? false;
+  // What each usable harness offers, asked once per harness version by the host.
+  const [options, setOptions] = useState<Record<string, HarnessOptions>>({});
+  const harnessKey = harness?.usable ? harness.id : null;
+  useEffect(() => {
+    if (!harnessKey) return;
+    let current = true;
+    client.harnessOptions(harnessKey).then(
+      (found) =>
+        current && setOptions((known) => ({ ...known, [harnessKey]: found })),
+      (reason: unknown) =>
+        current &&
+        setOptions((known) => ({
+          ...known,
+          [harnessKey]: {
+            harness_id: harnessKey,
+            models: [],
+            unavailable:
+              reason instanceof Error ? reason.message : String(reason),
+          },
+        })),
+    );
+    return () => {
+      current = false;
+    };
+  }, [client, harnessKey, probe]);
+  const offered = harness ? options[harness.id] : undefined;
+  // The last pick for this harness, while the harness still offers it.
+  const [picks, setPicks] = useState<Record<string, Pick>>({});
+  const pick = harness
+    ? offeredPick(offered, picks[harness.id] ?? rememberedPick(harness.id))
+    : NO_PICK;
+  const choosePick = (next: Pick) => {
+    if (!harness) return;
+    setPicks((known) => ({ ...known, [harness.id]: next }));
+    rememberPick(harness.id, next);
+  };
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
   const mentions = useMemo<ComposerMentions>(
     () => ({
@@ -360,11 +328,11 @@ export function NewChat({
       <div className="chat-new">
         <div>
           <h2>What should we work on?</h2>
-          <HarnessRadios
-            harnesses={harnesses}
-            value={harness?.id ?? ""}
-            onChange={setHarnessId}
-          />
+          {!harnesses && (
+            <p className="chat-harness-checking" role="status">
+              Checking which harnesses are installed…
+            </p>
+          )}
           <div
             className="chat-new-composer"
             onKeyDown={(event) => {
@@ -401,6 +369,34 @@ export function NewChat({
                 send: "send",
                 enabled: ready && text.trim() !== "",
               })}
+              {...(harness && {
+                leading: (
+                  <NewChatControls
+                    harnesses={found}
+                    harnessId={harness.id}
+                    onHarness={(id) => {
+                      setHarnessId(id);
+                      rememberHarness(id);
+                    }}
+                    options={offered}
+                    pick={pick}
+                    onPick={choosePick}
+                    notice={(id) => {
+                      const other = found.find((item) => item.id === id);
+                      return (
+                        other?.problem && (
+                          <ProblemNotice
+                            problem={other.problem}
+                            harness={other.name}
+                            onAction={() => setProbe((count) => count + 1)}
+                          />
+                        )
+                      );
+                    }}
+                    inputRef={input}
+                  />
+                ),
+              })}
               onSend={async (typed, mentioned) => {
                 if (!harness) return;
                 const message = quotedMessage(quotes, typed);
@@ -421,6 +417,10 @@ export function NewChat({
                       ) === index,
                   ),
                   message,
+                  // The first turn runs on what was picked; unset keeps the harness's own.
+                  ...(pick.model && { model: pick.model }),
+                  ...(pick.effort && { effort: pick.effort }),
+                  ...(pick.permission && { permission: pick.permission }),
                 };
                 const request = JSON.stringify(input);
                 if (attempt.current.request !== request)

@@ -19,8 +19,8 @@ use async_trait::async_trait;
 
 use crate::stdio::{spawn, version_output};
 use crate::{
-    Harness, HarnessAdapter, Inspection, OpenRequest, OpenedRuntime, Problem, ProblemKind,
-    ProviderDetail,
+    Harness, HarnessAdapter, HarnessOptions, Inspection, OpenRequest, OpenedRuntime, Problem,
+    ProblemKind, ProviderDetail,
 };
 
 use discovery::{LaunchEnvironment, Os};
@@ -90,6 +90,14 @@ impl HarnessAdapter for CodexAdapter {
             version,
             login,
         }
+    }
+
+    async fn options(&self) -> Result<HarnessOptions, String> {
+        let executable = self
+            .executable()
+            .ok_or_else(|| "Codex was not found".to_owned())?;
+        let io = spawn(&executable, ARGUMENTS, None).map_err(|error| error.to_string())?;
+        runtime::probe_options(io, Options::default()).await
     }
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {

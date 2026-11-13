@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::time::{sleep, timeout};
 
-use super::runtime::{Options, open_over, probe};
+use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, candidates, locate, verdict};
 use crate::install::{LaunchEnvironment, Os};
 use crate::scripted::{Peer, brief, pipes};
@@ -21,7 +21,7 @@ use crate::{
     HarnessRuntime, Inspection, InteractionAnswer, InteractionResponse, InterruptOutcome,
     InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId, OpenRequest,
     OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
-    RuntimeGeneration, SessionStart, Submission, SubmissionId, SubmissionKind,
+    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(7);
@@ -41,6 +41,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
+        settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
     let (opened, ()) = tokio::join!(opening, peer.play());
@@ -604,12 +605,72 @@ async fn resuming_a_missing_session_reports_unavailable_history() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_options_probe_lists_models_with_their_efforts_and_closes_the_bridge() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("options"));
+
+    let probing = probe_options(io, Path::new(CLAUDE), Options::default());
+    let (options, ()) = tokio::join!(probing, async {
+        peer.play().await;
+        assert!(peer.stdin_closed().await);
+        peer.exit(0);
+    });
+
+    let options = options.expect("Claude Code listed its models");
+    let models: Vec<_> = options
+        .models
+        .iter()
+        .map(|choice| {
+            let efforts: Vec<_> = choice.efforts.iter().map(|e| e.id.as_str()).collect();
+            (choice.model.id.as_str(), choice.model.is_default, efforts)
+        })
+        .collect();
+    assert_eq!(
+        models,
+        [
+            ("default", true, vec!["low", "medium", "high", "max"]),
+            ("sonnet", false, vec![]),
+        ]
+    );
+    // Before a session Claude Code's own mode is unknown, and full access is no choice.
+    let permission = options.permission.expect("Claude Code's modes");
+    assert_eq!(permission.current, None);
+    assert!(
+        permission
+            .options
+            .iter()
+            .all(|o| o.permission != Some(crate::PermissionKind::FullAccess))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_session_opens_with_new_chats_picks() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("start_settings"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        settings: StartSettings {
+            model: Some("sonnet".to_owned()),
+            effort: Some("high".to_owned()),
+            permission: Some("acceptEdits".to_owned()),
+        },
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+#[tokio::test(start_paused = true)]
 async fn inspection_judges_the_pairing_without_opening_a_session() {
     let (mut peer, io) = pipes();
     peer.load(fixture!("inspect"));
 
     let probing = probe(io, Path::new(CLAUDE), Options::default());
-    let (inspection, ()) = tokio::join!(probing, async {
+    let ((inspection, offered), ()) = tokio::join!(probing, async {
         peer.play().await;
         assert!(peer.stdin_closed().await);
         peer.exit(0);
@@ -626,10 +687,33 @@ async fn inspection_judges_the_pairing_without_opening_a_session() {
     };
     assert_eq!(executable, PathBuf::from(CLAUDE));
     assert_eq!(version.as_deref(), Some("2.1.322"));
-    // Sign-in is Claude Code's business; steering is unvalidated, so not offered.
-    assert_eq!(login, LoginState::Unknown);
+    // Sign-in is what Claude Code says of its account; steering is unvalidated.
+    assert_eq!(login, LoginState::SignedIn);
+    assert!(
+        offered.is_some_and(|listed| listed.is_ok()),
+        "the check lists its options too"
+    );
     assert!(matches!(capabilities.steering, Capability::Unknown { .. }));
     assert!(capabilities.native_resume.behavior().is_some());
+}
+
+#[test]
+fn sign_in_is_read_from_how_claude_code_describes_its_account() {
+    use super::runtime::account_login;
+    let login = |account: Value| account_login(&account);
+    assert_eq!(
+        login(json!({"subscription_type": "pro"})),
+        LoginState::SignedIn
+    );
+    assert_eq!(
+        login(json!({"api_key_source": "ANTHROPIC_API_KEY"})),
+        LoginState::NonSubscription
+    );
+    assert_eq!(
+        login(json!({"api_provider": "bedrock"})),
+        LoginState::NonSubscription
+    );
+    assert_eq!(login(Value::Null), LoginState::Unknown);
 }
 
 #[test]
