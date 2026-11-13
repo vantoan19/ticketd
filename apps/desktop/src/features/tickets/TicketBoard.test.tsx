@@ -1302,6 +1302,8 @@ test("a card outside the List page opens existing detail, preserves its draft ac
   await settle();
   await showBoard();
   const card = screen.getByRole("button", { name: /T-KQ56.*Ticket 56/ });
+  const board = screen.getByRole("region", { name: "Ticket status board" });
+  board.scrollLeft = 320;
   card.focus();
   fireEvent.click(card);
   await settle();
@@ -1324,6 +1326,29 @@ test("a card outside the List page opens existing detail, preserves its draft ac
   await settle();
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: /T-KQ56.*Ticket 56/ }),
+  );
+  expect(
+    screen.getByRole("region", { name: "Ticket status board" }).scrollLeft,
+  ).toBe(320);
+});
+
+test("closing a ticket followed within Board details returns to its card", async () => {
+  saved = [{ ...ticket(1), body: "See T-KQ2." }, ticket(2)];
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ }));
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "T-KQ2" }));
+  await settle();
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Ticket 2",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
+  await settle();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /T-KQ2.*Ticket 2/ }),
   );
 });
 

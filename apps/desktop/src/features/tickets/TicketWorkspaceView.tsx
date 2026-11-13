@@ -146,27 +146,28 @@ export function TicketWorkspaceView({
     if (layout) groupRef.current?.setLayout(layout);
     else listPanelRef.current?.resize(384);
   }, [workspace.layout, groupRef, listPanelRef]);
-  const focusPane = useRef<"detail" | "list" | null>(null);
-  const boardReturn = useRef<{ reference: string; scrollLeft: number } | null>(
+  const focusPane = useRef<"detail" | { reference: string | null } | null>(
     null,
   );
+  const boardScrollLeft = useRef<number | null>(null);
   useLayoutEffect(() => {
     if (focusPane.current === "detail")
       document.getElementById("detail-heading")?.focus();
-    if (focusPane.current === "list") {
-      const returned =
-        workspace.layout === "board" ? boardReturn.current : null;
+    if (focusPane.current && focusPane.current !== "detail") {
+      const { reference } = focusPane.current;
       const board =
         listRef.current?.querySelector<HTMLElement>(".ticket-board");
-      if (board && returned) board.scrollLeft = returned.scrollLeft;
-      const target =
-        (returned &&
-          listRef.current?.querySelector<HTMLButtonElement>(
-            `[data-board-reference="${returned.reference}"]`,
-          )) ||
-        listRef.current?.querySelector<HTMLButtonElement>(
-          '.board-card[aria-pressed="true"], .ticket-row[aria-pressed="true"]',
-        );
+      if (board && boardScrollLeft.current !== null)
+        board.scrollLeft = boardScrollLeft.current;
+      // Closing clears selection before this effect runs. Keep the ticket being
+      // viewed at return time, including navigation within details, independently.
+      const target = reference
+        ? listRef.current?.querySelector<HTMLButtonElement>(
+            workspace.layout === "board"
+              ? `[data-board-reference="${reference}"]`
+              : `[data-ticket-reference="${reference}"]`,
+          )
+        : null;
       (target ?? document.getElementById("tickets-heading"))?.focus({
         preventScroll: true,
       });
@@ -274,12 +275,9 @@ export function TicketWorkspaceView({
               onCreate={onCreate}
               onOpen={(reference) => {
                 if (workspace.layout === "board")
-                  boardReturn.current = {
-                    reference,
-                    scrollLeft:
-                      listRef.current?.querySelector(".ticket-board")
-                        ?.scrollLeft ?? 0,
-                  };
+                  boardScrollLeft.current =
+                    listRef.current?.querySelector(".ticket-board")
+                      ?.scrollLeft ?? 0;
                 setShowDependencies(false);
                 setSelected(reference);
                 setNarrowDetail(true);
@@ -316,10 +314,10 @@ export function TicketWorkspaceView({
               onReturn={() => {
                 setExpanded(false);
                 setNarrowDetail(false);
-                focusPane.current = "list";
+                focusPane.current = { reference: selected };
               }}
               onSelect={(value, mention) => {
-                if (value === null) focusPane.current = "list";
+                if (value === null) focusPane.current = { reference: selected };
                 setSelected(value, mention);
               }}
             />
