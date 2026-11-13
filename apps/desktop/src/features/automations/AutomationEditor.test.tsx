@@ -298,8 +298,10 @@ test("an unfinished step says what it needs and the Automation cannot be switche
 
 const run = (patch: Partial<AutomationRun>): AutomationRun => ({
   id: "run-1",
+  automation_id: "a2",
   status: "running",
   reason: null,
+  needs_you: false,
   ticket: { id: "t1", reference: "T-ZB7", title: "Fix login" },
   created_at: "2026-11-14T09:00:00.000Z",
   ...patch,
