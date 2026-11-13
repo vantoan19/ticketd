@@ -217,8 +217,10 @@ trigger Automations. The value itself is not stored.
 the Chat host, so it is tested without the desktop. The desktop calls one pass at
 start and every five seconds while Chat is on. A pass asks the core to queue a run
 for each Workspace event after a switched-on Automation's cursor that matches its
-trigger and conditions, and to start queued runs, oldest event first, until two are
-running. The core holds the rules: an event with actor `automation` matches
+trigger and conditions, and to start queued runs, oldest event first, until as
+many are running as the device's "Runs at once" setting allows (2 unless changed,
+at most 10; read on every pass, so a change counts from the next run). The core
+holds the rules: an event with actor `automation` matches
 nothing, a ticket has one active run per Automation (a partial unique index), and a
 run keeps the Automation definition it was created with. Matching and the run state
 machine are functions with no SQL: the state machine takes the run's steps and how
@@ -275,14 +277,29 @@ not from the workspace poll. The Experimental switch is a per-computer
 preference kept by the interface; the backend starts with Chat off and is told
 the choice at startup.
 
-Closing the window while Chat is on and a Chat is working hides the window and
-shows a tray icon; the process, the host and the page stay, so showing the
-window again attaches to the same work. Starting ticketd a second time shows the
+Closing the window while Chat is on and either a Chat is working or an
+Automation is switched on for this device hides the window and shows a tray
+icon; the process, the host, the Automation runner and the page stay, so showing
+the window again attaches to the same work. An Automation that is on counts even
+when nothing is running, because it may start a run at any time and runs only in
+this process. Starting ticketd a second time shows the
 running window instead of starting a second host
 (`tauri-plugin-single-instance`). Quit from the tray or the system asks in the
 window first, then stops app-owned execution with bounded cleanup before the
-process exits. With Chat off or no Chat working, closing the window exits as
-before.
+process exits; a run whose agent was stopped that way ends as Needs attention
+when ticketd next starts. With Chat off, or with no Chat working and no
+Automation on, closing the window exits as before.
+
+Switching an Automation off stops matching and leaves its active runs to finish.
+"Stop it and turn off" also ends its Queued and Running runs as Needs attention in
+the same transaction, and the runner then interrupts the agents they were
+running; what those turns report afterwards is refused.
+
+"Start ticketd when you sign in" registers the app with the system through
+`tauri-plugin-autostart` (the Run registry key on Windows, a launch agent on
+macOS, an autostart entry on Linux). The page reaches it through two ticketd
+commands; the plugin's own commands are granted to no window. There is no
+service: with ticketd quit, nothing runs.
 
 The product behavior and release acceptance are in [Native agent Chats](mvp-spec.md#20-native-agent-chats).
 Provider support clarification and live compatibility checks remain requirements
