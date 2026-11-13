@@ -268,13 +268,16 @@
   }
   /* Geist Mono's contextual alternates join "--" into one stroke that covers
      the space before it, so "list --project" reads as "list--project".
-     Commands and paths are read and copied exactly as typed. */
+     Commands and paths are read and copied exactly as typed. In Chromium the
+     root's "liga" feature setting outranks font-variant-ligatures, so it is
+     reset here too. */
   code,
   kbd,
   pre,
   samp,
   .font-mono {
     font-variant-ligatures: none;
+    font-feature-settings: normal;
   }
   button:focus-visible,
   summary:focus-visible,

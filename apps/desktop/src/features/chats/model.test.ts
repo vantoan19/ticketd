@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { ChatSnapshot, Problem } from "@/features/chats/client";
+import type { ChatSnapshot, Problem, Step } from "@/features/chats/client";
 import {
   applyChange,
   chatTime,
@@ -8,7 +8,8 @@ import {
   harnessUsable,
   hasComposer,
   problemNotice,
-  stepTally,
+  mergeSteps,
+  stepWords,
 } from "@/features/chats/model";
 import { chatState } from "@/features/chats/mock-client";
 
@@ -59,18 +60,192 @@ test("a change the snapshot already includes is ignored", () => {
   expect(applyChange(before, old)).toBe(before);
 });
 
-test("the steps tally counts merged reads and handles singular and plural", () => {
-  expect(
-    stepTally([
-      { verb: "read", target: "a.ts", more: 5 },
-      { verb: "edited", target: "b.ts", more: 0 },
-      { verb: "ran", target: "npm test", more: 0 },
-      { verb: "ran", target: "npm run lint", more: 0 },
-    ]),
-  ).toBe("Read 6 files, edited 1 file, ran 2 commands");
-  expect(
-    stepTally([{ verb: "other", target: "Searched the web", more: 0 }]),
-  ).toBe("1 other step");
+const step = (over: Partial<Step> & Pick<Step, "kind">): Step => ({
+  target: "",
+  ...over,
+});
+const paths = (...texts: string[]) => texts.map((text) => ({ text }));
+/** A row as one line: code targets in backticks, then the suffix after " · ". */
+const line = (s: Step) => {
+  const words = stepWords(s);
+  const text = words.parts
+    .map((part) => (part.code ? `\`${part.text}\`` : part.text))
+    .join(" ");
+  return words.suffix ? `${text} · ${words.suffix.text}` : text;
+};
+
+// The rows of the #366 design's fixtures, as the host classifies them.
+test.each<[Step, string, string]>([
+  [
+    step({ kind: "read", targets: paths("src/auth/limiter.ts") }),
+    "Read `src/auth/limiter.ts`",
+    "",
+  ],
+  [
+    step({ kind: "read", targets: paths("a.ts", "b.ts", "c.ts") }),
+    "Read 3 files",
+    "",
+  ],
+  [
+    step({ kind: "search", targets: [{ text: "RateLimiter", scope: "src" }] }),
+    "Searched for `RateLimiter` in `src`",
+    "",
+  ],
+  [
+    step({ kind: "search", targets: paths("*.test.ts") }),
+    "Searched for `*.test.ts`",
+    "",
+  ],
+  [
+    step({
+      kind: "search",
+      targets: [{ text: "legacyLimiter", scope: "src" }],
+      no_matches: true,
+    }),
+    "Searched for `legacyLimiter` in `src` · No matches",
+    "",
+  ],
+  [
+    step({
+      kind: "search",
+      targets: [
+        { text: "a", scope: "src" },
+        { text: "b", scope: "lib" },
+      ],
+    }),
+    "Searched for `a` and `b`",
+    "",
+  ],
+  [
+    step({ kind: "read", variant: "list", targets: paths("src/auth") }),
+    "Listed `src/auth`",
+    "",
+  ],
+  [step({ kind: "read", variant: "list", targets: [] }), "Listed files", ""],
+  [
+    step({ kind: "edit", targets: paths("src/auth/config.ts") }),
+    "Edited `src/auth/config.ts`",
+    "",
+  ],
+  [
+    step({ kind: "delete", targets: paths("coverage/*.json", "coverage") }),
+    "Deleted `coverage/*.json` and `coverage`",
+    "",
+  ],
+  [
+    step({ kind: "run", command: "npm run typecheck", folder: "apps/desktop" }),
+    "Ran `npm run typecheck`",
+    "in apps/desktop",
+  ],
+  [
+    step({ kind: "run", variant: "script", targets: paths("python3") }),
+    "Ran a `python3` script",
+    "",
+  ],
+  [
+    step({
+      kind: "run",
+      command: "npm run test:limiter",
+      state: "failed",
+      exit_code: 1,
+    }),
+    "Run `npm run test:limiter` · Failed",
+    "Exit 1",
+  ],
+  [
+    step({
+      kind: "run",
+      command: "npm run test:e2e",
+      state: "failed",
+      exit_code: 124,
+      timed_out: true,
+      duration_ms: 600_000,
+    }),
+    "Run `npm run test:e2e` · Failed",
+    "Timed out after 10m",
+  ],
+  [
+    step({ kind: "delete", targets: paths("node_modules"), state: "declined" }),
+    "Delete `node_modules` · Declined",
+    "",
+  ],
+  [
+    step({ kind: "run", command: "npm run dev", state: "not_finished" }),
+    "Run `npm run dev` · Not finished",
+    "",
+  ],
+  [
+    step({ kind: "run", command: "npm run bench", state: "unknown" }),
+    "Run `npm run bench` · Not confirmed",
+    "",
+  ],
+  [
+    step({ kind: "read", targets: paths("a.ts"), state: "running" }),
+    "Reading `a.ts`",
+    "",
+  ],
+  [
+    step({ kind: "web", targets: paths("tauri updater") }),
+    "Searched the web for “tauri updater”",
+    "",
+  ],
+  [
+    step({ kind: "web", variant: "fetch", targets: paths("docs.rs/serde") }),
+    "Fetched `docs.rs/serde`",
+    "",
+  ],
+  [
+    step({ kind: "create", targets: paths("a.ts", "b.ts", "c.ts") }),
+    "Created 3 files",
+    "",
+  ],
+  [
+    step({ kind: "other", targets: paths("mcp__linear__get_issue") }),
+    "Used `mcp__linear__get_issue`",
+    "",
+  ],
+  [
+    step({ kind: "other", target: "ticketd gave Codex this Chat's context" }),
+    "ticketd gave Codex this Chat's context",
+    "",
+  ],
+  [
+    step({ kind: "read", targets: [{ text: "a.ts", lines: [40, 90] }] }),
+    "Read `a.ts`",
+    "lines 40–90",
+  ],
+])("a step reads as one line: %#", (s, row, detail) => {
+  expect(line(s)).toBe(row);
+  expect(stepWords(s).detail).toBe(detail);
+});
+
+test("a command shows its first line, and its name says its outcome", () => {
+  const words = stepWords(
+    step({ kind: "run", command: "python3 -c '\nprint(1)'", state: "failed" }),
+  );
+  expect(words.parts[1]?.text).toBe("python3 -c '");
+  expect(words.label).toBe("Run python3 -c ', Failed");
+});
+
+test("steps of the same kind and outcome merge, but commands never do", () => {
+  const merged = mergeSteps([
+    step({ kind: "read", targets: paths("a.ts"), output: "x" }),
+    step({ kind: "read", targets: paths("b.ts", "c.ts") }),
+    step({ kind: "read", targets: paths("d.ts"), state: "failed" }),
+    step({ kind: "run", command: "npm test" }),
+    step({ kind: "run", command: "npm run lint" }),
+    step({ kind: "search", targets: paths("x"), no_matches: true }),
+    step({ kind: "search", targets: paths("y") }),
+  ]);
+  expect(merged.map(line)).toEqual([
+    "Read 3 files",
+    "Read `d.ts` · Failed",
+    "Ran `npm test`",
+    "Ran `npm run lint`",
+    "Searched for `x` and `y`",
+  ]);
+  // A merged row opens to its targets, not to one step's output.
+  expect(merged[0]?.output).toBeUndefined();
 });
 
 test("the composer offers Send, Stop or Queue for the turn's state", () => {
@@ -225,19 +400,6 @@ test("a missing folder is told without claiming a restore happened", () => {
   );
   // L9: a folder moved back is seen without picking another one.
   expect(notice.actions).toEqual(["check", "pick-folder"]);
-});
-
-test("a step that has not run, or did not complete, is not counted as run", () => {
-  expect(
-    stepTally([
-      { verb: "ran", target: "npm test", more: 0, state: "done" },
-      { verb: "ran", target: "rm -rf dist", more: 0, state: "running" },
-      { verb: "ran", target: "touch hello.txt", more: 0, state: "failed" },
-    ]),
-  ).toBe("Ran 1 command, 1 step in progress, 1 step did not complete");
-  expect(
-    stepTally([{ verb: "ran", target: "touch a", more: 0, state: "running" }]),
-  ).toBe("1 step in progress");
 });
 
 test("a missing ticketd component is a reinstall notice, not an update of the harness", () => {

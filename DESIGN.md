@@ -4,7 +4,7 @@
 
 This document defines the target visual and interaction design for ticketd's desktop application and the design system it is built from (section 11). It is a specification for design work and review; the current interface is not evidence that these rules have been implemented. Dimensions are logical CSS pixels at 100% zoom. Minimum heights must grow for wrapped text and accessibility settings.
 
-Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, or a board. The experimental native Chat screens (product specification section 21) are off by default and follow this guide’s tokens and components; their layout is not yet specified here. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
+Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, or a board. The experimental native Chat screens (product specification section 21) are off by default and follow this guide’s tokens and components; their layout is specified in section 15. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
 
 ### Reference and adaptation
 
@@ -276,7 +276,7 @@ Switching pane modes, resizing, or opening navigation must not remount drafts, r
 The sidebar sits on the canvas surface, top to bottom:
 
 - **Brand:** the product name in plain type beside a 32px New ticket icon button with an accessible name and tooltip. Do not use a full-width primary creation button in persistent navigation.
-- **Work views:** Inbox, All tickets, Ready, and In progress, each with a distinct icon (Ready does not reuse the Done icon) and a trailing count. While the experimental Chat setting is on, a Chats entry follows them; it shows an attention dot and a count only for Chats waiting for the person.
+- **Work views:** Inbox, All tickets, Ready, and In progress, each with a distinct icon (Ready does not reuse the Done icon) and a trailing count. While the experimental Chat setting is on, a Chats entry follows them; it shows an attention dot and the count of Chats waiting for the person, or, when none waits, an unread dot and the count of Chats with an unseen outcome (see Native Chat). Working Chats never count.
 - **Projects and Plans:** two groups, each with manage actions in its heading, plus an Archived Plans entry under Plans.
 - **Pinned bottom:** Trash and Settings stay at the bottom without forcing other items off-screen.
 - **Title bar:** on Windows the app draws its own 32px title bar on the canvas in place of the native one. It is the window's drag handle, and double-clicking it maximizes; Minimize, Maximize or Restore, and Close sit at its end, and Close turns the system red on hover. The window keeps its native resize edges and shadow. macOS keeps its transparent native bar.
@@ -615,3 +615,63 @@ Keep the 16px root so rem-based shared controls remain predictable. Working-pane
 ### Workspace hierarchy
 
 The ticket title is the strongest heading in the split workspace. The list heading is 14px/20px at weight 500, with a 12px count on the same line. Search and Filters use the 32px small-control role and transparent resting surfaces. Use the canvas color for navigation and the elevated surface color for the content panel. Preserve one subtle boundary between the list and detail panes; do not add nested cards around these regions. Properties in the rail use the shared ghost button and select variants beneath their labels. The full creation form keeps labeled, outlined controls.
+
+## 15. Native Chat
+
+A Chat (product specification section 21) opens in the detail pane: a 48px header, the transcript, then the problem notice, activity dock and composer. It uses the shared components and existing tokens and adds none. A spaced middle dot separates items, a chevron marks disclosure, and at most two disclosure levels show at once.
+
+### Identity and header
+
+- **Harness mark:** the official mark in one color, 14px in a 16px box, once per surface: before the header title and leading a list row. An unknown harness uses `SquareTerminal`. Status never sits on a mark's corner.
+- **Project icon:** derived from the Project's folder: its favicon in grays, else a letter tile on `recessed`.
+- **Header:** one line: mark and title, then one muted 32px context button (Project icon, folder, mono branch, a count only when another Chat shares the folder) before the actions. Its popover is the only place for Harness, Folder and Branch.
+
+### Transcript
+
+Your message is right-aligned on `accent`; a reply is full-width Markdown with no bubble. Expanded mode is a centered 720px column.
+
+A **turn** runs from your message to its end; a steer starts a new segment. While it runs, step rows appear as tools start; "Working for 1m 32s" shows only between steps. When it ends, its steps, reasoning and record changes fold under one muted row: "Worked for 2m 13s", "Continued for 48s", "Stopped after 40s" or "Failed after 8s", plus problem counts only when present (" · 1 failed"). Opened, steps indent 16px. The final response, question and expiry receipts, and ticketd notes such as sign-in problems are never folded. A turn whose stop was not confirmed stays open.
+
+A **step row** is one 28px line, `[icon] Verb target · suffix`:
+
+- **Icon:** one neutral 16px Lucide icon per kind: read `eye`, search `search`, edit `pencil`, create `square-plus`, delete `trash-2`, run `terminal`, web `globe`, other `wrench`. A running step shows the 12px spinner in its place.
+- **Words:** the verb in `muted-foreground`, the target in mono `foreground`. Only success takes the past tense: "Ran `npm test`", but "Run `npm test` · Failed".
+- **Suffix:** at most one: a clock ("12s"), a diffstat ("+12 −4", 12px mono, muted), "No matches", or an outcome word at weight 500: Failed, Declined, Not finished, Not confirmed. Rows are never grayed, and nothing is parsed from output.
+- **Targets:** one or two are named ("`a` and `b`"), three or more counted ("Read 6 files"). Paths are relative to the Chat's folder, with `~` outside it; a search reads "for `pattern` in `scope`", a web search "for “query”", a page `host/path`, and a command its first line without shell wrappers.
+- **Merging:** consecutive steps of one kind and outcome merge ("Read 6 files"); commands never merge.
+- **Detail:** a row opens one thing; a command opens one `code-block` box with its output and Copy, then a muted "Exit 1 · in {folder}".
+
+An answered approval folds into its step row, with a tooltip such as "You allowed this for this session"; only questions ("Answered · …") and expiries ("Expired · …") leave receipt rows.
+
+**Below the response** come 28px step-style rows, in order and only when needed: the stop marker, changed files ("3 files changed · +53 −12"), then records, verb first ("Moved T-KQ12 to In review · Posted an update on T-KQ12"). References are mono and underlined everywhere.
+
+### Scroll and the New marker
+
+The transcript follows only while you are at the bottom. Scrolling up stops following; reaching the bottom, sending, or "Jump to latest" (an outline button above the dock) resumes it. Otherwise the first visible item keeps its place. A divider with the unread dot and "New" marks the first item that arrived while you were away; your own messages never count.
+
+### Activity dock and composer
+
+The dock sits on the composer, hidden when empty, and holds only, in order, the pending request, the plan pill ("3 of 7 done · {current step}") and the queue. A pending request appears only here, never takes focus from the message box, and is answered only by its own buttons.
+
+The composer's control row holds two 32px triggers, model with effort (`Opus 5.5 ▂▄▆`) and permissions (shield and label; full access is never offered), then Stop and Send. Send shows an icon and a word set by the turn: Send, Steer or Queue. Enter does what it says, and Cmd/Ctrl+Enter queues. Stop is a filled square in an outline icon button while a turn runs; Esc stops when nothing else is open.
+
+### Status and attention
+
+| Rank | Word            | Signal                       |
+| ---- | --------------- | ---------------------------- |
+| 1    | Approval needed | Orange dot                   |
+| 2    | Question        | Orange dot                   |
+| 3    | Working         | Spinner                      |
+| 4    | Failed          | Orange dot, until seen       |
+| 5    | Done            | Blue dot, until seen         |
+| 6    | Idle            | None; the last line in words |
+
+Interrupted, Not confirmed and Stop not confirmed keep their own words and never read Done. Status sits on a row's second line: the dot or spinner, the word in regular weight, then muted detail. It drives the sidebar entry, the app-icon count and system notifications for Chats not in view; there is no in-app toast or window-title count.
+
+### Color, motion and narrow panes
+
+Color is only the existing small status dot beside a word. The one live signal is the 12px spinner beside words, at most one per turn and never on replayed history. Under reduced motion it is static and jumps are instant. In a narrow pane rows wrap with the suffix beside its target, outcome words never truncate, approval buttons stack, and the model trigger drops its effort bars.
+
+### Accessibility
+
+Every state is a word; icons, spinners and clocks are `aria-hidden`. Rows that open are buttons with `aria-expanded`. One polite status announces a turn starting, waiting and ending, and a request arriving, never each step. Command output is a focusable named region, and the New marker is a separator named "New since you left".

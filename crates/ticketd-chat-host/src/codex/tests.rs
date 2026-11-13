@@ -749,3 +749,20 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
         );
     }
 }
+
+/// Codex reports a command the person declined as `declined`: it never ran, so it is
+/// not a failure.
+#[test]
+fn a_declined_command_is_declined_not_failed() {
+    let mut session = Session::default();
+    let mut completed = |status: &str| {
+        let item = json!({"type": "commandExecution", "id": "item_9", "command": "rm -rf node_modules", "status": status});
+        let params = json!({"turnId": "turn_1", "item": item});
+        match session.notification("item/completed", &params).as_slice() {
+            [EventKind::ToolUpdated { status, .. }] => *status,
+            other => panic!("one tool update, got {other:?}"),
+        }
+    };
+    assert_eq!(completed("declined"), crate::ToolStatus::Declined);
+    assert_eq!(completed("failed"), crate::ToolStatus::Failed);
+}
