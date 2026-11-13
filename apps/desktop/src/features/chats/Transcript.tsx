@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { Fragment, memo, useEffect, useId, useState } from "react";
 import {
   Ban,
   Check,
@@ -26,7 +26,13 @@ import type {
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
-import { binarySize, elapsed, stepTally } from "@/features/chats/model";
+import {
+  binarySize,
+  elapsed,
+  mergeSteps,
+  stepWords,
+  targetLines,
+} from "@/features/chats/model";
 
 type Of<K extends TranscriptItem["kind"]> = Extract<
   TranscriptItem,
@@ -114,21 +120,43 @@ function Response({
   );
 }
 
-const VERB = { read: "Read", edited: "Edited", ran: "Ran", other: "" } as const;
-
-function StepRow({ step, harness }: { step: Step; harness: string }) {
+/** What an opened step row holds: its command, its targets or its output. */
+function StepDetail({
+  id,
+  step,
+  harness,
+}: {
+  id: string;
+  step: Step;
+  harness: string;
+}) {
+  const targets = step.targets ?? [];
+  const words = stepWords(step);
   return (
-    <li>
-      {step.verb === "other" ? (
-        step.target
-      ) : (
-        <>
-          {VERB[step.verb]} <code>{step.target}</code>
-        </>
+    <div className="chat-steplist" id={id}>
+      {step.kind === "run" && step.command && (
+        <pre className="chat-out">$ {step.command}</pre>
       )}
-      {step.more > 0 && ` and ${step.more} more`}
-      {step.result && <small>{step.result}</small>}
-      {step.output && <pre className="chat-out">{step.output}</pre>}
+      {targets.length > 2 ? (
+        <ul>
+          {targets.map((target, index) => (
+            <li key={index}>
+              <code>{target.text}</code>
+              {target.scope && (
+                <>
+                  {" "}
+                  in <code>{target.scope}</code>
+                </>
+              )}
+              {target.lines && <small>{targetLines(target)}</small>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        step.output && <pre className="chat-out">{step.output}</pre>
+      )}
+      {words.detail && <p className="chat-fine">{words.detail}</p>}
+      {step.result && <p className="chat-fine">{step.result}</p>}
       {step.truncated && (
         <p className="chat-fine">
           Truncated: ticketd keeps the last{" "}
@@ -136,34 +164,66 @@ function StepRow({ step, harness }: { step: Step; harness: string }) {
           {binarySize(step.truncated.total_bytes)}. {harness} saw all of it.
         </p>
       )}
-    </li>
+    </div>
   );
 }
 
-function Steps({ item, harness }: { item: Of<"steps">; harness: string }) {
+function StepRow({ step, harness }: { step: Step; harness: string }) {
   const [open, setOpen] = useState(false);
+  const id = useId();
+  const words = stepWords(step);
+  const line = (
+    <span className="chat-step-words">
+      {words.parts.map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 && " "}
+          {part.code ? <code>{part.text}</code> : part.text}
+        </Fragment>
+      ))}
+      {words.suffix && (
+        <>
+          <span aria-hidden> · </span>
+          <span data-outcome={words.suffix.outcome ? "" : undefined}>
+            {words.suffix.text}
+          </span>
+        </>
+      )}
+    </span>
+  );
+  const detail =
+    (step.kind === "run" && Boolean(step.command)) ||
+    Boolean(step.output) ||
+    (step.targets?.length ?? 0) > 2 ||
+    Boolean(words.detail || step.result || step.truncated);
+  if (!detail) return <div className="chat-steps">{line}</div>;
   return (
     <>
       <button
         type="button"
         className="chat-steps"
         aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        aria-label={words.label}
         onClick={() => setOpen(!open)}
       >
-        {stepTally(item.steps)}
+        {line}
         {open ? (
           <ChevronDown size={14} aria-hidden />
         ) : (
           <ChevronRight size={14} aria-hidden />
         )}
       </button>
-      {open && (
-        <ul className="chat-steplist">
-          {item.steps.map((step, index) => (
-            <StepRow key={index} step={step} harness={harness} />
-          ))}
-        </ul>
-      )}
+      {open && <StepDetail id={id} step={step} harness={harness} />}
+    </>
+  );
+}
+
+function Steps({ item, harness }: { item: Of<"steps">; harness: string }) {
+  return (
+    <>
+      {mergeSteps(item.steps).map((step, index) => (
+        <StepRow key={index} step={step} harness={harness} />
+      ))}
     </>
   );
 }

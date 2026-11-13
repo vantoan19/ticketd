@@ -279,12 +279,25 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
+.chat-steplist ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-steps code,
 .chat-steplist code,
 .chat-mono {
   color: var(--foreground);
   font-family: var(--font-mono);
   font-size: var(--text-code);
   overflow-wrap: anywhere;
+}
+/* An outcome is what the eye should find on a row: a word, never a colour. */
+.chat-steps [data-outcome] {
+  color: var(--foreground);
+  font-weight: 500;
 }
 .chat-steplist small {
   margin-left: 6px;

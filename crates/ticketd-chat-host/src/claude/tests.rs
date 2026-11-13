@@ -761,3 +761,37 @@ async fn closing_kills_a_process_that_stopped_reading_its_input_within_the_bound
     let outcome = outcome.expect("the write gives up").expect("the task ends");
     assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
 }
+
+/// A tool the person declined comes back as an error result; it is told as declined,
+/// and a later failure of another tool is still a failure.
+#[test]
+fn a_tool_the_person_declined_is_declined_not_failed() {
+    use super::session::Session;
+    use crate::ToolStatus;
+    let mut session = Session::default();
+    let tool_use = |id: &str| json!({"blocks": [{"type": "tool_use", "id": id, "name": "Bash", "input": {"command": "rm -rf node_modules"}}], "parent_tool_use_id": null});
+    let result = |id: &str| json!({"tool_use_id": id, "is_error": true, "text": "denied"});
+    let status = |events: Vec<EventKind>| match events.as_slice() {
+        [EventKind::ToolUpdated { status, .. }] => *status,
+        other => panic!("one tool update, got {other:?}"),
+    };
+    session.event("assistant_content", &tool_use("toolu_1"));
+    session.event(
+        "permission_request",
+        &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_1", "input": {"command": "rm -rf node_modules"}}),
+    );
+    let deny = InteractionAnswer::Approval(ApprovalDecision::Deny);
+    session
+        .answer(&NativeRequestId::new("req-1"), &deny)
+        .expect("the request is live");
+    let (events, _) = session
+        .event("tool_result", &result("toolu_1"))
+        .expect("modeled");
+    assert_eq!(status(events), ToolStatus::Declined);
+
+    session.event("assistant_content", &tool_use("toolu_2"));
+    let (events, _) = session
+        .event("tool_result", &result("toolu_2"))
+        .expect("modeled");
+    assert_eq!(status(events), ToolStatus::Failed);
+}

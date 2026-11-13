@@ -347,6 +347,8 @@ pub enum ChatToolState {
     Running,
     Completed,
     Failed,
+    /// The person declined it when the harness asked, so it never ran.
+    Declined,
     Unknown,
 }
 

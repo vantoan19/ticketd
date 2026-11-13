@@ -369,6 +369,8 @@ pub enum ToolStatus {
     Running,
     Succeeded,
     Failed,
+    /// The person declined it when the harness asked, so it never ran.
+    Declined,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
