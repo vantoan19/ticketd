@@ -132,6 +132,10 @@
   min-width: 0;
   padding-right: 8px;
 }
+/* The same quote at the top of a message that was sent with it. */
+blockquote.chat-quote {
+  margin: 0 0 8px;
+}
 .chat-quote-source {
   display: flex;
   align-items: center;

@@ -1251,6 +1251,15 @@ impl Workspace {
         self.list_by_trash(false)
     }
 
+    /// The `limit` tickets out of the trash whose content or organization changed
+    /// last, most recent first.
+    pub fn recently_updated_tickets(&self, limit: usize) -> Result<Vec<Ticket>, Error> {
+        let mut tickets = self.list_tickets()?;
+        tickets.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        tickets.truncate(limit);
+        Ok(tickets)
+    }
+
     pub fn list_trash(&self) -> Result<Vec<Ticket>, Error> {
         self.list_by_trash(true)
     }

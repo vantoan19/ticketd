@@ -1,5 +1,6 @@
 import type {
   ChatChange,
+  Gone,
   ChatSnapshot,
   ChatState,
   ChatStatus,
@@ -408,7 +409,11 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
       if (planFinished(item)) rows.push({ kind: "plan", key: item.id, item });
     } else if (item.kind === "records")
       item.changes.forEach((change, index) =>
-        rows.push({ kind: "record", key: `${item.id}:${index}`, change }),
+        rows.push({
+          kind: "record",
+          key: `${item.id}:${index}`,
+          change: { ...change, gone: item.gone?.[index] ?? null },
+        }),
       );
     else if (item.kind === "request" && item.state !== "pending")
       rows.push({ kind: "receipt", key: item.id, item, kept: true });
@@ -613,6 +618,10 @@ export function unseenFrom(items: TranscriptItem[]) {
       !(item.kind === "request" && item.state === "pending"),
   )?.id;
 }
+
+/** " (in Trash)", " (deleted)": said after a record that is no longer there to open. */
+export const goneWords = (gone: Gone | null | undefined) =>
+  gone === "trashed" ? " (in Trash)" : gone === "deleted" ? " (deleted)" : "";
 
 /** What the agent did to a record, as the list row says it. */
 export function changeLine(change: RecordChange) {

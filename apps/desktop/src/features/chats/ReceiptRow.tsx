@@ -4,6 +4,7 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import type { RecordChange } from "@/features/chats/client";
+import { goneWords } from "@/features/chats/model";
 
 /** Whole sentences shown on the row before the rest folds under `N more`. */
 const SHOWN = 2;
@@ -21,6 +22,13 @@ function ChangeIcon({ change }: { change: RecordChange }) {
 function Sentence({ change }: { change: RecordChange }) {
   const openTicket = useContext(TicketNavigation);
   const openDocument = useContext(DocumentNavigation);
+  if (change.kind === "document" && change.gone)
+    return (
+      <>
+        Created {change.title}
+        {goneWords(change.gone)}
+      </>
+    );
   if (change.kind === "document")
     return (
       <>
@@ -35,7 +43,13 @@ function Sentence({ change }: { change: RecordChange }) {
         </button>
       </>
     );
-  const reference = (
+  const reference = change.gone ? (
+    // No longer there to open: plain mono, then what became of it.
+    <>
+      <code className="chat-mono">{change.reference}</code>
+      {goneWords(change.gone)}
+    </>
+  ) : (
     // Inline text, not a Button: it reads as a link inside the sentence.
     <button
       type="button"

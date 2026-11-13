@@ -222,6 +222,9 @@ pub enum Item {
         id: String,
         at: String,
         changes: Vec<ChatAgentChange>,
+        /// For each change, whether its record is now `trashed` or `deleted`; such a
+        /// record is named, not linked. Filled in where the workspace can be read.
+        gone: Vec<Option<&'static str>>,
         turn_id: Option<String>,
     },
     /// When a turn started and ended, and how. It has no row of its own: the view folds
@@ -421,6 +424,8 @@ pub struct ChatState {
     pub has_composer: bool,
     /// The last transcript item the person had in view: the New marker goes after it.
     pub read_through: Option<String>,
+    /// Linked records now in the trash: a mention of one reads "(in Trash)".
+    pub trashed_links: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -475,6 +480,8 @@ pub struct Surroundings {
     /// The failed turn after which the person checked the harness again and it was
     /// usable; its failure is no longer told as a problem.
     pub checked_turn: Option<String>,
+    /// Ids of linked records now in the trash.
+    pub trashed_links: Vec<String>,
 }
 
 /// What a view has to remember from the history it has seen, because a change names
@@ -1240,6 +1247,7 @@ pub fn item(
         ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => Item::Records {
             id: tool.id.clone(),
             at: String::new(),
+            gone: vec![None; changes.len()],
             changes,
             turn_id: Some(tool.turn_id.clone()),
         },
@@ -1646,6 +1654,7 @@ pub fn chat_state(
         muted: chat.muted,
         has_composer,
         read_through: chat.read_through.clone(),
+        trashed_links: around.trashed_links.clone(),
     }
 }
 

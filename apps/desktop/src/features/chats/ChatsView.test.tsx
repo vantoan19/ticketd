@@ -1105,6 +1105,71 @@ test("what the agent changed in ticketd is a step row, verb first", async () => 
   expect(within(body).getAllByText("T-12")[0]?.dataset.slot).toBe("reference");
 });
 
+test("a sent message keeps its mentions as links and its quotes as quotes", async () => {
+  const t14 = {
+    kind: "ticket" as const,
+    id: "t14",
+    reference: "T-14",
+    title: "Show the remaining wait time",
+    status: "Todo",
+  };
+  const doc = { kind: "document" as const, id: "d1", title: "Login spec" };
+  await open(
+    one(
+      {
+        id: "sent",
+        title: "Limiter",
+        links: [t14, doc],
+        trashed_links: ["d1"],
+      },
+      [
+        {
+          ...youSaid,
+          text: "> From T-12 · Description:\n> keep it short\n\nLook at T-14 and Login spec",
+        },
+      ],
+    ),
+  );
+  const message = document.querySelector<HTMLElement>(".chat-you")!;
+  expect(within(message).getByRole("button", { name: "T-14" })).toBeTruthy();
+  expect(message.textContent).toContain("Login spec (in Trash)");
+  expect(
+    within(message).queryByRole("button", { name: "Login spec" }),
+  ).toBeNull();
+  const quote = message.querySelector("blockquote")!;
+  expect(quote.textContent).toBe("T-12 · Descriptionkeep it short");
+  expect(message.textContent).not.toContain("> From");
+});
+
+test("a receipt names a trashed or deleted record instead of linking it", async () => {
+  await open(
+    one({ id: "gone", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          {
+            kind: "status",
+            reference: "T-12",
+            title: "Rate-limit failed login attempts",
+            from: "In progress",
+            to: "In review",
+          },
+          { kind: "update", reference: "T-13", excerpt: "Limiter is in" },
+        ],
+        gone: ["trashed", "deleted"],
+      }),
+    ]),
+  );
+  const row = document.querySelector<HTMLElement>(".chat-records")!;
+  expect(row.textContent).toContain("Moved T-12 (in Trash) to In review");
+  expect(row.textContent).toContain("Posted an update on T-13 (deleted)");
+  expect(within(row).queryByRole("button", { name: "T-12" })).toBeNull();
+});
+
 test("a finished turn's record changes are one receipt row under it, whose more opens the fold", async () => {
   // Its own Chat: fold toggles are remembered by Chat for the session.
   await open(

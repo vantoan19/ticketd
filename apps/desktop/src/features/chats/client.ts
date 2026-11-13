@@ -79,6 +79,10 @@ export const linkedRecordSchema = z.discriminatedUnion("kind", [
 ]);
 export type LinkedRecord = z.infer<typeof linkedRecordSchema>;
 
+/** A record that is no longer there to open: named, not linked. */
+export const goneSchema = z.enum(["trashed", "deleted"]);
+export type Gone = z.infer<typeof goneSchema>;
+
 export const recordChangeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
@@ -86,16 +90,19 @@ export const recordChangeSchema = z.discriminatedUnion("kind", [
     title: z.string(),
     from: z.string(),
     to: z.string(),
+    gone: goneSchema.nullish(),
   }),
   z.object({
     kind: z.literal("update"),
     reference: z.string(),
     excerpt: z.string(),
+    gone: goneSchema.nullish(),
   }),
   z.object({
     kind: z.literal("document"),
     document_id: z.string(),
     title: z.string(),
+    gone: goneSchema.nullish(),
   }),
 ]);
 export type RecordChange = z.infer<typeof recordChangeSchema>;
@@ -326,6 +333,8 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     ...item,
     kind: z.literal("records"),
     changes: z.array(recordChangeSchema),
+    /** For each change, whether its record is now trashed or deleted. */
+    gone: z.array(goneSchema.nullable()).nullish(),
   }),
   /** When a turn started and ended, and how. It has no row of its own. */
   z.object({
@@ -544,6 +553,8 @@ export const chatStateSchema = z.object({
   muted: z.boolean(),
   /** There is something to type into: not in trash, and the folder and session are there. */
   has_composer: z.boolean(),
+  /** Linked records now in the trash: a mention of one reads "(in Trash)". */
+  trashed_links: z.array(z.string()).default([]),
   /** The last transcript item the person had in view, kept by the host: the New marker goes after it. */
   read_through: z.string().nullish(),
 });

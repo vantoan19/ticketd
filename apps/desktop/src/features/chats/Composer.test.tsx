@@ -64,6 +64,13 @@ test("a # mention inserts the record without sending, and the message links it w
   ]);
 });
 
+test("# with nothing typed offers the linked records, then the recently updated ones", async () => {
+  const { box } = setup();
+  type(box, "#");
+  expect(await screen.findByText("Recently updated")).toBeTruthy();
+  expect(await screen.findByRole("option", { name: /T-KQ12/ })).toBeTruthy();
+});
+
 test("Backspace removes a mention whole, and a deleted mention links nothing", async () => {
   const { box, onSend } = setup();
   type(box, "#rate");

@@ -1108,6 +1108,16 @@ async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the
         serde_json::from_value::<LinkRef>(json!({ "kind": "project", "id": project.id })).unwrap(),
         link()
     );
+    // With nothing typed, the recently updated records are offered.
+    let ticket = f.core().create_ticket("Recent work").unwrap();
+    let recent = f.chats.search_records("").unwrap();
+    assert!(
+        recent.iter().any(|record| matches!(
+            record,
+            LinkedRecord::Ticket { id, .. } if *id == ticket.id
+        )),
+        "{recent:?}"
+    );
     let found = f.chats.search_records("store").unwrap();
     assert_eq!(
         found,
@@ -1652,6 +1662,31 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
         serde_json::to_value(&rows[0]).unwrap()["last_change"],
         status
     );
+
+    // Trashed since, the receipt says so instead of linking it.
+    f.core().set_trashed(&ticket.reference, true, None).unwrap();
+    let (opened, _) = f.open(&id).await;
+    let gone = opened.snapshot.items.iter().find_map(|item| match item {
+        Item::Records { gone, .. } => Some(gone.clone()),
+        _ => None,
+    });
+    assert_eq!(gone, Some(vec![Some("trashed")]));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_linked_record_in_trash_is_named_as_such() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    let mut input = f.input("first");
+    input.links = vec![LinkRef {
+        kind: LinkKind::Ticket,
+        id: ticket.id.clone(),
+    }];
+    let id = f.chats.create(input).await.unwrap().chat_id;
+    settle().await;
+    f.core().set_trashed(&ticket.reference, true, None).unwrap();
+    let (opened, _) = f.open(&id).await;
+    assert_eq!(opened.snapshot.chat.trashed_links, [ticket.id]);
 }
 
 fn user_items(changes: &[Value]) -> Vec<(String, String)> {

@@ -55,6 +55,7 @@ import {
   type Step,
   type TranscriptItem,
   type ItemOf,
+  type LinkedRecord,
 } from "@/features/chats/client";
 import {
   FilesSummary,
@@ -71,9 +72,17 @@ import {
   turns,
   type Turn,
   type TurnRow,
+  goneWords,
 } from "@/features/chats/model";
 import { FileName } from "@/features/chats/FileName";
-import { ChatFilesContext, shownNames } from "@/features/chats/files";
+import {
+  ChatFilesContext,
+  SentLinksContext,
+  shownNames,
+} from "@/features/chats/files";
+import { sentParts } from "@/features/chats/composer-mentions";
+import { TicketNavigation } from "@/features/tickets/navigation";
+import { ProjectNavigation } from "@/features/documents/navigation";
 import { ImageTiles } from "@/features/chats/ImageTiles";
 import { OutputBox } from "@/features/chats/OutputBox";
 import { ReceiptRow } from "@/features/chats/ReceiptRow";
@@ -112,6 +121,75 @@ const sentAt = (stamp: string) => {
  * Your message, exactly as sent, on the right. Past four lines it folds behind
  * Show more. Its time and Copy show on hover or focus.
  */
+/** A record a sent message mentions: a link, or its name and "(in Trash)". */
+function SentMention({
+  record,
+  text,
+  trashed,
+}: {
+  record: LinkedRecord;
+  text: string;
+  trashed: boolean;
+}) {
+  const openTicket = useContext(TicketNavigation);
+  const openDocument = useContext(DocumentNavigation);
+  const openProject = useContext(ProjectNavigation);
+  const ticket = record.kind === "ticket";
+  if (trashed)
+    return (
+      <>
+        {ticket ? <code className="chat-mono">{text}</code> : text}
+        {goneWords("trashed")}
+      </>
+    );
+  const open = () =>
+    record.kind === "ticket"
+      ? openTicket?.(record.reference)
+      : record.kind === "document"
+        ? openDocument?.(record.id)
+        : openProject?.(record.id);
+  return (
+    // Inline text, not a Button: it reads as a link inside the message.
+    <button
+      type="button"
+      className={
+        ticket ? "chat-records-ref" : "chat-records-ref chat-records-name"
+      }
+      onClick={open}
+    >
+      {text}
+    </button>
+  );
+}
+
+/** A sent message's own words: its quotes as quotes, its mentions as links. */
+function SentText({ text }: { text: string }) {
+  const { links, trashed } = useContext(SentLinksContext);
+  const { quotes, parts } = sentParts(text, links);
+  return (
+    <>
+      {quotes.map((quote, index) => (
+        <blockquote key={index} className="chat-quote">
+          <span className="chat-quote-source">{quote.source}</span>
+          <span className="chat-quote-text">{quote.text}</span>
+        </blockquote>
+      ))}
+      {parts.map((part, index) =>
+        part.record ? (
+          <SentMention
+            key={index}
+            record={part.record}
+            text={part.text}
+            trashed={trashed.includes(part.record.id)}
+          />
+        ) : (
+          <Fragment key={index}>{part.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
 function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const caption = DELIVERY_CAPTION[item.delivery];
   const { copied, error, copy } = useCopy();
@@ -131,7 +209,7 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
       <div className="chat-you">
         <div ref={text} data-clamped={more ? undefined : ""}>
           <span className="sr-only">You: </span>
-          {item.text}
+          <SentText text={item.text} />
         </div>
       </div>
       {long && (
@@ -483,7 +561,8 @@ function RecordStep({ change }: { change: RecordChange }) {
       icon = <StatusIcon status={change.to} decorative />;
       words = (
         <>
-          Moved <Reference>{change.reference}</Reference> to {change.to}
+          Moved <Reference>{change.reference}</Reference>
+          {goneWords(change.gone)} to {change.to}
         </>
       );
       break;
@@ -492,6 +571,7 @@ function RecordStep({ change }: { change: RecordChange }) {
       words = (
         <>
           Posted an update on <Reference>{change.reference}</Reference>
+          {goneWords(change.gone)}
         </>
       );
       break;
@@ -501,7 +581,7 @@ function RecordStep({ change }: { change: RecordChange }) {
       words = (
         <>
           Created the Document{" "}
-          {openDocument ? (
+          {openDocument && !change.gone ? (
             // Inline text, not a Button: it reads as a link inside the sentence.
             <button
               type="button"
@@ -511,7 +591,10 @@ function RecordStep({ change }: { change: RecordChange }) {
               {change.title}
             </button>
           ) : (
-            change.title
+            <>
+              {change.title}
+              {goneWords(change.gone)}
+            </>
           )}
         </>
       );
@@ -1061,6 +1144,7 @@ export function Transcript({
     );
   const parts = turns(items, chat);
   const live = !chat.catching_up;
+  const sentLinks = { links: chat.links, trashed: chat.trashed_links };
   const stepRuns = parts.some(
     (part) =>
       part.kind === "turn" &&
@@ -1072,80 +1156,82 @@ export function Transcript({
   const working = chat.activity === "working";
   return (
     <ChatFilesContext.Provider value={files}>
-      <div className="chat-col" ref={contentRef}>
-        {parts.map((part) => {
-          const marker = newFrom !== undefined &&
-            (part.kind === "turn"
-              ? part.turn.ids.includes(newFrom)
-              : part.item.id === newFrom) && (
-              <NewMarker key="new" markerRef={markerRef ?? null} />
-            );
-          return part.kind === "turn" ? (
-            <Fragment key={part.turn.key}>
-              {marker}
-              <TurnView
-                turn={part.turn}
-                chatId={chat.id}
-                harness={harness}
-                readOnly={readOnly}
-                actions={actions}
-                live={live}
-              />
-            </Fragment>
-          ) : (
-            <Fragment key={part.item.id}>
-              {marker}
-              <div
-                className="chat-part"
-                data-anchor=""
-                data-seen={part.item.id}
-              >
-                <Item
-                  item={part.item}
+      <SentLinksContext.Provider value={sentLinks}>
+        <div className="chat-col" ref={contentRef}>
+          {parts.map((part) => {
+            const marker = newFrom !== undefined &&
+              (part.kind === "turn"
+                ? part.turn.ids.includes(newFrom)
+                : part.item.id === newFrom) && (
+                <NewMarker key="new" markerRef={markerRef ?? null} />
+              );
+            return part.kind === "turn" ? (
+              <Fragment key={part.turn.key}>
+                {marker}
+                <TurnView
+                  turn={part.turn}
+                  chatId={chat.id}
                   harness={harness}
                   readOnly={readOnly}
                   actions={actions}
+                  live={live}
                 />
-              </div>
-            </Fragment>
-          );
-        })}
-        {chat.catching_up && (
-          <>
-            <div className="chat-skel chat-skel-long" aria-hidden="true" />
-            <div className="chat-skel chat-skel-short" aria-hidden="true" />
-          </>
-        )}
-        {chat.catching_up ? (
-          <WorkingLine label="Catching up…" />
-        ) : chat.activity === "waiting" ? (
-          <WorkingLine label="Waiting for you" spinner={false} />
-        ) : working && chat.stopping ? (
-          <WorkingLine label="Stopping…" spinner={!stepRuns} />
-        ) : working && chat.opening ? (
-          <WorkingLine
-            key="opening"
-            label={
-              chat.opening === "resume"
-                ? `Resuming the ${harness} session…`
-                : `Starting ${harness}…`
-            }
-            fromShown
-          />
-        ) : (
-          // After an unconfirmed stop the open turn row and the notice say it.
-          working &&
-          !stepRuns &&
-          !parts.some(
-            (part) => part.kind === "turn" && part.turn.unconfirmed,
-          ) &&
-          (chat.doing ? (
-            <WorkingLine label={chat.doing.label} since={chat.doing.since} />
+              </Fragment>
+            ) : (
+              <Fragment key={part.item.id}>
+                {marker}
+                <div
+                  className="chat-part"
+                  data-anchor=""
+                  data-seen={part.item.id}
+                >
+                  <Item
+                    item={part.item}
+                    harness={harness}
+                    readOnly={readOnly}
+                    actions={actions}
+                  />
+                </div>
+              </Fragment>
+            );
+          })}
+          {chat.catching_up && (
+            <>
+              <div className="chat-skel chat-skel-long" aria-hidden="true" />
+              <div className="chat-skel chat-skel-short" aria-hidden="true" />
+            </>
+          )}
+          {chat.catching_up ? (
+            <WorkingLine label="Catching up…" />
+          ) : chat.activity === "waiting" ? (
+            <WorkingLine label="Waiting for you" spinner={false} />
+          ) : working && chat.stopping ? (
+            <WorkingLine label="Stopping…" spinner={!stepRuns} />
+          ) : working && chat.opening ? (
+            <WorkingLine
+              key="opening"
+              label={
+                chat.opening === "resume"
+                  ? `Resuming the ${harness} session…`
+                  : `Starting ${harness}…`
+              }
+              fromShown
+            />
           ) : (
-            <WorkingLine label="Working…" />
-          ))
-        )}
-      </div>
+            // After an unconfirmed stop the open turn row and the notice say it.
+            working &&
+            !stepRuns &&
+            !parts.some(
+              (part) => part.kind === "turn" && part.turn.unconfirmed,
+            ) &&
+            (chat.doing ? (
+              <WorkingLine label={chat.doing.label} since={chat.doing.since} />
+            ) : (
+              <WorkingLine label="Working…" />
+            ))
+          )}
+        </div>
+      </SentLinksContext.Provider>
     </ChatFilesContext.Provider>
   );
 }

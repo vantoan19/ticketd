@@ -208,36 +208,53 @@ export function ComposerField({
   const atHand: Option[] | null =
     !open || !mentions
       ? null
-      : open.char === "#" && !query
-        ? recordOptions(mentions.linked, "Linked to this Chat")
-        : open.char === "/"
-          ? (mentions.commands ?? [])
-              .filter((command) =>
-                command.name.toLowerCase().includes(query.toLowerCase()),
-              )
-              .map((command) => ({
-                id: command.name,
-                group: command.description ?? "",
-                insert: { kind: "command", text: `/${command.name}` },
-              }))
-          : null;
+      : open.char === "/"
+        ? (mentions.commands ?? [])
+            .filter((command) =>
+              command.name.toLowerCase().includes(query.toLowerCase()),
+            )
+            .map((command) => ({
+              id: command.name,
+              group: command.description ?? "",
+              insert: { kind: "command", text: `/${command.name}` },
+            }))
+        : null;
+  // `#` with nothing typed: the linked records at once, then the recently
+  // updated ones the host finds for an empty query.
+  const linkedFirst =
+    open?.char === "#" && !query && mentions
+      ? recordOptions(mentions.linked, "Linked to this Chat")
+      : null;
   const searches = Boolean(open && atHand === null);
   // What the open trigger asks for, read when the trigger changes (`openKey`).
   const search = useEffectEvent(() => {
     if (!open || !mentions) return null;
     const folder = mentions.folder;
     return open.char === "#"
-      ? mentions
-          .records(query)
-          .then((found) =>
-            recordOptions(
-              [...found].sort(
-                (a, b) =>
-                  Object.keys(RECORD_GROUPS).indexOf(a.kind) -
-                  Object.keys(RECORD_GROUPS).indexOf(b.kind),
+      ? mentions.records(query).then((found) =>
+          linkedFirst
+            ? [
+                ...linkedFirst,
+                ...recordOptions(
+                  found.filter(
+                    (record) =>
+                      !mentions.linked.some(
+                        (linked) =>
+                          linked.kind === record.kind &&
+                          linked.id === record.id,
+                      ),
+                  ),
+                  "Recently updated",
+                ),
+              ]
+            : recordOptions(
+                [...found].sort(
+                  (a, b) =>
+                    Object.keys(RECORD_GROUPS).indexOf(a.kind) -
+                    Object.keys(RECORD_GROUPS).indexOf(b.kind),
+                ),
               ),
-            ),
-          )
+        )
       : folder
         ? folder.files(query).then((files) =>
             files.map((file): Option => ({
@@ -283,8 +300,11 @@ export function ComposerField({
     !(open.char === "@" && !mentions?.folder)
       ? {
           trigger: open,
-          options: atHand ?? answered?.options ?? [],
-          state: atHand ? "ready" : (answered?.state ?? "searching"),
+          options: atHand ?? answered?.options ?? linkedFirst ?? [],
+          state:
+            atHand || (!answered && linkedFirst?.length)
+              ? "ready"
+              : (answered?.state ?? "searching"),
           error: answered?.error,
         }
       : null;

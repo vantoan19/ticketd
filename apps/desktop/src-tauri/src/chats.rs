@@ -18,9 +18,9 @@ use ticketd_chat_host::{
     WorkspaceOpener, harness_key, problem_kind,
 };
 use ticketd_core::{
-    BackupCheck, Chat, ChatDelivery, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind,
-    ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent, ChatTurnState,
-    NewChat, Workspace,
+    BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
+    ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
+    ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
@@ -435,6 +435,46 @@ fn status_name(status: impl Serialize) -> Result<String, ticketd_core::Error> {
     })
 }
 
+/// Says, for each change a receipt names, whether its record is now in the trash or
+/// gone, so the row names it instead of linking it. Other items pass unchanged.
+fn with_gone(workspace: &Workspace, item: Item) -> Item {
+    let Item::Records {
+        id,
+        at,
+        changes,
+        turn_id,
+        ..
+    } = item
+    else {
+        return item;
+    };
+    let gone = changes
+        .iter()
+        .map(|change| {
+            let trashed = match change {
+                ChatAgentChange::Status { reference, .. }
+                | ChatAgentChange::Update { reference, .. } => workspace
+                    .show_ticket(reference)
+                    .map(|ticket| ticket.trashed),
+            };
+            match trashed {
+                Ok(true) => Some("trashed"),
+                Ok(false) => None,
+                Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
+                // Not readable now: shown as it was, linked.
+                Err(_) => None,
+            }
+        })
+        .collect();
+    Item::Records {
+        id,
+        at,
+        changes,
+        gone,
+        turn_id,
+    }
+}
+
 fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, ticketd_core::Error> {
     let mut links = Vec::new();
     for record in workspace.chat_linked_records(chat_id)? {
@@ -558,7 +598,14 @@ fn surroundings(
         })
         .collect();
     let links = links(workspace, &chat.id)?;
+    let trashed_links = workspace
+        .chat_linked_records(&chat.id)?
+        .into_iter()
+        .filter(|record| record.trashed)
+        .map(|record| record.id)
+        .collect();
     Ok(Surroundings {
+        trashed_links,
         checked_turn,
         folder_missing,
         shared_with,
@@ -1236,6 +1283,7 @@ impl Chats {
             .items
             .iter()
             .flat_map(|item| chat_view::items(item, &chat, &attached.live, fresh, &tracker))
+            .map(|item| with_gone(&workspace, item))
             .collect();
         let view = View {
             chat,
@@ -1397,6 +1445,10 @@ impl Chats {
             for record in records {
                 let tracker = &view.tracker;
                 for item in chat_view::items(&record, &view.chat, &view.live, fresh, tracker) {
+                    let item = match (&item, self.workspace()) {
+                        (Item::Records { .. }, Ok(workspace)) => with_gone(&workspace, item),
+                        _ => item,
+                    };
                     if !send(&mut view, json!({ "kind": "item", "item": item })) {
                         return;
                     }
@@ -1678,12 +1730,34 @@ impl Chats {
         Ok(host.notify_changed(chat_id).await?)
     }
 
+    /// Records to link for `query`; with nothing typed, the recently updated ones.
     pub fn search_records(&self, query: &str) -> Outcome<Vec<LinkedRecord>> {
         let query = query.trim();
-        if query.is_empty() || query.len() > 200 {
+        if query.len() > 200 {
             return Ok(Vec::new());
         }
         let workspace = self.workspace()?;
+        if query.is_empty() {
+            let mut found = Vec::new();
+            for ticket in workspace.recently_updated_tickets(4)? {
+                found.push(LinkedRecord::Ticket {
+                    status: status_name(ticket.status)?,
+                    id: ticket.id,
+                    reference: ticket.reference,
+                    title: ticket.title,
+                });
+            }
+            found.extend(
+                workspace
+                    .recent_documents_page(2, 0)?
+                    .into_iter()
+                    .map(|document| LinkedRecord::Document {
+                        id: document.id,
+                        title: document.heading,
+                    }),
+            );
+            return Ok(found);
+        }
         let tickets = workspace.search_tickets(query, None, false, 8, 0)?;
         let documents = workspace.search_documents(query, None, 8, 0)?;
         let mut found = Vec::new();
