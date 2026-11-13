@@ -47,6 +47,8 @@ beforeEach(() => {
       settings?: AutomationAgent;
     };
     switch (command) {
+      case "automation_list":
+        return [];
       case "automation_agent_list":
         return stored;
       case "automation_agent_create": {
@@ -194,7 +196,10 @@ test("deleting an agent asks first, then removes it from the list", async () => 
   fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
   await screen.findByRole("region", { name: "Triage" });
 
-  fireEvent.click(screen.getByRole("button", { name: "Delete agent" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "Agent actions" }), {
+    key: "Enter",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
   expect(stored).toHaveLength(1);
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }),

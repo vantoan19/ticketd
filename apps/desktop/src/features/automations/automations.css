@@ -40,3 +40,258 @@
   align-items: center;
   gap: 6px;
 }
+
+/* --- The Automations list: a row that is off is muted. --- */
+.chat-row[data-off] .chat-row-title,
+.chat-row[data-off] .chat-row-mark {
+  color: var(--muted-foreground);
+}
+.auto-row-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* --- The detail header: what is left to finish, and the on switch. --- */
+.auto-left,
+.auto-on {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  white-space: nowrap;
+}
+.auto-on {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px;
+}
+
+/* --- The editor: the canvas beside the step panel. --- */
+.flow-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-rows: minmax(0, 1fr);
+}
+.flow-body[data-panel="none"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.flow-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--background);
+}
+.flow-canvas .react-flow__background {
+  background: var(--background);
+}
+.flow-canvas .react-flow__edge-path {
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+}
+.flow-canvas .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* A card: what kind of step, what it does, and its detail or what it needs. */
+.flow-card {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--shadow-border-base);
+}
+.flow-card[data-selected] {
+  background: var(--recessed);
+  box-shadow: 0 0 0 1.5px var(--foreground);
+}
+/* Nothing chosen yet: a dashed edge, like the graph's out-of-scope cards. */
+.flow-card[data-unset] {
+  background: var(--background);
+  box-shadow: none;
+  outline: 1.5px dashed var(--control-boundary);
+  outline-offset: -1.5px;
+}
+.flow-card[data-unset][data-selected] {
+  background: var(--recessed);
+  outline-color: var(--foreground);
+}
+.flow-card-main {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 10px 40px 10px 12px;
+  border-radius: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.flow-card-main:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.flow-card-main > svg {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+.flow-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.flow-card-kind,
+.flow-card-detail,
+.flow-card-status {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow-card-title {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow-card[data-unset] .flow-card-title {
+  color: var(--muted-foreground);
+}
+.flow-card-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.flow-card-menu {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+/* The + on a line shows on hover and on keyboard focus; the + that ends a path
+   always shows. */
+.flow-gap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.flow-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+}
+.flow-add:hover {
+  color: var(--foreground);
+}
+.flow-add:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.flow-gap:hover .flow-add,
+.flow-add:focus-visible,
+.flow-add[data-state="open"] {
+  opacity: 1;
+}
+.flow-add[data-state="open"] {
+  background: var(--accent);
+  color: var(--foreground);
+  box-shadow: 0 0 0 1.5px var(--foreground);
+}
+.flow-gap[data-end] .flow-add {
+  width: 32px;
+  height: 32px;
+  opacity: 1;
+}
+
+/* --- The step panel: like the graph's preview column. --- */
+.flow-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 20px 24px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.flow-panel:focus {
+  outline: none;
+}
+.flow-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px -8px -4px 0;
+}
+.flow-panel-head h3 {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.flow-panel-head h3 svg {
+  color: var(--muted-foreground);
+}
+.flow-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.flow-panel-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  overflow-wrap: anywhere;
+}
+.flow-panel-note code {
+  font-family: var(--font-mono);
+}
+.flow-pick-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+/* Menu items that carry a sentence, like the ticket menu's Publish item. */
+.flow-menu-item-text {
+  display: flex;
+  flex-direction: column;
+}
+.flow-menu-item-text small {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
