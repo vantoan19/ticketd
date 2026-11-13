@@ -156,17 +156,16 @@ export function useTranscriptScroll(chatId: string) {
   };
 
   /**
-   * The reader opened or closed `element`: it stays where it is, even at the
-   * bottom, so what they clicked does not move away from them.
+   * The reader opened or closed `element`: while they read further up it stays
+   * where it is, so what they clicked does not move away from them. At the
+   * bottom the transcript keeps following; only scrolling up stops that.
    */
   const keep = (element: Element) => {
     const box = root.current;
-    if (!box) return;
+    if (!box || follows.current) return;
     const offset =
       element.getBoundingClientRect().top - box.getBoundingClientRect().top;
     anchor.current = { element, offset };
-    follows.current = false;
-    setFollowing(false);
   };
 
   return {

@@ -1135,6 +1135,20 @@ test("scrolling up stops following; Jump to latest resumes it", async () => {
   expect(jump.hasAttribute("inert")).toBe(true);
 });
 
+test("opening a row at the bottom keeps following; only scrolling up stops it", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn({ id: "s1", at, kind: "steps", steps: [failedRun] }),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  const jump = document.querySelector<HTMLElement>(".chat-jump")!;
+  fireEvent.click(button("Worked for 2m 13s · 1 failed"));
+  expect(jump.hasAttribute("inert")).toBe(true);
+});
+
 test("what arrived while the Chat was not open is marked New, never your own message", async () => {
   // Everything in a window of this height counts as seen.
   const height = vi
