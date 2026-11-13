@@ -1,7 +1,13 @@
 import { useEffect, useId, useState } from "react";
-import { ArrowLeft, Maximize2, Minimize2, Trash2, X } from "lucide-react";
+import { ArrowLeft, Ellipsis, Maximize2, Minimize2, X } from "lucide-react";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -129,7 +135,8 @@ export function AgentForm({
   agent: AutomationAgent;
   expanded: boolean;
   single: boolean;
-  onExpand: () => void;
+  /** Omitted where the form has no list to expand from. */
+  onExpand?: () => void;
   onReturn: () => void;
   onClose: () => void;
   onSave: (settings: AutomationAgentSettings) => void;
@@ -167,6 +174,8 @@ export function AgentForm({
   const changeTools = (patch: Partial<Tools>) =>
     change({ tools: { ...draft.tools, ...patch } });
   const title = draft.name.trim() || "New agent";
+  /** An Automation with a step that runs this agent: it cannot be deleted. */
+  const usedBy = agent.used_by[0];
   const harnessName =
     HARNESSES.find((item) => item.id === draft.harness)?.name ?? "Harness";
   const standings = HARNESSES.map((harness) => ({
@@ -201,15 +210,38 @@ export function AgentForm({
           </h2>
         </div>
         <div className="detail-actions">
-          <IconButton label="Delete agent" onClick={() => setDeleting(true)}>
-            <Trash2 aria-hidden />
-          </IconButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton label="Agent actions">
+                <Ellipsis aria-hidden />
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" aria-label="Agent actions">
+              <DropdownMenuItem
+                variant="destructive"
+                className="items-start whitespace-normal"
+                disabled={usedBy !== undefined}
+                onSelect={() => setDeleting(true)}
+              >
+                <span className="flow-menu-item-text">
+                  Delete…
+                  {usedBy !== undefined && (
+                    <small>
+                      Used by {usedBy.trim() || "New Automation"}. Change that
+                      step first.
+                    </small>
+                  )}
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {expanded ? (
             <IconButton label="Show beside the list" onClick={onReturn}>
               <Minimize2 aria-hidden />
             </IconButton>
           ) : (
-            !single && (
+            !single &&
+            onExpand && (
               <IconButton label="Expand agent" onClick={onExpand}>
                 <Maximize2 aria-hidden />
               </IconButton>
