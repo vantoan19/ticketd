@@ -4,6 +4,7 @@ import {
   chatSnapshotSchema,
   chatStateSchema,
   chatSummarySchema,
+  harnessOptionsSchema,
   type ChatChange,
   type ChatClient,
   type ChatOverview,
@@ -11,7 +12,9 @@ import {
   type ChatStatus,
   type ChatSummary,
   type FolderFile,
+  type HarnessOptions,
   type HarnessStatus,
+  type SettingOption,
   type LinkRef,
   type LinkedRecord,
   type Suggestion,
@@ -312,6 +315,10 @@ export type MockChatClient = ChatClient & {
   /** Loses the next `count` changes on the way to subscribers. */
   dropChanges(id: string, count: number): void;
   setHarnesses(harnesses: HarnessInput[]): void;
+  /** What each harness reports it offers; a harness without an entry reports none. */
+  options: Map<string, HarnessOptions>;
+  /** What each createChat was asked with, in order. */
+  created: Parameters<ChatClient["createChat"]>[0][];
   requestQuit(): void;
   /** As if the person clicked the Chat's system notification. */
   requestOpen(request: OpenRequest): void;
@@ -331,6 +338,90 @@ export type MockChatClient = ChatClient & {
   nextFolder: string | null;
 };
 
+const option = (
+  id: string,
+  label: string,
+  extra: Partial<SettingOption> = {},
+) =>
+  ({ id, label, is_default: false, allowed: true, ...extra }) as SettingOption;
+const levels = (...ids: string[]) =>
+  ids.map((id) =>
+    option(
+      id,
+      id === "xhigh" ? "Extra high" : id[0]!.toUpperCase() + id.slice(1),
+    ),
+  );
+
+/** What the two harnesses list, as their real model lists are shaped. */
+export const HARNESS_OPTIONS: HarnessOptions[] = [
+  {
+    harness_id: "claude-code",
+    models: [
+      {
+        ...option("default", "Default (recommended)", {
+          description: "Opus 5.5 for complex, multi-step work",
+          is_default: true,
+        }),
+        efforts: levels("low", "medium", "high", "max"),
+      },
+      {
+        ...option("sonnet", "Sonnet 5", {
+          description: "Fast and capable for everyday coding",
+        }),
+        efforts: levels("low", "medium", "high"),
+      },
+      {
+        ...option("haiku", "Haiku 4.5", {
+          description: "Fastest, for quick answers",
+        }),
+        efforts: [],
+      },
+    ],
+    permission: {
+      options: [
+        option("default", "Ask before edits", {
+          is_default: true,
+          permission: "ask",
+        }),
+        option("acceptEdits", "Accept edits", { permission: "accept_edits" }),
+        option("plan", "Plan only", { permission: "read_only" }),
+      ],
+      changeable: true,
+      applies_from: "next_request",
+    },
+  },
+  {
+    harness_id: "codex",
+    models: [
+      {
+        ...option("gpt-5.5-codex", "GPT-5.5 Codex", {
+          description: "Optimized for coding agents",
+          is_default: true,
+        }),
+        efforts: levels("low", "medium", "high", "xhigh").map((level) => ({
+          ...level,
+          is_default: level.id === "medium",
+        })),
+      },
+      {
+        ...option("gpt-5.5", "GPT-5.5", {
+          description: "Broad world knowledge",
+        }),
+        efforts: levels("minimal", "low", "medium", "high"),
+      },
+    ],
+    permission: {
+      options: [
+        option(":workspace", "workspace"),
+        option(":read-only", "read-only"),
+      ],
+      changeable: false,
+      reason: "Codex sets permissions in its own configuration",
+      applies_from: "next_turn",
+    },
+  },
+];
+
 const READY: HarnessInput[] = [
   { id: "claude-code", name: "Claude Code", status: "ready" },
   { id: "codex", name: "Codex", status: "ready" },
@@ -345,6 +436,8 @@ export function createMockChatClient(
     enabled?: boolean;
     chats?: MockChat[];
     harnesses?: HarnessInput[];
+    /** What each harness lists before a session; HARNESS_OPTIONS when left out. */
+    options?: HarnessOptions[];
     records?: LinkedRecord[];
     /** What New Chat suggests; linked tickets are left out as the host does. */
     suggestions?: Suggestion[];
@@ -574,6 +667,13 @@ export function createMockChatClient(
     notify: true,
     savedDocuments: [],
     openedFiles: [],
+    options: new Map(
+      (seed.options ?? HARNESS_OPTIONS).map((entry) => [
+        entry.harness_id,
+        entry,
+      ]),
+    ),
+    created: [],
     readThroughs: [],
     folderProjects: new Map(),
     nextFolder: null,
@@ -615,6 +715,15 @@ export function createMockChatClient(
         .map(summary)
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     harnesses: async () => harnesses,
+    async harnessOptions(harnessId) {
+      return harnessOptionsSchema.parse(
+        client.options.get(harnessId) ?? {
+          harness_id: harnessId,
+          models: [],
+          unavailable: "It did not list its models.",
+        },
+      );
+    },
     pickFolder: async () => client.nextFolder,
     folderProject: async (path) => client.folderProjects.get(path) ?? null,
     folderUse: async (path) =>
@@ -629,6 +738,7 @@ export function createMockChatClient(
       if (existing) return { chat_id: existing };
       const id = `chat-${(created += 1)}`;
       requests.set(input.command_id, id);
+      client.created.push(input);
       const path = input.folder ?? `~/ticketd/chats/${id}`;
       store({
         chat: chatState({

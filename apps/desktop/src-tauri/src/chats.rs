@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use ticketd_chat_host::{
     Activity, ChatHost, ChatLive, ChatProblem, ChatUpdate, ContextSource, HarnessAdapter,
     HostError, Inspection, InteractionAnswer, InteractionKind, LoginState, ProblemKind,
-    QuestionAnswer, ResumeMode, SendMode, SettingKey, Subscription, UnconfirmedCleanup,
-    WorkspaceOpener, harness_key, problem_kind,
+    QuestionAnswer, ResumeMode, SendMode, SettingKey, StartSettings, Subscription,
+    UnconfirmedCleanup, WorkspaceOpener, harness_key, problem_kind,
 };
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
@@ -24,7 +24,7 @@ use ticketd_core::{
 };
 use tokio::sync::oneshot;
 
-use crate::chat_reports::{self, SettingChangeView};
+use crate::chat_reports::{self, HarnessOptionsView, SettingChangeView};
 use crate::chat_view::HarnessFound;
 use crate::chat_view::{
     self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, ProjectRef, Queued, Summary,
@@ -133,6 +133,13 @@ pub struct NewChatInput {
     pub folder: Option<String>,
     pub links: Vec<LinkRef>,
     pub message: String,
+    /// New Chat's picks: option ids the harness listed. Unset keeps its own setting.
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub permission: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -752,6 +759,11 @@ pub struct Chats {
     focused: AtomicBool,
     /// Settings > Chat > Notify me about Chats. The interface keeps the choice.
     notify: AtomicBool,
+    /// What each harness offered when last asked, with the version it was asked at:
+    /// probing starts a harness process, so it is repeated only for a new version.
+    options: Mutex<HashMap<&'static str, (Option<String>, HarnessOptionsView)>>,
+    /// The version each harness reported at its last check.
+    versions: Mutex<HashMap<&'static str, Option<String>>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -780,6 +792,8 @@ impl Chats {
             missing_folders: Mutex::new(HashSet::new()),
             focused: AtomicBool::new(true),
             notify: AtomicBool::new(true),
+            options: Mutex::new(HashMap::new()),
+            versions: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1114,10 +1128,18 @@ impl Chats {
     /// Probes installation and sign-in again on every call.
     pub async fn harnesses(&self) -> Outcome<Vec<HarnessStatus>> {
         let host = self.host()?;
+        // Each check starts its harness: run them side by side, so the slower one
+        // does not hold up the other.
+        let (first, second) =
+            tokio::join!(host.inspect(HARNESSES[0].0), host.inspect(HARNESSES[1].0));
         let mut statuses = Vec::new();
-        for (id, name) in HARNESSES {
-            statuses.push(match host.inspect(id).await {
-                Ok(inspection) => harness_status(id, name, inspection),
+        for ((id, name), inspected) in HARNESSES.into_iter().zip([first, second]) {
+            statuses.push(match inspected {
+                Ok(inspection) => {
+                    let status = harness_status(id, name, inspection);
+                    lock(&self.versions).insert(id, status.version.clone());
+                    status
+                }
                 Err(_) => HarnessStatus {
                     id,
                     name,
@@ -1143,6 +1165,31 @@ impl Chats {
             });
         }
         Ok(statuses)
+    }
+
+    /// What the installed harness offers before a session: its models with their
+    /// efforts and its permission modes, as it reported them. Asked once per
+    /// version the last check found; nothing is sent to a model.
+    pub async fn options(&self, harness_id: &str) -> Outcome<HarnessOptionsView> {
+        let host = self.host()?;
+        let (id, name) = HARNESSES
+            .iter()
+            .copied()
+            .find(|(id, _)| *id == harness_id)
+            .ok_or_else(|| failed(self.unavailable(harness_id)))?;
+        let version = lock(&self.versions).get(id).cloned().flatten();
+        if let Some((asked_at, view)) = lock(&self.options).get(id)
+            && *asked_at == version
+        {
+            return Ok(view.clone());
+        }
+        let reported = host.options(id).await.map_err(ChatFailure::from)?;
+        let view = chat_reports::options_view(id, name, reported);
+        // A failed probe is asked again next time rather than remembered.
+        if view.unavailable.is_none() {
+            lock(&self.options).insert(id, (version, view.clone()));
+        }
+        Ok(view)
     }
 
     /// How many Chats outside the trash already use the folder.
@@ -1182,6 +1229,25 @@ impl Chats {
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
             return Err(failed(self.unavailable(&input.harness_id)));
         }
+        let picks = StartSettings {
+            model: input.model.clone(),
+            effort: input.effort.clone(),
+            permission: input.permission.clone(),
+        };
+        if !picks.is_empty() {
+            // Only what the harness offered, and never full access.
+            let offered = self.options(&input.harness_id).await?;
+            if let Some(reason) = offered.refusal(
+                picks.model.as_deref(),
+                picks.effort.as_deref(),
+                picks.permission.as_deref(),
+            ) {
+                return Err(failed(format!(
+                    "{} can't start with that: {reason}",
+                    harness_name(&input.harness_id)
+                )));
+            }
+        }
         let mut workspace = self.workspace()?;
         // Beside the workspace file, one per Chat, named by the request so that a
         // retry asks for the same Chat.
@@ -1216,6 +1282,11 @@ impl Chats {
                 "could not create the Chat's folder {}: {error}",
                 chat.execution_folder
             ))));
+        }
+        if !picks.is_empty() {
+            host.start_with(&chat.id, picks)
+                .await
+                .map_err(ChatFailure::from)?;
         }
         let first = format!("{command_id}:first");
         let sent = host.send(&chat.id, Some(&first), &input.message, SendMode::Auto);

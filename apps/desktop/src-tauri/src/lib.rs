@@ -1678,6 +1678,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_set_muted,
             chat_commands::chat_list,
             chat_commands::chat_harnesses,
+            chat_commands::chat_harness_options,
             chat_commands::chat_folder_use,
             chat_commands::chat_create,
             chat_commands::chat_open,

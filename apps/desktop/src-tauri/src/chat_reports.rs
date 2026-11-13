@@ -8,7 +8,7 @@ use ticketd_chat_host::records::{
     ReasoningRecord,
 };
 use ticketd_chat_host::{
-    AppliesFrom, ChatLive, LiveSettings, PermissionKind, PlanStepStatus, Setting,
+    AppliesFrom, ChatLive, HarnessOptions, LiveSettings, PermissionKind, PlanStepStatus, Setting,
     SettingChangeState, SettingKey, SettingOutcome, StopState,
 };
 use ticketd_core::{Chat, ChatTool, ChatToolState};
@@ -286,14 +286,7 @@ fn setting(
                 option.permission != Some(PermissionKind::FullAccess)
                     || setting.current.as_deref() == Some(option.id.as_str())
             })
-            .map(|option| SettingOptionView {
-                id: option.id.clone(),
-                label: option.label.clone(),
-                description: option.description.clone(),
-                is_default: option.is_default,
-                permission: option.permission.map(permission_name),
-                allowed: option.allowed && option.permission != Some(PermissionKind::FullAccess),
-            })
+            .map(option_view)
             .collect(),
         changeable: reason.is_none(),
         reason,
@@ -304,6 +297,122 @@ fn setting(
         answered_by: setting.answered_by.clone(),
         change,
     })
+}
+
+fn option_view(option: &ticketd_chat_host::SettingOption) -> SettingOptionView {
+    SettingOptionView {
+        id: option.id.clone(),
+        label: option.label.clone(),
+        description: option.description.clone(),
+        is_default: option.is_default,
+        permission: option.permission.map(permission_name),
+        allowed: option.allowed && option.permission != Some(PermissionKind::FullAccess),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModelChoiceView {
+    #[serde(flatten)]
+    pub model: SettingOptionView,
+    /// Lowest first; `is_default` marks the model's own default, when said.
+    pub efforts: Vec<SettingOptionView>,
+}
+
+/// What New Chat's picker offers for one harness before any session: what the
+/// installed harness itself reported.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HarnessOptionsView {
+    pub harness_id: String,
+    pub models: Vec<ModelChoiceView>,
+    /// `current` is unset: before a session only the harness's own setting applies.
+    pub permission: Option<SettingView>,
+    /// Why the harness reported no options; the picker then offers its default only.
+    pub unavailable: Option<String>,
+}
+
+pub fn options_view(
+    harness_id: &str,
+    harness: &str,
+    options: Result<HarnessOptions, String>,
+) -> HarnessOptionsView {
+    let none = LiveSettings {
+        reported: ticketd_chat_host::HarnessSettings::default(),
+        changes: Vec::new(),
+    };
+    match options {
+        Ok(options) => HarnessOptionsView {
+            harness_id: harness_id.to_owned(),
+            models: options
+                .models
+                .iter()
+                .map(|choice| ModelChoiceView {
+                    model: option_view(&choice.model),
+                    efforts: choice.efforts.iter().map(option_view).collect(),
+                })
+                .collect(),
+            permission: setting(
+                SettingKey::Permission,
+                options.permission.as_ref(),
+                &none,
+                harness,
+            ),
+            unavailable: options
+                .models
+                .is_empty()
+                .then(|| format!("{harness} listed no models")),
+        },
+        Err(reason) => HarnessOptionsView {
+            harness_id: harness_id.to_owned(),
+            models: Vec::new(),
+            permission: None,
+            unavailable: Some(reason),
+        },
+    }
+}
+
+impl HarnessOptionsView {
+    /// Why New Chat's `pick` is not one this harness offered, or `None` when it is.
+    /// Full access is never a pick.
+    pub fn refusal(
+        &self,
+        model: Option<&str>,
+        effort: Option<&str>,
+        permission: Option<&str>,
+    ) -> Option<String> {
+        let chosen = match model {
+            Some(model) => match self.models.iter().find(|choice| choice.model.id == model) {
+                Some(choice) => Some(choice),
+                None => return Some(format!("{model} is not a model it offers")),
+            },
+            None => self.models.iter().find(|choice| choice.model.is_default),
+        };
+        if let Some(effort) = effort {
+            let offered = chosen.is_some_and(|choice| {
+                choice
+                    .efforts
+                    .iter()
+                    .any(|option| option.id == effort && option.allowed)
+            });
+            if !offered {
+                return Some(format!("{effort} is not an effort the model offers"));
+            }
+        }
+        if let Some(permission) = permission {
+            let offered = self.permission.as_ref().is_some_and(|setting| {
+                setting.changeable
+                    && setting
+                        .options
+                        .iter()
+                        .any(|option| option.id == permission && option.allowed)
+            });
+            if !offered {
+                return Some(format!(
+                    "{permission} is not a permission mode it lets ticketd choose"
+                ));
+            }
+        }
+        None
+    }
 }
 
 pub fn settings(live: &ChatLive, harness: &str) -> Option<SettingsView> {

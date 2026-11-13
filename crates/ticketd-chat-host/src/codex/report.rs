@@ -10,9 +10,9 @@ use crate::diffstat::counts;
 use crate::wire::{capitalized, text};
 
 use crate::{
-    AppliesFrom, ContextUsage, EventKind, FileChange, FileChangeKind, HarnessSettings,
-    NativeItemId, NativeTurnId, PermissionKind, Plan, PlanStep, PlanStepStatus, Setting,
-    SettingKey, SettingOption,
+    AppliesFrom, ContextUsage, EventKind, FileChange, FileChangeKind, HarnessOptions,
+    HarnessSettings, ModelChoice, NativeItemId, NativeTurnId, PermissionKind, Plan, PlanStep,
+    PlanStepStatus, Setting, SettingKey, SettingOption,
 };
 
 /// What a `*/list` request has returned so far.
@@ -434,22 +434,7 @@ impl Reports {
         let model_setting = Setting {
             current: model.clone(),
             options: match &self.models {
-                Listing::Listed(models) => models
-                    .iter()
-                    .filter(|entry| entry["hidden"] != true)
-                    .filter_map(|entry| {
-                        let id = owned(entry, "model").or_else(|| owned(entry, "id"))?;
-                        Some(SettingOption {
-                            label: owned(entry, "displayName").unwrap_or(id.clone()),
-                            description: owned(entry, "description")
-                                .filter(|text| !text.is_empty()),
-                            is_default: entry["isDefault"] == true,
-                            permission: None,
-                            allowed: true,
-                            id,
-                        })
-                    })
-                    .collect(),
+                Listing::Listed(models) => models.iter().filter_map(model_option).collect(),
                 _ => Vec::new(),
             },
             unchangeable: match &self.models {
@@ -461,23 +446,7 @@ impl Reports {
         };
         let entry = model.as_deref().and_then(|model| self.model_entry(model));
         let effort = entry.and_then(|entry| {
-            let default = text(entry, "defaultReasoningEffort");
-            let options: Vec<SettingOption> = entry
-                .get("supportedReasoningEfforts")?
-                .as_array()?
-                .iter()
-                .filter_map(|option| {
-                    let id = owned(option, "reasoningEffort")?;
-                    Some(SettingOption {
-                        label: capitalized(&id),
-                        description: owned(option, "description").filter(|text| !text.is_empty()),
-                        is_default: Some(id.as_str()) == default,
-                        permission: None,
-                        allowed: true,
-                        id,
-                    })
-                })
-                .collect();
+            let options = effort_options(entry);
             (!options.is_empty()).then(|| Setting {
                 current: self.overrides.effort.clone().or(self.effort.clone()),
                 options,
@@ -487,21 +456,7 @@ impl Reports {
             })
         });
         let profiles: Vec<SettingOption> = match &self.profiles {
-            Listing::Listed(profiles) => profiles
-                .iter()
-                .filter_map(|profile| {
-                    let id = owned(profile, "id")?;
-                    Some(SettingOption {
-                        label: id.trim_start_matches(':').to_owned(),
-                        description: owned(profile, "description"),
-                        is_default: false,
-                        // Codex names profiles freely; what one allows is not reported.
-                        permission: None,
-                        allowed: profile["allowed"] == true,
-                        id,
-                    })
-                })
-                .collect(),
+            Listing::Listed(profiles) => profiles.iter().filter_map(profile_option).collect(),
             _ => Vec::new(),
         };
         // Without profiles, the sandbox Codex reported is what is in effect.
@@ -531,7 +486,7 @@ impl Reports {
         let permission = (current.is_some() || !profiles.is_empty()).then(|| Setting {
             current,
             options: profiles,
-            unchangeable: Some("Codex sets permissions in its own configuration".to_owned()),
+            unchangeable: Some(PERMISSIONS_ELSEWHERE.to_owned()),
             applies_from: AppliesFrom::NextTurn,
             answered_by: None,
         });
@@ -540,6 +495,83 @@ impl Reports {
             effort,
             permission,
         })
+    }
+}
+
+const PERMISSIONS_ELSEWHERE: &str = "Codex sets permissions in its own configuration";
+
+/// A model Codex lists and does not hide.
+fn model_option(entry: &Value) -> Option<SettingOption> {
+    if entry["hidden"] == true {
+        return None;
+    }
+    let id = owned(entry, "model").or_else(|| owned(entry, "id"))?;
+    Some(SettingOption {
+        label: owned(entry, "displayName").unwrap_or(id.clone()),
+        description: owned(entry, "description").filter(|text| !text.is_empty()),
+        is_default: entry["isDefault"] == true,
+        permission: None,
+        allowed: true,
+        id,
+    })
+}
+
+/// A listed model's reasoning efforts in Codex's order, its default marked.
+fn effort_options(entry: &Value) -> Vec<SettingOption> {
+    let default = text(entry, "defaultReasoningEffort");
+    entry
+        .get("supportedReasoningEfforts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|option| {
+            let id = owned(option, "reasoningEffort")?;
+            Some(SettingOption {
+                label: capitalized(&id),
+                description: owned(option, "description").filter(|text| !text.is_empty()),
+                is_default: Some(id.as_str()) == default,
+                permission: None,
+                allowed: true,
+                id,
+            })
+        })
+        .collect()
+}
+
+fn profile_option(profile: &Value) -> Option<SettingOption> {
+    let id = owned(profile, "id")?;
+    Some(SettingOption {
+        label: id.trim_start_matches(':').to_owned(),
+        description: owned(profile, "description"),
+        is_default: false,
+        // Codex names profiles freely; what one allows is not reported.
+        permission: None,
+        allowed: profile["allowed"] == true,
+        id,
+    })
+}
+
+/// What Codex offers before a thread, from its `model/list` and
+/// `permissionProfile/list` replies. Without a thread no profile is in effect yet,
+/// and ticketd never chooses one.
+pub(super) fn listed_options(models: &[Value], profiles: Option<&[Value]>) -> HarnessOptions {
+    HarnessOptions {
+        models: models
+            .iter()
+            .filter_map(|entry| {
+                Some(ModelChoice {
+                    model: model_option(entry)?,
+                    efforts: effort_options(entry),
+                })
+            })
+            .collect(),
+        permission: profiles.map(|profiles| Setting {
+            current: None,
+            options: profiles.iter().filter_map(profile_option).collect(),
+            unchangeable: Some(PERMISSIONS_ELSEWHERE.to_owned()),
+            applies_from: AppliesFrom::NextTurn,
+            answered_by: None,
+        }),
     }
 }
 

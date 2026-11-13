@@ -13,10 +13,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     Capabilities, Capability, CloseOutcome, DispatchOutcome, EVENT_BUFFER, EventKind, Harness,
-    HarnessAdapter, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
-    InterruptRequest, LoginState, NativeRequestId, NativeTurnId, OpenRequest, OpenedRuntime,
-    Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SettingChange,
-    SettingOutcome, SteeringBehavior, Submission, SubmissionKind,
+    HarnessAdapter, HarnessOptions, HarnessRuntime, Inspection, InteractionResponse,
+    InterruptOutcome, InterruptRequest, LoginState, NativeRequestId, NativeTurnId, OpenRequest,
+    OpenedRuntime, Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
+    SettingChange, SettingOutcome, SteeringBehavior, Submission, SubmissionKind,
 };
 
 /// What the fake harness does with a submission after it was written.
@@ -63,6 +63,8 @@ struct State {
     respond_calls: usize,
     live: Option<Live>,
     turns_started: u64,
+    options: Option<HarnessOptions>,
+    options_asked: usize,
 }
 
 #[derive(Debug)]
@@ -120,6 +122,8 @@ impl FakeAdapter {
                 respond_calls: 0,
                 live: None,
                 turns_started: 0,
+                options: None,
+                options_asked: 0,
             })),
         }
     }
@@ -204,6 +208,16 @@ impl FakeAdapter {
         self.state().close_outcome = outcome;
     }
 
+    /// What `options` reports; without it the fake cannot tell.
+    pub fn set_options(&self, options: HarnessOptions) {
+        self.state().options = Some(options);
+    }
+
+    /// How many times the options were asked for.
+    pub fn options_asked(&self) -> usize {
+        self.state().options_asked
+    }
+
     /// Every successful open, in order.
     pub fn opens(&self) -> Vec<OpenRequest> {
         self.state().opens.clone()
@@ -284,6 +298,15 @@ impl HarnessAdapter for FakeAdapter {
 
     async fn inspect(&self) -> Inspection {
         self.state().inspection.clone()
+    }
+
+    async fn options(&self) -> Result<HarnessOptions, String> {
+        let mut state = self.state();
+        state.options_asked += 1;
+        state
+            .options
+            .clone()
+            .ok_or_else(|| "the fake lists no options".to_owned())
     }
 
     /// Opening replaces any live runtime, whose stream then ends.

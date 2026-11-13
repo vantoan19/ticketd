@@ -560,6 +560,16 @@ export const fixtureChatClient = () =>
   createMockChatClient({
     enabled: true,
     chats,
+    // One harness not ready, so New Chat's picker shows that state too.
+    harnesses: [
+      { id: "claude-code", name: "Claude Code", status: "ready" },
+      {
+        id: "codex",
+        name: "Codex",
+        status: "not_signed_in",
+        command: "codex login",
+      },
+    ],
     now: new Date().toISOString(),
     records: [
       t12,

@@ -10,8 +10,8 @@ use crate::wire::{capitalized, text};
 
 use crate::{
     AppliesFrom, ContextCategory, ContextUsage, EventKind, FileChange, FileChangeKind,
-    HarnessSettings, NativeItemId, NativeTurnId, PermissionKind, Plan, PlanStep, PlanStepStatus,
-    Setting, SettingOption,
+    HarnessOptions, HarnessSettings, ModelChoice, NativeItemId, NativeTurnId, PermissionKind, Plan,
+    PlanStep, PlanStepStatus, Setting, SettingOption,
 };
 
 /// Tools whose calls are the plan, shown as the plan and never as steps.
@@ -461,39 +461,14 @@ impl Reports {
                 .models
                 .iter()
                 .flatten()
-                .filter_map(|entry| {
-                    let id = text(entry, "value")?.to_owned();
-                    Some(SettingOption {
-                        label: text(entry, "display_name").unwrap_or(&id).to_owned(),
-                        description: text(entry, "description")
-                            .filter(|text| !text.is_empty())
-                            .map(str::to_owned),
-                        // The SDK lists Claude Code's default as the `default` row.
-                        is_default: id == "default",
-                        permission: None,
-                        allowed: true,
-                        id,
-                    })
-                })
+                .filter_map(model_option)
                 .collect(),
             unchangeable: None,
             applies_from: AppliesFrom::NextRequest,
             answered_by: None,
         });
         let effort = entry.and_then(|entry| {
-            let levels = entry["effort_levels"].as_array()?;
-            let options: Vec<SettingOption> = levels
-                .iter()
-                .filter_map(Value::as_str)
-                .map(|level| SettingOption {
-                    id: level.to_owned(),
-                    label: capitalized(level),
-                    description: None,
-                    is_default: false,
-                    permission: None,
-                    allowed: true,
-                })
-                .collect();
+            let options = effort_options(entry);
             (!options.is_empty()).then(|| Setting {
                 current: self.effort.clone(),
                 options,
@@ -503,17 +478,7 @@ impl Reports {
             })
         });
         let permission = self.permission_mode.as_ref().map(|mode| {
-            let mut options: Vec<SettingOption> = PERMISSION_MODES
-                .iter()
-                .map(|(id, label, kind)| SettingOption {
-                    id: (*id).to_owned(),
-                    label: (*label).to_owned(),
-                    description: None,
-                    is_default: *id == "default",
-                    permission: Some(*kind),
-                    allowed: true,
-                })
-                .collect();
+            let mut options = permission_options();
             let bypass = mode == "bypassPermissions";
             if !options.iter().any(|option| &option.id == mode) {
                 // A mode ticketd does not offer is shown as what is in effect.
@@ -544,5 +509,77 @@ impl Reports {
             effort,
             permission,
         })
+    }
+}
+
+/// A model the bridge listed, as `supportedModels()` describes it.
+fn model_option(entry: &Value) -> Option<SettingOption> {
+    let id = text(entry, "value")?.to_owned();
+    Some(SettingOption {
+        label: text(entry, "display_name").unwrap_or(&id).to_owned(),
+        description: text(entry, "description")
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned),
+        // The SDK lists Claude Code's default as the `default` row.
+        is_default: id == "default",
+        permission: None,
+        allowed: true,
+        id,
+    })
+}
+
+/// The effort levels a listed model supports, lowest first. The SDK names no default.
+fn effort_options(entry: &Value) -> Vec<SettingOption> {
+    entry["effort_levels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|level| SettingOption {
+            id: level.to_owned(),
+            label: capitalized(level),
+            description: None,
+            is_default: false,
+            permission: None,
+            allowed: true,
+        })
+        .collect()
+}
+
+fn permission_options() -> Vec<SettingOption> {
+    PERMISSION_MODES
+        .iter()
+        .map(|(id, label, kind)| SettingOption {
+            id: (*id).to_owned(),
+            label: (*label).to_owned(),
+            description: None,
+            is_default: *id == "default",
+            permission: Some(*kind),
+            allowed: true,
+        })
+        .collect()
+}
+
+/// What Claude Code offers before a session, from the models the bridge listed. Its
+/// permission mode is not known until a session starts (`current` is `None`): with no
+/// pick, the session keeps whatever Claude Code's own settings choose.
+pub(super) fn listed_options(models: &[Value]) -> HarnessOptions {
+    HarnessOptions {
+        models: models
+            .iter()
+            .filter_map(|entry| {
+                Some(ModelChoice {
+                    model: model_option(entry)?,
+                    efforts: effort_options(entry),
+                })
+            })
+            .collect(),
+        permission: Some(Setting {
+            current: None,
+            options: permission_options(),
+            unchangeable: None,
+            applies_from: AppliesFrom::NextRequest,
+            answered_by: None,
+        }),
     }
 }

@@ -10,6 +10,7 @@ import {
   chatSummarySchema,
   createdChatSchema,
   folderFileSchema,
+  harnessOptionsSchema,
   harnessStatusSchema,
   linkedRecordSchema,
   settingChangeSchema,
@@ -180,6 +181,10 @@ export function createHostChatClient(
       z.array(chatSummarySchema).parse(await call("chat_list", { scope })),
     harnesses: async () =>
       z.array(harnessStatusSchema).parse(await call("chat_harnesses")),
+    harnessOptions: async (harnessId) =>
+      harnessOptionsSchema.parse(
+        await call("chat_harness_options", { harnessId }),
+      ),
     pickFolder: () => bridge.pickFolder(),
     folderProject: async (path) =>
       projectRefSchema

@@ -24,7 +24,7 @@ use ticketd_chat_host::{
 use ticketd_chat_host::{
     AppliesFrom, ContextUsage, FileChange, FileChangeKind, HarnessSettings, PermissionKind, Plan,
     PlanStep, PlanStepStatus, Setting, SettingChange, SettingChangeState, SettingKey,
-    SettingOption, SettingOutcome,
+    SettingOption, SettingOutcome, StartSettings,
 };
 use ticketd_core::{
     Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
@@ -241,6 +241,21 @@ async fn input_is_recorded_as_possibly_submitted_before_the_write_and_acknowledg
     assert_eq!(attempt.delivery, ChatDelivery::Acknowledged);
     assert_eq!(attempt.turn_id, Some(turn.id));
     assert_eq!(turn.native_turn_id.as_deref(), Some("turn-1"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn new_chats_picks_open_the_first_session() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let picks = StartSettings {
+        model: Some("gpt-b".to_owned()),
+        effort: Some("high".to_owned()),
+        permission: None,
+    };
+    f.host.start_with(&f.chat.id, picks.clone()).await.unwrap();
+
+    f.send("hello").await;
+
+    assert_eq!(f.fake.opens()[0].settings, picks);
 }
 
 #[tokio::test(start_paused = true)]

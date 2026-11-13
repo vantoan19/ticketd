@@ -483,6 +483,25 @@ const settingSchema = z.object({
 });
 export type HarnessSetting = z.infer<typeof settingSchema>;
 
+const settingOptionSchema = settingSchema.shape.options.element;
+export type SettingOption = z.infer<typeof settingOptionSchema>;
+
+/** What one harness offers before any session, as the installed harness reported it. */
+export const harnessOptionsSchema = z.object({
+  harness_id: z.string(),
+  models: z.array(
+    settingOptionSchema.extend({
+      /** Lowest first; `is_default` marks the model's own default, when said. */
+      efforts: z.array(settingOptionSchema),
+    }),
+  ),
+  /** `current` is unset: before a session only the harness's own setting applies. */
+  permission: settingSchema.nullish(),
+  /** Why it reported nothing; the picker then offers its Default only. */
+  unavailable: z.string().nullish(),
+});
+export type HarnessOptions = z.infer<typeof harnessOptionsSchema>;
+
 export const chatStateSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -679,6 +698,8 @@ export interface ChatClient {
   listChats(scope: Retention): Promise<ChatSummary[]>;
   /** Probes installation and sign-in again on every call. */
   harnesses(): Promise<HarnessStatus[]>;
+  /** What a harness offers before a session; asked of the harness once per version. */
+  harnessOptions(harnessId: string): Promise<HarnessOptions>;
   /** The native folder dialog; null when dismissed. */
   pickFolder(): Promise<string | null>;
   /** How many Chats already run in the folder. */
@@ -696,6 +717,10 @@ export interface ChatClient {
     folder: string | null;
     links: LinkRef[];
     message: string;
+    /** New Chat's picks: option ids the harness offered. Unset keeps its own setting. */
+    model?: string;
+    effort?: string;
+    permission?: string;
   }): Promise<CreatedChat>;
   openChat(id: string): Promise<ChatSnapshot>;
   /** Changes after `cursor`, in order. */
