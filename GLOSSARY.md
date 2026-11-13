@@ -175,5 +175,18 @@ A ticket in Duplicate status, recognized as describing the same intended outcome
 **Canonical ticket**:
 The ticket selected to represent an intended outcome shared by duplicate tickets. It is the direct destination of those duplicate relationships and is not itself a duplicate.
 
+**Automation**:
+A workspace record that runs steps without the person starting them: one trigger, conditions that must all pass, then a flow of steps that can branch. It is switched on or off separately on each device.
+_Avoid_: Workflow, rule
+
+**Automation agent**:
+A named, reusable definition of who an Automation step runs: harness, model, instructions, allowed tools, and turn and time limits. The interface calls it an Agent. It is distinct from the Editing agent, which is attribution on a write.
+
+**Automation run**:
+One firing of an Automation: the Workspace event that started it, the steps taken, its outcome, and the Chat of each agent step. The interface calls it a run. It is local to the device that ran it.
+
+**Workspace event**:
+A logged fact that something in the Workspace changed (for example a tag added to a ticket), with the previous and current values and whether a person, an Automation or synchronization made the change. Automations are triggered from this log. It is distinct from an Activity's automatic event, which is ticket history shown to the person.
+
 **Implementation evidence**:
 Named material associated with a ticket that locates its implementation or records verification, such as a pull request, commit, branch, worktree, or verification result.
