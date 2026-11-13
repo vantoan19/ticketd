@@ -111,6 +111,17 @@ function AppContent() {
     if (view !== "settings" && returnToSettingsEntry.current) {
       returnToSettingsEntry.current = false;
       document.getElementById("sidebar-settings")?.focus();
+      // The sidebar comes back under a pointer that has not moved: the row it
+      // happens to rest on shows no hover fill until the pointer moves, so only
+      // the current view reads as selected (LIVE2-12).
+      const root = document.documentElement;
+      root.dataset.hoverHeld = "";
+      const release = () => {
+        delete root.dataset.hoverHeld;
+        document.removeEventListener("pointermove", release, true);
+      };
+      document.addEventListener("pointermove", release, true);
+      return release;
     }
   }, [view]);
   const [documentListRequest, setDocumentListRequest] = useState(0);

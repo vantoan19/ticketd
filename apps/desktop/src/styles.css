@@ -1183,6 +1183,11 @@ html[data-window-bar] {
   background: var(--accent);
   color: var(--foreground);
 }
+/* Back from Settings: no hover fill until the pointer moves (App.tsx). */
+html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
+  background: transparent;
+  color: var(--muted-foreground);
+}
 /* The whole body (top entries and lists) scrolls above the fixed footer. */
 .sidebar-body > * {
   flex-shrink: 0;

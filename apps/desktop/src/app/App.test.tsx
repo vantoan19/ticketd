@@ -1404,6 +1404,10 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Settings" }),
   );
+  // LIVE2-12: the row under the resting pointer shows no hover fill until it moves.
+  expect(document.documentElement.dataset.hoverHeld).toBe("");
+  fireEvent.pointerMove(document.body);
+  expect(document.documentElement.dataset.hoverHeld).toBeUndefined();
   tickets = 7;
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(screen.getByRole("button", { name: "Location" }));
