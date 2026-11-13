@@ -196,9 +196,17 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
+  // Measured again whenever the message's width changes: a pane narrowed after
+  // the message was shown clamps it, and then it needs Show more.
   useLayoutEffect(() => {
     const box = text.current;
-    if (box && !more) setLong(box.scrollHeight > box.clientHeight + 1);
+    if (!box || more) return;
+    const measure = () => setLong(box.scrollHeight > box.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
   }, [item.text, more]);
   const time = sentAt(item.at);
   return (

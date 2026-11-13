@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -23,8 +24,13 @@ import {
 } from "@/features/chats/mock-client";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+/** What each ResizeObserver watches, so a test can report a size change. */
+const watching = new Map<Element, ResizeObserverCallback>();
 window.ResizeObserver = class {
-  observe() {}
+  constructor(private callback: ResizeObserverCallback) {}
+  observe(element: Element) {
+    watching.set(element, this.callback);
+  }
   unobserve() {}
   disconnect() {}
 };
@@ -32,6 +38,7 @@ window.ResizeObserver = class {
 afterEach(() => {
   cleanup();
   drafts.clear();
+  watching.clear();
 });
 
 const at = "2026-11-10T10:00:00Z";
@@ -287,4 +294,27 @@ test("suggestions that fail to load say so and try again", async () => {
   client.suggestions = real;
   fireEvent.click(button("Try again"));
   expect(await screen.findByRole("region", { name: "Suggested" })).toBeTruthy();
+});
+
+test("a message that the pane later narrows to more than four lines offers Show more", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter" }),
+      items: [
+        {
+          id: "u1",
+          at,
+          kind: "user",
+          text: "Work on T-MP2: read README.md and say what it says.",
+          delivery: "delivered",
+        },
+      ],
+    },
+  ]);
+  expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  const box = document.querySelector<HTMLElement>(".chat-you > div")!;
+  Object.defineProperty(box, "clientHeight", { configurable: true, value: 80 });
+  Object.defineProperty(box, "scrollHeight", { configurable: true, value: 100 });
+  act(() => watching.get(box)?.([], {} as unknown as ResizeObserver));
+  expect(screen.getByRole("button", { name: "Show more" })).toBeTruthy();
 });
