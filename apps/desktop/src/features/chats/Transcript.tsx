@@ -235,7 +235,7 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
         <Button
           variant="ghost"
           size="xs"
-          className="chat-you-more"
+          className="-mt-1 -mr-2"
           aria-expanded={more}
           onClick={() => setMore(!more)}
         >
@@ -322,7 +322,7 @@ function useNow(on: boolean) {
 }
 
 /** A Project, Document or Plan linked to the Chat, by its title. */
-export function useRecordName(): RecordName {
+function useRecordName(): RecordName {
   const { links } = useContext(SentLinksContext);
   return useMemo(() => recordNamer(links), [links]);
 }
@@ -462,9 +462,10 @@ export function StepRow({
   // name after it does not slide under the pointer.
   const verb = useRef<HTMLSpanElement>(null);
   const [verbWidth, setVerbWidth] = useState<number>();
+  const verbText = words.parts[0]?.text;
   useLayoutEffect(() => {
     if (running && verb.current) setVerbWidth(verb.current.offsetWidth);
-  }, [running, words.parts[0]?.text]);
+  }, [running, verbText]);
   const now = useNow(running && Boolean(step.started_at));
   const started = step.started_at ? Date.parse(step.started_at) : NaN;
   const clock =

@@ -640,11 +640,11 @@ impl Tracker {
                 self.reports.insert(tool.id.clone(), tool.clone());
             }
             ChatItem::Tool(tool) => {
-                if let Some(changes) = agent_changes(tool) {
-                    if let Some(change) = changes.last() {
-                        self.last_change = Some(change.clone());
-                        self.last_change_turn = Some(tool.turn_id.clone());
-                    }
+                if let Some(changes) = agent_changes(tool)
+                    && let Some(change) = changes.last()
+                {
+                    self.last_change = Some(change.clone());
+                    self.last_change_turn = Some(tool.turn_id.clone());
                 }
                 // Only the latest turn's calls can still be asked about.
                 self.turn_tools

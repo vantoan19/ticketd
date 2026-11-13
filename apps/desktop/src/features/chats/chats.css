@@ -403,10 +403,7 @@
   -webkit-line-clamp: 4;
   overflow: hidden;
 }
-/* Right under the bubble, on its edge (STATIC-17). */
-.chat-you-more {
-  margin: -4px -8px 0 0;
-}
+/* Show more sits right under the bubble, on its edge (STATIC-17): set on the Button. */
 .chat-you-actions {
   display: flex;
   align-items: center;
@@ -1159,9 +1156,6 @@ button.chat-file-name:focus-visible,
 .chat-option:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-}
-.chat-request-show {
-  margin: 4px 0 0 -8px;
 }
 .chat-request-command {
   white-space: pre-wrap;

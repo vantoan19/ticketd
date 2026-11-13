@@ -159,7 +159,7 @@ function Request({
             <Button
               variant="ghost"
               size="xs"
-              className="chat-request-show"
+              className="-ml-2 mt-1"
               aria-expanded={showCommand}
               aria-controls={showCommand ? commandId : undefined}
               onClick={() => setShowCommand(!showCommand)}
