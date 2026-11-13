@@ -71,6 +71,8 @@ const open = async (patch: Partial<Automation> = {}) => {
       onSaveAgent={nothing}
       onDeleteAgent={nothing}
       onFail={nothing}
+      openRun={null}
+      onOpenRun={nothing}
     />,
   );
   return screen.findByRole("application", { name: "Steps" });
