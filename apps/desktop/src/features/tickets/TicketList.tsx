@@ -164,6 +164,7 @@ export function TicketList({
                 }}
                 type="button"
                 className="ticket-row"
+                data-ticket-reference={ticket.reference}
                 data-rows={simple ? "simple" : undefined}
                 aria-pressed={ticket.reference === selected}
                 onClick={() => onOpen(ticket.reference)}
