@@ -9,6 +9,8 @@ fn is_untracked(table: &str) -> bool {
         || table == "request_outcomes"
         || table == "last_backup"
         || table == "document_opens"
+        // The event log is read by its own cursor and shown nowhere.
+        || table == "workspace_events"
         // Chat tables change many times a second while a turn streams; Chat views
         // follow `chat_changes` instead.
         || table == "chats"

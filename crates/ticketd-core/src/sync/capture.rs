@@ -186,7 +186,9 @@ impl Workspace {
                 "UPDATE sync_capture SET applying = 1, origin = ?1",
                 [device],
             )?;
+            let logged = crate::events::head(&self.connection)?;
             let applied = apply(self)?;
+            crate::events::fold_into_creation(&self.connection, logged)?;
             self.connection.execute(
                 "UPDATE sync_capture SET applying = ?1, origin = ?2",
                 params![before.0, before.1],

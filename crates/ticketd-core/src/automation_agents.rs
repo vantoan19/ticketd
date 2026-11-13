@@ -105,7 +105,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     )?;
     // Views refresh on the change token, so an agent changed elsewhere shows up.
     crate::change_token::track(connection, "automation_agents")?;
-    connection.execute_batch("PRAGMA user_version = 67;")?;
+    connection.execute_batch("PRAGMA user_version = 68;")?;
     Ok(())
 }
 

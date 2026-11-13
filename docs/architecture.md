@@ -206,6 +206,11 @@ turn running at that moment; otherwise it is shown for no Chat rather than the
 wrong one. Save as Document is the ordinary Document-creation workflow applied to a
 stored response.
 
+A harness process started for an Automation run also gets the run's ID in
+`TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
+change it makes as a Workspace event with actor `automation`, and such events never
+trigger Automations. The value itself is not stored.
+
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process
 recovery. Only a live request registry can answer approvals. Native resume failure
@@ -911,6 +916,7 @@ the core; the desktop only schedules it and shows its state.
 | Remote storage interface | `sync/remote.rs` defines the file operations the engine needs (folders, list, download, conditional write, revisions). Its in-memory fake, `sync/fake_remote.rs`, is built only for tests. |
 | Google Drive adapter     | `drive/remote.rs` implements that interface under `drive.file`, with authorization renewal, pagination, bounded retries and typed recovery states.                                         |
 | Version history          | `versions.rs` saves the replaced version of a ticket or Document through database triggers, for local edits and incoming sync alike, and removes versions older than 30 days when asked.   |
+| Workspace event log      | `events.rs` logs each committed ticket change through database triggers, with its previous and current values and actor kind; device-local, read by cursor, kept 90 days (ADR 0012).       |
 
 A captured mark names a record, not a change. The file is produced from current
 state at upload time and compared with the last-synced copy, so a mark for a

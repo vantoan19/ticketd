@@ -863,8 +863,7 @@ fn the_previous_format_and_its_backups_gain_chat_storage_without_losing_records(
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("Kept").unwrap();
     drop(workspace);
-    // The format before Chat storage was added.
-    let previous = 65;
+    let previous = 65; // The format before Chat storage (step 66).
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(&format!("{CHAT_TABLES} PRAGMA user_version = {previous};"))
         .unwrap();

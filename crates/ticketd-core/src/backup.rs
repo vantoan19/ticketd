@@ -52,8 +52,9 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 75] = [
-    ("automation_agents", 67),
+const TABLES: [(&str, i64); 76] = [
+    ("automation_agents", 68),
+    ("workspace_events", 67),
     ("chat_record_writes", 66),
     ("chat_notices", 66),
     ("chats", 66),
@@ -199,6 +200,12 @@ pub(crate) fn missing_tables(
         ("write_drive_request_namespace", 52),
         ("record_version_ticket", 57),
         ("record_version_document", 57),
+        ("workspace_event_ticket_created", 67),
+        ("workspace_event_ticket_updated", 67),
+        ("workspace_event_ticket_status_changed", 67),
+        ("workspace_event_ticket_tag_added", 67),
+        ("workspace_event_ticket_tag_removed", 67),
+        ("workspace_event_activity_created", 67),
     ] {
         let exists: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",

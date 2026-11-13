@@ -113,7 +113,7 @@ fn name_this_desktop(
 
 /// What the scheduler does at launch and once a day while the app stays open.
 pub fn upkeep(workspace: &mut Workspace) -> Result<(), Error> {
-    workspace.expire_versions(None).map(drop)
+    workspace.upkeep(None)
 }
 
 /// What the desktop does once when it starts, before the first sync run.

@@ -145,20 +145,31 @@ fn a_deleted_agent_is_gone_from_the_list_and_cannot_be_read_or_changed() {
 }
 
 #[test]
-fn a_workspace_in_the_previous_format_gains_agent_storage() {
+fn a_workspace_in_the_previous_format_gains_agent_storage_quietly() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("agents.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("Kept").unwrap();
+    let token = workspace.change_token().unwrap();
+    let events = workspace.workspace_event_head().unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE automation_agents; PRAGMA user_version = 66;")
+    db.execute_batch("DROP TABLE automation_agents; PRAGMA user_version = 67;")
         .unwrap();
     drop(db);
 
     let mut workspace = Workspace::open(&path).unwrap();
 
     assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
-    workspace.create_automation_agent(triage()).unwrap();
+    // Migrating changes nothing a view shows and is not a Workspace event.
+    assert_eq!(workspace.change_token().unwrap(), token);
+    assert_eq!(workspace.workspace_event_head().unwrap(), events);
+    let agent = workspace.create_automation_agent(triage()).unwrap();
     assert_eq!(workspace.automation_agents().unwrap().len(), 1);
+    // Agents are not tickets: changing one logs no Workspace event.
+    workspace
+        .update_automation_agent(&agent.id, triage())
+        .unwrap();
+    workspace.delete_automation_agent(&agent.id).unwrap();
+    assert_eq!(workspace.workspace_event_head().unwrap(), events);
 }
