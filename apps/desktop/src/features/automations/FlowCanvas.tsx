@@ -211,7 +211,7 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
 const nodeTypes = { card: CardNode, add: AddNode };
 
 /** Brings the whole flow back into view when a step is added or removed. */
-export function Refit({ shape }: { shape: string }) {
+function Refit({ shape }: { shape: string }) {
   const { fitView } = useReactFlow();
   useEffect(() => {
     void fitView({ maxZoom: 1, padding: 0.2 });

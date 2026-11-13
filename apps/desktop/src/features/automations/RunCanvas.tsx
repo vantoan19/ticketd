@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   Background,
   Handle,
   Position,
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
+  useStore,
   type Edge,
   type Node,
   type NodeProps,
@@ -28,7 +30,6 @@ import {
   triggerCard,
   type Card,
 } from "@/features/automations/flow-cards";
-import { Refit } from "@/features/automations/FlowCanvas";
 import {
   everyStep,
   flowSteps,
@@ -123,6 +124,19 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
 const nodeTypes = { card: RunCardNode };
 
 /**
+ * Keeps the whole run in view. It fits again whenever the canvas changes
+ * width, as when the panel opens beside it; a run's steps never change.
+ */
+function FitRun() {
+  const { fitView } = useReactFlow();
+  const width = useStore((state) => state.width);
+  useEffect(() => {
+    void fitView({ maxZoom: 1, padding: 0.2 });
+  }, [width, fitView]);
+  return null;
+}
+
+/**
  * What a run did, on the canvas its Automation is built on: every step of the
  * definition the run executes with where it stands, the steps it did not reach
  * dashed, and the lines it followed marked. Nothing here can be changed.
@@ -183,7 +197,7 @@ export function RunCanvas({
         ...(path && { label: PATH_LABELS[path] }),
         className: [
           path === "failure" && "flow-edge-failure",
-          reached(target) && "flow-edge-taken",
+          reached(target) ? "flow-edge-taken" : "flow-edge-idle",
         ]
           .filter(Boolean)
           .join(" "),
@@ -198,6 +212,9 @@ export function RunCanvas({
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          // A flow with paths side by side is wide: let all of it fit beside
+          // the panel.
+          minZoom={0.25}
           maxZoom={1.5}
           panOnScroll
           nodesDraggable={false}
@@ -210,7 +227,7 @@ export function RunCanvas({
           proOptions={{ hideAttribution: true }}
         >
           <Background />
-          <Refit shape={nodes.map((node) => node.id).join(" ")} />
+          <FitRun />
         </ReactFlow>
       </ReactFlowProvider>
     </div>

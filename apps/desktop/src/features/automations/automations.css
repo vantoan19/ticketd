@@ -376,7 +376,11 @@
   background: var(--recessed);
   outline-color: var(--foreground);
 }
-/* The lines the run followed; a failure path leaves its step dashed. */
+/* The lines the run followed stand out from the ones it did not; a failure
+   path leaves its step dashed. */
+.flow-canvas .flow-edge-idle .react-flow__edge-path {
+  stroke: var(--control-boundary);
+}
 .flow-canvas .flow-edge-failure .react-flow__edge-path {
   stroke-dasharray: 6 4;
 }
