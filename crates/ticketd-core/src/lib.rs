@@ -97,6 +97,7 @@ pub use attachments::{
     DEFAULT_ATTACHMENT_LIMIT,
 };
 mod automation_agents;
+mod automations;
 mod change_token;
 mod chats;
 mod events;
@@ -105,6 +106,10 @@ pub use activities::{
 };
 pub use automation_agents::{
     AgentHarness, AutomationAgent, AutomationAgentSettings, AutomationAgentTools,
+};
+pub use automations::{
+    AUTOMATION_TRIGGER_ID, Automation, AutomationDefinition, AutomationProblem, Check, Condition,
+    NotifyTarget, Schedule, Step, StepAction, StepChange, Trigger, Weekday,
 };
 pub use chats::{
     CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE,
@@ -122,7 +127,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 68;
+pub const FORMAT_VERSION: i64 = 69;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -216,6 +221,14 @@ pub enum Error {
     AutomationAgentNotFound(String),
     #[error("invalid agent: {0}")]
     InvalidAutomationAgent(String),
+    #[error("This agent is used by {0}. Change that step first.")]
+    AutomationAgentInUse(String),
+    #[error("Automation '{0}' was not found")]
+    AutomationNotFound(String),
+    #[error("invalid Automation: {0}")]
+    InvalidAutomation(String),
+    #[error("This Automation cannot be switched on yet. {0}.")]
+    AutomationUnfinished(String),
     #[error("duplicate would create a cycle or self-link")]
     DuplicateCycle,
     #[error(
@@ -932,6 +945,9 @@ impl Workspace {
         }
         if version < 68 {
             automation_agents::migrate(&transaction)?;
+        }
+        if version < 69 {
+            automations::migrate(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

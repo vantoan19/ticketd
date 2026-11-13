@@ -233,7 +233,15 @@ impl Workspace {
         })
     }
 
+    /// Refused while a step of any Automation runs this agent.
     pub fn delete_automation_agent(&mut self, id: &str) -> Result<(), Error> {
+        if let Some(name) = crate::automations::using_agent(&self.connection, id)?.first() {
+            return Err(Error::AutomationAgentInUse(if name.is_empty() {
+                "an Automation without a name".to_owned()
+            } else {
+                name.clone()
+            }));
+        }
         let changed = self.connection.execute(
             "UPDATE automation_agents SET trashed = 1 WHERE id = ?1 AND trashed = 0",
             [id],
