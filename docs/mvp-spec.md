@@ -1175,6 +1175,9 @@ and upload queues. Workspace sync never publishes to an external tracker.
 - Connect Google Drive, then choose one of two actions: upload this Workspace, or
   download an existing one from Drive. A Workspace that was disconnected can
   instead reconnect to its folder, as described below.
+- A new upload uses an available folder name, adding a numbered suffix when a
+  listed Workspace already uses that name. Existing folders keep their names,
+  including when a Workspace uploads to its own folder again.
 - Downloading replaces the local Workspace after saving a safety backup. Two
   Workspaces created independently are never merged automatically.
 - A Workspace has one storage destination.
