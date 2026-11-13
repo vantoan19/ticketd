@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { MessageSquarePlus } from "lucide-react";
+import { MessageSquarePlus, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,6 +19,9 @@ import {
   type ChatSummary,
   type LinkRef,
 } from "@/features/chats/client";
+import { ChatStatus } from "@/features/chats/ChatStatus";
+import { HarnessMark } from "@/features/chats/HarnessMark";
+import { statusLabel } from "@/features/chats/model";
 import { addQuote, NEW_CHAT } from "@/features/chats/quotes";
 import { useChatFeature } from "@/features/chats/use-chats";
 
@@ -43,18 +46,33 @@ function parseRecord(value: string | undefined): LinkRef | null {
   return { kind, id };
 }
 
-/** The selection, when it lies inside one quotable source and nowhere editable. */
+const elementOf = (node: Node) =>
+  node instanceof Element ? node : node.parentElement;
+
+/**
+ * The selection, when it lies inside one quotable source and nowhere editable.
+ * A triple-click selects a block up to offset 0 of the block after it, which can
+ * lie outside the source: what is selected is still only the source's text, so
+ * the range is cut at the source's end.
+ */
 function readSelection(): Selected | null {
   const selection = document.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0)
     return null;
   const text = selection.toString().trim();
   if (!text) return null;
-  const range = selection.getRangeAt(0);
-  const node = range.commonAncestorContainer;
-  const element = node instanceof Element ? node : node.parentElement;
-  const source = element?.closest<HTMLElement>("[data-chat-source]");
-  if (!source || element?.closest("[contenteditable='true'], textarea, input"))
+  let range = selection.getRangeAt(0);
+  const start = elementOf(range.startContainer);
+  const source = start?.closest<HTMLElement>("[data-chat-source]");
+  if (!source) return null;
+  if (!source.contains(range.endContainer)) {
+    const inside = range.cloneRange();
+    inside.setEnd(source, source.childNodes.length);
+    if (inside.toString().trim() !== text) return null;
+    range = inside;
+  }
+  const element = elementOf(range.commonAncestorContainer);
+  if (element?.closest("[contenteditable='true'], textarea, input"))
     return null;
   // Not every engine measures ranges (a test document does not); then the bar
   // sits at the source's corner.
@@ -205,6 +223,8 @@ export function SelectionAddToChat() {
           </TooltipProvider>
           <DropdownMenuContent
             align="start"
+            collisionPadding={8}
+            className="linked-chats-menu"
             onCloseAutoFocus={(event) => {
               // Escape returns to the text the quote came from.
               event.preventDefault();
@@ -226,11 +246,30 @@ export function SelectionAddToChat() {
                     });
                   }}
                 >
+                  <HarnessMark
+                    harness={chat.harness_id}
+                    name={chat.harness_name}
+                    className="linked-chats-mark"
+                    decorative
+                  />
                   <span className="linked-chats-item">
                     <span className="linked-chats-item-title">
                       {chat.title}
                     </span>
-                    {reason && <span className="chat-status">{reason}</span>}
+                    {reason ? (
+                      <span className="chat-status">
+                        <span className="chat-status-word">{reason}</span>
+                      </span>
+                    ) : (
+                      <ChatStatus
+                        status={{
+                          ...chat.status,
+                          word: statusLabel(chat.status),
+                          detail: null,
+                        }}
+                        activity={chat.activity}
+                      />
+                    )}
                   </span>
                 </DropdownMenuItem>
               );
@@ -242,6 +281,7 @@ export function SelectionAddToChat() {
                 requestChat({ kind: "new" });
               }}
             >
+              <SquarePen aria-hidden />
               New Chat
             </DropdownMenuItem>
           </DropdownMenuContent>
