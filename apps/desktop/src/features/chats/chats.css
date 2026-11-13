@@ -5,6 +5,7 @@
   min-width: 0;
 }
 .chat-pane {
+  container: ticket-detail / inline-size;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -218,7 +219,10 @@
 /* The title group takes the free room and gives it up first, so the actions
    stay on the header's one 48px line, as on a ticket. */
 .chat-pane > .detail-header > .detail-title-group {
+  display: flex;
   flex: 1 1 0;
+  align-items: center;
+  min-width: 0;
 }
 /* A narrow pane keeps the header on one line: the trigger keeps its chevron
    and accessible name, as the ticket header keeps the reminder's bell. */
@@ -230,9 +234,10 @@
     display: none;
   }
 }
-/* The header's one context button (#368) sits before the actions and alone
-   shortens: the branch in the middle first, then it moves into the popover
-   below 600px; below 460px only the icon, the shared count and the chevron. */
+/* The header's one context button (#368): the Project icon (else a folder),
+   the folder's name capped at 18ch, and the chevron. It holds nothing else, so
+   it never pushes into the title or the actions; below 460px only the icon
+   and the chevron stay. Everything else is in its popover. */
 .chat-head-mark {
   color: var(--foreground);
 }
@@ -243,41 +248,36 @@
   gap: 6px;
   color: var(--muted-foreground);
 }
-.chat-context-name,
-.chat-context-missing {
-  flex: none;
-}
-.chat-context-missing {
+.chat-pane
+  .detail-title-group
+  > [data-context][data-missing]
+  > svg:first-child {
   color: var(--foreground);
 }
-.chat-context-branch,
-.chat-context-shared {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.chat-context-name {
+  flex: 0 1 auto;
   min-width: 0;
-  margin-left: 6px;
-}
-.chat-context-shared {
-  flex: none;
-}
-.chat-context-branch > .chat-mono {
-  min-width: 8ch;
+  max-width: 18ch;
   overflow: hidden;
-  direction: rtl;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-@container ticket-detail (max-width: 599px) {
-  .chat-context-branch {
+@container ticket-detail (max-width: 459px) {
+  .chat-context-name {
     display: none;
   }
 }
-@container ticket-detail (max-width: 459px) {
-  .chat-context-name,
-  .chat-context-missing {
-    display: none;
-  }
+/* The composer's context count: quiet mono tokens, words from 80%. */
+[data-context-count] {
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+[data-context-count][data-full] {
+  color: var(--foreground);
+  font-family: inherit;
 }
 .chat-body {
   flex: 1;
@@ -1511,14 +1511,64 @@ button.chat-file-name:focus-visible,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Every value wraps: a long path or harness report never runs past the edge (#307). */
+/* The Chat context popover (header button and composer count): 280px, four
+   groups split by one hairline: folder, harness, context, then ghost rows. */
 .chat-pop {
   display: flex;
   flex-direction: column;
-  gap: 16px;
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
-  overflow-wrap: anywhere;
+}
+.chat-pop > * + * {
+  margin-top: 12px;
+  padding-top: 12px;
+  box-shadow: inset 0 1px 0 0 var(--border);
+}
+.chat-pop section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-pop-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin: -6px -6px 0 0;
+  color: var(--foreground);
+  font-weight: 500;
+}
+.chat-pop .path-text {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+}
+.chat-pop-branch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-pop-branch > svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.chat-pop-branch > span:not(.chat-pop-branch-name) {
+  flex: none;
+}
+.chat-pop-branch-name {
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-pop-line {
   display: flex;
@@ -1530,7 +1580,7 @@ button.chat-file-name:focus-visible,
 .chat-pop-line > svg,
 .chat-pop-line > .harness-mark {
   flex: none;
-  color: var(--muted-foreground);
+  color: var(--foreground);
 }
 .chat-pop-truncate {
   min-width: 0;
@@ -1538,47 +1588,141 @@ button.chat-file-name:focus-visible,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-pop-path {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-.chat-pop-path > .path-text {
-  flex: 1;
-  min-width: 0;
-}
-.chat-pop-status {
+.chat-pop-harness {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 4px;
+  min-width: 0;
 }
-.chat-pop-status > span {
+/* The status word keeps its line while it checks, so nothing moves. */
+.chat-pop-status {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
+  line-height: var(--text-ui-line);
 }
-.chat-pop code {
-  color: var(--foreground);
-}
-.chat-pop section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.chat-pop h3 {
+.chat-pop small {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
-  font-weight: 400;
 }
-.chat-pop p {
+.chat-pop small.chat-mono {
+  margin-top: 2px;
+}
+.chat-pop [data-recheck] {
+  align-self: flex-start;
+  margin: 4px 0 -6px -8px;
+  font-size: var(--text-caption);
+}
+.chat-pop-context-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-ui-line);
+}
+.chat-pop-context-head > .chat-mono {
   color: var(--foreground);
+}
+.chat-pop-context:focus-visible {
+  outline: none;
+}
+/* One 4px bar: the share used, and a tick where the harness compacts. */
+.chat-pop-meter {
+  position: relative;
+  height: 4px;
+  margin: 6px 0;
+  border-radius: var(--radius-pill);
+  background: var(--control-boundary);
+}
+.chat-pop-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--muted-foreground);
+}
+[data-full] > .chat-pop-meter > .chat-pop-meter-fill {
+  background: var(--foreground);
+}
+.chat-pop-meter-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--foreground);
+}
+.chat-pop-context-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+[data-full] > .chat-pop-context-note {
+  color: var(--foreground);
+}
+.chat-pop [data-details] {
+  align-self: flex-start;
+  margin: 4px 0 -6px -8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.chat-pop-categories {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-pop-categories li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+.chat-pop-categories .chat-mono {
+  color: var(--foreground);
+}
+/* Ghost rows: text in line with the groups above, hover to the edge. */
+.chat-pop-rows {
+  display: flex;
+  flex-direction: column;
+  margin-inline: -8px;
+}
+.chat-pop-rows > button,
+.chat-pop-sublist > button,
+.chat-pop-row {
+  justify-content: flex-start;
+  width: 100%;
+  padding-inline: 8px;
+  gap: 8px;
+}
+.chat-pop-rows > button > .chat-pop-truncate {
+  flex: 1 1 auto;
+  text-align: left;
+}
+.chat-pop-row {
+  min-height: 32px;
+}
+.chat-pop-sublist {
+  display: flex;
+  flex-direction: column;
+  padding-left: 12px;
+}
+.chat-pop-aside {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.chat-pop-rows > small {
+  padding: 0 8px 4px;
 }
 /* A path inside a notice's sentence: the popover's path, kept in the line and
    in the sentence's weight; a long one shortens in the middle, then the tail. */
@@ -1594,12 +1738,6 @@ button.chat-file-name:focus-visible,
   vertical-align: bottom;
   line-height: inherit;
   font-weight: inherit;
-}
-.chat-pop small {
-  overflow-wrap: anywhere;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .chat-pick-results {
   display: flex;

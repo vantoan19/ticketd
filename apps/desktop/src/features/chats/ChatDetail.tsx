@@ -45,7 +45,7 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
-import { ChatContext } from "@/features/chats/ChatContext";
+import { ChatContext, ContextCount } from "@/features/chats/ChatContext";
 import { ComposerControls } from "@/features/chats/ComposerControls";
 import {
   settingLine,
@@ -68,8 +68,8 @@ import {
   useQuotes,
 } from "@/features/chats/quotes";
 import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
-import { runningPlan } from "@/features/chats/reports";
-import { ContextRing, PlanPill } from "@/features/chats/TurnReports";
+import { lastAsk, runningPlan } from "@/features/chats/reports";
+import { PlanPill } from "@/features/chats/TurnReports";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
   composerControls,
@@ -357,9 +357,7 @@ function Conversation({
   /** Running only in this view so far: Stop waits for the host to know of the turn. */
   const unconfirmedStart = chat !== reported;
   const plan = runningPlan(items);
-  const turnStartedAt = [...items]
-    .reverse()
-    .find((item) => item.kind === "user")?.at;
+  const turnStartedAt = lastAsk(items);
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
@@ -718,9 +716,11 @@ function Conversation({
                   }
                   {...(chat.context && {
                     beforeStop: (
-                      <ContextRing
+                      <ContextCount
+                        chat={chat}
                         context={chat.context}
-                        turnStartedAt={turnStartedAt}
+                        asOf={turnStartedAt}
+                        returnTo={messageBox}
                       />
                     ),
                   })}
@@ -811,7 +811,9 @@ export function ChatDetail({
           <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
             {chat?.title ?? "Chat"}
           </h2>
-          {chat && <ChatContext chat={chat} />}
+          {chat && (
+            <ChatContext chat={chat} asOf={lastAsk(snapshot?.items ?? [])} />
+          )}
         </div>
         <div className="detail-actions">
           {chat?.retention === "archived" && (

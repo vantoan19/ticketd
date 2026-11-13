@@ -38,7 +38,7 @@ test("the context button names folder, branch, Project and sharing", () => {
     title: "Tidy",
     folder: { name: "8b65", managed: true },
   });
-  expect(contextLabel(managed)).toBe("Folder ticketd folder");
+  expect(contextLabel(managed)).toBe("Folder Scratch folder");
   const missing = chatState({
     id: "c3",
     title: "Reset",
