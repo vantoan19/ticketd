@@ -1,8 +1,10 @@
 //! The Codex adapter: the user's installed `codex app-server` over structured stdio.
 //!
-//! Codex keeps its own sign-in, configuration, instructions, approval policy and
-//! sandbox. The adapter passes only the working directory and never reads
-//! credentials, overrides settings or chooses how the user is billed.
+//! Codex keeps its own sign-in, configuration and instructions. For a person's Chat
+//! the adapter passes only the working directory, so the approval policy and sandbox
+//! are theirs too. For an unattended session (an Automation run) it turns approvals
+//! off and sets the sandbox from the agent's allowed tools. It never reads
+//! credentials, grants full access or chooses how the user is billed.
 
 mod discovery;
 mod mapping;

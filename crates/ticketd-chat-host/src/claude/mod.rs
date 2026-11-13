@@ -2,9 +2,11 @@
 //! stdio, always driving the user's installed official Claude Code.
 //!
 //! Claude Code keeps its own sign-in, settings, instructions, skills, plugins, hooks,
-//! MCP servers and permission mode. The adapter passes only the working directory,
-//! the executable it found and the session to resume. It never reads credentials and
-//! never asks for permissions to be skipped.
+//! MCP servers and permission mode. For a person's Chat the adapter passes only the
+//! working directory, the executable it found and the session to resume. For an
+//! unattended session (an Automation run) it also passes the agent's model, allowed
+//! tools and turn limit, and Claude Code denies what is not allowed instead of
+//! asking. It never reads credentials and never asks for permissions to be skipped.
 
 mod runtime;
 mod session;
