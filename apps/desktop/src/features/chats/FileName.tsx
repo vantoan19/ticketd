@@ -31,14 +31,14 @@ export function FileName({
   );
   if (!open || gone)
     return (
-      <code className="chat-file" title={path}>
+      <code className="chat-file-name" title={path}>
         {text}
       </code>
     );
   return (
     <button
       type="button"
-      className="chat-file"
+      className="chat-file-name"
       aria-label={`Open ${path}`}
       title={path}
       onClick={() =>

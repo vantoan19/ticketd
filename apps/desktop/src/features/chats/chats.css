@@ -632,7 +632,7 @@ button.chat-steps:hover {
 }
 /* A file a step named: the mono name is the button. Short of room it truncates
    in the middle, so its end and extension stay. */
-.chat-file {
+.chat-file-name {
   display: inline-flex;
   max-width: 100%;
   min-width: 0;
@@ -653,10 +653,10 @@ button.chat-steps:hover {
 .chat-file-tail {
   flex: none;
 }
-button.chat-file:hover {
+button.chat-file-name:hover {
   background: var(--accent);
 }
-button.chat-file:focus-visible,
+button.chat-file-name:focus-visible,
 .chat-record-link:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
