@@ -309,11 +309,19 @@ export function createBridge(deps: BridgeDeps) {
    */
   async function listOptions(command: Extract<Command, { cmd: "options" }>) {
     const abort = new AbortController();
-    const never = async function* (): AsyncGenerator<SDKUserMessage> {
-      await new Promise<void>((resolve) =>
-        abort.signal.addEventListener("abort", () => resolve(), { once: true }),
-      );
-    };
+    // An input stream whose first message never comes; it ends on abort.
+    const never = (): AsyncIterable<SDKUserMessage> => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise<IteratorResult<SDKUserMessage>>((resolve) =>
+            abort.signal.addEventListener(
+              "abort",
+              () => resolve({ done: true, value: undefined }),
+              { once: true },
+            ),
+          ),
+      }),
+    });
     let query: SdkQuery | undefined;
     let models: ModelOption[] = [];
     let account: Extract<BridgeEventBody, { event: "options" }>["account"] =
