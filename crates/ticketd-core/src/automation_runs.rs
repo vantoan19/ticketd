@@ -77,6 +77,8 @@ pub struct AutomationRunTicket {
 pub struct AutomationRun {
     pub id: String,
     pub automation_id: String,
+    /// The Automation as it is called now, deleted or not.
+    pub automation_name: String,
     /// The Workspace event that started it.
     pub event: WorkspaceEvent,
     pub ticket: Option<AutomationRunTicket>,
@@ -130,8 +132,8 @@ fn named<T: serde::de::DeserializeOwned>(text: String) -> Result<T, Error> {
 
 fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<AutomationRun>, Error> {
     let mut statement = connection.prepare(&format!(
-        "SELECT r.id, r.automation_id, r.event, r.definition, r.status, r.reason, r.created_at, r.started_at, r.ended_at, t.id, t.reference, t.title
-         FROM automation_runs r LEFT JOIN tickets t ON t.id = r.ticket_id WHERE {filter} ORDER BY r.rowid DESC"
+        "SELECT r.id, r.automation_id, r.event, r.definition, r.status, r.reason, r.created_at, r.started_at, r.ended_at, t.id, t.reference, t.title, a.name
+         FROM automation_runs r JOIN automations a ON a.id = r.automation_id LEFT JOIN tickets t ON t.id = r.ticket_id WHERE {filter} ORDER BY r.rowid DESC"
     ))?;
     let rows = statement
         .query_map([value], |row| {
@@ -154,6 +156,7 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, Option<String>>(8)?,
                 ticket,
+                row.get::<_, String>(12)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -173,6 +176,7 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                 started,
                 ended,
                 ticket,
+                automation_name,
             )| {
                 let reached = steps
                     .query_map([&id], |row| {
@@ -202,6 +206,7 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                         .collect::<Result<_, Error>>()?,
                     id,
                     automation_id,
+                    automation_name,
                     event: serde_json::from_str(&event)?,
                     ticket,
                     definition: serde_json::from_str(&definition)?,
@@ -522,5 +527,12 @@ impl Workspace {
     // makes thousands of runs in that time.
     pub fn automation_runs(&self, automation_id: &str) -> Result<Vec<AutomationRun>, Error> {
         read(&self.connection, "r.automation_id = ?1", automation_id)
+    }
+
+    /// The runs of every Automation, newest first.
+    // ponytail: unpaged like the list above; the same retention bounds it.
+    pub fn all_automation_runs(&self) -> Result<Vec<AutomationRun>, Error> {
+        // `read` filters on one value; this filter passes every run.
+        read(&self.connection, "?1 = ''", "")
     }
 }

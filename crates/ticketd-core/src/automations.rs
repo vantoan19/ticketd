@@ -626,6 +626,17 @@ impl Workspace {
         one(&self.connection, &id)
     }
 
+    /// A new Automation with the same trigger, conditions and steps, named as a
+    /// copy. Like any new Automation it is off, whatever the original is.
+    pub fn duplicate_automation(&mut self, id: &str) -> Result<Automation, Error> {
+        let mut definition = one(&self.connection, id)?.definition;
+        if !definition.name.is_empty() {
+            definition.name.push_str(" copy");
+        }
+        // Step ids only have to be unique within one Automation, so the copy keeps them.
+        self.create_automation(definition)
+    }
+
     /// Replaces the whole definition. An edit that leaves something unfinished
     /// switches the Automation off here, so one that is on can always run.
     pub fn update_automation(

@@ -6,8 +6,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 use ticketd_chat_host::WorkspaceOpener;
 use ticketd_core::{
-    Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationRun,
-    AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
+    Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationExample,
+    AutomationRun, AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
 };
 
 use crate::chat_commands::ChatBridge;
@@ -82,6 +82,22 @@ pub fn automation_create() -> Result<Automation, String> {
         .map_err(|error| error.to_string())
 }
 
+/// One of the examples the empty page offers, as an Automation that is off.
+#[tauri::command]
+pub fn automation_create_example(example: AutomationExample) -> Result<Automation, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.create_example_automation(example))
+        .map_err(|error| error.to_string())
+}
+
+/// A copy of an Automation, off.
+#[tauri::command]
+pub fn automation_duplicate(id: String) -> Result<Automation, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.duplicate_automation(&id))
+        .map_err(|error| error.to_string())
+}
+
 /// Replaces the whole definition: renaming and reshaping are the same edit.
 #[tauri::command]
 pub fn automation_update(
@@ -112,6 +128,9 @@ pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, S
 #[derive(serde::Serialize)]
 pub struct ListedRun {
     id: String,
+    automation_id: String,
+    /// The Automation as it is called now.
+    automation_name: String,
     status: AutomationRunStatus,
     /// Why it needs attention.
     reason: Option<String>,
@@ -119,22 +138,35 @@ pub struct ListedRun {
     created_at: String,
 }
 
+impl From<AutomationRun> for ListedRun {
+    fn from(run: AutomationRun) -> Self {
+        Self {
+            id: run.id,
+            automation_id: run.automation_id,
+            automation_name: run.automation_name,
+            status: run.status,
+            reason: run.reason,
+            ticket: run.ticket,
+            created_at: run.created_at,
+        }
+    }
+}
+
 /// An Automation's runs on this device, newest first.
 #[tauri::command]
 pub fn automation_run_list(automation_id: String) -> Result<Vec<ListedRun>, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_runs(&automation_id))
-        .map(|runs| {
-            runs.into_iter()
-                .map(|run| ListedRun {
-                    id: run.id,
-                    status: run.status,
-                    reason: run.reason,
-                    ticket: run.ticket,
-                    created_at: run.created_at,
-                })
-                .collect()
-        })
+        .map(|runs| runs.into_iter().map(ListedRun::from).collect())
+        .map_err(|error| error.to_string())
+}
+
+/// The runs of every Automation on this device, newest first.
+#[tauri::command]
+pub fn automation_run_list_all() -> Result<Vec<ListedRun>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.all_automation_runs())
+        .map(|runs| runs.into_iter().map(ListedRun::from).collect())
         .map_err(|error| error.to_string())
 }
 
