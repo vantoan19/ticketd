@@ -227,6 +227,9 @@ pub struct ChatState {
     pub opening: Option<&'static str>,
     pub catching_up: bool,
     pub steering: Steering,
+    /// Stop was asked for and the harness has not ended the turn; Stop waits. Not set
+    /// once the wait ran out unconfirmed, so Stop can be asked for again.
+    pub stopping: bool,
     pub links: Vec<LinkedRecord>,
     pub queue: Vec<Queued>,
     pub queue_paused: bool,
@@ -1114,12 +1117,19 @@ pub fn chat_state(
         catching_up: false,
         steering: Steering {
             available: live.steering.is_some(),
-            // "Send adds this to the turn in progress" already says the plain case.
-            effect: live
-                .steering
-                .filter(|steering| steering.interrupts_tools)
-                .map(|_| format!("Sending now may interrupt tools {name} is running.")),
+            // Said beside Steer, so the person knows what it does before choosing it.
+            effect: live.steering.map(|steering| {
+                if steering.interrupts_tools {
+                    format!("May interrupt tools {name} is running")
+                } else {
+                    "Joins after the current tool finishes".to_owned()
+                }
+            }),
         },
+        stopping: matches!(
+            live.stop,
+            Some(StopState::Requested | StopState::Acknowledged)
+        ),
         links: around.links.clone(),
         queue: around.queue.clone(),
         queue_paused: chat.queue_paused,

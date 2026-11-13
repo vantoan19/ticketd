@@ -15,6 +15,7 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
+import { drafts } from "@/features/chats/drafts";
 import {
   chatState,
   createMockChatClient,
@@ -28,7 +29,11 @@ window.ResizeObserver = class {
   disconnect() {}
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // What was typed in one test is not a draft in the next.
+  drafts.clear();
+});
 
 const at = "2026-11-10T10:00:00Z";
 const reply = (id: string, text: string): TranscriptItem => ({
@@ -101,41 +106,68 @@ const openMenu = (name: string) =>
 
 test("an idle Chat sends what was typed and shows the turn as working, not done", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
+  // Send names its action even while there is nothing to send; no Stop yet.
   expect(button("Send")).toHaveProperty("disabled", true);
+  noButton("Stop");
   type("Add a rate limiter");
   fireEvent.click(button("Send"));
   expect(await screen.findByText("Add a rate limiter")).toBeTruthy();
   expect((await screen.findByRole("status")).textContent).toContain("Working");
-  await waitFor(() => expect(composer()).toHaveProperty("value", ""));
-  // With nothing typed, the one button is Stop.
-  expect(button("Stop")).toBeTruthy();
+  await waitFor(() =>
+    expect(composer("Steer Codex")).toHaveProperty("value", ""),
+  );
+  // A turn runs: Stop sits beside the button, which now reads Steer.
+  expect(button("Stop").getAttribute("aria-keyshortcuts")).toBe("Escape");
+  expect(button("Steer")).toHaveProperty("disabled", true);
   noButton("Send");
 });
 
-test("while a turn runs, typed text can steer it or be queued, and the queue stays visible", async () => {
-  await open(one({ id: "c1", title: "Limiter", activity: "working" }));
-  type("also cover the admin login");
-  expect(
-    screen.getByText(
-      "Send adds this to the turn in progress. Queue holds it until the turn ends.",
-    ),
-  ).toBeTruthy();
-  // Stop stays beside Send and Queue while text is typed.
-  expect(button("Stop")).toBeTruthy();
-  fireEvent.click(button("Queue until this turn ends"));
+test("while a turn runs, Enter steers, Cmd+Enter queues, and the caret holds both", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      steering: {
+        available: true,
+        effect: "Joins after the current tool finishes",
+      },
+    }),
+  );
+  type("also cover the admin login", "Steer Codex");
+  fireEvent.keyDown(composer("Steer Codex"), { key: "Enter", metaKey: true });
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("also cover the admin login")).toBeTruthy();
-  type("use Redis");
-  fireEvent.click(button("Send"));
+  expect(screen.getByText("Queued 1")).toBeTruthy();
+  expect(screen.getByText("After this turn")).toBeTruthy();
+
+  type("use Redis", "Steer Codex");
+  fireEvent.keyDown(composer("Steer Codex"), { key: "Enter" });
   expect(await screen.findByText("use Redis")).toBeTruthy();
   expect(within(queue).queryByText("use Redis")).toBeNull();
-  fireEvent.click(button("Remove queued message"));
+
+  // With nothing typed there is nothing to send another way.
+  expect(button("More ways to send")).toHaveProperty("disabled", true);
+  type("and the reset link", "Steer Codex");
+  openMenu("More ways to send");
+  const menu = await screen.findByRole("menu");
+  expect(within(menu).getByText("Steer now")).toBeTruthy();
+  expect(
+    within(menu).getByText("Joins after the current tool finishes"),
+  ).toBeTruthy();
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /Queue/ }));
+  expect(await within(queue).findByText("and the reset link")).toBeTruthy();
+
+  for (const remove of screen.getAllByRole("button", {
+    name: "Remove from queue",
+  }))
+    fireEvent.click(remove);
   await waitFor(() =>
     expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull(),
   );
 });
 
-test("a harness that cannot be steered only offers Queue, and says why", async () => {
+test("a harness that cannot be steered reads Queue, with no caret", async () => {
   await open(
     one({
       id: "c1",
@@ -144,20 +176,22 @@ test("a harness that cannot be steered only offers Queue, and says why", async (
       steering: { available: false },
     }),
   );
-  type("then update the docs");
+  type("then update the docs", "Queue for Codex");
   noButton("Send");
+  noButton("Steer");
+  noButton("More ways to send");
   expect(button("Stop")).toBeTruthy();
-  expect(
-    screen.getByText(
-      "Codex can't take messages mid-turn. This will be queued until the turn ends.",
-    ),
-  ).toBeTruthy();
+  expect(button("Queue").getAttribute("aria-description")).toContain(
+    "Codex can't steer, so this waits for the turn to end.",
+  );
   fireEvent.click(button("Queue"));
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("then update the docs")).toBeTruthy();
+  // Send now cannot reach a turn that cannot be steered.
+  noButton("Send now");
 });
 
-test("Stop marks the turn, pauses the queue and waits for Resume", async () => {
+test("Esc stops the turn and pauses the queue, which waits for Resume", async () => {
   const client = await open(
     one({
       id: "c1",
@@ -166,53 +200,115 @@ test("Stop marks the turn, pauses the queue and waits for Resume", async () => {
       queue: [{ id: "q1", text: "then add tests" }],
     }),
   );
-  fireEvent.click(button("Stop"));
+  type("a draft", "Steer Codex");
+  fireEvent.keyDown(composer("Steer Codex"), { key: "Escape" });
   expect(
     await screen.findByText(
       "You stopped this turn. Edits already made are kept.",
     ),
   ).toBeTruthy();
-  expect(
-    screen.getByText("Queue paused. Nothing sends until you resume."),
-  ).toBeTruthy();
+  // The draft is kept; the queue shows it is paused.
+  expect(composer()).toHaveProperty("value", "a draft");
+  expect(screen.getByText("Paused")).toBeTruthy();
   expect(screen.getByText("then add tests")).toBeTruthy();
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
   fireEvent.click(button("Resume"));
-  await waitFor(() =>
-    expect(
-      screen.queryByText("Queue paused. Nothing sends until you resume."),
-    ).toBeNull(),
-  );
+  await waitFor(() => expect(screen.queryByText("Paused")).toBeNull());
 });
 
-test("an approval sets its command in code and its reason as prose", async () => {
+test("Stop waits while stopping and is the retry once the stop is not confirmed", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working", stopping: true }),
+  );
+  expect(button("Stop")).toHaveProperty("disabled", true);
+  // Send waits for the turn to end.
+  type("next", "Message Codex");
+  expect(button("Send")).toHaveProperty("disabled", true);
+  act(() =>
+    client.patch("c1", {
+      stopping: false,
+      problem: { kind: "stop_unconfirmed" },
+    }),
+  );
+  expect(await screen.findByText("Stop not confirmed")).toBeTruthy();
+  expect(screen.getByText("Codex may still be running.")).toBeTruthy();
+  noButton("Check again");
+  expect(button("Stop")).toHaveProperty("disabled", false);
+});
+
+test("a queued message can be sent now, alone, or moved back into the message box", async () => {
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      queue_paused: true,
+      queue: [
+        { id: "q1", text: "then add tests" },
+        { id: "q2", text: "and a changelog entry" },
+      ],
+    }),
+  );
+  type("draft");
+  const second = screen.getByText("and a changelog entry").closest("li");
+  if (!second) throw new Error("no card");
+  fireEvent.click(
+    within(second).getByRole("button", { name: "Edit in the message box" }),
+  );
+  await waitFor(() =>
+    expect(composer()).toHaveProperty(
+      "value",
+      "draft\n\nand a changelog entry",
+    ),
+  );
+  expect(
+    screen.queryByText("and a changelog entry", { selector: "li *" }),
+  ).toBeNull();
+
+  fireEvent.click(button("Send now"));
+  expect(
+    await screen.findByText("then add tests", { selector: ".chat-you" }),
+  ).toBeTruthy();
+  const { chat } = await client.openChat("c1");
+  expect(chat.queue).toEqual([]);
+  expect(chat.queue_paused).toBe(true);
+});
+
+test("a pending approval waits in the dock with its command inline, never in the transcript", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [
       { ...approval, reason: "Allow installing the PagerDuty client?" },
     ]),
   );
-  const card = screen.getByRole("region", { name: "Approval request" });
-  const command = within(card).getByText("npm install @pagerduty/pdjs");
-  const reason = within(card).getByText(
-    "Allow installing the PagerDuty client?",
+  const request = screen.getByRole("group", {
+    name: "Codex wants to run a command: npm install @pagerduty/pdjs",
+  });
+  expect(within(request).getByText("npm install @pagerduty/pdjs").tagName).toBe(
+    "CODE",
   );
-  expect(command.tagName).toBe("PRE");
-  expect(reason.tagName).toBe("P");
-  expect(command.contains(reason)).toBe(false);
+  expect(request.getAttribute("aria-describedby")).toBeTruthy();
+  expect(
+    within(request).getByText("Allow installing the PagerDuty client?").tagName,
+  ).toBe("P");
+  const conversation = document.querySelector(".chat-scroll");
+  expect(conversation?.textContent).not.toContain("npm install");
+  // Typed text never answers an approval: the button keeps the turn's word.
+  type("and pin the version", "Steer Codex");
+  expect(button("Steer")).toBeTruthy();
 });
 
-test("an approval is answered once and becomes a receipt without buttons", async () => {
+test("an approval is answered from the dock and becomes a receipt without buttons", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [approval]),
   );
-  const card = screen.getByRole("region", { name: "Approval request" });
-  expect(within(card).getByText("npm install @pagerduty/pdjs")).toBeTruthy();
-  fireEvent.click(within(card).getByRole("button", { name: "Allow once" }));
+  fireEvent.click(button("Allow once"));
   const receipt = await screen.findByRole("region", {
     name: "Answered request",
   });
   expect(receipt.textContent).toContain('You chose "Allow once"');
   expect(within(receipt).queryByRole("button")).toBeNull();
+  expect(screen.queryByRole("group", { name: /wants to run/ })).toBeNull();
+  // Answering returns focus to the message box.
+  expect(document.activeElement).toBe(composer("Steer Codex"));
 });
 
 test("an expired request cannot be answered", async () => {
@@ -235,7 +331,7 @@ test("answering a request that expired behind a lost update is refused, then the
   act(() => client.push("c1", { ...approval, state: "expired" }));
   fireEvent.click(button("Allow once"));
   expect((await screen.findByRole("alert")).textContent).toBe(
-    "This request is no longer waiting for an answer.",
+    "The request had closed; your answer wasn't applied.",
   );
   // The next change exposes the gap; the view takes a fresh snapshot.
   act(() => client.patch("c1", { activity: "idle" }));
@@ -245,36 +341,83 @@ test("answering a request that expired behind a lost update is refused, then the
   noButton("Allow once");
 });
 
-test("a question takes an option or a typed answer", async () => {
-  const question: TranscriptItem = {
-    id: "q-1",
-    at,
-    kind: "request",
-    request: "question",
-    title: "What should the limiter do when Redis is unreachable?",
-    options: [
-      {
-        id: "open",
-        label: "Fail open",
-        description: "Let logins through and log a warning",
-      },
-      { id: "closed", label: "Fail closed" },
-    ],
-    free_text: true,
-    state: "pending",
-  };
+const question: TranscriptItem = {
+  id: "q-1",
+  at,
+  kind: "request",
+  request: "question",
+  title: "Codex is asking you",
+  subject: "What should the limiter do when Redis is unreachable?",
+  options: [
+    {
+      id: "open",
+      label: "Fail open",
+      description: "Let logins through and log a warning",
+    },
+    { id: "closed", label: "Fail closed" },
+  ],
+  free_text: true,
+  state: "pending",
+};
+
+test("a question takes an option by key inside the request, or a typed answer", async () => {
   const client = await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
   );
-  expect(
-    screen.getByRole("region", { name: "Question from Codex" }),
-  ).toBeTruthy();
-  expect(screen.getByText("Or type your own answer below.")).toBeTruthy();
-  type("Fail open for five minutes", "Answer Codex");
+  const request = screen.getByRole("group", {
+    name: "What should the limiter do when Redis is unreachable?",
+  });
+  const open_ = within(request).getByRole("button", { name: /Fail open/ });
+  expect(open_.getAttribute("aria-keyshortcuts")).toBe("1");
+  // ↑ from the empty message box reaches the options; ↓ from the last returns.
+  const box = composer("Answer, or pick above");
+  box.focus();
+  fireEvent.keyDown(box, { key: "ArrowUp" });
+  const closed = within(request).getByRole("button", { name: "Fail closed" });
+  expect(document.activeElement).toBe(closed);
+  fireEvent.keyDown(closed, { key: "ArrowDown" });
+  expect(document.activeElement).toBe(box);
+
+  type("Fail open for five minutes", "Answer, or pick above");
   fireEvent.click(button("Send"));
   expect((await screen.findByText(/You answered/)).textContent).toBeTruthy();
   const { items } = await client.openChat("c1");
   expect(items.filter((item) => item.kind === "user")).toEqual([]);
+});
+
+test("digits pick a question's option only while focus is inside the request", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+  );
+  fireEvent.keyDown(composer("Answer, or pick above"), { key: "2" });
+  expect(
+    screen.getByRole("group", { name: /Redis is unreachable/ }),
+  ).toBeTruthy();
+  fireEvent.keyDown(button(/Fail open/), { key: "2" });
+  expect(
+    (await screen.findByRole("region", { name: "Answered request" }))
+      .textContent,
+  ).toContain('You chose "Fail closed"');
+});
+
+test("a request arriving mid-draft takes no focus, and the draft keeps its meaning", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }),
+  );
+  composer("Steer Codex").focus();
+  type("use Redis", "Steer Codex");
+  act(() => {
+    client.push("c1", question);
+    client.patch("c1", { activity: "waiting" });
+  });
+  await screen.findByRole("group", { name: /Redis is unreachable/ });
+  expect(composer("Steer Codex")).toHaveProperty("value", "use Redis");
+  // A request never takes focus from the message box.
+  expect(document.activeElement).toBe(composer("Steer Codex"));
+  expect(button("Steer")).toBeTruthy();
+  // Emptied, the box answers the question.
+  type("", "Steer Codex");
+  expect(composer("Answer, or pick above")).toBeTruthy();
 });
 
 test("an uncertain delivery is never resent unless the person says so", async () => {

@@ -48,6 +48,11 @@ pub(crate) enum Command {
     },
     Stop(Reply<()>),
     ResumeQueue(Reply<()>),
+    /// The person asked for one queued input to go out now, ahead of the queue.
+    SendQueuedNow {
+        message_id: String,
+        reply: Reply<()>,
+    },
     Respond {
         interaction_id: String,
         answer: InteractionAnswer,
@@ -176,6 +181,9 @@ pub(crate) struct Supervisor {
     active: Option<ActiveTurn>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
     direct: VecDeque<String>,
+    /// The inputs in `direct` that the person took out of the queue with Send now.
+    /// They had no row on screen, so their history moves to where they are sent.
+    direct_from_queue: HashSet<String>,
     /// Input the person asked to send again although its delivery is uncertain.
     resend: Option<String>,
     /// Selected history for a fresh session, sent with the next new turn.
@@ -251,6 +259,7 @@ impl Supervisor {
             unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
+            direct_from_queue: HashSet::new(),
             resend: None,
             preamble: None,
             session_context: None,
@@ -389,6 +398,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.resend = None;
         self.problem = Some(problem);
     }
@@ -427,6 +437,9 @@ impl Supervisor {
                     }
                 }
                 let _ = reply.send(result.map(|_| ()).map_err(HostError::from));
+            }
+            Command::SendQueuedNow { message_id, reply } => {
+                let _ = reply.send(self.send_queued_now(message_id));
             }
             Command::Respond {
                 interaction_id,
@@ -530,6 +543,28 @@ impl Supervisor {
         Ok(message)
     }
 
+    /// Sends one queued input now: it steers the turn in progress or starts one. Only
+    /// that input goes; a paused queue stays paused. Refused while a turn runs that
+    /// cannot be steered, since the input could only wait in the queue where it is.
+    fn send_queued_now(&mut self, message_id: String) -> Result<(), HostError> {
+        if let Some(detail) = &self.storage_failed {
+            return Err(HostError::StorageFailed(detail.clone()));
+        }
+        if self.active.is_some() && self.steering().is_none() {
+            return Err(HostError::Working);
+        }
+        let chat = self.chat_id.clone();
+        let queued = self.core(|core| core.chat_queue(&chat))?;
+        if !queued.iter().any(|message| message.id == message_id) {
+            return Err(Error::Chat("this input is not in the queue".to_owned()).into());
+        }
+        if !self.direct.contains(&message_id) {
+            self.direct_from_queue.insert(message_id.clone());
+            self.direct.push_back(message_id);
+        }
+        Ok(())
+    }
+
     /// Whether the queue, not paused, holds input saved before `message_id`.
     fn older_input_waits(&self, message_id: &str) -> bool {
         let chat = self.chat_id.clone();
@@ -550,6 +585,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.direct.clear();
+        self.direct_from_queue.clear();
         if self.active.is_some() {
             self.interrupt();
         } else if self.unconfirmed_start.is_some()
@@ -584,6 +620,7 @@ impl Supervisor {
         }
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.problem = None;
         self.resend = Some(message_id);
         Ok(())
@@ -600,6 +637,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.stop = None;
         self.stop_deadline = None;
     }
@@ -863,6 +901,7 @@ impl Supervisor {
         self.text.clear();
         self.pending_tools.clear();
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.resend = None;
         self.stop = None;
         self.stop_deadline = None;
@@ -924,6 +963,7 @@ impl Supervisor {
         };
         if chat.trashed {
             self.direct.clear();
+            self.direct_from_queue.clear();
             self.resend = None;
             return;
         }
@@ -937,7 +977,9 @@ impl Supervisor {
                 Some(id) if idle || self.steering().is_some() => break id.clone(),
                 // Steering is not available: it stays in the visible queue.
                 Some(_) => {
-                    self.direct.pop_front();
+                    if let Some(id) = self.direct.pop_front() {
+                        self.direct_from_queue.remove(&id);
+                    }
                 }
                 None if idle
                     && !chat.queue_paused
@@ -972,6 +1014,7 @@ impl Supervisor {
             self.resend = None;
         } else if self.direct.front() == Some(&message_id) {
             self.direct.pop_front();
+            from_queue = self.direct_from_queue.remove(&message_id);
         } else {
             from_queue = true;
         }
@@ -1565,6 +1608,7 @@ impl Supervisor {
                         let chat = self.chat_id.clone();
                         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                         self.direct.clear();
+                        self.direct_from_queue.clear();
                     }
                 }
             }

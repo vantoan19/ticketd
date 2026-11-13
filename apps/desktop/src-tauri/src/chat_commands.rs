@@ -241,6 +241,15 @@ pub async fn chat_resume_queue(bridge: State<'_, ChatBridge>, chat_id: String) -
 }
 
 #[tauri::command]
+pub async fn chat_send_queued_now(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    queued_id: String,
+) -> Outcome<()> {
+    bridge.chats.send_queued_now(&chat_id, &queued_id).await
+}
+
+#[tauri::command]
 pub async fn chat_stop(bridge: State<'_, ChatBridge>, chat_id: String) -> Outcome<()> {
     bridge.chats.stop(&chat_id).await
 }

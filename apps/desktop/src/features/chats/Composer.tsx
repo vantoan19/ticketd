@@ -1,14 +1,15 @@
-import { useState } from "react";
-import { ArrowUp, Square } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, type Ref } from "react";
+import { Square } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import type { ComposerControls } from "@/features/chats/model";
+import { SendButton } from "@/features/chats/SendButton";
 
 /**
- * The message box and its one button group. Which buttons show is decided by
+ * The message box and its control row. The send button's word comes from
  * `controls`; the text is kept until the action it was typed for succeeds, so
- * a refused send never loses what was written. Enter sends, Shift+Enter adds
- * a line. Stop shows whenever `onStop` is given, whatever is typed.
+ * a refused send never loses what was written. Enter does what the button
+ * says, Shift+Enter adds a line, Cmd/Ctrl+Enter queues while a turn runs.
+ * Stop shows whenever `onStop` is given, whatever is typed.
  */
 export function Composer({
   placeholder,
@@ -18,6 +19,9 @@ export function Composer({
   onSend,
   onQueue,
   onStop,
+  stopping = false,
+  onArrowUpFromEmpty,
+  inputRef,
   autoFocus = false,
 }: {
   placeholder: string;
@@ -25,11 +29,16 @@ export function Composer({
   controls: (text: string) => ComposerControls;
   initialText?: string;
   onText?: (text: string) => void;
-  /** Resolve to clear the box; reject to keep the text. */
+  /** Send, steer or answer. Resolve to clear the box; reject to keep the text. */
   onSend: (text: string) => Promise<void>;
   onQueue?: (text: string) => Promise<void>;
   /** Pass only while a turn is in progress. */
   onStop?: () => void;
+  /** Stop was asked for and has not finished: Stop waits. */
+  stopping?: boolean;
+  /** ↑ in an empty box: what is above it (a request's options) takes focus. */
+  onArrowUpFromEmpty?: () => void;
+  inputRef?: Ref<HTMLTextAreaElement>;
   autoFocus?: boolean;
 }) {
   const [text, setTextState] = useState(initialText);
@@ -51,83 +60,69 @@ export function Composer({
       () => setBusy(false),
     );
   };
-  const primary =
-    state.kind === "queue-only"
-      ? onQueue
-      : state.kind === "steer" || (state.kind === "send" && state.enabled)
-        ? onSend
-        : undefined;
+  const primary = state.send === "queue" ? onQueue : onSend;
+  const queue = () => {
+    if (state.queues) submit(onQueue);
+  };
   return (
-    <>
-      <form
-        className="chat-composer"
-        onSubmit={(event) => {
+    <form
+      className="chat-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (state.enabled) submit(primary);
+      }}
+    >
+      <textarea
+        ref={inputRef}
+        rows={1}
+        aria-label={placeholder}
+        placeholder={placeholder}
+        value={text}
+        autoFocus={autoFocus}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (
+            event.key === "ArrowUp" &&
+            onArrowUpFromEmpty &&
+            text === "" &&
+            !event.shiftKey
+          ) {
+            event.preventDefault();
+            onArrowUpFromEmpty();
+            return;
+          }
+          if (event.key !== "Enter" || event.shiftKey) return;
           event.preventDefault();
-          submit(primary);
+          if ((event.metaKey || event.ctrlKey) && state.queues !== undefined)
+            queue();
+          else if (state.enabled) submit(primary);
         }}
-      >
-        <textarea
-          rows={1}
-          aria-label={placeholder}
-          placeholder={placeholder}
-          value={text}
-          autoFocus={autoFocus}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
-              event.preventDefault();
-              submit(primary);
-            }
-          }}
+      />
+      {/* The left of the row is for the harness's own controls (#368). */}
+      <div className="chat-composer-row">
+        <span className="chat-spacer" />
+        {onStop && (
+          <IconButton
+            type="button"
+            variant="outline"
+            label="Stop"
+            shortcut="Esc"
+            aria-keyshortcuts="Escape"
+            disabled={stopping}
+            onClick={onStop}
+          >
+            {/* Filled, the stop sign does not read as an empty checkbox. */}
+            <Square fill="currentColor" aria-hidden />
+          </IconButton>
+        )}
+        <SendButton
+          controls={state}
+          busy={busy}
+          onSteer={() => submit(onSend)}
+          onQueue={queue}
         />
-        <div className="chat-composer-buttons">
-          {onStop && (
-            <IconButton
-              type="button"
-              variant={state.kind === "stop" ? "default" : "outline"}
-              label="Stop"
-              onClick={onStop}
-            >
-              <Square aria-hidden />
-            </IconButton>
-          )}
-          {state.kind === "stop" ? null : state.kind === "queue-only" ? (
-            <Button type="submit" size="sm" disabled={busy}>
-              Queue
-            </Button>
-          ) : (
-            <>
-              {state.kind === "steer" && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Queue until this turn ends"
-                  disabled={busy}
-                  onClick={() => submit(onQueue)}
-                >
-                  Queue
-                </Button>
-              )}
-              <IconButton
-                type="submit"
-                variant="default"
-                label="Send"
-                disabled={busy || (state.kind === "send" && !state.enabled)}
-              >
-                <ArrowUp aria-hidden />
-              </IconButton>
-            </>
-          )}
-        </div>
-      </form>
-      {(state.kind === "steer" || state.kind === "queue-only") && (
-        <p className="chat-hint">{state.hint}</p>
-      )}
-    </>
+      </div>
+    </form>
   );
 }

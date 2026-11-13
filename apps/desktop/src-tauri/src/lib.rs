@@ -1666,6 +1666,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_send,
             chat_commands::chat_remove_queued,
             chat_commands::chat_resume_queue,
+            chat_commands::chat_send_queued_now,
             chat_commands::chat_stop,
             chat_commands::chat_answer,
             chat_commands::chat_resolve_uncertain,

@@ -1609,3 +1609,57 @@ async fn work_is_its_session_opening_until_the_sessions_first_turn_starts() {
     assert_eq!(f.live().await.activity, Activity::Working);
     assert_eq!(f.live().await.opening, None);
 }
+
+/// Send now on a queued card: during a turn it steers that input alone; the rest of
+/// the queue keeps waiting for the turn to end.
+#[tokio::test(start_paused = true)]
+async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.queue("later").await;
+    let now = f.queue("this one now").await;
+
+    f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
+    settle().await;
+
+    assert_eq!(
+        f.submits()[1].kind,
+        SubmissionKind::Steer {
+            expected_turn: turn_1()
+        }
+    );
+    assert_eq!(f.submits()[1].text, "this one now");
+    assert_eq!(f.queued(), ["later"]);
+}
+
+/// Send now on a paused queue starts a turn with that input only; the queue stays
+/// paused until the person resumes it.
+#[tokio::test(start_paused = true)]
+async fn send_now_on_a_paused_queue_sends_only_that_input() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.host.stop(&f.chat.id).await.unwrap();
+    f.queue("older").await;
+    let now = f.queue("this one now").await;
+
+    f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
+    settle().await;
+
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(texts(&f), ["this one now"]);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(texts(&f), ["this one now"], "the paused queue stays paused");
+    assert_eq!(f.queued(), ["older"]);
+}
+
+/// Without steering, a turn in progress cannot take it now: it stays in the queue.
+#[tokio::test(start_paused = true)]
+async fn send_now_is_refused_during_a_turn_that_cannot_be_steered() {
+    let f = Fixture::new(FakeAdapter::without_steering());
+    f.send("first").await;
+    let later = f.queue("later").await;
+
+    let refused = f.host.send_queued_now(&f.chat.id, &later.id).await;
+
+    assert!(matches!(refused, Err(HostError::Working)));
+    assert_eq!(f.queued(), ["later"]);
+}

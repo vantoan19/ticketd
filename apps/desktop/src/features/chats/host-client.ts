@@ -238,6 +238,8 @@ export function createHostChatClient(
     removeQueued: (id, queuedId) =>
       run("chat_remove_queued", { chatId: id, queuedId }),
     resumeQueue: (id) => run("chat_resume_queue", { chatId: id }),
+    sendQueuedNow: (id, queuedId) =>
+      run("chat_send_queued_now", { chatId: id, queuedId }),
     stop: (id) => run("chat_stop", { chatId: id }),
     answer: (id, requestId, answer) =>
       run("chat_answer", { chatId: id, requestId, answer }),

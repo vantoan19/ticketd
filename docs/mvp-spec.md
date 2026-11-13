@@ -1344,14 +1344,16 @@ whose outcome was not observed are each told as such, never as done or failed.
 Sending while work is active steers it when the effective harness capability
 supports the intended behavior; otherwise the input is visibly queued. Steering
 capabilities must describe effects such as interrupting tools. Provide explicit
-Queue and Stop actions. Queue ownership remains with ticketd. Only input known
+Queue and Stop actions. Queue ownership remains with ticketd. A queued message can
+be sent now on its own, steering active work or starting a turn; a paused queue
+stays paused. Only input known
 not to have been accepted can automatically fall back from steering to the queue;
 ambiguous delivery is preserved for reconciliation.
 
 Stop pauses further automatic queue dispatch and requests interruption of the
 active turn, retaining unsent input. An interruption acknowledgment does not prove
 every tool stopped or undo completed effects. Distinguish confirmed interruption
-from a timeout or loss of contact.
+from a timeout or loss of contact; Stop can be requested again while unconfirmed.
 
 Execution belongs to the desktop backend, independently of the current view.
 Navigating away or closing the window keeps active work running. Reopening attaches
