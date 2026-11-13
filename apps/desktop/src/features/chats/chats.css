@@ -140,19 +140,43 @@
   flex-direction: column;
   min-height: 0;
 }
-/* column-reverse keeps a long transcript pinned to its newest message; the
-   spacer puts a short one at the top. */
+/* The reading position is held in code (useTranscriptScroll): WebKit has no
+   CSS scroll anchoring. The spacer seats a short transcript at the bottom. */
+.chat-reading {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .chat-scroll {
   flex: 1;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   min-height: 0;
   padding: 32px 32px 8px;
   overflow-y: auto;
+  overflow-anchor: none;
 }
 .chat-scroll::before {
   content: "";
   flex: 1 1 0;
+}
+/* Jump to latest: centred 12px above the dock, whenever the reader isn't following. */
+.chat-jump {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
+}
+.chat-jump:not([data-shown]) {
+  visibility: hidden;
+}
+.chat-new-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .chat-col {
   flex: none;
@@ -242,14 +266,145 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
+/* A step row: one 28px line, `[icon] Verb target · suffix`; it wraps when
+   narrow. As a button its hover fill reaches 8px past the text. */
 .chat-steps {
-  gap: 4px;
+  align-items: flex-start;
+  gap: 8px;
   width: fit-content;
+  max-width: calc(100% + 16px);
+  min-height: 28px;
+  margin-left: -8px;
+  padding: 4px 8px;
   border-radius: var(--radius);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
 }
-.chat-steps:focus-visible {
+button.chat-steps:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.chat-steps:focus-visible,
+.chat-fold:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+.chat-row-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
+}
+.chat-row-icon:empty {
+  display: none;
+}
+.chat-step-words {
+  min-width: 0;
+}
+/* A row's chevron shows on hover, focus or while open. */
+.chat-steps .chat-chevron {
+  flex: none;
+  margin-top: 3px;
+  opacity: 0;
+}
+.chat-steps:hover .chat-chevron,
+.chat-steps:focus-visible .chat-chevron,
+.chat-steps[aria-expanded="true"] .chat-chevron {
+  opacity: 1;
+}
+.chat-steps .ui-reference {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The turn row: muted, its chevron after the text and always shown. */
+.chat-fold {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% + 16px);
+  min-height: 32px;
+  margin: -6px 0 -6px -8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.chat-fold:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.chat-fold > svg {
+  flex: none;
+}
+.chat-turnpart,
+.chat-turn-rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-fold + .chat-turn-rows {
+  margin-top: 8px;
+}
+.chat-turn-rows[data-folded] {
+  padding-left: 16px;
+}
+.chat-turn-response {
+  margin: 4px 0 8px;
+}
+.chat-turn-response:first-child {
+  margin-top: 0;
+}
+/* The rows below a response sit close under it. */
+.chat-below {
+  margin-top: -12px;
+}
+@container ticket-detail (max-width: 400px) {
+  .chat-turn-rows[data-folded] {
+    padding-left: 12px;
+  }
+}
+/* A command's detail: `$ command`, output and Copy, at most 12 lines. */
+.chat-output {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--code-block, var(--recessed));
+  box-shadow: var(--shadow-border-base);
+}
+.chat-output-view {
+  max-height: 264px;
+  margin-right: 32px;
+  overflow: auto;
+}
+.chat-output-view:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+.chat-output pre {
+  margin: 0;
+  padding: 12px 0 12px 12px;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-variant-ligatures: none;
+  line-height: 20px;
+  white-space: pre;
+}
+.chat-output-prompt {
+  color: var(--disabled-foreground);
+  user-select: none;
+}
+.chat-output-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
 }
 .chat-line .chat-spacer {
   flex: 1;
@@ -268,8 +423,8 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: -12px 0 0;
-  padding: 0 0 0 2px;
+  margin: 0 0 4px 24px;
+  padding: 0;
   list-style: none;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
@@ -545,40 +700,6 @@
     outline: 1px solid CanvasText;
   }
 }
-.chat-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.chat-card-title {
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  font-weight: 500;
-}
-.chat-card-text {
-  color: var(--foreground);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.chat-code {
-  margin: 0;
-  padding: 10px 12px;
-  overflow-x: auto;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  line-height: 20px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 /* The heading, composer and chips sit in the middle row; notices that arrive
    later fill the row under them, so nothing above moves. */
 .chat-new {
@@ -677,50 +798,6 @@
 .chat-chip-title {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-records {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.chat-records ul {
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  list-style: none;
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-}
-.chat-records li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px 12px;
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.chat-records li + li {
-  box-shadow: inset 0 1px 0 0 var(--group-hairline);
-}
-.chat-records li > svg {
-  flex: none;
-}
-.chat-rec-main {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-rec-what {
-  flex: none;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
   white-space: nowrap;
 }
 .chat-pop {

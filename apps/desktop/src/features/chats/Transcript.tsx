@@ -1,6 +1,16 @@
-import { Fragment, memo, useEffect, useId, useState } from "react";
 import {
-  Ban,
+  Fragment,
+  memo,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
+import {
+  ArrowDown,
   Check,
   ChevronDown,
   ChevronRight,
@@ -16,6 +26,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Reference } from "@/components/ui/reference";
+import { StatusDot } from "@/components/ui/status-dot";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -27,11 +44,17 @@ import type {
 } from "@/features/chats/client";
 import {
   binarySize,
+  duration,
   elapsed,
-  mergeSteps,
+  receiptLine,
   stepWords,
   targetLines,
+  turns,
+  type Turn,
+  type TurnRow,
 } from "@/features/chats/model";
+import { OutputBox } from "@/features/chats/OutputBox";
+import { useFollowing } from "@/features/chats/use-transcript-scroll";
 
 type Of<K extends TranscriptItem["kind"]> = Extract<
   TranscriptItem,
@@ -118,7 +141,18 @@ function Response({
   );
 }
 
-/** What an opened step row holds: its command, its targets or its output. */
+/** The current time, ticking each second while `on`. */
+function useNow(on: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [on]);
+  return now;
+}
+
+/** What an opened step row holds: its command and output, its targets or its output. */
 function StepDetail({
   id,
   step,
@@ -130,12 +164,12 @@ function StepDetail({
 }) {
   const targets = step.targets ?? [];
   const words = stepWords(step);
+  const command = step.kind === "run" ? step.command : undefined;
   return (
-    <div className="chat-steplist" id={id}>
-      {step.kind === "run" && step.command && (
-        <pre className="chat-out">$ {step.command}</pre>
-      )}
-      {targets.length > 2 ? (
+    <div className="chat-steplist" id={command ? undefined : id}>
+      {command ? (
+        <OutputBox id={id} command={command} output={step.output} />
+      ) : targets.length > 2 ? (
         <ul>
           {targets.map((target, index) => (
             <li key={index}>
@@ -166,150 +200,381 @@ function StepDetail({
   );
 }
 
-function StepRow({ step, harness }: { step: Step; harness: string }) {
+/** One 28px line: `[icon] words`, then a chevron when it opens. */
+function RowLine({
+  icon,
+  children,
+}: {
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <span className="chat-row-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="chat-step-words">{children}</span>
+    </>
+  );
+}
+
+/**
+ * One step: `[icon] Verb target · suffix`. While it runs, and the view is live
+ * rather than replaying history, the spinner takes the icon's slot and a clock
+ * counts from the host's start time. `decision` is the answered approval the step
+ * waited on, shown as its tooltip and description.
+ */
+export function StepRow({
+  step,
+  harness,
+  decision,
+  live,
+}: {
+  step: Step;
+  harness: string;
+  decision?: string | undefined;
+  live: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const described = useId();
   const words = stepWords(step);
+  const running = live && step.state === "running";
+  const now = useNow(running && Boolean(step.started_at));
+  const started = step.started_at ? Date.parse(step.started_at) : NaN;
+  const clock =
+    running && now - started >= 1000 ? duration(now - started) : undefined;
   const line = (
-    <span className="chat-step-words">
+    <RowLine
+      icon={
+        running ? <LoaderCircle size={12} className="chat-spin" /> : undefined
+      }
+    >
       {words.parts.map((part, index) => (
         <Fragment key={index}>
           {index > 0 && " "}
           {part.code ? <code>{part.text}</code> : part.text}
         </Fragment>
       ))}
-      {words.suffix && (
+      {words.suffix ? (
         <>
           <span aria-hidden> · </span>
           <span data-outcome={words.suffix.outcome ? "" : undefined}>
             {words.suffix.text}
           </span>
         </>
+      ) : (
+        clock && <span aria-hidden="true"> · {clock}</span>
       )}
-    </span>
+      {decision && (
+        <span id={described} className="sr-only">
+          {decision}
+        </span>
+      )}
+    </RowLine>
   );
   const detail =
     (step.kind === "run" && Boolean(step.command)) ||
     Boolean(step.output) ||
     (step.targets?.length ?? 0) > 2 ||
     Boolean(words.detail || step.result || step.truncated);
-  if (!detail) return <div className="chat-steps">{line}</div>;
+  const row = detail ? (
+    <button
+      type="button"
+      className="chat-steps"
+      data-anchor=""
+      aria-expanded={open}
+      aria-controls={open ? id : undefined}
+      aria-label={words.label}
+      aria-describedby={decision ? described : undefined}
+      onClick={() => setOpen(!open)}
+    >
+      {line}
+      {open ? (
+        <ChevronDown size={14} className="chat-chevron" aria-hidden />
+      ) : (
+        <ChevronRight size={14} className="chat-chevron" aria-hidden />
+      )}
+    </button>
+  ) : (
+    <div
+      className="chat-steps"
+      data-anchor=""
+      // A row carrying a decision takes focus, so its tooltip shows from the keyboard.
+      tabIndex={decision ? 0 : undefined}
+      aria-describedby={decision ? described : undefined}
+    >
+      {line}
+    </div>
+  );
   return (
     <>
-      <button
-        type="button"
-        className="chat-steps"
-        aria-expanded={open}
-        aria-controls={open ? id : undefined}
-        aria-label={words.label}
-        onClick={() => setOpen(!open)}
-      >
-        {line}
-        {open ? (
-          <ChevronDown size={14} aria-hidden />
-        ) : (
-          <ChevronRight size={14} aria-hidden />
-        )}
-      </button>
+      {decision ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>{row}</TooltipTrigger>
+            <TooltipContent side="right">{decision}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        row
+      )}
       {open && <StepDetail id={id} step={step} harness={harness} />}
     </>
   );
 }
 
-function Steps({ item, harness }: { item: Of<"steps">; harness: string }) {
+/** A record the agent changed, as a step row: verb first, the reference in mono. */
+function RecordStep({ change }: { change: RecordChange }) {
+  const [icon, words] =
+    change.kind === "status"
+      ? [
+          <StatusIcon key="icon" status={change.to} decorative />,
+          <>
+            Moved <Reference>{change.reference}</Reference> to {change.to}
+          </>,
+        ]
+      : change.kind === "update"
+        ? [
+            <MessageSquareText key="icon" size={16} />,
+            <>
+              Posted an update on <Reference>{change.reference}</Reference>
+            </>,
+          ]
+        : [
+            <FileText key="icon" size={16} />,
+            <>Created the Document “{change.title}”</>,
+          ];
   return (
-    <>
-      {mergeSteps(item.steps).map((step, index) => (
-        <StepRow key={index} step={step} harness={harness} />
-      ))}
-    </>
+    <div className="chat-steps" data-anchor="">
+      <RowLine icon={icon}>{words}</RowLine>
+    </div>
   );
 }
 
-function RecordRow({ change }: { change: RecordChange }) {
-  if (change.kind === "status")
-    return (
-      <li>
-        <StatusIcon status={change.to} decorative />
-        <span className="chat-rec-main">
-          <Reference>{change.reference}</Reference> {change.title}
-        </span>
-        <span className="chat-rec-what">
-          {change.from} → {change.to}
-        </span>
-      </li>
-    );
-  if (change.kind === "update")
-    return (
-      <li>
-        <MessageSquareText size={16} aria-hidden />
-        <span className="chat-rec-main">
-          <Reference>{change.reference}</Reference> “{change.excerpt}”
-        </span>
-        <span className="chat-rec-what">Update posted</span>
-      </li>
-    );
+/** An answered question or an expired request, in regular weight with no fill. */
+function Receipt({ item }: { item: Of<"request"> }) {
   return (
-    <li>
-      <FileText size={16} aria-hidden />
-      <span className="chat-rec-main">{change.title}</span>
-      <span className="chat-rec-what">Document created</span>
-    </li>
+    <div className="chat-steps chat-receipt" data-anchor="">
+      <RowLine
+        icon={
+          item.state === "expired" ? <Clock size={16} /> : <Check size={16} />
+        }
+      >
+        {receiptLine(item)}
+      </RowLine>
+    </div>
   );
 }
 
-const receiptTime = (timestamp: string) => {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : ` · ${date.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })}`;
-};
+/** What ticketd says, not the harness: a smaller muted line with a marker. */
+function Note({ item }: { item: Of<"marker"> }) {
+  return (
+    <p className="chat-line chat-note" data-anchor="">
+      <Info size={14} aria-hidden />
+      <span>
+        <span className="sr-only">ticketd: </span>
+        {item.message}
+      </span>
+    </p>
+  );
+}
+
+function Row({
+  row,
+  harness,
+  readOnly,
+  actions,
+  live,
+}: {
+  row: TurnRow;
+  harness: string;
+  readOnly: boolean;
+  actions: TranscriptActions;
+  live: boolean;
+}) {
+  switch (row.kind) {
+    case "step":
+      return (
+        <StepRow
+          step={row.step}
+          harness={harness}
+          decision={row.decision}
+          live={live}
+        />
+      );
+    case "response":
+      return (
+        <div className="chat-turn-response" data-anchor="">
+          <Response
+            item={row.item}
+            harness={harness}
+            readOnly={readOnly}
+            actions={actions}
+          />
+        </div>
+      );
+    case "record":
+      return <RecordStep change={row.change} />;
+    case "receipt":
+      return <Receipt item={row.item} />;
+    case "note":
+      return <Note item={row.item} />;
+  }
+}
+
+/** Fold toggles the person made, by Chat and turn; they win for the session. */
+const toggles = new Map<string, boolean>();
 
 /**
- * An answered or expired request. A pending one is not in the transcript: it
- * waits in the activity dock above the composer, where it is answered. An
- * expired one says so, because a callback that belonged to an earlier turn or
- * process can no longer be answered.
+ * A turn. While it runs its rows show as they come. Once it ends they fold under
+ * one muted row, and the final response and end marker stay outside. A turn the
+ * person is reading in, or that holds focus, folds once it is out of view; a stop
+ * that was not confirmed stays open.
  */
-function RequestCard({ item }: { item: Of<"request"> }) {
-  const label =
-    item.state === "answered" ? "Answered request" : "Expired request";
+function TurnView({
+  turn,
+  chatId,
+  harness,
+  readOnly,
+  actions,
+  live,
+}: {
+  turn: Turn;
+  chatId: string;
+  harness: string;
+  readOnly: boolean;
+  actions: TranscriptActions;
+  live: boolean;
+}) {
+  const key = `${chatId}:${turn.key}`;
+  const [toggled, setToggled] = useState(() => toggles.get(key));
+  const following = useFollowing();
+  const part = useRef<HTMLDivElement>(null);
+  const rowButton = useRef<HTMLButtonElement>(null);
+  const bodyId = useId();
+  const rowId = useId();
+  // A turn that ends in view of someone reading, or with focus inside, stays open
+  // until it leaves the view. `settled` says the end has been looked at.
+  const [settled, setSettled] = useState(!turn.live);
+  const [held, setHeld] = useState(false);
+  useLayoutEffect(() => {
+    if (turn.live || settled) return;
+    const element = part.current;
+    const scroller = element?.closest(".chat-scroll");
+    const reading =
+      element &&
+      scroller &&
+      (element.contains(document.activeElement) ||
+        (!following() &&
+          element.getBoundingClientRect().bottom >
+            scroller.getBoundingClientRect().top &&
+          element.getBoundingClientRect().top <
+            scroller.getBoundingClientRect().bottom));
+    setHeld(Boolean(reading));
+    setSettled(true);
+  }, [following, settled, turn.live]);
+  useEffect(() => {
+    const element = part.current;
+    const scroller = element?.closest(".chat-scroll");
+    if (!held || !element || typeof IntersectionObserver === "undefined")
+      return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry && !entry.isIntersecting) setHeld(false);
+      },
+      { root: scroller ?? null },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [held]);
+  const folds = turn.rows.some((row) => row.kept !== true);
+  const showRow = !turn.live && folds;
+  const open = !showRow || (toggled ?? (turn.unconfirmed || !settled || held));
+  const toggle = () => {
+    const next = !open;
+    toggles.set(key, next);
+    setToggled(next);
+    // Collapsing with focus inside leaves focus on the row.
+    if (!next) rowButton.current?.focus();
+  };
+  const rowLive = live && turn.live;
+  const rows = (only: (row: TurnRow) => boolean) =>
+    turn.rows
+      .filter(only)
+      .map((row) => (
+        <Row
+          key={row.key}
+          row={row}
+          harness={harness}
+          readOnly={readOnly}
+          actions={actions}
+          live={rowLive}
+        />
+      ));
   return (
-    <section className="chat-card" aria-label={label}>
-      <h3 className="chat-card-title">{item.title}</h3>
-      {item.subject &&
-        (item.request === "question" ? (
-          // A question is prose; only a command or path is set in code.
-          <p className="chat-card-text">{item.subject}</p>
+    <>
+      <div
+        ref={part}
+        className="chat-turnpart"
+        data-anchor=""
+        data-seen={turn.ids.at(-1)}
+      >
+        {showRow && (
+          <button
+            ref={rowButton}
+            id={rowId}
+            type="button"
+            className="chat-fold"
+            aria-expanded={open}
+            aria-controls={open ? bodyId : undefined}
+            onClick={toggle}
+          >
+            <span>{turn.label}</span>
+            {open ? (
+              <ChevronDown size={14} aria-hidden />
+            ) : (
+              <ChevronRight size={14} aria-hidden />
+            )}
+          </button>
+        )}
+        {open ? (
+          <div
+            id={showRow ? bodyId : undefined}
+            className="chat-turn-rows"
+            data-folded={showRow ? "" : undefined}
+            role={showRow ? "group" : undefined}
+            aria-labelledby={showRow ? rowId : undefined}
+          >
+            {rows(() => true)}
+          </div>
         ) : (
-          <pre className="chat-code">{item.subject}</pre>
-        ))}
-      {/* Why the harness asks is prose, apart from what would run. */}
-      {item.reason && <p className="chat-card-text">{item.reason}</p>}
-      {item.state === "answered" && (
-        <p className="chat-line">
-          {/* The host words a denial "You denied this"; it gets no check mark. */}
-          {item.outcome?.startsWith("You denied") ? (
-            <Ban size={14} aria-hidden />
-          ) : (
-            <Check size={14} aria-hidden />
-          )}
-          {item.outcome ?? "Answered"}
-          {item.resolved_at && receiptTime(item.resolved_at)}
-        </p>
+          // Collapsed, receipts and notes sit under the turn row in order.
+          turn.rows.some((row) => row.kept === true) && (
+            <div className="chat-turn-rows">
+              {rows((row) => row.kept === true)}
+            </div>
+          )
+        )}
+      </div>
+      {turn.final && (
+        <div data-anchor="">
+          <Response
+            item={turn.final}
+            harness={harness}
+            readOnly={readOnly}
+            actions={actions}
+          />
+        </div>
       )}
-      {item.state === "expired" && (
-        <p className="chat-line">
-          <Clock size={14} aria-hidden />
-          Expired. The turn ended before this was answered.
-        </p>
+      {/* Below the response, in order: the stop marker, then #367's changed
+          files row, then #364's records row. */}
+      {turn.marker && (
+        <div className="chat-below" data-anchor="">
+          <StopMarker item={turn.marker} harness={harness} />
+        </div>
       )}
-    </section>
+    </>
   );
 }
 
@@ -329,6 +594,22 @@ function markerText(item: Of<"marker">, harness: string) {
   }
 }
 
+function StopMarker({
+  item,
+  harness,
+}: {
+  item: Of<"marker">;
+  harness: string;
+}) {
+  return (
+    <p className="chat-line">
+      {/* Filled, the stop sign does not read as an empty checkbox. */}
+      <Square size={12} fill="currentColor" aria-hidden />
+      <span>{markerText(item, harness)}</span>
+    </p>
+  );
+}
+
 const SESSION_HISTORY = {
   last_response: () => "the last response",
   last_messages: (count: number) => `the last ${count} messages`,
@@ -337,6 +618,7 @@ const SESSION_HISTORY = {
     `${count} picked ${count === 1 ? "message" : "messages"}`,
 } as const;
 
+/** An item outside any turn: your message, a session divider, a lone marker. */
 const Item = memo(function Item({
   item,
   harness,
@@ -360,40 +642,6 @@ const Item = memo(function Item({
           actions={actions}
         />
       );
-    case "steps":
-      return <Steps item={item} harness={harness} />;
-    case "records":
-      return (
-        <div className="chat-records">
-          <span className="chat-fine" id={`records-${item.id}`}>
-            Updated in ticketd
-          </span>
-          <ul aria-labelledby={`records-${item.id}`}>
-            {item.changes.map((change, index) => (
-              <RecordRow key={index} change={change} />
-            ))}
-          </ul>
-        </div>
-      );
-    case "request":
-      // Pending requests live in the activity dock (#363), not here.
-      return item.state === "pending" ? null : <RequestCard item={item} />;
-    case "marker":
-      return item.reason === "note" ? (
-        <p className="chat-line chat-note">
-          <Info size={14} aria-hidden />
-          <span>
-            <span className="sr-only">ticketd: </span>
-            {item.message}
-          </span>
-        </p>
-      ) : (
-        <p className="chat-line">
-          {/* Filled, the stop sign does not read as an empty checkbox. */}
-          <Square size={12} fill="currentColor" aria-hidden />
-          <span>{markerText(item, harness)}</span>
-        </p>
-      );
     case "session":
       return (
         <div className="chat-divider" role="separator">
@@ -401,41 +649,102 @@ const Item = memo(function Item({
           {SESSION_HISTORY[item.history](item.count)}
         </div>
       );
+    case "marker":
+      return item.reason === "note" ? (
+        <Note item={item} />
+      ) : (
+        <StopMarker item={item} harness={harness} />
+      );
+    default:
+      return null;
   }
 });
 
 /**
- * The live step and how long it has run. The clock is not read out every second.
- * `fromShown` counts from when the line appeared, for a phase the host gives no
- * start time for.
+ * The live line: the spinner and what the turn is doing, shown only while no step
+ * row runs. `since` counts "Working for 1m 32s" from the turn's start; `fromShown`
+ * counts from when the line appeared, for a phase the host gives no start time for.
+ * The clock is not read out: one polite status says when a turn starts, waits and
+ * ends.
  */
 function WorkingLine({
   label,
   since,
   fromShown = false,
+  spinner = true,
 }: {
   label: string;
   since?: string;
   fromShown?: boolean;
+  spinner?: boolean;
 }) {
   const [shown] = useState(() => Date.now());
-  const [now, setNow] = useState(shown);
-  const timed = Boolean(since) || fromShown;
-  useEffect(() => {
-    if (!timed) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [timed]);
-  const started = since ? new Date(since).getTime() : fromShown ? shown : NaN;
+  const now = useNow(Boolean(since) || fromShown);
+  const started = since ? Date.parse(since) : NaN;
   return (
-    <div className="chat-working" role="status">
-      <LoaderCircle size={14} className="chat-spin" aria-hidden />
+    <div className="chat-working">
+      {spinner && <LoaderCircle size={12} className="chat-spin" aria-hidden />}
       <span>
-        {label}
-        {!Number.isNaN(started) && (
-          <span aria-hidden="true"> · {elapsed(now - started)}</span>
+        {since ? (
+          Number.isNaN(started) || now - started < 1000 ? (
+            `${label}…`
+          ) : (
+            <>
+              {label} for{" "}
+              <span aria-hidden="true">{duration(now - started)}</span>
+            </>
+          )
+        ) : (
+          label
         )}
+        {fromShown && <span aria-hidden="true"> · {elapsed(now - shown)}</span>}
       </span>
+    </div>
+  );
+}
+
+/** Above the first item that arrived while the reader was away. */
+function NewMarker({ markerRef }: { markerRef: Ref<HTMLDivElement> }) {
+  return (
+    <div
+      ref={markerRef}
+      className="chat-divider"
+      role="separator"
+      aria-label="New since you left"
+    >
+      <span className="chat-new-marker">
+        <StatusDot tone="unread" />
+        New
+      </span>
+    </div>
+  );
+}
+
+/**
+ * "Jump to latest", centred above the dock whenever the reader is not following.
+ * From the keyboard it also moves focus to the message box.
+ */
+export function JumpToLatest({
+  shown,
+  onJump,
+}: {
+  shown: boolean;
+  onJump: (fromKeyboard: boolean) => void;
+}) {
+  return (
+    <div
+      className="chat-jump"
+      data-shown={shown ? "" : undefined}
+      inert={!shown}
+    >
+      <Button
+        variant="outline"
+        size="sm"
+        // A click from the keyboard has no pointer position.
+        onClick={(event) => onJump(event.detail === 0)}
+      >
+        <ArrowDown aria-hidden /> Jump to latest
+      </Button>
     </div>
   );
 }
@@ -444,9 +753,10 @@ const excerpt = (text: string) =>
   text.length > 60 ? `${text.slice(0, 60)}…` : text;
 
 /**
- * The conversation, in the order things happened. In pick mode it becomes the
- * history picker of "Resume in a fresh session": only messages, each with a
- * checkbox.
+ * The conversation, in the order things happened, read result-first: each turn's
+ * work folds under one row once it ends. In pick mode it becomes the history
+ * picker of "Resume in a fresh session": only messages, each with a checkbox.
+ * `newFrom` is the first item that arrived while the reader was away.
  */
 export function Transcript({
   chat,
@@ -454,6 +764,9 @@ export function Transcript({
   actions,
   picked,
   onPick,
+  newFrom,
+  markerRef,
+  contentRef,
 }: {
   chat: ChatState;
   items: TranscriptItem[];
@@ -461,12 +774,15 @@ export function Transcript({
   /** Set while picking history; holds the chosen message ids. */
   picked?: ReadonlySet<string> | undefined;
   onPick?: (id: string, include: boolean) => void;
+  newFrom?: string | undefined;
+  markerRef?: Ref<HTMLDivElement>;
+  contentRef?: Ref<HTMLDivElement>;
 }) {
   const harness = chat.harness.name;
   const readOnly = chat.retention === "trashed";
   if (picked)
     return (
-      <div className="chat-col">
+      <div className="chat-col" ref={contentRef}>
         {items.map(
           (item) =>
             (item.kind === "user" || item.kind === "response") && (
@@ -494,18 +810,52 @@ export function Transcript({
         )}
       </div>
     );
+  const parts = turns(items, chat);
+  const live = !chat.catching_up;
+  const stepRuns = parts.some(
+    (part) =>
+      part.kind === "turn" &&
+      part.turn.live &&
+      part.turn.rows.some(
+        (row) => row.kind === "step" && row.step.state === "running",
+      ),
+  );
   const working = chat.activity === "working";
   return (
-    <div className="chat-col">
-      {items.map((item) => (
-        <Item
-          key={item.id}
-          item={item}
-          harness={harness}
-          readOnly={readOnly}
-          actions={actions}
-        />
-      ))}
+    <div className="chat-col" ref={contentRef}>
+      {parts.map((part) => {
+        const marker = newFrom !== undefined &&
+          (part.kind === "turn"
+            ? part.turn.ids.includes(newFrom)
+            : part.item.id === newFrom) && (
+            <NewMarker key="new" markerRef={markerRef ?? null} />
+          );
+        return part.kind === "turn" ? (
+          <Fragment key={part.turn.key}>
+            {marker}
+            <TurnView
+              turn={part.turn}
+              chatId={chat.id}
+              harness={harness}
+              readOnly={readOnly}
+              actions={actions}
+              live={live}
+            />
+          </Fragment>
+        ) : (
+          <Fragment key={part.item.id}>
+            {marker}
+            <div className="chat-part" data-anchor="" data-seen={part.item.id}>
+              <Item
+                item={part.item}
+                harness={harness}
+                readOnly={readOnly}
+                actions={actions}
+              />
+            </div>
+          </Fragment>
+        );
+      })}
       {chat.catching_up && (
         <>
           <div className="chat-skel chat-skel-long" aria-hidden="true" />
@@ -514,6 +864,10 @@ export function Transcript({
       )}
       {chat.catching_up ? (
         <WorkingLine label="Catching up…" />
+      ) : chat.activity === "waiting" ? (
+        <WorkingLine label="Waiting for you" spinner={false} />
+      ) : working && chat.stopping ? (
+        <WorkingLine label="Stopping…" spinner={!stepRuns} />
       ) : working && chat.opening ? (
         <WorkingLine
           key="opening"
@@ -525,10 +879,11 @@ export function Transcript({
           fromShown
         />
       ) : (
-        working && (
+        working &&
+        !stepRuns && (
           <WorkingLine
-            label={chat.doing?.label ?? "Working…"}
-            {...(chat.doing && { since: chat.doing.since })}
+            label={chat.doing?.label ?? "Working"}
+            {...(chat.doing ? { since: chat.doing.since } : {})}
           />
         )
       )}

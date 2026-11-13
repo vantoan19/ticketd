@@ -56,17 +56,25 @@ import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
   composerControls,
   composerPlaceholder,
+  firstNew,
   hasComposer,
   isLive,
   problemNotice,
   requestLabel,
+  turnStatus,
   type NoticeAction,
   type PendingRequest,
 } from "@/features/chats/model";
 import {
+  JumpToLatest,
   Transcript,
   type TranscriptActions,
 } from "@/features/chats/Transcript";
+import {
+  FollowingContext,
+  lastSeen,
+  useTranscriptScroll,
+} from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
 
 /**
@@ -360,6 +368,16 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
         setEdits((count) => count + 1);
       }),
     );
+  // Placed once when the Chat opens; it stays until the person sends or leaves.
+  const [newFrom, setNewFrom] = useState(() => firstNew(items, lastSeen(id)));
+  const { root, content, marker, following, follows, follow, onScroll } =
+    useTranscriptScroll(id);
+  /** Sending resumes following and clears the New marker. */
+  const sent = <T,>(action: Promise<T>) => {
+    follow();
+    setNewFrom(undefined);
+    return action;
+  };
   const messageCount = items.filter(isMessage).length;
   const trashed = chat.retention === "trashed";
   const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
@@ -383,20 +401,40 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
   return (
     <div className="chat-body" onKeyDown={onPaneKey}>
       {!trashed && !picked && <LinkedRecords chat={chat} />}
-      <div className="chat-scroll" tabIndex={0} aria-label="Conversation">
-        <Transcript
-          chat={chat}
-          items={items}
-          actions={actions}
-          picked={picked ?? undefined}
-          onPick={(itemId, include) =>
-            setPicked((current) => {
-              const next = new Set(current);
-              if (include) next.add(itemId);
-              else next.delete(itemId);
-              return next;
-            })
-          }
+      <div className="chat-reading">
+        <FollowingContext value={follows}>
+          <div
+            ref={root}
+            className="chat-scroll"
+            tabIndex={0}
+            aria-label="Conversation"
+            onScroll={onScroll}
+          >
+            <Transcript
+              chat={chat}
+              items={items}
+              actions={actions}
+              newFrom={newFrom}
+              markerRef={marker}
+              contentRef={content}
+              picked={picked ?? undefined}
+              onPick={(itemId, include) =>
+                setPicked((current) => {
+                  const next = new Set(current);
+                  if (include) next.add(itemId);
+                  else next.delete(itemId);
+                  return next;
+                })
+              }
+            />
+          </div>
+        </FollowingContext>
+        <JumpToLatest
+          shown={!following}
+          onJump={(fromKeyboard) => {
+            follow();
+            if (fromKeyboard) messageBox.current?.focus();
+          }}
         />
       </div>
       <div className="chat-dock">
@@ -405,7 +443,7 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
             ? requestLabel(pending[0])
             : chat.stopping
               ? "Stopping…"
-              : ""}
+              : turnStatus(chat, items)}
         </div>
         {failure && (
           <p className="chat-fine" role="alert">
@@ -487,12 +525,14 @@ function Conversation({ snapshot }: { snapshot: ChatSnapshot }) {
                   controls={(text) => composerControls(chat, text, answering)}
                   onSend={(text) =>
                     run(
-                      answering && question
-                        ? client.answer(id, question.id, { text })
-                        : client.send(id, text),
+                      sent(
+                        answering && question
+                          ? client.answer(id, question.id, { text })
+                          : client.send(id, text),
+                      ),
                     )
                   }
-                  onQueue={(text) => run(client.queue(id, text))}
+                  onQueue={(text) => run(sent(client.queue(id, text)))}
                   {...(pending.length > 0 && {
                     onArrowUpFromEmpty: () => focusLastChoice(dock.current),
                   })}

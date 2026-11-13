@@ -223,6 +223,339 @@ export function mergeSteps(steps: Step[]): Step[] {
   return rows;
 }
 
+type Of<K extends TranscriptItem["kind"]> = Extract<
+  TranscriptItem,
+  { kind: K }
+>;
+
+/** One row of a turn, in the order it happened. `kept` rows are never folded. */
+export type TurnRow =
+  | {
+      kind: "step";
+      key: string;
+      step: Step;
+      /** The answered approval this step waited on: "You allowed this for this session". */
+      decision?: string;
+      kept?: false;
+    }
+  | { kind: "response"; key: string; item: Of<"response">; kept?: false }
+  | {
+      kind: "record";
+      key: string;
+      change: RecordChange;
+      kept?: false;
+    }
+  | { kind: "receipt"; key: string; item: Of<"request">; kept: true }
+  | { kind: "note"; key: string; item: Of<"marker">; kept: true };
+
+/**
+ * A turn, or one segment of it after a steer: your message's work through its end.
+ * While it runs it shows its rows as they come; once it ends they fold under one
+ * row, and the final response and the end marker stay outside.
+ */
+export type Turn = {
+  key: string;
+  /** Still running: nothing folds and there is no turn row. */
+  live: boolean;
+  /** Stop was asked for and not confirmed: the turn row shows, open. */
+  unconfirmed: boolean;
+  /** "Worked for 2m 13s · 1 failed". */
+  label: string;
+  rows: TurnRow[];
+  /** The turn's last response, when no step follows it. */
+  final?: Of<"response">;
+  /** Why the turn stopped: stopped, quit or failed. */
+  marker?: Of<"marker">;
+  /** Every item the turn holds, for the reading position. */
+  ids: string[];
+};
+
+export type TranscriptPart =
+  { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
+
+/** What the turn row says, by how the segment ended. */
+const TURN_WORDS = {
+  worked: ["Worked for", "Worked"],
+  continued: ["Continued for", "Continued"],
+  stopped: ["Stopped after", "Stopped"],
+  failed: ["Failed after", "Failed"],
+  unconfirmed: ["Stop not confirmed after", "Stop not confirmed"],
+} as const;
+
+const PROBLEM_COUNTS = [
+  ["failed", "failed"],
+  ["declined", "declined"],
+  ["not_finished", "not finished"],
+  ["unknown", "not confirmed"],
+] as const;
+
+type Segment = {
+  turnId?: string;
+  steer: boolean;
+  started?: string;
+  /** Set when a steer ended the segment while its turn went on. */
+  until?: string;
+  members: TranscriptItem[];
+};
+
+/** The last element that passes `test`. */
+function lastOf<T, S extends T>(
+  list: readonly T[],
+  test: (value: T) => value is S,
+): S | undefined;
+function lastOf<T>(
+  list: readonly T[],
+  test: (value: T) => boolean,
+): T | undefined;
+function lastOf<T>(list: readonly T[], test: (value: T) => boolean) {
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const value = list[index];
+    if (value !== undefined && test(value)) return value;
+  }
+  return undefined;
+}
+
+const time = (stamp: string | null | undefined) => {
+  const value = stamp ? Date.parse(stamp) : NaN;
+  return Number.isNaN(value) ? undefined : value;
+};
+
+/** "Answered · Fail open", "Expired · rm -rf dist": a request's receipt row. */
+export function receiptLine(request: Of<"request">) {
+  const subject = request.subject ?? request.title;
+  if (request.state === "expired") return `Expired · ${subject}`;
+  if (request.request === "question")
+    return `Answered · ${request.answer ?? subject}`;
+  // An approval with no step to fold into still says what was decided.
+  return `${request.outcome?.startsWith("You denied") ? "Declined" : "Allowed"} · ${subject}`;
+}
+
+/**
+ * A turn's rows in order, and every step as it now reads. Steps merge across the
+ * items they arrived in. `running` is what a step still running reads as: running,
+ * or Not finished once its turn ended, or Not confirmed after an unconfirmed stop.
+ */
+function rowsOf(members: TranscriptItem[], running: Step["state"]) {
+  const rows: TurnRow[] = [];
+  const all: Step[] = [];
+  let steps: { key: string; step: Step }[] = [];
+  /** An answered approval waiting for the step it allowed or declined. */
+  let approval: Of<"request"> | undefined;
+  const flush = () => {
+    const first = steps[0]?.key ?? "";
+    mergeSteps(steps.map((entry) => entry.step)).forEach((step, index) =>
+      rows.push({ kind: "step", key: `${first}:${index}`, step }),
+    );
+    steps = [];
+  };
+  /** An approval no step followed keeps a receipt, so the decision is not lost. */
+  const unfolded = () => {
+    if (approval)
+      rows.push({
+        kind: "receipt",
+        key: approval.id,
+        item: approval,
+        kept: true,
+      });
+    approval = undefined;
+  };
+  for (const item of members) {
+    if (item.kind === "steps") {
+      item.steps.forEach((original, index) => {
+        const step =
+          original.state === "running" && running !== "running"
+            ? { ...original, state: running }
+            : original;
+        all.push(step);
+        const key = `${item.id}:${index}`;
+        if (approval) {
+          // A step that waited on a decision stands alone, so its tooltip is its own.
+          flush();
+          const decision = approval.outcome ?? receiptLine(approval);
+          rows.push({ kind: "step", key, step, decision });
+          approval = undefined;
+        } else steps.push({ key, step });
+      });
+      continue;
+    }
+    flush();
+    unfolded();
+    if (
+      item.kind === "request" &&
+      item.request === "approval" &&
+      item.state === "answered"
+    ) {
+      approval = item;
+      continue;
+    }
+    if (item.kind === "response")
+      rows.push({ kind: "response", key: item.id, item });
+    else if (item.kind === "records")
+      item.changes.forEach((change, index) =>
+        rows.push({ kind: "record", key: `${item.id}:${index}`, change }),
+      );
+    else if (item.kind === "request" && item.state !== "pending")
+      rows.push({ kind: "receipt", key: item.id, item, kept: true });
+    else if (item.kind === "marker" && item.reason === "note")
+      rows.push({ kind: "note", key: item.id, item, kept: true });
+  }
+  flush();
+  unfolded();
+  return { rows, steps: all };
+}
+
+/**
+ * The transcript as turns: each runs from your message through the turn's end, and
+ * a steer starts a new segment of the same turn. Messages, session dividers and
+ * anything outside a turn stay single items. `now` measures a turn whose stop was
+ * not confirmed, which has not ended.
+ */
+export function turns(
+  items: TranscriptItem[],
+  chat: Pick<ChatState, "activity" | "problem">,
+  now = Date.now(),
+): TranscriptPart[] {
+  const timings = new Map<string, Of<"turn">>();
+  for (const item of items)
+    if (item.kind === "turn") timings.set(item.turn_id, item);
+  const parts: (TranscriptPart | Segment)[] = [];
+  let open: Segment | undefined;
+  for (const item of items) {
+    if (item.kind === "turn") continue;
+    if (item.kind === "request" && item.state === "pending") continue;
+    if (item.kind === "user" || item.kind === "session") {
+      // A steer ends the segment it joined; the turn goes on in a new one.
+      const steered = item.kind === "user" && item.steer ? open : undefined;
+      if (steered) steered.until = item.at;
+      parts.push({ kind: "item", item });
+      open = undefined;
+      if (steered) {
+        const turnId = steered.turnId ?? item.turn_id ?? undefined;
+        open = {
+          steer: true,
+          started: item.at,
+          members: [],
+          ...(turnId && { turnId }),
+        };
+        parts.push(open);
+      }
+      continue;
+    }
+    const turnId = item.turn_id ?? undefined;
+    if (open && turnId && open.turnId && open.turnId !== turnId)
+      open = undefined;
+    if (!open) {
+      open = { steer: false, members: [], ...(turnId && { turnId }) };
+      parts.push(open);
+    }
+    if (turnId && !open.turnId) open.turnId = turnId;
+    open.members.push(item);
+  }
+  const last = lastOf(parts, (part) => !("kind" in part));
+  const unconfirmedStop =
+    chat.problem?.kind === "stop_unconfirmed" && !chat.problem.past;
+  const live = chat.activity === "working" || chat.activity === "waiting";
+  return parts.flatMap((part): TranscriptPart[] => {
+    if ("kind" in part) return [part];
+    if (part.members.length === 0) return [];
+    const timing = part.turnId ? timings.get(part.turnId) : undefined;
+    const active = timing ? timing.outcome === "active" : part === last && live;
+    // A segment a steer ended folds while its turn goes on.
+    const ongoing = active && !part.until;
+    const unconfirmed = ongoing && unconfirmedStop;
+    const { rows, steps } = rowsOf(
+      part.members,
+      !active ? "not_finished" : unconfirmedStop ? "unknown" : "running",
+    );
+    const marker = lastOf(
+      part.members,
+      (item): item is Of<"marker"> =>
+        item.kind === "marker" && item.reason !== "note",
+    );
+    // The final response is the last one, unless steps follow it.
+    const lastWork = lastOf(
+      rows,
+      (row) => row.kind === "step" || row.kind === "response",
+    );
+    const final =
+      !ongoing && lastWork?.kind === "response" ? lastWork.item : undefined;
+    const started = time(part.steer ? part.started : timing?.started_at);
+    const ended = unconfirmed
+      ? now
+      : time(part.until ?? timing?.ended_at ?? undefined);
+    const outcome = part.until ? "completed" : (timing?.outcome ?? "completed");
+    const words = unconfirmed
+      ? TURN_WORDS.unconfirmed
+      : outcome === "failed"
+        ? TURN_WORDS.failed
+        : outcome === "stopped" || outcome === "quit" || outcome === "lost"
+          ? TURN_WORDS.stopped
+          : part.steer
+            ? TURN_WORDS.continued
+            : TURN_WORDS.worked;
+    const counts = PROBLEM_COUNTS.flatMap(([state, word]) => {
+      // A count already said by the row's own outcome is not said again.
+      if (state === "failed" && words === TURN_WORDS.failed) return [];
+      if (state === "unknown" && unconfirmed) return [];
+      const n = steps.filter((step) => step.state === state).length;
+      return n ? [`${n} ${word}`] : [];
+    });
+    const span =
+      started !== undefined && ended !== undefined && ended >= started
+        ? `${words[0]} ${duration(ended - started)}`
+        : words[1];
+    return [
+      {
+        kind: "turn",
+        turn: {
+          key: part.members[0]?.id ?? "",
+          live: ongoing && !unconfirmed,
+          unconfirmed,
+          label: [span, ...counts].join(" · "),
+          rows: rows.filter(
+            (row) => row.kind !== "response" || row.item !== final,
+          ),
+          ...(final && { final }),
+          ...(marker && { marker }),
+          ids: part.members.map((item) => item.id),
+        },
+      },
+    ];
+  });
+}
+
+/**
+ * The one polite status: a turn starting, waiting and ending, never each step.
+ * Requests and stopping are said before it.
+ */
+export function turnStatus(
+  chat: Pick<ChatState, "activity" | "problem">,
+  items: TranscriptItem[],
+) {
+  if (chat.activity === "working") return "Working";
+  if (chat.activity === "waiting") return "Waiting for you";
+  const last = lastOf(turns(items, chat), (part) => part.kind === "turn");
+  return last?.kind === "turn" ? last.turn.label : "";
+}
+
+/**
+ * The first item that arrived after `seen`, the last one the reader had in view:
+ * where the New marker goes. Your own messages never count, and neither do items
+ * with no row of their own. Nothing is new without a seen position.
+ */
+export function firstNew(items: TranscriptItem[], seen: string | undefined) {
+  const from = seen === undefined ? -1 : items.findIndex((i) => i.id === seen);
+  if (from < 0) return undefined;
+  return items
+    .slice(from + 1)
+    .find(
+      (item) =>
+        item.kind !== "user" &&
+        item.kind !== "turn" &&
+        !(item.kind === "request" && item.state === "pending"),
+    )?.id;
+}
+
 /** What the agent did to a record, as the list row says it. */
 export function changeLine(change: RecordChange) {
   if (change.kind === "status")

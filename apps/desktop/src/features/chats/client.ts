@@ -251,7 +251,14 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     started_at: z.string(),
     ended_at: z.string().nullish(),
     /** `stopped` by the person, `quit` with ticketd, `lost`: contact was lost. */
-    outcome: z.enum(["active", "completed", "stopped", "quit", "failed", "lost"]),
+    outcome: z.enum([
+      "active",
+      "completed",
+      "stopped",
+      "quit",
+      "failed",
+      "lost",
+    ]),
   }),
   z.object({
     ...item,
