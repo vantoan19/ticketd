@@ -38,20 +38,35 @@ const PANEL_STYLE = {
 /** What starts an Automation, as its list row says it. */
 function startedBy(trigger: Automation["trigger"]) {
   if (!trigger) return <span>no trigger yet</span>;
-  if (trigger.kind === "tag_added")
+  if (trigger.kind === "tag_added" || trigger.kind === "tag_removed") {
+    const tag = trigger.tag.trim();
     return (
       <span className="auto-row-start">
         <Tag size={12} aria-hidden />
-        {trigger.tag.trim() || "no tag yet"}
+        {!tag
+          ? "no tag yet"
+          : trigger.kind === "tag_added"
+            ? tag
+            : `${tag} removed`}
       </span>
     );
+  }
   return (
     <span className="auto-row-start">
       <Zap size={12} aria-hidden />
-      {trigger.kind === "by_hand" ? "By hand" : "Another trigger"}
+      {trigger.kind === "status_changed"
+        ? (trigger.to ?? "no status yet")
+        : ROW_TRIGGERS[trigger.kind]}
     </span>
   );
 }
+const ROW_TRIGGERS = {
+  ticket_created: "Ticket created",
+  ticket_updated: "Ticket updated",
+  activity_created: "Update added",
+  schedule: "On a schedule",
+  by_hand: "By hand",
+} as const;
 
 /**
  * The Automations screen, in the Chats list-and-detail split. The list header

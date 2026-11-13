@@ -10,7 +10,16 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { Bot, Ellipsis, Plus, Tag } from "lucide-react";
+import {
+  Bot,
+  CircleDot,
+  CirclePlus,
+  Ellipsis,
+  MessageSquare,
+  Pencil,
+  Plus,
+  Tag,
+} from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import {
   DropdownMenu,
@@ -41,8 +50,42 @@ import {
   type Card,
 } from "@/features/automations/flow-cards";
 
+/** The triggers under "A ticket changes", in the order the menu offers them. */
+const TICKET_TRIGGERS = [
+  { kind: "ticket_created", label: "Ticket created", icon: CirclePlus },
+  {
+    kind: "ticket_updated",
+    label: "Ticket updated",
+    note: "Its title, description or properties change",
+    icon: Pencil,
+  },
+  {
+    kind: "status_changed",
+    label: "Status changed",
+    note: "To a status you choose",
+    icon: CircleDot,
+  },
+  {
+    kind: "tag_added",
+    label: "Tag added",
+    note: "A tag you choose is added",
+    icon: Tag,
+  },
+  {
+    kind: "tag_removed",
+    label: "Tag removed",
+    note: "A tag you choose is removed",
+    icon: Tag,
+  },
+  {
+    kind: "activity_created",
+    label: "Update added",
+    note: "Someone posts an update",
+    icon: MessageSquare,
+  },
+] as const;
 /** The trigger kinds this page can set up. */
-export type TriggerChoice = "tag_added";
+export type TriggerChoice = (typeof TICKET_TRIGGERS)[number]["kind"];
 
 type Actions = {
   onSelect: (id: string) => void;
@@ -69,16 +112,19 @@ function TriggerMenu({ children }: { children: ReactNode }) {
         aria-label="What starts it"
       >
         <DropdownMenuLabel>A ticket changes</DropdownMenuLabel>
-        <DropdownMenuItem
-          className="items-start whitespace-normal"
-          onSelect={() => onChooseTrigger("tag_added")}
-        >
-          <Tag aria-hidden />
-          <span className="flow-menu-item-text">
-            Tag added
-            <small>A tag you choose is added</small>
-          </span>
-        </DropdownMenuItem>
+        {TICKET_TRIGGERS.map(({ kind, label, icon: Icon, ...rest }) => (
+          <DropdownMenuItem
+            key={kind}
+            className="items-start whitespace-normal"
+            onSelect={() => onChooseTrigger(kind)}
+          >
+            <Icon aria-hidden />
+            <span className="flow-menu-item-text">
+              {label}
+              {"note" in rest && <small>{rest.note}</small>}
+            </span>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -229,10 +275,13 @@ export function FlowCanvas({
   problems,
   agents,
   selected,
+  only,
   notice,
   ...actions
 }: {
   definition: AutomationDefinition;
+  /** The line the conditions add to the trigger's card. */
+  only?: string | undefined;
   problems: Automation["problems"];
   agents: AutomationAgent[];
   /** The card whose panel is open: a step's id, or the trigger's. */
@@ -245,7 +294,7 @@ export function FlowCanvas({
   const { nodes, edges } = useMemo(() => {
     const cards = new Map(
       [
-        triggerCard(trigger),
+        triggerCard(trigger, only),
         ...steps.map((step) => stepCard(step, agents)),
       ].map((card) => [card.id, card]),
     );
@@ -291,7 +340,7 @@ export function FlowCanvas({
       focusable: false,
     }));
     return { nodes, edges };
-  }, [trigger, steps, agents, problems, selected]);
+  }, [trigger, only, steps, agents, problems, selected]);
   const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
   const context = useMemo(
     () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep }),

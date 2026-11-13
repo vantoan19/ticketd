@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Bot, ChevronDown, Folder, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +9,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { Input } from "@/components/ui/input";
 import {
   HARNESS_NAMES,
   type AutomationAgent,
@@ -57,32 +56,6 @@ export function StepPanel({
       </div>
       {children}
     </aside>
-  );
-}
-
-export function TagTriggerFields({
-  tag,
-  onChange,
-}: {
-  tag: string;
-  onChange: (tag: string) => void;
-}) {
-  const id = useId();
-  return (
-    <div className="flow-panel-section">
-      <label htmlFor={id}>Tag</label>
-      <Input
-        id={id}
-        placeholder="e.g. ready-for-triage"
-        value={tag}
-        // Tags are stored in lower case; show the tag as it will match.
-        onChange={(event) => onChange(event.target.value.toLowerCase())}
-      />
-      <p className="flow-panel-note">
-        Starts when this tag is added to a ticket, or a ticket is created with
-        it.
-      </p>
-    </div>
   );
 }
 

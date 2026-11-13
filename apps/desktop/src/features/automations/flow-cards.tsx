@@ -9,11 +9,12 @@ import {
   type AutomationAgent,
   type AutomationDefinition,
   type AutomationStep,
+  type AutomationTrigger,
 } from "@/features/automations/client";
 
 /* What the cards of a flow say, for the editor and for a run alike. */
 
-const TRIGGER_KINDS: Record<string, string> = {
+export const TRIGGER_KINDS: Record<AutomationTrigger["kind"], string> = {
   ticket_created: "When a ticket is created",
   ticket_updated: "When a ticket is updated",
   status_changed: "When the status changes",
@@ -46,7 +47,11 @@ export type Card = {
   menu: "choose-trigger" | "change-trigger" | "step";
 };
 
-export function triggerCard(trigger: AutomationDefinition["trigger"]): Card {
+/** `only` is the line its conditions add (see `conditionsLine`). */
+export function triggerCard(
+  trigger: AutomationDefinition["trigger"],
+  only?: string,
+): Card {
   if (!trigger)
     return {
       id: TRIGGER_ID,
@@ -56,12 +61,30 @@ export function triggerCard(trigger: AutomationDefinition["trigger"]): Card {
       unset: true,
       menu: "choose-trigger",
     };
-  const kind = TRIGGER_KINDS[trigger.kind] ?? "Trigger";
-  if (trigger.kind !== "tag_added")
+  const kind = TRIGGER_KINDS[trigger.kind];
+  const detail = only ? { detail: only } : {};
+  if (trigger.kind === "status_changed") {
+    const { to, from } = trigger;
+    return {
+      id: TRIGGER_ID,
+      kind,
+      title: !to
+        ? "Choose a status"
+        : from
+          ? `From ${from} to ${to}`
+          : `To ${to}`,
+      ...detail,
+      icon: "trigger",
+      unset: !to,
+      menu: "change-trigger",
+    };
+  }
+  if (trigger.kind !== "tag_added" && trigger.kind !== "tag_removed")
     return {
       id: TRIGGER_ID,
       kind: "Trigger",
       title: kind,
+      ...detail,
       icon: "trigger",
       unset: false,
       menu: "change-trigger",
@@ -70,6 +93,7 @@ export function triggerCard(trigger: AutomationDefinition["trigger"]): Card {
   return {
     id: TRIGGER_ID,
     kind,
+    ...detail,
     title: tag || "Choose a tag",
     ...(tag && {
       shown: (

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
@@ -7,6 +7,7 @@ import {
   Minimize2,
   Tag,
   X,
+  Zap,
 } from "lucide-react";
 import {
   Alert,
@@ -40,18 +41,32 @@ import {
   type AutomationDefinition,
   type AutomationRun,
   type AutomationStep,
+  type AutomationTrigger,
 } from "@/features/automations/client";
+import { conditionsLine } from "@/features/automations/automation-text";
+import { TRIGGER_KINDS } from "@/features/automations/flow-cards";
 import {
   FlowCanvas,
   type TriggerChoice,
 } from "@/features/automations/FlowCanvas";
 import { RunsList } from "@/features/automations/RunsList";
 import { RunView } from "@/features/automations/RunView";
+import { RunAgentFields, StepPanel } from "@/features/automations/StepPanel";
 import {
-  RunAgentFields,
-  StepPanel,
-  TagTriggerFields,
-} from "@/features/automations/StepPanel";
+  ConditionRows,
+  TriggerFields,
+} from "@/features/automations/TriggerPanel";
+import { client, type Project } from "@/lib/api/client";
+
+/** Each trigger as it is when first chosen, before anything is set on it. */
+const NEW_TRIGGERS: Record<TriggerChoice, AutomationTrigger> = {
+  ticket_created: { kind: "ticket_created" },
+  ticket_updated: { kind: "ticket_updated" },
+  status_changed: { kind: "status_changed", to: null, from: null },
+  tag_added: { kind: "tag_added", tag: "" },
+  tag_removed: { kind: "tag_removed", tag: "" },
+  activity_created: { kind: "activity_created" },
+};
 
 /**
  * One Automation, edited in place: every change is saved as it is made. Mount
@@ -111,6 +126,11 @@ export function AutomationEditor({
   /** The runs in progress, while the person is asked how to switch off. */
   const [turningOff, setTurningOff] = useState<AutomationRun[] | null>(null);
   const onSwitch = useRef<HTMLButtonElement>(null);
+  /** For the project conditions: their names, and the ones to choose from. */
+  const [projects, setProjects] = useState<Project[]>([]);
+  useEffect(() => {
+    void client.listProjects().then(setProjects, onFail);
+  }, [onFail]);
 
   const setEnabled = (enabled: boolean) => {
     if (enabled) return onSetEnabled(true);
@@ -137,7 +157,7 @@ export function AutomationEditor({
     });
   const chooseTrigger = (kind: TriggerChoice) => {
     // Choosing the kind it already has keeps what was set on it.
-    if (draft.trigger?.kind !== kind) change({ trigger: { kind, tag: "" } });
+    if (draft.trigger?.kind !== kind) change({ trigger: NEW_TRIGGERS[kind] });
     setSelected(TRIGGER_ID);
   };
   const addStep = (index: number) => {
@@ -188,17 +208,29 @@ export function AutomationEditor({
   const left = automation.problems.length;
   const step = draft.steps.find((item) => item.id === selected);
   const openAgent = agents.find((agent) => agent.id === agentOpen);
+  const trigger = draft.trigger;
   const panel =
-    selected === TRIGGER_ID && draft.trigger?.kind === "tag_added" ? (
+    selected === TRIGGER_ID && trigger && trigger.kind in NEW_TRIGGERS ? (
       <StepPanel
         key={selected}
-        title="When a tag is added"
-        icon={<Tag size={16} aria-hidden />}
+        title={TRIGGER_KINDS[trigger.kind]}
+        icon={
+          "tag" in trigger ? (
+            <Tag size={16} aria-hidden />
+          ) : (
+            <Zap size={16} aria-hidden />
+          )
+        }
         onClose={closePanel}
       >
-        <TagTriggerFields
-          tag={draft.trigger.tag}
-          onChange={(tag) => change({ trigger: { kind: "tag_added", tag } })}
+        <TriggerFields
+          trigger={trigger}
+          onChange={(next) => change({ trigger: next })}
+        />
+        <ConditionRows
+          conditions={draft.conditions}
+          projects={projects}
+          onChange={(conditions) => change({ conditions })}
         />
       </StepPanel>
     ) : step?.kind === "run_agent" ? (
@@ -316,6 +348,7 @@ export function AutomationEditor({
             problems={automation.problems}
             agents={agents}
             selected={panel ? selected : null}
+            only={conditionsLine(draft.conditions, projects)}
             onSelect={setSelected}
             onChooseTrigger={chooseTrigger}
             onAddStep={addStep}

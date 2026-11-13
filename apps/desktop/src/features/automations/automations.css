@@ -338,6 +338,25 @@
   text-align: left;
   text-overflow: ellipsis;
 }
+/* A condition: what it tests, its value, and its Remove button. */
+.flow-condition {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.flow-condition strong {
+  font-weight: 500;
+}
+.flow-condition-value {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.flow-condition-value > * {
+  flex: 1;
+  min-width: 0;
+}
 
 /* --- A run: the same canvas, read only, saying what happened. --- */
 .run-crumb {
