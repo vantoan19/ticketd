@@ -9,8 +9,8 @@ use ticketd_automation_runner::{Notifier, Runner, TicketdCli};
 use ticketd_chat_host::{ChatHost, WorkspaceOpener};
 use ticketd_core::{
     AutomationDefinition, AutomationNotification, AutomationRun, AutomationRunStatus,
-    AutomationStepStatus, Check, NotifyTarget, Status, Step, StepAction, StepChange, Ticket, Trigger,
-    Workspace, WorkspaceActor,
+    AutomationStepStatus, Check, NotifyTarget, Status, Step, StepAction, StepChange, Ticket,
+    Trigger, Workspace, WorkspaceActor,
 };
 
 const TAG: &str = "ready-for-testing";

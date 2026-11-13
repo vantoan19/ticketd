@@ -333,9 +333,7 @@ fn an_if_tests_the_ticket_as_it_is_when_asked_and_passes_when_every_check_does()
         .unwrap();
     assert!(workspace.automation_if_passes(&run.id, "passed").unwrap());
 
-    workspace
-        .remove_tag(&ticket.reference, "verified")
-        .unwrap();
+    workspace.remove_tag(&ticket.reference, "verified").unwrap();
     assert!(!workspace.automation_if_passes(&run.id, "passed").unwrap());
 }
 

@@ -1,8 +1,6 @@
 //! The run state machine on flows that branch: which step a run goes to after an If.
 
-use ticketd_core::{
-    NotifyTarget, RunAction, RunEnd, Step, StepAction, StepOutcome, next_action,
-};
+use ticketd_core::{NotifyTarget, RunAction, RunEnd, Step, StepAction, StepOutcome, next_action};
 
 fn notify(id: &str) -> Step {
     Step {
@@ -86,11 +84,17 @@ fn a_nested_if_chooses_again_inside_the_path_taken() {
 fn a_path_with_no_steps_ends_the_run() {
     let steps = vec![branch("passed", vec![notify("close")], Vec::new())];
     assert_eq!(
-        next_action(&steps, Some(("passed", &StepOutcome::Branched { yes: false }))),
+        next_action(
+            &steps,
+            Some(("passed", &StepOutcome::Branched { yes: false }))
+        ),
         RunAction::End(RunEnd::Completed)
     );
     assert_eq!(
-        next_action(&steps, Some(("passed", &StepOutcome::Branched { yes: true }))),
+        next_action(
+            &steps,
+            Some(("passed", &StepOutcome::Branched { yes: true }))
+        ),
         run_step("close")
     );
 }
