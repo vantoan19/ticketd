@@ -23,8 +23,8 @@ use ticketd_core::{
 };
 use tokio::sync::oneshot;
 
-use crate::chat_reports::{self, SettingChangeView};
 use crate::chat_attention::Rank;
+use crate::chat_reports::{self, SettingChangeView};
 use crate::chat_view::{
     self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, Queued, Summary, Surroundings,
     Tracker, harness_name,

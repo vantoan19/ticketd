@@ -20,8 +20,8 @@ use ticketd_core::ChatListFilter;
 
 use tauri_plugin_opener::OpenerExt;
 
-use crate::chat_reports::SettingChangeView;
 use crate::chat_attention::{Alert, Notifier, Row, badge_text};
+use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, ChatFailure, Chats, CloseAction, Created, HarnessStatus, HistorySelection, LinkRef,
