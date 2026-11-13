@@ -362,8 +362,10 @@ fn resolve(
                 (Choice::Local, _) => SyncChoice::Local,
                 (Choice::Remote, _) => SyncChoice::Remote,
                 // Only Markdown text is edited by hand; other fields have set values.
+                // An Automation's body is its steps: taken whole from one desktop.
                 (Choice::Edited, Some(value))
-                    if resolution.field == "body" || resolution.field.ends_with(":body") =>
+                    if kind != SyncKind::Automation
+                        && (resolution.field == "body" || resolution.field.ends_with(":body")) =>
                 {
                     SyncChoice::Edited(value)
                 }

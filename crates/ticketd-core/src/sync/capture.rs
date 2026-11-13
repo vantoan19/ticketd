@@ -15,6 +15,8 @@ pub enum RecordKind {
     Plan,
     Project,
     Attachment,
+    Automation,
+    AutomationAgent,
 }
 
 impl RecordKind {
@@ -25,6 +27,8 @@ impl RecordKind {
             Self::Plan => "plan",
             Self::Project => "project",
             Self::Attachment => "attachment",
+            Self::Automation => "automation",
+            Self::AutomationAgent => "automation_agent",
         }
     }
 }
@@ -37,6 +41,8 @@ impl FromSql for RecordKind {
             "plan" => Ok(Self::Plan),
             "project" => Ok(Self::Project),
             "attachment" => Ok(Self::Attachment),
+            "automation" => Ok(Self::Automation),
+            "automation_agent" => Ok(Self::AutomationAgent),
             _ => Err(rusqlite::types::FromSqlError::InvalidType),
         }
     }
@@ -52,16 +58,17 @@ pub struct DirtyRecord {
     pub mark: i64,
 }
 
-use RecordKind::{Attachment, Document, Plan, Project, Ticket};
+use RecordKind::{Attachment, Automation, AutomationAgent, Document, Plan, Project, Ticket};
 
 /// Each table holding synced content, the record that owns a row, and the
 /// column holding that record's GUID. A relationship belongs to one record only:
 /// `blocked_by` to the blocked ticket, `parent` to the child, a tag to its record.
 ///
 /// Left out on purpose: device-local tables (inbox, checkouts, upload queues,
-/// credentials), indexes derived from bodies, the bare `tags` vocabulary, and
-/// what a tracker refresh rewrites (`source_sync`, `source_conversation`).
-const CAPTURED: [(&str, RecordKind, &str); 21] = [
+/// credentials, whether an Automation is on), indexes derived from bodies, the
+/// bare `tags` vocabulary, and what a tracker refresh rewrites (`source_sync`,
+/// `source_conversation`).
+const CAPTURED: [(&str, RecordKind, &str); 23] = [
     ("tickets", Ticket, "id"),
     ("activities", Ticket, "ticket_id"),
     ("evidence", Ticket, "ticket_id"),
@@ -83,13 +90,22 @@ const CAPTURED: [(&str, RecordKind, &str); 21] = [
     ("plan_documents", Plan, "plan_id"),
     ("projects", Project, "id"),
     ("attachments", Attachment, "id"),
+    ("automations", Automation, "id"),
+    ("automation_agents", AutomationAgent, "id"),
 ];
 
 pub(crate) const TRIGGER_EVENTS: [&str; 3] = ["insert", "update", "delete"];
 
-/// The tables with capture triggers, named `sync_capture_<table>_<event>`.
-pub(crate) fn captured_tables() -> impl Iterator<Item = &'static str> {
-    CAPTURED.iter().map(|(table, _, _)| *table)
+/// The tables with capture triggers, named `sync_capture_<table>_<event>`, each
+/// with the format version its triggers came with.
+pub(crate) fn captured_tables() -> impl Iterator<Item = (&'static str, i64)> {
+    CAPTURED.iter().map(|(table, kind, _)| {
+        let since = match kind {
+            Automation | AutomationAgent => 70,
+            Ticket | Document | Plan | Project | Attachment => 58,
+        };
+        (*table, since)
+    })
 }
 
 /// Safe to run again after a later migration rebuilds a captured table.
@@ -100,6 +116,16 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
          INSERT OR IGNORE INTO sync_capture (id, applying, marks) VALUES (1, 0, 0);",
     )?;
     for (table, kind, owner) in CAPTURED {
+        // A table of a later format version gets its triggers when that version
+        // runs this again.
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [table],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            continue;
+        }
         let kind = kind.as_str();
         // An upsert, not INSERT OR REPLACE: a conflict clause on the statement that
         // fired the trigger (INSERT OR IGNORE INTO ticket_tags) would override it.

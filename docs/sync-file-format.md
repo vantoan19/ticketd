@@ -1,15 +1,17 @@
 # Sync file format
 
-Workspace sync writes every ticket, Document, Plan and project as one Markdown file. This page is the convention for those files. The converter is `crates/ticketd-core/src/sync_files.rs`; it reads and writes files as text and knows nothing about where they are stored.
+Workspace sync writes every ticket, Document, Plan, project, Automation and Automation agent as one Markdown file. This page is the convention for those files. The converter is `crates/ticketd-core/src/sync_files.rs`; it reads and writes files as text and knows nothing about where they are stored.
 
 ## Files
 
-| Record   | Folder       | File name                                             |
-| -------- | ------------ | ----------------------------------------------------- |
-| Ticket   | `tickets/`   | The Ticket reference and title: `T-KQ43 Fix login.md` |
-| Document | `documents/` | The title, or `Untitled.md`                           |
-| Plan     | `plans/`     | The name                                              |
-| Project  | `projects/`  | The name                                              |
+| Record           | Folder               | File name                                             |
+| ---------------- | -------------------- | ----------------------------------------------------- |
+| Ticket           | `tickets/`           | The Ticket reference and title: `T-KQ43 Fix login.md` |
+| Document         | `documents/`         | The title, or `Untitled.md`                           |
+| Plan             | `plans/`             | The name                                              |
+| Project          | `projects/`          | The name                                              |
+| Automation       | `automations/`       | The name, or `Untitled.md`                            |
+| Automation agent | `automation_agents/` | The name, or `Untitled.md`                            |
 
 The file name is a readable label. It changes when the title does, may repeat, and is never used to find a record. A record's identity is its GUID, which never changes: it is the `id` field of the header, and ticketd also sets it as a property on the Drive file, which is how a file is found. A file that has no such property, such as one created by hand in the folder, is not a record.
 
@@ -53,7 +55,7 @@ The same record always produces the same bytes, so a file changes only when its 
 
 - `kind` comes first, then `format`, the number of the file format (1), then `id`.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
-- Every text value is a double-quoted YAML string on one line. Lists are written one item per line, sorted.
+- Every text value is a double-quoted YAML string on one line. A whole number is written bare. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
 - A file written to storage also carries comments for readers: `# synced from:` with the name of the desktop that wrote it, and the Ticket reference beside each ticket GUID. Comments are never read back as data; the GUID alone identifies a record.
 - The text after the header is the record's Markdown followed by one line break.
@@ -80,7 +82,7 @@ A file is rejected as a whole, with the reason, when:
 
 A desktop does not write a file larger than 8 MiB either: the record stays on that desktop with a Needs attention notice naming it, and uploads once it is short enough. The device list and the Attachment list are not read when they are larger than that; the run stops and names the file.
 
-A rejected file changes nothing in the Workspace, and the desktop records a Needs attention notice that names the file and the reason. The next change made to that record in ticketd replaces the file. The notice goes once the file reads again; on the desktop that replaced it, the notice instead stays in the Inbox as already read and no longer counts towards Needs attention. It says the file could not be read, why, and that the earlier file is in Drive's version history, since nothing else records what the replaced file held. There is one exception: a file with a higher `format` was written by a newer ticketd and is never replaced by a desktop that cannot read it. Changes made to that record on such a desktop wait, and its sync status stays Needs attention, until it runs a ticketd that reads the file or the file is corrected; the file is read again each time the app starts. The format number is the only mark of a newer ticketd: an unknown field or section marker in a format this version reads is rejected like any other mistake and replaced by the next change. A ticketd version that adds a field or a section marker therefore raises `format`; a test in `sync_files.rs` pins the fields and markers of the current number. A new form of value in an existing field (such as the `<GUID> <n>` item of `parent_removed`) is rejected by older versions in the same way and also requires raising `format`; the test does not pin value forms, so nothing fails to remind of it.
+A rejected file changes nothing in the Workspace, and the desktop records a Needs attention notice that names the file and the reason. The next change made to that record in ticketd replaces the file. The notice goes once the file reads again; on the desktop that replaced it, the notice instead stays in the Inbox as already read and no longer counts towards Needs attention. It says the file could not be read, why, and that the earlier file is in Drive's version history, since nothing else records what the replaced file held. There is one exception: a file with a higher `format` was written by a newer ticketd and is never replaced by a desktop that cannot read it. Changes made to that record on such a desktop wait, and its sync status stays Needs attention, until it runs a ticketd that reads the file or the file is corrected; the file is read again each time the app starts. The format number is the only mark of a newer ticketd: an unknown field or section marker in a format this version reads is rejected like any other mistake and replaced by the next change. A ticketd version that adds a field or a section marker therefore raises `format`; a test in `sync_files.rs` pins the fields and markers of the current number. A new kind of record in a folder of its own does not raise it: a ticketd from before that kind does not look in the folder, so it never reads such a file. Automations and Automation agents joined format 1 this way. A new form of value in an existing field (such as the `<GUID> <n>` item of `parent_removed`) is rejected by older versions in the same way and also requires raising `format`; the test does not pin value forms, so nothing fails to remind of it.
 
 A file that disappears from the folder is not a deletion. The next sync run of a desktop that had synced it writes it again. The file a desktop then finds is another Drive file than the one it last synced, made later, and is merged against the last-synced copy like any change. Only a file made earlier than the one last synced (an old file restored from Drive's trash), or one whose creation time cannot be compared, is taken to share no history: every field whose value differs goes to Needs review and nothing is replaced silently.
 
@@ -195,11 +197,68 @@ The text after the header is the Plan's purpose.
 
 A project file has no text after its header.
 
+### Automation agent
+
+| Field                                                 | Value                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| `name`                                                | The agent's name.                                                        |
+| `harness`                                             | Required: claude-code or codex.                                          |
+| `model`                                               | The model; left out for the harness's own default.                       |
+| `turn_limit`, `time_limit_minutes`                    | Required. Whole numbers of at least 1.                                   |
+| `read_files`, `edit_files`, `run_commands`, `use_web` | What the agent may do.                                                   |
+| `allowed_commands`                                    | With `run_commands`, the only commands allowed. Their order is not kept. |
+| `trashed`                                             | Whether the agent was deleted.                                           |
+
+The text after the header is the agent's instructions.
+
+### Automation
+
+| Field     | Value                               |
+| --------- | ----------------------------------- |
+| `name`    | The Automation's name.              |
+| `trashed` | Whether the Automation was deleted. |
+
+The text after the header is one `json` code block holding the trigger, the conditions and the steps. Steps nest (an If has a Yes and a No list, and a step may have a failure list), which a header's flat fields cannot hold, and each step names its agent by GUID:
+
+<!-- prettier-ignore -->
+``````text
+---
+kind: automation
+format: 1
+id: "5a1d7c3e-9b2f-4e6a-8c0d-1f2e3a4b5c6d"
+name: "Triage new bugs"
+trashed: false
+---
+```json
+{
+  "schema_version": 1,
+  "trigger": {
+    "kind": "tag_added",
+    "tag": "bug"
+  },
+  "conditions": [],
+  "steps": [
+    {
+      "id": "0c9b8a7d-6e5f-4d3c-8b2a-1f0e9d8c7b6a",
+      "kind": "run_agent",
+      "agent_id": "7e6d5c4b-3a2f-4b1c-9d0e-8f7a6b5c4d3e",
+      "execution_folder": "C:\\code\\web-app",
+      "on_failure": null
+    }
+  ]
+}
+```
+``````
+
+The block is one field. A change to it on one desktop replaces it on the others, and a change on two desktops goes to Needs review as a whole: the review takes one desktop's trigger and steps or the other's, and does not combine them. A block that is not a definition as ticketd writes one (JSON of this shape, every step with an id of its own, tags in lowercase) rejects the file. `schema_version` is the shape of the block; a higher one than this version reads rejects the file too.
+
+Deleting an Automation or an agent sets `trashed`; the file stays, as sync deletes none. An agent can be deleted on one desktop while another desktop adds a step that runs it. Both changes are kept: the step then has no agent, and the Automation cannot be switched on until the step is given one.
+
 ## What stays on the device
 
-These are never written to a sync file: checkout folders of a project, Attention inbox entries and their read state, recently opened Documents, credentials, source connection settings, the conversation and refresh state fetched from an external source, publication attempts, automatic history entries, the time a ticket or Document last changed, and tags no record uses.
+These are never written to a sync file: checkout folders of a project, Attention inbox entries and their read state, recently opened Documents, credentials, source connection settings, the conversation and refresh state fetched from an external source, publication attempts, automatic history entries, the time a ticket or Document last changed, tags no record uses, whether an Automation is on, how far it has read the Workspace event log, Workspace events, and Automation runs.
 
-A project that arrives from another device has no checkout folder until one is registered on this device.
+A project that arrives from another device has no checkout folder until one is registered on this device. An Automation that arrives from another device is off until it is switched on on this device, whatever it is on the device it came from. One that is on here and arrives changed so that a step is unfinished, or deleted, is switched off here.
 
 ## Files that are not records
 

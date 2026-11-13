@@ -330,6 +330,7 @@ export function FlowCanvas({
   problems,
   agents,
   selected,
+  notice,
   ...actions
 }: {
   definition: AutomationDefinition;
@@ -337,6 +338,8 @@ export function FlowCanvas({
   agents: AutomationAgent[];
   /** The card whose panel is open: a step's id, or the trigger's. */
   selected: string | null;
+  /** A one-line bar across the top of the canvas. */
+  notice?: ReactNode;
 } & Actions) {
   const { trigger, steps } = definition;
   const shape = steps.map((step) => step.id).join(" ");
@@ -397,6 +400,7 @@ export function FlowCanvas({
   );
   return (
     <div className="flow-canvas">
+      {notice && <div className="flow-notice">{notice}</div>}
       <ActionsContext value={context}>
         <ReactFlowProvider>
           <ReactFlow

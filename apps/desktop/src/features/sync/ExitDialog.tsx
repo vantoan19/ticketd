@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Bot,
   FileText,
   Folder,
   Layers,
   Paperclip,
   Ticket,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import { DialogShell } from "@/components/ui/dialog-shell";
@@ -21,6 +23,8 @@ const ICONS: Record<SyncPendingItem["kind"], LucideIcon> = {
   document: FileText,
   plan: Layers,
   project: Folder,
+  automation_agent: Bot,
+  automation: Workflow,
   attachment: Paperclip,
 };
 

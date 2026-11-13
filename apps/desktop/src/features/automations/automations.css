@@ -85,6 +85,14 @@
   overflow: hidden;
   background: var(--background);
 }
+/* The bar over the canvas: off on this desktop. */
+.flow-notice {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 6;
+}
 .flow-canvas .react-flow__background {
   background: var(--background);
 }
