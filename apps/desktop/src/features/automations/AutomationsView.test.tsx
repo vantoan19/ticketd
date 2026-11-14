@@ -456,7 +456,12 @@ test("with Codex chosen, the switches it cannot enforce are fixed on and the tur
   expect(control("switch", "Use the web").getAttribute("aria-checked")).toBe(
     "false",
   );
-  expect(within(form).getByText(/Codex applies its own sandbox/)).toBeTruthy();
+  // #387 3B1: Codex's sandbox limits writes, not reads, and the note says so.
+  expect(
+    within(form).getByText(
+      /Codex applies its own sandbox: it can read any file you can read on this computer/,
+    ),
+  ).toBeTruthy();
   expect(control("spinbutton", "Turns").disabled).toBe(true);
   expect(within(form).getByText("Not applied with Codex")).toBeTruthy();
   expect(control("spinbutton", "Minutes").disabled).toBe(false);
@@ -697,8 +702,13 @@ test("Run commands allows only the commands listed unless Any command is chosen"
   expect(
     within(form).getByRole("textbox", { name: "Allowed commands" }),
   ).toBeTruthy();
+  // #387 3B1: what Claude Code is held to, as the bridge enforces it.
   expect(form.textContent).toContain(
-    "Claude Code may still run shell commands that only read",
+    "Claude Code may still run shell commands that only read in the step’s folder",
+  );
+  expect(form.textContent).toContain("Only in the step’s folder");
+  expect(form.textContent).toContain(
+    "commands are not kept to the step’s folder",
   );
 
   fireEvent.click(within(form).getByRole("radio", { name: "Any command" }));
