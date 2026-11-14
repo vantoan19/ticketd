@@ -520,6 +520,7 @@ impl Connector for GithubConnector {
                             other => other.to_string(),
                         },
                         field: Some("repositories".to_owned()),
+                        partition: repository.to_lowercase(),
                     }],
                 });
             }
@@ -560,6 +561,22 @@ impl Connector for GithubConnector {
 
     fn destinations(&self, config: &ConfigValues) -> Vec<String> {
         Self::repositories(config)
+    }
+
+    // GitHub does not tell `Owner/Name` from `owner/name`, so neither do these.
+    fn partition(&self, reference: &ExternalRef) -> String {
+        let repository = reference
+            .locator
+            .rsplit_once('#')
+            .map_or(reference.locator.as_str(), |(repository, _)| repository);
+        repository.to_lowercase()
+    }
+
+    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
+        Self::repositories(config)
+            .iter()
+            .map(|repository| repository.to_lowercase())
+            .collect()
     }
 
     fn publish(
