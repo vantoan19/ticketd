@@ -358,6 +358,8 @@ export function AgentForm({
             <Input
               id={`${fieldId}-name`}
               placeholder="e.g. Triage"
+              // The core's AUTOMATION_NAME_LIMIT, as for an Automation's name.
+              maxLength={120}
               value={draft.name}
               onChange={(event) => change({ name: event.target.value })}
             />

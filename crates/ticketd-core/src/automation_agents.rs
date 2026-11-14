@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, Workspace};
+use crate::{Error, Workspace, automations::AUTOMATION_NAME_LIMIT};
 
 /// The harness an Automation agent runs on, named as the Chat host names it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +150,11 @@ fn validated(mut settings: AutomationAgentSettings) -> Result<AutomationAgentSet
         )));
     }
     settings.name = settings.name.trim().to_owned();
+    if settings.name.chars().count() > AUTOMATION_NAME_LIMIT {
+        return Err(Error::InvalidAutomationAgent(format!(
+            "a name can be at most {AUTOMATION_NAME_LIMIT} characters"
+        )));
+    }
     settings.model = settings
         .model
         .map(|model| model.trim().to_owned())
