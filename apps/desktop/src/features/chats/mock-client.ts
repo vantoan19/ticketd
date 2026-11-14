@@ -15,6 +15,7 @@ import {
   type HarnessOptions,
   type HarnessStatus,
   type SettingOption,
+  type Stopping,
   type LinkRef,
   type LinkedRecord,
   type Suggestion,
@@ -326,6 +327,8 @@ export type MockChatClient = ChatClient & {
   /** What each createChat was asked with, in order. */
   created: Parameters<ChatClient["createChat"]>[0][];
   requestQuit(): void;
+  /** Automation runs going, which the Chat list does not show; set to fake them. */
+  runsGoing: number;
   /** As if the person clicked the Chat's system notification. */
   requestOpen(request: OpenRequest): void;
   /** What Notify me about Chats was last set to. */
@@ -468,7 +471,7 @@ export function createMockChatClient(
   const dropping = new Map<string, number>();
   const overviewListeners = new Set<(overview: ChatOverview) => void>();
   const openListeners = new Set<(request: OpenRequest) => void>();
-  const quitListeners = new Set<(working: number) => void>();
+  const quitListeners = new Set<(stopping: Stopping) => void>();
   const chats = new Map<string, Stored>();
   /** Chats the person marked unread: as the host, they keep their seen words. */
   const marked = new Set<string>();
@@ -674,6 +677,7 @@ export function createMockChatClient(
   const client: MockChatClient = {
     quit: false,
     notify: true,
+    runsGoing: 0,
     savedDocuments: [],
     openedFiles: [],
     options: new Map(
@@ -704,7 +708,8 @@ export function createMockChatClient(
       for (const listener of [...openListeners]) listener(request);
     },
     requestQuit() {
-      for (const listener of [...quitListeners]) listener(overview().working);
+      const stopping = { chats: overview().working, runs: client.runsGoing };
+      for (const listener of [...quitListeners]) listener(stopping);
     },
 
     getEnabled: async () => enabled,
@@ -715,6 +720,10 @@ export function createMockChatClient(
       enabled = value;
     },
     overview: async () => overview(),
+    stopping: async () =>
+      enabled
+        ? { chats: overview().working, runs: client.runsGoing }
+        : { chats: 0, runs: 0 },
     subscribeOverview(listener) {
       overviewListeners.add(listener);
       return () => overviewListeners.delete(listener);

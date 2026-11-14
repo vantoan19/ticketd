@@ -1741,6 +1741,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_open_folder,
             project_icon,
             chat_commands::chat_answer_quit,
+            chat_commands::chat_stopping,
             chat_commands::close_keeps_running,
             sync_commands::sync_conflicts,
             sync_commands::sync_conflict,

@@ -148,10 +148,10 @@ test("the count takes uncertain delivery and failures, not a sign-in step alone"
 
 test("quitting stops working Chats and says why in their history", async () => {
   const client = working();
-  let asked = -1;
-  client.onQuitRequested((count) => (asked = count));
+  let asked: unknown = null;
+  client.onQuitRequested((stopping) => (asked = stopping));
   client.requestQuit();
-  expect(asked).toBe(1);
+  expect(asked).toEqual({ chats: 1, runs: 0 });
   await client.answerQuit(true);
   const { items } = await client.openChat("c1");
   expect(items.at(-1)).toMatchObject({ kind: "marker", reason: "quit" });

@@ -4,7 +4,9 @@ import {
   useChatClient,
   type ChatOverview,
   type OpenRequest,
+  type Stopping,
 } from "@/features/chats/client";
+import { stoppingText } from "@/features/chats/model";
 import {
   ChatFeatureContext,
   NO_CHAT_OVERVIEW,
@@ -14,6 +16,12 @@ import type { ChatRequest } from "@/features/chats/ticket-chat";
 import { usePreferences } from "@/lib/preferences";
 import "@/features/chats/chats.css";
 import "@/features/chats/ticket-chats.css";
+
+function quitText({ chats, runs }: Stopping) {
+  const { subject, one } = stoppingText(chats, runs);
+  const them = one ? "it" : "them";
+  return `${subject} still working. Quitting stops ${them}. Closing the window instead keeps ${them} running.`;
+}
 
 /**
  * Holds what every screen needs to know about Chat: whether it is on, how
@@ -34,7 +42,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     n: number;
   } | null>(null);
   const { notifyChats } = usePreferences();
-  const [quitting, setQuitting] = useState<number | null>(null);
+  const [quitting, setQuitting] = useState<Stopping | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -42,10 +50,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       (value) => current && setEnabledState(value),
       () => {},
     );
-    const stopQuit = client.onQuitRequested((working) => {
+    const stopQuit = client.onQuitRequested((stopping) => {
       // Nothing is working: there is nothing to confirm.
-      if (working === 0) void client.answerQuit(true);
-      else setQuitting(working);
+      if (stopping.chats + stopping.runs === 0) void client.answerQuit(true);
+      else setQuitting(stopping);
     });
     return () => {
       current = false;
@@ -122,13 +130,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         blockedReason={null}
         onSubmit={() => answerQuit(true)}
       >
-        <p className="chat-dialog-text">
-          {quitting === 1
-            ? "1 Chat is still working. Quitting stops it."
-            : `${quitting} Chats are still working. Quitting stops them.`}{" "}
-          Closing the window instead keeps {quitting === 1 ? "it" : "them"}{" "}
-          running.
-        </p>
+        {quitting && <p className="chat-dialog-text">{quitText(quitting)}</p>}
         <p className="chat-fine">
           History and queued messages are kept. Nothing restarts by itself next
           time.
