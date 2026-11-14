@@ -719,6 +719,50 @@ async fn a_chat_taken_over_mid_run_goes_on_as_an_ordinary_chat_past_the_agents_l
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
 }
 
+/// #387 M2: with a harness that cannot steer, the composer sends a reply to a going
+/// run as "Queue". The turn it would wait for ends with the take-over, so the reply
+/// is the resumed Chat's first turn at once, sent once, and nothing is left paused.
+#[tokio::test(start_paused = true)]
+async fn a_reply_queued_behind_the_agents_turn_is_sent_when_it_takes_the_run_over() {
+    let f = Fixture::on(AgentHarness::ClaudeCode);
+    f.agent_working().await;
+    let chat = f.chat();
+    f.fake
+        .emit(EventKind::SessionIdentified {
+            native_session: NativeSessionId::new("native-1"),
+        })
+        .await;
+    settle().await;
+
+    f.host
+        .send(&chat, None, "Reply with hello", SendMode::Queue)
+        .await
+        .unwrap();
+    settle().await;
+
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert_eq!(
+        written(&f)[1..],
+        ["interrupt", "close", "submit: Reply with hello"]
+    );
+    assert!(!f.core().chat(&chat).unwrap().queue_paused);
+    // The agent's turn the take-over interrupted does not pause what comes next.
+    f.fake
+        .emit(EventKind::TurnEnded {
+            turn: NativeTurnId::new("turn-2"),
+            outcome: TurnOutcome::Completed,
+            submissions: Vec::new(),
+        })
+        .await;
+    settle().await;
+    f.host
+        .send(&chat, None, "And again", SendMode::Queue)
+        .await
+        .unwrap();
+    settle().await;
+    assert_eq!(written(&f).last().unwrap(), "submit: And again");
+}
+
 /// Replying in the Chat of a step that has finished takes the run over while a
 /// later step's agent is working: that agent is stopped too.
 #[tokio::test(start_paused = true)]
