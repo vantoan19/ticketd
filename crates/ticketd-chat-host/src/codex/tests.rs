@@ -1111,6 +1111,15 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
         "Codex could not change /elsewhere/a.txt: it is outside the step's folder."
     );
     assert_eq!(reason(&[guide, "ls"], false), "Codex could not run ls.");
+    // #387 6A2: Codex quotes a command like a POSIX shell, doubling its backslashes;
+    // the reason shows the command as typed.
+    assert_eq!(
+        reason(
+            &[r#""C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'echo "hi"'"#],
+            false
+        ),
+        r#"Codex could not run "C:\Program Files\PowerShell\7\pwsh.exe" -Command 'echo "hi"'."#
+    );
     // Only the guide was declined: the agent still could not do its work.
     assert_eq!(
         reason(&[guide], false),
