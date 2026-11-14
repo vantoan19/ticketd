@@ -209,7 +209,7 @@ test("steps are added inside each path, and an If inside a path has two paths of
     "Add a step after Notify me: Write a message",
     `Add a step on the No path of ${PASSED}`,
     "Add a step on the Yes path of If: Choose what to check",
-    "Add a step after Change ticket: Choose a change",
+    "Add a step after Change ticket: Add a tag",
     "Add a step on the No path of If: Choose what to check",
   ]);
 });
@@ -243,7 +243,7 @@ test("a step on a path is set up and deleted where it is, and deleting an If tak
   const remove = async (card: string) => {
     const actions = within(
       button(steps, card).closest<HTMLElement>(".flow-card")!,
-    ).getByRole("button", { name: "Step actions" });
+    ).getByRole("button", { name: /^Actions for / });
     await choose(actions, "Delete step");
     fireEvent.click(
       within(await screen.findByRole("dialog")).getByRole("button", {
@@ -252,7 +252,7 @@ test("a step on a path is set up and deleted where it is, and deleting an If tak
     );
   };
 
-  fireEvent.click(button(steps, "Change ticket: Choose a change"));
+  fireEvent.click(button(steps, "Change ticket: Add a tag"));
   const panel = await screen.findByRole("complementary", {
     name: "Change ticket",
   });

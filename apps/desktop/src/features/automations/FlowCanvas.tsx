@@ -1,4 +1,4 @@
-import { createContext, use, useMemo, type ReactNode } from "react";
+import { createContext, use, useMemo, useRef, type ReactNode } from "react";
 import {
   Background,
   Handle,
@@ -74,7 +74,7 @@ const TICKET_TRIGGERS = [
   {
     kind: "ticket_updated",
     label: "Ticket updated",
-    note: "Its title, description or properties change",
+    note: "Its title, description, project or Plan changes",
     icon: Pencil,
   },
   {
@@ -97,7 +97,7 @@ const TICKET_TRIGGERS = [
   },
   {
     kind: "activity_created",
-    label: "Update added",
+    label: "Update posted",
     note: "Someone posts an update",
     icon: MessageSquare,
   },
@@ -213,7 +213,9 @@ type CardData = {
 };
 
 function CardNode({ data }: NodeProps<Node<CardData>>) {
-  const { card, place, selected, needs, failureSteps } = data;
+  const { card, place, selected, failureSteps } = data;
+  // An empty trigger's prompt is already what it needs.
+  const needs = data.needs === card.title ? undefined : data.needs;
   const { onSelect, onDeleteStep, onSetFailurePath } = useActions();
   const Icon = CARD_ICONS[card.icon];
   const face = (
@@ -227,7 +229,8 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
         {needs ? (
           <span className="flow-card-status">
             <StatusDot tone="attention" />
-            {needs}
+            {/* Its own box, so a reason too long for the card ends in "…". */}
+            <span className="flow-card-status-text">{needs}</span>
           </span>
         ) : (
           card.detail && <span className="flow-card-detail">{card.detail}</span>
@@ -240,6 +243,9 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
     className: "flow-card-main nodrag nopan",
     // Read in order, the cards are an outline: each says where it is on its path.
     "aria-label": place ? `${cardName(card)}, ${place}` : cardName(card),
+    // The whole reason, where the card has to cut it short; with a name of its
+    // own, the button reads its title as its description.
+    ...(needs && { title: needs }),
     "data-flow-card": card.id,
   } as const;
   return (
@@ -282,7 +288,7 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
           <span className="flow-card-menu nodrag nopan">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <IconButton label="Step actions">
+                <IconButton label={`Actions for ${cardName(card)}`}>
                   <Ellipsis aria-hidden />
                 </IconButton>
               </DropdownMenuTrigger>
@@ -343,7 +349,20 @@ type AddData = {
 /** A place to add a step: on the line between two cards, or ending the path. */
 function AddNode({ data }: NodeProps<Node<AddData>>) {
   const { onAddStep, ticketless } = useActions();
-  const add = (kind: StepChoice) => onAddStep(data.index, kind, data.list);
+  /** A step was added from the menu: focus goes to its panel as the menu closes. */
+  const added = useRef(false);
+  const add = (kind: StepChoice) => {
+    added.current = true;
+    onAddStep(data.index, kind, data.list);
+  };
+  // Not `disabled`, which the arrow keys skip: a keyboard user would never
+  // hear why. It stays in reach, says it is unavailable, and does nothing.
+  const unavailable = ticketless && {
+    "aria-disabled": true,
+    // Drawn as a disabled item is.
+    "data-disabled": "",
+    onSelect: (event: Event) => event.preventDefault(),
+  };
   return (
     <>
       {data.end && (
@@ -357,7 +376,18 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
               <Plus size={data.end ? 16 : 14} aria-hidden />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-70" aria-label="Add a step">
+          <DropdownMenuContent
+            className="w-70"
+            aria-label="Add a step"
+            onCloseAutoFocus={(event) => {
+              if (!added.current) return;
+              // Not back to this +: on to the new step's panel, which the
+              // menu took focus from while it closed.
+              event.preventDefault();
+              added.current = false;
+              document.querySelector<HTMLElement>(".flow-panel")?.focus();
+            }}
+          >
             <DropdownMenuItem
               className="items-start whitespace-normal"
               onSelect={() => add("run_agent")}
@@ -370,8 +400,8 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
             </DropdownMenuItem>
             <DropdownMenuItem
               className="items-start whitespace-normal"
-              disabled={ticketless}
               onSelect={() => add("change_ticket")}
+              {...unavailable}
             >
               <SquarePen aria-hidden />
               <span className="flow-menu-item-text">
@@ -395,8 +425,8 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
             </DropdownMenuItem>
             <DropdownMenuItem
               className="items-start whitespace-normal"
-              disabled={ticketless}
               onSelect={() => add("if")}
+              {...unavailable}
             >
               <Split aria-hidden />
               <span className="flow-menu-item-text">

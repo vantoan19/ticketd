@@ -90,6 +90,8 @@ const choose = async (button: HTMLElement, item: string) => {
   ].find((element) => element.textContent.startsWith(item));
   if (!found) throw new Error(`the menu has no ${item}`);
   fireEvent.click(found);
+  // A menu of several choices stays open for the next one.
+  if (menu.isConnected) fireEvent.keyDown(menu, { key: "Escape" });
 };
 const triggerCard = (steps: HTMLElement) =>
   within(steps).getByRole("button", { name: /^(Trigger|When)/ });
@@ -131,7 +133,7 @@ test("the trigger menu offers the six ticket triggers under A ticket changes", a
     "Status changed",
     "Tag added",
     "Tag removed",
-    "Update added",
+    "Update posted",
   ]);
 });
 
@@ -141,7 +143,7 @@ test("a trigger that needs nothing more is saved as chosen, and its panel holds 
   for (const [item, kind, title] of [
     ["Ticket created", "ticket_created", "When a ticket is created"],
     ["Ticket updated", "ticket_updated", "When a ticket is updated"],
-    ["Update added", "activity_created", "When an update is added"],
+    ["Update posted", "activity_created", "When an update is posted"],
   ] as const) {
     const panel = await start(steps, item, title);
     expect(saved?.trigger).toEqual({ kind });
@@ -181,7 +183,10 @@ test("Status changed takes a To status and an optional From status", async () =>
     "When the status changes: Choose a status",
   );
 
-  await choose(within(panel).getByRole("button", { name: "To" }), "In review");
+  await choose(
+    within(panel).getByRole("button", { name: "To: choose a status" }),
+    "In review",
+  );
   expect(saved?.trigger).toEqual({
     kind: "status_changed",
     to: "In review",
@@ -325,6 +330,24 @@ test("a source condition names more than one source", async () => {
   expect(saved?.conditions).toEqual([
     { kind: "source", any_of: ["github", "local"] },
   ]);
+
+  // The menu stays open between picks: one condition names several.
+  fireEvent.keyDown(
+    within(panel).getByRole("button", { name: "Source is: GitHub or Local" }),
+    { key: "Enter" },
+  );
+  const menu = await screen.findByRole("menu");
+  fireEvent.click(
+    within(menu).getByRole("menuitemcheckbox", { name: "Local" }),
+  );
+  fireEvent.click(
+    within(menu).getByRole("menuitemcheckbox", { name: "Local" }),
+  );
+  expect(menu.isConnected).toBe(true);
+  expect(saved?.conditions).toEqual([
+    { kind: "source", any_of: ["github", "local"] },
+  ]);
+  fireEvent.keyDown(menu, { key: "Escape" });
 
   // Unticking one leaves the other.
   await choose(
