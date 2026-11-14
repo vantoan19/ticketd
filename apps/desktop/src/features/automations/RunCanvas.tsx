@@ -171,7 +171,7 @@ export function RunCanvas({
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
-  const { nodes, edges } = useMemo(() => {
+  const { nodes, edges, ran } = useMemo(() => {
     const { trigger, steps } = run.definition;
     const states = stepStates(run);
     const cards = new Map([
@@ -226,7 +226,11 @@ export function RunCanvas({
           .filter(Boolean)
           .join(" "),
       }));
-    return { nodes, edges };
+    // What a run is opened on: the trigger and the steps it reached.
+    const ran = nodes
+      .map((node) => node.id)
+      .filter((id) => id === TRIGGER_ID || reached(id));
+    return { nodes, edges, ran };
   }, [run, agents, only, selected, onSelect]);
   return (
     <div className="flow-canvas">
@@ -252,7 +256,7 @@ export function RunCanvas({
           <Background />
         </ReactFlow>
         {/* A run's steps never change, so only the canvas's size refits it. */}
-        <FlowView shape="" selected={selected} />
+        <FlowView shape="" selected={selected} start={ran} />
       </ReactFlowProvider>
     </div>
   );

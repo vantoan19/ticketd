@@ -182,3 +182,69 @@ export function layoutFlow(
     edges: [edge(TRIGGER_ID, flow.first), ...flow.edges],
   };
 }
+
+/* Where the view of a flow goes. */
+
+type Box = { x: number; y: number; width: number; height: number };
+/** The smallest a flow is drawn without being asked: its cards still read. */
+export const READABLE_ZOOM = 0.75;
+/** The least kept clear around a flow at its smallest readable size. */
+export const VIEW_MARGIN = 16;
+/** Above the first card when the flow is too tall to show whole. */
+const TOP = 32;
+/** Kept clear at the bottom for the zoom control: its height and its offset. */
+export const ZOOM_ROOM = 48;
+
+/**
+ * Where a flow too big to show whole goes at the readable size, one axis at a
+ * time. An axis the flow fits is centered on the whole flow. On one it does
+ * not, `focus` is shown, centered, or with its top at the top when `fromTop`,
+ * but the view never runs past either end of the flow.
+ */
+export function readableViewport(
+  flow: Box,
+  focus: Box,
+  canvas: { width: number; height: number },
+  fromTop: boolean,
+) {
+  const zoom = READABLE_ZOOM;
+  const place = (
+    start: number,
+    length: number,
+    focusStart: number,
+    focusLength: number,
+    room: number,
+    lead: number,
+    alignStart: boolean,
+  ) => {
+    // Whole, even if that leaves less than the margin at its sides.
+    if (length * zoom <= room) return room / 2 - (start + length / 2) * zoom;
+    const wanted = alignStart
+      ? lead - focusStart * zoom
+      : room / 2 - (focusStart + focusLength / 2) * zoom;
+    const first = lead - start * zoom;
+    const last = room - VIEW_MARGIN - (start + length) * zoom;
+    return Math.min(first, Math.max(last, wanted));
+  };
+  return {
+    x: place(
+      flow.x,
+      flow.width,
+      focus.x,
+      focus.width,
+      canvas.width,
+      VIEW_MARGIN,
+      false,
+    ),
+    y: place(
+      flow.y,
+      flow.height,
+      focus.y,
+      focus.height,
+      canvas.height - ZOOM_ROOM,
+      TOP,
+      fromTop,
+    ),
+    zoom,
+  };
+}

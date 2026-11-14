@@ -1,5 +1,8 @@
 import { expect, test } from "vitest";
-import { layoutFlow } from "@/features/automations/canvas-layout";
+import {
+  layoutFlow,
+  readableViewport,
+} from "@/features/automations/canvas-layout";
 
 test("a straight flow puts each step directly below the one before, with a + on every line and at the end", () => {
   const layout = layoutFlow([{ id: "a" }, { id: "b" }]);
@@ -244,4 +247,32 @@ test("a nested If widens its side, and the If above stays over the middle of its
     a: [0, 496],
     b: [288, 496],
   });
+});
+
+test("a flow only too tall to read whole is still centred across, so a failure path on its right stays in view", () => {
+  // 896 by 1400 is 672 by 1050 at the readable 75%: as wide as fits 687.
+  const flow = { x: 0, y: 0, width: 896, height: 1400 };
+  const trigger = { x: 0, y: 0, width: 240, height: 76 };
+
+  const view = readableViewport(
+    flow,
+    trigger,
+    { width: 687, height: 600 },
+    true,
+  );
+
+  // Centred on the whole flow, not on the trigger at its left.
+  expect(view.x).toBeCloseTo(687 / 2 - (896 / 2) * 0.75);
+  // The top of the flow below the canvas's top edge.
+  expect(view.y).toBe(32);
+});
+
+test("a flow too wide to read whole shows the chosen card, but never scrolls past the flow's ends", () => {
+  const flow = { x: 0, y: 0, width: 2000, height: 400 };
+  // The chosen card at the left end: centring it would show empty canvas.
+  const card = { x: 0, y: 200, width: 240, height: 76 };
+
+  const view = readableViewport(flow, card, { width: 600, height: 800 }, false);
+
+  expect(view.x).toBe(16);
 });
