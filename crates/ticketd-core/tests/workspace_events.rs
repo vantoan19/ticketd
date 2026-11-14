@@ -338,7 +338,7 @@ fn the_previous_format_and_its_backups_gain_the_event_log_without_losing_records
          DROP TRIGGER workspace_event_ticket_tag_removed;
          DROP TRIGGER workspace_event_activity_created;
          DROP TABLE workspace_events;
-         PRAGMA user_version = 66;",
+         PRAGMA user_version = 72;",
     )
     .unwrap();
     db.execute("VACUUM INTO ?1", [backup.to_string_lossy()])

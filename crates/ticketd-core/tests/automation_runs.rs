@@ -807,7 +807,7 @@ fn the_previous_format_gains_run_storage_without_losing_records() {
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
         "DROP TABLE automation_run_steps; DROP TABLE automation_runs;
-         ALTER TABLE chats DROP COLUMN automation_run_id; PRAGMA user_version = 70;",
+         ALTER TABLE chats DROP COLUMN automation_run_id; PRAGMA user_version = 76;",
     )
     .unwrap();
     drop(db);
@@ -1281,7 +1281,7 @@ fn the_previous_format_keeps_its_runs_and_the_ones_needing_attention_still_need_
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 72;",
+        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 78;",
     )
     .unwrap();
     drop(db);

@@ -270,11 +270,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     // Views refresh on the change token, so a change made elsewhere shows up.
     crate::change_token::track(connection, "automations")?;
     crate::change_token::track(connection, "automation_device_state")?;
-    connection.execute_batch("PRAGMA user_version = 69;")?;
+    connection.execute_batch("PRAGMA user_version = 75;")?;
     Ok(())
 }
 
-/// Format version 70: Automations and agents synchronize. A row of
+/// Format version 76: Automations and agents synchronize. A row of
 /// `automation_arrivals` marks an Automation that Workspace sync brought to this
 /// device and that has not been switched on here since. Like on/off, it belongs
 /// to the device and does not synchronize.
@@ -285,11 +285,11 @@ pub(crate) fn migrate_sync(connection: &Connection) -> Result<(), Error> {
     crate::change_token::track(connection, "automation_arrivals")?;
     // Automations and agents join the tables whose changes are captured.
     crate::sync::migrate_capture(connection)?;
-    connection.execute_batch("PRAGMA user_version = 70;")?;
+    connection.execute_batch("PRAGMA user_version = 76;")?;
     Ok(())
 }
 
-/// Format version 74: where a schedule counts from on this device. `schedule_from`
+/// Format version 80: where a schedule counts from on this device. `schedule_from`
 /// is the local time a schedule that is on last fired, or was first looked at; it
 /// is NULL until then, and again after the trigger changes.
 pub(crate) fn migrate_schedule(connection: &Connection) -> Result<(), Error> {
@@ -302,7 +302,7 @@ pub(crate) fn migrate_schedule(connection: &Connection) -> Result<(), Error> {
         connection
             .execute_batch("ALTER TABLE automation_device_state ADD COLUMN schedule_from TEXT;")?;
     }
-    connection.execute_batch("PRAGMA user_version = 74;")?;
+    connection.execute_batch("PRAGMA user_version = 80;")?;
     Ok(())
 }
 

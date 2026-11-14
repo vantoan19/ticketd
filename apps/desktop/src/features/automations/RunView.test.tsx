@@ -178,7 +178,9 @@ const openRun = async () => {
   fireEvent.click((await screen.findAllByRole("radio", { name: "Runs" }))[1]!);
   const today = await screen.findByRole("list", { name: "Runs, Today" });
   fireEvent.click(within(today).getAllByRole("button")[0]!);
-  await screen.findByRole("application", { name: "Steps" });
+  const steps = await screen.findByRole("application", { name: "Steps" });
+  // The canvas draws its cards a moment after it appears.
+  await within(steps).findAllByRole("button");
   return view;
 };
 const cards = () =>

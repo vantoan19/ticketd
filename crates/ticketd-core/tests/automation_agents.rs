@@ -26,7 +26,7 @@ fn triage() -> AutomationAgentSettings {
     }
 }
 
-/// Until format 75 an empty command list meant "any command". Agents saved that way
+/// Until format 81 an empty command list meant "any command". Agents saved that way
 /// keep it; a list with commands, and commands switched off, never gain it.
 #[test]
 fn agents_saved_with_an_empty_command_list_keep_any_command_after_migrating() {
@@ -47,7 +47,7 @@ fn agents_saved_with_an_empty_command_list_keep_any_command_after_migrating() {
         .unwrap();
     }
     db.execute_batch(
-        "ALTER TABLE automation_agents DROP COLUMN any_command; PRAGMA user_version = 74;",
+        "ALTER TABLE automation_agents DROP COLUMN any_command; PRAGMA user_version = 80;",
     )
     .unwrap();
     drop(db);
@@ -233,7 +233,7 @@ fn a_workspace_in_the_previous_format_gains_agent_storage_quietly() {
     let events = workspace.workspace_event_head().unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE automation_agents; PRAGMA user_version = 67;")
+    db.execute_batch("DROP TABLE automation_agents; PRAGMA user_version = 73;")
         .unwrap();
     drop(db);
 

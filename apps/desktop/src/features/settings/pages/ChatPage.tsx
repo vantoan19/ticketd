@@ -1,5 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { ExperimentalCard } from "@/features/chats/ExperimentalCard";
+import { NotificationsCard } from "@/features/chats/NotificationsCard";
+import { useChatFeature } from "@/features/chats/use-chats";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import {
   AppliesRightAway,
@@ -7,6 +9,7 @@ import {
 } from "@/features/settings/layout/SettingsPage";
 
 export function ChatPage() {
+  const { enabled } = useChatFeature();
   return (
     <SettingsPage
       {...sectionMeta("chat")}
@@ -15,6 +18,7 @@ export function ChatPage() {
       endSlot={<AppliesRightAway />}
     >
       <ExperimentalCard />
+      {enabled && <NotificationsCard />}
     </SettingsPage>
   );
 }

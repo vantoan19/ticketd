@@ -5,10 +5,13 @@ mod attachment_media;
 mod automation_commands;
 mod automation_runner;
 mod chat_commands;
+mod chat_reports;
+mod chat_ticketd;
 mod chat_view;
 mod chats;
 mod cli_status;
 mod drive_commands;
+mod folder_probe;
 mod sync_commands;
 mod sync_scheduler;
 mod workspace_session;
@@ -382,6 +385,17 @@ fn list_projects() -> Result<Vec<Project>, String> {
     open_workspace()
         .and_then(|w| w.list_projects())
         .map_err(|e| e.to_string())
+}
+/// The favicon a Project's folder ships, probed now and never stored. `None` when no
+/// checkout has one, so the Project shows its letter tile.
+#[tauri::command(async)]
+fn project_icon(id: String) -> Result<Option<folder_probe::Favicon>, String> {
+    let project = open_workspace()
+        .and_then(|w| w.show_project(&id))
+        .map_err(|e| e.to_string())?;
+    Ok(std::iter::once(&project.path)
+        .chain(&project.paths)
+        .find_map(|path| folder_probe::favicon(std::path::Path::new(path))))
 }
 #[tauri::command]
 fn create_project(name: String, path: String) -> Result<Project, String> {
@@ -1482,6 +1496,7 @@ pub fn run() -> Result<(), tauri::Error> {
             let chat = chat_commands::ChatBridge::new(version);
             automation_runner::start(chat.chats(), app.handle().clone());
             tauri::Manager::manage(app, chat);
+            chat_commands::on_notification_click(app.handle());
             start_periodic_refresh(coordinator);
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
@@ -1691,15 +1706,25 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_enabled,
             chat_commands::chat_set_enabled,
             chat_commands::chat_overview,
+            chat_commands::chat_set_notify,
+            chat_commands::chat_mark_read,
+            chat_commands::chat_read_through,
+            chat_commands::chat_folder_project,
+            chat_commands::chat_mark_unread,
+            chat_commands::chat_set_muted,
             chat_commands::chat_list,
             chat_commands::chat_harnesses,
+            chat_commands::chat_harness_options,
             chat_commands::chat_folder_use,
             chat_commands::chat_create,
             chat_commands::chat_open,
             chat_commands::chat_close,
             chat_commands::chat_send,
+            chat_commands::chat_linked_to,
+            chat_commands::chat_files,
             chat_commands::chat_remove_queued,
             chat_commands::chat_resume_queue,
+            chat_commands::chat_send_queued_now,
             chat_commands::chat_stop,
             chat_commands::chat_answer,
             chat_commands::chat_resolve_uncertain,
@@ -1710,6 +1735,11 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_set_link,
             chat_commands::chat_resume,
             chat_commands::chat_save_as_document,
+            chat_commands::chat_change_setting,
+            chat_commands::chat_suggestions,
+            chat_commands::chat_open_file,
+            chat_commands::chat_open_folder,
+            project_icon,
             chat_commands::chat_answer_quit,
             chat_commands::close_keeps_running,
             sync_commands::sync_conflicts,

@@ -2181,9 +2181,9 @@ fn before_the_repositories_read_were_kept_one_with_imported_tickets_counts_as_re
     assert_eq!(logged(&f, 3), []);
 }
 
-/// Format 76 replaces the configuration format 75 kept with the repositories read.
+/// Format 82 replaces the configuration unreleased builds kept with the repositories read.
 #[test]
-fn a_format_75_workspace_gains_the_repositories_read_and_loses_the_configuration() {
+fn a_format_81_workspace_gains_the_repositories_read_and_loses_the_configuration() {
     let f = Fixture::new();
     let path = f.path();
     drop(f.workspace);
@@ -2191,7 +2191,7 @@ fn a_format_75_workspace_gains_the_repositories_read_and_loses_the_configuration
     db.execute_batch(
         "ALTER TABLE source_status DROP COLUMN read_partitions; \
          ALTER TABLE source_status ADD COLUMN refreshed_configuration TEXT; \
-         PRAGMA user_version = 75;",
+         PRAGMA user_version = 81;",
     )
     .unwrap();
     drop(db);

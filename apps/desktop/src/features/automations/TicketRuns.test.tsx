@@ -89,8 +89,11 @@ const ticket = (chat = true) =>
         value={{
           enabled: chat,
           setEnabled: async () => {},
-          overview: { needs_you: 0, working: 0 },
+          overview: { needs_you: 0, unread: 0, app_icon: 0, working: 0 },
           revision: 0,
+          openRequest: null,
+          chatRequest: null,
+          requestChat: () => {},
         }}
       >
         <RunNavigation value={openRun}>
@@ -201,8 +204,11 @@ test("a failed read of the ticket's runs stops showing once a later read works",
         value={{
           enabled: true,
           setEnabled: async () => {},
-          overview: { needs_you: 0, working: 0 },
+          overview: { needs_you: 0, unread: 0, app_icon: 0, working: 0 },
           revision: 0,
+          openRequest: null,
+          chatRequest: null,
+          requestChat: () => {},
         }}
       >
         <Ticket />

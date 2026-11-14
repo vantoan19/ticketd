@@ -107,6 +107,7 @@ mod automation_schedule;
 mod automation_steps;
 mod automations;
 mod change_token;
+mod chat_suggestions;
 mod chats;
 mod events;
 pub use activities::{
@@ -126,6 +127,7 @@ pub use automations::{
     AUTOMATION_TRIGGER_ID, Automation, AutomationDefinition, AutomationProblem, Check, Condition,
     NotifyTarget, Schedule, Step, StepAction, StepChange, Trigger, Weekday,
 };
+pub use chat_suggestions::{ChatSuggestion, SuggestedTicket};
 pub use chats::{
     CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE,
     CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatAgentChange,
@@ -142,7 +144,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 76;
+pub const FORMAT_VERSION: i64 = 82;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -962,35 +964,53 @@ impl Workspace {
             chats::migrate(&transaction)?;
         }
         if version < 67 {
-            events::migrate(&transaction)?;
+            chats::migrate_attention(&transaction)?;
         }
         if version < 68 {
-            automation_agents::migrate(&transaction)?;
+            chats::migrate_tool_start(&transaction)?;
         }
         if version < 69 {
-            automations::migrate(&transaction)?;
+            chats::migrate_interaction_tool(&transaction)?;
         }
         if version < 70 {
-            automations::migrate_sync(&transaction)?;
+            chats::migrate_read_through(&transaction)?;
         }
         if version < 71 {
-            automation_runs::migrate(&transaction)?;
+            chats::migrate_marked_unread(&transaction)?;
         }
         if version < 72 {
-            automation_background::migrate(&transaction)?;
+            chats::migrate_request_times(&transaction)?;
         }
         if version < 73 {
-            automation_runs::migrate_attention(&transaction)?;
+            events::migrate(&transaction)?;
         }
         if version < 74 {
-            automations::migrate_schedule(&transaction)?;
+            automation_agents::migrate(&transaction)?;
         }
         if version < 75 {
-            automation_agents::migrate_any_command(&transaction)?;
-            events::migrate_workspace_sync_actor(&transaction)?;
-            transaction.execute_batch("PRAGMA user_version = 75;")?;
+            automations::migrate(&transaction)?;
         }
         if version < 76 {
+            automations::migrate_sync(&transaction)?;
+        }
+        if version < 77 {
+            automation_runs::migrate(&transaction)?;
+        }
+        if version < 78 {
+            automation_background::migrate(&transaction)?;
+        }
+        if version < 79 {
+            automation_runs::migrate_attention(&transaction)?;
+        }
+        if version < 80 {
+            automations::migrate_schedule(&transaction)?;
+        }
+        if version < 81 {
+            automation_agents::migrate_any_command(&transaction)?;
+            events::migrate_workspace_sync_actor(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 81;")?;
+        }
+        if version < 82 {
             source::migrate_read_partitions(&transaction)?;
         }
         let violations: i64 =
@@ -1331,6 +1351,15 @@ impl Workspace {
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
         self.list_by_trash(false)
+    }
+
+    /// The `limit` tickets out of the trash whose content or organization changed
+    /// last, most recent first.
+    pub fn recently_updated_tickets(&self, limit: usize) -> Result<Vec<Ticket>, Error> {
+        let mut tickets = self.list_tickets()?;
+        tickets.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        tickets.truncate(limit);
+        Ok(tickets)
     }
 
     pub fn list_trash(&self) -> Result<Vec<Ticket>, Error> {

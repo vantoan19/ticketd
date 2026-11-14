@@ -45,8 +45,11 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     cwd: absolutePath,
     claude_executable: absolutePath,
     resume_session_id: z.string().min(1).optional(),
-    // No permission mode can be passed: Claude Code's own setting applies, and the
-    // bridge can never be asked to skip permissions.
+    // New Chat's picks; without one Claude Code's own setting applies. The bridge
+    // can never be asked to skip permissions.
+    model: z.string().min(1).optional(),
+    effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    permission_mode: z.enum(["default", "acceptEdits", "plan"]).optional(),
     /**
      * Set for the Chat of an Automation run, where nobody can approve. The session
      * runs in the "don't ask" permission mode: a tool on `allowed_tools` runs and
@@ -62,6 +65,12 @@ export const commandSchema = z.discriminatedUnion("cmd", [
         max_turns: z.number().int().positive(),
       })
       .optional(),
+  }),
+  // Lists the models Claude Code offers without a session: no prompt is sent.
+  z.strictObject({
+    id,
+    cmd: z.literal("options"),
+    claude_executable: absolutePath,
   }),
   z.strictObject({
     id,
@@ -79,6 +88,25 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     decision,
   }),
   z.strictObject({ id, cmd: z.literal("interrupt"), generation }),
+  // Applies from Claude Code's next request; the host sends it between turns.
+  z.strictObject({
+    id,
+    cmd: z.literal("set_setting"),
+    generation,
+    setting: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("model"), value: z.string().min(1) }),
+      z.strictObject({
+        kind: z.literal("effort"),
+        value: z.enum(["low", "medium", "high", "xhigh", "max"]),
+      }),
+      // bypassPermissions is not here: the bridge can never be asked to skip
+      // permissions.
+      z.strictObject({
+        kind: z.literal("permission"),
+        value: z.enum(["default", "acceptEdits", "plan"]),
+      }),
+    ]),
+  }),
   z.strictObject({ id, cmd: z.literal("close"), generation }),
 ]);
 
@@ -101,6 +129,43 @@ export type RejectionCode =
 export type InputEvidence = "none" | "handed_to_sdk" | "processing";
 
 export type ErrorInfo = { name: string; message: string };
+
+/** A model Claude Code offers, as `supportedModels()` describes it. */
+export type ModelOption = {
+  value: string;
+  /** The model id `value` resolves to, when the SDK said. */
+  resolved_model: string | null;
+  display_name: string;
+  description: string;
+  /** In the SDK's order; empty when the model takes no effort level. */
+  effort_levels: string[];
+};
+
+export type CommandOption = {
+  /** Without its slash: "review". */
+  name: string;
+  description: string | null;
+};
+
+/** What a tool's structured result says, for the tools whose result is shown. */
+export type ToolOutcome =
+  | {
+      kind: "file";
+      path: string;
+      /** `create` for a new file, else `update`; null when the tool did not say. */
+      change: "create" | "update" | null;
+      /** Counted from the patch Claude Code reported, or a new file's content. */
+      added_lines: number | null;
+      removed_lines: number | null;
+    }
+  | { kind: "task_created"; task_id: string; subject: string }
+  | { kind: "task_updated"; task_id: string; success: boolean }
+  | {
+      kind: "task_list";
+      tasks: { id: string; subject: string; status: string }[];
+    };
+
+export type ContextCategory = { name: string; tokens: number };
 
 export type ContentBlock =
   | { type: "text"; text: string }
@@ -127,6 +192,19 @@ type EventBody =
       error: string | null;
     }
   | {
+      event: "options";
+      id: string;
+      models: ModelOption[];
+      /** How Claude Code describes its account (no credential), when it said. */
+      account: {
+        subscription_type: string | null;
+        token_source: string | null;
+        api_key_source: string | null;
+        api_provider: string | null;
+      } | null;
+      error: string | null;
+    }
+  | {
       event: "command_rejected";
       id: string | null;
       code: RejectionCode;
@@ -137,6 +215,9 @@ type EventBody =
       event: "session_initialized";
       generation: number;
       claude_code_version: string | null;
+      models: ModelOption[];
+      /** The slash commands Claude Code lists for the session, in its order. */
+      commands: CommandOption[];
     }
   | {
       event: "session_info";
@@ -146,7 +227,37 @@ type EventBody =
       cwd: string | null;
       model: string | null;
       permission_mode: string | null;
+      /** The effort for the next message, when Claude Code published it. */
+      effort: string | null;
       capabilities: string[];
+    }
+  | {
+      /** A thinking block began or ended; `at` is when the bridge saw it (ms). */
+      event: "thinking";
+      generation: number;
+      phase: "started" | "stopped";
+      index: number | null;
+      redacted: boolean;
+      at: number;
+      parent_tool_use_id: string | null;
+    }
+  | {
+      /** `get_context_usage`'s answer: the window and what fills it. */
+      event: "context_usage";
+      generation: number;
+      total_tokens: number;
+      max_tokens: number;
+      categories: ContextCategory[];
+      /** Where Claude Code compacts on its own; null when auto-compact is off. */
+      compacts_at: number | null;
+    }
+  | { event: "compacted"; generation: number }
+  | {
+      event: "setting_result";
+      id: string;
+      generation: number;
+      outcome: "applied" | "refused";
+      message: string | null;
     }
   | { event: "input_handed_to_sdk"; generation: number; submission_id: string }
   | { event: "input_processing"; generation: number; submission_ids: string[] }
@@ -176,6 +287,7 @@ type EventBody =
       is_error: boolean;
       text: string;
       truncated: boolean;
+      outcome: ToolOutcome | null;
     }
   | {
       event: "permission_request";

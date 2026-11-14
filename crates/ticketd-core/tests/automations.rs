@@ -821,7 +821,7 @@ fn a_workspace_in_the_previous_format_gains_automation_storage_quietly() {
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE automation_device_state; DROP TABLE automations; PRAGMA user_version = 68;",
+        "DROP TABLE automation_device_state; DROP TABLE automations; PRAGMA user_version = 74;",
     )
     .unwrap();
     drop(db);

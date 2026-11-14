@@ -329,7 +329,7 @@ fn the_previous_format_gains_schedule_state_and_keeps_what_is_on() {
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE automation_device_state DROP COLUMN schedule_from; PRAGMA user_version = 73;",
+        "ALTER TABLE automation_device_state DROP COLUMN schedule_from; PRAGMA user_version = 79;",
     )
     .unwrap();
     drop(db);

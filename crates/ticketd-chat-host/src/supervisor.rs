@@ -21,11 +21,27 @@ use uuid::Uuid;
 
 use crate::host::{
     AGENT_CHANGES_RECORD_NAME, Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive,
-    ChatProblem, ChatView, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
-    INTERRUPT_TIMEOUT, LiveInteraction, ResumeMode, SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode,
-    StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
-    problem_key,
+    ChatProblem, ChatView, ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
+    INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
+    SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode, SettingChangeState, StopState,
+    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal, problem_key,
 };
+use crate::records::{
+    FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
+    ReasoningRecord,
+};
+use crate::{
+    HarnessCommand, HarnessSettings, SettingChange, SettingKey, SettingOutcome, StartSettings,
+};
+
+/// Now, in milliseconds since the Unix epoch.
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        })
+}
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::{
     ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
@@ -48,6 +64,11 @@ pub(crate) enum Command {
     },
     Stop(Reply<()>),
     ResumeQueue(Reply<()>),
+    /// The person asked for one queued input to go out now, ahead of the queue.
+    SendQueuedNow {
+        message_id: String,
+        reply: Reply<()>,
+    },
     Respond {
         interaction_id: String,
         answer: InteractionAnswer,
@@ -63,6 +84,13 @@ pub(crate) enum Command {
         reply: Reply<()>,
     },
     Trash(Reply<Option<String>>),
+    ChangeSetting {
+        setting: SettingKey,
+        value: String,
+        reply: Reply<SettingChangeState>,
+    },
+    /// The person's New Chat picks, for the next new session this Chat opens.
+    StartWith(StartSettings),
     Changed,
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
@@ -96,6 +124,12 @@ enum Done {
         outcome: RespondOutcome,
         reply: Reply<()>,
     },
+    SettingChanged {
+        generation: RuntimeGeneration,
+        setting: SettingKey,
+        value: String,
+        outcome: SettingOutcome,
+    },
 }
 
 struct Runtime {
@@ -111,6 +145,12 @@ struct Runtime {
     tools: HashSet<String>,
     /// Harness notices already kept for this session.
     said: HashSet<String>,
+    context: Option<ContextReport>,
+    /// When the session compacted, kept for a context report that comes later.
+    compacted_at: Option<i64>,
+    settings: Option<HarnessSettings>,
+    setting_changes: Vec<LiveSettingChange>,
+    commands: Vec<HarnessCommand>,
 }
 
 struct Opening {
@@ -178,6 +218,9 @@ pub(crate) struct Supervisor {
     active: Option<ActiveTurn>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
     direct: VecDeque<String>,
+    /// The inputs in `direct` that the person took out of the queue with Send now.
+    /// They had no row on screen, so their history moves to where they are sent.
+    direct_from_queue: HashSet<String>,
     /// Input the person asked to send again although its delivery is uncertain.
     resend: Option<String>,
     /// Selected history for a fresh session, sent with the next new turn.
@@ -210,6 +253,8 @@ pub(crate) struct Supervisor {
     /// The context of the live session is being read again; nothing is dispatched until
     /// it is, so the next message carries it.
     refreshing: Option<RuntimeGeneration>,
+    /// New Chat's picks, given to the next new session; kept until one opens.
+    start_settings: StartSettings,
 }
 
 async fn next_event(runtime: &mut Option<Runtime>) -> Option<RuntimeEvent> {
@@ -255,6 +300,7 @@ impl Supervisor {
             unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
+            direct_from_queue: HashSet::new(),
             resend: None,
             preamble: None,
             session_context: None,
@@ -277,6 +323,7 @@ impl Supervisor {
             closing: false,
             unpublished: true,
             refreshing: None,
+            start_settings: StartSettings::default(),
         };
         tokio::spawn(supervisor.run());
         sender
@@ -321,6 +368,8 @@ impl Supervisor {
                     self.notice(format!("Stopping the harness was not confirmed: {reason}"));
                 }
             }
+            // Before the queue can start another turn, so held changes apply to it.
+            self.send_held_settings();
             self.pump();
             self.publish();
         }
@@ -393,6 +442,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.resend = None;
         self.problem = Some(problem);
     }
@@ -432,6 +482,9 @@ impl Supervisor {
                 }
                 let _ = reply.send(result.map(|_| ()).map_err(HostError::from));
             }
+            Command::SendQueuedNow { message_id, reply } => {
+                let _ = reply.send(self.send_queued_now(message_id));
+            }
             Command::Respond {
                 interaction_id,
                 answer,
@@ -449,8 +502,95 @@ impl Supervisor {
                 };
                 let _ = reply.send(result);
             }
+            Command::ChangeSetting {
+                setting,
+                value,
+                reply,
+            } => {
+                let _ = reply.send(Ok(self.change_setting(setting, value)));
+            }
+            Command::StartWith(settings) => self.start_settings = settings,
             Command::LinksChanged => self.refresh_context(),
-            Command::Changed | Command::Shutdown(_) => {}
+            // Views read the Chat again even when no record changed: what they show
+            // can depend on the folder too, such as its branch.
+            Command::Changed => self.last_live = None,
+            Command::Shutdown(_) => {}
+        }
+    }
+
+    /// Refuses a value the harness did not offer, holds a change while a turn runs and
+    /// otherwise sends it now.
+    fn change_setting(&mut self, setting: SettingKey, value: String) -> SettingChangeState {
+        let busy = self.active.is_some() || self.dispatching.is_some();
+        let Some(runtime) = &mut self.runtime else {
+            return SettingChangeState::Done(SettingOutcome::Refused {
+                reason: "no session is running".to_owned(),
+            });
+        };
+        let state = match runtime.settings.as_ref().and_then(|s| s.get(setting)) {
+            None => SettingChangeState::Done(SettingOutcome::Unsupported),
+            Some(reported) => match reported.refusal(&value) {
+                Some(reason) => SettingChangeState::Done(SettingOutcome::Refused { reason }),
+                None if busy => SettingChangeState::Held,
+                None => SettingChangeState::Sent,
+            },
+        };
+        runtime
+            .setting_changes
+            .retain(|change| change.setting != setting);
+        runtime.setting_changes.push(LiveSettingChange {
+            setting,
+            value: value.clone(),
+            state: state.clone(),
+        });
+        if state == SettingChangeState::Sent {
+            self.send_setting(setting, value);
+        }
+        state
+    }
+
+    fn send_setting(&self, setting: SettingKey, value: String) {
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+        let (handle, done, generation) = (
+            runtime.handle.clone(),
+            self.done.clone(),
+            runtime.generation,
+        );
+        tokio::spawn(async move {
+            let change = SettingChange {
+                generation,
+                setting,
+                value: value.clone(),
+            };
+            let outcome = handle.change_setting(change).await;
+            let _ = done.send(Done::SettingChanged {
+                generation,
+                setting,
+                value,
+                outcome,
+            });
+        });
+    }
+
+    /// Sends the changes held during a turn once no turn runs or is starting.
+    fn send_held_settings(&mut self) {
+        if self.active.is_some() || self.dispatching.is_some() {
+            return;
+        }
+        let Some(runtime) = &mut self.runtime else {
+            return;
+        };
+        let mut held = Vec::new();
+        for change in &mut runtime.setting_changes {
+            if change.state == SettingChangeState::Held {
+                change.state = SettingChangeState::Sent;
+                held.push((change.setting, change.value.clone()));
+            }
+        }
+        for (setting, value) in held {
+            self.send_setting(setting, value);
         }
     }
 
@@ -534,6 +674,28 @@ impl Supervisor {
         Ok(message)
     }
 
+    /// Sends one queued input now: it steers the turn in progress or starts one. Only
+    /// that input goes; a paused queue stays paused. Refused while a turn runs that
+    /// cannot be steered, since the input could only wait in the queue where it is.
+    fn send_queued_now(&mut self, message_id: String) -> Result<(), HostError> {
+        if let Some(detail) = &self.storage_failed {
+            return Err(HostError::StorageFailed(detail.clone()));
+        }
+        if self.active.is_some() && self.steering().is_none() {
+            return Err(HostError::Working);
+        }
+        let chat = self.chat_id.clone();
+        let queued = self.core(|core| core.chat_queue(&chat))?;
+        if !queued.iter().any(|message| message.id == message_id) {
+            return Err(Error::Chat("this input is not in the queue".to_owned()).into());
+        }
+        if !self.direct.contains(&message_id) {
+            self.direct_from_queue.insert(message_id.clone());
+            self.direct.push_back(message_id);
+        }
+        Ok(())
+    }
+
     /// Whether the queue, not paused, holds input saved before `message_id`.
     fn older_input_waits(&self, message_id: &str) -> bool {
         let chat = self.chat_id.clone();
@@ -554,6 +716,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.direct.clear();
+        self.direct_from_queue.clear();
         if self.active.is_some() {
             self.interrupt();
         } else if self.unconfirmed_start.is_some()
@@ -588,6 +751,7 @@ impl Supervisor {
         }
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.problem = None;
         self.resend = Some(message_id);
         Ok(())
@@ -604,6 +768,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.stop = None;
         self.stop_deadline = None;
     }
@@ -742,6 +907,11 @@ impl Supervisor {
             generation,
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
+            // A resumed session keeps what it ran with.
+            settings: match session {
+                SessionStart::New => self.start_settings.clone(),
+                SessionStart::Resume(_) => StartSettings::default(),
+            },
             session,
             unattended: self.unattended.clone(),
         };
@@ -868,6 +1038,7 @@ impl Supervisor {
         self.text.clear();
         self.pending_tools.clear();
         self.direct.clear();
+        self.direct_from_queue.clear();
         self.resend = None;
         self.stop = None;
         self.stop_deadline = None;
@@ -929,6 +1100,7 @@ impl Supervisor {
         };
         if chat.trashed {
             self.direct.clear();
+            self.direct_from_queue.clear();
             self.resend = None;
             return;
         }
@@ -942,7 +1114,9 @@ impl Supervisor {
                 Some(id) if idle || self.steering().is_some() => break id.clone(),
                 // Steering is not available: it stays in the visible queue.
                 Some(_) => {
-                    self.direct.pop_front();
+                    if let Some(id) = self.direct.pop_front() {
+                        self.direct_from_queue.remove(&id);
+                    }
                 }
                 None if idle
                     && !chat.queue_paused
@@ -977,6 +1151,7 @@ impl Supervisor {
             self.resend = None;
         } else if self.direct.front() == Some(&message_id) {
             self.direct.pop_front();
+            from_queue = self.direct_from_queue.remove(&message_id);
         } else {
             from_queue = true;
         }
@@ -1152,6 +1327,36 @@ impl Supervisor {
                 }
                 let _ = reply.send(result);
             }
+            Done::SettingChanged {
+                generation,
+                setting,
+                value,
+                outcome,
+            } => {
+                let Some(runtime) = self
+                    .runtime
+                    .as_mut()
+                    .filter(|runtime| runtime.generation == generation)
+                else {
+                    return;
+                };
+                if outcome == SettingOutcome::Applied
+                    && let Some(reported) = runtime
+                        .settings
+                        .as_mut()
+                        .and_then(|settings| settings.get_mut(setting))
+                {
+                    reported.current = Some(value.clone());
+                }
+                // A later change of the same setting replaced this one.
+                if let Some(change) = runtime.setting_changes.iter_mut().find(|change| {
+                    change.setting == setting
+                        && change.value == value
+                        && change.state == SettingChangeState::Sent
+                }) {
+                    change.state = SettingChangeState::Done(outcome);
+                }
+            }
         }
     }
 
@@ -1169,6 +1374,7 @@ impl Supervisor {
         };
         let result = match result {
             Ok(opened) => {
+                self.start_settings = StartSettings::default();
                 self.runtime = Some(Runtime {
                     generation,
                     run: Uuid::new_v4().to_string(),
@@ -1179,6 +1385,11 @@ impl Supervisor {
                     turns: HashSet::new(),
                     tools: HashSet::new(),
                     said: HashSet::new(),
+                    context: None,
+                    compacted_at: None,
+                    settings: None,
+                    setting_changes: Vec::new(),
+                    commands: Vec::new(),
                 });
                 if opening.preamble.is_some() {
                     self.preamble = opening.preamble;
@@ -1224,7 +1435,7 @@ impl Supervisor {
             .is_some_and(|runtime| runtime.generation == dispatch.generation);
         match outcome {
             DispatchOutcome::NotSent(refusal) => {
-                let detail = format!("{refusal:?}");
+                let detail = refusal.reason().to_owned();
                 self.record(vec![ChatObservation::SubmissionNotDelivered {
                     attempt_id,
                     detail: Some(detail.clone()),
@@ -1462,6 +1673,7 @@ impl Supervisor {
                         ToolStatus::Running => ChatToolState::Running,
                         ToolStatus::Succeeded => ChatToolState::Completed,
                         ToolStatus::Failed => ChatToolState::Failed,
+                        ToolStatus::Declined => ChatToolState::Declined,
                     },
                     output,
                 };
@@ -1540,7 +1752,14 @@ impl Supervisor {
                 if self.active.as_ref().is_some_and(|a| a.turn_id == turn_id) {
                     observations.extend(self.agent_changes());
                 }
+                // A turn the person stopped is theirs to have stopped, even when the
+                // harness ends it as completed (Codex can, once interrupted).
+                let stopped = self.stop.is_some()
+                    && self.active.as_ref().is_some_and(|a| a.turn_id == turn_id);
                 let (state, detail, problem, problem_resets_at) = match outcome {
+                    TurnOutcome::Completed if stopped => {
+                        (ChatTurnState::Interrupted, None, None, None)
+                    }
                     TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
                     TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None, None),
                     TurnOutcome::Failed(problem) => (
@@ -1569,6 +1788,7 @@ impl Supervisor {
                         let chat = self.chat_id.clone();
                         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                         self.direct.clear();
+                        self.direct_from_queue.clear();
                     }
                 }
             }
@@ -1602,8 +1822,110 @@ impl Supervisor {
                     let _ = self.write(|core| core.set_chat_effective_settings(&chat, &settings));
                 }
             },
+            EventKind::ReasoningUpdated {
+                turn,
+                item,
+                running,
+                started_at,
+                ended_at,
+                text,
+                heading,
+            } => {
+                let record = ReasoningRecord {
+                    running,
+                    started_at,
+                    ended_at,
+                    text,
+                    heading,
+                };
+                let state = if running {
+                    ChatToolState::Running
+                } else {
+                    ChatToolState::Completed
+                };
+                let id = format!("{run}:reasoning:{}", item.0);
+                self.turn_record(&turn, id, REASONING_RECORD_NAME, &record, state);
+            }
+            EventKind::PlanUpdated { turn, plan } => {
+                let id = format!("{run}:plan:{}", turn.0);
+                let record = PlanRecord::from(&plan);
+                self.turn_record(
+                    &turn,
+                    id,
+                    PLAN_RECORD_NAME,
+                    &record,
+                    ChatToolState::Completed,
+                );
+            }
+            EventKind::FilesChanged { turn, files } => {
+                let id = format!("{run}:files:{}", turn.0);
+                let record = FilesRecord::from(files.as_slice());
+                self.turn_record(
+                    &turn,
+                    id,
+                    FILES_RECORD_NAME,
+                    &record,
+                    ChatToolState::Completed,
+                );
+            }
+            EventKind::ContextUsage(usage) => {
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.context = Some(ContextReport {
+                        usage,
+                        at: now_millis(),
+                        compacted_at: runtime.compacted_at,
+                    });
+                }
+            }
+            EventKind::Compacted => {
+                if let Some(runtime) = &mut self.runtime {
+                    let at = Some(now_millis());
+                    runtime.compacted_at = at;
+                    if let Some(context) = &mut runtime.context {
+                        context.compacted_at = at;
+                    }
+                }
+            }
+            EventKind::SettingsState(settings) => {
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.settings = Some(settings);
+                }
+            }
+            EventKind::CommandsListed(commands) => {
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.commands = commands;
+                }
+            }
             EventKind::Unknown { summary, .. } => self.harness_notice(summary),
         }
+    }
+
+    /// Records a turn's reasoning, plan or files as the tool record that keeps it,
+    /// replacing what the harness reported before.
+    fn turn_record<T: serde::Serialize>(
+        &mut self,
+        turn: &NativeTurnId,
+        tool_id: String,
+        name: &str,
+        record: &T,
+        state: ChatToolState,
+    ) {
+        let mut observations = Vec::new();
+        let Some(turn_id) = self.turn(turn, &mut observations) else {
+            return;
+        };
+        let Ok(input) = serde_json::to_string(record) else {
+            return;
+        };
+        observations.push(ChatObservation::Tool {
+            tool_id,
+            turn_id,
+            name: name.to_owned(),
+            input,
+            state,
+            output: None,
+        });
+        self.record(observations);
     }
 
     /// What the agent changed in ticketd during the active turn, as the record that keeps
@@ -1689,6 +2011,10 @@ impl Supervisor {
             native_request_id: Some(request.request.0.clone()),
             prompt,
             reason,
+            tool_id: request
+                .item
+                .as_ref()
+                .map(|item| format!("{run}:{}", item.0)),
         });
         self.record(observations);
         self.interactions.insert(
@@ -1756,17 +2082,22 @@ impl Supervisor {
             .as_mut()
             .is_none_or(|runtime| runtime.said.insert(text.clone()));
         if first {
-            self.notice(text);
+            self.record_notice(text, true);
         }
     }
 
     /// Keeps something worth telling the person that belongs to no other record. It is
     /// stored, so it is there for a view that attaches later.
     fn notice(&mut self, text: String) {
+        self.record_notice(text, false);
+    }
+
+    fn record_notice(&mut self, text: String, from_harness: bool) {
         let chat = self.chat_id.clone();
         let notice = ChatObservation::Notice {
             notice_id: Uuid::new_v4().to_string(),
             text,
+            from_harness,
         };
         // A storage failure is reported by `write` itself.
         let _ = self.write(|core| core.record_chat_observations(&chat, vec![notice]));
@@ -1812,6 +2143,18 @@ impl Supervisor {
                 }),
                 None => self.problem.clone(),
             },
+            context: self.runtime.as_ref().and_then(|r| r.context.clone()),
+            settings: self.runtime.as_ref().and_then(|runtime| {
+                Some(Box::new(LiveSettings {
+                    reported: runtime.settings.clone()?,
+                    changes: runtime.setting_changes.clone(),
+                }))
+            }),
+            commands: self
+                .runtime
+                .as_ref()
+                .map(|runtime| runtime.commands.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -1856,7 +2199,7 @@ impl Supervisor {
         let live = self.live();
         if self.last_live.as_ref() != Some(&live) {
             for subscriber in &self.subscribers {
-                subscriber.push(ChatUpdate::Live(live.clone()));
+                subscriber.push(ChatUpdate::Live(Box::new(live.clone())));
             }
             self.last_live = Some(live);
         }
