@@ -12,7 +12,7 @@ import {
 } from "@/features/automations/client";
 import { RunNavigation } from "@/features/automations/navigation";
 import { RunMark } from "@/features/automations/RunsList";
-import { RUN_STATUS_LABELS } from "@/features/automations/runs-model";
+import { runStatusText } from "@/features/automations/runs-model";
 import { chatTime } from "@/features/chats/model";
 import type { useTicketRuns } from "@/features/automations/use-ticket-runs";
 import { RailSection } from "@/features/tickets/RailSection";
@@ -59,7 +59,16 @@ export function RunNotices({
             className="mb-6"
           >
             <AlertTitle>{nameOf(run)} needs attention</AlertTitle>
-            {run.reason && <AlertDescription>{run.reason}</AlertDescription>}
+            {(run.reason || run.automation_deleted) && (
+              <AlertDescription>
+                {[
+                  run.reason,
+                  run.automation_deleted && "Its Automation was deleted.",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              </AlertDescription>
+            )}
             <AlertActions>
               <Button
                 variant="outline"
@@ -68,14 +77,16 @@ export function RunNotices({
               >
                 Open run
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() => act(automationsClient.runAgain(run.id))}
-              >
-                Run again
-              </Button>
+              {!run.automation_deleted && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => act(automationsClient.runAgain(run.id))}
+                >
+                  Run again
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -112,8 +123,8 @@ export function TicketRunsSection({ runs }: { runs: TicketRun[] }) {
             >
               <span className="ticket-run-name">{nameOf(run)}</span>
               <span className="ticket-run-state">
-                <RunMark status={run.status} />
-                {RUN_STATUS_LABELS[run.status]} · {chatTime(run.created_at)}
+                <RunMark run={run} />
+                {runStatusText(run)} · {chatTime(run.created_at)}
               </span>
             </button>
           </li>

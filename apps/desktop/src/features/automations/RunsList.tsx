@@ -18,16 +18,23 @@ import {
   type ListedRun,
 } from "@/features/automations/client";
 import {
-  RUN_STATUS_LABELS,
   runsByDay,
   runsByNeed,
+  runStatusText,
 } from "@/features/automations/runs-model";
 import { chatTime } from "@/features/chats/model";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 
-/** The mark beside a run: an icon in its status color. The word is always there too. */
-export function RunMark({ status }: { status: AutomationRun["status"] }) {
-  switch (status) {
+/**
+ * The mark beside a run: an icon in its status color. The word is always there
+ * too. An answered Needs attention run is grey: it asks nothing any more.
+ */
+export function RunMark({
+  run,
+}: {
+  run: Pick<AutomationRun, "status" | "answer">;
+}) {
+  switch (run.status) {
     case "queued":
       // Grey wherever it is drawn, not the color of the text around it.
       return <Clock size={14} className="text-muted-foreground" aria-hidden />;
@@ -40,7 +47,7 @@ export function RunMark({ status }: { status: AutomationRun["status"] }) {
         <CircleCheck size={14} className="text-status-ready" aria-hidden />
       );
     case "needs_attention":
-      return <StatusDot tone="attention" />;
+      return <StatusDot tone={run.answer ? "neutral" : "attention"} />;
     case "taken_over":
       return <UserRound size={14} className="text-violet" aria-hidden />;
   }
@@ -70,7 +77,7 @@ function RunRow({
         {...(run.needs_you && { "data-attention": "" })}
       >
         <span className="chat-row-mark">
-          <RunMark status={run.status} />
+          <RunMark run={run} />
         </span>
         <span className="chat-row-title">
           {run.ticket ? (
@@ -87,10 +94,10 @@ function RunRow({
         </time>
         <span className="chat-row-sub">
           <span>
-            {run.status === "needs_attention" ? (
-              <strong>{RUN_STATUS_LABELS[run.status]}</strong>
+            {run.needs_you ? (
+              <strong>{runStatusText(run)}</strong>
             ) : (
-              RUN_STATUS_LABELS[run.status]
+              runStatusText(run)
             )}
           </span>
           {automationName === undefined ? (

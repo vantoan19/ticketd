@@ -276,6 +276,7 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                     native_request_id: Some("req-1".into()),
                     prompt: "Allow Bash?".into(),
                     reason: None,
+                    tool_id: Some("tool-1".into()),
                 },
                 ChatObservation::InteractionResolved {
                     interaction_id: "ask-1".into(),
@@ -321,7 +322,16 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
     let ChatItem::Tool(tool) = &snapshot.items[3] else {
         panic!("expected the tool");
     };
+    // The approval remembers the tool call it was asked for.
+    let ChatItem::Interaction(asked) = &snapshot.items[4] else {
+        panic!("expected the approval");
+    };
+    assert_eq!(asked.tool_id.as_deref(), Some("tool-1"));
+    // It keeps when it was asked and answered, so the turn's time can leave the wait out.
+    assert!(asked.asked_at.is_some() && asked.resolved_at.is_some());
     assert!(tool.output_truncated);
+    // A running step's clock counts from when the host recorded the call.
+    assert!(tool.started_at.is_some());
     // The end of the output is what is kept: it is where a command says how it went.
     let kept = tool.output.as_ref().unwrap();
     assert!(kept.len() <= CHAT_TOOL_OUTPUT_LIMIT && kept.len() > CHAT_TOOL_OUTPUT_LIMIT - 4);
@@ -438,6 +448,7 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
                     native_request_id: None,
                     prompt: "Which branch?".into(),
                     reason: None,
+                    tool_id: None,
                 },
             ],
         )
@@ -856,14 +867,15 @@ fn chat_state_survives_backup_and_restore_without_resuming_work() {
 }
 
 #[test]
-fn the_previous_format_and_its_backups_gain_chat_storage_without_losing_records() {
+fn a_format_before_chat_and_its_backups_gain_chat_storage_without_losing_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let backup = dir.path().join("old-backup.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("Kept").unwrap();
     drop(workspace);
-    let previous = 65; // The format before Chat storage (step 66).
+    // Format 66 added Chat storage.
+    let previous = 65;
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(&format!("{CHAT_TABLES} PRAGMA user_version = {previous};"))
         .unwrap();
@@ -1096,6 +1108,7 @@ fn a_failed_turn_keeps_its_problem_kind_and_notices_and_reported_settings_are_st
                 ChatObservation::Notice {
                     notice_id: "n1".into(),
                     text: "x".repeat(CHAT_NOTICE_LIMIT + 10),
+                    from_harness: false,
                 },
                 ChatObservation::TurnEnded {
                     turn_id: "t1".into(),
@@ -1141,6 +1154,7 @@ fn an_approval_keeps_why_it_was_asked_apart_from_what_would_run() {
                 native_request_id: Some("req-1".into()),
                 prompt: "npm install".into(),
                 reason: Some("x".repeat(CHAT_NOTICE_LIMIT + 10)),
+                tool_id: None,
             }],
         )
         .unwrap();
@@ -1484,4 +1498,163 @@ fn overlapping_chats_of_one_harness_are_credited_only_with_their_own_changes() {
     };
     assert_eq!(excerpts(&first, "turn-a"), ["A-note"]);
     assert_eq!(excerpts(&second, "turn-b"), ["B-note"]);
+}
+
+#[allow(clippy::unwrap_used)]
+fn end_turn(workspace: &mut Workspace, chat: &Chat, turn: &str) {
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnEnded {
+                turn_id: turn.into(),
+                state: ChatTurnState::Completed,
+                detail: None,
+                problem: None,
+                problem_resets_at: None,
+            }],
+        )
+        .unwrap();
+}
+
+#[allow(clippy::unwrap_used)]
+fn last_turn(workspace: &Workspace, chat: &Chat) -> ticketd_core::ChatTurn {
+    workspace
+        .chat_snapshot(&chat.id, 500)
+        .unwrap()
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Turn(turn) => Some(turn),
+            _ => None,
+        })
+        .max_by_key(|turn| turn.position)
+        .unwrap()
+}
+
+#[test]
+fn what_the_person_read_through_is_kept_and_only_moves_forward() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let message = start_turn(&mut workspace, &chat, "Hello", "turn-1");
+    assert_eq!(chat.read_through, None);
+    let read = workspace
+        .mark_chat_read_through(&chat.id, "turn-1")
+        .unwrap();
+    assert_eq!(read.read_through.as_deref(), Some("turn-1"));
+    // Scrolling back up to an earlier record does not move it back.
+    let read = workspace
+        .mark_chat_read_through(&chat.id, &message.id)
+        .unwrap();
+    assert_eq!(read.read_through.as_deref(), Some("turn-1"));
+    // A record that is not in this Chat changes nothing.
+    let read = workspace
+        .mark_chat_read_through(&chat.id, "elsewhere")
+        .unwrap();
+    assert_eq!(read.read_through.as_deref(), Some("turn-1"));
+    drop(workspace);
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert_eq!(
+        workspace.chat(&chat.id).unwrap().read_through.as_deref(),
+        Some("turn-1")
+    );
+}
+
+#[test]
+fn a_turn_that_ends_after_the_chat_was_seen_is_unseen_until_seen_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "Hello", "turn-1");
+    // Seen while the turn runs: its outcome is still to come.
+    workspace.mark_chat_seen(&chat.id).unwrap();
+    end_turn(&mut workspace, &chat, "turn-1");
+    let turn = last_turn(&workspace, &chat);
+    assert!(workspace.chat(&chat.id).unwrap().unseen(&turn));
+
+    assert!(!workspace.mark_chat_seen(&chat.id).unwrap().unseen(&turn));
+    // Seeing it again writes nothing.
+    let sequence = workspace.chat_change_sequence().unwrap();
+    workspace.mark_chat_seen(&chat.id).unwrap();
+    assert_eq!(workspace.chat_change_sequence().unwrap(), sequence);
+
+    // Marked unread, it reads unread without its outcome becoming unseen again.
+    let marked = workspace.mark_chat_unread(&chat.id).unwrap();
+    assert!(marked.marked_unread && !marked.unseen(&turn));
+    let mut reopened = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert!(reopened.chat(&chat.id).unwrap().marked_unread);
+    // Seeing it clears the mark.
+    assert!(!reopened.mark_chat_seen(&chat.id).unwrap().marked_unread);
+}
+
+#[test]
+fn mute_is_kept_with_the_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    assert!(!chat.muted);
+    assert!(workspace.set_chat_muted(&chat.id, true).unwrap().muted);
+    assert!(workspace.chat(&chat.id).unwrap().muted);
+    assert!(!workspace.set_chat_muted(&chat.id, false).unwrap().muted);
+}
+
+#[test]
+fn upgrading_keeps_existing_requests_without_a_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "go", "t1");
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::InteractionRequested {
+                interaction_id: "ask-1".into(),
+                turn_id: "t1".into(),
+                kind: ChatInteractionKind::Approval,
+                native_request_id: None,
+                prompt: "npm install".into(),
+                reason: None,
+                tool_id: Some("tool-1".into()),
+            }],
+        )
+        .unwrap();
+    drop(workspace);
+    // Format 69 added the tool call an approval was asked for.
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "ALTER TABLE chat_interactions DROP COLUMN tool_id; PRAGMA user_version = 68;",
+    )
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+    let items = workspace.chat_snapshot(&chat.id, 50).unwrap().items;
+    let asked = items.iter().find_map(|item| match item {
+        ChatItem::Interaction(asked) => Some(asked),
+        _ => None,
+    });
+    assert_eq!(
+        asked.map(|asked| (asked.prompt.as_str(), asked.tool_id.as_deref())),
+        Some(("npm install", None))
+    );
+}
+
+#[test]
+fn upgrading_counts_every_existing_turn_as_seen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    start_turn(&mut workspace, &chat, "Hello", "turn-1");
+    end_turn(&mut workspace, &chat, "turn-1");
+    drop(workspace);
+    // Format 67 added what the person has seen of each Chat.
+    let previous = 66;
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(&format!(
+        "ALTER TABLE chats DROP COLUMN seen_through; ALTER TABLE chats DROP COLUMN muted; PRAGMA user_version = {previous};"
+    ))
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+    let upgraded = workspace.chat(&chat.id).unwrap();
+    assert!(!upgraded.unseen(&last_turn(&workspace, &chat)));
+    assert!(!upgraded.muted);
 }

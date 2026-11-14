@@ -9,12 +9,14 @@
 //! and the person's own settings files are left out so they cannot allow more. It
 //! never reads credentials and never asks for permissions to be skipped.
 
+mod report;
 mod runtime;
 mod session;
 #[cfg(test)]
 mod tests;
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -22,8 +24,8 @@ use serde_json::{Value, json};
 use crate::install::{LaunchEnvironment, Os, parse_version};
 use crate::stdio::{Serving, spawn};
 use crate::{
-    Capabilities, Capability, Harness, HarnessAdapter, Inspection, LoginState, OpenRequest,
-    OpenedRuntime, Problem, ProblemKind, ProviderDetail, Unattended,
+    Capabilities, Capability, Harness, HarnessAdapter, HarnessOptions, Inspection, LoginState,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Unattended,
 };
 
 use runtime::Options;
@@ -39,6 +41,9 @@ pub const BRIDGE_SIDECAR_NAME: &str = "ticketd-chat-bridge-claude";
 pub struct ClaudeAdapter {
     bridge: PathBuf,
     selected: Option<PathBuf>,
+    /// What the last check found Claude Code offers: the check already asked, so
+    /// `options` need not start it again.
+    offered: Arc<Mutex<Option<HarnessOptions>>>,
 }
 
 impl ClaudeAdapter {
@@ -47,6 +52,7 @@ impl ClaudeAdapter {
         Self {
             bridge: bridge.into(),
             selected: None,
+            offered: Arc::default(),
         }
     }
 
@@ -55,6 +61,7 @@ impl ClaudeAdapter {
         Self {
             bridge: bridge.into(),
             selected: Some(executable.into()),
+            offered: Arc::default(),
         }
     }
 
@@ -80,11 +87,34 @@ impl HarnessAdapter for ClaudeAdapter {
             return Inspection::NotInstalled;
         };
         match spawn(&self.bridge, &[], Serving::Nothing) {
-            Ok(io) => runtime::probe(io, &executable, Options::default()).await,
+            Ok(io) => {
+                let (inspection, offered) =
+                    runtime::probe(io, &executable, Options::default()).await;
+                *self.offered.lock().unwrap_or_else(PoisonError::into_inner) =
+                    offered.and_then(Result::ok);
+                inspection
+            }
             Err(error) => Inspection::ProbeFailed {
                 reason: self.bridge_problem(&error).message,
             },
         }
+    }
+
+    async fn options(&self) -> Result<HarnessOptions, String> {
+        let checked = self
+            .offered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(options) = checked {
+            return Ok(options);
+        }
+        let executable = self
+            .executable()
+            .ok_or_else(|| "Claude Code was not found".to_owned())?;
+        let io = spawn(&self.bridge, &[], Serving::Nothing)
+            .map_err(|error| self.bridge_problem(&error).message)?;
+        runtime::probe_options(io, &executable, Options::default()).await
     }
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {

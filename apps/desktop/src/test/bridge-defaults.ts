@@ -105,6 +105,7 @@ export function bridgeDefault(
       return false;
     case "reminder":
     case "last_backup":
+    case "project_icon": // no favicon: the letter tile
       return null;
     case "workspace_info":
       return {

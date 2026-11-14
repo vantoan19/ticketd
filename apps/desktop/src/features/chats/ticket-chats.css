@@ -1,0 +1,330 @@
+/* #364: Chats on tickets, the composer's mentions and quotes, Add to chat and
+   the records receipt row. Layout only; colors, type and radii are tokens. */
+
+/* The message box: the text, with a layer behind it that draws record
+   mentions as links. Both share the textarea's box metrics exactly. */
+.chat-composer-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-composer-input {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+.chat-composer-input > * {
+  grid-area: 1 / 1;
+}
+.chat-composer-mirror {
+  overflow: hidden;
+  max-height: 200px;
+  padding: 2px 8px 2px 0;
+  color: transparent;
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+}
+.chat-composer-input textarea {
+  position: relative;
+  overflow-wrap: break-word;
+}
+.chat-token {
+  text-decoration: underline;
+  text-decoration-color: var(--interactive);
+  text-underline-offset: 4px;
+}
+
+/* `#`, `@` and `/`: the level-2 Command list without its input, above the box. */
+.chat-menu {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: -8px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  /* As wide as the composer, so it never sits off to one side (LIVE-20). */
+  width: calc(100% + 16px);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+}
+/* Rows keep their 32px when the list is longer than the menu: it scrolls. */
+.chat-menu > * {
+  flex: none;
+}
+.chat-menu ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-menu-group {
+  padding: 6px 8px 2px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  cursor: default;
+}
+.chat-menu-option[aria-selected="true"] {
+  background: var(--accent);
+}
+.chat-menu-option svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.chat-menu-title {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-menu-detail {
+  overflow: hidden;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A command name never wraps: it truncates, and leaves room for its description. */
+.chat-menu-mono {
+  flex: none;
+  overflow: hidden;
+  min-width: 0;
+  max-width: 60%;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-menu-note,
+.chat-menu-foot {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-menu-foot {
+  margin-top: 4px;
+  box-shadow: 0 -1px 0 0 var(--group-hairline);
+}
+
+/* A quote: a muted source line over two clamped lines beside a 2px rule. */
+.chat-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-right: 8px;
+}
+/* The same quote at the top of a message that was sent with it. */
+blockquote.chat-quote {
+  margin: 0 0 8px;
+}
+.chat-quote-source {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.chat-quote-source > span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-quote-remove {
+  opacity: 0;
+}
+.chat-quote:hover .chat-quote-remove,
+.chat-quote:focus-within .chat-quote-remove {
+  opacity: 1;
+}
+.chat-quote-text {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  color: var(--secondary-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.chat-quote-lines {
+  padding-left: 12px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+
+/* The ticket rail's Chats line and its action. */
+.linked-chats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.linked-chats > button {
+  max-width: 100%;
+  margin-left: -8px;
+}
+.linked-chats-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.linked-chats-line .chat-status {
+  min-width: 0;
+}
+.linked-chats-line .chat-status-word {
+  flex: 0 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linked-chats-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.linked-chats-mark {
+  color: var(--muted-foreground);
+}
+/* A flat row of mark, title and status word; the menu fits the window. */
+.linked-chats-item {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: min(320px, calc(100vw - 64px));
+}
+.linked-chats-item-title {
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linked-chats-item[data-attention] .linked-chats-item-title {
+  font-weight: 500;
+}
+.linked-chats-item .chat-status {
+  flex: none;
+}
+.linked-chats-item .chat-status-word {
+  color: var(--muted-foreground);
+}
+
+/* The records receipt row under a response: 28px, step-row anatomy. */
+.chat-records {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+}
+.chat-records > svg {
+  flex: none;
+}
+.chat-records-items {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+}
+.chat-records-ref {
+  /* A 24px target around the inline reference (STATIC-15). */
+  padding: 2px 0;
+  margin: -2px 0;
+  border: 0;
+  background: none;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  text-decoration: underline;
+  text-decoration-color: var(--interactive);
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+.chat-records-ref:hover {
+  color: var(--interactive);
+}
+/* A Document is named in sans; only references are mono. */
+.chat-records-name {
+  font-family: inherit;
+  font-size: inherit;
+}
+.chat-records-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted-foreground);
+  font-family: inherit;
+  font-size: inherit;
+  text-decoration: none;
+}
+/* Add to chat: one ghost button at the selection's end. */
+/* ⌘L with nothing selected: a short line at the foot of the window. */
+.add-to-chat-hint {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 40;
+  padding: 6px 12px;
+  transform: translateX(-50%);
+  border-radius: var(--radius);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  pointer-events: none;
+}
+.add-to-chat-bar {
+  position: fixed;
+  z-index: 40;
+  border-radius: var(--radius);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+}
+@media (prefers-reduced-motion: reduce) {
+  .add-to-chat-bar {
+    transition: none;
+  }
+}

@@ -11,8 +11,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
-    Harness, HarnessAdapter, Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind,
-    SteeringBehavior, Subscription, Unattended,
+    ContextUsage, Harness, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings,
+    Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey,
+    SettingOutcome, StartSettings, SteeringBehavior, Subscription, Unattended,
 };
 
 /// Provisional bounds, to be measured in #267.
@@ -28,6 +29,9 @@ pub const ADAPTER_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const _: () = assert!(ADAPTER_CLOSE_TIMEOUT.as_millis() < CLOSE_TIMEOUT.as_millis());
 /// How long one write to a harness may take before the harness counts as not reading.
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a harness check waits for sign-in and its options before it reports
+/// what it found without them.
+pub const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a written new turn may go without any confirmation before its delivery is
 /// recorded as uncertain and the Chat stops showing as working. Provisional (#267).
 pub const DELIVERY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -51,8 +55,73 @@ pub const CONTEXT_RECORD_NAME: &str = "ticketd context";
 /// during a turn (`ChatAgentChange`s), so the transcript can show it after the turn.
 pub const AGENT_CHANGES_RECORD_NAME: &str = "ticketd changes";
 
-/// The detail recorded on a turn ticketd itself stopped, on Quit or when Chat is turned off.
+/// The detail recorded on a turn ticketd itself stopped on Quit, and on every such
+/// turn recorded before `TicketdStop` told the reasons apart.
 pub const STOPPED_BY_TICKETD: &str = "ticketd stopped this Chat";
+
+/// Why ticketd itself stopped a Chat's harness. Recorded as the interrupted turn's
+/// detail, so the transcript and the list say what happened (L15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TicketdStop {
+    /// Quit, or a backup being restored.
+    Quit,
+    TurnedOff,
+    /// The person took over the Automation run whose agent was working.
+    TakenOver,
+    /// The run's time limit passed while its agent was working.
+    TimeLimit,
+    /// The run's agent was closed because its step ended.
+    RunEnded,
+}
+
+impl TicketdStop {
+    const ALL: [Self; 5] = [
+        Self::Quit,
+        Self::TurnedOff,
+        Self::TakenOver,
+        Self::TimeLimit,
+        Self::RunEnded,
+    ];
+
+    pub const fn detail(self) -> &'static str {
+        match self {
+            Self::Quit => STOPPED_BY_TICKETD,
+            Self::TurnedOff => "ticketd stopped this Chat when Chat was turned off",
+            Self::TakenOver => "ticketd stopped this run's agent when the run was taken over",
+            Self::TimeLimit => "ticketd stopped this run's agent at the run's time limit",
+            Self::RunEnded => "ticketd stopped this run's agent when its step ended",
+        }
+    }
+
+    /// The reason a turn's recorded detail names, if ticketd stopped it.
+    pub fn of(detail: Option<&str>) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|stop| Some(stop.detail()) == detail)
+    }
+
+    /// For the person, without a full stop: "Stopped when ticketd quit".
+    pub const fn words(self) -> &'static str {
+        match self {
+            Self::Quit => "Stopped when ticketd quit",
+            Self::TurnedOff => "Stopped when Chat was turned off",
+            Self::TakenOver => "You took this run over",
+            Self::TimeLimit => "Stopped at the run's time limit",
+            Self::RunEnded => "Stopped when its run step ended",
+        }
+    }
+
+    /// The transcript's marker for it.
+    pub const fn marker(self) -> &'static str {
+        match self {
+            Self::Quit => "quit",
+            Self::TurnedOff => "turned_off",
+            Self::TakenOver => "taken_over",
+            Self::TimeLimit => "time_limit",
+            Self::RunEnded => "run_ended",
+        }
+    }
+}
 
 /// The `Chat.harness` value an adapter serves.
 pub fn harness_key(harness: Harness) -> &'static str {
@@ -196,6 +265,65 @@ pub struct ChatLive {
     pub interactions: Vec<LiveInteraction>,
     pub stop: Option<StopState>,
     pub problem: Option<ChatProblem>,
+    /// The live session's last context report; a new session starts without one.
+    pub context: Option<ContextReport>,
+    /// The live session's settings, when its harness reported them. Boxed: it is
+    /// large and most updates do not carry it changed.
+    pub settings: Option<Box<LiveSettings>>,
+    /// The slash commands the live session's harness lists; empty when it lists none.
+    pub commands: Vec<HarnessCommand>,
+}
+
+impl ChatLive {
+    /// A Chat with nothing running and nothing asked.
+    pub fn idle() -> Self {
+        Self {
+            activity: Activity::Idle,
+            running: false,
+            opening: None,
+            steering: None,
+            delivery_unconfirmed: false,
+            sending: Vec::new(),
+            interactions: Vec::new(),
+            stop: None,
+            problem: None,
+            context: None,
+            settings: None,
+            commands: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextReport {
+    pub usage: ContextUsage,
+    /// When it was reported, in milliseconds since the Unix epoch.
+    pub at: i64,
+    /// When the session last compacted its context, if it did since it started.
+    pub compacted_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSettings {
+    pub reported: HarnessSettings,
+    /// The latest change the person asked for, per setting.
+    pub changes: Vec<LiveSettingChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSettingChange {
+    pub setting: SettingKey,
+    pub value: String,
+    pub state: SettingChangeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingChangeState {
+    /// Held while a turn runs; it is sent when the turn ends.
+    Held,
+    /// Sent to the harness; no answer yet.
+    Sent,
+    Done(SettingOutcome),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -352,7 +480,7 @@ impl ChatHost {
         let mut closed = false;
         // The Chat acted on, and the Chat of a later step whose agent was working.
         for step in run.steps.iter().filter_map(|step| step.chat_id.as_deref()) {
-            closed |= self.end_unattended(step).await && step == chat_id;
+            closed |= self.end_unattended(step, TicketdStop::TakenOver).await && step == chat_id;
         }
         Ok(closed)
     }
@@ -390,6 +518,18 @@ impl ChatHost {
         self.ask(chat_id, Command::ResumeQueue).await
     }
 
+    /// Sends one queued input now, alone: it steers the turn in progress or starts one,
+    /// and a paused queue stays paused. Refused with `Working` while a turn that cannot
+    /// be steered runs. Returns once it is held to send; delivery is reported as usual.
+    pub async fn send_queued_now(&self, chat_id: &str, message_id: &str) -> Result<(), HostError> {
+        let message_id = message_id.to_owned();
+        self.ask(chat_id, |reply| Command::SendQueuedNow {
+            message_id,
+            reply,
+        })
+        .await
+    }
+
     pub async fn respond(
         &self,
         chat_id: &str,
@@ -403,6 +543,61 @@ impl ChatHost {
             reply,
         })
         .await
+    }
+
+    /// Asks the live session to use `value` for `setting` from the next turn. While a
+    /// turn runs the change is held and sent when it ends, so every turn runs on one
+    /// set of settings. Returns where the change stands; later states are in
+    /// `ChatLive::settings`. A value the harness did not offer, or full access, is
+    /// refused without being sent.
+    pub async fn change_setting(
+        &self,
+        chat_id: &str,
+        setting: SettingKey,
+        value: &str,
+    ) -> Result<SettingChangeState, HostError> {
+        // An unattended session runs on its agent's settings and is never widened:
+        // the person takes the run over (a reply or Stop) before changing anything.
+        if self.is_unattended(chat_id) {
+            return Ok(SettingChangeState::Done(SettingOutcome::Refused {
+                reason:
+                    "An Automation is running this Chat. Reply or stop it to take it over first."
+                        .to_owned(),
+            }));
+        }
+        let value = value.to_owned();
+        self.ask(chat_id, |reply| Command::ChangeSetting {
+            setting,
+            value,
+            reply,
+        })
+        .await
+    }
+
+    /// Opens the Chat's next new session with the person's New Chat picks. Sent before
+    /// the first message, so its first turn already uses them.
+    pub async fn start_with(
+        &self,
+        chat_id: &str,
+        settings: StartSettings,
+    ) -> Result<(), HostError> {
+        self.sender(chat_id)?
+            .send(Command::StartWith(settings))
+            .await
+            .map_err(|_| HostError::Quitting)
+    }
+
+    /// What the harness offers before any session: models, efforts, permissions.
+    pub async fn options(
+        &self,
+        harness: &str,
+    ) -> Result<Result<HarnessOptions, String>, HostError> {
+        let adapter = self
+            .inner
+            .adapters
+            .get(harness)
+            .ok_or_else(|| HostError::HarnessUnavailable(harness.to_owned()))?;
+        Ok(adapter.options().await)
     }
 
     /// Sends input again although its first delivery is uncertain, because the person
@@ -449,7 +644,7 @@ impl ChatHost {
     /// supervisor, on every clone of this host, then stops every running Chat.
     pub async fn turn_off(&self) -> Vec<UnconfirmedCleanup> {
         self.inner.off.store(true, Ordering::SeqCst);
-        self.stop_all().await
+        self.stop_all(TicketdStop::TurnedOff).await
     }
 
     /// Chat was switched on again; requests are served.
@@ -458,12 +653,12 @@ impl ChatHost {
     }
 
     /// Stops every running Chat with bounded cleanup and keeps the host usable.
-    pub async fn stop_all(&self) -> Vec<UnconfirmedCleanup> {
+    pub async fn stop_all(&self, why: TicketdStop) -> Vec<UnconfirmedCleanup> {
         let chats: Vec<_> = self.chats().drain().collect();
         let mut waiting = Vec::new();
         for (chat_id, commands) in chats {
             let (reply, done) = oneshot::channel();
-            if commands.send(Command::Shutdown(reply)).await.is_ok() {
+            if commands.send(Command::Shutdown(why, reply)).await.is_ok() {
                 waiting.push((chat_id, done));
             }
         }
@@ -479,7 +674,7 @@ impl ChatHost {
     /// Refuses new work, then stops every running Chat. Close storage after this returns.
     pub async fn quit(&self) -> Vec<UnconfirmedCleanup> {
         self.inner.quitting.store(true, Ordering::SeqCst);
-        self.stop_all().await
+        self.stop_all(TicketdStop::Quit).await
     }
 
     /// Before the workspace is replaced by a backup: refuses every request that would
@@ -487,7 +682,7 @@ impl ChatHost {
     /// running Chat. Nothing runs until `finish_restore`.
     pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
         self.inner.restoring.store(true, Ordering::SeqCst);
-        self.stop_all().await
+        self.stop_all(TicketdStop::Quit).await
     }
 
     /// The restore is over, whether or not it replaced anything; requests are served again.
@@ -627,11 +822,11 @@ impl ChatHost {
     /// Whoever gets here first does the closing, so a run that ends and a person who
     /// takes it over at the same moment never close the person's new session.
     /// Returns whether it was running unattended.
-    pub(crate) async fn end_unattended(&self, chat_id: &str) -> bool {
+    pub(crate) async fn end_unattended(&self, chat_id: &str, why: TicketdStop) -> bool {
         if self.unattended().remove(chat_id).is_none() {
             return false;
         }
-        self.close(chat_id).await;
+        self.close(chat_id, why).await;
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
         self.inner
             .board

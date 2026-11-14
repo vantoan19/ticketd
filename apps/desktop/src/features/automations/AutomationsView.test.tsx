@@ -151,6 +151,8 @@ const listed = (
   status,
   reason: null,
   needs_you: status === "needs_attention",
+  answer: null,
+  automation_deleted: false,
   ticket: { id, reference: `T-${id}`, title },
   created_at: new Date().toISOString(),
 });
@@ -295,6 +297,64 @@ test("an edit is saved as it is made and shows in the list", async () => {
       name: /Verifier/,
     }),
   ).toBeTruthy();
+});
+
+test("a limit outside its range is not saved and says why under the field, until the field is left", async () => {
+  await open(undefined, [
+    { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = await screen.findByRole("region", { name: "Triage" });
+  const turns = within(form).getByRole("spinbutton", { name: "Turns" });
+  const minutes = within(form).getByRole("spinbutton", { name: "Minutes" });
+
+  for (const [field, typed, note] of [
+    [
+      turns,
+      "99999999999",
+      "A whole number from 1 to 500. Until then, 40 is kept.",
+    ],
+    [turns, "0", "A whole number from 1 to 500. Until then, 40 is kept."],
+    [turns, "1.5", "A whole number from 1 to 500. Until then, 40 is kept."],
+    [minutes, "241", "A whole number from 1 to 240. Until then, 20 is kept."],
+  ] as const) {
+    fireEvent.change(field, { target: { value: typed } });
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(within(form).getByRole("alert").textContent).toBe(note);
+    fireEvent.blur(field);
+    expect(within(form).queryByRole("alert")).toBeNull();
+  }
+  expect(invoke).not.toHaveBeenCalledWith(
+    "automation_agent_update",
+    expect.anything(),
+  );
+
+  fireEvent.change(turns, { target: { value: "500" } });
+  await waitFor(() => expect(stored[0]).toMatchObject({ turn_limit: 500 }));
+});
+
+test("switching the harness clears a model typed for the other one", async () => {
+  await open(undefined, [
+    {
+      id: "a1",
+      ...DEFAULTS,
+      name: "Triage",
+      model: "claude-sonnet-4-5",
+    } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = await screen.findByRole("region", { name: "Triage" });
+  const model = within(form).getByRole("textbox", {
+    name: /Model/,
+  }) as HTMLInputElement;
+  expect(model.value).toBe("claude-sonnet-4-5");
+
+  fireEvent.click(within(form).getByRole("radio", { name: /Codex/ }));
+
+  expect(model.value).toBe("");
+  await waitFor(() =>
+    expect(stored[0]).toMatchObject({ harness: "codex", model: null }),
+  );
 });
 
 test("deleting an agent asks first, then removes it from the list", async () => {

@@ -33,7 +33,7 @@ import {
   type Card,
 } from "@/features/automations/flow-cards";
 import { FlowView } from "@/features/automations/FlowView";
-import { elapsed } from "@/features/chats/model";
+import { duration } from "@/features/chats/model";
 import {
   everyStep,
   flowSteps,
@@ -79,7 +79,7 @@ function Elapsed({ since }: { since: string }) {
   return (
     <span aria-hidden="true">
       {" "}
-      · {elapsed(now - new Date(since).getTime())}
+      · {duration(now - new Date(since).getTime())}
     </span>
   );
 }

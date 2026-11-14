@@ -1,8 +1,27 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DialogShell } from "@/components/ui/dialog-shell";
-import { useChatClient, type ChatOverview } from "@/features/chats/client";
-import { ChatFeatureContext } from "@/features/chats/use-chats";
+import {
+  useChatClient,
+  type ChatOverview,
+  type OpenRequest,
+  type Stopping,
+} from "@/features/chats/client";
+import { stoppingText } from "@/features/chats/model";
+import {
+  ChatFeatureContext,
+  NO_CHAT_OVERVIEW,
+} from "@/features/chats/use-chats";
+import { SelectionAddToChat } from "@/features/chats/SelectionAddToChat";
+import type { ChatRequest } from "@/features/chats/ticket-chat";
+import { usePreferences } from "@/lib/preferences";
 import "@/features/chats/chats.css";
+import "@/features/chats/ticket-chats.css";
+
+function quitText({ chats, runs }: Stopping) {
+  const { subject, one } = stoppingText(chats, runs);
+  const them = one ? "it" : "them";
+  return `${subject} still working. Quitting stops ${them}. Closing the window instead keeps ${them} running.`;
+}
 
 /**
  * Holds what every screen needs to know about Chat: whether it is on, how
@@ -12,12 +31,18 @@ import "@/features/chats/chats.css";
 export function ChatProvider({ children }: { children: ReactNode }) {
   const client = useChatClient();
   const [enabled, setEnabledState] = useState(false);
-  const [overview, setOverview] = useState<ChatOverview>({
-    needs_you: 0,
-    working: 0,
-  });
+  const [overview, setOverview] = useState<ChatOverview>(NO_CHAT_OVERVIEW);
   const [revision, setRevision] = useState(0);
-  const [quitting, setQuitting] = useState<number | null>(null);
+  const [openRequest, setOpenRequest] = useState<{
+    request: OpenRequest;
+    n: number;
+  } | null>(null);
+  const [chatRequest, setChatRequest] = useState<{
+    request: ChatRequest;
+    n: number;
+  } | null>(null);
+  const { notifyChats } = usePreferences();
+  const [quitting, setQuitting] = useState<Stopping | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -25,10 +50,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       (value) => current && setEnabledState(value),
       () => {},
     );
-    const stopQuit = client.onQuitRequested((working) => {
+    const stopQuit = client.onQuitRequested((stopping) => {
       // Nothing is working: there is nothing to confirm.
-      if (working === 0) void client.answerQuit(true);
-      else setQuitting(working);
+      if (stopping.chats + stopping.runs === 0) void client.answerQuit(true);
+      else setQuitting(stopping);
     });
     return () => {
       current = false;
@@ -46,17 +71,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     };
     client.overview().then(apply, () => {});
     const stop = client.subscribeOverview(apply);
+    const stopOpen = client.onOpenRequested(
+      (request) =>
+        current &&
+        setOpenRequest((last) => ({ request, n: (last?.n ?? 0) + 1 })),
+    );
     return () => {
       current = false;
       stop();
+      stopOpen();
     };
   }, [client, enabled]);
+
+  // The backend starts with notifications on; it is told the person's choice.
+  useEffect(() => {
+    if (enabled) void client.setNotify(notifyChats).catch(() => {});
+  }, [client, enabled, notifyChats]);
 
   const feature = useMemo(
     () => ({
       enabled,
-      overview: enabled ? overview : { needs_you: 0, working: 0 },
+      overview: enabled ? overview : NO_CHAT_OVERVIEW,
       revision,
+      openRequest,
+      chatRequest,
+      requestChat: (request: ChatRequest) =>
+        setChatRequest((last) => ({ request, n: (last?.n ?? 0) + 1 })),
       setEnabled: async (value: boolean) => {
         try {
           await client.setEnabled(value);
@@ -69,7 +109,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [client, enabled, overview, revision],
+    [client, enabled, overview, revision, openRequest, chatRequest],
   );
   const answerQuit = (quit: boolean) => {
     setQuitting(null);
@@ -78,6 +118,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   return (
     <ChatFeatureContext value={feature}>
       {children}
+      <SelectionAddToChat />
       <DialogShell
         open={quitting !== null}
         onOpenChange={(open) => {
@@ -89,13 +130,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         blockedReason={null}
         onSubmit={() => answerQuit(true)}
       >
-        <p className="chat-dialog-text">
-          {quitting === 1
-            ? "1 Chat is still working. Quitting stops it."
-            : `${quitting} Chats are still working. Quitting stops them.`}{" "}
-          Closing the window instead keeps {quitting === 1 ? "it" : "them"}{" "}
-          running.
-        </p>
+        {quitting && <p className="chat-dialog-text">{quitText(quitting)}</p>}
         <p className="chat-fine">
           History and queued messages are kept. Nothing restarts by itself next
           time.

@@ -75,11 +75,11 @@ pub struct WorkspaceEvent {
 /// write that changes nothing out of the log.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     create(connection)?;
-    connection.execute_batch("PRAGMA user_version = 67;")?;
+    connection.execute_batch("PRAGMA user_version = 73;")?;
     Ok(())
 }
 
-/// Format version 75: what Workspace sync applies is logged with an actor of its
+/// Format version 81: what Workspace sync applies is logged with an actor of its
 /// own, `workspace_sync`, apart from a ticket source's `sync`. Events already
 /// logged keep the actor they have.
 pub(crate) fn migrate_workspace_sync_actor(connection: &Connection) -> Result<(), Error> {

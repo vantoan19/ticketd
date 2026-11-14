@@ -11,7 +11,8 @@ use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
     InteractionKind, InteractionRequest, NativeRequestId, NativeSessionId, NativeTurnId, Problem,
-    ProblemKind, SendMode, SessionStart, TurnOutcome, WorkspaceOpener,
+    ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey, SettingOutcome,
+    TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -379,6 +380,7 @@ async fn a_harness_that_asks_for_approval_anyway_is_stopped_instead_of_waited_on
         .emit(EventKind::InteractionRequested(InteractionRequest {
             request: NativeRequestId::new("request-1"),
             turn: Some(NativeTurnId::new("turn-1")),
+            item: None,
             kind: InteractionKind::Approval {
                 description: "rm -rf build".into(),
                 reason: None,
@@ -394,6 +396,27 @@ async fn a_harness_that_asks_for_approval_anyway_is_stopped_instead_of_waited_on
         f.needs_attention()
             .starts_with("The agent needed something it is not allowed to do."),
     );
+}
+
+/// The Chat's own model and permission pickers do not reach an unattended session:
+/// the agent's settings hold until the person takes the run over.
+#[tokio::test(start_paused = true)]
+#[allow(clippy::unwrap_used)]
+async fn a_setting_cannot_be_changed_in_a_chat_an_automation_is_running() {
+    let f = Fixture::new();
+    f.agent_working().await;
+
+    let asked = f
+        .host
+        .change_setting(&f.chat(), SettingKey::Permission, "acceptEdits")
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        asked,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    assert!(!written(&f).contains(&"setting".to_owned()));
 }
 
 #[tokio::test(start_paused = true)]
@@ -588,7 +611,23 @@ async fn a_message_from_the_person_takes_a_running_run_over_and_its_chat_becomes
 
     let run = f.runs().remove(0);
     assert_eq!(run.status, AutomationRunStatus::TakenOver);
-    assert_eq!(f.listed_chats(), [chat]);
+    assert_eq!(f.listed_chats(), std::slice::from_ref(&chat));
+    // L15: the agent's turn is recorded as stopped for the take-over, not for Quit.
+    let first_turn = f
+        .core()
+        .chat_snapshot(&chat, 50)
+        .unwrap()
+        .items
+        .into_iter()
+        .find_map(|item| match item {
+            ticketd_core::ChatItem::Turn(turn) => Some(turn),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        ticketd_chat_host::TicketdStop::of(first_turn.detail.as_deref()),
+        Some(ticketd_chat_host::TicketdStop::TakenOver)
+    );
     // The turn that was going ends later; the run stays the person's.
     f.end_turn(TurnOutcome::Completed).await;
     let run = f.runs().remove(0);
@@ -606,6 +645,7 @@ fn written(f: &Fixture) -> Vec<String> {
             Written::Respond(_) => "respond".to_owned(),
             Written::Interrupt(_) => "interrupt".to_owned(),
             Written::Close(_) => "close".to_owned(),
+            Written::Setting(_) => "setting".to_owned(),
         })
         .collect()
 }

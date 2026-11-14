@@ -8,7 +8,7 @@ use ticketd_chat_host::WorkspaceOpener;
 use ticketd_core::{
     Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationExample,
     AutomationRun, AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
-    DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE,
+    DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE, RunAnswer,
 };
 
 use crate::chat_commands::ChatBridge;
@@ -45,9 +45,7 @@ pub fn automation_agent_list() -> Result<Vec<ListedAgent>, String> {
 #[tauri::command]
 pub fn automation_agent_create() -> Result<AutomationAgent, String> {
     open_workspace()
-        .and_then(|mut workspace| {
-            workspace.create_automation_agent(AutomationAgentSettings::default())
-        })
+        .and_then(|mut workspace| workspace.create_new_automation_agent())
         .map_err(|error| error.to_string())
 }
 
@@ -170,6 +168,10 @@ pub struct ListedRun {
     reason: Option<String>,
     /// It needs attention and the person has not yet acted on it.
     needs_you: bool,
+    /// How the person answered it, once it no longer needs them.
+    answer: Option<RunAnswer>,
+    /// Its Automation was deleted: it cannot be run again.
+    automation_deleted: bool,
     ticket: Option<AutomationRunTicket>,
     created_at: String,
 }
@@ -183,6 +185,8 @@ fn listed(runs: Vec<AutomationRun>) -> Vec<ListedRun> {
             status: run.status,
             reason: run.reason,
             needs_you: run.needs_you,
+            answer: run.answer,
+            automation_deleted: run.automation_deleted,
             ticket: run.ticket,
             created_at: run.created_at,
         })

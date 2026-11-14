@@ -11,7 +11,7 @@ use tokio::time::timeout;
 
 use crate::host::{Activity, ChatHost, ChatLive, ChatProblem, HostError, SendMode, problem_kind};
 use crate::supervisor::Command;
-use crate::{ProblemKind, Unattended};
+use crate::{ProblemKind, TicketdStop, Unattended};
 
 /// How an unattended turn ended. Only `Finished` is the agent ending its turn itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +61,11 @@ impl ChatHost {
         let run_id = unattended.run_id.clone();
         self.set_unattended(chat_id, Some(unattended));
         let ended = self.first_turn(chat_id, &run_id, text, time_limit).await;
-        if !self.end_unattended(chat_id).await {
+        let why = match ended {
+            Ok(TurnEnd::TimeLimitReached) => TicketdStop::TimeLimit,
+            _ => TicketdStop::RunEnded,
+        };
+        if !self.end_unattended(chat_id, why).await {
             return Ok(TurnEnd::TakenOver);
         }
         ended
@@ -124,12 +128,12 @@ impl ChatHost {
     }
 
     /// Stops the Chat's supervisor and its harness process with bounded cleanup.
-    pub(crate) async fn close(&self, chat_id: &str) {
+    pub(crate) async fn close(&self, chat_id: &str, why: TicketdStop) {
         let Some(commands) = self.forget(chat_id) else {
             return;
         };
         let (reply, done) = oneshot::channel();
-        if commands.send(Command::Shutdown(reply)).await.is_ok() {
+        if commands.send(Command::Shutdown(why, reply)).await.is_ok() {
             let _ = done.await;
         }
     }

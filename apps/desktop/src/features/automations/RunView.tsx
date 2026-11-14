@@ -32,14 +32,14 @@ import { RunCanvas, StepMark } from "@/features/automations/RunCanvas";
 import { RunMark } from "@/features/automations/RunsList";
 import {
   everyStep,
-  RUN_STATUS_LABELS,
+  runStatusText,
   STEP_STATE_LABELS,
   stepStates,
 } from "@/features/automations/runs-model";
 import { StepPanel } from "@/features/automations/StepPanel";
 import { TakenOverLine } from "@/features/automations/TakenOver";
 import { ChatDetail } from "@/features/chats/ChatDetail";
-import { elapsed } from "@/features/chats/model";
+import { duration } from "@/features/chats/model";
 import { client, type Project } from "@/lib/api/client";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 
@@ -169,7 +169,7 @@ function RunPanel({
             <>
               <dt>Took</dt>
               <dd>
-                {elapsed(
+                {duration(
                   new Date(run.ended_at).getTime() -
                     new Date(run.started_at).getTime(),
                 )}
@@ -260,6 +260,12 @@ export function RunView({
       <ChatDetail
         key={chat}
         id={chat}
+        // The title the runner gives a run's Chat (`run_agent`), until it is read.
+        title={
+          run?.ticket
+            ? `${run.definition.name}: ${run.ticket.reference} ${run.ticket.title}`
+            : run?.definition.name
+        }
         notice={
           run?.steps.some((step) => step.chat_id === chat && step.chat_owned)
             ? `A run of ${automationName}. Reply to take it over; it moves to your Chats.`
@@ -329,8 +335,8 @@ export function RunView({
           {run && (
             <>
               <span className="run-status" role="status">
-                <RunMark status={run.status} />
-                {RUN_STATUS_LABELS[run.status]}
+                <RunMark run={run} />
+                {runStatusText(run)}
               </span>
               {active ? (
                 <Button
@@ -348,6 +354,10 @@ export function RunView({
                   <Square aria-hidden />
                   Stop
                 </Button>
+              ) : run.automation_deleted ? (
+                <span className="run-status text-muted-foreground">
+                  Its Automation was deleted.
+                </span>
               ) : (
                 <Button
                   variant="outline"

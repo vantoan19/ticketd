@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use ticketd_chat_host::records::{FILES_RECORD_NAME, PLAN_RECORD_NAME, REASONING_RECORD_NAME};
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities,
@@ -20,10 +21,15 @@ use ticketd_chat_host::{
     TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus, TurnOutcome, UnconfirmedCleanup,
     WorkspaceOpener, problem_kind,
 };
+use ticketd_chat_host::{
+    AppliesFrom, ContextUsage, FileChange, FileChangeKind, HarnessSettings, PermissionKind, Plan,
+    PlanStep, PlanStepStatus, Setting, SettingChange, SettingChangeState, SettingKey,
+    SettingOption, SettingOutcome, StartSettings,
+};
 use ticketd_core::{
     Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
-    ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatTurn, ChatTurnState, Error,
-    NewChat, Workspace,
+    ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurn,
+    ChatTurnState, Error, NewChat, Workspace,
 };
 
 struct Fixture {
@@ -141,6 +147,7 @@ impl Fixture {
         self.emit(EventKind::InteractionRequested(InteractionRequest {
             request: NativeRequestId::new("approval-1"),
             turn: None,
+            item: None,
             kind: InteractionKind::Approval {
                 description: "Run cargo test".to_owned(),
                 reason: None,
@@ -234,6 +241,21 @@ async fn input_is_recorded_as_possibly_submitted_before_the_write_and_acknowledg
     assert_eq!(attempt.delivery, ChatDelivery::Acknowledged);
     assert_eq!(attempt.turn_id, Some(turn.id));
     assert_eq!(turn.native_turn_id.as_deref(), Some("turn-1"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn new_chats_picks_open_the_first_session() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let picks = StartSettings {
+        model: Some("gpt-b".to_owned()),
+        effort: Some("high".to_owned()),
+        permission: None,
+    };
+    f.host.start_with(&f.chat.id, picks.clone()).await.unwrap();
+
+    f.send("hello").await;
+
+    assert_eq!(f.fake.opens()[0].settings, picks);
 }
 
 #[tokio::test(start_paused = true)]
@@ -415,6 +437,22 @@ async fn stop_during_a_pending_submission_interrupts_its_turn_and_keeps_unsent_i
     f.host.resume_queue(&f.chat.id).await.unwrap();
     settle().await;
     assert_eq!(f.submits()[1].text, "later");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_turn_the_person_stopped_is_interrupted_even_when_the_harness_says_completed() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    settle().await;
+    assert!(matches!(
+        f.fake.written().last(),
+        Some(Written::Interrupt(_))
+    ));
+    // Codex can end an interrupted turn as `completed`.
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.turns()[0].state, ChatTurnState::Interrupted);
+    assert_eq!(f.live().await.stop, None);
 }
 
 #[tokio::test(start_paused = true)]
@@ -940,7 +978,7 @@ async fn live_state_is_readable_without_a_view_and_cleared_when_the_chat_stops()
 
     assert!(changed.has_changed().unwrap());
     assert_eq!(f.host.live()[&f.chat.id].activity, Activity::Working);
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     assert!(f.host.live().is_empty());
 }
 
@@ -1077,7 +1115,7 @@ async fn the_feed_of_a_view_ends_when_the_supervisor_of_its_chat_stops() {
     f.send("first").await;
     let (_view, mut subscription) = f.host.attach(&f.chat.id).await.unwrap();
 
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
 
     let ended = tokio::time::timeout(Duration::from_secs(60), async {
         while subscription.next().await.is_some() {}
@@ -1439,7 +1477,7 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
 
     // A new session says it again, once.
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     f.send("second").await;
     for _ in 0..2 {
         for event in repeated() {
@@ -1502,7 +1540,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     assert_eq!(kept, ["links: none", "links: T-KQ1"]);
 
     // A resumed native session already has what it was given ...
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     f.send("fourth").await;
     assert_eq!(texts(&f)[3], "fourth");
     f.emit(turn_ended(
@@ -1511,7 +1549,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     ))
     .await;
     // ... and is told when the links changed while no session was live.
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     *context.lock().unwrap() = "links: T-KQ2".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("fifth").await;
@@ -1608,4 +1646,234 @@ async fn work_is_its_session_opening_until_the_sessions_first_turn_starts() {
     f.send("second").await;
     assert_eq!(f.live().await.activity, Activity::Working);
     assert_eq!(f.live().await.opening, None);
+}
+
+/// Send now on a queued card: during a turn it steers that input alone; the rest of
+/// the queue keeps waiting for the turn to end.
+#[tokio::test(start_paused = true)]
+async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.queue("later").await;
+    let now = f.queue("this one now").await;
+
+    f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
+    settle().await;
+
+    assert_eq!(
+        f.submits()[1].kind,
+        SubmissionKind::Steer {
+            expected_turn: turn_1()
+        }
+    );
+    assert_eq!(f.submits()[1].text, "this one now");
+    assert_eq!(f.queued(), ["later"]);
+}
+
+/// Send now on a paused queue starts a turn with that input only; the queue stays
+/// paused until the person resumes it.
+#[tokio::test(start_paused = true)]
+async fn send_now_on_a_paused_queue_sends_only_that_input() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.host.stop(&f.chat.id).await.unwrap();
+    f.queue("older").await;
+    let now = f.queue("this one now").await;
+
+    f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
+    settle().await;
+
+    let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
+    assert_eq!(texts(&f), ["this one now"]);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(texts(&f), ["this one now"], "the paused queue stays paused");
+    assert_eq!(f.queued(), ["older"]);
+}
+
+/// Without steering, a turn in progress cannot take it now: it stays in the queue.
+#[tokio::test(start_paused = true)]
+async fn send_now_is_refused_during_a_turn_that_cannot_be_steered() {
+    let f = Fixture::new(FakeAdapter::without_steering());
+    f.send("first").await;
+    let later = f.queue("later").await;
+
+    let refused = f.host.send_queued_now(&f.chat.id, &later.id).await;
+
+    assert!(matches!(refused, Err(HostError::Working)));
+    assert_eq!(f.queued(), ["later"]);
+}
+
+/// The tool records of the history whose name is `name`, as their stored JSON.
+fn records(f: &Fixture, name: &str) -> Vec<(String, ChatToolState, serde_json::Value)> {
+    f.items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == name => Some((
+                tool.id,
+                tool.state,
+                serde_json::from_str(&tool.input).unwrap(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn reasoning_plan_and_files_are_kept_with_their_turn_each_replacing_the_last() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("Add a limiter").await;
+    let reasoning = |running, text: Option<&str>| EventKind::ReasoningUpdated {
+        turn: turn_1(),
+        item: NativeItemId::new("rs-1"),
+        running,
+        started_at: Some(1_000),
+        ended_at: (!running).then_some(13_000),
+        text: text.map(str::to_owned),
+        heading: None,
+    };
+    let plan = |done| EventKind::PlanUpdated {
+        turn: turn_1(),
+        plan: Plan {
+            steps: vec![PlanStep {
+                text: "Add the limiter".to_owned(),
+                status: if done {
+                    PlanStepStatus::Completed
+                } else {
+                    PlanStepStatus::InProgress
+                },
+                active_label: None,
+            }],
+            explanation: None,
+        },
+    };
+    let files = |confirmed| EventKind::FilesChanged {
+        turn: turn_1(),
+        files: vec![FileChange {
+            path: "/work/app/src/limiter.ts".to_owned(),
+            kind: FileChangeKind::Added,
+            added_lines: Some(48),
+            removed_lines: Some(0),
+            confirmed,
+        }],
+    };
+
+    for event in [
+        reasoning(true, None),
+        reasoning(false, Some("The handler has no limit.")),
+        plan(false),
+        plan(true),
+        files(false),
+        files(true),
+    ] {
+        f.emit(event).await;
+    }
+
+    let [(_, state, kept)] = records(&f, REASONING_RECORD_NAME).try_into().unwrap();
+    assert_eq!(state, ChatToolState::Completed);
+    assert_eq!(kept["text"], "The handler has no limit.");
+    assert_eq!(kept["ended_at"], 13_000);
+    let [(_, _, kept)] = records(&f, PLAN_RECORD_NAME).try_into().unwrap();
+    assert_eq!(kept["steps"][0]["status"], "completed");
+    let [(_, _, kept)] = records(&f, FILES_RECORD_NAME).try_into().unwrap();
+    assert_eq!(kept["files"][0]["kind"], "added");
+    assert_eq!(kept["files"][0]["confirmed"], true);
+}
+
+fn settings(permission: &str) -> HarnessSettings {
+    let option = |id: &str, kind| SettingOption {
+        id: id.to_owned(),
+        label: id.to_owned(),
+        description: None,
+        is_default: false,
+        permission: kind,
+        allowed: true,
+    };
+    HarnessSettings {
+        model: Some(Setting {
+            current: Some("gpt-a".to_owned()),
+            options: vec![option("gpt-a", None), option("gpt-b", None)],
+            unchangeable: None,
+            applies_from: AppliesFrom::NextTurn,
+            answered_by: None,
+        }),
+        effort: None,
+        permission: Some(Setting {
+            current: Some(permission.to_owned()),
+            options: vec![
+                option("ask", Some(PermissionKind::Ask)),
+                option("full", Some(PermissionKind::FullAccess)),
+            ],
+            unchangeable: None,
+            applies_from: AppliesFrom::NextTurn,
+            answered_by: None,
+        }),
+    }
+}
+
+fn setting_changes(f: &Fixture) -> Vec<SettingChange> {
+    f.fake
+        .written()
+        .into_iter()
+        .filter_map(|written| match written {
+            Written::Setting(change) => Some(change),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_setting_changed_during_a_turn_is_held_until_it_ends_and_full_access_is_never_sent() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("Start").await;
+    f.emit(EventKind::SettingsState(settings("ask"))).await;
+    f.emit(EventKind::ContextUsage(ContextUsage {
+        used: 124_000,
+        window: 200_000,
+        categories: Vec::new(),
+        compacts_at: None,
+    }))
+    .await;
+    assert_eq!(f.live().await.context.unwrap().usage.used, 124_000);
+
+    let full = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "full")
+        .await
+        .unwrap();
+    let unknown = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Model, "gpt-z")
+        .await
+        .unwrap();
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Model, "gpt-b")
+        .await
+        .unwrap();
+    settle().await;
+
+    assert!(matches!(
+        full,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    assert!(matches!(
+        unknown,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    assert_eq!(held, SettingChangeState::Held);
+    // Nothing reaches the harness while the turn runs.
+    assert!(setting_changes(&f).is_empty());
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let sent = setting_changes(&f);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].value, "gpt-b");
+    let live = f.live().await;
+    let settings = live.settings.unwrap();
+    assert_eq!(
+        settings.reported.model.unwrap().current.as_deref(),
+        Some("gpt-b")
+    );
+    assert!(settings.changes.iter().any(|change| change.value == "gpt-b"
+        && change.state == SettingChangeState::Done(SettingOutcome::Applied)));
 }

@@ -57,15 +57,17 @@ export function SettingsRow({
     >
       {leading}
       <div className="settings-list-row-main">
+        {/* Divs, not paragraphs: a title or description may hold a block, such
+            as a loading skeleton, and a block cannot sit inside a <p>. */}
         {title && (
-          <p className="settings-list-row-title" id={titleId}>
+          <div className="settings-list-row-title" id={titleId}>
             {title}
-          </p>
+          </div>
         )}
         {description && (
-          <p className="settings-list-row-description" id={descriptionId}>
+          <div className="settings-list-row-description" id={descriptionId}>
             {description}
-          </p>
+          </div>
         )}
         {children}
       </div>

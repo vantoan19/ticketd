@@ -76,6 +76,8 @@ beforeEach(() => {
           status: "completed",
           reason: null,
           needs_you: false,
+          answer: null,
+          automation_deleted: false,
           ticket: { id: "t-1", reference: "T-ZB5", title: "Fix login" },
           created_at: now,
           started_at: now,

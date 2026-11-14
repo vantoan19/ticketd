@@ -93,6 +93,8 @@ const run = (patch: Partial<AutomationRunDetail>): AutomationRunDetail => ({
   status: "running",
   reason: null,
   needs_you: false,
+  answer: null,
+  automation_deleted: false,
   ticket: { id: "t-1", reference: "T-ZB7", title: "Show the wait time" },
   created_at: new Date().toISOString(),
   started_at: new Date().toISOString(),
@@ -176,7 +178,9 @@ const openRun = async () => {
   fireEvent.click((await screen.findAllByRole("radio", { name: "Runs" }))[1]!);
   const today = await screen.findByRole("list", { name: "Runs, Today" });
   fireEvent.click(within(today).getAllByRole("button")[0]!);
-  await screen.findByRole("application", { name: "Steps" });
+  const steps = await screen.findByRole("application", { name: "Steps" });
+  // The canvas draws its cards a moment after it appears.
+  await within(steps).findAllByRole("button");
   return view;
 };
 const cards = () =>
@@ -234,6 +238,26 @@ test("a run that needs attention opens on the canvas with each step's status and
     expect(cards()[1]).toBe("Run agent: Verifier, step 1 of 2, Waiting"),
   );
   expect(invoke).toHaveBeenCalledWith("automation_run_again", { id: "run-1" });
+});
+
+test("a run whose Automation was deleted says so and offers no Run again", async () => {
+  runs = [
+    run({
+      status: "needs_attention",
+      reason: "The agent reached its limit of 40 turns before finishing.",
+      answer: "dismissed",
+      automation_deleted: true,
+      ended_at: new Date().toISOString(),
+      steps: [reached("verify", "failed", "Limit")],
+    }),
+  ];
+  await openRun();
+
+  expect(screen.getByRole("status").textContent).toBe(
+    "Needs attention · dismissed",
+  );
+  expect(screen.getByText("Its Automation was deleted.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
 });
 
 test("a run in progress follows the Workspace as it goes, and Stop ends it needing attention", async () => {
@@ -369,6 +393,22 @@ const failedRun = (owned: boolean) =>
     ended_at: new Date().toISOString(),
     steps: [{ ...reached("verify", "failed", "Limit"), chat_owned: owned }],
   });
+
+test("a run's Chat that is still being read shows its title and says it is opening", async () => {
+  runs = [failedRun(true)];
+  await openRun();
+  const reading = vi
+    .spyOn(chat, "openChat")
+    .mockReturnValue(new Promise(() => {}));
+
+  fireEvent.click(screen.getByRole("button", { name: "Open Chat" }));
+
+  expect(
+    (await screen.findByRole("heading", { level: 2 })).textContent,
+  ).toMatch(/^Verify on staging: T-\S+ /);
+  expect(screen.getByText("Opening the Chat…")).toBeTruthy();
+  reading.mockRestore();
+});
 
 test("a run's Chat opens in the page and says above the composer that replying takes it over", async () => {
   runs = [failedRun(true)];

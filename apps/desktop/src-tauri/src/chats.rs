@@ -14,19 +14,25 @@ use serde_json::{Value, json};
 use ticketd_chat_host::{
     Activity, ChatHost, ChatLive, ChatProblem, ChatUpdate, ContextSource, HarnessAdapter,
     HostError, Inspection, InteractionAnswer, InteractionKind, LoginState, ProblemKind,
-    QuestionAnswer, ResumeMode, SendMode, Subscription, UnconfirmedCleanup, WorkspaceOpener,
-    harness_key, problem_kind,
+    QuestionAnswer, ResumeMode, SendMode, SettingKey, StartSettings, Subscription,
+    UnconfirmedCleanup, WorkspaceOpener, harness_key, problem_kind,
 };
 use ticketd_core::{
-    BackupCheck, Chat, ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter,
-    ChatMessage, ChatRecord, ChatRole, ChatTurnState, NewChat, Workspace,
+    AutomationRunStatus, BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding,
+    ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
+    ChatSubmissionIntent, ChatTurnState, NewChat, Workspace,
 };
 use tokio::sync::oneshot;
 
+use crate::chat_reports::{self, HarnessOptionsView, SettingChangeView};
+use crate::chat_view::HarnessFound;
 use crate::chat_view::{
-    self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, Queued, Summary, Surroundings,
-    Tracker, harness_name,
+    self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, ProjectRef, Queued, Summary,
+    Surroundings, Tracker, harness_name,
 };
+use crate::folder_probe;
+use ticketd_chat_host::attention::Rank;
+use ticketd_chat_host::conditions::{ChatProblemKind, HarnessState, HarnessWord};
 
 /// History read to build a list row. A Chat's latest outcome is near its end.
 const SUMMARY_ITEMS: usize = 50;
@@ -77,6 +83,17 @@ impl From<HostError> for ChatFailure {
 
 type Outcome<T> = Result<T, ChatFailure>;
 
+/// Work nothing waits on, such as marking a Chat seen while a view opens: a failure
+/// does not stop the caller, and it is written to the log rather than lost.
+pub fn log_failure<T>(what: &str, result: Outcome<T>) {
+    if let Err(failure) = result {
+        eprintln!(
+            "Chat: could not {what}: {} ({})",
+            failure.message, failure.code
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkKind {
@@ -116,6 +133,13 @@ pub struct NewChatInput {
     pub folder: Option<String>,
     pub links: Vec<LinkRef>,
     pub message: String,
+    /// New Chat's picks: option ids the harness listed. Unset keeps its own setting.
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub permission: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -225,22 +249,51 @@ fn restorable(open: &WorkspaceOpener, backup: &Path) -> Result<(), String> {
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Overview {
+    /// Chats waiting for the person (a request, uncertain delivery, an unseen failure),
+    /// muted ones included: the sidebar count.
     pub needs_you: usize,
+    /// Chats with an unseen outcome that does not wait for the person.
+    pub unread: usize,
+    /// Waiting Chats that are not muted: the app-icon count.
+    pub app_icon: usize,
     pub working: usize,
+}
+
+/// What turning Chat off, quitting or closing would stop: Chats with work in progress
+/// or a request waiting, and runs that are going. A run's own Chat is counted as its
+/// run, not as a Chat, since it is not in the Chat list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Stopping {
+    pub chats: usize,
+    pub runs: usize,
+}
+
+impl Stopping {
+    pub fn any(self) -> bool {
+        self.chats + self.runs > 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HarnessStatus {
     pub id: &'static str,
     pub name: &'static str,
-    pub status: &'static str,
+    pub status: HarnessState,
+    /// Chats can be started on it.
+    pub usable: bool,
+    /// What New Chat and the header say beside it when it is not ready.
+    pub word: Option<HarnessWord>,
+    /// What New Chat's notice tells when it is not ready.
+    pub problem: Option<chat_view::Problem>,
     pub message: Option<String>,
     pub command: Option<String>,
     pub help_url: Option<String>,
-    /// The executable that was found, when the message is about one.
+    /// The executable that was found.
     pub path: Option<String>,
+    /// The version number it reported ("2.1.322"), when it was found and said one.
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -308,21 +361,25 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             login,
             ..
         } => match login {
-            LoginState::SignedIn => ("ready", found(executable, version), None),
+            LoginState::SignedIn => (HarnessState::Ready, found(executable, version), None),
             // Usable, but never shown as plain ready: the person sees how it bills
             // before the first message goes out.
             LoginState::NonSubscription => (
-                "not_subscription",
+                HarnessState::NotSubscription,
                 format!(
                     "{}. It is signed in with an API key or cloud provider, not a subscription; {name} bills usage there.",
                     found(executable, version)
                 ),
                 sign_in,
             ),
-            LoginState::SignedOut => ("not_signed_in", found(executable, version), sign_in),
+            LoginState::SignedOut => (
+                HarnessState::NotSignedIn,
+                found(executable, version),
+                sign_in,
+            ),
             // Not every harness can be asked; it says so itself when a Chat starts.
             LoginState::Unknown => (
-                "sign_in_unknown",
+                HarnessState::SignInUnknown,
                 format!(
                     "{}. ticketd cannot check whether it is signed in; {name} reports that when a Chat starts.",
                     found(executable, version)
@@ -335,7 +392,7 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             version,
             requirement,
         } => (
-            "incompatible",
+            HarnessState::Incompatible,
             format!(
                 "Found {name} {} at `{}`. ticketd needs {requirement}.",
                 version
@@ -345,30 +402,51 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             ),
             None,
         ),
-        Inspection::NotInstalled => ("not_installed", format!("{name} was not found"), sign_in),
-        Inspection::ProbeFailed { reason } => ("unknown", reason.clone(), None),
+        Inspection::NotInstalled => (
+            HarnessState::NotInstalled,
+            format!("{name} was not found"),
+            sign_in,
+        ),
+        Inspection::ProbeFailed { reason } => (HarnessState::Unknown, reason.clone(), None),
+    };
+    let found = HarnessFound {
+        message: Some(message),
+        command,
+        // Shown where the person has something to install or update.
+        help_url: matches!(
+            status,
+            HarnessState::NotInstalled | HarnessState::Incompatible
+        )
+        .then(|| chat_view::help_url(id).map(str::to_owned))
+        .flatten(),
+        path: match &inspection {
+            Inspection::Installed { executable, .. }
+            | Inspection::Incompatible { executable, .. } => Some(executable.display().to_string()),
+            Inspection::NotInstalled | Inspection::ProbeFailed { .. } => None,
+        },
     };
     HarnessStatus {
         id,
         name,
         status,
-        message: Some(message),
-        command,
-        // Shown where the person has something to install or update.
-        help_url: matches!(status, "not_installed" | "incompatible")
-            .then(|| chat_view::help_url(id).map(str::to_owned))
-            .flatten(),
-        path: match &inspection {
-            Inspection::Incompatible { executable, .. } => Some(executable.display().to_string()),
-            _ => None,
+        usable: status.usable(),
+        word: status.word(),
+        problem: status
+            .problem_kind()
+            .map(|kind| chat_view::Problem::for_harness(name, kind, &found)),
+        message: found.message,
+        command: found.command,
+        help_url: found.help_url,
+        path: found.path,
+        version: match &inspection {
+            Inspection::Installed { version, .. } | Inspection::Incompatible { version, .. } => {
+                version
+                    .as_deref()
+                    .map(|text| version_number(text).to_owned())
+            }
+            Inspection::NotInstalled | Inspection::ProbeFailed { .. } => None,
         },
     }
-}
-
-/// Whether Chats can be started on a harness with this status. A sign-in ticketd could
-/// not confirm as a subscription does not block; it is shown.
-fn usable(status: &str) -> bool {
-    matches!(status, "ready" | "not_subscription" | "sign_in_unknown")
 }
 
 /// A ticket status as the interface names it.
@@ -377,6 +455,46 @@ fn status_name(status: impl Serialize) -> Result<String, ticketd_core::Error> {
         Value::String(name) => name,
         other => other.to_string(),
     })
+}
+
+/// Says, for each change a receipt names, whether its record is now in the trash or
+/// gone, so the row names it instead of linking it. Other items pass unchanged.
+fn with_gone(workspace: &Workspace, item: Item) -> Item {
+    let Item::Records {
+        id,
+        at,
+        changes,
+        turn_id,
+        ..
+    } = item
+    else {
+        return item;
+    };
+    let gone = changes
+        .iter()
+        .map(|change| {
+            let trashed = match change {
+                ChatAgentChange::Status { reference, .. }
+                | ChatAgentChange::Update { reference, .. } => workspace
+                    .show_ticket(reference)
+                    .map(|ticket| ticket.trashed),
+            };
+            match trashed {
+                Ok(true) => Some("trashed"),
+                Ok(false) => None,
+                Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
+                // Not readable now: shown as it was, linked.
+                Err(_) => None,
+            }
+        })
+        .collect();
+    Item::Records {
+        id,
+        at,
+        changes,
+        gone,
+        turn_id,
+    }
 }
 
 fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, ticketd_core::Error> {
@@ -404,6 +522,77 @@ fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, tick
     Ok(links)
 }
 
+/// A file or folder offered by the composer's `@` menu, relative to the Chat's folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FolderFile {
+    /// With `/` separators on every platform, as the composer inserts it.
+    pub path: String,
+    pub folder: bool,
+}
+
+/// Folders a mention never needs: version control, dependencies and build output.
+const SKIPPED_FOLDERS: [&str; 6] = [
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "__pycache__",
+    "vendor",
+];
+/// Bounds one search, so a home folder answers as quickly as a repository.
+const FILES_VISITED: usize = 20_000;
+const FILES_FOUND: usize = 20;
+
+/// Files and folders under `root` whose path contains `query` (case-insensitive),
+/// shallowest first, then by path. Hidden entries and `SKIPPED_FOLDERS` are left out.
+pub fn folder_files(root: &Path, query: &str) -> Vec<FolderFile> {
+    let needle = query.trim().to_lowercase();
+    let mut found = Vec::new();
+    let mut visited = 0;
+    let mut level = vec![PathBuf::new()];
+    while !level.is_empty() && visited < FILES_VISITED {
+        let mut next = Vec::new();
+        let mut matches = Vec::new();
+        for relative in level {
+            let Ok(entries) = std::fs::read_dir(root.join(&relative)) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                visited += 1;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
+                if name.starts_with('.') || (folder && SKIPPED_FOLDERS.contains(&name.as_str())) {
+                    continue;
+                }
+                let path = relative.join(&name);
+                let shown = path
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if shown.to_lowercase().contains(&needle) {
+                    matches.push(FolderFile {
+                        path: shown,
+                        folder,
+                    });
+                }
+                if folder {
+                    next.push(path);
+                }
+            }
+        }
+        matches.sort_by(|a, b| a.path.cmp(&b.path));
+        found.extend(matches);
+        if found.len() >= FILES_FOUND {
+            break;
+        }
+        next.sort();
+        level = next;
+    }
+    found.truncate(FILES_FOUND);
+    found
+}
+
 /// Every Chat outside the trash, read once per request for what Chats share.
 fn folder_users(workspace: &Workspace) -> Result<Vec<Chat>, ticketd_core::Error> {
     let mut chats = workspace.list_chats(ChatListFilter::Active)?;
@@ -424,13 +613,27 @@ fn surroundings(
     let shared_with = folder_users
         .iter()
         .filter(|other| other.id != chat.id && other.execution_folder == chat.execution_folder)
-        .map(|other| other.title.clone().unwrap_or("Untitled Chat".to_owned()))
+        .map(|other| chat_view::SharedChat {
+            id: other.id.clone(),
+            title: other.title.clone().unwrap_or("Untitled Chat".to_owned()),
+            retention: chat_view::retention(other),
+        })
+        .collect();
+    let links = links(workspace, &chat.id)?;
+    let trashed_links = workspace
+        .chat_linked_records(&chat.id)?
+        .into_iter()
+        .filter(|record| record.trashed)
+        .map(|record| record.id)
         .collect();
     Ok(Surroundings {
+        trashed_links,
         checked_turn,
         folder_missing,
         shared_with,
-        links: links(workspace, &chat.id)?,
+        project: project(workspace, &chat.execution_folder, &links)?,
+        branch: None,
+        links,
         // Input the host holds to send is being sent, not in the person's queue.
         queue: workspace
             .chat_queue(&chat.id)?
@@ -440,11 +643,50 @@ fn surroundings(
                     == ChatInputStanding::Queued
             })
             .map(|message| Queued {
+                refused_steer: message
+                    .attempts
+                    .last()
+                    .filter(|attempt| {
+                        attempt.intent == ChatSubmissionIntent::Steer
+                            && matches!(
+                                attempt.delivery,
+                                ChatDelivery::Rejected | ChatDelivery::NotDelivered
+                            )
+                    })
+                    .map(|attempt| {
+                        attempt
+                            .detail
+                            .clone()
+                            .unwrap_or("the harness did not take it".to_owned())
+                    }),
                 id: message.id,
                 text: message.text,
             })
             .collect(),
     })
+}
+
+/// The Project whose folder (any checkout) holds `folder`, else the first linked one.
+fn project(
+    workspace: &Workspace,
+    folder: &str,
+    links: &[LinkedRecord],
+) -> Result<Option<ProjectRef>, ticketd_core::Error> {
+    Ok(workspace
+        .project_for_folder(Path::new(folder))?
+        .map(|project| ProjectRef {
+            id: project.id,
+            title: project.name,
+        })
+        .or_else(|| {
+            links.iter().find_map(|link| match link {
+                LinkedRecord::Project { id, title } => Some(ProjectRef {
+                    id: id.clone(),
+                    title: title.clone(),
+                }),
+                LinkedRecord::Ticket { .. } | LinkedRecord::Document { .. } => None,
+            })
+        }))
 }
 
 /// Remembers whether a Chat was last shown with its folder missing; returns whether
@@ -455,6 +697,26 @@ fn note_folder(missing_folders: &Mutex<HashSet<String>>, chat_id: &str, missing:
         missing_folders.insert(chat_id.to_owned())
     } else {
         missing_folders.remove(chat_id)
+    }
+}
+
+/// A stored time's date as "Nov 13, 2026". Stored times are UTC, so near midnight it
+/// can be the neighbouring day.
+fn shown_date(at: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let mut parts = at.get(..10).unwrap_or_default().split('-');
+    let (Some(year), Some(month), Some(day)) = (parts.next(), parts.next(), parts.next()) else {
+        return at.to_owned();
+    };
+    let month = month
+        .parse::<usize>()
+        .ok()
+        .and_then(|month| MONTHS.get(month.checked_sub(1)?));
+    match (month, day.parse::<u32>()) {
+        (Some(month), Ok(day)) => format!("{month} {day}, {year}"),
+        _ => at.to_owned(),
     }
 }
 
@@ -508,6 +770,15 @@ pub struct Chats {
     fresh: Mutex<HashMap<String, FreshHistory>>,
     /// Chats last shown with their folder missing, so a check can tell what changed.
     missing_folders: Mutex<HashSet<String>>,
+    /// The main window has focus: an open Chat is in view only while it does.
+    focused: AtomicBool,
+    /// Settings > Chat > Notify me about Chats. The interface keeps the choice.
+    notify: AtomicBool,
+    /// What each harness offered when last asked, with the version it was asked at:
+    /// probing starts a harness process, so it is repeated only for a new version.
+    options: Mutex<HashMap<&'static str, (Option<String>, HarnessOptionsView)>>,
+    /// The version each harness reported at its last check.
+    versions: Mutex<HashMap<&'static str, Option<String>>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -534,6 +805,10 @@ impl Chats {
             next_feed: AtomicU64::new(1),
             fresh: Mutex::new(HashMap::new()),
             missing_folders: Mutex::new(HashSet::new()),
+            focused: AtomicBool::new(true),
+            notify: AtomicBool::new(true),
+            options: Mutex::new(HashMap::new()),
+            versions: Mutex::new(HashMap::new()),
         })
     }
 
@@ -607,7 +882,7 @@ impl Chats {
     fn live(&self, chat_id: &str) -> ChatLive {
         self.started_host()
             .and_then(|host| host.live().remove(chat_id))
-            .unwrap_or_else(chat_view::idle)
+            .unwrap_or_else(ChatLive::idle)
     }
 
     pub fn enabled(&self) -> bool {
@@ -637,6 +912,38 @@ impl Chats {
             .flat_map(HashMap::into_values)
             .filter(|live| live.activity != Activity::Idle)
             .count()
+    }
+
+    /// What turning Chat off or quitting would stop now. With Chat off nothing runs.
+    /// Runs are read from the Workspace, so one between agents counts too; when it
+    /// cannot be read, every live Chat counts as a Chat rather than nothing at all.
+    pub fn stopping(&self) -> Stopping {
+        if !self.enabled() {
+            return Stopping::default();
+        }
+        let mut live = self
+            .started_host()
+            .map(|host| host.live())
+            .unwrap_or_default();
+        live.retain(|_, live| live.activity != Activity::Idle);
+        let runs = self
+            .workspace()
+            .ok()
+            .and_then(|workspace| workspace.all_automation_runs().ok())
+            .unwrap_or_default();
+        let going: Vec<_> = runs
+            .iter()
+            .filter(|run| run.status == AutomationRunStatus::Running)
+            .collect();
+        for step in going.iter().flat_map(|run| &run.steps) {
+            if let Some(chat_id) = &step.chat_id {
+                live.remove(chat_id);
+            }
+        }
+        Stopping {
+            chats: live.len(),
+            runs: going.len(),
+        }
     }
 
     /// Whether any Automation is on for this device. One that is keeps ticketd in the
@@ -727,6 +1034,95 @@ impl Chats {
         self.started_host().map(|host| host.changed())
     }
 
+    /// "active", "archived" or "trashed", to open the Chat under the right list.
+    pub fn chat_retention(&self, chat_id: &str) -> Outcome<&'static str> {
+        let chat = self.workspace()?.chat(chat_id)?;
+        Ok(if chat.trashed {
+            "trashed"
+        } else if chat.archived {
+            "archived"
+        } else {
+            "active"
+        })
+    }
+
+    /// Chats open in a view while the window has focus. A visible list row is not a view.
+    pub fn in_view(&self) -> HashSet<String> {
+        if !self.focused.load(Ordering::SeqCst) {
+            return HashSet::new();
+        }
+        lock(&self.feeds)
+            .values()
+            .map(|feed| feed.chat_id.clone())
+            .collect()
+    }
+
+    /// The window gained or lost focus. Regaining it marks the open Chats seen and
+    /// reads them again, so a branch switched outside ticketd shows.
+    pub async fn set_focused(&self, focused: bool) {
+        self.focused.store(focused, Ordering::SeqCst);
+        if focused {
+            for chat_id in self.in_view() {
+                log_failure("mark the Chat seen", self.mark_seen(&chat_id).await);
+                log_failure("read the Chat again", self.reread(&chat_id).await);
+            }
+        }
+    }
+
+    /// Tells the Chat's views to read its state again.
+    async fn reread(&self, chat_id: &str) -> Outcome<()> {
+        Ok(self.host()?.notify_changed(chat_id).await?)
+    }
+
+    pub fn notifies(&self) -> bool {
+        self.notify.load(Ordering::SeqCst)
+    }
+
+    pub fn set_notify(&self, notify: bool) {
+        self.notify.store(notify, Ordering::SeqCst);
+    }
+
+    /// The person saw the Chat's outcome. Rows and counts follow when that changed.
+    async fn mark_seen(&self, chat_id: &str) -> Outcome<()> {
+        let host = self.host()?;
+        let mut workspace = self.workspace()?;
+        let seen = |chat: &Chat| (chat.seen_through, chat.marked_unread);
+        let before = seen(&workspace.chat(chat_id)?);
+        if seen(&workspace.mark_chat_seen(chat_id)?) != before {
+            drop(workspace);
+            host.notify_changed(chat_id).await?;
+        }
+        Ok(())
+    }
+
+    /// Mark as read: clears an unseen outcome, never a live request.
+    pub async fn mark_read(&self, chat_id: &str) -> Outcome<()> {
+        self.mark_seen(chat_id).await
+    }
+
+    /// Mark as unread: the last turn reads as unseen until the Chat is next opened.
+    pub async fn mark_unread(&self, chat_id: &str) -> Outcome<()> {
+        let host = self.host()?;
+        self.workspace()?.mark_chat_unread(chat_id)?;
+        Ok(host.notify_changed(chat_id).await?)
+    }
+
+    /// The person had the transcript in view through `item_id`, a transcript item. It
+    /// is kept with the Chat so the New marker is placed after it the next time the
+    /// Chat opens, also after ticketd restarts. Nothing is announced.
+    pub fn read_through(&self, chat_id: &str, item_id: &str) -> Outcome<()> {
+        // A turn's timing item is named after its turn.
+        let record = item_id.strip_prefix("turn:").unwrap_or(item_id);
+        self.workspace()?.mark_chat_read_through(chat_id, record)?;
+        Ok(())
+    }
+
+    pub async fn set_muted(&self, chat_id: &str, muted: bool) -> Outcome<()> {
+        let host = self.host()?;
+        self.workspace()?.set_chat_muted(chat_id, muted)?;
+        Ok(host.notify_changed(chat_id).await?)
+    }
+
     fn summaries(&self, filter: ChatListFilter) -> Outcome<Vec<Summary>> {
         let workspace = self.workspace()?;
         let live = self.started_host().map(|host| host.live());
@@ -739,7 +1135,7 @@ impl Chats {
             let live = live
                 .as_ref()
                 .and_then(|live| live.get(&chat.id).cloned())
-                .unwrap_or_else(chat_view::idle);
+                .unwrap_or_else(ChatLive::idle);
             summaries.push(chat_view::summary(
                 &chat,
                 &live,
@@ -757,38 +1153,34 @@ impl Chats {
         Ok(summaries)
     }
 
-    /// The counts, and a text that differs exactly when a list row or the counts would
-    /// read differently. Streamed text being checkpointed changes neither, so lists are
-    /// not fetched again for it.
-    pub fn overview_digest(&self) -> Outcome<(Overview, String)> {
-        let mut overview = Overview {
-            needs_you: 0,
-            working: 0,
-        };
-        let mut rows = Vec::new();
-        for filter in [ChatListFilter::Active, ChatListFilter::Archived] {
-            for summary in self.summaries(filter)? {
-                overview.needs_you += usize::from(summary.needs_you);
-                overview.working += usize::from(matches!(summary.activity, "working" | "waiting"));
-                rows.push(summary);
-            }
-        }
-        rows.extend(self.summaries(ChatListFilter::Trashed)?);
-        let digest = format!("{rows:?}");
-        Ok((overview, digest))
+    /// The counts, the rows outside the trash, and a text that differs exactly when a
+    /// list row or the counts would read differently. Streamed text being checkpointed
+    /// changes neither, so lists are not fetched again for it.
+    pub fn overview_digest(&self) -> Outcome<(Overview, String, Vec<Summary>)> {
+        let mut rows = self.summaries(ChatListFilter::Active)?;
+        rows.extend(self.summaries(ChatListFilter::Archived)?);
+        let overview = overview_of(&rows);
+        let trashed = self.summaries(ChatListFilter::Trashed)?;
+        let digest = format!("{rows:?}{trashed:?}");
+        Ok((overview, digest, rows))
     }
 
     pub fn list(&self, scope: ChatListFilter) -> Outcome<Vec<Summary>> {
         self.host()?;
-        self.summaries(scope)
+        let mut rows = self.summaries(scope)?;
+        // An archived Chat that asks the person something shows in Active until answered.
+        if scope == ChatListFilter::Active {
+            let asking = self.summaries(ChatListFilter::Archived)?.into_iter();
+            rows.extend(
+                asking.filter(|row| matches!(row.status.rank, Rank::Approval | Rank::Question)),
+            );
+        }
+        Ok(rows)
     }
 
     pub fn overview(&self) -> Outcome<Overview> {
         if !self.enabled() {
-            return Ok(Overview {
-                needs_you: 0,
-                working: 0,
-            });
+            return Ok(Overview::default());
         }
         Ok(self.overview_digest()?.0)
     }
@@ -796,25 +1188,82 @@ impl Chats {
     /// Probes installation and sign-in again on every call.
     pub async fn harnesses(&self) -> Outcome<Vec<HarnessStatus>> {
         let host = self.host()?;
+        // Each check starts its harness: run them side by side, so the slower one
+        // does not hold up the other.
+        let (first, second) =
+            tokio::join!(host.inspect(HARNESSES[0].0), host.inspect(HARNESSES[1].0));
         let mut statuses = Vec::new();
-        for (id, name) in HARNESSES {
-            statuses.push(match host.inspect(id).await {
-                Ok(inspection) => harness_status(id, name, inspection),
+        for ((id, name), inspected) in HARNESSES.into_iter().zip([first, second]) {
+            statuses.push(match inspected {
+                Ok(inspection) => {
+                    let status = harness_status(id, name, inspection);
+                    lock(&self.versions).insert(id, status.version.clone());
+                    status
+                }
                 Err(_) => HarnessStatus {
                     id,
                     name,
-                    status: "unavailable",
+                    status: HarnessState::Unavailable,
+                    usable: false,
+                    word: HarnessState::Unavailable.word(),
+                    problem: Some(chat_view::Problem::for_harness(
+                        name,
+                        ChatProblemKind::Unavailable,
+                        &HarnessFound {
+                            message: Some(self.unavailable(id)),
+                            command: None,
+                            help_url: None,
+                            path: None,
+                        },
+                    )),
                     message: Some(self.unavailable(id)),
                     command: None,
                     help_url: None,
                     path: None,
+                    version: None,
                 },
             });
         }
         Ok(statuses)
     }
 
+    /// What the installed harness offers before a session: its models with their
+    /// efforts and its permission modes, as it reported them. Asked once per
+    /// version the last check found; nothing is sent to a model.
+    pub async fn options(&self, harness_id: &str) -> Outcome<HarnessOptionsView> {
+        let host = self.host()?;
+        let (id, name) = HARNESSES
+            .iter()
+            .copied()
+            .find(|(id, _)| *id == harness_id)
+            .ok_or_else(|| failed(self.unavailable(harness_id)))?;
+        let version = lock(&self.versions).get(id).cloned().flatten();
+        if let Some((asked_at, view)) = lock(&self.options).get(id)
+            && *asked_at == version
+        {
+            return Ok(view.clone());
+        }
+        let reported = host.options(id).await.map_err(ChatFailure::from)?;
+        let view = chat_reports::options_view(id, name, reported);
+        // A failed probe is asked again next time rather than remembered.
+        if view.unavailable.is_none() {
+            lock(&self.options).insert(id, (version, view.clone()));
+        }
+        Ok(view)
+    }
+
     /// How many Chats outside the trash already use the folder.
+    /// The Project whose checkout holds `path`, for New Chat's folder button.
+    pub fn folder_project(&self, path: &str) -> Outcome<Option<ProjectRef>> {
+        Ok(self
+            .workspace()?
+            .project_for_folder(Path::new(path))?
+            .map(|project| ProjectRef {
+                id: project.id,
+                title: project.name,
+            }))
+    }
+
     pub fn folder_use(&self, path: &str) -> Outcome<usize> {
         let workspace = self.workspace()?;
         let mut count = 0;
@@ -839,6 +1288,25 @@ impl Chats {
         let served = |adapter: &Arc<dyn HarnessAdapter>| harness_key(adapter.harness());
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
             return Err(failed(self.unavailable(&input.harness_id)));
+        }
+        let picks = StartSettings {
+            model: input.model.clone(),
+            effort: input.effort.clone(),
+            permission: input.permission.clone(),
+        };
+        if !picks.is_empty() {
+            // Only what the harness offered, and never full access.
+            let offered = self.options(&input.harness_id).await?;
+            if let Some(reason) = offered.refusal(
+                picks.model.as_deref(),
+                picks.effort.as_deref(),
+                picks.permission.as_deref(),
+            ) {
+                return Err(failed(format!(
+                    "{} can't start with that: {reason}",
+                    harness_name(&input.harness_id)
+                )));
+            }
         }
         let mut workspace = self.workspace()?;
         // Beside the workspace file, one per Chat, named by the request so that a
@@ -875,6 +1343,11 @@ impl Chats {
                 chat.execution_folder
             ))));
         }
+        if !picks.is_empty() {
+            host.start_with(&chat.id, picks)
+                .await
+                .map_err(ChatFailure::from)?;
+        }
         let first = format!("{command_id}:first");
         let sent = host.send(&chat.id, Some(&first), &input.message, SendMode::Auto);
         Ok(created(
@@ -896,7 +1369,7 @@ impl Chats {
         let workspace = self.workspace()?;
         let users = folder_users(&workspace)?;
         let checked = self.checked(&view.chat.id);
-        let around = surroundings(
+        let mut around = surroundings(
             &workspace,
             &view.chat,
             &users,
@@ -904,6 +1377,9 @@ impl Chats {
             &view.live,
             &self.missing_folders,
         )?;
+        // Read again with every state, so a branch switched outside shows by the
+        // turn's end.
+        around.branch = folder_probe::branch(Path::new(&view.chat.execution_folder));
         Ok(chat_view::chat_state(
             &view.chat,
             &view.live,
@@ -915,29 +1391,30 @@ impl Chats {
     /// Attaches a view: a snapshot now, then every change after it through `sink`,
     /// numbered one apart from the snapshot's cursor. Attaching starts no harness.
     pub async fn open(self: &Arc<Self>, chat_id: &str, sink: Sink) -> Outcome<Opened> {
-        let (attached, subscription) = self.host()?.attach(chat_id).await?;
+        let host = self.host()?;
+        // Opening a Chat any way marks it seen. A view keeps working if that fails.
+        log_failure("mark the Chat seen", self.mark_seen(chat_id).await);
+        let (attached, subscription) = host.attach(chat_id).await?;
         let workspace = self.workspace()?;
         let tracker = Tracker::from_items(&attached.snapshot.items);
         let chat = attached.snapshot.chat;
-        let state = chat_view::chat_state(
+        let mut around = surroundings(
+            &workspace,
             &chat,
+            &folder_users(&workspace)?,
+            self.checked(chat_id),
             &attached.live,
-            &tracker,
-            &surroundings(
-                &workspace,
-                &chat,
-                &folder_users(&workspace)?,
-                self.checked(chat_id),
-                &attached.live,
-                &self.missing_folders,
-            )?,
-        );
+            &self.missing_folders,
+        )?;
+        around.branch = folder_probe::branch(Path::new(&chat.execution_folder));
+        let state = chat_view::chat_state(&chat, &attached.live, &tracker, &around);
         let fresh = self.fresh(chat_id);
         let items = attached
             .snapshot
             .items
             .iter()
-            .filter_map(|item| chat_view::item(item, &chat, &attached.live, fresh))
+            .flat_map(|item| chat_view::items(item, &chat, &attached.live, fresh, &tracker))
+            .map(|item| with_gone(&workspace, item))
             .collect();
         let view = View {
             chat,
@@ -1000,6 +1477,7 @@ impl Chats {
                 // Closed by the view (nobody is listening) or asked to resync.
                 _ = &mut resynced => None,
             };
+            let mut ended = false;
             let records = match update {
                 Some(ChatUpdate::Changes(changes)) => {
                     let active = view.chat.active_turn.as_ref().map(|turn| turn.id.clone());
@@ -1011,6 +1489,7 @@ impl Chats {
                                 // A turn starting or ending changes no Chat record, so the
                                 // Chat's active turn is followed from the turn itself.
                                 if let ChatItem::Turn(turn) = &item {
+                                    ended |= turn.state != ChatTurnState::Active;
                                     let ends_active = view.chat.active_turn.as_ref().map(|t| &t.id)
                                         == Some(&turn.id);
                                     if turn.state == ChatTurnState::Active {
@@ -1028,6 +1507,8 @@ impl Chats {
                     if active != view.chat.active_turn.as_ref().map(|turn| turn.id.clone()) {
                         records.extend(view.tracker.dependents());
                     }
+                    // A decided approval is told on the step it was asked for.
+                    records.extend(view.tracker.refolded());
                     records
                 }
                 Some(ChatUpdate::Text {
@@ -1041,6 +1522,7 @@ impl Chats {
                             at: String::new(),
                             text: delta,
                             state: "streaming",
+                            turn_id: Some(turn_id),
                         };
                         json!({ "kind": "item", "item": item })
                     } else {
@@ -1052,7 +1534,7 @@ impl Chats {
                     continue;
                 }
                 Some(ChatUpdate::Live(live)) => {
-                    let held_before = std::mem::replace(&mut view.live, live).sending;
+                    let held_before = std::mem::replace(&mut view.live, *live).sending;
                     // Whether a stored request can still be answered is live state.
                     let mut records = view.tracker.dependents();
                     // Input the host began or stopped holding to send reads differently.
@@ -1086,12 +1568,21 @@ impl Chats {
                 }
                 Some(ChatUpdate::Resync) | None => break,
             };
+            // A turn that ends while its Chat is in view is seen.
+            if ended && self.focused.load(Ordering::SeqCst) {
+                log_failure("mark the Chat seen", self.mark_seen(&view.chat.id).await);
+            }
             let fresh = self.fresh(&view.chat.id);
             for record in records {
-                if let Some(item) = chat_view::item(&record, &view.chat, &view.live, fresh)
-                    && !send(&mut view, json!({ "kind": "item", "item": item }))
-                {
-                    return;
+                let tracker = &view.tracker;
+                for item in chat_view::items(&record, &view.chat, &view.live, fresh, tracker) {
+                    let item = match (&item, self.workspace()) {
+                        (Item::Records { .. }, Ok(workspace)) => with_gone(&workspace, item),
+                        _ => item,
+                    };
+                    if !send(&mut view, json!({ "kind": "item", "item": item })) {
+                        return;
+                    }
                 }
             }
             // If the workspace cannot be read the view keeps what it shows; the next
@@ -1115,6 +1606,68 @@ impl Chats {
         Ok(())
     }
 
+    /// Sends or queues a message after linking the records it mentions or quotes, so the
+    /// harness is told about them with this message (spec 21.4). A record that cannot be
+    /// linked refuses the message; links made before the refusal stay, as harmless as
+    /// linking them by hand.
+    pub async fn send_linking(
+        &self,
+        chat_id: &str,
+        text: &str,
+        mode: SendMode,
+        links: &[LinkRef],
+    ) -> Outcome<()> {
+        text_argument(text, "The message")?;
+        let host = self.host()?;
+        let present = self.workspace()?.chat(chat_id)?.links;
+        let mut added = false;
+        for link in links {
+            let link = ChatLink::from(link.clone());
+            if present
+                .iter()
+                .any(|old| old.kind == link.kind && old.id == link.id)
+            {
+                continue;
+            }
+            self.workspace()?.set_chat_link(chat_id, link, true)?;
+            added = true;
+        }
+        if added {
+            host.links_changed(chat_id).await?;
+        }
+        self.send(chat_id, text, mode).await
+    }
+
+    /// What the composer's `@` menu offers from a Chat's folder.
+    pub fn files(&self, path: &str, query: &str) -> Outcome<Vec<FolderFile>> {
+        self.host()?;
+        let folder = folder_argument(path)?;
+        Ok(folder_files(Path::new(&folder), query))
+    }
+
+    /// The Chats outside the trash linked to one record, for the record's own page.
+    pub fn linked_to(&self, link: &LinkRef) -> Outcome<Vec<Summary>> {
+        self.host()?;
+        let link = ChatLink::from(link.clone());
+        let workspace = self.workspace()?;
+        let mut ids = HashSet::new();
+        for filter in [ChatListFilter::Active, ChatListFilter::Archived] {
+            for chat in workspace.list_chats(filter)? {
+                if chat
+                    .links
+                    .iter()
+                    .any(|old| old.kind == link.kind && old.id == link.id)
+                {
+                    ids.insert(chat.id);
+                }
+            }
+        }
+        let mut rows = self.summaries(ChatListFilter::Active)?;
+        rows.extend(self.summaries(ChatListFilter::Archived)?);
+        rows.retain(|row| ids.contains(&row.id));
+        Ok(rows)
+    }
+
     pub async fn remove_queued(&self, chat_id: &str, message_id: &str) -> Outcome<()> {
         let host = self.host()?;
         self.workspace()?.withdraw_chat_input(chat_id, message_id)?;
@@ -1126,6 +1679,11 @@ impl Chats {
 
     pub async fn resume_queue(&self, chat_id: &str) -> Outcome<()> {
         Ok(self.host()?.resume_queue(chat_id).await?)
+    }
+
+    /// Sends one queued message now, alone; see `ChatHost::send_queued_now`.
+    pub async fn send_queued_now(&self, chat_id: &str, message_id: &str) -> Outcome<()> {
+        Ok(self.host()?.send_queued_now(chat_id, message_id).await?)
     }
 
     pub async fn stop(&self, chat_id: &str) -> Outcome<()> {
@@ -1249,7 +1807,7 @@ impl Chats {
             .find(|(id, _)| *id == chat.harness)
             .ok_or_else(|| failed(format!("unknown harness '{}'", chat.harness)))?;
         let status = harness_status(id, name, host.inspect(id).await?);
-        if !usable(status.status) {
+        if !status.usable {
             return Err(failed(status.message.unwrap_or_default()));
         }
         if matches!(
@@ -1262,7 +1820,7 @@ impl Chats {
             // A sign-in the probe cannot see is not shown to be in order by it.
             let signed_out =
                 turn.problem.as_deref().map(problem_kind) == Some(ProblemKind::LoginRequired);
-            if signed_out && status.status == "sign_in_unknown" {
+            if signed_out && status.status == HarnessState::SignInUnknown {
                 return Err(failed(status.message.unwrap_or_default()));
             }
             lock(&self.checked).insert(chat_id.to_owned(), turn.id.clone());
@@ -1303,12 +1861,34 @@ impl Chats {
         Ok(host.notify_changed(chat_id).await?)
     }
 
+    /// Records to link for `query`; with nothing typed, the recently updated ones.
     pub fn search_records(&self, query: &str) -> Outcome<Vec<LinkedRecord>> {
         let query = query.trim();
-        if query.is_empty() || query.len() > 200 {
+        if query.len() > 200 {
             return Ok(Vec::new());
         }
         let workspace = self.workspace()?;
+        if query.is_empty() {
+            let mut found = Vec::new();
+            for ticket in workspace.recently_updated_tickets(4)? {
+                found.push(LinkedRecord::Ticket {
+                    status: status_name(ticket.status)?,
+                    id: ticket.id,
+                    reference: ticket.reference,
+                    title: ticket.title,
+                });
+            }
+            found.extend(
+                workspace
+                    .recent_documents_page(2, 0)?
+                    .into_iter()
+                    .map(|document| LinkedRecord::Document {
+                        id: document.id,
+                        title: document.heading,
+                    }),
+            );
+            return Ok(found);
+        }
         let tickets = workspace.search_tickets(query, None, false, 8, 0)?;
         let documents = workspace.search_documents(query, None, 8, 0)?;
         let mut found = Vec::new();
@@ -1433,7 +2013,8 @@ impl Chats {
             .await?)
     }
 
-    /// Saves one assistant response as a Document through the ordinary core workflow.
+    /// Saves one assistant response, or a turn's plan as a checklist, as a Document
+    /// through the ordinary core workflow.
     pub fn save_as_document(
         &self,
         chat_id: &str,
@@ -1442,13 +2023,174 @@ impl Chats {
     ) -> Outcome<String> {
         self.host()?;
         let mut workspace = self.workspace()?;
-        let response = messages(&workspace, chat_id)?
-            .into_iter()
-            .find(|message| message.id == response_id && message.role == ChatRole::Assistant)
-            .ok_or_else(|| failed("that response is not in this Chat"))?;
+        let snapshot = workspace.chat_snapshot(chat_id, HISTORY_ITEMS)?;
+        let text = snapshot.items.iter().find_map(|item| match item {
+            ChatItem::Message(message)
+                if message.id == response_id && message.role == ChatRole::Assistant =>
+            {
+                Some(message.text.clone())
+            }
+            ChatItem::Tool(tool) if tool.id == response_id => {
+                let turn = snapshot.items.iter().find_map(|item| match item {
+                    ChatItem::Turn(turn) if turn.id == tool.turn_id => Some(turn),
+                    _ => None,
+                });
+                let date = turn.map_or(String::new(), |turn| shown_date(&turn.started_at));
+                let chat_title = chat_view::title(&snapshot.chat);
+                chat_reports::plan_document(tool, &chat_title, &date)
+            }
+            _ => None,
+        });
+        let text = text.ok_or_else(|| failed("that response is not in this Chat"))?;
         let title = Some(title.trim()).filter(|title| !title.is_empty());
-        Ok(workspace.create_document(title, &response.text)?.id)
+        Ok(workspace.create_document(title, &text)?.id)
     }
+
+    /// Asks the live session to use `value` for `setting` from its next turn, and says
+    /// where the change stands.
+    pub async fn change_setting(
+        &self,
+        chat_id: &str,
+        setting: SettingKey,
+        value: &str,
+    ) -> Outcome<SettingChangeView> {
+        let state = self.host()?.change_setting(chat_id, setting, value).await?;
+        Ok(chat_reports::change_view(value, &state))
+    }
+
+    /// The Chat's execution folder, to open in the file manager, when it exists.
+    pub fn folder(&self, chat_id: &str) -> Outcome<PathBuf> {
+        let path = PathBuf::from(self.workspace()?.chat(chat_id)?.execution_folder);
+        if !path.is_dir() {
+            return Err(failed("The folder is no longer on this computer."));
+        }
+        Ok(path)
+    }
+
+    /// New Chat's suggestions for `folder` (`None`: a folder ticketd keeps), skipping
+    /// the tickets the person already linked and those a working Chat is linked to.
+    pub fn suggestions(
+        &self,
+        folder: Option<&str>,
+        linked: &[String],
+    ) -> Outcome<Vec<chat_view::Suggestion>> {
+        let workspace = self.workspace()?;
+        let mut skip: HashSet<String> = linked.iter().cloned().collect();
+        if let Some(host) = self.started_host() {
+            for (chat_id, live) in host.live() {
+                if live.activity == Activity::Idle {
+                    continue;
+                }
+                let Ok(chat) = workspace.chat(&chat_id) else {
+                    continue;
+                };
+                skip.extend(
+                    chat.links
+                        .into_iter()
+                        .filter(|link| link.kind == ChatLinkKind::Ticket)
+                        .map(|link| link.id),
+                );
+            }
+        }
+        Ok(workspace
+            .chat_suggestions(folder.map(Path::new), skip)?
+            .into_iter()
+            .map(chat_view::Suggestion::from)
+            .collect())
+    }
+
+    /// A file in the Chat's folder, for the system to open: one a step named
+    /// (relative to the folder) or one a turn reported changing (absolute). A path
+    /// that resolves outside the folder, through `..` or a link, is refused; a file
+    /// that is no longer there fails as `gone`.
+    pub fn file_in_folder(&self, chat_id: &str, path: &str) -> Outcome<PathBuf> {
+        let chat = self.workspace()?.chat(chat_id)?;
+        file_in(Path::new(&chat.execution_folder), path)
+    }
+}
+
+/// Extensions the system runs, rather than shows, when such a file is opened.
+const RUNNABLE: [&str; 17] = [
+    "app",
+    "applescript",
+    "bat",
+    "cmd",
+    "com",
+    "command",
+    "exe",
+    "jar",
+    "msi",
+    "pkg",
+    "ps1",
+    "py",
+    "rb",
+    "scpt",
+    "sh",
+    "tool",
+    "vbs",
+];
+
+/// Opening the file would run it: a program or script. Such a file is shown in its
+/// folder instead, so a click on a file name never starts something.
+pub fn runs_when_opened(path: &Path) -> bool {
+    let named = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| RUNNABLE.contains(&extension.to_ascii_lowercase().as_str()));
+    #[cfg(unix)]
+    let executable = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+    };
+    #[cfg(not(unix))]
+    let executable = false;
+    named || executable
+}
+
+/// `path` inside `folder`, resolved through links.
+fn file_in(folder: &Path, path: &str) -> Outcome<PathBuf> {
+    let outside = || failed("that file is outside the Chat's folder");
+    let candidate = folder.join(path);
+    let name = candidate.file_name().map_or_else(
+        || path.to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let gone = || ChatFailure {
+        code: "gone",
+        message: format!("{name} is no longer in this folder."),
+    };
+    if let (Ok(root), Ok(file)) = (folder.canonicalize(), candidate.canonicalize()) {
+        if !file.starts_with(&root) {
+            return Err(outside());
+        }
+        return if file.is_file() {
+            Ok(file)
+        } else {
+            Err(gone())
+        };
+    }
+    // Nothing is there to resolve: refuse what names a place outside the folder
+    // as written, and call the rest gone.
+    let climbs = Path::new(path)
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir));
+    if climbs || !candidate.starts_with(folder) {
+        return Err(outside());
+    }
+    Err(gone())
+}
+
+/// The counts the sidebar and the app icon show, from the rows outside the trash.
+pub fn overview_of(rows: &[Summary]) -> Overview {
+    let mut overview = Overview::default();
+    for row in rows {
+        let needs_you = row.status.rank.needs_you();
+        overview.needs_you += usize::from(needs_you);
+        overview.app_icon += usize::from(needs_you && !row.muted);
+        overview.unread += usize::from(row.status.unread());
+        overview.working += usize::from(matches!(row.activity, "working" | "waiting"));
+    }
+    overview
 }
 
 /// What closing the main window does.
@@ -1460,10 +2202,10 @@ pub enum CloseAction {
     KeepRunning,
 }
 
-/// ticketd stays for a Chat that is working and for an Automation that is on, which
-/// may start a run at any time. With Chat off neither runs.
-pub fn close_action(enabled: bool, working: usize, automations_on: bool) -> CloseAction {
-    if enabled && (working > 0 || automations_on) {
+/// ticketd stays for a Chat that is working, a run that is going, and an Automation
+/// that is on, which may start a run at any time. With Chat off none of them runs.
+pub fn close_action(enabled: bool, stopping: Stopping, automations_on: bool) -> CloseAction {
+    if enabled && (stopping.any() || automations_on) {
         CloseAction::KeepRunning
     } else {
         CloseAction::Exit
@@ -1473,15 +2215,15 @@ pub fn close_action(enabled: bool, working: usize, automations_on: bool) -> Clos
 /// What a request to quit does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuitAction {
-    /// Ask the person first: this many Chats would be stopped.
-    Confirm(usize),
+    /// Ask the person first: this would be stopped.
+    Confirm(Stopping),
     /// Stop app-owned execution, then exit.
     Quit,
 }
 
-pub fn quit_action(working: usize, confirmed: bool) -> QuitAction {
-    if working > 0 && !confirmed {
-        QuitAction::Confirm(working)
+pub fn quit_action(stopping: Stopping, confirmed: bool) -> QuitAction {
+    if stopping.any() && !confirmed {
+        QuitAction::Confirm(stopping)
     } else {
         QuitAction::Quit
     }

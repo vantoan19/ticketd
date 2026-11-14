@@ -116,11 +116,11 @@ pub(crate) fn migrate_run_counts(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-/// Format version 76: `read_partitions`, the parts of a source (for GitHub, its
+/// Format version 82: `read_partitions`, the parts of a source (for GitHub, its
 /// repositories) that have been read, as a JSON list, so the first read of each
 /// can be told from the ones that follow. NULL for a source last read before
 /// this was kept; [`read_partitions`] says what counts as read then. It replaces
-/// `refreshed_configuration`, which format 75 kept on unreleased builds only.
+/// `refreshed_configuration`, which only unreleased builds kept.
 pub(crate) fn migrate_read_partitions(connection: &Connection) -> Result<(), Error> {
     let has = |column: &str| {
         connection.query_row(
@@ -136,7 +136,7 @@ pub(crate) fn migrate_read_partitions(connection: &Connection) -> Result<(), Err
     if !has("read_partitions")? {
         connection.execute_batch("ALTER TABLE source_status ADD COLUMN read_partitions TEXT")?;
     }
-    connection.execute_batch("PRAGMA user_version = 76;")?;
+    connection.execute_batch("PRAGMA user_version = 82;")?;
     Ok(())
 }
 

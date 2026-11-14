@@ -54,6 +54,19 @@ afterEach(() => {
 
 const waitingChat = () => ({
   chat: chatState({ id: "c1", title: "Limiter", activity: "waiting" }),
+  items: [
+    {
+      id: "req-1",
+      at: "2026-11-10T10:00:00Z",
+      kind: "request" as const,
+      request: "approval" as const,
+      title: "Codex wants to run",
+      subject: "npm test",
+      options: [{ id: "once", label: "Allow once" }],
+      free_text: false,
+      state: "pending" as const,
+    },
+  ],
 });
 const settings = (client: MockChatClient) =>
   render(
@@ -134,13 +147,55 @@ test("turning Chat off while Chats work asks first, and stops them only on confi
   fireEvent.click(chatSwitch());
   dialog = await screen.findByRole("dialog", { name: "Turn off Chat?" });
   fireEvent.click(
-    within(dialog).getByRole("button", { name: "Stop Chats and turn off" }),
+    within(dialog).getByRole("button", { name: "Stop it and turn off" }),
   );
   await waitFor(() =>
     expect(chatSwitch().getAttribute("aria-checked")).toBe("false"),
   );
   // The Chat is kept, stopped, and will not restart by itself.
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
+});
+
+test("turning Chat off while a run is going and no Chat works asks first, naming both", async () => {
+  const client = createMockChatClient({ enabled: true });
+  client.runsGoing = 2;
+  settings(client);
+  await waitFor(() =>
+    expect(chatSwitch().getAttribute("aria-checked")).toBe("true"),
+  );
+  fireEvent.click(chatSwitch());
+  let dialog = await screen.findByRole("dialog", { name: "Turn off Chat?" });
+  expect(dialog.textContent).toContain(
+    "2 runs are working. Turning Chat off stops them first.",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Keep Chat on" }));
+  expect(await client.getEnabled()).toBe(true);
+
+  client.runsGoing = 1;
+  await client.createChat({
+    command_id: "c",
+    harness_id: "codex",
+    folder: null,
+    links: [],
+    message: "go",
+  });
+  fireEvent.click(chatSwitch());
+  dialog = await screen.findByRole("dialog", { name: "Turn off Chat?" });
+  expect(dialog.textContent).toContain(
+    "1 Chat and 1 run are working. Turning Chat off stops them first.",
+  );
+});
+
+test("Quit names the runs it would stop", async () => {
+  const client = createMockChatClient({ enabled: true });
+  client.runsGoing = 1;
+  settings(client);
+  act(() => client.requestQuit());
+  const dialog = await screen.findByRole("dialog", { name: "Quit ticketd?" });
+  expect(dialog.textContent).toContain(
+    "1 run is still working. Quitting stops it. Closing the window instead keeps it running.",
+  );
+  expect(client.quit).toBe(false);
 });
 
 test("Quit asks before stopping working Chats; Cancel leaves them running", async () => {
@@ -215,7 +270,7 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
   });
   app(client);
   const entry = await screen.findByRole("button", {
-    name: "Chats · 1 needs you",
+    name: "Chats, 1 waiting",
   });
   fireEvent.click(entry);
   expect(entry.getAttribute("aria-current")).toBe("page");

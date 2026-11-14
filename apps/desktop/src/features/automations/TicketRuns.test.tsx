@@ -29,6 +29,8 @@ const ticketRun = (patch: Partial<TicketRun>): TicketRun => ({
   status: "completed",
   reason: null,
   needs_you: false,
+  answer: null,
+  automation_deleted: false,
   ticket: { id: "t-8", reference: "T-ZB8", title: "Login form flickers" },
   created_at: new Date().toISOString(),
   ...patch,
@@ -50,7 +52,16 @@ beforeEach(() => {
       case "automation_run_dismiss":
       case "automation_run_again":
         runs = runs.map((run) =>
-          run.id === id ? { ...run, needs_you: false } : run,
+          run.id === id
+            ? {
+                ...run,
+                needs_you: false,
+                answer:
+                  command === "automation_run_again"
+                    ? "ran_again"
+                    : "dismissed",
+              }
+            : run,
         );
         return undefined;
       default:
@@ -78,8 +89,11 @@ const ticket = (chat = true) =>
         value={{
           enabled: chat,
           setEnabled: async () => {},
-          overview: { needs_you: 0, working: 0 },
+          overview: { needs_you: 0, unread: 0, app_icon: 0, working: 0 },
           revision: 0,
+          openRequest: null,
+          chatRequest: null,
+          requestChat: () => {},
         }}
       >
         <RunNavigation value={openRun}>
@@ -130,12 +144,26 @@ test("a run that needs attention puts a notice on the ticket, and opening the ru
   ).toBeTruthy();
 });
 
+test("a run whose Automation was deleted says so in its notice and cannot be run again", async () => {
+  runs = [{ ...FAILED, automation_deleted: true }];
+  ticket();
+
+  const notice = await screen.findByRole("region", {
+    name: "Triage new tickets needs attention",
+  });
+  expect(notice.textContent).toContain(`${LIMIT} Its Automation was deleted.`);
+  expect(
+    within(notice).queryByRole("button", { name: "Run again" }),
+  ).toBeNull();
+  expect(within(notice).getByRole("button", { name: "Dismiss" })).toBeTruthy();
+});
+
 test.each([
-  ["Dismiss", "automation_run_dismiss"],
-  ["Run again", "automation_run_again"],
+  ["Dismiss", "automation_run_dismiss", "dismissed"],
+  ["Run again", "automation_run_again", "run again"],
 ])(
-  "%s clears the notice and keeps the run in the section",
-  async (name, command) => {
+  "%s clears the notice and keeps the run in the section, saying how it was answered",
+  async (name, command, how) => {
     runs = [FAILED];
     ticket();
     const notice = await screen.findByRole("region", {
@@ -155,7 +183,7 @@ test.each([
     expect(
       within(screen.getByRole("region", { name: "Runs" })).getByRole("button")
         .textContent,
-    ).toBe("Triage new ticketsNeeds attention · now");
+    ).toBe(`Triage new ticketsNeeds attention · ${how} · now`);
   },
 );
 
@@ -176,8 +204,11 @@ test("a failed read of the ticket's runs stops showing once a later read works",
         value={{
           enabled: true,
           setEnabled: async () => {},
-          overview: { needs_you: 0, working: 0 },
+          overview: { needs_you: 0, unread: 0, app_icon: 0, working: 0 },
           revision: 0,
+          openRequest: null,
+          chatRequest: null,
+          requestChat: () => {},
         }}
       >
         <Ticket />

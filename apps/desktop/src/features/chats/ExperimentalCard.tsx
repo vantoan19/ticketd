@@ -9,24 +9,28 @@ import {
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
-import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { useSettingsState } from "@/features/settings/use-settings-state";
-import { useChatClient } from "@/features/chats/client";
-import { chatCount } from "@/features/chats/model";
+import { useChatClient, type Stopping } from "@/features/chats/client";
+import { stoppingText } from "@/features/chats/model";
 import { useChatFeature } from "@/features/chats/use-chats";
 
 /**
  * Settings > Chat: the notice and the Show Chat switch. Off by default. Turning it off
- * hides Chat and keeps every Chat; Chats that are working are stopped first,
- * and only after the person confirms.
+ * hides Chat and keeps every Chat; Chats that are working and runs that are
+ * going are stopped first, and only after the person confirms.
  */
 export function ExperimentalCard() {
   const client = useChatClient();
   const { openPage } = useSettingsState();
   const { enabled, setEnabled } = useChatFeature();
   const [failure, setFailure] = useState("");
-  /** How many Chats turning off would stop; set while the confirmation is open. */
-  const [confirming, setConfirming] = useState<number | null>(null);
+  /**
+   * What turning off would stop; set while the confirmation is open. `"unknown"`
+   * when it could not be read.
+   */
+  const [confirming, setConfirming] = useState<Stopping | "unknown" | null>(
+    null,
+  );
   const apply = (value: boolean) =>
     setEnabled(value).then(
       () => setFailure(""),
@@ -37,14 +41,20 @@ export function ExperimentalCard() {
     );
   async function change(value: boolean) {
     if (value) return apply(true);
-    // If the count cannot be read, ask anyway rather than stop work unannounced.
-    const working = await client.overview().then(
-      (overview) => overview.working,
-      () => null,
+    // Runs are counted too: their Chats are not in the Chat list (L3). If the
+    // count cannot be read, ask anyway rather than stop work unannounced.
+    const stopping = await client.stopping().then(
+      (value) => value,
+      () => "unknown" as const,
     );
-    if (working === 0) return apply(false);
-    setConfirming(working ?? -1);
+    if (stopping !== "unknown" && stopping.chats + stopping.runs === 0)
+      return apply(false);
+    setConfirming(stopping);
   }
+  const text =
+    confirming !== null && confirming !== "unknown"
+      ? stoppingText(confirming.chats, confirming.runs)
+      : null;
   return (
     <>
       <Alert role="note" className="mt-10">
@@ -60,7 +70,8 @@ export function ExperimentalCard() {
           .
         </AlertDescription>
       </Alert>
-      <SettingsSection title="Chat">
+      {/* The page is Chat already: its one row needs no "Chat" heading (LIVE-21). */}
+      <div className="settings-section">
         <SettingsList>
           <SettingsRow
             variant="top"
@@ -85,7 +96,7 @@ export function ExperimentalCard() {
             {failure}
           </p>
         )}
-      </SettingsSection>
+      </div>
       <DialogShell
         open={confirming !== null}
         onOpenChange={(open) => {
@@ -93,7 +104,9 @@ export function ExperimentalCard() {
         }}
         title="Turn off Chat?"
         cancelLabel="Keep Chat on"
-        primaryLabel="Stop Chats and turn off"
+        primaryLabel={
+          text?.one ? "Stop it and turn off" : "Stop them and turn off"
+        }
         primaryVariant="destructive"
         blockedReason={null}
         onSubmit={() => {
@@ -102,10 +115,9 @@ export function ExperimentalCard() {
         }}
       >
         <p className="chat-dialog-text">
-          {confirming === null || confirming < 0
-            ? "Chats may be working."
-            : `${chatCount(confirming)} ${confirming === 1 ? "is" : "are"} working.`}{" "}
-          Turning Chat off stops {confirming === 1 ? "it" : "them"} first.
+          {text
+            ? `${text.subject} working. Turning Chat off stops ${text.one ? "it" : "them"} first.`
+            : "Chats and runs may be working. Turning Chat off stops them first."}
         </p>
         <p className="chat-fine">
           Your Chats are kept. Turn Chat back on to see them again; nothing

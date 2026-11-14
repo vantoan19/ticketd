@@ -1,7 +1,8 @@
 use ticketd_core::{
     Automation, AutomationAgentSettings, AutomationDefinition, AutomationRun, AutomationRunStatus,
     AutomationStepStatus, ChatLink, ChatLinkKind, ChatListFilter, Check, Condition, NewChat,
-    NotifyTarget, RunAction, RunEnd, Step, StepAction, StepOutcome, Ticket, Trigger, Workspace,
+    NotifyTarget, RunAction, RunAnswer, RunEnd, Step, StepAction, StepOutcome, Ticket, Trigger,
+    Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -806,7 +807,7 @@ fn the_previous_format_gains_run_storage_without_losing_records() {
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
         "DROP TABLE automation_run_steps; DROP TABLE automation_runs;
-         ALTER TABLE chats DROP COLUMN automation_run_id; PRAGMA user_version = 70;",
+         ALTER TABLE chats DROP COLUMN automation_run_id; PRAGMA user_version = 76;",
     )
     .unwrap();
     drop(db);
@@ -1038,6 +1039,7 @@ fn dismissing_a_run_clears_needs_attention_and_leaves_the_run_as_it_ended() {
     let dismissed = workspace.dismiss_automation_run(&run.id).unwrap();
 
     assert!(!dismissed.needs_you);
+    assert_eq!(dismissed.answer, Some(RunAnswer::Dismissed));
     assert_eq!(dismissed.status, AutomationRunStatus::NeedsAttention);
     assert_eq!(dismissed.reason.as_deref(), Some(LIMIT));
     assert_eq!(needing_you(&workspace), 0);
@@ -1054,10 +1056,35 @@ fn running_again_clears_needs_attention_on_the_run_it_repeats() {
 
     let again = workspace.run_automation_again(&run.id).unwrap();
 
-    assert!(!workspace.automation_run(&run.id).unwrap().needs_you);
+    let answered = workspace.automation_run(&run.id).unwrap();
+    assert!(!answered.needs_you);
+    assert_eq!(answered.answer, Some(RunAnswer::RanAgain));
     assert!(!again.needs_you);
+    assert_eq!(again.answer, None);
     assert_eq!(needing_you(&workspace), 0);
     assert_eq!(workspace.inbox_page(10, 0, true).unwrap(), []);
+}
+
+#[test]
+fn a_run_of_a_deleted_automation_says_so_and_running_it_again_is_refused_in_words() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    let (run, _chat) = needing_attention(&mut workspace);
+    assert!(!run.automation_deleted);
+
+    workspace.delete_automation(&automation.id).unwrap();
+
+    assert!(
+        workspace
+            .automation_run(&run.id)
+            .unwrap()
+            .automation_deleted
+    );
+    let refused = workspace.run_automation_again(&run.id).unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        "Its Automation was deleted, so it cannot be run again."
+    );
 }
 
 #[test]
@@ -1254,7 +1281,7 @@ fn the_previous_format_keeps_its_runs_and_the_ones_needing_attention_still_need_
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 72;",
+        "ALTER TABLE automation_runs DROP COLUMN attention_cleared; PRAGMA user_version = 78;",
     )
     .unwrap();
     drop(db);

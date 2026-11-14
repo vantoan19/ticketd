@@ -11,17 +11,21 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
 
 use super::mapping::Session;
-use super::runtime::{Options, login_state, open_over, probe_login};
+use super::runtime::{Options, login_state, open_over, probe_login, probe_options};
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
     HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
     LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
     OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
-    RuntimeGeneration, SessionStart, Submission, SubmissionId, SubmissionKind, TurnOutcome,
+    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    TurnOutcome,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(7);
+/// The settings the handshake fixture's `thread/start` reply reports.
+const SETTINGS: &str =
+    "settings model=gpt-test[] permission=workspaceWrite[\"workspaceWrite\"] fixed";
 
 macro_rules! fixture {
     ($name:literal) => {
@@ -32,6 +36,8 @@ macro_rules! fixture {
 fn options() -> Options {
     Options {
         client_version: "0.0.0-test".to_owned(),
+        // Only the settings fixture plays the list requests.
+        list_settings: false,
         ..Options::default()
     }
 }
@@ -45,6 +51,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         working_directory: PathBuf::from("/work/chat-1"),
         session,
         unattended: None,
+        settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
     (peer, opened)
@@ -56,7 +63,7 @@ async fn open() -> (Peer, Arc<dyn HarnessRuntime>, EventStream) {
     let mut opened = opened.expect("the handshake succeeds");
     assert_eq!(
         seen(&mut opened.events).await,
-        ["session thr_1", "notice EffectiveSettings"]
+        ["session thr_1", SETTINGS, "notice EffectiveSettings"]
     );
     (peer, opened.runtime, opened.events)
 }
@@ -455,7 +462,10 @@ fn an_unavailable_model_or_mcp_server_is_reported_as_a_capability_not_a_warning(
     let kinds = |events: &[EventKind]| -> Vec<String> { events.iter().map(brief).collect() };
     assert_eq!(
         kinds(&rerouted),
-        ["notice CapabilityUnavailable turn_1 \"Codex rerouted this turn to a different model\""]
+        [
+            "settings",
+            "notice CapabilityUnavailable turn_1 \"Codex rerouted this turn to a different model\""
+        ]
     );
     let [
         EventKind::Notice {
@@ -613,7 +623,7 @@ async fn resuming_reports_the_native_session_and_a_missing_one_as_unavailable_hi
 
     assert_eq!(
         seen(&mut opened.events).await,
-        ["session thr_1", "notice EffectiveSettings"]
+        ["session thr_1", SETTINGS, "notice EffectiveSettings"]
     );
     assert!(matches!(
         opened.capabilities.native_resume,
@@ -674,6 +684,100 @@ async fn the_login_probe_reads_the_account_kind_and_closes_the_process() {
     assert_eq!(login_state(&api_key), LoginState::NonSubscription);
     assert_eq!(login_state(&signed_out), LoginState::SignedOut);
     assert_eq!(login_state(&other_provider), LoginState::Unknown);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_codex_slow_to_start_is_not_checked_rather_than_checking_forever() {
+    let (mut peer, io) = pipes();
+    // Codex takes the request and never answers.
+    peer.load(
+        &fixture!("login")
+            .lines()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let slow = Options {
+        rpc_timeout: Duration::from_secs(600),
+        ..options()
+    };
+
+    let (login, ()) = tokio::join!(probe_login(io, slow), async {
+        peer.play().await;
+        assert!(peer.stdin_closed().await);
+        peer.exit(0);
+    });
+
+    assert_eq!(login, LoginState::Unknown);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_options_probe_lists_every_page_of_models_with_their_efforts_and_closes() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("options"));
+
+    let (options, ()) = tokio::join!(probe_options(io, options()), async {
+        peer.play().await;
+        assert!(peer.stdin_closed().await);
+        peer.exit(0);
+    });
+
+    let options = options.expect("Codex listed its options");
+    let models: Vec<_> = options
+        .models
+        .iter()
+        .map(|choice| {
+            let efforts: Vec<_> = choice.efforts.iter().map(|e| e.id.as_str()).collect();
+            (
+                choice.model.label.as_str(),
+                choice.model.is_default,
+                efforts,
+            )
+        })
+        .collect();
+    // Hidden models are not choices.
+    assert_eq!(
+        models,
+        [
+            ("GPT A", true, vec!["low", "medium", "high"]),
+            ("GPT B", false, vec!["high"]),
+        ]
+    );
+    let default_effort = options.models[0].efforts.iter().find(|e| e.is_default);
+    assert_eq!(default_effort.map(|e| e.id.as_str()), Some("medium"));
+    let permission = options.permission.expect("profiles were listed");
+    assert_eq!(permission.current, None);
+    assert!(permission.unchangeable.is_some(), "Codex sets permissions");
+    assert_eq!(permission.options.len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("start_settings"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: None,
+        settings: StartSettings {
+            model: Some("gpt-b".to_owned()),
+            effort: Some("high".to_owned()),
+            permission: None,
+        },
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let runtime = opened.expect("the thread opens").runtime;
+
+    let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Go")).await;
+
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -809,6 +913,7 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
         unattended: Some(unattended(false, false)),
+        settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
     let mut opened = opened.expect("the thread opens");
@@ -826,4 +931,150 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
         }
         other => panic!("a failed turn, got {other:?}"),
     }
+}
+
+/// Codex reports a command the person declined as `declined`: it never ran, so it is
+/// not a failure.
+#[test]
+fn a_declined_command_is_declined_not_failed() {
+    let mut session = Session::default();
+    let mut completed = |status: &str| {
+        let item = json!({"type": "commandExecution", "id": "item_9", "command": "rm -rf node_modules", "status": status});
+        let params = json!({"turnId": "turn_1", "item": item});
+        match session.notification("item/completed", &params).as_slice() {
+            [EventKind::ToolUpdated { status, .. }] => *status,
+            other => panic!("one tool update, got {other:?}"),
+        }
+    };
+    assert_eq!(completed("declined"), crate::ToolStatus::Declined);
+    assert_eq!(completed("failed"), crate::ToolStatus::Failed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn reasoning_plan_files_and_context_carry_only_what_codex_reported() {
+    let (mut peer, runtime, mut events) = open().await;
+    peer.load(fixture!("reports"));
+
+    submit(&mut peer, &runtime, start_turn("sub-1", "Add a limiter")).await;
+
+    assert_eq!(
+        seen(&mut events).await,
+        [
+            "turn-started turn_1",
+            "reasoning rs_1 running Some(1730910000000) None None None",
+            // A heading only once Codex closed the bold text it marked one with.
+            "reasoning rs_1 running Some(1730910000000) None None Some(\"Reading the handler\")",
+            "reasoning rs_1 done Some(1730910000000) Some(1730910012000) Some(\"**Reading the handler**\\n\\nThe handler has no limit.\") Some(\"Reading the handler\")",
+            "plan [\"Completed Read the handler\", \"InProgress Add the limiter\", \"Pending Run the tests\"] Some(\"Small change\")",
+            "tool fc_1 \"Edit /work/chat-1/src/limiter.ts, /work/chat-1/src/handler.ts\" Running None",
+            "files [\"Added /work/chat-1/src/limiter.ts +2 -0 unconfirmed\", \"Modified /work/chat-1/src/handler.ts +1 -1 unconfirmed\"]",
+            "tool fc_1 \"Edit /work/chat-1/src/limiter.ts, /work/chat-1/src/handler.ts\" Succeeded None",
+            "files [\"Added /work/chat-1/src/limiter.ts +2 -0\", \"Modified /work/chat-1/src/handler.ts +1 -1\"]",
+            // The turn's net diff replaces the counts of the files it names.
+            "files [\"Added /work/chat-1/src/limiter.ts +2 -0\", \"Modified /work/chat-1/src/handler.ts +2 -1\"]",
+            // The last request's tokens, of the window Codex gave.
+            "context 124000 of 200000 [] None",
+            "compacted",
+            // A proposed plan is Markdown, shown like a response.
+            "message pl_1 \"1. Add the limiter\\n2. Test it\"",
+            "turn-ended turn_1 Completed [\"sub-1\"]",
+        ]
+    );
+}
+
+#[test]
+fn a_failed_file_change_changed_nothing_and_usage_without_a_window_is_not_reported() {
+    let mut session = Session::default();
+    let item = |status: &str| {
+        json!({"turnId": "turn_1", "item": {"type": "fileChange", "id": "fc_1", "status": status,
+            "changes": [{"path": "a.ts", "kind": {"type": "update", "move_path": "b.ts"}, "diff": "+x\n"}]}})
+    };
+    session.notification("item/started", &item("inProgress"));
+    let failed = session.notification("item/completed", &item("failed"));
+    assert_eq!(failed.last().map(brief).as_deref(), Some("files []"));
+
+    let started = session.notification("item/started", &item("inProgress"));
+    assert_eq!(
+        started.last().map(brief).as_deref(),
+        Some("files [\"Renamed { from: \\\"a.ts\\\" } b.ts +1 -0 unconfirmed\"]")
+    );
+
+    let usage = json!({"turnId": "turn_1", "tokenUsage": {"last": {"totalTokens": 5}, "modelContextWindow": null}});
+    assert!(
+        session
+            .notification("thread/tokenUsage/updated", &usage)
+            .is_empty()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_next_turn() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("settings"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: None,
+        settings: StartSettings::default(),
+    };
+    let listing = Options {
+        list_settings: true,
+        ..options()
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, listing), peer.play());
+    let mut opened = opened.expect("the thread opens");
+
+    let settings = drain(&mut opened.events).await;
+    let models = "model=gpt-a[\"gpt-a\", \"gpt-b\"] effort=medium[\"low\", \"medium\", \"high\"]";
+    let profiles = "[\":read-only\", \":workspace\", \":danger-no-sandbox\"] fixed";
+    assert_eq!(
+        settings.iter().map(brief).collect::<Vec<_>>(),
+        [
+            "session thr_1".to_owned(),
+            // Before the lists: the thread's own answer, with no choices.
+            "settings model=gpt-a[] permission=workspaceWrite[\"workspaceWrite\"] fixed".to_owned(),
+            "notice EffectiveSettings".to_owned(),
+            // Hidden models are not choices; efforts are the current model's, in order.
+            format!("settings {models} permission=workspaceWrite[\"workspaceWrite\"] fixed"),
+            format!("settings {models} permission=?{profiles}"),
+            format!("settings {models} permission=:workspace{profiles}"),
+        ]
+    );
+    let Some(EventKind::SettingsState(last)) = settings.last() else {
+        panic!("settings last, got {settings:?}");
+    };
+    let profile_options = &last.permission.as_ref().expect("permission").options;
+    assert!(
+        !profile_options[2].allowed,
+        "Codex's policy refuses this profile"
+    );
+
+    let runtime = opened.runtime;
+    let change = |setting, value: &str| crate::SettingChange {
+        generation: GENERATION,
+        setting,
+        value: value.to_owned(),
+    };
+    assert_eq!(
+        runtime
+            .change_setting(change(crate::SettingKey::Model, "gpt-b"))
+            .await,
+        crate::SettingOutcome::Applied
+    );
+    assert_eq!(
+        runtime
+            .change_setting(change(crate::SettingKey::Permission, ":read-only"))
+            .await,
+        crate::SettingOutcome::Unsupported
+    );
+    // Nothing was written for the change: the next turn carries it.
+    let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Go")).await;
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
 }

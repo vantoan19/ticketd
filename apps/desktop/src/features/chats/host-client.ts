@@ -9,10 +9,16 @@ import {
   chatSnapshotSchema,
   chatSummarySchema,
   createdChatSchema,
+  folderFileSchema,
+  harnessOptionsSchema,
   harnessStatusSchema,
   linkedRecordSchema,
+  settingChangeSchema,
+  openRequestSchema,
+  suggestionSchema,
   type ChatChange,
   type ChatClient,
+  projectRefSchema,
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 
@@ -56,8 +62,12 @@ export function tauriBridge(): HostBridge {
 }
 
 const failureSchema = z.object({
-  code: z.enum(["stale", "failed"]),
+  code: z.enum(["stale", "gone", "failed"]),
   message: z.string(),
+});
+const stoppingSchema = z.object({
+  chats: z.number().int().nonnegative(),
+  runs: z.number().int().nonnegative(),
 });
 const openedSchema = z.object({
   subscription: z.number().int(),
@@ -175,7 +185,20 @@ export function createHostChatClient(
       z.array(chatSummarySchema).parse(await call("chat_list", { scope })),
     harnesses: async () =>
       z.array(harnessStatusSchema).parse(await call("chat_harnesses")),
+    harnessOptions: async (harnessId) =>
+      harnessOptionsSchema.parse(
+        await call("chat_harness_options", { harnessId }),
+      ),
     pickFolder: () => bridge.pickFolder(),
+    projectFolder: async (projectId) =>
+      z
+        .array(z.object({ id: z.string(), path: z.string() }))
+        .parse(await call("list_projects"))
+        .find((project) => project.id === projectId)?.path || null,
+    folderProject: async (path) =>
+      projectRefSchema
+        .nullable()
+        .parse(await call("chat_folder_project", { path })),
     folderUse: async (path) =>
       z
         .number()
@@ -233,11 +256,21 @@ export function createHostChatClient(
         close(feed);
       };
     },
-    send: (id, text) => run("chat_send", { chatId: id, text, queue: false }),
-    queue: (id, text) => run("chat_send", { chatId: id, text, queue: true }),
+    send: (id, text, links = []) =>
+      run("chat_send", { chatId: id, text, queue: false, links }),
+    queue: (id, text, links = []) =>
+      run("chat_send", { chatId: id, text, queue: true, links }),
+    linkedTo: async (link) =>
+      z.array(chatSummarySchema).parse(await call("chat_linked_to", { link })),
+    folderFiles: async (folder, query) =>
+      z
+        .array(folderFileSchema)
+        .parse(await call("chat_files", { path: folder, query })),
     removeQueued: (id, queuedId) =>
       run("chat_remove_queued", { chatId: id, queuedId }),
     resumeQueue: (id) => run("chat_resume_queue", { chatId: id }),
+    sendQueuedNow: (id, queuedId) =>
+      run("chat_send_queued_now", { chatId: id, queuedId }),
     stop: (id) => run("chat_stop", { chatId: id }),
     answer: (id, requestId, answer) =>
       run("chat_answer", { chatId: id, requestId, answer }),
@@ -262,6 +295,12 @@ export function createHostChatClient(
     removeLink: (id, link) =>
       run("chat_set_link", { chatId: id, link, present: false }),
     resume: (id, history) => run("chat_resume", { chatId: id, history }),
+    changeSetting: async (id, setting, value) =>
+      settingChangeSchema.parse(
+        await call("chat_change_setting", { chatId: id, setting, value }),
+      ),
+    openFile: (id, path) => run("chat_open_file", { chatId: id, path }),
+    openFolder: (id) => run("chat_open_folder", { chatId: id }),
     saveAsDocument: async (id, responseId, title) =>
       z.string().parse(
         await call("chat_save_as_document", {
@@ -270,12 +309,21 @@ export function createHostChatClient(
           title,
         }),
       ),
+    suggestions: async (folder, linked) =>
+      z
+        .array(suggestionSchema)
+        .parse(await call("chat_suggestions", { folder, linked })),
+    markRead: (id) => run("chat_mark_read", { chatId: id }),
+    markUnread: (id) => run("chat_mark_unread", { chatId: id }),
+    readThrough: (id, itemId) =>
+      run("chat_read_through", { chatId: id, itemId }),
+    setMuted: (id, muted) => run("chat_set_muted", { chatId: id, muted }),
+    setNotify: (enabled) => run("chat_set_notify", { enabled }),
+    onOpenRequested: (listener) =>
+      subscribeTo("chat-open-requested", openRequestSchema, listener),
+    stopping: async () => stoppingSchema.parse(await call("chat_stopping")),
     onQuitRequested: (listener) =>
-      subscribeTo(
-        "chat-quit-requested",
-        z.number().int().nonnegative(),
-        listener,
-      ),
+      subscribeTo("chat-quit-requested", stoppingSchema, listener),
     answerQuit: (quit) => run("chat_answer_quit", { quit }),
   };
 }

@@ -749,7 +749,7 @@ fn a_workspace_in_the_previous_format_starts_syncing_the_automations_it_has() {
             drops.push_str(&format!("DROP TRIGGER sync_capture_{table}_{event};"));
         }
     }
-    db.execute_batch(&format!("{drops} PRAGMA user_version = 69;"))
+    db.execute_batch(&format!("{drops} PRAGMA user_version = 75;"))
         .unwrap();
     drop(db);
 

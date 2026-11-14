@@ -35,6 +35,9 @@
   font-weight: 400;
   line-height: var(--text-caption-line);
 }
+.agent-hint-error {
+  color: var(--error-foreground);
+}
 /* A tool or a limit: one line, the note giving way before the name does. */
 .agent-tool {
   display: grid;
@@ -79,10 +82,12 @@
 .chat-row[data-off] .chat-row-mark {
   color: var(--muted-foreground);
 }
-.auto-row-start {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+/* An icon, then text: kept inline rather than a flex row, so the row's ellipsis
+   (chats.css, .chat-row-sub > span) cuts the text and the icon keeps its size. */
+.auto-row-start > svg {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -2px;
 }
 
 /* --- An Automation's runs: a list under day headings. --- */
