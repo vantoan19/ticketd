@@ -517,8 +517,13 @@ export function FlowCanvas({
     }));
     return { nodes, edges };
   }, [trigger, only, steps, agents, projects, problems, selected]);
-  const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
-  const { onSetFailurePath } = actions;
+  const {
+    onSelect,
+    onChooseTrigger,
+    onAddStep,
+    onDeleteStep,
+    onSetFailurePath,
+  } = actions;
   const ticketless = startsWithoutTicket(trigger);
   const context = useMemo(
     () => ({
