@@ -767,8 +767,11 @@ export function ChatDetail({
   notice,
   crumb,
   focusRequest = false,
+  title,
 }: {
   id: string;
+  /** The title to show until the Chat is read, when the opener knows it. */
+  title?: string | undefined;
   /** What ticketd says above the composer about this Chat, where it is open. */
   notice?: ReactNode;
   /** The person asked for the full width. */
@@ -815,7 +818,7 @@ export function ChatDetail({
             />
           )}
           <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
-            {chat?.title ?? "Chat"}
+            {chat?.title ?? (title || "Chat")}
           </h2>
           {chat && (
             <ChatContext chat={chat} asOf={lastAsk(snapshot?.items ?? [])} />
@@ -877,6 +880,11 @@ export function ChatDetail({
           </p>
         )}
       </div>
+      {!snapshot && !error && (
+        <p className="chat-list-empty" role="status">
+          Opening the Chat…
+        </p>
+      )}
       {snapshot && (
         <Conversation
           key={id}

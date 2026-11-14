@@ -372,6 +372,22 @@ const failedRun = (owned: boolean) =>
     steps: [{ ...reached("verify", "failed", "Limit"), chat_owned: owned }],
   });
 
+test("a run's Chat that is still being read shows its title and says it is opening", async () => {
+  runs = [failedRun(true)];
+  await openRun();
+  const reading = vi
+    .spyOn(chat, "openChat")
+    .mockReturnValue(new Promise(() => {}));
+
+  fireEvent.click(screen.getByRole("button", { name: "Open Chat" }));
+
+  expect(
+    (await screen.findByRole("heading", { level: 2 })).textContent,
+  ).toMatch(/^Verify on staging: T-\S+ /);
+  expect(screen.getByText("Opening the Chat…")).toBeTruthy();
+  reading.mockRestore();
+});
+
 test("a run's Chat opens in the page and says above the composer that replying takes it over", async () => {
   runs = [failedRun(true)];
   const view = await openRun();
