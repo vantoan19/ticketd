@@ -611,7 +611,7 @@ async fn a_message_from_the_person_takes_a_running_run_over_and_its_chat_becomes
 
     let run = f.runs().remove(0);
     assert_eq!(run.status, AutomationRunStatus::TakenOver);
-    assert_eq!(f.listed_chats(), [chat.clone()]);
+    assert_eq!(f.listed_chats(), std::slice::from_ref(&chat));
     // L15: the agent's turn is recorded as stopped for the take-over, not for Quit.
     let first_turn = f
         .core()
