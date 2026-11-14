@@ -106,8 +106,8 @@ pub(super) struct Session {
     /// approvals off and the sandbox as the agent's allowed tools set it.
     pub(super) turn_overrides: Option<Value>,
     /// Why the open turn of an unattended session fails: the first tool Codex
-    /// declined, or file it declined or could not change.
-    declined: Option<String>,
+    /// declined, or file it declined or could not change, in the order they came.
+    declined: Vec<String>,
     /// Why Codex could not start a command in the open turn of an unattended session.
     not_started: Option<String>,
     /// The turn a Stop was sent for: a tool of it that then fails was cut off.
@@ -394,7 +394,7 @@ impl Session {
 
     fn turn_completed(&mut self, turn: &Value) -> Option<Vec<EventKind>> {
         let id = text(turn, &["id"])?;
-        let declined = self.declined.take();
+        let declined = std::mem::take(&mut self.declined);
         let not_started = self.not_started.take();
         let ended_by = |kind, message| {
             TurnOutcome::Failed(Problem {
@@ -407,9 +407,9 @@ impl Session {
         let outcome = match text(turn, &["status"])? {
             // Nobody approves for an unattended session, so a declined tool is one
             // the agent needed and was denied, even if it then ended its turn.
-            "completed" if declined.is_some() => ended_by(
+            "completed" if !declined.is_empty() => ended_by(
                 ProblemKind::ToolDenied,
-                declined.unwrap_or_default(),
+                declined.join(" "),
             ),
             // Whatever the agent then said, it could not do its work (#387 D2).
             "completed" if not_started.is_some() => ended_by(
@@ -619,8 +619,12 @@ impl Session {
         item: &Value,
         completed: bool,
     ) -> EventKind {
-        if self.turn_overrides.is_some() && self.declined.is_none() {
-            self.declined = Self::denial(kind, &title, item);
+        if self.turn_overrides.is_some() {
+            if let Some(denial) = Self::denial(kind, &title, item) {
+                if !self.declined.contains(&denial) {
+                    self.declined.push(denial);
+                }
+            }
         }
         if kind == "commandExecution"
             && self.turn_overrides.is_some()
