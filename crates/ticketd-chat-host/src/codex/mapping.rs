@@ -407,10 +407,9 @@ impl Session {
         let outcome = match text(turn, &["status"])? {
             // Nobody approves for an unattended session, so a declined tool is one
             // the agent needed and was denied, even if it then ended its turn.
-            "completed" if !declined.is_empty() => ended_by(
-                ProblemKind::ToolDenied,
-                declined.join(" "),
-            ),
+            "completed" if !declined.is_empty() => {
+                ended_by(ProblemKind::ToolDenied, declined.join(" "))
+            }
             // Whatever the agent then said, it could not do its work (#387 D2).
             "completed" if not_started.is_some() => ended_by(
                 ProblemKind::PermissionUnavailable,

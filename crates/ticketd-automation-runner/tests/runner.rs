@@ -1062,7 +1062,12 @@ async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
 /// is ever sent: after a reply only the reply reaches the harness.
 #[tokio::test(start_paused = true)]
 async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queued() {
-    for how in ["stop in the chat", "reply", "stop the run", "chat turned off"] {
+    for how in [
+        "stop in the chat",
+        "reply",
+        "stop the run",
+        "chat turned off",
+    ] {
         let f = Fixture::new();
         let open = f.fake.hold_next_open();
         f.tag("Fix login");

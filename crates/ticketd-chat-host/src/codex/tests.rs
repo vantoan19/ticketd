@@ -1077,7 +1077,8 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
     // Each denial is named, in order: a declined command does not hide the file.
     let mut session = Session::default();
     session.turn_overrides = Some(json!({}));
-    let command = json!({"type": "commandExecution", "id": "c_1", "command": "ls", "status": "declined"});
+    let command =
+        json!({"type": "commandExecution", "id": "c_1", "command": "ls", "status": "declined"});
     for item in [command, item("declined")] {
         session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
     }
