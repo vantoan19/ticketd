@@ -49,6 +49,7 @@ import { RunNavigation } from "@/features/automations/navigation";
 import { RunView } from "@/features/automations/RunView";
 import { runStatusText } from "@/features/automations/runs-model";
 import { chatTime } from "@/features/chats/model";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import "@/features/chats/chats.css";
@@ -121,11 +122,18 @@ function startedBy(trigger: Automation["trigger"]) {
         By hand
       </span>
     );
+  if (trigger.kind === "status_changed" && trigger.to)
+    return (
+      <span className="auto-row-start">
+        <StatusIcon status={trigger.to} size={12} decorative />
+        Status → {trigger.to}
+      </span>
+    );
   return (
     <span className="auto-row-start">
       <Zap size={12} aria-hidden />
       {trigger.kind === "status_changed"
-        ? (trigger.to ?? "no status yet")
+        ? "no status yet"
         : ROW_TRIGGERS[trigger.kind]}
     </span>
   );
@@ -517,7 +525,10 @@ export function AutomationsView({
                     <span className="chat-row-mark">
                       <Workflow size={14} aria-hidden />
                     </span>
-                    <span className="chat-row-title">
+                    <span
+                      className="chat-row-title"
+                      title={automation.name.trim() || "New Automation"}
+                    >
                       {automation.name.trim() || "New Automation"}
                     </span>
                     <span className="chat-row-time">
@@ -550,7 +561,10 @@ export function AutomationsView({
                   <span className="chat-row-mark">
                     <Bot size={14} aria-hidden />
                   </span>
-                  <span className="chat-row-title">
+                  <span
+                    className="chat-row-title"
+                    title={agent.name.trim() || "New agent"}
+                  >
                     {agent.name.trim() || "New agent"}
                   </span>
                   <span className="chat-row-time" />

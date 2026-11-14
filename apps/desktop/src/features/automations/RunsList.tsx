@@ -79,7 +79,14 @@ function RunRow({
         <span className="chat-row-mark">
           <RunMark run={run} />
         </span>
-        <span className="chat-row-title">
+        <span
+          className="chat-row-title"
+          title={
+            run.ticket
+              ? `${run.ticket.reference} ${run.ticket.title}`
+              : "No ticket"
+          }
+        >
           {run.ticket ? (
             <>
               <span className="auto-ref">{run.ticket.reference}</span>{" "}

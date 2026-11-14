@@ -909,6 +909,47 @@ test("a failed save after quick saves of its own that worked is not taken for a 
   expect(screen.queryByText("Changed somewhere else")).toBeNull();
 });
 
+test("a list row names a status trigger with what changes, and gives every name in full on hover", async () => {
+  const long = "Mark quick for the weekly release train, stage one of three";
+  automations = [
+    {
+      ...TRIAGE,
+      name: long,
+      trigger: { kind: "status_changed", to: "Done", from: null },
+    },
+  ];
+  stored = [
+    { id: "a1", ...DEFAULTS, name: "Verifier" } as unknown as AutomationAgent,
+  ];
+  runs = [{ ...listed("2", "completed", "Login flickers"), automation_name: long }];
+  show();
+
+  const row = within(
+    await screen.findByRole("list", { name: "Automations" }),
+  ).getByRole("button");
+  expect(row.querySelector(".chat-row-title")?.getAttribute("title")).toBe(
+    long,
+  );
+  expect(row.querySelector(".auto-row-start")?.textContent).toBe(
+    "Status → Done",
+  );
+  expect(row.querySelector(".auto-row-start svg")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("radio", { name: /^Agents/ }));
+  const agent = within(
+    await screen.findByRole("list", { name: "Agents" }),
+  ).getByRole("button");
+  expect(agent.querySelector(".chat-row-title")?.getAttribute("title")).toBe(
+    "Verifier",
+  );
+
+  fireEvent.click(screen.getByRole("radio", { name: /^Runs/ }));
+  const run = await screen.findByRole("button", { name: /Login flickers/ });
+  expect(run.querySelector(".chat-row-title")?.getAttribute("title")).toBe(
+    "T-2 Login flickers",
+  );
+});
+
 test("New Automation while a run is open opens the new Automation, not the run", async () => {
   automations = [TRIAGE];
   runs = [listed("2", "needs_attention", "Login flickers")];
