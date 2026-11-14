@@ -356,8 +356,9 @@ export function RunView({
             className="chat-head-title run-title"
             tabIndex={-1}
           >
-            <span className="run-crumb">{automationName} › </span>
+            <span className="run-crumb">{automationName}</span>
             <span className="run-own-title">
+              <span className="run-crumb-separator"> › </span>
               {run?.ticket ? `Run on ${run.ticket.reference}` : "Run"}
             </span>
           </h2>

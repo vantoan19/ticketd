@@ -569,10 +569,15 @@
   color: var(--muted-foreground);
   font-weight: 400;
   text-overflow: ellipsis;
-  white-space: pre;
+  white-space: nowrap;
 }
 .run-own-title {
   flex: none;
+  white-space: pre;
+}
+.run-crumb-separator {
+  color: var(--muted-foreground);
+  font-weight: 400;
 }
 .run-note {
   flex: none;
