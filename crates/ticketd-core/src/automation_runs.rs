@@ -848,6 +848,17 @@ impl Workspace {
         run.map(|id| one(&self.connection, &id)).transpose()
     }
 
+    /// Whether an agent step of a run ever ran in this Chat, so its harness session
+    /// began unattended. True also once the person took the Chat over, from a run
+    /// that had ended or not.
+    pub fn chat_ran_an_automation_agent(&self, chat_id: &str) -> Result<bool, Error> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS (SELECT 1 FROM automation_run_steps WHERE chat_id = ?1)",
+            [chat_id],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn automation_run(&self, id: &str) -> Result<AutomationRun, Error> {
         one(&self.connection, id)
     }

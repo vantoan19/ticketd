@@ -9,7 +9,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 use ticketd_automation_runner::{Notifier, Runner, TicketdCli};
-use ticketd_chat_host::{ChatHost, cli};
+use ticketd_chat_host::ChatHost;
 
 use crate::chats::Chats;
 
@@ -51,16 +51,13 @@ pub fn open_on_click(app: &AppHandle) {
 /// nothing new in the event log, one reads each cursor and writes nothing.
 const TICK: Duration = Duration::from_secs(5);
 
-/// Where the ticketd CLI is and which folder it writes to, so an agent can always
-/// run it. Blocking: it runs the CLI with a deadline.
-fn ticketd_cli(app_version: &str) -> TicketdCli {
+/// Which folder the ticketd CLI writes to, so an agent can always run it.
+fn ticketd_cli() -> TicketdCli {
     let workspace = crate::open_workspace()
         .and_then(|workspace| workspace.workspace_info())
         .map(|info| PathBuf::from(info.path))
         .ok();
-    let status = cli::locate(app_version, workspace.as_deref());
     TicketdCli {
-        executable: status.path.map(PathBuf::from),
         folders: workspace
             .as_deref()
             .and_then(|path| path.parent())
@@ -78,7 +75,7 @@ fn pass(runner: Option<Runner>, host: ChatHost, app: &AppHandle) -> Option<Runne
             let built = Runner::new(
                 Arc::new(crate::open_workspace),
                 host,
-                ticketd_cli(&app.package_info().version.to_string()),
+                ticketd_cli(),
                 notifier(app.clone()),
             );
             match built {

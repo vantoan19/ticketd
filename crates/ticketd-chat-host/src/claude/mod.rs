@@ -150,9 +150,9 @@ impl ClaudeAdapter {
 /// A command rule matches the command as the agent wrote it, up to the `*` (Claude
 /// Code's permissions documentation, "Bash" and "PowerShell"). The agent's main shell
 /// is PowerShell on Windows and Bash elsewhere, so each command is allowed in both.
-// ponytail: the rules for the CLI's path cover the ways an agent usually writes it.
-// One written another way (a path with `*` or parentheses, `/c/...` in Git Bash) is
-// denied and the step fails saying so; add the form here when one turns up.
+/// The ticketd CLI is allowed by its name only: its folder is first on the agent's
+/// `PATH` (see `Serving`) and its context says to call it by name. A rule for its path
+/// did not match as written in either shell (live check, #387 L1), so none is given.
 pub(super) fn unattended_options(unattended: &Unattended) -> Value {
     let tools = &unattended.tools;
     let (mut allowed, mut disallowed) = (Vec::new(), Vec::new());
@@ -164,34 +164,11 @@ pub(super) fn unattended_options(unattended: &Unattended) -> Value {
         let list = if on { &mut allowed } else { &mut disallowed };
         list.extend(names.iter().map(|name| (*name).to_owned()));
     }
-    // The ticketd CLI is always allowed, under its name and under the path the
-    // Chat's context gives the agent, as each shell writes it.
-    let cli = unattended
-        .ticketd_cli
-        .as_ref()
-        .map(|cli| cli.to_string_lossy());
-    let mut bash = vec!["ticketd".to_owned()];
-    let mut powershell = bash.clone();
-    if let Some(cli) = &cli {
-        bash.extend([cli.to_string(), format!("\"{cli}\"")]);
-        if cli.contains('\\') {
-            // Git Bash also takes a Windows path with forward slashes.
-            let slashed = cli.replace('\\', "/");
-            bash.extend([slashed.clone(), format!("\"{slashed}\"")]);
-        }
-        powershell.extend([
-            cli.to_string(),
-            format!("& \"{cli}\""),
-            format!("& '{cli}'"),
-        ]);
-    }
-    allowed.extend(bash.iter().map(|command| format!("Bash({command} *)")));
-    allowed.extend(
-        powershell
-            .iter()
-            .map(|command| format!("PowerShell({command} *)")),
-    );
     const SHELLS: [&str; 2] = ["Bash", "PowerShell"];
+    // The ticketd CLI is always allowed, by its name, with or without `.exe`.
+    for command in ["ticketd", "ticketd.exe"] {
+        allowed.extend(SHELLS.map(|shell| format!("{shell}({command} *)")));
+    }
     // "Any command" is said outright: an empty list allows none.
     match (tools.run_commands, tools.any_command) {
         (false, _) => {}

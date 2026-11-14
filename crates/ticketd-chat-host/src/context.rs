@@ -20,7 +20,7 @@ pub fn for_chat(workspace: &Workspace, chat_id: &str, cli: &CliStatus) -> Result
 /// `harness` is offered as the agent's `--agent` name. That name describes who wrote a
 /// change; it is not the Chat's identity and grants nothing.
 pub fn agent_context(cli: &CliStatus, harness: &str, records: &[ChatLinkedRecord]) -> String {
-    let (Some(path), Some(version), None) = (&cli.path, &cli.version, cli.problem()) else {
+    let (Some(_), Some(version), None) = (&cli.path, &cli.version, cli.problem()) else {
         let problem = cli
             .problem()
             .unwrap_or_else(|| "the ticketd command-line tool could not be checked".into());
@@ -32,7 +32,8 @@ pub fn agent_context(cli: &CliStatus, harness: &str, records: &[ChatLinkedRecord
     };
     let mut text = format!(
         "ticketd context for this Chat\n\n\
-         The ticketd CLI is `{path}` (version {version}); below, `ticketd` means that executable. \
+         The ticketd CLI is the `ticketd` command (version {version}), first on this Chat's PATH. \
+         Run it by that name, never by a path: where commands are limited, a path is denied. \
          It reads and writes the workspace the ticketd app shows.\n\
          Run `ticketd skills get chat` before your first ticketd command; it is the operating \
          guide for this version.\n\
