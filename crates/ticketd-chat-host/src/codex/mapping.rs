@@ -604,7 +604,9 @@ impl Session {
     fn denial(kind: &str, title: &str, item: &Value) -> Option<String> {
         let status = text(item, &["status"])?;
         if kind != "fileChange" {
-            return (status == "declined").then(|| format!("Codex could not run {title}."));
+            // Codex shell-quotes the command, doubling each backslash.
+            return (status == "declined")
+                .then(|| format!("Codex could not run {}.", title.replace("\\\\", "\\")));
         }
         let paths: Vec<&str> = item
             .get("changes")
