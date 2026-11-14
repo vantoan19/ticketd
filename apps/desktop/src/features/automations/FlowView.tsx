@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
 import { ZoomControl } from "@/components/ui/zoom-control";
 import {
+  focusZoom,
   READABLE_ZOOM,
   readableViewport,
   VIEW_MARGIN as MARGIN,
@@ -16,10 +17,11 @@ const PADDING = 0.2;
  * flow is fitted when a step is added or removed (`shape`) and when the canvas
  * changes size, as when a panel opens beside it. A flow too wide or tall to
  * read whole is not shrunk to fit: it stays at a readable size, showing the
- * `selected` card with the start of its failure path, or else the `start`
- * cards (the top of the flow when there are none), and the rest is a scroll
- * away. The control zooms out further for whoever wants the overview. Whatever
- * takes focus on the canvas is brought into view.
+ * `selected` card with the start of its failure path (shrunk to half at most,
+ * so the two show together), or else the `start` cards (the top of the flow
+ * when there are none), and the rest is a scroll away. The Fit button shows
+ * the whole flow, as small as that takes. Whatever takes focus on the canvas
+ * is brought into view.
  */
 export function FlowView({
   shape,
@@ -35,17 +37,21 @@ export function FlowView({
   const width = useStore((state) => state.width);
   const height = useStore((state) => state.height);
   const zoom = useStore((state) => state.transform[2]);
+  const minZoom = useStore((state) => state.minZoom);
   const canvas = useStore((state) => state.domNode);
+  /** Fits the whole flow when it reads whole; says whether it did. */
+  const fitReadable = () => {
+    const bounds = flow.getNodesBounds(flow.getNodes());
+    const room = (side: number) => (side - 2 * MARGIN) / READABLE_ZOOM;
+    if (bounds.width > room(width) || bounds.height > room(height))
+      return false;
+    void flow.fitView({ minZoom: READABLE_ZOOM, maxZoom: 1, padding: PADDING });
+    return true;
+  };
   const fit = () => {
+    if (fitReadable()) return;
     const nodes = flow.getNodes();
     const bounds = flow.getNodesBounds(nodes);
-    const room = (side: number) => (side - 2 * MARGIN) / READABLE_ZOOM;
-    if (bounds.width <= room(width) && bounds.height <= room(height))
-      return void flow.fitView({
-        minZoom: READABLE_ZOOM,
-        maxZoom: 1,
-        padding: PADDING,
-      });
     // A failure path leaves its step's side: show where it goes as well.
     const failure = flow
       .getEdges()
@@ -59,15 +65,34 @@ export function FlowView({
     const first = nodes[0];
     const focus = shown.length > 0 ? shown : first ? [first] : [];
     if (focus.length === 0) return;
+    const focusBox = flow.getNodesBounds(focus);
     void flow.setViewport(
       readableViewport(
         bounds,
-        flow.getNodesBounds(focus),
+        focusBox,
         { width, height },
         selected === null,
+        // Shrunk, within limits, so the failure path shows beside its card.
+        failure ? focusZoom(focusBox, { width, height }) : READABLE_ZOOM,
       ),
     );
   };
+  /**
+   * Fit, when asked for: the whole flow, every card, label and +, in the room
+   * beside the panel, as small as that takes (down to the canvas's least).
+   */
+  const fitWhole = () =>
+    fitReadable() ||
+    void flow.fitView({
+      minZoom,
+      maxZoom: 1,
+      padding: {
+        top: `${MARGIN}px`,
+        left: `${MARGIN}px`,
+        right: `${MARGIN}px`,
+        bottom: `${ZOOM_ROOM}px`,
+      },
+    });
   // The card selected when the canvas resizes; choosing another card alone
   // leaves the view where the person put it.
   const refit = useEffectEvent(fit);
@@ -119,7 +144,7 @@ export function FlowView({
         zoom={zoom}
         onZoomOut={() => void flow.zoomOut()}
         onZoomIn={() => void flow.zoomIn()}
-        onFit={fit}
+        onFit={fitWhole}
       />
     </div>
   );
