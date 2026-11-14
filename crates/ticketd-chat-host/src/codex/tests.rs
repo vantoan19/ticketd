@@ -859,6 +859,40 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
     }
 }
 
+/// #387 3B3: a command a Stop cuts off completes as failed before the turn ends
+/// interrupted; it stays unfinished, which the turn then shows as "not finished".
+#[test]
+fn a_command_cut_off_by_a_stop_is_not_reported_as_failed() {
+    let mut session = Session::default();
+    session.notification("turn/started", &json!({"turn": {"id": "turn_1"}}));
+    let command = |status: &str| json!({"turnId": "turn_1", "item": {"id": "cmd_1", "type": "commandExecution", "command": "ticketd list", "status": status, "processId": "42", "exitCode": null}});
+    session.notification("item/started", &command("inProgress"));
+    session.interrupt_asked(&NativeTurnId::new("turn_1"));
+
+    let events = session.notification("item/completed", &command("failed"));
+
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            EventKind::ToolUpdated {
+                status: crate::ToolStatus::Running,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventKind::ToolUpdated {
+                status: crate::ToolStatus::Failed,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
+}
+
 fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
     crate::Unattended {
         run_id: "run-1".into(),

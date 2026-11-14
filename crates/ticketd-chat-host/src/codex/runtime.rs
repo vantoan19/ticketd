@@ -713,6 +713,7 @@ impl HarnessRuntime for CodexRuntime {
                     });
                 }
                 let params = json!({"threadId": thread, "turnId": request.expected_turn.0});
+                session.interrupt_asked(&request.expected_turn);
                 Ok((params, Call::Plain))
             })
             .await;

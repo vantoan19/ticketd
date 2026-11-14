@@ -1127,6 +1127,35 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
     assert_eq!(status(events), ToolStatus::Failed);
 }
 
+/// #387 3B3: Claude Code answers the tool a Stop cuts off with an error result ("The
+/// user doesn't want to proceed with this tool use", seen in live transcripts). It
+/// is left unfinished, which the turn then shows as "not finished", not failed.
+#[test]
+fn a_tool_cut_off_by_a_stop_is_not_reported_as_failed() {
+    use super::session::Session;
+    use crate::ToolStatus;
+    let mut session = Session::default();
+    session.event("assistant_content", &json!({"blocks": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ticketd list"}}], "parent_tool_use_id": null}));
+    session.interrupt_written();
+    let (events, _) = session
+        .event(
+            "tool_result",
+            &json!({"tool_use_id": "toolu_1", "is_error": true, "text": "The user doesn't want to proceed with this tool use."}),
+        )
+        .expect("modeled");
+
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventKind::ToolUpdated {
+                status: ToolStatus::Failed,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
+}
+
 /// The lines an edit added and removed, from its result, stay with the tool so its
 /// step row can show them.
 #[test]
