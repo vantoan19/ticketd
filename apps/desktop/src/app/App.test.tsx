@@ -988,6 +988,81 @@ const bulkTicket = (index: number, overrides = {}) => ({
   ...overrides,
 });
 
+test.each(["split", "expanded", "beside", "narrow"])(
+  "closing %s ticket details restores focus to the just-viewed row",
+  async (mode) => {
+    narrowViewport = mode === "narrow";
+    const tickets = [bulkTicket(1), bulkTicket(2)];
+    await renderBulk({
+      find_tickets: () => tickets,
+      show_ticket: ({ reference }: { reference: string }) =>
+        tickets.find((ticket) => ticket.reference === reference),
+    });
+    const first = screen.getByRole("button", { name: /First/ });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    const second = screen.getByRole("button", { name: /Second/ });
+    expect(document.activeElement).toBe(second);
+    fireEvent.keyDown(second, { key: "Enter" });
+    await act(async () => {});
+    if (mode === "expanded" || mode === "beside") {
+      fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+      if (mode === "beside")
+        fireEvent.click(
+          screen.getByRole("button", { name: "Show beside the list" }),
+        );
+    }
+    const close = screen.getByRole("button", { name: "Close ticket details" });
+    close.focus();
+    fireEvent.click(close);
+    expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
+    expect(document.activeElement).toBe(second);
+    expect(second.getAttribute("aria-pressed")).toBe("false");
+  },
+);
+
+test("closing after Next restores focus to the current ticket rather than the original row", async () => {
+  const tickets = [bulkTicket(1), bulkTicket(2)];
+  await renderBulk({
+    find_tickets: () => tickets,
+    count_tickets: counted({ todo: 2 }),
+    show_ticket: ({ reference }: { reference: string }) =>
+      tickets.find((ticket) => ticket.reference === reference),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  await act(async () => {});
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Second",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /Second/ }),
+  );
+});
+
+test("closing details falls back to the list heading when the ticket has left the visible results", async () => {
+  let tickets = [bulkTicket(1), bulkTicket(2)];
+  const viewed = tickets[1];
+  await renderBulk({
+    find_tickets: () => tickets,
+    show_ticket: () => viewed,
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Second/ }));
+  await act(async () => {});
+  tickets = [bulkTicket(1)];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.queryByRole("button", { name: /Second/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "All tickets" }),
+  );
+});
+
 function openMenu(name: string) {
   fireEvent.keyDown(screen.getByRole("button", { name }), { key: "Enter" });
 }
@@ -1011,6 +1086,43 @@ async function renderBulk(handlers: Record<string, unknown>) {
     await vi.advanceTimersByTimeAsync(0);
   });
 }
+
+test("a failed refresh keeps saved tickets and shows its actionable cause until recovery", async () => {
+  let missing = false;
+  const cause =
+    "cannot reopen workspace at /data/ticketd/workspace.sqlite3: unable to open database file. Restore the workspace file or make its folder available, then retry";
+  await renderBulk({
+    find_tickets: () => {
+      if (missing) throw new Error(cause);
+      return [bulkTicket(1)];
+    },
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  missing = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText(/Can’t refresh/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("alert").textContent).toContain(cause);
+  expect(screen.getByText(/Can’t refresh/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+
+  missing = false;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText(/Can’t refresh/)).toBeNull();
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+});
 
 test("shows the bulk bar only while tickets are selected and applies one status change", async () => {
   let tickets = [bulkTicket(1), bulkTicket(2)];

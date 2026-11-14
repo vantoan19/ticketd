@@ -64,7 +64,7 @@ use std::{
 };
 
 use directories::ProjectDirs;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -122,6 +122,12 @@ pub const FORMAT_VERSION: i64 = 72;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("cannot reopen workspace at {}: {source}. Restore the workspace file or make its folder available, then retry", path.display())]
+    WorkspaceUnavailable {
+        path: std::path::PathBuf,
+        #[source]
+        source: Box<Error>,
+    },
     #[error("Drive: {0}")]
     Drive(#[from] drive::DriveError),
     #[error("attachment: {0}")]
@@ -431,7 +437,19 @@ impl Workspace {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        Self::open_within(path.as_ref(), OPEN_WORKSPACES_WAIT, MIGRATION_WAIT)
+        Self::open_within(path.as_ref(), OPEN_WORKSPACES_WAIT, MIGRATION_WAIT, true)
+    }
+
+    /// Opens an initialized workspace without creating a missing database.
+    /// Existing workspaces still receive the same migration and restore recovery.
+    pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = path.as_ref();
+        Self::open_within(path, OPEN_WORKSPACES_WAIT, MIGRATION_WAIT, false).map_err(|source| {
+            Error::WorkspaceUnavailable {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            }
+        })
     }
 
     /// [`Workspace::open`] with other bounds on its two waits, so a test of
@@ -442,14 +460,19 @@ impl Workspace {
         open_workspaces: Duration,
         migration: Duration,
     ) -> Result<Self, Error> {
-        Self::open_within(path.as_ref(), open_workspaces, migration)
+        Self::open_within(path.as_ref(), open_workspaces, migration, true)
     }
 
     fn open_within(
         path: &Path,
         open_workspaces_wait: Duration,
         migration_wait: Duration,
+        create: bool,
     ) -> Result<Self, Error> {
+        let mut flags = OpenFlags::default();
+        if !create {
+            flags.remove(OpenFlags::SQLITE_OPEN_CREATE);
+        }
         use fs2::FileExt;
         let resolved = if path.exists() {
             Some(path.canonicalize()?)
@@ -488,7 +511,7 @@ impl Workspace {
                 restore::recover(path)?;
                 continue;
             }
-            let connection = Connection::open(path)?;
+            let connection = Connection::open_with_flags(path, flags)?;
             if backup::table_exists(&connection, "ticketd_backup_container")?
                 || backup::table_exists(&connection, "ticketd_backup_files")?
             {
@@ -527,7 +550,7 @@ impl Workspace {
                 )?;
                 continue;
             }
-            let mut connection = Connection::open(path)?;
+            let mut connection = Connection::open_with_flags(path, flags)?;
             document_links::register_heading_function(&connection)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =

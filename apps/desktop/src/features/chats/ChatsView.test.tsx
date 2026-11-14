@@ -1609,39 +1609,65 @@ test("while its session opens the working line says so and counts, then reads as
   expect(working()).toBe("Working…");
 });
 
-test("New Chat keeps the draft when the harness is missing and starts once it is found", async () => {
-  const client = await open([]);
-  client.setHarnesses([
-    {
-      id: "codex",
-      name: "Codex",
-      status: "not_installed",
-      help_url: "https://example.com/install",
-    },
-  ]);
-  client.nextFolder = "~/code/web-app";
-  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  expect(
-    await screen.findByRole("heading", { name: "What should we work on?" }),
-  ).toBeTruthy();
-  type("Draft the reset email", "Describe a task or ask a question");
-  expect(await screen.findByText("Codex isn't installed")).toBeTruthy();
-  expect(button("Send")).toHaveProperty("disabled", true);
+test.each([
+  { id: "codex", name: "Codex", command: "codex login" },
+  { id: "claude-code", name: "Claude Code", command: "claude /login" },
+])(
+  "New Chat guides installation and sign-in for missing $name and keeps the draft",
+  async ({ id, name, command }) => {
+    const client = await open([]);
+    client.setHarnesses([
+      {
+        id,
+        name,
+        status: "not_installed",
+        command,
+        help_url: "https://example.com/install",
+      },
+    ]);
+    client.nextFolder = "~/code/web-app";
+    fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+    expect(
+      await screen.findByRole("heading", { name: "What should we work on?" }),
+    ).toBeTruthy();
+    type("Draft the reset email", "Describe a task or ask a question");
+    expect(await screen.findByText(`${name} isn't installed`)).toBeTruthy();
+    expect(screen.getByText(command)).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      `Install it, then run ${command} in a terminal and sign in, then check again.`,
+    );
+    expect(button("Install guide")).toBeTruthy();
+    expect(button("Copy command")).toBeTruthy();
+    expect(button("Send")).toHaveProperty("disabled", true);
+    const create = vi.spyOn(client, "createChat");
+    fireEvent.click(button("Send"));
+    expect(create).not.toHaveBeenCalled();
 
-  client.setHarnesses([{ id: "codex", name: "Codex", status: "ready" }]);
-  fireEvent.click(button("Check again"));
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
-  expect(composer("Describe a task or ask a question")).toHaveProperty(
-    "value",
-    "Draft the reset email",
-  );
-  fireEvent.click(button("Send"));
-  expect(
-    await screen.findByRole("heading", { name: "Draft the reset email" }),
-  ).toBeTruthy();
-  // No Project or ticket was needed; ticketd keeps a folder for the Chat.
-  expect((await client.openChat("chat-1")).chat.folder.managed).toBe(true);
-});
+    fireEvent.click(button("Check again"));
+    expect(await screen.findByText(`${name} isn't installed`)).toBeTruthy();
+    expect(button("Send")).toHaveProperty("disabled", true);
+    expect(composer("Describe a task or ask a question")).toHaveProperty(
+      "value",
+      "Draft the reset email",
+    );
+
+    client.setHarnesses([{ id, name, status: "ready" }]);
+    fireEvent.click(button("Check again"));
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    expect(composer("Describe a task or ask a question")).toHaveProperty(
+      "value",
+      "Draft the reset email",
+    );
+    fireEvent.click(button("Send"));
+    expect(
+      await screen.findByRole("heading", { name: "Draft the reset email" }),
+    ).toBeTruthy();
+    // No Project or ticket was needed; ticketd keeps a folder for the Chat.
+    expect((await client.openChat("chat-1")).chat.folder.managed).toBe(true);
+  },
+);
 
 test("a first message that was not sent opens the Chat with the text, and New Chat starts over", async () => {
   const mock = createMockChatClient({

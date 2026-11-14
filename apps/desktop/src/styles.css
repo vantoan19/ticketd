@@ -332,10 +332,16 @@
   font-weight: 400;
   line-height: 14px;
 }
-.ui-button:focus-visible,
-.ui-navigation-button:focus-visible {
+.ui-button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+.ui-navigation-button:focus-visible {
+  /* Navigation rows touch their scroll container's edges and each other.
+     Keep focus inside the row so clipping and selected neighbors cannot hide it. */
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  box-shadow: none;
 }
 .ui-button-primary {
   color: var(--primary-foreground);
