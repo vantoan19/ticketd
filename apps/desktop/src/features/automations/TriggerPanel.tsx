@@ -27,6 +27,7 @@ import {
   type AutomationSchedule,
   type AutomationTrigger,
 } from "@/features/automations/client";
+import { useWholeNumber } from "@/features/automations/whole-number";
 import type { Project } from "@/lib/api/client";
 import { ticketStatuses } from "@/lib/statuses";
 
@@ -104,6 +105,46 @@ const NEW_SCHEDULES: {
   weekly: { kind: "weekly", time: "09:00", weekdays: ["mon"] },
 };
 
+/** The most hours between two runs, a week, as the core allows (`automations.rs`). */
+const MOST_HOURS = 168;
+
+/** "Every N hours": saved when it is finished, and a range said while it is not. */
+function HoursInput({
+  id,
+  hours,
+  onChange,
+}: {
+  id: string;
+  hours: number;
+  onChange: (hours: number) => void;
+}) {
+  const noteId = useId();
+  const field = useWholeNumber({
+    value: hours,
+    most: MOST_HOURS,
+    onCommit: onChange,
+  });
+  return (
+    <>
+      <div className="flow-inline">
+        <Input
+          {...field.inputProps}
+          id={id}
+          aria-label="Hours"
+          aria-invalid={field.invalid || undefined}
+          aria-describedby={field.invalid ? noteId : undefined}
+        />
+        <span>{hours === 1 ? "hour" : "hours"}</span>
+      </div>
+      {field.invalid && (
+        <p id={noteId} role="alert" className="flow-panel-note">
+          Every 1 to {MOST_HOURS} hours. For longer, use At set times.
+        </p>
+      )}
+    </>
+  );
+}
+
 /**
  * When a schedule runs: every few hours, or at a time on chosen weekdays, in
  * this computer's time. There is nothing finer to set.
@@ -135,26 +176,11 @@ function ScheduleFields({
       {schedule.kind === "every_hours" ? (
         <div className="flow-panel-section">
           <label htmlFor={id}>Every</label>
-          <div className="flow-inline">
-            <Input
-              id={id}
-              type="number"
-              min={1}
-              aria-label="Hours"
-              // Nothing typed yet is stored as 0, which the card says it needs.
-              value={schedule.hours || ""}
-              onChange={(event) =>
-                onChange({
-                  ...schedule,
-                  hours: Math.max(
-                    0,
-                    Math.floor(event.target.valueAsNumber) || 0,
-                  ),
-                })
-              }
-            />
-            <span>{schedule.hours === 1 ? "hour" : "hours"}</span>
-          </div>
+          <HoursInput
+            id={id}
+            hours={schedule.hours}
+            onChange={(hours) => onChange({ ...schedule, hours })}
+          />
         </div>
       ) : (
         <div className="flow-panel-section">
