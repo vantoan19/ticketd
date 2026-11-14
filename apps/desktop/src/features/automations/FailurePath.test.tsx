@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { AutomationEditor } from "@/features/automations/AutomationEditor";
+import { EditorUnderTest } from "@/features/automations/testing";
 import type {
   AutomationDefinition,
   AutomationStep,
@@ -42,7 +42,7 @@ const open = async (
 ) => {
   saved = undefined;
   render(
-    <AutomationEditor
+    <EditorUnderTest
       automation={{
         id: "automation-1",
         name: "Verify on staging",
@@ -52,6 +52,7 @@ const open = async (
         enabled: false,
         arrived_off: false,
         problems: [],
+        has_ticket: true,
       }}
       agents={[]}
       expanded={false}
@@ -59,7 +60,7 @@ const open = async (
       onExpand={nothing}
       onReturn={nothing}
       onClose={nothing}
-      onChange={(definition) => (saved = definition)}
+      onSaved={(definition) => (saved = definition)}
       onSetEnabled={nothing}
       onStopAndTurnOff={nothing}
       onDelete={nothing}
@@ -74,8 +75,12 @@ const open = async (
   );
   return screen.findByRole("application", { name: "Steps" });
 };
+/** A button by its name. A card's name goes on to say where it is on its path. */
 const button = (within_: HTMLElement, name: string) =>
-  within(within_).getByRole("button", { name });
+  within(within_).getByRole("button", {
+    name: (accessible) =>
+      accessible === name || accessible.startsWith(`${name}, `),
+  });
 /** What the menu a button carries offers: each item's first line. */
 const offered = async (opener: HTMLElement) => {
   fireEvent.keyDown(opener, { key: "Enter" });

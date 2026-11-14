@@ -539,7 +539,14 @@
   line-height: var(--text-ui-line);
   white-space: nowrap;
 }
-/* In a run, a step's tile takes the color of where it stands instead. */
+/* In a run, a step's tile takes the color of where it stands instead. The icon
+   itself is drawn in the text color: a status color on its own tint is too faint
+   to read (under 3:1 for Failed and Completed in light, Running in dark). */
+.flow-card[data-run="running"] .flow-card-icon,
+.flow-card[data-run="completed"] .flow-card-icon,
+.flow-card[data-run="failed"] .flow-card-icon {
+  color: var(--foreground);
+}
 .flow-card[data-run="running"] {
   --tile: var(--status-unread);
 }
@@ -595,14 +602,22 @@
 .flow-canvas .flow-edge-yes .react-flow__edge-textbg {
   fill: color-mix(in srgb, var(--status-ready) 14%, var(--surface));
 }
+/* Mixed far enough toward the text color to pass 4.5:1 on its tint in both
+   themes: 5.4:1 and 5.3:1 in light, over 7:1 in dark. */
 .flow-canvas .flow-edge-yes .react-flow__edge-text {
-  fill: color-mix(in srgb, var(--status-ready) 70%, var(--foreground));
+  fill: color-mix(in srgb, var(--status-ready) 60%, var(--foreground));
 }
 .flow-canvas .flow-edge-failure .react-flow__edge-textbg {
   fill: color-mix(in srgb, var(--status-blocked) 16%, var(--surface));
 }
 .flow-canvas .flow-edge-failure .react-flow__edge-text {
-  fill: color-mix(in srgb, var(--status-blocked) 60%, var(--foreground));
+  fill: color-mix(in srgb, var(--status-blocked) 50%, var(--foreground));
+}
+/* A failed Stop or Run again, under the run's header. */
+.run-failure,
+.auto-failure {
+  flex: none;
+  margin: 8px 16px 0;
 }
 .run-reason {
   margin: 0;

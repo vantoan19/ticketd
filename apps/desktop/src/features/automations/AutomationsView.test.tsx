@@ -39,6 +39,7 @@ const DEFAULTS = {
     read_files: true,
     edit_files: false,
     run_commands: false,
+    any_command: false,
     allowed_commands: [],
     use_web: false,
   },
@@ -127,6 +128,7 @@ const TRIAGE: Automation = {
   enabled: false,
   arrived_off: false,
   problems: [],
+  has_ticket: true,
 };
 const listed = (
   id: string,
@@ -256,6 +258,7 @@ test("an edit is saved as it is made and shows in the list", async () => {
       turn_limit: 12,
       tools: {
         run_commands: true,
+        any_command: false,
         allowed_commands: ["npm test", "npm run lint"],
       },
     }),
@@ -457,4 +460,98 @@ test("a run chosen in the Runs view goes through the page's run navigation and o
   expect(
     screen.getByRole("radio", { name: /^Runs/ }).getAttribute("aria-checked"),
   ).toBe("true");
+});
+
+test("a list row says how the Automation's latest run stands, and Off for one that is off", async () => {
+  automations = [
+    { ...TRIAGE, enabled: true },
+    { ...TRIAGE, id: "automation-2", name: "Weekly summary" },
+  ];
+  // Newest first, both of the first Automation.
+  runs = [
+    listed("2", "needs_attention", "Login flickers"),
+    listed("1", "completed", "Fix the footer"),
+  ];
+  show();
+
+  const rows = await screen.findByRole("list", { name: "Automations" });
+  await waitFor(() =>
+    expect(within(rows).getAllByRole("button")[0]?.textContent).toContain(
+      "Needs attention",
+    ),
+  );
+  const [on, off] = within(rows).getAllByRole("button");
+  expect(on?.querySelector(".chat-row-time")?.textContent).not.toBe("");
+  expect(off?.querySelector(".chat-row-sub")?.textContent).toMatch(/^Off/);
+});
+
+test("a run asked for from elsewhere is opened once, and one whose Automation was deleted opens among all runs", async () => {
+  // The run's Automation is not in the list: it was deleted.
+  runs = [listed("2", "needs_attention", "Login flickers")];
+  const opened = vi.fn();
+  render(
+    <ChatClientContext value={createMockChatClient()}>
+      <AutomationsView openRun={{ id: "2", key: 1 }} onRunOpened={opened} />
+    </ChatClientContext>,
+  );
+
+  await screen.findByRole("heading", { name: /Run on T-2/ });
+  expect(
+    screen.getByRole("radio", { name: /^Runs/ }).getAttribute("aria-checked"),
+  ).toBe("true");
+  // The asker is told, so it forgets the run and a later visit shows the list.
+  await waitFor(() => expect(opened).toHaveBeenCalledTimes(1));
+});
+
+test("a switch that fails says so on the page until it is dismissed, not in the list alone", async () => {
+  automations = [TRIAGE];
+  show();
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Triage new tickets/ }),
+  );
+
+  // The fake Workspace refuses to switch anything on.
+  fireEvent.click(
+    await screen.findByRole("switch", { name: "On for this desktop" }),
+  );
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("It could not be switched on.");
+  // Above both panes, so it shows whichever one is on screen.
+  expect(alert.closest(".ticket-list")).toBeNull();
+  fireEvent.click(within(alert).getByRole("button", { name: "Dismiss" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("Run commands allows only the commands listed unless Any command is chosen", async () => {
+  await open(createMockChatClient(), [
+    {
+      ...DEFAULTS,
+      id: "agent-1",
+      name: "Triage",
+      tools: { ...DEFAULTS.tools, run_commands: true },
+      used_by: [],
+    } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: /Triage/ }));
+  const form = await screen.findByRole("region", { name: "Triage" });
+  // An empty list is not "any command": the list is there to fill in.
+  expect(
+    within(form).getByRole("textbox", { name: "Allowed commands" }),
+  ).toBeTruthy();
+  expect(form.textContent).toContain(
+    "Claude Code may still run shell commands that only read",
+  );
+
+  fireEvent.click(within(form).getByRole("radio", { name: "Any command" }));
+
+  await waitFor(() =>
+    expect(stored[0]?.tools).toMatchObject({
+      run_commands: true,
+      any_command: true,
+    }),
+  );
+  expect(
+    within(form).queryByRole("textbox", { name: "Allowed commands" }),
+  ).toBeNull();
 });

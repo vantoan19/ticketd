@@ -11,6 +11,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -85,7 +86,7 @@ function ToolRow({
 }
 
 const TOOLS: {
-  key: Exclude<keyof Tools, "allowed_commands">;
+  key: Exclude<keyof Tools, "allowed_commands" | "any_command">;
   title: string;
   description: string;
 }[] = [
@@ -388,20 +389,36 @@ export function AgentForm({
                     {key === "run_commands" &&
                       !codex &&
                       draft.tools.run_commands && (
-                        <Textarea
-                          aria-label="Allowed commands"
-                          placeholder="One command per line. Leave empty to allow any command."
-                          value={commands}
-                          onChange={(event) => {
-                            setCommands(event.target.value);
-                            changeTools({
-                              allowed_commands: event.target.value
-                                .split("\n")
-                                .map((line) => line.trim())
-                                .filter(Boolean),
-                            });
-                          }}
-                        />
+                        <>
+                          {/* Chosen outright: an empty list never means "any". */}
+                          <SegmentedControl
+                            aria-label="Which commands"
+                            value={draft.tools.any_command ? "any" : "listed"}
+                            onValueChange={(which) =>
+                              changeTools({ any_command: which === "any" })
+                            }
+                            options={[
+                              { value: "listed", label: "Only these" },
+                              { value: "any", label: "Any command" },
+                            ]}
+                          />
+                          {!draft.tools.any_command && (
+                            <Textarea
+                              aria-label="Allowed commands"
+                              placeholder="One command per line. With none listed, no command runs."
+                              value={commands}
+                              onChange={(event) => {
+                                setCommands(event.target.value);
+                                changeTools({
+                                  allowed_commands: event.target.value
+                                    .split("\n")
+                                    .map((line) => line.trim())
+                                    .filter(Boolean),
+                                });
+                              }}
+                            />
+                          )}
+                        </>
                       )}
                   </ToolRow>
                 );
@@ -415,11 +432,17 @@ export function AgentForm({
                 never asks.
               </SettingsListFooter>
             </SettingsList>
-            {codex && (
+            {codex ? (
               <p className="agent-hint">
                 Codex applies its own sandbox: it reads files, runs any command,
                 and writes only in the step’s folder and your ticketd data. Your
                 own choices are kept for Claude Code.
+              </p>
+            ) : (
+              <p className="agent-hint">
+                Claude Code may still run shell commands that only read, such as
+                listing a folder or printing a file, with “Read files” and “Run
+                commands” off. ticketd cannot switch that off.
               </p>
             )}
           </div>

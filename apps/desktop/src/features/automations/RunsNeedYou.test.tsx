@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 import { ChatClientContext } from "@/features/chats/client";
@@ -35,9 +41,12 @@ const ENTRY = {
 };
 /** How many runs the fake Workspace says need the person. */
 let waiting = 0;
+/** Every command the page sent, with what it sent. */
+let asked: [string, unknown][] = [];
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: never) => {
+    asked.push([command, args]);
     switch (command) {
       case "workspace_change_token":
         return 1;
@@ -54,8 +63,19 @@ vi.mock("@tauri-apps/api/core", () => ({
         return [ENTRY];
       case "set_inbox_read":
         return undefined;
+      // The ticket itself is not what these tests look at.
+      case "show_ticket":
+        throw new Error("no such ticket in this test");
       case "automation_list":
-        return [{ ...TRIAGE, enabled: true, arrived_off: false, problems: [] }];
+        return [
+          {
+            ...TRIAGE,
+            enabled: true,
+            arrived_off: false,
+            problems: [],
+            has_ticket: true,
+          },
+        ];
       case "automation_run_get":
         return {
           id: "run-1",
@@ -94,6 +114,7 @@ Object.defineProperty(window, "matchMedia", {
 
 afterEach(() => {
   cleanup();
+  asked = [];
   localStorage.clear();
   expect(unknownCommands).toEqual([]);
 });
@@ -149,4 +170,25 @@ test("an Inbox entry for a run without a reason or a name still reads as a sente
   expect(
     summarize({ ...ENTRY, to_value: "", editing_agent: null, deleted: false }),
   ).toBe("An Automation needs attention");
+});
+
+test("with Chat off, where there is no Automations page, a run's Inbox entry opens its ticket", async () => {
+  waiting = 1;
+  render(
+    <ChatClientContext value={createMockChatClient({ enabled: false })}>
+      <App />
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /^Inbox/ }));
+  asked = [];
+
+  fireEvent.click(
+    await screen.findByText(`Triage new tickets needs attention: ${LIMIT}`),
+  );
+
+  // Its ticket is opened: the run has no page to open on.
+  await waitFor(() =>
+    expect(asked).toContainEqual(["show_ticket", { reference: "T-ZB8" }]),
+  );
+  expect(asked.map(([command]) => command)).not.toContain("automation_run_get");
 });

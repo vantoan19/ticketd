@@ -28,7 +28,7 @@ beforeEach(() => {
     if (command === refuse) throw new Error("not allowed here");
     switch (command) {
       case "automation_runs_at_once":
-        return runsAtOnce;
+        return { runs: runsAtOnce, default: 2, most: 10 };
       case "set_automation_runs_at_once":
         runsAtOnce = runs ?? 0;
         return null;

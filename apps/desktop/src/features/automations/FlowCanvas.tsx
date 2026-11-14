@@ -44,7 +44,6 @@ import {
   type FlowList,
 } from "@/features/automations/canvas-layout";
 import {
-  startsWithoutTicket,
   type Automation,
   type AutomationAgent,
   type AutomationDefinition,
@@ -62,7 +61,11 @@ import {
   type Card,
 } from "@/features/automations/flow-cards";
 import { FlowView } from "@/features/automations/FlowView";
-import { everyStep, flowSteps } from "@/features/automations/runs-model";
+import {
+  everyStep,
+  flowSteps,
+  stepPlaces,
+} from "@/features/automations/runs-model";
 import type { Project } from "@/lib/api/client";
 
 /** The triggers under "A ticket changes", in the order the menu offers them. */
@@ -198,6 +201,8 @@ function TriggerMenu({ children }: { children: ReactNode }) {
 
 type CardData = {
   card: Card;
+  /** Where the step is on its path, such as "Yes path, step 1 of 2". */
+  place: string | undefined;
   selected: boolean;
   needs: string | undefined;
   /**
@@ -208,7 +213,7 @@ type CardData = {
 };
 
 function CardNode({ data }: NodeProps<Node<CardData>>) {
-  const { card, selected, needs, failureSteps } = data;
+  const { card, place, selected, needs, failureSteps } = data;
   const { onSelect, onDeleteStep, onSetFailurePath } = useActions();
   const Icon = CARD_ICONS[card.icon];
   const face = (
@@ -233,7 +238,8 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
   const main = {
     type: "button",
     className: "flow-card-main nodrag nopan",
-    "aria-label": cardName(card),
+    // Read in order, the cards are an outline: each says where it is on its path.
+    "aria-label": place ? `${cardName(card)}, ${place}` : cardName(card),
     "data-flow-card": card.id,
   } as const;
   return (
@@ -423,10 +429,13 @@ export function FlowCanvas({
   projects,
   selected,
   only,
+  hasTicket,
   notice,
   ...actions
 }: {
   definition: AutomationDefinition;
+  /** Whether its runs act on a ticket; without one no step can change a ticket. */
+  hasTicket: boolean;
   /** For the name of a project an If checks for. */
   projects: Project[];
   /** The line the conditions add to the trigger's card. */
@@ -460,6 +469,7 @@ export function FlowCanvas({
       return card;
     };
     const layout = layoutFlow(flowSteps(steps));
+    const places = stepPlaces(steps);
     const nodes: Node[] = layout.items.map((item) => {
       const position = { x: item.x, y: item.y };
       if (item.kind === "card")
@@ -471,6 +481,7 @@ export function FlowCanvas({
           height: CARD_HEIGHT,
           data: {
             card: cardOf(item.id),
+            place: places.get(item.id),
             selected: item.id === selected,
             needs: problems.find((problem) => problem.step_id === item.id)
               ?.message,
@@ -521,7 +532,7 @@ export function FlowCanvas({
     onDeleteStep,
     onSetFailurePath,
   } = actions;
-  const ticketless = startsWithoutTicket(trigger);
+  const ticketless = !hasTicket;
   const context = useMemo(
     () => ({
       onSelect,

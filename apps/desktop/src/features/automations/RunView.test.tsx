@@ -39,6 +39,7 @@ const VERIFIER: AutomationAgent = {
     read_files: true,
     edit_files: false,
     run_commands: false,
+    any_command: false,
     allowed_commands: [],
     use_web: false,
   },
@@ -84,6 +85,7 @@ const VERIFY: Automation = {
   enabled: true,
   arrived_off: false,
   problems: [],
+  has_ticket: true,
 };
 const run = (patch: Partial<AutomationRunDetail>): AutomationRunDetail => ({
   id: "run-1",
@@ -184,7 +186,7 @@ const cards = () =>
       // What a Notify me or Change ticket card says is not this view's to decide.
       button
         .getAttribute("aria-label")
-        ?.replace(/^(Notify me|Change ticket): .*, /, "$1, "),
+        ?.replace(/^(Notify me|Change ticket): [^,]*, /, "$1, "),
     );
 
 test("a run that needs attention opens on the canvas with each step's status and why it failed, and can be run again", async () => {
@@ -207,10 +209,10 @@ test("a run that needs attention opens on the canvas with each step's status and
   // Every step of the run's definition, in run order; nothing can be added.
   expect(cards()).toEqual([
     "When a tag is added: ready-for-testing",
-    "Run agent: Verifier, Failed",
-    "If: Ticket has tag verified, Not run",
-    "Notify me, Not run",
-    "Change ticket, Not run",
+    "Run agent: Verifier, step 1 of 2, Failed",
+    "If: Ticket has tag verified, step 2 of 2, Not run",
+    "Notify me, Yes path, step 1 of 1, Not run",
+    "Change ticket, No path, step 1 of 1, Not run",
   ]);
   expect(screen.getByRole("status").textContent).toBe("Needs attention");
   // It opens on the step that failed: why, and the agent's Chat.
@@ -228,7 +230,9 @@ test("a run that needs attention opens on the canvas with each step's status and
     expect(screen.getByRole("status").textContent).toBe("Queued"),
   );
   // The canvas draws its cards a moment after the run loads.
-  await waitFor(() => expect(cards()[1]).toBe("Run agent: Verifier, Waiting"));
+  await waitFor(() =>
+    expect(cards()[1]).toBe("Run agent: Verifier, step 1 of 2, Waiting"),
+  );
   expect(invoke).toHaveBeenCalledWith("automation_run_again", { id: "run-1" });
 });
 
@@ -237,8 +241,8 @@ test("a run in progress follows the Workspace as it goes, and Stop ends it needi
   const view = await openRun();
   expect(screen.getByRole("status").textContent).toBe("Running");
   expect(cards().slice(1, 3)).toEqual([
-    "Run agent: Verifier, Running",
-    "If: Ticket has tag verified, Waiting",
+    "Run agent: Verifier, step 1 of 2, Running",
+    "If: Ticket has tag verified, step 2 of 2, Waiting",
   ]);
 
   // The runner moves on; the page hears that the Workspace changed.
@@ -256,9 +260,9 @@ test("a run in progress follows the Workspace as it goes, and Stop ends it needi
   await screen.findByRole("button", { name: /^Change ticket: .*, Running$/ });
   // The path it did not take is settled, though the run is still going.
   expect(cards().slice(1, 4)).toEqual([
-    "Run agent: Verifier, Completed",
-    "If: Ticket has tag verified, Completed",
-    "Notify me, Not run",
+    "Run agent: Verifier, step 1 of 2, Completed",
+    "If: Ticket has tag verified, step 2 of 2, Completed",
+    "Notify me, Yes path, step 1 of 1, Not run",
   ]);
 
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -332,14 +336,14 @@ test("a run whose failed step had a failure path is Completed, with the step Fai
   // The failure path follows its step; the steps after the one that failed did
   // not run.
   expect(cards().slice(1)).toEqual([
-    "Run agent: Verifier, Failed",
-    "Notify me, Completed",
-    "If: Ticket has tag verified, Not run",
-    "Notify me, Not run",
-    "Change ticket, Not run",
+    "Run agent: Verifier, step 1 of 2, Failed",
+    "Notify me, Failure path, step 1 of 1, Completed",
+    "If: Ticket has tag verified, step 2 of 2, Not run",
+    "Notify me, Yes path, step 1 of 1, Not run",
+    "Change ticket, No path, step 1 of 1, Not run",
   ]);
   fireEvent.click(
-    screen.getByRole("button", { name: "Run agent: Verifier, Failed" }),
+    screen.getByRole("button", { name: /^Run agent: Verifier, .*Failed$/ }),
   );
   const panel = screen.getByRole("complementary", { name: "Run agent" });
   expect(panel.textContent).toContain(

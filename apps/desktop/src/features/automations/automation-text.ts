@@ -160,10 +160,12 @@ export function agentReach(agent: AutomationAgent): string {
   const may = [
     tools.read_files && "read files",
     tools.edit_files && "edit files",
+    // "Any command" is said outright; an empty list allows none.
     tools.run_commands &&
-      (commands === 0
+      (tools.any_command
         ? "run any command"
-        : `run ${commands} ${commands === 1 ? "command" : "commands"}`),
+        : commands > 0 &&
+          `run ${commands} ${commands === 1 ? "command" : "commands"}`),
     tools.use_web && "use the web",
   ].filter((item) => typeof item === "string");
   const harness = HARNESS_NAMES[agent.harness];

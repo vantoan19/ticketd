@@ -15,6 +15,7 @@ import type {
   Automation,
   AutomationDefinition,
 } from "@/features/automations/client";
+import { fakeStored } from "@/features/automations/fake-core";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
 
@@ -43,6 +44,7 @@ beforeEach(() => {
     enabled: false,
     arrived_off: false,
     problems: [],
+    has_ticket: true,
   };
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { definition, id } = (args ?? {}) as {
@@ -58,7 +60,7 @@ beforeEach(() => {
       case "list_projects":
         return [];
       case "automation_update":
-        stored = { ...stored, ...definition };
+        stored = fakeStored(stored, definition ?? {});
         return stored;
       case "automation_run_now":
         ranNow.push(id);
@@ -71,7 +73,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const open = async (patch: Partial<Automation> = {}) => {
-  stored = { ...stored, ...patch };
+  stored = fakeStored(stored, patch);
   render(
     <ChatClientContext value={createMockChatClient()}>
       <AutomationsView />
@@ -152,8 +154,9 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
     kind: "schedule",
     schedule: { kind: "weekly", time: "09:00", weekdays: ["mon"] },
   });
-  // Conditions are about a ticket, and nothing here starts from one.
-  expect(stored.conditions).toEqual([]);
+  // Conditions are about a ticket, and nothing here starts from one: they are
+  // kept for when a ticket trigger is chosen back, and neither asked nor shown.
+  expect(stored.conditions).toEqual([{ kind: "tag", tag: "bug", has: true }]);
   expect(within(panel).queryByRole("button", { name: "Add condition" })).toBe(
     null,
   );
@@ -287,4 +290,44 @@ test("a notification added where there is no ticket opens the run", async () => 
   await waitFor(() =>
     expect(stored.steps[0]).toMatchObject({ kind: "notify", opens: "run" }),
   );
+});
+
+test("a message without a ticket is previewed with empty ticket fields, and no field can be inserted", async () => {
+  const steps = await open({
+    trigger: { kind: "by_hand" },
+    steps: [
+      {
+        id: "tell",
+        kind: "notify",
+        text: "The week is up",
+        opens: "run",
+        on_failure: null,
+      },
+    ],
+  });
+  fireEvent.click(within(steps).getByRole("button", { name: /^Notify me/ }));
+  const panel = await screen.findByRole("complementary", {
+    name: "Notify me",
+  });
+
+  // The core is asked for the text as a run without a ticket fills it in.
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("automation_text_preview", {
+      text: "The week is up",
+      tag: null,
+      hasTicket: false,
+    }),
+  );
+  expect(panel.textContent).toContain(
+    "This Automation runs without a ticket, so ticket fields stay empty.",
+  );
+  fireEvent.keyDown(
+    within(panel).getByRole("button", { name: "Insert field" }),
+    { key: "Enter" },
+  );
+  const menu = await screen.findByRole("menu");
+  for (const item of within(menu).getAllByRole("menuitem")) {
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Needs a ticket");
+  }
 });

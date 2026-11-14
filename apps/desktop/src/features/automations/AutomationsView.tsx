@@ -1,4 +1,11 @@
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import {
+  use,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowRight,
   Bot,
@@ -13,6 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { ListHeader } from "@/components/ui/list-header";
@@ -38,6 +46,8 @@ import { scheduleText } from "@/features/automations/automation-text";
 import { AllRunsList } from "@/features/automations/RunsList";
 import { RunNavigation } from "@/features/automations/navigation";
 import { RunView } from "@/features/automations/RunView";
+import { RUN_STATUS_LABELS } from "@/features/automations/runs-model";
+import { chatTime } from "@/features/chats/model";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import "@/features/chats/chats.css";
@@ -62,7 +72,7 @@ const EXAMPLES = [
     example: "verify_ready_for_testing",
     icon: FlaskConical,
     title: "Verify what is ready for testing",
-    sub: "An agent checks the work, then the ticket moves on.",
+    sub: "An agent checks the work and adds the tag verified when it passes; the ticket is then set to Done, or tagged needs-fix.",
   },
   {
     example: "weekly_summary",
@@ -132,9 +142,15 @@ const ROW_TRIGGERS = {
  */
 export function AutomationsView({
   openRun,
+  onRunOpened,
 }: {
   /** A run to open, asked for elsewhere; a new `key` asks again. */
   openRun?: { id: string; key: number } | null;
+  /**
+   * The run asked for was opened, or could not be: the asker forgets it, so
+   * coming back to this page later shows the list, not that run again.
+   */
+  onRunOpened?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("automations");
   /** The run open in place of its Automation. */
@@ -151,51 +167,95 @@ export function AutomationsView({
     runs: null,
   });
   const [expanded, setExpanded] = useState(false);
+  /** Why the lists could not be read; a read that works clears it. */
   const [error, setError] = useState("");
+  /**
+   * What the person last asked for and did not get (a switch, a delete, a run).
+   * It shows above whichever pane is on screen and stays until they dismiss it
+   * or the same thing works: a refresh of the lists does not take it away.
+   */
+  const [failure, setFailure] = useState<{
+    action: string;
+    text: string;
+  } | null>(null);
   /** Counts saves, so only the answer to the latest one is taken. */
   const saves = useRef(0);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
   const single = narrow || expanded;
 
-  const fail = useCallback((reason: unknown) => setError(String(reason)), []);
-  const load = useCallback(
-    () =>
-      Promise.all([
-        automationsClient.automations(),
-        automationsClient.agents(),
-        automationsClient.allRuns(),
-      ]).then(([foundAutomations, foundAgents, foundRuns]) => {
-        setAutomations(foundAutomations);
+  const failed = useCallback(
+    (action: string, what: string) => (reason: unknown) =>
+      setFailure({
+        action,
+        text: `${what} ${reason instanceof Error ? reason.message : String(reason)}`,
+      }),
+    [],
+  );
+  /** `action` worked, so what it failed with before no longer stands. */
+  const worked = (action: string) =>
+    setFailure((current) => (current?.action === action ? null : current));
+  /** For what the open pane asks for itself: reading projects, runs, a new run. */
+  const fail = useCallback(
+    (reason: unknown) => failed("pane", "That did not work.")(reason),
+    [failed],
+  );
+  const load = useCallback(() => {
+    const saved = saves.current;
+    return Promise.all([
+      automationsClient.automations(),
+      automationsClient.agents(),
+      automationsClient.allRuns(),
+    ]).then(
+      ([foundAutomations, foundAgents, foundRuns]) => {
+        // Read before a save that has been made since: it would put the old
+        // definition back under the editor. The save's own change reads again.
+        if (saved === saves.current) setAutomations(foundAutomations);
         setAgents(foundAgents);
         setRuns(foundRuns);
         setError("");
-      }, fail),
-    [fail],
-  );
+      },
+      (reason: unknown) => setError(String(reason)),
+    );
+  }, []);
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());
   const asked = openRun?.id;
   const askedKey = openRun?.key;
+  const opened = useEffectEvent(() => onRunOpened?.());
   useEffect(() => {
     if (!asked) return;
-    void automationsClient.run(asked).then((found) => {
-      // Asked for from the list of every run, it opens beside that list;
-      // from anywhere else, inside its Automation.
-      setTab((current) => (current === "runs" ? "runs" : "automations"));
-      setExpanded(false);
-      setOpenIds((current) => ({
-        ...current,
-        automations: found.automation_id,
-        runs: found.id,
-      }));
-      setRun(found.id);
-    }, fail);
-  }, [asked, askedKey, fail]);
+    void Promise.all([
+      automationsClient.run(asked),
+      automationsClient.automations(),
+    ])
+      .then(
+        ([found, listed]) => {
+          // Asked for from the list of every run, it opens beside that list;
+          // from anywhere else, inside its Automation. A run whose Automation
+          // was deleted has only the list of every run to open in.
+          const kept = listed.some((item) => item.id === found.automation_id);
+          setTab((current) =>
+            current === "runs" || !kept ? "runs" : "automations",
+          );
+          setExpanded(false);
+          setOpenIds((current) => ({
+            ...current,
+            ...(kept && { automations: found.automation_id }),
+            runs: found.id,
+          }));
+          setRun(kept ? found.id : null);
+        },
+        failed("open-run", "That run could not be opened."),
+      )
+      .finally(opened);
+  }, [asked, askedKey, failed]);
 
   const openId = openIds[tab];
   const setOpenId = (id: string | null) => {
     setRun(null);
+    // What failed in the pane that was open is not about the next one.
+    setFailure(null);
     setOpenIds((current) => ({ ...current, [tab]: id }));
   };
   const openAgent =
@@ -230,10 +290,14 @@ export function AutomationsView({
       return agent;
     });
   const createAgent = () =>
-    addAgent().then((agent) => {
-      setTab("agents");
-      setOpenIds((current) => ({ ...current, agents: agent.id }));
-    }, fail);
+    addAgent().then(
+      (agent) => {
+        worked("new-agent");
+        setTab("agents");
+        setOpenIds((current) => ({ ...current, agents: agent.id }));
+      },
+      failed("new-agent", "The agent could not be made."),
+    );
   const saveAgent = (id: string, settings: AutomationAgentSettings) => {
     setAgents(
       (current) =>
@@ -241,14 +305,26 @@ export function AutomationsView({
           agent.id === id ? { ...agent, ...settings } : agent,
         ) ?? null,
     );
-    automationsClient.updateAgent(id, settings).then(() => setError(""), fail);
+    automationsClient
+      .updateAgent(id, settings)
+      .then(
+        () => worked("save-agent"),
+        failed(
+          "save-agent",
+          "Your last change to the agent was not saved; change it again to retry.",
+        ),
+      );
   };
   const deleteAgent = (id: string) =>
-    automationsClient.deleteAgent(id).then(() => {
-      setAgents((current) => current?.filter((a) => a.id !== id) ?? null);
-      if (openIds.agents === id)
-        setOpenIds((current) => ({ ...current, agents: null }));
-    }, fail);
+    automationsClient.deleteAgent(id).then(
+      () => {
+        worked("delete-agent");
+        setAgents((current) => current?.filter((a) => a.id !== id) ?? null);
+        if (openIds.agents === id)
+          setOpenIds((current) => ({ ...current, agents: null }));
+      },
+      failed("delete-agent", "The agent could not be deleted."),
+    );
 
   const putAutomation = (saved: Automation) =>
     setAutomations(
@@ -257,41 +333,65 @@ export function AutomationsView({
     );
   /** Lists a new Automation first and opens it. */
   const added = (created: Promise<Automation>) =>
-    created.then((automation) => {
-      setAutomations((current) => [automation, ...(current ?? [])]);
-      setTab("automations");
-      setOpenIds((current) => ({ ...current, automations: automation.id }));
-    }, fail);
-  const createAutomation = () => added(automationsClient.createAutomation());
-  const saveAutomation = (id: string, definition: AutomationDefinition) => {
-    const save = ++saves.current;
-    setAutomations(
-      (current) =>
-        current?.map((item) =>
-          item.id === id ? { ...item, ...definition } : item,
-        ) ?? null,
+    created.then(
+      (automation) => {
+        worked("new-automation");
+        setAutomations((current) => [automation, ...(current ?? [])]);
+        setTab("automations");
+        setOpenIds((current) => ({ ...current, automations: automation.id }));
+      },
+      failed("new-automation", "The Automation could not be made."),
     );
-    automationsClient.updateAutomation(id, definition).then((saved) => {
-      // An earlier save's answer would undo what was typed since.
-      if (save === saves.current) putAutomation(saved);
-      setError("");
-    }, fail);
+  const createAutomation = () => added(automationsClient.createAutomation());
+  /**
+   * Saves an edit and resolves to the Automation as it is then stored. The
+   * editor that made the edit keeps it and says so when the save fails.
+   */
+  const saveAutomation = (
+    id: string,
+    definition: AutomationDefinition,
+    typing: boolean,
+  ) => {
+    const save = ++saves.current;
+    const saved = automationsClient.updateAutomation(id, definition, typing);
+    // An earlier save's answer would undo what was typed since.
+    void saved.then(
+      (automation) => save === saves.current && putAutomation(automation),
+      () => undefined,
+    );
+    return saved;
   };
   const setEnabled = (id: string, enabled: boolean) =>
-    automationsClient.setAutomationEnabled(id, enabled).then((saved) => {
-      putAutomation(saved);
-      setError("");
-    }, fail);
+    automationsClient.setAutomationEnabled(id, enabled).then(
+      (saved) => {
+        putAutomation(saved);
+        worked("switch");
+      },
+      failed(
+        "switch",
+        enabled
+          ? "It could not be switched on."
+          : "It could not be switched off.",
+      ),
+    );
   const stopAndTurnOff = (id: string) =>
-    automationsClient.stopAndTurnOff(id).then((saved) => {
-      putAutomation(saved);
-      setError("");
-    }, fail);
+    automationsClient.stopAndTurnOff(id).then(
+      (saved) => {
+        putAutomation(saved);
+        worked("switch");
+      },
+      failed("switch", "It could not be stopped and switched off."),
+    );
   const deleteAutomation = (id: string) =>
-    automationsClient.deleteAutomation(id).then(() => {
-      setAutomations((current) => current?.filter((a) => a.id !== id) ?? null);
-      close();
-    }, fail);
+    automationsClient.deleteAutomation(id).then(
+      () => {
+        setAutomations(
+          (current) => current?.filter((a) => a.id !== id) ?? null,
+        );
+        close();
+      },
+      failed("delete", "The Automation could not be deleted."),
+    );
 
   const listPane = (
     <section className="ticket-list chat-pane" aria-label={TAB_NAMES[tab].list}>
@@ -359,42 +459,53 @@ export function AutomationsView({
             <p className="chat-list-empty">No Automations yet.</p>
           )}
           <ul className="chat-rows" aria-label="Automations">
-            {automations?.map((automation) => (
-              <li key={automation.id}>
-                <button
-                  type="button"
-                  className="chat-row"
-                  // One that is run by hand is neither on nor off.
-                  data-off={
-                    (!automation.enabled &&
-                      automation.trigger?.kind !== "by_hand") ||
-                    undefined
-                  }
-                  aria-current={automation.id === openId ? "true" : undefined}
-                  onClick={() => setOpenId(automation.id)}
-                >
-                  <span className="chat-row-mark">
-                    <Workflow size={14} aria-hidden />
-                  </span>
-                  <span className="chat-row-title">
-                    {automation.name.trim() || "New Automation"}
-                  </span>
-                  <span className="chat-row-time" />
-                  <span className="chat-row-sub">
-                    {automation.trigger?.kind !== "by_hand" && (
-                      <span>
-                        {automation.arrived_off
-                          ? "Off on this desktop"
-                          : automation.enabled
-                            ? "On"
-                            : "Off"}
-                      </span>
-                    )}
-                    {startedBy(automation.trigger)}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {automations?.map((automation) => {
+              // Runs arrive newest first: the first of its runs is the latest.
+              const latest = runs?.find(
+                (item) => item.automation_id === automation.id,
+              );
+              const byHand = automation.trigger?.kind === "by_hand";
+              // Off says so; one that can run says how its latest run stands.
+              const state = automation.arrived_off
+                ? "Off on this desktop"
+                : !automation.enabled && !byHand
+                  ? "Off"
+                  : latest
+                    ? RUN_STATUS_LABELS[latest.status]
+                    : byHand
+                      ? null
+                      : "On";
+              return (
+                <li key={automation.id}>
+                  <button
+                    type="button"
+                    className="chat-row"
+                    // One that is run by hand is neither on nor off.
+                    data-off={
+                      (!automation.enabled &&
+                        automation.trigger?.kind !== "by_hand") ||
+                      undefined
+                    }
+                    aria-current={automation.id === openId ? "true" : undefined}
+                    onClick={() => setOpenId(automation.id)}
+                  >
+                    <span className="chat-row-mark">
+                      <Workflow size={14} aria-hidden />
+                    </span>
+                    <span className="chat-row-title">
+                      {automation.name.trim() || "New Automation"}
+                    </span>
+                    <span className="chat-row-time">
+                      {latest && chatTime(latest.created_at)}
+                    </span>
+                    <span className="chat-row-sub">
+                      {state && <span>{state}</span>}
+                      {startedBy(automation.trigger)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </>
       ) : (
@@ -445,7 +556,9 @@ export function AutomationsView({
       {...paneProps}
       openRun={run}
       onOpenRun={setRun}
-      onChange={(definition) => saveAutomation(openAutomation.id, definition)}
+      onChange={(definition, typing) =>
+        saveAutomation(openAutomation.id, definition, typing)
+      }
       onSetEnabled={(enabled) => void setEnabled(openAutomation.id, enabled)}
       onStopAndTurnOff={() => void stopAndTurnOff(openAutomation.id)}
       onDuplicate={() =>
@@ -454,7 +567,7 @@ export function AutomationsView({
       onDelete={() => void deleteAutomation(openAutomation.id)}
       onCreateAgent={() =>
         addAgent().catch((reason: unknown) => {
-          fail(reason);
+          failed("new-agent", "The agent could not be made.")(reason);
           return undefined;
         })
       }
@@ -559,6 +672,22 @@ export function AutomationsView({
   const open = openAgent ?? openAutomation ?? listedRun;
   return (
     <div ref={workspaceRef} className="plan-workspace">
+      {failure && (
+        <div className="auto-failure">
+          <Alert size="compact" tone="error">
+            <AlertDescription>{failure.text}</AlertDescription>
+            <AlertActions>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setFailure(null)}
+              >
+                Dismiss
+              </Button>
+            </AlertActions>
+          </Alert>
+        </div>
+      )}
       {single ? (
         <div className="ticket-workspace chats-workspace">
           {open ? detailPane : listPane}

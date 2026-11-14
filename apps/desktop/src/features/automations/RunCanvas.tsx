@@ -38,6 +38,7 @@ import {
   everyStep,
   flowSteps,
   STEP_STATE_LABELS,
+  stepPlaces,
   stepStates,
   type StepState,
 } from "@/features/automations/runs-model";
@@ -85,6 +86,8 @@ function Elapsed({ since }: { since: string }) {
 
 type RunCardData = {
   card: Card;
+  /** Where the step is on its path; undefined for the trigger. */
+  place: string | undefined;
   /** When the step started, while it is running. */
   since: string | undefined;
   /** null for the trigger, which has no status. */
@@ -94,9 +97,10 @@ type RunCardData = {
 };
 
 function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
-  const { card, state, since, selected, onSelect } = data;
+  const { card, place, state, since, selected, onSelect } = data;
   const Icon = CARD_ICONS[card.icon];
   const label = state && STEP_STATE_LABELS[state];
+  const name = [cardName(card), place, label].filter(Boolean).join(", ");
   return (
     <>
       <Handle type="target" position={Position.Top} isConnectable={false} />
@@ -109,7 +113,7 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
         <button
           type="button"
           className="flow-card-main nodrag nopan"
-          aria-label={label ? `${cardName(card)}, ${label}` : cardName(card)}
+          aria-label={name}
           aria-pressed={selected}
           data-flow-card={card.id}
           onClick={() => openCard(card.id, selected, onSelect)}
@@ -177,6 +181,7 @@ export function RunCanvas({
       ),
     ]);
     const layout = layoutFlow(flowSteps(steps), RUN_CARD_HEIGHT);
+    const places = stepPlaces(steps);
     const nodes: Node[] = layout.items.flatMap((item) => {
       const card = cards.get(item.id);
       if (item.kind !== "card" || !card) return [];
@@ -188,6 +193,7 @@ export function RunCanvas({
         height: RUN_CARD_HEIGHT,
         data: {
           card,
+          place: places.get(item.id),
           state: states.get(item.id) ?? null,
           since: run.steps.find(
             (step) => step.step_id === item.id && step.status === "running",

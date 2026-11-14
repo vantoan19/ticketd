@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { AutomationEditor } from "@/features/automations/AutomationEditor";
+import { EditorUnderTest } from "@/features/automations/testing";
 import type {
   Automation,
   AutomationDefinition,
@@ -45,7 +45,7 @@ let saved: AutomationDefinition | undefined;
 const open = async (patch: Partial<Automation> = {}) => {
   saved = undefined;
   render(
-    <AutomationEditor
+    <EditorUnderTest
       automation={{
         id: "automation-1",
         name: "Triage",
@@ -55,6 +55,7 @@ const open = async (patch: Partial<Automation> = {}) => {
         enabled: false,
         arrived_off: false,
         problems: [],
+        has_ticket: true,
         ...patch,
       }}
       agents={[]}
@@ -63,7 +64,7 @@ const open = async (patch: Partial<Automation> = {}) => {
       onExpand={nothing}
       onReturn={nothing}
       onClose={nothing}
-      onChange={(definition) => (saved = definition)}
+      onSaved={(definition) => (saved = definition)}
       onSetEnabled={nothing}
       onStopAndTurnOff={nothing}
       onDelete={nothing}
@@ -308,4 +309,26 @@ test("a condition is removed from its row", async () => {
     { kind: "tag", tag: "bug", has: true },
   ]);
   expect(triggerCard(steps).textContent).toContain("Only in api, with bug");
+});
+
+test("a source condition names more than one source", async () => {
+  const { panel } = await openPanel({
+    ...TAGGED,
+    conditions: [{ kind: "source", any_of: ["github"] }],
+  });
+
+  await choose(
+    within(panel).getByRole("button", { name: "Source is: GitHub" }),
+    "Local",
+  );
+  expect(saved?.conditions).toEqual([
+    { kind: "source", any_of: ["github", "local"] },
+  ]);
+
+  // Unticking one leaves the other.
+  await choose(
+    within(panel).getByRole("button", { name: "Source is: GitHub or Local" }),
+    "GitHub",
+  );
+  expect(saved?.conditions).toEqual([{ kind: "source", any_of: ["local"] }]);
 });

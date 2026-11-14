@@ -39,6 +39,7 @@ const TRIAGE: AutomationAgent = {
     read_files: true,
     edit_files: false,
     run_commands: true,
+    any_command: false,
     allowed_commands: ["npm test", "npm run lint"],
     use_web: false,
   },
@@ -62,6 +63,7 @@ const automation = (patch: Partial<Automation>): Automation => ({
   enabled: false,
   arrived_off: false,
   problems: [],
+  has_ticket: true,
   ...patch,
 });
 
@@ -213,7 +215,7 @@ test("a simple Automation is built from a trigger card and one +, each set up in
     }),
   );
   expect(
-    within(steps).getByRole("button", { name: "Run agent: Triage" })
+    within(steps).getByRole("button", { name: /^Run agent: Triage, / })
       .textContent,
   ).toContain("Claude Code · in web-app");
 });
@@ -223,7 +225,9 @@ test("a Run agent step can make a new agent without leaving the editor", async (
     automation({ steps: [runAgent("s1", null, null)] }),
   ]);
   fireEvent.click(
-    within(steps).getByRole("button", { name: "Run agent: Choose an agent" }),
+    within(steps).getByRole("button", {
+      name: /^Run agent: Choose an agent, /,
+    }),
   );
   const panel = await screen.findByRole("complementary", { name: "Run agent" });
 
@@ -251,7 +255,7 @@ test("the + on a line is in the Tab order between the two cards it joins, and th
   expect(cardNames(steps)).toEqual([
     "When a tag is added: ready-for-triage",
     "Add a step after When a tag is added: ready-for-triage",
-    "Run agent: Triage",
+    "Run agent: Triage, step 1 of 1",
     "Add a step after Run agent: Triage",
   ]);
   // Every one is a real button, reached by Tab.
@@ -276,7 +280,7 @@ test("an unfinished step says what it needs and the Automation cannot be switche
   ]);
 
   expect(
-    within(steps).getByRole("button", { name: "Run agent: Choose an agent" })
+    within(steps).getByRole("button", { name: /^Run agent: Choose an agent, / })
       .textContent,
   ).toContain("Needs an agent and a folder");
   expect(screen.getByText("1 step left")).toBeTruthy();
@@ -441,7 +445,7 @@ test("an Automation is renamed and deleted from its menu, and a step is deleted 
   );
   await waitFor(() => expect(automations[0]?.steps).toEqual([]));
   expect(
-    within(steps).queryByRole("button", { name: "Run agent: Triage" }),
+    within(steps).queryByRole("button", { name: /^Run agent: Triage, / }),
   ).toBeNull();
 
   await choose(actions(), /Delete/);
@@ -590,7 +594,7 @@ test("Esc closes a step's panel and returns to the step, and Delete on the step 
     }),
   ]);
   const card = within(steps).getAllByRole("button", {
-    name: "Run agent: Triage",
+    name: /^Run agent: Triage, /,
   })[0]!;
 
   // Enter on a card is a click on it: the panel opens and takes focus.

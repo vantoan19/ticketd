@@ -52,10 +52,13 @@ function stored(node: Node): string {
 function FieldText({
   label,
   value,
+  hasTicket = true,
   onChange,
 }: {
   label: string;
   value: string;
+  /** False where the Automation runs without a ticket: no field can be filled in. */
+  hasTicket?: boolean;
   onChange: (text: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -130,8 +133,20 @@ function FieldText({
             }}
           >
             {(Object.keys(TEXT_FIELDS) as TextField[]).map((field) => (
-              <DropdownMenuItem key={field} onSelect={() => insert(field)}>
-                {TEXT_FIELDS[field]}
+              <DropdownMenuItem
+                key={field}
+                // A run without a ticket has nothing to fill a field from.
+                disabled={!hasTicket}
+                onSelect={() => insert(field)}
+              >
+                {hasTicket ? (
+                  TEXT_FIELDS[field]
+                ) : (
+                  <span className="flow-menu-item-text">
+                    {TEXT_FIELDS[field]}
+                    <small>Needs a ticket</small>
+                  </span>
+                )}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -230,6 +245,7 @@ export function NotifyFields({
   opens,
   automationName,
   eventTag,
+  hasTicket,
   onChange,
 }: {
   text: string;
@@ -237,6 +253,8 @@ export function NotifyFields({
   automationName: string;
   /** The tag the trigger names, which stands for the event's tag in the preview. */
   eventTag: string | null;
+  /** Whether a run of this Automation has a ticket to fill the fields from. */
+  hasTicket: boolean;
   onChange: (patch: { text?: string; opens?: "ticket" | "run" }) => void;
 }) {
   const previewId = useId();
@@ -244,7 +262,7 @@ export function NotifyFields({
   const [preview, setPreview] = useState<string | null>();
   useEffect(() => {
     let current = true;
-    automationsClient.previewText(text, eventTag).then(
+    automationsClient.previewText(text, eventTag, hasTicket).then(
       (filled) => current && setPreview(filled),
       // The preview is a convenience; the message itself is unaffected.
       () => current && setPreview(null),
@@ -252,7 +270,7 @@ export function NotifyFields({
     return () => {
       current = false;
     };
-  }, [text, eventTag]);
+  }, [text, eventTag, hasTicket]);
   return (
     <>
       <div className="flow-panel-section">
@@ -260,6 +278,7 @@ export function NotifyFields({
         <FieldText
           label="Message"
           value={text}
+          hasTicket={hasTicket}
           onChange={(next) => onChange({ text: next })}
         />
       </div>
@@ -292,9 +311,11 @@ export function NotifyFields({
           <span>{preview ?? textInWords(text)}</span>
         </div>
         <p className="flow-panel-note">
-          {preview === null
-            ? "No ticket to preview it with yet."
-            : "With the most recent ticket."}
+          {!hasTicket
+            ? "This Automation runs without a ticket, so ticket fields stay empty."
+            : preview === null
+              ? "No ticket to preview it with yet."
+              : "With the most recent ticket."}
         </p>
       </div>
     </>

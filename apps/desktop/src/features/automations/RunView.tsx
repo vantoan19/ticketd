@@ -8,6 +8,7 @@ import {
   Square,
   X,
 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { conditionsLine } from "@/features/automations/automation-text";
@@ -217,6 +218,8 @@ export function RunView({
   /** The Chat of an agent step, open in place of the run. */
   const [chat, setChat] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** What Stop or Run again last failed with, shown here until one works. */
+  const [failure, setFailure] = useState("");
   /** The step that last finished or failed while this was open, for a screen reader. */
   const [ended, setEnded] = useState("");
   const last = useRef<AutomationRunDetail | null>(null);
@@ -271,9 +274,24 @@ export function RunView({
       />
     );
 
-  const act = <T,>(action: Promise<T>, done: (result: T) => void) => {
+  const act = <T,>(
+    what: string,
+    action: Promise<T>,
+    done: (result: T) => void,
+  ) => {
     setBusy(true);
-    void action.then(done, onFail).finally(() => setBusy(false));
+    void action
+      .then(
+        (result) => {
+          setFailure("");
+          done(result);
+        },
+        (reason: unknown) =>
+          setFailure(
+            `${what} ${reason instanceof Error ? reason.message : String(reason)}`,
+          ),
+      )
+      .finally(() => setBusy(false));
   };
   const closePanel = () => {
     const card = selected;
@@ -315,7 +333,13 @@ export function RunView({
                   variant="outline"
                   size="sm"
                   disabled={busy}
-                  onClick={() => act(automationsClient.stopRun(id), setRun)}
+                  onClick={() =>
+                    act(
+                      "The run could not be stopped.",
+                      automationsClient.stopRun(id),
+                      setRun,
+                    )
+                  }
                 >
                   <Square aria-hidden />
                   Stop
@@ -326,8 +350,10 @@ export function RunView({
                   size="sm"
                   disabled={busy}
                   onClick={() =>
-                    act(automationsClient.runAgain(id), (again) =>
-                      onOpenRun(again.id),
+                    act(
+                      "It could not be run again.",
+                      automationsClient.runAgain(id),
+                      (again) => onOpenRun(again.id),
                     )
                   }
                 >
@@ -348,11 +374,18 @@ export function RunView({
               </IconButton>
             )
           )}
-          <IconButton label="Close Automation" onClick={onClose}>
+          <IconButton label="Close run" onClick={onClose}>
             <X aria-hidden />
           </IconButton>
         </div>
       </div>
+      {failure && (
+        <div className="run-failure">
+          <Alert size="compact" tone="error">
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        </div>
+      )}
       {/* A live region and no more: focus stays where the person left it. */}
       <p className="sr-only" aria-live="polite">
         {ended}

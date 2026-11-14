@@ -18,10 +18,6 @@ import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import "@/features/settings/pages/attachments.css";
 
-const DEFAULT_RUNS = 2;
-const MOST_RUNS = 10;
-const OUT_OF_RANGE = `Enter a whole number from 1 to ${MOST_RUNS}.`;
-
 /** Settings > Automations: how Automations run on this desktop. */
 export function AutomationsPage() {
   return (
@@ -41,15 +37,18 @@ function RunsAtOnce() {
   const [value, setValue] = useState("");
   /** null until the setting is read. */
   const [saved, setSaved] = useState<number | null>(null);
+  /** What the setting starts at and the most it takes, as the core has them. */
+  const [limits, setLimits] = useState({ default: 0, most: 0 });
   const [confirmed, setConfirmed] = useState(false);
   const [failure, setFailure] = useState("");
   useEffect(() => {
     let current = true;
     automationsClient.runsAtOnce().then(
-      (runs) => {
+      ({ runs, ...bounds }) => {
         if (!current) return;
         setValue(String(runs));
         setSaved(runs);
+        setLimits(bounds);
       },
       (reason: unknown) =>
         current && setFailure(`Could not read runs at once: ${String(reason)}`),
@@ -58,11 +57,12 @@ function RunsAtOnce() {
       current = false;
     };
   }, []);
+  const outOfRange = `Enter a whole number from 1 to ${limits.most}.`;
   async function save(text: string) {
     const runs = Number(text);
     setConfirmed(false);
-    if (!Number.isInteger(runs) || runs < 1 || runs > MOST_RUNS) {
-      setFailure(OUT_OF_RANGE);
+    if (!Number.isInteger(runs) || runs < 1 || runs > limits.most) {
+      setFailure(outOfRange);
       return;
     }
     setFailure("");
@@ -75,7 +75,7 @@ function RunsAtOnce() {
       setFailure(`Could not save runs at once: ${String(reason)}`);
     }
   }
-  const invalid = failure === OUT_OF_RANGE;
+  const invalid = failure === outOfRange;
   return (
     <SettingsSection title="Runs">
       <SettingsList>
@@ -92,7 +92,7 @@ function RunsAtOnce() {
                   className="w-24 text-right"
                   type="number"
                   min={1}
-                  max={MOST_RUNS}
+                  max={limits.most || undefined}
                   step={1}
                   value={value}
                   disabled={saved === null}
@@ -110,16 +110,16 @@ function RunsAtOnce() {
               </span>
               {saved !== null &&
                 !invalid &&
-                (Number(value) === DEFAULT_RUNS ? (
+                (Number(value) === limits.default ? (
                   <span className="attachments-limit-note">Default</span>
                 ) : (
                   <SettingsLink
                     onClick={() => {
-                      setValue(String(DEFAULT_RUNS));
-                      void save(String(DEFAULT_RUNS));
+                      setValue(String(limits.default));
+                      void save(String(limits.default));
                     }}
                   >
-                    Use the default, {DEFAULT_RUNS}
+                    Use the default, {limits.default}
                   </SettingsLink>
                 ))}
               <span role="status" className="attachments-limit-note">
