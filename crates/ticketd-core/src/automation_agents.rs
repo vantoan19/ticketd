@@ -133,11 +133,21 @@ pub(crate) fn migrate_any_command(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
+/// The largest turn limit an agent may have. The agent editor offers the same range.
+pub const MAX_TURN_LIMIT: u32 = 500;
+/// The largest time limit, in minutes, an agent may have.
+pub const MAX_TIME_LIMIT_MINUTES: u32 = 240;
+
 fn validated(mut settings: AutomationAgentSettings) -> Result<AutomationAgentSettings, Error> {
-    if settings.turn_limit == 0 || settings.time_limit_minutes == 0 {
-        return Err(Error::InvalidAutomationAgent(
-            "the turn limit and the time limit must be at least 1".into(),
-        ));
+    if !(1..=MAX_TURN_LIMIT).contains(&settings.turn_limit) {
+        return Err(Error::InvalidAutomationAgent(format!(
+            "the turn limit must be a whole number from 1 to {MAX_TURN_LIMIT}"
+        )));
+    }
+    if !(1..=MAX_TIME_LIMIT_MINUTES).contains(&settings.time_limit_minutes) {
+        return Err(Error::InvalidAutomationAgent(format!(
+            "the time limit must be a whole number of minutes from 1 to {MAX_TIME_LIMIT_MINUTES}"
+        )));
     }
     settings.name = settings.name.trim().to_owned();
     settings.model = settings
@@ -196,6 +206,29 @@ fn commands_json(settings: &AutomationAgentSettings) -> Result<String, Error> {
 }
 
 impl Workspace {
+    /// A new agent with the default settings, named "New agent", or "New agent 2"
+    /// and on when that is taken, so two fresh agents can be told apart. Names
+    /// need not be unique: an agent is found by its id.
+    pub fn create_new_automation_agent(&mut self) -> Result<AutomationAgent, Error> {
+        let taken: Vec<String> = self
+            .automation_agents()?
+            .into_iter()
+            .map(|agent| agent.settings.name)
+            .collect();
+        // One more number than there are agents is always free.
+        let name = (1..=taken.len() + 1)
+            .map(|number| match number {
+                1 => "New agent".to_owned(),
+                _ => format!("New agent {number}"),
+            })
+            .find(|name| !taken.contains(name))
+            .unwrap_or_default();
+        self.create_automation_agent(AutomationAgentSettings {
+            name,
+            ..AutomationAgentSettings::default()
+        })
+    }
+
     pub fn create_automation_agent(
         &mut self,
         settings: AutomationAgentSettings,

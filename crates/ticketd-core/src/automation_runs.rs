@@ -25,6 +25,18 @@ const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 /// A run needs the person from when it ends as Needs attention until they run it
 /// again, take it over or dismiss it. Opening it changes nothing.
 const NEEDS_YOU: &str = "status = 'needs_attention' AND attention_cleared = 0";
+/// `attention_cleared` says how the person answered: 1 for anything but running it
+/// again (and for every answer stored before the two were told apart), 2 for that.
+const DISMISSED: i64 = 1;
+const RAN_AGAIN: i64 = 2;
+
+/// How the person answered a run that needed attention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunAnswer {
+    Dismissed,
+    RanAgain,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -101,6 +113,12 @@ pub struct AutomationRun {
     /// It ended as Needs attention and the person has not yet run it again, taken
     /// it over or dismissed it.
     pub needs_you: bool,
+    /// How the person answered it, once a Needs attention run no longer needs them.
+    #[serde(default)]
+    pub answer: Option<RunAnswer>,
+    /// Its Automation has been deleted since, so it cannot be run again.
+    #[serde(default)]
+    pub automation_deleted: bool,
     pub created_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
@@ -174,10 +192,10 @@ pub(crate) fn announce(connection: &Connection) -> Result<(), Error> {
 
 /// The person acted on a run that needed attention: it stops asking, and its inbox
 /// entry is answered.
-fn answer(connection: &Connection, run_id: &str) -> Result<(), Error> {
+fn answer(connection: &Connection, run_id: &str, how: i64) -> Result<(), Error> {
     connection.execute(
-        "UPDATE automation_runs SET attention_cleared = 1 WHERE id = ?1 AND status = 'needs_attention' AND attention_cleared = 0",
-        [run_id],
+        "UPDATE automation_runs SET attention_cleared = ?2 WHERE id = ?1 AND status = 'needs_attention' AND attention_cleared = 0",
+        params![run_id, how],
     )?;
     connection.execute(
         "UPDATE inbox_entries SET read = 1 WHERE kind = 'automation_run' AND from_value = ?1 AND read = 0",
@@ -192,7 +210,8 @@ fn named<T: serde::de::DeserializeOwned>(text: String) -> Result<T, Error> {
 
 fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<AutomationRun>, Error> {
     let mut statement = connection.prepare(&format!(
-        "SELECT r.id, r.automation_id, r.event, r.definition, r.status, r.reason, r.created_at, r.started_at, r.ended_at, t.id, t.reference, t.title, r.{NEEDS_YOU}, a.name
+        "SELECT r.id, r.automation_id, r.event, r.definition, r.status, r.reason, r.created_at, r.started_at, r.ended_at, t.id, t.reference, t.title, r.{NEEDS_YOU}, a.name,
+           CASE WHEN r.status = 'needs_attention' THEN r.attention_cleared ELSE 0 END, a.trashed
          FROM automation_runs r JOIN automations a ON a.id = r.automation_id LEFT JOIN tickets t ON t.id = r.ticket_id WHERE {filter} ORDER BY r.rowid DESC"
     ))?;
     let rows = statement
@@ -218,6 +237,12 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                 ticket,
                 row.get::<_, bool>(12)?,
                 row.get::<_, String>(13)?,
+                match row.get::<_, i64>(14)? {
+                    0 => None,
+                    RAN_AGAIN => Some(RunAnswer::RanAgain),
+                    _ => Some(RunAnswer::Dismissed),
+                },
+                row.get::<_, bool>(15)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -239,6 +264,8 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                 ticket,
                 needs_you,
                 automation_name,
+                answer,
+                automation_deleted,
             )| {
                 let reached = steps
                     .query_map([&id], |row| {
@@ -287,6 +314,8 @@ fn read(connection: &Connection, filter: &str, value: &str) -> Result<Vec<Automa
                     status: named(status)?,
                     reason,
                     needs_you,
+                    answer,
+                    automation_deleted,
                     created_at: created,
                     started_at: started,
                     ended_at: ended,
@@ -738,6 +767,9 @@ impl Workspace {
         ) {
             return Err(Error::AutomationRun("the run has not ended yet".into()));
         }
+        if run.automation_deleted {
+            return Err(Error::AutomationRunAutomationDeleted);
+        }
         let automation = crate::automations::one(&transaction, &run.automation_id)?;
         // As for Run now and switching on: one that is unfinished cannot run.
         if let Some(problem) = automation.problems.first() {
@@ -764,7 +796,7 @@ impl Workspace {
                 "a run of this Automation is already going".into(),
             ));
         };
-        answer(&transaction, run_id)?;
+        answer(&transaction, run_id, RAN_AGAIN)?;
         let again = one(&transaction, &id)?;
         transaction.commit()?;
         Ok(again)
@@ -775,7 +807,7 @@ impl Workspace {
     pub fn dismiss_automation_run(&mut self, run_id: &str) -> Result<AutomationRun, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
-        answer(&transaction, run_id)?;
+        answer(&transaction, run_id, DISMISSED)?;
         let run = one(&transaction, run_id)?;
         transaction.commit()?;
         Ok(run)
@@ -816,7 +848,7 @@ impl Workspace {
         // The Chat list follows the Chat log.
         crate::chats::log(&transaction, chat_id, "chat", chat_id)?;
         if status != AutomationRunStatus::Completed {
-            answer(&transaction, &run_id)?;
+            answer(&transaction, &run_id, DISMISSED)?;
             transaction.execute(
                 &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE run_id = ?1 AND status = 'running'"),
                 params![run_id, TAKEN_OVER],

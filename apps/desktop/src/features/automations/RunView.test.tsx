@@ -93,6 +93,8 @@ const run = (patch: Partial<AutomationRunDetail>): AutomationRunDetail => ({
   status: "running",
   reason: null,
   needs_you: false,
+  answer: null,
+  automation_deleted: false,
   ticket: { id: "t-1", reference: "T-ZB7", title: "Show the wait time" },
   created_at: new Date().toISOString(),
   started_at: new Date().toISOString(),
@@ -236,6 +238,26 @@ test("a run that needs attention opens on the canvas with each step's status and
     expect(cards()[1]).toBe("Run agent: Verifier, step 1 of 2, Waiting"),
   );
   expect(invoke).toHaveBeenCalledWith("automation_run_again", { id: "run-1" });
+});
+
+test("a run whose Automation was deleted says so and offers no Run again", async () => {
+  runs = [
+    run({
+      status: "needs_attention",
+      reason: "The agent reached its limit of 40 turns before finishing.",
+      answer: "dismissed",
+      automation_deleted: true,
+      ended_at: new Date().toISOString(),
+      steps: [reached("verify", "failed", "Limit")],
+    }),
+  ];
+  await openRun();
+
+  expect(screen.getByRole("status").textContent).toBe(
+    "Needs attention · dismissed",
+  );
+  expect(screen.getByText("Its Automation was deleted.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
 });
 
 test("a run in progress follows the Workspace as it goes, and Stop ends it needing attention", async () => {

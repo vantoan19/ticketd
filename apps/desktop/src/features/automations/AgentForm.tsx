@@ -26,6 +26,7 @@ import {
   type AutomationAgent,
   type AutomationAgentSettings,
 } from "@/features/automations/client";
+import { FIXED_ON_FOR_CODEX } from "@/features/automations/automation-text";
 import { useChatClient, type HarnessStatus } from "@/features/chats/client";
 import {
   SettingsList,
@@ -119,48 +120,66 @@ const TOOLS: {
   },
 ];
 
-/**
- * The switches Codex does not follow. It reads files and runs any command inside
- * its own sandbox, and that sandbox always lets it write in the step's folder, so
- * with Codex these show as on and cannot be changed. The agent keeps its own
- * choices for Claude Code.
- */
-const FIXED_ON_FOR_CODEX: ReadonlySet<keyof Tools> = new Set([
-  "read_files",
-  "edit_files",
-  "run_commands",
-]);
+/** The largest limits the core accepts (`automation_agents.rs`), offered as each field's range. */
+const MOST_TURNS = 500;
+const MOST_MINUTES = 240;
 
-/** A whole number of at least 1, saved only while it is one. */
-function LimitInput({
-  label,
+/**
+ * A limit row: a whole number from 1 to `most`, saved only while it is one and
+ * said under the field while it is not.
+ */
+function LimitRow({
+  title,
+  description,
+  most,
   value,
   disabled,
   onSave,
 }: {
-  label: string;
+  title: string;
+  description: string;
+  most: number;
   value: number;
   disabled?: boolean;
   onSave: (value: number) => void;
 }) {
+  const noteId = useId();
   const [text, setText] = useState(String(value));
+  const inRange = (next: number) =>
+    Number.isInteger(next) && next >= 1 && next <= most;
+  const invalid = !disabled && !inRange(Number(text));
   return (
-    <Input
-      type="number"
-      min={1}
-      step={1}
-      className="h-8 w-18"
-      aria-label={label}
-      disabled={disabled}
-      value={text}
-      onChange={(event) => {
-        setText(event.target.value);
-        const next = Number(event.target.value);
-        if (Number.isInteger(next) && next >= 1) onSave(next);
-      }}
-      // Leaving the field with something that is not a limit shows the saved one.
-      onBlur={() => setText(String(value))}
-    />
+    <ToolRow
+      title={title}
+      description={description}
+      control={
+        <Input
+          type="number"
+          min={1}
+          max={most}
+          step={1}
+          className="h-8 w-18"
+          aria-label={title}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? noteId : undefined}
+          disabled={disabled}
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            const next = Number(event.target.value);
+            if (inRange(next)) onSave(next);
+          }}
+          // Leaving the field with something that is not a limit shows the saved one.
+          onBlur={() => setText(String(value))}
+        />
+      }
+    >
+      {invalid && (
+        <p id={noteId} role="alert" className="agent-hint agent-hint-error">
+          A whole number from 1 to {most}. Until then, {value} is kept.
+        </p>
+      )}
+    </ToolRow>
   );
 }
 
@@ -398,8 +417,10 @@ export function AgentForm({
             <ChoiceTiles
               aria-labelledby={`${fieldId}-harness`}
               value={draft.harness}
+              // A model names one harness's model, so it does not carry over.
               onValueChange={(harness) =>
-                change({ harness: harness as Harness })
+                harness !== draft.harness &&
+                change({ harness: harness as Harness, model: null })
               }
             >
               {standings.map(({ id, name, standing }) => (
@@ -537,36 +558,26 @@ export function AgentForm({
               <small>A step that reaches one fails</small>
             </span>
             <SettingsList>
-              <ToolRow
+              <LimitRow
+                key={`turns-${taken}`}
                 title="Turns"
                 description={
                   codex
                     ? "Not applied with Codex"
                     : "How many turns one step may take"
                 }
-                control={
-                  <LimitInput
-                    key={taken}
-                    label="Turns"
-                    disabled={codex}
-                    value={draft.turn_limit}
-                    onSave={(turn_limit) => change({ turn_limit })}
-                  />
-                }
+                most={MOST_TURNS}
+                disabled={codex}
+                value={draft.turn_limit}
+                onSave={(turn_limit) => change({ turn_limit })}
               />
-              <ToolRow
+              <LimitRow
+                key={`minutes-${taken}`}
                 title="Minutes"
                 description="How long one step may run"
-                control={
-                  <LimitInput
-                    key={taken}
-                    label="Minutes"
-                    value={draft.time_limit_minutes}
-                    onSave={(time_limit_minutes) =>
-                      change({ time_limit_minutes })
-                    }
-                  />
-                }
+                most={MOST_MINUTES}
+                value={draft.time_limit_minutes}
+                onSave={(time_limit_minutes) => change({ time_limit_minutes })}
               />
             </SettingsList>
           </div>

@@ -47,7 +47,7 @@ import { scheduleText } from "@/features/automations/automation-text";
 import { AllRunsList } from "@/features/automations/RunsList";
 import { RunNavigation } from "@/features/automations/navigation";
 import { RunView } from "@/features/automations/RunView";
-import { RUN_STATUS_LABELS } from "@/features/automations/runs-model";
+import { runStatusText } from "@/features/automations/runs-model";
 import { chatTime } from "@/features/chats/model";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
@@ -493,7 +493,7 @@ export function AutomationsView({
                 : !automation.enabled && !byHand
                   ? "Off"
                   : latest
-                    ? RUN_STATUS_LABELS[latest.status]
+                    ? runStatusText(latest)
                     : byHand
                       ? null
                       : "On";

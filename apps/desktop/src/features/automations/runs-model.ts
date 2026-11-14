@@ -101,6 +101,19 @@ export const RUN_STATUS_LABELS: Record<AutomationRun["status"], string> = {
   taken_over: "Taken over",
 };
 
+/**
+ * A run's status in words. A Needs attention run the person has answered says
+ * how, so it no longer reads as asking for them.
+ */
+export function runStatusText(
+  run: Pick<AutomationRun, "status" | "answer">,
+): string {
+  const label = RUN_STATUS_LABELS[run.status];
+  if (run.answer === "dismissed") return `${label} · dismissed`;
+  if (run.answer === "ran_again") return `${label} · run again`;
+  return label;
+}
+
 export type RunDay = { label: string; runs: AutomationRun[] };
 
 /**
@@ -133,7 +146,9 @@ export function runsByDay(runs: AutomationRun[], now = Date.now()): RunDay[] {
 /**
  * Runs under what they ask of the person: going now, waiting on them, or over.
  * A run that needed attention and was dismissed, run again or taken over is
- * over. Each group keeps the order `runs` arrive in; an empty group is left out.
+ * over. `runs` arrive newest first, and the groups keep that order, except Now:
+ * there the running runs come first, then the queued ones in the order they
+ * start, oldest first. An empty group is left out.
  */
 export function runsByNeed<Run extends AutomationRun>(runs: Run[]) {
   const need = (run: Run) =>
@@ -142,10 +157,16 @@ export function runsByNeed<Run extends AutomationRun>(runs: Run[]) {
       : run.needs_you
         ? "Needs you"
         : "Earlier";
+  const inGroup = (label: ReturnType<typeof need>) => {
+    const members = runs.filter((run) => need(run) === label);
+    return label === "Now"
+      ? [
+          ...members.filter((run) => run.status === "running"),
+          ...members.filter((run) => run.status === "queued").reverse(),
+        ]
+      : members;
+  };
   return (["Now", "Needs you", "Earlier"] as const)
-    .map((label) => ({
-      label,
-      runs: runs.filter((run) => need(run) === label),
-    }))
+    .map((label) => ({ label, runs: inGroup(label) }))
     .filter((group) => group.runs.length > 0);
 }

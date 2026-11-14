@@ -83,6 +83,8 @@ vi.mock("@tauri-apps/api/core", () => ({
           status: "needs_attention",
           reason: LIMIT,
           needs_you: true,
+          answer: null,
+          automation_deleted: false,
           ticket: { id: "t-8", reference: "T-ZB8", title: ENTRY.title },
           created_at: ENTRY.timestamp,
           started_at: ENTRY.timestamp,
