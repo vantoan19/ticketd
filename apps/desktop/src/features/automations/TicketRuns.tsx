@@ -14,6 +14,7 @@ import { RunNavigation } from "@/features/automations/navigation";
 import { RunMark } from "@/features/automations/RunsList";
 import { runStatusText } from "@/features/automations/runs-model";
 import { chatTime } from "@/features/chats/model";
+import { useChatFeature } from "@/features/chats/use-chats";
 import type { useTicketRuns } from "@/features/automations/use-ticket-runs";
 import { RailSection } from "@/features/tickets/RailSection";
 import "@/features/automations/automations.css";
@@ -21,19 +22,27 @@ import "@/features/automations/automations.css";
 const nameOf = (run: TicketRun) =>
   run.automation_name.trim() || "An Automation";
 
+/** Notices shown before the rest fold into one line. */
+const SHOWN = 2;
+
 /**
- * A notice at the top of a ticket for each of its runs that needs attention. It
- * stays until the person runs the run again, takes it over or dismisses it;
- * opening the run leaves it.
+ * A notice at the top of a ticket for each of its runs that needs attention,
+ * newest first, each with when it started. It stays until the person runs the
+ * run again, takes it over or dismisses it; opening the run leaves it. While
+ * Chat is off the run cannot be opened or run again, so it offers Dismiss only.
  */
 export function RunNotices({
   runs,
   error,
   reload,
+  chatOn,
 }: ReturnType<typeof useTicketRuns>) {
   const openRun = useContext(RunNavigation);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
+  const [all, setAll] = useState(false);
+  const waiting = runs.filter((run) => run.needs_you);
+  const folded = all ? 0 : Math.max(0, waiting.length - SHOWN);
   const act = (action: Promise<unknown>) => {
     setBusy(true);
     void action
@@ -48,28 +57,30 @@ export function RunNotices({
   };
   return (
     <>
-      {runs
-        .filter((run) => run.needs_you)
-        .map((run) => (
-          <Alert
-            key={run.id}
-            tone="attention"
-            role="region"
-            aria-label={`${nameOf(run)} needs attention`}
-            className="mb-6"
-          >
-            <AlertTitle>{nameOf(run)} needs attention</AlertTitle>
-            {(run.reason || run.automation_deleted) && (
-              <AlertDescription>
-                {[
-                  run.reason,
-                  run.automation_deleted && "Its Automation was deleted.",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              </AlertDescription>
-            )}
-            <AlertActions>
+      {waiting.slice(0, waiting.length - folded).map((run) => (
+        <Alert
+          key={run.id}
+          tone="attention"
+          role="region"
+          aria-label={`${nameOf(run)} needs attention`}
+          className="mb-6"
+        >
+          <AlertTitle>
+            {nameOf(run)} needs attention · {chatTime(run.created_at)}
+          </AlertTitle>
+          {(run.reason || run.automation_deleted || !chatOn) && (
+            <AlertDescription>
+              {[
+                run.reason,
+                run.automation_deleted && "Its Automation was deleted.",
+                !chatOn && "Turn Chat on to open this run.",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </AlertDescription>
+          )}
+          <AlertActions>
+            {chatOn && (
               <Button
                 variant="outline"
                 size="sm"
@@ -77,27 +88,40 @@ export function RunNotices({
               >
                 Open run
               </Button>
-              {!run.automation_deleted && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => act(automationsClient.runAgain(run.id))}
-                >
-                  Run again
-                </Button>
-              )}
+            )}
+            {chatOn && !run.automation_deleted && (
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 disabled={busy}
-                onClick={() => act(automationsClient.dismissRun(run.id))}
+                onClick={() => act(automationsClient.runAgain(run.id))}
               >
-                Dismiss
+                Run again
               </Button>
-            </AlertActions>
-          </Alert>
-        ))}
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => act(automationsClient.dismissRun(run.id))}
+            >
+              Dismiss
+            </Button>
+          </AlertActions>
+        </Alert>
+      ))}
+      {folded > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mb-6"
+          onClick={() => setAll(true)}
+        >
+          {folded === 1
+            ? "Show 1 more run that needs attention"
+            : `Show ${folded} more runs that need attention`}
+        </Button>
+      )}
       {(failure || error) && (
         <p role="alert" className="mb-6">
           {failure || error}
@@ -107,10 +131,14 @@ export function RunNotices({
   );
 }
 
-/** The "Runs" section of a ticket's side panel. A ticket without runs has none. */
+/**
+ * The "Runs" section of a ticket's side panel. A ticket without runs has none,
+ * and neither does any ticket while Chat is off, when no run can be opened.
+ */
 export function TicketRunsSection({ runs }: { runs: TicketRun[] }) {
   const openRun = useContext(RunNavigation);
-  if (runs.length === 0) return null;
+  const chatOn = useChatFeature().enabled;
+  if (runs.length === 0 || !chatOn) return null;
   return (
     <RailSection label="Runs">
       <ul className="ticket-runs">

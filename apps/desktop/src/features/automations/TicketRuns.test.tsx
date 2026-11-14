@@ -187,12 +187,61 @@ test.each([
   },
 );
 
-test("while Chat is off, a ticket shows nothing about runs", async () => {
+test("while Chat is off, a run that needs attention keeps its notice with Dismiss only, and the Runs section is hidden", async () => {
   runs = [FAILED];
   ticket(false);
-  await Promise.resolve();
-  expect(invoke).not.toHaveBeenCalled();
-  expect(screen.queryByRole("region")).toBeNull();
+
+  const notice = await screen.findByRole("region", {
+    name: "Triage new tickets needs attention",
+  });
+  expect(notice.textContent).toContain("Turn Chat on to open this run.");
+  expect(
+    within(notice)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Dismiss"]);
+  expect(screen.queryByRole("region", { name: "Runs" })).toBeNull();
+
+  fireEvent.click(within(notice).getByRole("button", { name: "Dismiss" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("region", {
+        name: "Triage new tickets needs attention",
+      }),
+    ).toBeNull(),
+  );
+});
+
+test("each notice says when its run started, and past two the rest fold into one line", async () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+  runs = [
+    { ...FAILED, id: "run-3", created_at: minutesAgo(5) },
+    { ...FAILED, id: "run-2", created_at: minutesAgo(12) },
+    { ...FAILED, id: "run-1", created_at: minutesAgo(30) },
+  ];
+  ticket();
+
+  const notices = () =>
+    screen.queryAllByRole("region", {
+      name: "Triage new tickets needs attention",
+    });
+  await waitFor(() => expect(notices()).toHaveLength(2));
+  expect(
+    notices().map(
+      (notice) => notice.querySelector("[data-slot=alert-title]")?.textContent,
+    ),
+  ).toEqual([
+    "Triage new tickets needs attention · 5m",
+    "Triage new tickets needs attention · 12m",
+  ]);
+
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Show 1 more run that needs attention",
+    }),
+  );
+  expect(notices()).toHaveLength(3);
 });
 
 test("a failed read of the ticket's runs stops showing once a later read works", async () => {
