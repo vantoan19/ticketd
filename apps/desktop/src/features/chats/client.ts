@@ -417,7 +417,13 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** `warning`: said by the harness; it folds with its turn. `note`: ticketd's own. */
     reason: z.enum([
       "stopped",
+      // ticketd stopped the turn: it quit, Chat was turned off, the run was
+      // taken over, reached its time limit, or its step ended.
       "quit",
+      "turned_off",
+      "taken_over",
+      "time_limit",
+      "run_ended",
       "stop_unconfirmed",
       "failed",
       "note",

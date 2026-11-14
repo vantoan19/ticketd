@@ -24,7 +24,8 @@ use crate::host::{
     ChatProblem, ChatView, ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
     INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
     SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode, SettingChangeState, StopState,
-    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal, problem_key,
+    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, TicketdStop, WorkspaceOpener, is_refusal,
+    problem_key,
 };
 use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
@@ -95,7 +96,7 @@ pub(crate) enum Command {
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
     /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
-    Shutdown(oneshot::Sender<Option<String>>),
+    Shutdown(TicketdStop, oneshot::Sender<Option<String>>),
 }
 
 /// The result of an adapter call that ran in its own task.
@@ -243,6 +244,9 @@ pub(crate) struct Supervisor {
     checkpoint_at: Option<Instant>,
     stop_deadline: Option<Instant>,
     shutting_down: bool,
+    /// Why ticketd is shutting the Chat down, kept on a turn the harness reports
+    /// interrupted meanwhile, so it does not read as the person's stop.
+    shut_down_for: Option<TicketdStop>,
     /// The person resumed the queue or sent into it, so it may open a session. Without
     /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
     queue_started: bool,
@@ -319,6 +323,7 @@ impl Supervisor {
             checkpoint_at: None,
             stop_deadline: None,
             shutting_down: false,
+            shut_down_for: None,
             queue_started: false,
             closing: false,
             unpublished: true,
@@ -342,9 +347,10 @@ impl Supervisor {
             .min();
             tokio::select! {
                 command = self.commands.recv() => match command {
-                    Some(Command::Shutdown(reply)) => {
+                    Some(Command::Shutdown(why, reply)) => {
                         self.shutting_down = true;
-                        let unconfirmed = self.stop_runtime(STOPPED_BY_TICKETD).await;
+                        self.shut_down_for = Some(why);
+                        let unconfirmed = self.stop_runtime(why.detail()).await;
                         self.publish();
                         self.board.report(&self.chat_id, None);
                         let _ = reply.send(unconfirmed);
@@ -514,7 +520,7 @@ impl Supervisor {
             // Views read the Chat again even when no record changed: what they show
             // can depend on the folder too, such as its branch.
             Command::Changed => self.last_live = None,
-            Command::Shutdown(_) => {}
+            Command::Shutdown(..) => {}
         }
     }
 
@@ -1761,7 +1767,12 @@ impl Supervisor {
                         (ChatTurnState::Interrupted, None, None, None)
                     }
                     TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
-                    TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None, None),
+                    TurnOutcome::Interrupted => (
+                        ChatTurnState::Interrupted,
+                        self.shut_down_for.map(|why| why.detail().to_owned()),
+                        None,
+                        None,
+                    ),
                     TurnOutcome::Failed(problem) => (
                         ChatTurnState::Failed,
                         Some(problem.message.chars().take(CHAT_NOTICE_LIMIT).collect()),

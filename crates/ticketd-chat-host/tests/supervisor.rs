@@ -978,7 +978,7 @@ async fn live_state_is_readable_without_a_view_and_cleared_when_the_chat_stops()
 
     assert!(changed.has_changed().unwrap());
     assert_eq!(f.host.live()[&f.chat.id].activity, Activity::Working);
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     assert!(f.host.live().is_empty());
 }
 
@@ -1115,7 +1115,7 @@ async fn the_feed_of_a_view_ends_when_the_supervisor_of_its_chat_stops() {
     f.send("first").await;
     let (_view, mut subscription) = f.host.attach(&f.chat.id).await.unwrap();
 
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
 
     let ended = tokio::time::timeout(Duration::from_secs(60), async {
         while subscription.next().await.is_some() {}
@@ -1477,7 +1477,7 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
 
     // A new session says it again, once.
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     f.send("second").await;
     for _ in 0..2 {
         for event in repeated() {
@@ -1540,7 +1540,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     assert_eq!(kept, ["links: none", "links: T-KQ1"]);
 
     // A resumed native session already has what it was given ...
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     f.send("fourth").await;
     assert_eq!(texts(&f)[3], "fourth");
     f.emit(turn_ended(
@@ -1549,7 +1549,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     ))
     .await;
     // ... and is told when the links changed while no session was live.
-    f.host.stop_all().await;
+    f.host.stop_all(ticketd_chat_host::TicketdStop::Quit).await;
     *context.lock().unwrap() = "links: T-KQ2".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("fifth").await;

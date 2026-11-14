@@ -1112,7 +1112,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${problem.message ?? "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
+        body: `${sentence(problem.message ?? "It gave no reason.")} What it finished before that is kept; the turn is not complete.`,
         actions: ["check"],
       };
   }
@@ -1157,6 +1157,10 @@ export function binarySize(bytes: number): string {
 
 /** "1 Chat", "2 Chats". */
 export const chatCount = (n: number) => count(n, "Chat");
+
+/** A harness's or the host's message as a sentence, so another can follow it (L16). */
+export const sentence = (text: string) =>
+  /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`;
 
 /**
  * What turning Chat off or quitting stops, as the subject of a sentence:
