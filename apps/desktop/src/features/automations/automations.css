@@ -35,6 +35,39 @@
   font-weight: 400;
   line-height: var(--text-caption-line);
 }
+/* A tool or a limit: one line, the note giving way before the name does. */
+.agent-tool {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 48px;
+  padding: 6px 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.agent-tool + .agent-tool {
+  border-top: 1px solid var(--border);
+}
+.agent-tool-title {
+  font-weight: 500;
+}
+.agent-tool-desc {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool-control {
+  display: inline-flex;
+  align-items: center;
+}
+.agent-tool-more {
+  grid-column: 1 / -1;
+  padding: 2px 0 6px;
+}
 .agent-standing {
   display: inline-flex;
   align-items: center;
@@ -190,6 +223,13 @@
   min-height: 0;
   overflow: hidden;
   background: var(--background);
+}
+/* The zoom control, over the canvas at its lower left. */
+.flow-zoom {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
 }
 /* The bar over the canvas: off on this desktop. */
 .flow-notice {
