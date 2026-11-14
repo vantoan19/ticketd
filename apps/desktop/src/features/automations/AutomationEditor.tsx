@@ -928,9 +928,8 @@ function TurnOffMenu({
         <span className="auto-on-anchor" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        // Toward the window's middle, and never against its edge.
+        // Toward the window's middle, not out past its edge.
         align="end"
-        collisionPadding={8}
         // The anchor has no name to lend the menu.
         aria-labelledby={undefined}
         aria-label="Turn off"
