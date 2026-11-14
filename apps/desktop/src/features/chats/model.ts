@@ -1,15 +1,17 @@
 import type {
   ChatChange,
+  Gone,
   ChatSnapshot,
   ChatState,
-  ChatSummary,
-  HarnessStatus,
+  ChatStatus,
   Problem,
-  ProblemKind,
   RecordChange,
   Step,
+  StepTarget,
+  TicketdCall,
+  TranscriptItem,
+  ItemOf,
 } from "@/features/chats/client";
-import { plainText } from "@/features/documents/graph-text";
 
 /**
  * Applies one change-log entry to the snapshot it follows. Returns "resync"
@@ -50,33 +52,758 @@ export function applyChange(
 const count = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
+/** Running, succeeded, and any other outcome; then what three or more count as. */
+const STEP_VERBS = {
+  read: ["Reading", "Read", "Read", "file"],
+  list: ["Listing", "Listed", "List", "folder"],
+  search: ["Searching for", "Searched for", "Search for", "time"],
+  edit: ["Editing", "Edited", "Edit", "file"],
+  create: ["Creating", "Created", "Create", "file"],
+  delete: ["Deleting", "Deleted", "Delete", "file"],
+  run: ["Running", "Ran", "Run", "command"],
+  web: [
+    "Searching the web for",
+    "Searched the web for",
+    "Search the web for",
+    "time",
+  ],
+  fetch: ["Fetching", "Fetched", "Fetch", "page"],
+  other: ["Using", "Used", "Use", "tool"],
+} as const;
+
+/** A ticketd call's verb: running, succeeded, and any other outcome (and an approval's). */
+const TICKETD_VERBS: Record<
+  TicketdCall["verb"],
+  readonly [string, string, string]
+> = {
+  read: ["Reading", "Read", "Read"],
+  list: ["Listing", "Listed", "List"],
+  search: ["Searching", "Searched", "Search"],
+  create: ["Creating", "Created", "Create"],
+  change: ["Changing", "Changed", "Change"],
+  set: ["Setting", "Set", "Set"],
+  post: ["Posting", "Posted", "Post"],
+  add: ["Adding", "Added", "Add"],
+  move: ["Moving", "Moved", "Move"],
+  restore: ["Restoring", "Restored", "Restore"],
+  tag: ["Tagging", "Tagged", "Tag"],
+  untag: ["Untagging", "Untagged", "Untag"],
+  run: ["Running", "Ran", "Run"],
+};
+
+/** Names a Project, Document or Plan by id; undefined when it is not known here. */
+export type RecordName = (kind: string, id: string) => string | undefined;
+
+/** Names the records linked to a Chat by their titles. */
+export const recordNamer =
+  (links: { kind: string; id: string; title: string }[]): RecordName =>
+  (kind, id) =>
+    links.find((link) => link.kind === kind && link.id === id)?.title;
+
 /**
- * "Read 6 files, edited 2 files, ran 1 command" for the finished steps; a step still
- * running, or one that failed, was refused or lost, is never told as done.
+ * ticketd calls as one sentence, one clause per call: "Read `T-MP4`, then set it to
+ * In progress". A verb is said once while it repeats ("Read `T-12` and `T-13`"), and
+ * a call on the reference the one before it named calls it "it". `tense` 0 is
+ * running, 1 done, 2 any other outcome or an approval; `lower` starts with a lowercase
+ * verb, to follow "wants to". A record the view knows reads by its title, any other
+ * by its id.
  */
-export function stepTally(
-  steps: Pick<Step, "verb" | "target" | "more" | "state">[],
-) {
-  const sum = (picked: typeof steps) =>
-    picked.reduce((total, step) => total + 1 + step.more, 0);
-  const done = steps.filter((step) => (step.state ?? "done") === "done");
-  const total = (verb: Step["verb"]) =>
-    sum(done.filter((step) => step.verb === verb));
-  const running = sum(steps.filter((step) => step.state === "running"));
-  const unfinished = sum(
-    steps.filter((step) => step.state === "failed" || step.state === "unknown"),
-  );
-  const parts = [
-    total("read") && `read ${count(total("read"), "file")}`,
-    total("edited") && `edited ${count(total("edited"), "file")}`,
-    total("ran") && `ran ${count(total("ran"), "command")}`,
-    total("other") && count(total("other"), "other step"),
-    running && `${count(running, "step")} in progress`,
-    unfinished && `${count(unfinished, "step")} did not complete`,
-  ].filter((part): part is string => Boolean(part));
-  const text = parts.join(", ");
-  return text.charAt(0).toUpperCase() + text.slice(1);
+export function ticketdParts(
+  calls: TicketdCall[],
+  tense: 0 | 1 | 2,
+  name: RecordName = () => undefined,
+  lower = false,
+): StepWords["parts"] {
+  const parts: StepWords["parts"] = [];
+  const reference = (call: TicketdCall | undefined) =>
+    call?.words.find((word) => word.code && !word.record)?.text;
+  calls.forEach((call, index) => {
+    const before = calls[index - 1];
+    const repeats = before?.verb === call.verb;
+    if (index > 0) {
+      if (repeats)
+        parts.push({
+          text: calls[index + 1]?.verb === call.verb ? "," : "and",
+        });
+      else parts.push({ text: "," }, { text: "then" });
+    }
+    if (!repeats) {
+      const verb = TICKETD_VERBS[call.verb][tense];
+      parts.push({ text: index > 0 || lower ? verb.toLowerCase() : verb });
+    }
+    const it = !repeats && reference(call) === reference(before);
+    for (const word of call.words) {
+      const title = word.record ? name(word.record, word.text) : undefined;
+      parts.push(
+        title
+          ? { text: title }
+          : word.record
+            ? { text: word.text.slice(0, 8), code: true }
+            : word.code && it && word.text === reference(before)
+              ? { text: "it" }
+              : word.code
+                ? { text: word.text, code: true }
+                : { text: word.text },
+      );
+    }
+  });
+  return parts;
 }
+
+/** Parts as one string, with "," set against the word before it. */
+export const partsText = (parts: StepWords["parts"]) =>
+  parts
+    .map((part) => part.text)
+    .join(" ")
+    .replace(/ ,/g, ",");
+
+const OUTCOME_WORDS = {
+  failed: "Failed",
+  declined: "Declined",
+  not_finished: "Not finished",
+  unknown: "Not confirmed",
+} as const;
+
+export type StepWords = {
+  /** The row's words in order; `code` ones are targets, shown in mono. */
+  parts: { text: string; code?: boolean }[];
+  /** At most one: an outcome word, a muted result such as "No matches", or a diffstat (12px mono). */
+  suffix?: { text: string; outcome: boolean; diffstat?: boolean };
+  /** The row's accessible name: "Run npm run test:limiter, Failed". */
+  label: string;
+  /** The muted line under an opened row: "Exit 1 · in apps/desktop". */
+  detail: string;
+};
+
+/**
+ * "12s", "2m 13s", "10m", "1h 4m": how long something took or has run. The
+ * one way a Chat says a time; never "0s".
+ */
+export function duration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes >= 60) {
+    const rest = minutes % 60;
+    return rest ? `${Math.floor(minutes / 60)}h ${rest}m` : `${minutes / 60}h`;
+  }
+  return seconds % 60 ? `${minutes}m ${seconds % 60}s` : `${minutes}m`;
+}
+
+/** "lines 40–90" for a read that names its lines. */
+export function targetLines(target: StepTarget): string {
+  if (!target.lines) return "";
+  const [from, to] = target.lines;
+  return from === to ? `line ${from}` : `lines ${from}–${to}`;
+}
+
+/**
+ * Every word of a step row: `[icon] Verb target · suffix`. Only a step that succeeded
+ * is in the past tense; any other outcome keeps the plain verb and says its word.
+ */
+export function stepWords(
+  step: Step,
+  name: RecordName = () => undefined,
+): StepWords {
+  const state = step.state ?? "done";
+  const targets = step.targets ?? [];
+  const key =
+    step.kind === "read" && step.variant === "list"
+      ? "list"
+      : step.kind === "web" && step.variant === "fetch"
+        ? "fetch"
+        : step.kind;
+  const [running, done, otherwise, noun] = STEP_VERBS[key];
+  const verb =
+    state === "running" ? running : state === "done" ? done : otherwise;
+  const code = (text: string) => ({ text, code: true });
+  const quoted = (text: string) => ({
+    text: key === "web" ? `“${text}”` : text,
+    code: key !== "web",
+  });
+  let parts: StepWords["parts"];
+  if (step.ticketd?.length) {
+    parts = ticketdParts(
+      step.ticketd,
+      state === "running" ? 0 : state === "done" ? 1 : 2,
+      name,
+    );
+  } else if (step.variant === "plan") {
+    // Claude Code keeps its plan in its own profile; the path says nothing more.
+    parts = [
+      {
+        text: `${state === "running" ? "Writing" : state === "done" ? "Wrote" : "Write"} its plan`,
+      },
+    ];
+  } else if (step.kind === "other" && targets.length === 0) {
+    parts = [{ text: step.target }];
+  } else if (step.kind === "run" && step.variant === "script") {
+    parts = [
+      { text: `${verb} a` },
+      code(targets[0]?.text ?? ""),
+      { text: "script" },
+    ];
+  } else if (step.kind === "run") {
+    // `target` is the command as shown (ticketd without its path); `command` is what ran.
+    const command = step.target || step.command || "";
+    parts = [{ text: verb }, code(command.split("\n")[0] ?? command)];
+  } else if (targets.length > 2) {
+    // "Searched for" counts as "Searched 3 times".
+    const counted = verb.replace(/ for$/, "");
+    parts = [{ text: `${counted} ${count(targets.length, noun)}` }];
+  } else if (targets.length === 0) {
+    // `rg --files` lists files, not a folder it names.
+    const what = key === "list" ? "file" : noun;
+    parts = [
+      {
+        text: key === "search" ? verb.replace(/ for$/, "") : `${verb} ${what}s`,
+      },
+    ];
+  } else {
+    const [first, second] = targets;
+    parts = [{ text: verb }, quoted(first?.text ?? "")];
+    if (second) parts.push({ text: "and" }, quoted(second.text));
+    else if (first?.scope && key === "search")
+      parts.push({ text: "in" }, code(first.scope));
+  }
+  const suffix =
+    state === "failed" && step.timed_out
+      ? { text: "Timed out", outcome: true }
+      : state in OUTCOME_WORDS
+        ? {
+            text: OUTCOME_WORDS[state as keyof typeof OUTCOME_WORDS],
+            outcome: true,
+          }
+        : state === "done" && step.no_matches
+          ? { text: "No matches", outcome: false }
+          : state === "done" &&
+              step.added_lines != null &&
+              step.removed_lines != null
+            ? {
+                text: `+${step.added_lines} −${step.removed_lines}`,
+                outcome: false,
+                diffstat: true,
+              }
+            : undefined;
+  const words = partsText(parts);
+  const spoken = suffix?.diffstat
+    ? `${step.added_lines} lines added, ${step.removed_lines} removed`
+    : suffix?.text;
+  const single = targets.length === 1 && !step.command ? targets[0] : undefined;
+  const took = step.duration_ms ? duration(step.duration_ms) : "";
+  // "Exit 1 · 4s", "Stopped after 10m": how it ended and how long it took.
+  const detail = [
+    step.timed_out
+      ? took && `Stopped after ${took}`
+      : step.exit_code
+        ? `Exit ${step.exit_code}`
+        : "",
+    step.timed_out ? "" : took,
+    step.folder ? `in ${step.folder}` : "",
+    single ? targetLines(single) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    parts,
+    ...(suffix && { suffix }),
+    label: spoken ? `${words}, ${spoken}` : words,
+    detail,
+  };
+}
+
+/**
+ * Consecutive steps of the same kind and outcome as one row ("Read 6 files"), which
+ * opens to its targets. Commands never merge, so each one's output stays one level
+ * down. Steps with a different outcome word ("No matches", "Timed out") never merge.
+ */
+const sum = (a: number | null | undefined, b: number | null | undefined) =>
+  a != null && b != null ? a + b : null;
+
+export function mergeSteps(steps: Step[]): Step[] {
+  const rows: Step[] = [];
+  for (const step of steps) {
+    const last = rows.at(-1);
+    const same =
+      last &&
+      step.kind !== "run" &&
+      last.kind === step.kind &&
+      (last.variant ?? null) === (step.variant ?? null) &&
+      (last.state ?? "done") === (step.state ?? "done") &&
+      // A different outcome word ("No matches") keeps its own row.
+      Boolean(last.no_matches) === Boolean(step.no_matches) &&
+      Boolean(last.timed_out) === Boolean(step.timed_out);
+    if (!same) {
+      rows.push(step);
+      continue;
+    }
+    // A merged row opens to its targets, so no one step's output comes with it.
+    const merged: Step = { ...last };
+    delete merged.output;
+    delete merged.result;
+    delete merged.truncated;
+    rows[rows.length - 1] = {
+      ...merged,
+      targets: [...(last.targets ?? []), ...(step.targets ?? [])],
+      no_matches: Boolean(last.no_matches && step.no_matches),
+      // Diffstats add up only when every merged step has one.
+      added_lines: sum(last.added_lines, step.added_lines),
+      removed_lines: sum(last.removed_lines, step.removed_lines),
+    };
+  }
+  return rows;
+}
+
+/** A reasoning row with no text leaves the list once it ends; one cut off stays. */
+export const reasoningShown = (item: ItemOf<"reasoning">) =>
+  item.state !== "done" || Boolean(item.text?.trim());
+
+/** A plan whose turn ended with every step done: one row in the fold. */
+export const planFinished = (item: ItemOf<"plan">) =>
+  item.state === "ended" &&
+  item.steps.length > 0 &&
+  item.steps.every((step) => step.status === "completed");
+
+/** A plan its turn ended without finishing, or whose stop did not confirm: a card. */
+export const planUnfinished = (item: ItemOf<"plan">) =>
+  item.state !== "running" && item.steps.length > 0 && !planFinished(item);
+
+/** One row of a turn, in the order it happened. `kept` rows are never folded. */
+export type TurnRow =
+  | {
+      kind: "step";
+      key: string;
+      step: Step;
+      /** The answered approval this step waited on: "You allowed this for this session". */
+      decision?: string;
+      kept?: false;
+    }
+  | { kind: "response"; key: string; item: ItemOf<"response">; kept?: false }
+  | {
+      kind: "record";
+      key: string;
+      change: RecordChange;
+      kept?: false;
+    }
+  | { kind: "receipt"; key: string; item: ItemOf<"request">; kept: true }
+  | { kind: "note"; key: string; item: ItemOf<"marker">; kept: true }
+  /** The harness's warnings in the turn, as one quiet line that opens to them. */
+  | {
+      kind: "warnings";
+      key: string;
+      items: ItemOf<"marker">[];
+      kept?: false;
+    }
+  /** #367: a reasoning row, and a plan that finished every step. */
+  | { kind: "reasoning"; key: string; item: ItemOf<"reasoning">; kept?: false }
+  | { kind: "plan"; key: string; item: ItemOf<"plan">; kept?: false };
+
+/**
+ * A turn, or one segment of it after a steer: your message's work through its end.
+ * While it runs it shows its rows as they come; once it ends they fold under one
+ * row, and the final response and the end marker stay outside.
+ */
+export type Turn = {
+  key: string;
+  /** Still running: nothing folds and there is no turn row. */
+  live: boolean;
+  /** Stop was asked for and not confirmed: the turn row shows, open. */
+  unconfirmed: boolean;
+  /** "Worked for 2m 13s · 1 failed". */
+  label: string;
+  rows: TurnRow[];
+  /** The turn's last response, when no step follows it. */
+  final?: ItemOf<"response">;
+  /** Why the turn stopped: stopped, quit or failed. */
+  marker?: ItemOf<"marker">;
+  /** A plan the turn ended with unfinished: a card above the final response. */
+  plan?: ItemOf<"plan">;
+  /** The files the turn changed, below the response and stop marker. */
+  files?: ItemOf<"files">;
+  /** The turn ran commands that edited files the files row cannot list. */
+  commandEdits?: boolean;
+  /** Every item the turn holds, for the reading position. */
+  ids: string[];
+};
+
+export type TranscriptPart =
+  { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
+
+/** What the turn row says, by how the segment ended. */
+const TURN_WORDS = {
+  worked: ["Worked for", "Worked"],
+  continued: ["Continued for", "Continued"],
+  stopped: ["Stopped after", "Stopped"],
+  failed: ["Failed after", "Failed"],
+  unconfirmed: ["Stop not confirmed after", "Stop not confirmed"],
+} as const;
+
+const PROBLEM_COUNTS = [
+  ["failed", "failed"],
+  ["declined", "declined"],
+  ["not_finished", "not finished"],
+  ["unknown", "not confirmed"],
+] as const;
+
+type Segment = {
+  turnId?: string;
+  steer: boolean;
+  started?: string;
+  /** Set when a steer ended the segment while its turn went on. */
+  until?: string;
+  members: TranscriptItem[];
+};
+
+/** The last element that passes `test`. */
+function lastOf<T, S extends T>(
+  list: readonly T[],
+  test: (value: T) => value is S,
+): S | undefined;
+function lastOf<T>(
+  list: readonly T[],
+  test: (value: T) => boolean,
+): T | undefined;
+function lastOf<T>(list: readonly T[], test: (value: T) => boolean) {
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const value = list[index];
+    if (value !== undefined && test(value)) return value;
+  }
+  return undefined;
+}
+
+const time = (stamp: string | null | undefined) => {
+  const value = stamp ? Date.parse(stamp) : NaN;
+  return Number.isNaN(value) ? undefined : value;
+};
+
+/** "Answered · Fail open", "Expired · rm -rf dist": a request's receipt row. */
+export function receiptLine(request: ItemOf<"request">) {
+  const subject = request.subject ?? request.title;
+  if (request.state === "expired") return `Expired · ${subject}`;
+  return `Answered · ${request.answer ?? subject}`;
+}
+
+/**
+ * A turn's rows in order, and every step as it now reads. Steps merge across the
+ * items they arrived in. `running` is what a step still running reads as: running,
+ * or Not finished once its turn ended, or Not confirmed after an unconfirmed stop.
+ */
+function rowsOf(members: TranscriptItem[], running: Step["state"]) {
+  const rows: TurnRow[] = [];
+  const all: Step[] = [];
+  let steps: { key: string; step: Step }[] = [];
+  // One line for every warning, where the first one came.
+  let warnings: Extract<TurnRow, { kind: "warnings" }> | undefined;
+  const flush = () => {
+    const first = steps[0]?.key ?? "";
+    mergeSteps(steps.map((entry) => entry.step)).forEach((step, index) =>
+      rows.push({ kind: "step", key: `${first}:${index}`, step }),
+    );
+    steps = [];
+  };
+  for (const item of members) {
+    if (item.kind === "steps") {
+      item.steps.forEach((original, index) => {
+        // The dock holds a step waiting on its approval; it has no row until decided.
+        if (original.awaiting && original.state === "running") return;
+        const step =
+          original.state === "running" && running !== "running"
+            ? { ...original, state: running }
+            : original;
+        all.push(step);
+        const key = `${item.id}:${index}`;
+        if (step.decision) {
+          // A step the person decided about stands alone, so its tooltip is its own.
+          flush();
+          rows.push({ kind: "step", key, step, decision: step.decision });
+        } else steps.push({ key, step });
+      });
+      continue;
+    }
+    flush();
+    // The host told the decision on the step it was asked for.
+    if (item.kind === "request" && item.folded) continue;
+    if (item.kind === "response")
+      rows.push({ kind: "response", key: item.id, item });
+    else if (item.kind === "reasoning") {
+      if (reasoningShown(item))
+        rows.push({ kind: "reasoning", key: item.id, item });
+    } else if (item.kind === "plan") {
+      if (planFinished(item)) rows.push({ kind: "plan", key: item.id, item });
+    } else if (item.kind === "records")
+      item.changes.forEach((change, index) =>
+        rows.push({
+          kind: "record",
+          key: `${item.id}:${index}`,
+          change: { ...change, gone: item.gone?.[index] ?? null },
+        }),
+      );
+    else if (item.kind === "request" && item.state !== "pending")
+      rows.push({ kind: "receipt", key: item.id, item, kept: true });
+    else if (item.kind === "marker" && item.reason === "note")
+      rows.push({ kind: "note", key: item.id, item, kept: true });
+    else if (item.kind === "marker" && item.reason === "warning") {
+      if (warnings) warnings.items.push(item);
+      else {
+        warnings = { kind: "warnings", key: item.id, items: [item] };
+        rows.push(warnings);
+      }
+    }
+  }
+  flush();
+  return { rows, steps: all };
+}
+
+/** A wait shorter than this is not worth saying. */
+const WAIT_SAID_FROM = 5000;
+
+/**
+ * How long, within `from`–`to`, the segment's requests waited on the person: from
+ * when each was asked until it was answered or expired, overlaps counted once.
+ * Requests recorded without those times count for nothing.
+ */
+function waitedIn(members: TranscriptItem[], from: number, to: number) {
+  const spans = members
+    .flatMap((item) => {
+      if (item.kind !== "request") return [];
+      const asked = time(item.at);
+      // A request still waiting waits until now (`to`).
+      const resolved = item.state === "pending" ? to : time(item.resolved_at);
+      if (asked === undefined || resolved === undefined) return [];
+      const start = Math.max(from, asked);
+      const end = Math.min(to, resolved);
+      return end > start ? [[start, end] as const] : [];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let reached = -Infinity;
+  for (const [start, end] of spans) {
+    const begin = Math.max(start, reached);
+    if (end > begin) total += end - begin;
+    reached = Math.max(reached, end);
+  }
+  return total;
+}
+
+/**
+ * How long a running turn has worked since `since`: the time from then to `now`
+ * less the time its requests waited on the person, as the fold counts it (LIVE2-8).
+ */
+export function workedFor(
+  items: TranscriptItem[],
+  since: string,
+  now: number,
+): number {
+  const from = time(since);
+  if (from === undefined) return NaN;
+  return Math.max(0, now - from - waitedIn(items, from, now));
+}
+
+/**
+ * The transcript as turns: each runs from your message through the turn's end, and
+ * a steer starts a new segment of the same turn. Messages, session dividers and
+ * anything outside a turn stay single items. `now` measures a turn whose stop was
+ * not confirmed, which has not ended.
+ */
+export function turns(
+  items: TranscriptItem[],
+  chat: Pick<ChatState, "activity" | "problem">,
+  now = Date.now(),
+): TranscriptPart[] {
+  const timings = new Map<string, ItemOf<"turn">>();
+  for (const item of items)
+    if (item.kind === "turn") timings.set(item.turn_id, item);
+  const parts: (TranscriptPart | Segment)[] = [];
+  let open: Segment | undefined;
+  for (const item of items) {
+    if (item.kind === "turn") continue;
+    if (item.kind === "request" && item.state === "pending") continue;
+    if (item.kind === "user" || item.kind === "session") {
+      // A steer ends the segment it joined; the turn goes on in a new one.
+      const steered = item.kind === "user" && item.steer ? open : undefined;
+      if (steered) steered.until = item.at;
+      parts.push({ kind: "item", item });
+      open = undefined;
+      if (steered) {
+        const turnId = steered.turnId ?? item.turn_id ?? undefined;
+        open = {
+          steer: true,
+          started: item.at,
+          members: [],
+          ...(turnId && { turnId }),
+        };
+        parts.push(open);
+      }
+      continue;
+    }
+    const turnId = item.turn_id ?? undefined;
+    if (open && turnId && open.turnId && open.turnId !== turnId)
+      open = undefined;
+    if (!open) {
+      open = { steer: false, members: [], ...(turnId && { turnId }) };
+      parts.push(open);
+    }
+    if (turnId && !open.turnId) open.turnId = turnId;
+    open.members.push(item);
+  }
+  const last = lastOf(parts, (part) => !("kind" in part));
+  const unconfirmedStop =
+    chat.problem?.kind === "stop_unconfirmed" && !chat.problem.past;
+  const live = chat.activity === "working" || chat.activity === "waiting";
+  return parts.flatMap((part): TranscriptPart[] => {
+    if ("kind" in part) return [part];
+    if (part.members.length === 0) return [];
+    const timing = part.turnId ? timings.get(part.turnId) : undefined;
+    const active = timing ? timing.outcome === "active" : part === last && live;
+    // A segment a steer ended folds while its turn goes on.
+    const ongoing = active && !part.until;
+    const unconfirmed = ongoing && unconfirmedStop;
+    const { rows, steps } = rowsOf(
+      part.members,
+      !active ? "not_finished" : unconfirmedStop ? "unknown" : "running",
+    );
+    const marker = lastOf(
+      part.members,
+      (item): item is ItemOf<"marker"> =>
+        item.kind === "marker" &&
+        item.reason !== "note" &&
+        item.reason !== "warning",
+    );
+    const plan = lastOf(
+      part.members,
+      (item): item is ItemOf<"plan"> => item.kind === "plan",
+    );
+    const files = lastOf(
+      part.members,
+      (item): item is ItemOf<"files"> =>
+        item.kind === "files" && item.state === "ended",
+    );
+    const commandEdits = steps.some(
+      (step) =>
+        Boolean(step.command) &&
+        (step.kind === "edit" ||
+          step.kind === "create" ||
+          step.kind === "delete"),
+    );
+    // The final response is the last one, unless steps follow it.
+    const lastWork = lastOf(
+      rows,
+      (row) => row.kind === "step" || row.kind === "response",
+    );
+    const final =
+      !ongoing && lastWork?.kind === "response" ? lastWork.item : undefined;
+    const started = time(part.steer ? part.started : timing?.started_at);
+    const ended = unconfirmed
+      ? now
+      : time(part.until ?? timing?.ended_at ?? undefined);
+    const outcome = part.until ? "completed" : (timing?.outcome ?? "completed");
+    const words = unconfirmed
+      ? TURN_WORDS.unconfirmed
+      : outcome === "failed"
+        ? TURN_WORDS.failed
+        : outcome === "stopped" || outcome === "quit" || outcome === "lost"
+          ? TURN_WORDS.stopped
+          : part.steer
+            ? TURN_WORDS.continued
+            : TURN_WORDS.worked;
+    const counts = PROBLEM_COUNTS.flatMap(([state, word]) => {
+      // A count already said by the row's own outcome is not said again.
+      if (state === "failed" && words === TURN_WORDS.failed) return [];
+      if (state === "unknown" && unconfirmed) return [];
+      const n = steps.filter((step) => step.state === state).length;
+      return n ? [`${n} ${word}`] : [];
+    });
+    const timed =
+      started !== undefined && ended !== undefined && ended >= started;
+    // Time the turn waited on the person is not time it worked.
+    const waited = timed ? waitedIn(part.members, started, ended) : 0;
+    const span = timed
+      ? `${words[0]} ${duration(Math.max(0, ended - started - waited))}`
+      : words[1];
+    const waitWords =
+      waited > WAIT_SAID_FROM ? [`waited ${duration(waited)}`] : [];
+    return [
+      {
+        kind: "turn",
+        turn: {
+          key: part.members[0]?.id ?? "",
+          live: ongoing && !unconfirmed,
+          unconfirmed,
+          label: [span, ...waitWords, ...counts].join(" · "),
+          rows: rows.filter(
+            (row) => row.kind !== "response" || row.item !== final,
+          ),
+          ...(final && { final }),
+          ...(marker && { marker }),
+          ...(plan && planUnfinished(plan) && { plan }),
+          ...(files && { files, commandEdits }),
+          ids: part.members.map((item) => item.id),
+        },
+      },
+    ];
+  });
+}
+
+/**
+ * The one polite status: a turn starting, waiting and ending, never each step.
+ * Requests and stopping are said before it.
+ */
+export function turnStatus(
+  chat: Pick<ChatState, "activity" | "problem">,
+  items: TranscriptItem[],
+) {
+  if (chat.activity === "working") return "Working";
+  if (chat.activity === "waiting") return "Waiting for you";
+  const last = lastOf(turns(items, chat), (part) => part.kind === "turn");
+  return last?.kind === "turn" ? last.turn.label : "";
+}
+
+/**
+ * The first item that arrived after `seen`, the last one the reader had in view:
+ * where the New marker goes. Your own messages never count, and neither do items
+ * with no row of their own. Nothing is new without a seen position.
+ */
+export function firstNew(items: TranscriptItem[], seen: string | undefined) {
+  // The host keeps a turn's timing item by its turn's id.
+  const from =
+    seen === undefined
+      ? -1
+      : items.findIndex((i) => i.id === seen || i.id === `turn:${seen}`);
+  if (from < 0) return undefined;
+  return items
+    .slice(from + 1)
+    .find(
+      (item) =>
+        item.kind !== "user" &&
+        item.kind !== "turn" &&
+        !(item.kind === "request" && item.state === "pending"),
+    )?.id;
+}
+
+/**
+ * Where the New marker goes in a Chat the host says is unseen (#365: its last
+ * ended turn came after the person last saw it) when this session has no seen
+ * position of its own: the first item of that turn.
+ */
+export function unseenFrom(items: TranscriptItem[]) {
+  const ended = lastOf(
+    items,
+    (item): item is ItemOf<"turn"> =>
+      item.kind === "turn" && item.outcome !== "active",
+  );
+  if (!ended) return undefined;
+  return items.find(
+    (item) =>
+      item.turn_id === ended.turn_id &&
+      item.kind !== "user" &&
+      item.kind !== "turn" &&
+      !(item.kind === "request" && item.state === "pending"),
+  )?.id;
+}
+
+/** " (in Trash)", " (deleted)": said after a record that is no longer there to open. */
+export const goneWords = (gone: Gone | null | undefined) =>
+  gone === "trashed" ? " (in Trash)" : gone === "deleted" ? " (deleted)" : "";
 
 /** What the agent did to a record, as the list row says it. */
 export function changeLine(change: RecordChange) {
@@ -87,157 +814,136 @@ export function changeLine(change: RecordChange) {
   return `Created the Document "${change.title}"`;
 }
 
-const PROBLEM_LINES: Record<ProblemKind, string> = {
-  not_installed: "Not sent",
-  incompatible: "Not sent",
-  unavailable: "Not sent",
-  probe_failed: "Not sent",
-  not_signed_in: "Not sent",
-  not_subscription: "Not on a subscription",
-  sign_in_unknown: "Sign-in not checked",
-  usage_limit: "Stopped: usage limit reached",
-  sandbox_unavailable: "Stopped: sandbox unavailable",
-  uncertain_delivery: "Needs your decision",
-  folder_missing: "Folder missing",
-  history_lost: "Session unavailable",
-  session_in_use: "Session in use elsewhere",
-  stop_unconfirmed: "Stop not confirmed",
-  failed: "Failed",
-};
+/** The host says the problem keeps the Chat from taking a new message. */
+export const blocksSend = (problem: Problem | null | undefined) =>
+  Boolean(problem?.blocks_send);
 
-/** Row wording for a problem that is why the last turn stopped, where it differs. */
-const PAST_PROBLEM_LINES: Partial<Record<ProblemKind, string>> = {
-  not_signed_in: "Stopped: not signed in",
-  session_in_use: "Stopped: session was in use elsewhere",
-};
+/** A managed folder is named by an id; it reads as New Chat names it: the Scratch folder. */
+export const folderLabel = (folder: ChatState["folder"]) =>
+  folder.managed ? "Scratch folder" : folder.name;
 
-/** The second line of a Chat's list row. */
-export function summaryLine(chat: ChatSummary): string {
-  if (chat.problem)
-    return (
-      (chat.problem_past && PAST_PROBLEM_LINES[chat.problem]) ||
-      PROBLEM_LINES[chat.problem]
-    );
-  if (chat.activity === "waiting") return "Waiting for you";
-  if (chat.activity === "working") return "Working…";
-  if (chat.activity === "failed") return "Failed";
-  if (chat.activity === "interrupted")
-    return chat.interruption === "stopped"
-      ? "You stopped this turn"
-      : chat.interruption === "quit"
-        ? "Stopped when ticketd quit"
-        : chat.interruption === "unconfirmed"
-          ? "Stop not confirmed"
-          : "Interrupted";
-  if (chat.last_change) return changeLine(chat.last_change);
-  // The preview is the raw last response, which is Markdown.
-  return (chat.preview && plainText(chat.preview)) || "Idle";
+/** The header's context button, read aloud: what the popover holds. */
+export function contextLabel(chat: ChatState) {
+  const { folder } = chat;
+  const branch = folder.branch?.name
+    ? folder.branch.kind === "detached"
+      ? `detached at ${folder.branch.name}`
+      : `branch ${folder.branch.name}`
+    : null;
+  const others = folder.shared_with.length;
+  return [
+    `Folder ${folderLabel(folder)}`,
+    folder.missing && "missing",
+    branch,
+    folder.project && `Project ${folder.project.title}`,
+    others > 0 && `used by ${others} other ${others === 1 ? "Chat" : "Chats"}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
-/**
- * Problems that keep the Chat from taking a new message until they are resolved.
- * Only one observed now blocks; why the last turn stopped (`past`) never does.
- */
-const BLOCKING: ProblemKind[] = [
-  "not_installed",
-  "incompatible",
-  "unavailable",
-  "not_signed_in",
-  "usage_limit",
-  "sandbox_unavailable",
-  "uncertain_delivery",
-  "session_in_use",
-];
-/** Problems under which there is nothing to type into. */
-const NO_COMPOSER: ProblemKind[] = ["folder_missing", "history_lost"];
+/** Waits for the person: approval, question, or a failure not yet seen. */
+export const needsYou = (status: ChatStatus) =>
+  status.rank === "approval" ||
+  status.rank === "question" ||
+  status.rank === "failed";
 
-export function blocksSend(problem: Problem | null | undefined) {
-  return Boolean(problem && !problem.past && BLOCKING.includes(problem.kind));
-}
-
-export function hasComposer(chat: ChatState) {
-  const problem = chat.problem;
-  return (
-    chat.retention !== "trashed" &&
-    !(problem && !problem.past && NO_COMPOSER.includes(problem.kind))
-  );
-}
-
-/**
- * Whether a Chat can be started on a harness with this status. A sign-in that is
- * not a subscription, or that ticketd could not check, does not block: it is shown.
- */
-export function harnessUsable(status: HarnessStatus["status"]) {
-  return (
-    status === "ready" ||
-    status === "not_subscription" ||
-    status === "sign_in_unknown"
-  );
-}
-
-/** Problems that are an install or sign-in step: shown on the row, never counted. */
-const SETUP: ProblemKind[] = [
-  "not_installed",
-  "incompatible",
-  "unavailable",
-  "probe_failed",
-  "not_signed_in",
-  "not_subscription",
-  "sign_in_unknown",
-];
-
-/**
- * Whether a Chat counts in the sidebar: it waits for an answer, its delivery
- * is uncertain, or it Failed. The host computes the same rule for its rows.
- */
-export function needsYou(
-  activity: ChatState["activity"],
-  problem: ProblemKind | undefined,
-) {
-  if (activity === "waiting" || problem === "uncertain_delivery") return true;
-  if (problem && SETUP.includes(problem)) return false;
-  return activity === "failed" || problem === "failed";
-}
+/** The row's one emphasis (title weight 500): it waits, or holds something unseen. */
+export const emphasised = (status: ChatStatus) =>
+  needsYou(status) || status.unseen;
 
 /** A turn is in progress, so it can be stopped. */
 export function isLive(chat: ChatState) {
   return chat.activity === "working" || chat.activity === "waiting";
 }
 
-export type ComposerControls =
-  | { kind: "send"; enabled: boolean }
-  /** Nothing typed during a turn: Stop is the only button. */
-  | { kind: "stop" }
-  | { kind: "steer"; hint: string }
-  | { kind: "queue-only"; hint: string };
+/**
+ * The Chat as the view shows it: a message saved and not yet taken by an idle
+ * Chat means its turn is starting, so the composer and the working line go to
+ * "Starting" at once on Send instead of after the host's next report (LIVE-6).
+ */
+export function asStarting(
+  chat: ChatState,
+  items: readonly TranscriptItem[],
+): ChatState {
+  if (isLive(chat) || chat.problem || !chat.has_composer) return chat;
+  const sending = items.some(
+    (item) => item.kind === "user" && item.delivery === "sending",
+  );
+  return sending
+    ? { ...chat, activity: "working", opening: chat.opening ?? "start" }
+    : chat;
+}
 
-/** Which buttons the composer shows for the turn's state and what is typed. */
+/**
+ * The composer's send button. Its word is set by the turn, never by what is
+ * typed or by a request: `send` with no turn running (or to answer an open
+ * question from the message box), `steer` while a turn runs that the harness
+ * can steer, `queue` while one runs that it cannot.
+ */
+export type ComposerControls = {
+  send: "send" | "steer" | "queue";
+  /** Enter, or a click, does what the word says. */
+  enabled: boolean;
+  /** Cmd/Ctrl+Enter queues instead. Only while a turn runs. */
+  queues?: boolean;
+  /** What steering does, or why the message waits: the button's tooltip. */
+  effect?: string;
+};
+
+/**
+ * The send button for the turn's state and what is typed. `answering` is set
+ * while the message box answers an open question.
+ */
 export function composerControls(
   chat: ChatState,
   text: string,
+  answering = false,
 ): ComposerControls {
   const typed = text.trim() !== "";
-  if (!isLive(chat))
-    return {
-      kind: "send",
-      enabled: typed && !blocksSend(chat.problem),
-    };
-  if (!typed) return { kind: "stop" };
+  const blocked = blocksSend(chat.problem);
+  if (!isLive(chat)) return { send: "send", enabled: typed && !blocked };
+  // Stopping: Send waits for the turn to end; queueing stays possible.
+  if (chat.stopping) return { send: "send", enabled: false, queues: typed };
+  if (answering) return { send: "send", enabled: typed, queues: typed };
   if (!chat.steering.available)
     return {
-      kind: "queue-only",
-      hint: `${chat.harness.name} can't take messages mid-turn. This will be queued until the turn ends.`,
+      send: "queue",
+      enabled: typed,
+      queues: typed,
+      effect: `${chat.harness.name} can't steer, so this waits for the turn to end.`,
     };
   return {
-    kind: "steer",
-    hint: [
-      "Send adds this to the turn in progress.",
-      chat.steering.effect,
-      "Queue holds it until the turn ends.",
-    ]
-      .filter(Boolean)
-      .join(" "),
+    send: "steer",
+    enabled: typed && !blocked,
+    queues: typed,
+    ...(chat.steering.effect && { effect: chat.steering.effect }),
   };
+}
+
+/** A request item whose `state` is `pending`: it waits in the activity dock. */
+export type PendingRequest = Extract<TranscriptItem, { kind: "request" }>;
+
+/**
+ * What a pending request is called: the host's title with what would run, or
+ * the question itself. It names the request group and is what arrives in the
+ * live announcement.
+ */
+export function requestLabel(request: PendingRequest, name?: RecordName) {
+  if (request.request === "question") return request.subject || request.title;
+  if (request.ticketd?.length)
+    return `${request.title} ${partsText(ticketdParts(request.ticketd, 2, name, true))}`;
+  return request.subject
+    ? `${request.title} ${request.subject}`
+    : request.title;
+}
+
+/** What the message box says it will do with what is typed. */
+export function composerPlaceholder(chat: ChatState, answering: boolean) {
+  const harness = chat.harness.name;
+  if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
+  if (answering) return "Answer, or pick above";
+  return chat.steering.available ? `Steer ${harness}` : `Queue for ${harness}`;
 }
 
 export type NoticeAction =
@@ -260,8 +966,9 @@ export type Notice = {
 };
 
 /**
- * The notice for a problem. Wording for the states the design drew is the
- * design's; the rest (spec table 21.6) say what was observed as plainly.
+ * The notice for a problem. The host titles it; the body says what to do.
+ * Wording for the states the design drew is the design's; the rest (spec
+ * table 21.6) say what was observed as plainly.
  */
 export function problemNotice(problem: Problem, harness: string): Notice {
   const said = problem.message ? ` ${problem.message}` : "";
@@ -274,34 +981,34 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       if (past)
         return {
           tone: "neutral",
-          title: `${harness} wasn't signed in`,
+          title: problem.title,
           body: `The last turn stopped because ${harness} wasn't signed in. Run ${signIn} in a terminal and sign in, then check again or send your message. ticketd never asks for your password or keys.${said}`,
           actions: problem.command ? ["copy-command", "check"] : ["check"],
         };
       return {
         tone: "neutral",
-        title: `${harness} isn't signed in`,
+        title: problem.title,
         body: `Run ${signIn} in a terminal and sign in, then check again. ticketd never asks for your password or keys.${said}`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_subscription":
       return {
         tone: "neutral",
-        title: `${harness} isn't using a subscription`,
+        title: problem.title,
         body: `${problem.message ?? `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "sign_in_unknown":
       return {
         tone: "neutral",
-        title: `ticketd can't check ${harness}'s sign-in`,
+        title: problem.title,
         body: `${problem.message ?? `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_installed":
       return {
         tone: "neutral",
-        title: `${harness} isn't installed`,
+        title: problem.title,
         body: `ticketd couldn't find ${harness} on this computer. Install it, then ${problem.command ? `run ${signIn} in a terminal and sign in, then ` : ""}check again. What you typed is kept.`,
         actions: problem.command
           ? ["help", "copy-command", "check"]
@@ -311,7 +1018,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "incompatible":
       return {
         tone: "neutral",
-        title: `This ${harness} version can't be used`,
+        title: problem.title,
         body: `${problem.message ?? `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Update guide",
@@ -319,21 +1026,21 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "unavailable":
       return {
         tone: "neutral",
-        title: `${harness} isn't available`,
+        title: problem.title,
         body: `${problem.message ?? `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
         actions: ["check"],
       };
     case "probe_failed":
       return {
         tone: "neutral",
-        title: `ticketd couldn't check ${harness}`,
+        title: problem.title,
         body: `It may still work.${said} Check again before sending.`,
         actions: ["check"],
       };
     case "usage_limit":
       return {
         tone: "neutral",
-        title: `${harness} reached your usage limit`,
+        title: problem.title,
         body: [
           problem.message,
           resetTime(problem.resets_at)
@@ -350,7 +1057,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "sandbox_unavailable":
       return {
         tone: "error",
-        title: `${harness} can't run commands here`,
+        title: problem.title,
         body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
@@ -358,7 +1065,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "uncertain_delivery":
       return {
         tone: "neutral",
-        title: `Did ${harness} get your message?`,
+        title: problem.title,
         // With a message, a resend the person asked for was not accepted.
         body: problem.message
           ? `${problem.message} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
@@ -368,14 +1075,14 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "folder_missing":
       return {
         tone: "neutral",
-        title: "This Chat's folder is missing",
+        title: problem.title,
         body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.`,
         actions: ["check", "pick-folder"],
       };
     case "history_lost":
       return {
         tone: "neutral",
-        title: `${harness} no longer has this conversation`,
+        title: problem.title,
         body: "You can still read it here. To keep going, resume in a fresh session and choose which history to give it.",
         actions: ["resume"],
       };
@@ -383,27 +1090,28 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       if (past)
         return {
           tone: "neutral",
-          title: `This ${harness} session was open somewhere else`,
+          title: problem.title,
           body: `The last turn stopped because of that. Close it there before you send again.${said}`,
           actions: [],
         };
       return {
         tone: "neutral",
-        title: `This ${harness} session is open somewhere else`,
+        title: problem.title,
         body: `Close it there, then check again. Nothing was sent.${said}`,
         actions: ["check"],
       };
     case "stop_unconfirmed":
+      // Stop stays enabled as the retry, so the notice offers nothing else.
       return {
         tone: "neutral",
-        title: `${harness} didn't confirm it stopped`,
-        body: `ticketd asked it to stop and heard nothing back. It may still be running. Edits already made are kept.${said}`,
-        actions: ["check"],
+        title: problem.title,
+        body: `${harness} may still be running.`,
+        actions: [],
       };
     case "failed":
       return {
         tone: "error",
-        title: `${harness} stopped with an error`,
+        title: problem.title,
         body: `${problem.message ?? "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
         actions: ["check"],
       };
@@ -440,14 +1148,6 @@ export function chatTime(timestamp: string, now = Date.now()): string {
   return then.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-/** "12s", "2m 14s": how long the current step has run. */
-export function elapsed(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  return seconds < 60
-    ? `${seconds}s`
-    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
-
 /** KiB or MiB to one decimal, as the truncation note states sizes. */
 export function binarySize(bytes: number): string {
   const mib = bytes / 1_048_576;
@@ -457,3 +1157,17 @@ export function binarySize(bytes: number): string {
 
 /** "1 Chat", "2 Chats". */
 export const chatCount = (n: number) => count(n, "Chat");
+
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+/** Terminal colour, cursor and title codes, which a step's output box does not draw. */
+const ANSI = new RegExp(
+  `${ESC}\\[[0-9;?]*[ -/]*[@-~]|${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`,
+  "g",
+);
+
+/** A step's output as plain text: ANSI colour is stripped. */
+export const plainOutput = (output: string) => output.replace(ANSI, "");
+
+/** The word naming a Chat's rank, for one-line summaries such as a ticket's Chats line. */
+export const statusLabel = (status: ChatStatus) => status.label ?? status.word;

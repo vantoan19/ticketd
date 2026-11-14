@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import { z } from "zod";
+import { attachmentSchema } from "@/lib/api/attachments";
 
 /**
  * What the desktop host tells the Chat screens, and what they may ask of it.
@@ -46,6 +47,10 @@ export type ProblemKind = z.infer<typeof problemKindSchema>;
 /** Why a Chat cannot continue as it is, with what the person needs to recover. */
 export const problemSchema = z.object({
   kind: problemKindSchema,
+  /** The notice's title, worded by the host in the harness's name. */
+  title: z.string(),
+  /** Observed now, it keeps the Chat from taking a new message (the host decides). */
+  blocks_send: z.boolean(),
   /** The host's plain explanation, for kinds whose wording depends on what was observed. */
   message: z.string().nullish(),
   /** A terminal command to copy, such as the harness's own sign-in. */
@@ -74,6 +79,10 @@ export const linkedRecordSchema = z.discriminatedUnion("kind", [
 ]);
 export type LinkedRecord = z.infer<typeof linkedRecordSchema>;
 
+/** A record that is no longer there to open: named, not linked. */
+export const goneSchema = z.enum(["trashed", "deleted"]);
+export type Gone = z.infer<typeof goneSchema>;
+
 export const recordChangeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
@@ -81,29 +90,67 @@ export const recordChangeSchema = z.discriminatedUnion("kind", [
     title: z.string(),
     from: z.string(),
     to: z.string(),
+    gone: goneSchema.nullish(),
   }),
   z.object({
     kind: z.literal("update"),
     reference: z.string(),
     excerpt: z.string(),
+    gone: goneSchema.nullish(),
   }),
   z.object({
     kind: z.literal("document"),
     document_id: z.string(),
     title: z.string(),
+    gone: goneSchema.nullish(),
   }),
 ]);
 export type RecordChange = z.infer<typeof recordChangeSchema>;
 
 export const interruptionSchema = z.enum(["stopped", "quit", "unconfirmed"]);
 
+/** Highest first: a Chat shows only its top status (spec 21.3). */
+export const rankSchema = z.enum([
+  "approval",
+  "question",
+  "working",
+  "failed",
+  "done",
+  "idle",
+]);
+export type Rank = z.infer<typeof rankSchema>;
+
+/** A Chat's ranked status and its row's second line, worded by the host. */
+export const chatStatusSchema = z.object({
+  rank: rankSchema,
+  /** The last turn ended after the person last saw the Chat, or they marked it unread. */
+  unseen: z.boolean(),
+  /** "Approval needed", "Working"; for Idle, the plain last line. */
+  word: z.string(),
+  /** The word naming the rank, for one-line summaries: Idle after a reply says "Done". */
+  label: z.string().nullish(),
+  detail: z.string().nullish(),
+});
+export type ChatStatus = z.infer<typeof chatStatusSchema>;
+
+/** A Project as a Chat names it: the folder's Project, else a linked one. */
+export const projectRefSchema = z.object({ id: z.string(), title: z.string() });
+export type ProjectRef = z.infer<typeof projectRefSchema>;
+
 export const chatSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
+  /** Absent from older hosts; the mark then reads as an unknown harness. */
+  harness_id: z.string().nullish(),
   harness_name: z.string(),
   /** Absent while the folder is missing. */
   folder_name: z.string().nullish(),
   first_ticket: z.string().nullish(),
+  project: projectRefSchema.nullish(),
+  /** The linked tickets, in link order: the row's context item. */
+  tickets: z
+    .array(z.object({ reference: z.string(), status: z.string() }))
+    .default([]),
   retention: retentionSchema,
   activity: activitySchema,
   /** A live approval or question, or a delivery the person must decide about. */
@@ -116,11 +163,18 @@ export const chatSummarySchema = z.object({
   /** The start of the last response. */
   preview: z.string().nullish(),
   updated_at: z.string(),
+  status: chatStatusSchema,
+  muted: z.boolean(),
 });
 export type ChatSummary = z.infer<typeof chatSummarySchema>;
 
 export const chatOverviewSchema = z.object({
+  /** Waiting for the person, muted Chats included: the sidebar count. */
   needs_you: z.number().int().nonnegative(),
+  /** An unseen outcome that does not wait for the person: the blue dot. */
+  unread: z.number().int().nonnegative(),
+  /** Waiting Chats that are not muted: the app-icon count. */
+  app_icon: z.number().int().nonnegative(),
   working: z.number().int().nonnegative(),
 });
 export type ChatOverview = z.infer<typeof chatOverviewSchema>;
@@ -141,30 +195,112 @@ export const harnessStatusSchema = z.object({
     "sign_in_unknown",
     "unknown",
   ]),
+  /** Chats can be started on it (the host decides). */
+  usable: z.boolean(),
+  /** The word shown beside its name when it isn't ready; `dot` when it needs the person. */
+  word: z.object({ word: z.string(), dot: z.boolean() }).nullish(),
+  /** What New Chat's notice tells when it isn't ready. */
+  problem: problemSchema.nullish(),
   /** What was found or why the probe is uncertain: executable, version, requirement. */
   message: z.string().nullish(),
   command: z.string().nullish(),
   help_url: z.string().nullish(),
-  /** The executable the message is about, to show as a path. */
+  /** The executable that was found, to show as a path. */
   path: z.string().nullish(),
+  /** The version number it reported ("2.1.322"). */
+  version: z.string().nullish(),
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
 
+const stepTargetSchema = z.object({
+  /** A path relative to the Chat's folder, a pattern, a query or a page. */
+  text: z.string(),
+  /** The lines read, first and last. */
+  lines: z.tuple([z.number(), z.number()]).nullish(),
+  /** Where a search looked. */
+  scope: z.string().nullish(),
+});
+export type StepTarget = z.infer<typeof stepTargetSchema>;
+
+/** One word of a ticketd call's sentence; a `record` word is an id shown by its title. */
+const ticketdWordSchema = z.object({
+  text: z.string(),
+  code: z.boolean().optional(),
+  record: z.enum(["project", "document", "plan"]).nullish(),
+});
+
+/** A ticketd CLI call as a sentence: the verb, put in the step's tense, then its words. */
+export const ticketdCallSchema = z.object({
+  verb: z.enum([
+    "read",
+    "list",
+    "search",
+    "create",
+    "change",
+    "set",
+    "post",
+    "add",
+    "move",
+    "restore",
+    "tag",
+    "untag",
+    "run",
+  ]),
+  words: z.array(ticketdWordSchema),
+});
+export type TicketdCall = z.infer<typeof ticketdCallSchema>;
+
+/** The host classifies every step; the view only words it (`stepWords`). */
 const stepSchema = z.object({
-  verb: z.enum(["read", "edited", "ran", "other"]),
-  /** A path or command; for `other`, the readable fallback text. */
+  kind: z.enum([
+    "read",
+    "search",
+    "edit",
+    "create",
+    "delete",
+    "run",
+    "web",
+    "other",
+  ]),
+  /** `list`: Listed; `fetch`: Fetched a page; `script`: Ran a `python3` script; `plan`: Wrote its plan. */
+  variant: z.enum(["list", "fetch", "script", "plan"]).nullish(),
+  /** Readable text for a step without targets: the command, tool or note. */
   target: z.string(),
-  /** Further targets merged into this row ("and 5 more"). */
-  more: z.number().int().nonnegative().default(0),
-  /** Whether the step has finished. Absent from older records: read as `done`. */
-  state: z.enum(["running", "done", "failed", "unknown"]).optional(),
-  /** Diffstat or outcome, already readable: "+12 −3", "passed", "1 failed". */
+  targets: z.array(stepTargetSchema).optional(),
+  /** The command without its shell wrappers. */
+  command: z.string().nullish(),
+  exit_code: z.number().int().nullish(),
+  /** Where the command ran, when that is not the Chat's folder. */
+  folder: z.string().nullish(),
+  timed_out: z.boolean().optional(),
+  duration_ms: z.number().nullish(),
+  /** A search that finished and found nothing. */
+  no_matches: z.boolean().optional(),
+  /**
+   * Whether the step has finished. Absent from older records: read as `done`.
+   * `not_finished`: the turn ended first; `unknown`: contact was lost.
+   */
+  state: z
+    .enum(["running", "done", "failed", "declined", "not_finished", "unknown"])
+    .optional(),
+  /** A note about the output, already readable. */
   result: z.string().nullish(),
   output: z.string().nullish(),
   /** Set when ticketd kept less output than the harness produced. */
   truncated: z
     .object({ kept_bytes: z.number(), total_bytes: z.number() })
     .nullish(),
+  /** When the host recorded the call, for a running step's clock. */
+  started_at: z.string().nullish(),
+  /** Lines the step added and removed, when the harness said: its diffstat. */
+  added_lines: z.number().int().nonnegative().nullish(),
+  removed_lines: z.number().int().nonnegative().nullish(),
+  /** The decision on the approval the harness asked for this step ("You declined this"). */
+  decision: z.string().nullish(),
+  /** A command that only calls ticketd, told as sentences; `command` is what runs. */
+  ticketd: z.array(ticketdCallSchema).nullish(),
+  /** Its approval waits in the dock, which is its only row until decided. */
+  awaiting: z.boolean().optional(),
 });
 export type Step = z.infer<typeof stepSchema>;
 
@@ -174,7 +310,32 @@ const requestOptionSchema = z.object({
   description: z.string().nullish(),
 });
 
-const item = { id: z.string(), at: z.string() };
+/** `turn_id`: the turn that owns the item, when one does. */
+const item = { id: z.string(), at: z.string(), turn_id: z.string().nullish() };
+
+const planStepSchema = z.object({
+  text: z.string(),
+  status: z.enum(["pending", "in_progress", "completed"]),
+  /** What the harness shows while the step runs ("Running tests"). */
+  active_label: z.string().nullish(),
+});
+export type PlanStep = z.infer<typeof planStepSchema>;
+
+const changedFileSchema = z.object({
+  /** Relative to the Chat's folder, or with `~` for the home folder. */
+  path: z.string(),
+  /** The absolute path the host opens. */
+  open_path: z.string(),
+  kind: z.enum(["added", "modified", "deleted", "renamed"]),
+  /** A renamed file's earlier path. */
+  from: z.string().nullish(),
+  /** Absent when the harness reported no line counts. */
+  added_lines: z.number().int().nullish(),
+  removed_lines: z.number().int().nullish(),
+  /** The harness reported the change as made. */
+  confirmed: z.boolean(),
+});
+export type ChangedFile = z.infer<typeof changedFileSchema>;
 export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
@@ -189,6 +350,10 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
       "uncertain",
       "set_aside",
     ]),
+    /** Sent to steer a turn in progress: what follows is a new segment of it. */
+    steer: z.boolean().optional(),
+    /** Images sent with the message, kept as Attachments. */
+    images: z.array(attachmentSchema).optional(),
   }),
   z.object({
     ...item,
@@ -202,6 +367,25 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     ...item,
     kind: z.literal("records"),
     changes: z.array(recordChangeSchema),
+    /** For each change, whether its record is now trashed or deleted. */
+    gone: z.array(goneSchema.nullable()).nullish(),
+  }),
+  /** When a turn started and ended, and how. It has no row of its own. */
+  z.object({
+    ...item,
+    kind: z.literal("turn"),
+    turn_id: z.string(),
+    started_at: z.string(),
+    ended_at: z.string().nullish(),
+    /** `stopped` by the person, `quit` with ticketd, `lost`: contact was lost. */
+    outcome: z.enum([
+      "active",
+      "completed",
+      "stopped",
+      "quit",
+      "failed",
+      "lost",
+    ]),
   }),
   z.object({
     ...item,
@@ -217,12 +401,28 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     state: z.enum(["pending", "answered", "expired"]),
     /** For an answered request: "You allowed this once". */
     outcome: z.string().nullish(),
+    /** For an answered question, the answer as given. */
+    answer: z.string().nullish(),
     resolved_at: z.string().nullish(),
+    /** An answered approval: the host tells its decision on the step it was asked for, so it has no row. */
+    folded: z.boolean().nullish(),
+    /** Exactly what would run, when the subject shortens it or says it as sentences. */
+    command: z.string().nullish(),
+    /** A command that only calls ticketd, said after the title ("wants to"). */
+    ticketd: z.array(ticketdCallSchema).nullish(),
   }),
   z.object({
     ...item,
     kind: z.literal("marker"),
-    reason: z.enum(["stopped", "quit", "stop_unconfirmed", "failed", "note"]),
+    /** `warning`: said by the harness; it folds with its turn. `note`: ticketd's own. */
+    reason: z.enum([
+      "stopped",
+      "quit",
+      "stop_unconfirmed",
+      "failed",
+      "note",
+      "warning",
+    ]),
     /** Required reading for `failed` and `note`; optional detail otherwise. */
     message: z.string().nullish(),
   }),
@@ -232,8 +432,121 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     history: z.enum(["last_response", "last_messages", "all", "picked"]),
     count: z.number().int().nonnegative(),
   }),
+  /** One reasoning item. Times are milliseconds since the Unix epoch, as reported. */
+  z.object({
+    ...item,
+    kind: z.literal("reasoning"),
+    turn_id: z.string(),
+    /** `not_finished`: the turn ended first; `unknown`: contact was lost. */
+    state: z.enum(["running", "done", "not_finished", "unknown"]),
+    started_at: z.number().nullish(),
+    ended_at: z.number().nullish(),
+    /** Only what the harness showed; absent when it showed nothing or redacted it. */
+    text: z.string().nullish(),
+    /** A heading the harness itself marked. */
+    heading: z.string().nullish(),
+  }),
+  /** A turn's plan as the harness last reported it. */
+  z.object({
+    ...item,
+    kind: z.literal("plan"),
+    turn_id: z.string(),
+    /** `unconfirmed`: Stop was asked for and did not confirm. */
+    state: z.enum(["running", "ended", "unconfirmed"]),
+    steps: z.array(planStepSchema),
+    explanation: z.string().nullish(),
+  }),
+  /** The files a turn changed. */
+  z.object({
+    ...item,
+    kind: z.literal("files"),
+    turn_id: z.string(),
+    state: z.enum(["running", "ended"]),
+    files: z.array(changedFileSchema),
+  }),
 ]);
 export type TranscriptItem = z.infer<typeof transcriptItemSchema>;
+/** The transcript item of one kind: `ItemOf<"step">`. */
+export type ItemOf<K extends TranscriptItem["kind"]> = Extract<
+  TranscriptItem,
+  { kind: K }
+>;
+
+const contextSchema = z.object({
+  /** Tokens in use. */
+  used: z.number(),
+  /** The window's size in tokens. */
+  window: z.number(),
+  /** What the harness says fills the window. */
+  categories: z.array(z.object({ name: z.string(), tokens: z.number() })),
+  /** Where the harness compacts on its own, in tokens. */
+  compacts_at: z.number().nullish(),
+  /** When it was reported, in milliseconds since the Unix epoch. */
+  at: z.number(),
+  compacted_at: z.number().nullish(),
+});
+export type ContextUsage = z.infer<typeof contextSchema>;
+
+export const settingChangeSchema = z.object({
+  value: z.string(),
+  /** `held`: waits for the turn to end; then `sent`, then the outcome. */
+  state: z.enum([
+    "held",
+    "sent",
+    "applied",
+    "refused",
+    "unconfirmed",
+    "unsupported",
+  ]),
+  reason: z.string().nullish(),
+});
+export type SettingChange = z.infer<typeof settingChangeSchema>;
+
+/** One harness setting. Full access is never among the choosable options. */
+const settingSchema = z.object({
+  current: z.string().nullish(),
+  options: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      description: z.string().nullish(),
+      is_default: z.boolean(),
+      permission: z
+        .enum(["read_only", "ask", "accept_edits", "full_access"])
+        .nullish(),
+      allowed: z.boolean(),
+    }),
+  ),
+  changeable: z.boolean(),
+  /** Why it cannot be changed, when it cannot. */
+  reason: z.string().nullish(),
+  applies_from: z.enum(["next_turn", "next_request"]),
+  /** The model the harness says answered, when not the chosen one. */
+  answered_by: z.string().nullish(),
+  change: settingChangeSchema.nullish(),
+});
+export type HarnessSetting = z.infer<typeof settingSchema>;
+
+const settingOptionSchema = settingSchema.shape.options.element;
+export type SettingOption = z.infer<typeof settingOptionSchema>;
+
+/** What one harness offers before any session, as the installed harness reported it. */
+export const harnessOptionsSchema = z.object({
+  harness_id: z.string(),
+  models: z.array(
+    settingOptionSchema.extend({
+      /** Lowest first; `is_default` marks the model's own default, when said. */
+      efforts: z.array(settingOptionSchema),
+      /** The model an alias row runs, by name ("Default" runs "Opus 5.5"). */
+      runs_as: z.string().nullish(),
+    }),
+  ),
+  /** `current` is unset: before a session only the harness's own setting applies. */
+  permission: settingSchema.nullish(),
+  /** Why it reported nothing; the picker then offers its Default only. */
+  unavailable: z.string().nullish(),
+});
+export type HarnessOptions = z.infer<typeof harnessOptionsSchema>;
 
 export const chatStateSchema = z.object({
   id: z.string(),
@@ -250,7 +563,21 @@ export const chatStateSchema = z.object({
     managed: z.boolean(),
     missing: z.boolean(),
     /** Titles of other Chats running in the same folder. */
-    shared_with: z.array(z.string()),
+    shared_with: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        retention: retentionSchema,
+      }),
+    ),
+    /** The git branch checked out there, read by the host; absent outside a repository. */
+    branch: z
+      .object({
+        kind: z.enum(["branch", "detached", "unreadable"]),
+        name: z.string().nullish(),
+      })
+      .nullish(),
+    project: projectRefSchema.nullish(),
   }),
   retention: retentionSchema,
   activity: activitySchema,
@@ -267,9 +594,40 @@ export const chatStateSchema = z.object({
     /** What steering does to running work, as the harness defines it. */
     effect: z.string().nullish(),
   }),
+  /** Stop was asked for and the turn has not ended; Stop waits. Not set once unconfirmed. */
+  stopping: z.boolean().default(false),
   links: z.array(linkedRecordSchema),
-  queue: z.array(z.object({ id: z.string(), text: z.string() })),
+  queue: z.array(
+    z.object({
+      id: z.string(),
+      text: z.string(),
+      /** Sent to steer, and the harness did not take it: the host's reason. */
+      refused_steer: z.string().nullish(),
+    }),
+  ),
   queue_paused: z.boolean(),
+  /** The live session's context window; absent until the harness reports it. */
+  context: contextSchema.nullish(),
+  /** The live session's settings, for the composer's pickers (#368). */
+  settings: z
+    .object({
+      model: settingSchema.nullish(),
+      effort: settingSchema.nullish(),
+      permission: settingSchema.nullish(),
+    })
+    .nullish(),
+  unseen: z.boolean(),
+  muted: z.boolean(),
+  /** There is something to type into: not in trash, and the folder and session are there. */
+  has_composer: z.boolean(),
+  /** Linked records now in the trash: a mention of one reads "(in Trash)". */
+  trashed_links: z.array(z.string()).default([]),
+  /** The slash commands the live session's harness lists; `/` opens only with some. */
+  commands: z
+    .array(z.object({ name: z.string(), description: z.string().nullish() }))
+    .default([]),
+  /** The last transcript item the person had in view, kept by the host: the New marker goes after it. */
+  read_through: z.string().nullish(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 
@@ -307,6 +665,20 @@ export type ChatChange = z.infer<typeof chatChangeSchema>;
 
 export type LinkRef = { kind: LinkedRecord["kind"]; id: string };
 
+/** A file or folder in a Chat's folder; `path` is relative, with `/` separators. */
+export const folderFileSchema = z.object({
+  path: z.string(),
+  folder: z.boolean(),
+});
+export type FolderFile = z.infer<typeof folderFileSchema>;
+
+/** A click on a Chat's system notification: open it under its own list. */
+export const openRequestSchema = z.object({
+  chat_id: z.string(),
+  retention: retentionSchema,
+});
+export type OpenRequest = z.infer<typeof openRequestSchema>;
+
 /**
  * A created Chat. `send_error` says why its first message was not saved: the
  * Chat exists, so the interface opens it with the unsent text in its composer.
@@ -316,6 +688,29 @@ export const createdChatSchema = z.object({
   send_error: z.string().nullish(),
 });
 export type CreatedChat = z.infer<typeof createdChatSchema>;
+
+const linkedTicketSchema = linkedRecordSchema.options[0];
+/** What New Chat offers while its box is empty, chosen by the host from local records. */
+export const suggestionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("continue"),
+    ticket: linkedTicketSchema,
+    at: z.string().nullish(),
+  }),
+  z.object({
+    kind: z.literal("review"),
+    ticket: linkedTicketSchema,
+    at: z.string().nullish(),
+  }),
+  /** `count` unread Inbox entries about the linked tickets; `at` is the newest. */
+  z.object({
+    kind: z.literal("triage"),
+    count: z.number().int().positive(),
+    links: z.array(linkedTicketSchema),
+    at: z.string(),
+  }),
+]);
+export type Suggestion = z.infer<typeof suggestionSchema>;
 export type RequestAnswer = { option_id: string } | { text: string };
 export type HistorySelection =
   | { kind: "last_response" }
@@ -326,11 +721,12 @@ export type Unsubscribe = () => void;
 
 /**
  * A command the host refused. `stale` means the request, turn or runtime it
- * named is no longer current; the view shows the current state instead.
+ * named is no longer current; the view shows the current state instead. `gone`
+ * means the file it named is no longer there.
  */
 export class ChatError extends Error {
   constructor(
-    readonly code: "stale" | "failed",
+    readonly code: "stale" | "gone" | "failed",
     message: string,
   ) {
     super(message);
@@ -348,10 +744,16 @@ export interface ChatClient {
   listChats(scope: Retention): Promise<ChatSummary[]>;
   /** Probes installation and sign-in again on every call. */
   harnesses(): Promise<HarnessStatus[]>;
+  /** What a harness offers before a session; asked of the harness once per version. */
+  harnessOptions(harnessId: string): Promise<HarnessOptions>;
   /** The native folder dialog; null when dismissed. */
   pickFolder(): Promise<string | null>;
   /** How many Chats already run in the folder. */
   folderUse(path: string): Promise<number>;
+  /** The Project whose checkout holds `path`, for New Chat's folder button. */
+  folderProject(path: string): Promise<ProjectRef | null>;
+  /** A Project's folder on this computer, for New Chat when it is linked; null without one. */
+  projectFolder(projectId: string): Promise<string | null>;
   /**
    * `folder: null` asks for a managed folder. `command_id` is a UUID made once
    * per request and repeated only when the very same request is sent again,
@@ -363,6 +765,10 @@ export interface ChatClient {
     folder: string | null;
     links: LinkRef[];
     message: string;
+    /** New Chat's picks: option ids the harness offered. Unset keeps its own setting. */
+    model?: string;
+    effort?: string;
+    permission?: string;
   }): Promise<CreatedChat>;
   openChat(id: string): Promise<ChatSnapshot>;
   /** Changes after `cursor`, in order. */
@@ -371,11 +777,20 @@ export interface ChatClient {
     cursor: number,
     listener: (change: ChatChange) => void,
   ): Unsubscribe;
-  /** Starts a turn, or steers the one in progress; the host queues it when steering is known not to have been accepted. */
-  send(id: string, text: string): Promise<void>;
-  queue(id: string, text: string): Promise<void>;
+  /**
+   * Starts a turn, or steers the one in progress; the host queues it when steering is known not to have been accepted.
+   * `links` are the records the message mentions or quotes: linked as it is sent (spec 21.4).
+   */
+  send(id: string, text: string, links?: LinkRef[]): Promise<void>;
+  queue(id: string, text: string, links?: LinkRef[]): Promise<void>;
+  /** The Chats outside the trash linked to one record. Refetch on `revision`. */
+  linkedTo(link: LinkRef): Promise<ChatSummary[]>;
+  /** Files and folders under `folder` matching `query`, for the composer's `@` menu. */
+  folderFiles(folder: string, query: string): Promise<FolderFile[]>;
   removeQueued(id: string, queuedId: string): Promise<void>;
   resumeQueue(id: string): Promise<void>;
+  /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */
+  sendQueuedNow(id: string, queuedId: string): Promise<void>;
   stop(id: string): Promise<void>;
   /** Rejects with a `stale` ChatError unless the request is the live one. */
   answer(id: string, requestId: string, answer: RequestAnswer): Promise<void>;
@@ -398,12 +813,45 @@ export interface ChatClient {
   removeLink(id: string, link: LinkRef): Promise<void>;
   /** Continues the same Chat in a fresh harness session started with the chosen history. */
   resume(id: string, history: HistorySelection): Promise<void>;
-  /** Ordinary core Document creation; resolves to the Document's id. */
+  /**
+   * Uses `value` for a harness setting from the next turn. While a turn runs
+   * the change is held until it ends. Resolves to where it stands.
+   */
+  changeSetting(
+    id: string,
+    setting: "model" | "effort" | "permission",
+    value: string,
+  ): Promise<SettingChange>;
+  /** Opens the Chat's folder itself in the file manager. */
+  openFolder(id: string): Promise<void>;
+  /**
+   * Opens a file in the Chat's folder in the system's default app: one a step
+   * named (relative to the folder) or one a turn changed (absolute). Fails with
+   * `gone` when the file is no longer there; a path outside the folder fails.
+   */
+  openFile(id: string, path: string): Promise<void>;
+  /** Ordinary core Document creation from a response or a plan; resolves to the Document's id. */
   saveAsDocument(
     id: string,
     responseId: string,
     title: string,
   ): Promise<string>;
+  /**
+   * New Chat's suggestions for a folder (null: one ticketd keeps), skipping the
+   * tickets already linked to it.
+   */
+  suggestions(folder: string | null, linked: string[]): Promise<Suggestion[]>;
+  /** Mark as read clears an unseen outcome, never a live request. */
+  markRead(id: string): Promise<void>;
+  /** The last turn reads as unseen until the Chat is next opened. */
+  markUnread(id: string): Promise<void>;
+  /** The person had the transcript in view through `itemId`; kept with the Chat. */
+  readThrough(id: string, itemId: string): Promise<void>;
+  setMuted(id: string, muted: boolean): Promise<void>;
+  /** Settings > Chat > Notify me about Chats, as the person last chose it. */
+  setNotify(enabled: boolean): Promise<void>;
+  /** The person clicked a Chat's system notification. */
+  onOpenRequested(listener: (request: OpenRequest) => void): Unsubscribe;
   /** Quit was asked for while Chats work; `working` is how many. */
   onQuitRequested(listener: (working: number) => void): Unsubscribe;
   answerQuit(quit: boolean): Promise<void>;
@@ -416,7 +864,11 @@ export interface ChatClient {
 export const unavailableChatClient: ChatClient = new Proxy({} as ChatClient, {
   get: (_, method: string) => {
     if (method === "getEnabled") return async () => false;
-    if (method === "subscribeOverview" || method === "onQuitRequested")
+    if (
+      method === "subscribeOverview" ||
+      method === "onQuitRequested" ||
+      method === "onOpenRequested"
+    )
       return () => () => {};
     return async () => {
       throw new ChatError("failed", "Chat is not available in this build.");

@@ -1,0 +1,10 @@
+{"note":"Hand-built from the codex-cli 0.167.2 TypeScript bindings (ModelListParams/Response with cursor paging, PermissionProfileListResponse). Not captured from a live session; every value is synthetic."}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"server":{"id":1,"result":{"userAgent":"ticketd/0.167.2","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"macos"}}}
+{"client":{"method":"initialized"}}
+{"client":{"id":2,"method":"model/list","params":{}}}
+{"server":{"id":2,"result":{"data":[{"id":"gpt-a","model":"gpt-a","displayName":"GPT A","description":"Everyday work","hidden":false,"isDefault":true,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},{"reasoningEffort":"medium","description":""},{"reasoningEffort":"high","description":"Deep"}]},{"id":"gpt-hidden","model":"gpt-hidden","displayName":"Hidden","description":"","hidden":true,"isDefault":false,"defaultReasoningEffort":"low","supportedReasoningEfforts":[]}],"nextCursor":"page-2"}}}
+{"client":{"id":3,"method":"model/list","params":{"cursor":"page-2"}}}
+{"server":{"id":3,"result":{"data":[{"id":"gpt-b","model":"gpt-b","displayName":"GPT B","description":"","hidden":false,"isDefault":false,"defaultReasoningEffort":"high","supportedReasoningEfforts":[{"reasoningEffort":"high","description":""}]}],"nextCursor":null}}}
+{"client":{"id":4,"method":"permissionProfile/list","params":{}}}
+{"server":{"id":4,"result":{"data":[{"id":":read-only","description":"Read files only","allowed":true},{"id":":workspace","description":null,"allowed":true}],"nextCursor":null}}}

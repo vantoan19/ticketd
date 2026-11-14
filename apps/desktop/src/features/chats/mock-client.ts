@@ -4,45 +4,292 @@ import {
   chatSnapshotSchema,
   chatStateSchema,
   chatSummarySchema,
+  harnessOptionsSchema,
   type ChatChange,
   type ChatClient,
   type ChatOverview,
   type ChatState,
+  type ChatStatus,
   type ChatSummary,
+  type FolderFile,
+  type HarnessOptions,
   type HarnessStatus,
+  type SettingOption,
+  type LinkRef,
   type LinkedRecord,
+  type Suggestion,
+  type OpenRequest,
+  type Problem,
+  type ProblemKind,
+  type ProjectRef,
   type TranscriptItem,
 } from "@/features/chats/client";
-import { harnessUsable, needsYou } from "@/features/chats/model";
+import { changeLine } from "@/features/chats/model";
+import { plainText } from "@/features/documents/graph-text";
+
+/** Words for a condition that holds now and is not a failure; as the host says them. */
+const CONDITION_WORDS: Partial<Record<string, string>> = {
+  not_installed: "Not sent",
+  incompatible: "Not sent",
+  unavailable: "Not sent",
+  probe_failed: "Not sent",
+  not_signed_in: "Not sent",
+  folder_missing: "Folder missing",
+  history_lost: "Session unavailable",
+  session_in_use: "Session in use elsewhere",
+};
+
+/** As the host's `ChatProblemKind::blocks_send`. */
+const BLOCKS_SEND = new Set<ProblemKind>([
+  "not_installed",
+  "incompatible",
+  "unavailable",
+  "not_signed_in",
+  "usage_limit",
+  "sandbox_unavailable",
+  "uncertain_delivery",
+  "session_in_use",
+]);
+/** As the host's `ChatProblemKind::removes_composer`. */
+const NO_COMPOSER = new Set<ProblemKind>(["folder_missing", "history_lost"]);
+
+/** A problem as a test spells it; the fake host fills in what the real one decides. */
+export type ProblemInput = Omit<Problem, "title" | "blocks_send"> &
+  Partial<Pick<Problem, "title" | "blocks_send">>;
+
+/** As the host's `ChatProblemKind::title`. */
+function problemTitle(kind: ProblemKind, harness: string, past: boolean) {
+  switch (kind) {
+    case "not_signed_in":
+      return past
+        ? `${harness} wasn't signed in`
+        : `${harness} isn't signed in`;
+    case "not_subscription":
+      return `${harness} isn't using a subscription`;
+    case "sign_in_unknown":
+      return `ticketd can't check ${harness}'s sign-in`;
+    case "not_installed":
+      return `${harness} isn't installed`;
+    case "incompatible":
+      return `This ${harness} version can't be used`;
+    case "unavailable":
+      return `${harness} isn't available`;
+    case "probe_failed":
+      return `ticketd couldn't check ${harness}`;
+    case "usage_limit":
+      return `${harness} reached your usage limit`;
+    case "sandbox_unavailable":
+      return `${harness} can't run commands here`;
+    case "uncertain_delivery":
+      return `Did ${harness} get your message?`;
+    case "folder_missing":
+      return "This Chat's folder is missing";
+    case "history_lost":
+      return `${harness} no longer has this conversation`;
+    case "session_in_use":
+      return past
+        ? `This ${harness} session was open somewhere else`
+        : `This ${harness} session is open somewhere else`;
+    case "stop_unconfirmed":
+      return "Stop not confirmed";
+    case "failed":
+      return `${harness} stopped with an error`;
+  }
+}
+
+/** A problem as the host sends it, worded for `harness`. */
+export function hostProblem(problem: ProblemInput, harness: string): Problem {
+  return {
+    title: problemTitle(problem.kind, harness, Boolean(problem.past)),
+    blocks_send: !problem.past && BLOCKS_SEND.has(problem.kind),
+    ...problem,
+  };
+}
+
+/** A harness status as a test spells it; the fake host fills in the rest. */
+export type HarnessInput = Omit<HarnessStatus, "usable" | "word" | "problem"> &
+  Partial<Pick<HarnessStatus, "usable" | "word">> & {
+    problem?: Partial<ProblemInput> | null;
+  };
+
+const HARNESS_WORDS: Record<
+  HarnessStatus["status"],
+  HarnessStatus["word"] | null
+> = {
+  ready: null,
+  not_signed_in: { word: "Not signed in", dot: true },
+  incompatible: { word: "Can't be used", dot: true },
+  unavailable: { word: "Can't be used", dot: true },
+  unknown: { word: "Couldn't check", dot: true },
+  not_subscription: { word: "Not on a subscription", dot: true },
+  not_installed: { word: "Not installed", dot: false },
+  sign_in_unknown: { word: "Sign-in not checked", dot: false },
+};
+
+/** As the host's `HarnessState`: usable, its word, and New Chat's notice. */
+export function harnessStatus(input: HarnessInput): HarnessStatus {
+  const { problem, ...rest } = input;
+  const kind: ProblemKind | null =
+    input.status === "ready"
+      ? null
+      : input.status === "unknown"
+        ? "probe_failed"
+        : input.status;
+  return {
+    usable: ["ready", "not_subscription", "sign_in_unknown"].includes(
+      input.status,
+    ),
+    word: HARNESS_WORDS[input.status],
+    problem:
+      kind &&
+      hostProblem(
+        {
+          kind,
+          message: input.message,
+          command: input.command,
+          help_url: input.help_url,
+          path: input.path,
+          ...problem,
+        },
+        input.name,
+      ),
+    ...rest,
+  };
+}
+
+/** What the host derives from a Chat's state: whether there is a composer. */
+function settled(chat: ChatState): ChatState {
+  const problem = chat.problem;
+  return {
+    ...chat,
+    has_composer:
+      chat.retention !== "trashed" &&
+      !(problem && !problem.past && NO_COMPOSER.has(problem.kind)),
+  };
+}
+
+/**
+ * The host's ranked status (spec 21.3), simplified for fixtures: the mock has no
+ * turns, so a Failed or finished Chat is unseen until it is opened.
+ */
+function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
+  const unseen = chat.unseen;
+  const make = (
+    rank: ChatStatus["rank"],
+    word: string,
+    detail?: string | null,
+  ): ChatStatus => ({
+    rank,
+    unseen,
+    word,
+    label: word,
+    detail: detail ?? null,
+  });
+  const pending = items.find(
+    (item): item is Extract<TranscriptItem, { kind: "request" }> =>
+      item.kind === "request" && item.state === "pending",
+  );
+  if (pending?.request === "approval")
+    return make("approval", "Approval needed", pending.subject);
+  if (pending) return make("question", "Question", pending.subject);
+  const problem = chat.problem;
+  if (problem?.kind === "uncertain_delivery") {
+    const message = items.find((item) => item.id === problem.message_id);
+    return make(
+      "question",
+      "Not confirmed",
+      message?.kind === "user" ? message.text : null,
+    );
+  }
+  if (problem?.kind === "stop_unconfirmed")
+    return make("working", "Stop not confirmed");
+  if (chat.activity === "working" || chat.activity === "waiting")
+    return make("working", "Working", chat.opening ? "Starting" : null);
+  const marker = items.at(-1)?.kind === "marker" ? items.at(-1) : undefined;
+  const reason = marker?.kind === "marker" ? marker.reason : undefined;
+  if (reason === "stopped") return make("idle", "You stopped it");
+  if (reason === "quit") return make("idle", "Stopped when ticketd quit");
+  // A failure observed now waits for the person while it holds.
+  if (problem?.kind === "failed" && !problem.past)
+    return make(
+      "failed",
+      "Failed",
+      problem.message ?? `${chat.harness.name} stopped with an error`,
+    );
+  if (chat.activity === "failed")
+    return make(
+      unseen ? "failed" : "idle",
+      "Failed",
+      `${chat.harness.name} ${problem?.kind === "usage_limit" ? "reached your usage limit" : "stopped with an error"}`,
+    );
+  if (chat.activity === "interrupted")
+    return make(
+      unseen ? "failed" : "idle",
+      "Interrupted",
+      `${chat.harness.name} stopped mid-turn`,
+    );
+  const condition = problem && !problem.past && CONDITION_WORDS[problem.kind];
+  if (condition) return make("idle", condition);
+  const change = items
+    .filter(
+      (item): item is Extract<TranscriptItem, { kind: "records" }> =>
+        item.kind === "records",
+    )
+    .at(-1)
+    ?.changes.at(-1);
+  const response = items
+    .filter(
+      (item): item is Extract<TranscriptItem, { kind: "response" }> =>
+        item.kind === "response",
+    )
+    .at(-1);
+  const line =
+    (change && changeLine(change)) ||
+    (response && plainText(response.text)) ||
+    null;
+  if (unseen && response) return make("done", "Done", line);
+  return line ? { ...make("idle", line), label: "Done" } : make("idle", "Idle");
+}
 
 /** A Chat state with quiet defaults, so a test or fixture spells out only what matters. */
 export function chatState(
-  over: Partial<Omit<ChatState, "steering" | "folder" | "harness">> & {
+  over: Partial<
+    Omit<ChatState, "steering" | "folder" | "harness" | "problem">
+  > & {
     id: string;
     title: string;
     harness?: Partial<ChatState["harness"]>;
     folder?: Partial<ChatState["folder"]>;
     steering?: Partial<ChatState["steering"]>;
+    problem?: ProblemInput | null;
   },
 ): ChatState {
-  return chatStateSchema.parse({
-    retention: "active",
-    activity: "idle",
-    links: [],
-    queue: [],
-    queue_paused: false,
-    ...over,
-    harness: { id: "codex", name: "Codex", ...over.harness },
-    folder: {
-      path: "~/code/web-app",
-      name: "web-app",
-      managed: false,
-      missing: false,
-      shared_with: [],
-      ...over.folder,
-    },
-    steering: { available: true, ...over.steering },
-  });
+  const harness = { id: "codex", name: "Codex", ...over.harness };
+  return settled(
+    chatStateSchema.parse({
+      retention: "active",
+      activity: "idle",
+      links: [],
+      queue: [],
+      queue_paused: false,
+      // A failure in a fixture has not been seen yet.
+      unseen: over.activity === "failed",
+      muted: false,
+      has_composer: true,
+      ...over,
+      problem: over.problem && hostProblem(over.problem, harness.name),
+      harness,
+      folder: {
+        path: "~/code/web-app",
+        name: "web-app",
+        managed: false,
+        missing: false,
+        shared_with: [],
+        ...over.folder,
+      },
+      steering: { available: true, ...over.steering },
+    }),
+  );
 }
 
 export type MockChat = {
@@ -65,20 +312,126 @@ export type MockChatClient = ChatClient & {
   /** Adds a transcript item, or replaces the one with the same id. */
   push(id: string, item: TranscriptItem): void;
   streamText(id: string, itemId: string, text: string): void;
-  patch(id: string, change: Partial<ChatState>): void;
+  patch(
+    id: string,
+    change: Partial<Omit<ChatState, "problem">> & {
+      problem?: ProblemInput | null;
+    },
+  ): void;
   /** Loses the next `count` changes on the way to subscribers. */
   dropChanges(id: string, count: number): void;
-  setHarnesses(harnesses: HarnessStatus[]): void;
+  setHarnesses(harnesses: HarnessInput[]): void;
+  /** What each harness reports it offers; a harness without an entry reports none. */
+  options: Map<string, HarnessOptions>;
+  /** What each createChat was asked with, in order. */
+  created: Parameters<ChatClient["createChat"]>[0][];
   requestQuit(): void;
+  /** As if the person clicked the Chat's system notification. */
+  requestOpen(request: OpenRequest): void;
+  /** What Notify me about Chats was last set to. */
+  notify: boolean;
   /** Whether Quit was confirmed. */
   quit: boolean;
   /** Titles saved through Save as Document, in order. */
   savedDocuments: string[];
+  /** Items passed to readThrough, in order. */
+  readThroughs: string[];
+  /** The Project each folder belongs to, as the host would find it. */
+  folderProjects: Map<string, ProjectRef>;
+  /** Each Project's folder, by Project id. */
+  projectFolders: Map<string, string>;
+  /** Paths opened through a changed-files row or a step's file name, in order. */
+  openedFiles: string[];
   /** What the next folder dialog returns. */
   nextFolder: string | null;
 };
 
-const READY: HarnessStatus[] = [
+const option = (
+  id: string,
+  label: string,
+  extra: Partial<SettingOption> = {},
+) =>
+  ({ id, label, is_default: false, allowed: true, ...extra }) as SettingOption;
+const levels = (...ids: string[]) =>
+  ids.map((id) =>
+    option(
+      id,
+      id === "xhigh" ? "Extra high" : id[0]!.toUpperCase() + id.slice(1),
+    ),
+  );
+
+/** What the two harnesses list, as their real model lists are shaped. */
+export const HARNESS_OPTIONS: HarnessOptions[] = [
+  {
+    harness_id: "claude-code",
+    models: [
+      {
+        ...option("default", "Default (recommended)", {
+          description: "Opus 5.5 for complex, multi-step work",
+          is_default: true,
+        }),
+        runs_as: "Opus 5.5",
+        efforts: levels("low", "medium", "high", "max"),
+      },
+      {
+        ...option("sonnet", "Sonnet 5", {
+          description: "Fast and capable for everyday coding",
+        }),
+        efforts: levels("low", "medium", "high"),
+      },
+      {
+        ...option("haiku", "Haiku 4.5", {
+          description: "Fastest, for quick answers",
+        }),
+        efforts: [],
+      },
+    ],
+    permission: {
+      options: [
+        option("default", "Ask before edits", {
+          is_default: true,
+          permission: "ask",
+        }),
+        option("acceptEdits", "Accept edits", { permission: "accept_edits" }),
+        option("plan", "Plan only", { permission: "read_only" }),
+      ],
+      changeable: true,
+      applies_from: "next_request",
+    },
+  },
+  {
+    harness_id: "codex",
+    models: [
+      {
+        ...option("gpt-5.5-codex", "GPT-5.5 Codex", {
+          description: "Optimized for coding agents",
+          is_default: true,
+        }),
+        efforts: levels("low", "medium", "high", "xhigh").map((level) => ({
+          ...level,
+          is_default: level.id === "medium",
+        })),
+      },
+      {
+        ...option("gpt-5.5", "GPT-5.5", {
+          description: "Broad world knowledge",
+        }),
+        efforts: levels("minimal", "low", "medium", "high"),
+      },
+    ],
+    permission: {
+      options: [
+        option(":workspace", "workspace"),
+        option(":read-only", "read-only"),
+      ],
+      changeable: false,
+      reason: "Codex sets permissions in its own configuration",
+      applies_from: "next_turn",
+    },
+  },
+];
+
+const READY: HarnessInput[] = [
   { id: "claude-code", name: "Claude Code", status: "ready" },
   { id: "codex", name: "Codex", status: "ready" },
 ];
@@ -91,8 +444,16 @@ export function createMockChatClient(
   seed: {
     enabled?: boolean;
     chats?: MockChat[];
-    harnesses?: HarnessStatus[];
+    harnesses?: HarnessInput[];
+    /** What each harness lists before a session; HARNESS_OPTIONS when left out. */
+    options?: HarnessOptions[];
     records?: LinkedRecord[];
+    /** What New Chat suggests; linked tickets are left out as the host does. */
+    suggestions?: Suggestion[];
+    /** Step files that are no longer in their Chat's folder. */
+    goneFiles?: string[];
+    /** What every Chat's folder holds, for the `@` menu. */
+    files?: FolderFile[];
     now?: string;
     /** How many log entries are kept per Chat for a reconnecting subscriber. */
     logLimit?: number;
@@ -101,13 +462,16 @@ export function createMockChatClient(
   const now = seed.now ?? "2026-11-10T10:00:00Z";
   const logLimit = seed.logLimit ?? 1000;
   let enabled = seed.enabled ?? false;
-  let harnesses = seed.harnesses ?? READY;
+  let harnesses = (seed.harnesses ?? READY).map(harnessStatus);
   let created = 0;
   const requests = new Map<string, string>();
   const dropping = new Map<string, number>();
   const overviewListeners = new Set<(overview: ChatOverview) => void>();
+  const openListeners = new Set<(request: OpenRequest) => void>();
   const quitListeners = new Set<(working: number) => void>();
   const chats = new Map<string, Stored>();
+  /** Chats the person marked unread: as the host, they keep their seen words. */
+  const marked = new Set<string>();
   const store = (entry: MockChat) =>
     chats.set(entry.chat.id, {
       chat: entry.chat,
@@ -130,8 +494,15 @@ export function createMockChatClient(
     const all = [...chats.values()].filter(
       (entry) => entry.chat.retention !== "trashed",
     );
+    const rows = all.map(summary);
     return {
-      needs_you: all.filter((entry) => summary(entry).needs_you).length,
+      needs_you: rows.filter((row) => row.needs_you).length,
+      unread: rows.filter(
+        (row) =>
+          row.status.unseen &&
+          (row.status.rank === "done" || row.status.rank === "idle"),
+      ).length,
+      app_icon: rows.filter((row) => row.needs_you && !row.muted).length,
       working: all.filter((entry) => live(entry.chat)).length,
     };
   };
@@ -146,17 +517,34 @@ export function createMockChatClient(
         .at(-1);
     const marker = items.at(-1)?.kind === "marker" ? last("marker") : undefined;
     const ticket = chat.links.find((link) => link.kind === "ticket");
+    const status = marked.has(chat.id)
+      ? { ...mockStatus({ ...chat, unseen: false }, items), unseen: true }
+      : mockStatus(chat, items);
     return chatSummarySchema.parse({
       id: chat.id,
       title: chat.title,
+      harness_id: chat.harness.id,
       harness_name: chat.harness.name,
+      project:
+        chat.folder.project ??
+        chat.links
+          .filter((link) => link.kind === "project")
+          .map(({ id, title }) => ({ id, title }))[0] ??
+        null,
+      tickets: chat.links.flatMap((link) =>
+        link.kind === "ticket"
+          ? [{ reference: link.reference, status: link.status }]
+          : [],
+      ),
       // As the host: a managed folder's name is an id, so the row leaves it out.
       folder_name:
         chat.folder.missing || chat.folder.managed ? null : chat.folder.name,
       first_ticket: ticket?.kind === "ticket" ? ticket.reference : null,
       retention: chat.retention,
       activity: chat.activity,
-      needs_you: needsYou(chat.activity, chat.problem?.kind),
+      needs_you: ["approval", "question", "failed"].includes(status.rank),
+      status,
+      muted: chat.muted,
       problem: chat.problem?.kind ?? null,
       interruption:
         marker?.reason === "stopped"
@@ -195,9 +583,28 @@ export function createMockChatClient(
     else entry.items[index] = item;
     emit(entry, { kind: "item", item });
   };
-  const patch = (id: string, change: Partial<ChatState>) => {
+  const patch = (
+    id: string,
+    asked: Partial<Omit<ChatState, "problem">> & {
+      problem?: ProblemInput | null;
+    },
+  ) => {
     const entry = get(id);
-    entry.chat = chatStateSchema.parse({ ...entry.chat, ...change });
+    const { problem, ...rest } = asked;
+    let change: Partial<ChatState> = rest;
+    if (problem !== undefined)
+      change = {
+        ...change,
+        problem: problem && hostProblem(problem, entry.chat.harness.name),
+      };
+    // A turn that ends while nobody follows the Chat is unseen.
+    const ended =
+      live(entry.chat) &&
+      change.activity &&
+      !live({ ...entry.chat, ...change });
+    if (ended && entry.listeners.size === 0)
+      change = { unseen: true, ...change };
+    entry.chat = settled(chatStateSchema.parse({ ...entry.chat, ...change }));
     emit(entry, { kind: "chat", chat: entry.chat });
   };
   let ids = 0;
@@ -210,7 +617,13 @@ export function createMockChatClient(
   const halt = (id: string, reason: "stopped" | "quit") => {
     expirePending(id);
     push(id, { id: nextId("marker"), at: now, kind: "marker", reason });
-    patch(id, { activity: "interrupted", doing: null, queue_paused: true });
+    // A turn ticketd or the person stopped is Idle; it does not turn unread.
+    patch(id, {
+      activity: "interrupted",
+      doing: null,
+      queue_paused: true,
+      unseen: get(id).chat.unseen,
+    });
   };
   const startTurn = (id: string, text: string) => {
     push(id, {
@@ -230,6 +643,17 @@ export function createMockChatClient(
     patch(id, {
       queue: [...get(id).chat.queue, { id: nextId("queued"), text }],
     });
+  const linkAll = (id: string, links: LinkRef[]) => {
+    for (const link of links) {
+      const record = (seed.records ?? []).find(
+        (item) => item.kind === link.kind && item.id === link.id,
+      );
+      if (!record) throw new ChatError("failed", "The record was not found.");
+      const current = get(id).chat.links;
+      if (!current.some((item) => item.id === record.id))
+        patch(id, { links: [...current, record] });
+    }
+  };
   const send = async (id: string, text: string) => {
     const { chat } = get(id);
     if (chat.retention === "trashed")
@@ -240,6 +664,7 @@ export function createMockChatClient(
         id: nextId("user"),
         at: now,
         kind: "user",
+        steer: true,
         text,
         delivery: "delivered",
       });
@@ -248,7 +673,19 @@ export function createMockChatClient(
 
   const client: MockChatClient = {
     quit: false,
+    notify: true,
     savedDocuments: [],
+    openedFiles: [],
+    options: new Map(
+      (seed.options ?? HARNESS_OPTIONS).map((entry) => [
+        entry.harness_id,
+        entry,
+      ]),
+    ),
+    created: [],
+    readThroughs: [],
+    folderProjects: new Map(),
+    projectFolders: new Map(),
     nextFolder: null,
     push,
     patch,
@@ -262,7 +699,10 @@ export function createMockChatClient(
       emit(entry, { kind: "text", item_id: itemId, text });
     },
     dropChanges: (id, count) => void dropping.set(id, count),
-    setHarnesses: (next) => void (harnesses = next),
+    setHarnesses: (next) => void (harnesses = next.map(harnessStatus)),
+    requestOpen(request) {
+      for (const listener of [...openListeners]) listener(request);
+    },
     requestQuit() {
       for (const listener of [...quitListeners]) listener(overview().working);
     },
@@ -285,19 +725,31 @@ export function createMockChatClient(
         .map(summary)
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     harnesses: async () => harnesses,
+    async harnessOptions(harnessId) {
+      return harnessOptionsSchema.parse(
+        client.options.get(harnessId) ?? {
+          harness_id: harnessId,
+          models: [],
+          unavailable: "It did not list its models.",
+        },
+      );
+    },
     pickFolder: async () => client.nextFolder,
+    folderProject: async (path) => client.folderProjects.get(path) ?? null,
+    projectFolder: async (id) => client.projectFolders.get(id) ?? null,
     folderUse: async (path) =>
       [...chats.values()].filter((entry) => entry.chat.folder.path === path)
         .length,
     async createChat(input) {
       const harness = harnesses.find((item) => item.id === input.harness_id);
-      if (!harness || !harnessUsable(harness.status))
+      if (!harness?.usable)
         throw new ChatError("failed", "The harness is not ready.");
       // A repeated request finds the Chat the first try created.
       const existing = requests.get(input.command_id);
       if (existing) return { chat_id: existing };
       const id = `chat-${(created += 1)}`;
       requests.set(input.command_id, id);
+      client.created.push(input);
       const path = input.folder ?? `~/ticketd/chats/${id}`;
       store({
         chat: chatState({
@@ -321,6 +773,9 @@ export function createMockChatClient(
     },
     async openChat(id) {
       const entry = get(id);
+      // Opening a Chat any way marks it seen.
+      marked.delete(id);
+      if (entry.chat.unseen) patch(id, { unseen: false });
       return chatSnapshotSchema.parse(
         structuredClone({
           chat: entry.chat,
@@ -339,8 +794,29 @@ export function createMockChatClient(
       entry.listeners.add(listener);
       return () => entry.listeners.delete(listener);
     },
-    send,
-    queue,
+    async send(id, text, links = []) {
+      linkAll(id, links);
+      await send(id, text);
+    },
+    async queue(id, text, links = []) {
+      linkAll(id, links);
+      await queue(id, text);
+    },
+    linkedTo: async (link) =>
+      [...chats.values()]
+        .filter(
+          (entry) =>
+            entry.chat.retention !== "trashed" &&
+            entry.chat.links.some(
+              (item) => item.kind === link.kind && item.id === link.id,
+            ),
+        )
+        .map(summary)
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+    folderFiles: async (_folder, query) =>
+      (seed.files ?? []).filter((file) =>
+        file.path.toLowerCase().includes(query.trim().toLowerCase()),
+      ),
     async removeQueued(id, queuedId) {
       patch(id, {
         queue: get(id).chat.queue.filter((item) => item.id !== queuedId),
@@ -354,6 +830,19 @@ export function createMockChatClient(
         queue: first && !live(chat) ? rest : chat.queue,
       });
       if (first && !live(chat)) startTurn(id, first.text);
+    },
+    async sendQueuedNow(id, queuedId) {
+      const { chat } = get(id);
+      const queued = chat.queue.find((item) => item.id === queuedId);
+      if (!queued)
+        throw new ChatError("stale", "This message is no longer queued.");
+      if (live(chat) && !chat.steering.available)
+        throw new ChatError(
+          "failed",
+          "the Chat is working; try again when it has finished",
+        );
+      patch(id, { queue: chat.queue.filter((item) => item.id !== queuedId) });
+      await send(id, queued.text);
     },
     async stop(id) {
       if (live(get(id).chat)) halt(id, "stopped");
@@ -373,6 +862,11 @@ export function createMockChatClient(
         ...request,
         state: "answered",
         outcome: option ? `You chose "${option.label}"` : "You answered",
+        // As the host: an approval's decision is told on its step.
+        folded: request.request === "approval",
+        ...(request.request === "question" && {
+          answer: option?.label ?? ("text" in answer ? answer.text : ""),
+        }),
         resolved_at: now,
       });
       patch(id, { activity: "working" });
@@ -397,8 +891,7 @@ export function createMockChatClient(
     async checkAgain(id) {
       const { chat } = get(id);
       const harness = harnesses.find((item) => item.id === chat.harness.id);
-      if (harness && harnessUsable(harness.status))
-        patch(id, { activity: "idle", problem: null });
+      if (harness?.usable) patch(id, { activity: "idle", problem: null });
     },
     async setFolder(id, path) {
       const { chat } = get(id);
@@ -410,7 +903,10 @@ export function createMockChatClient(
           managed: false,
           missing: false,
         },
-        problem: chat.problem?.kind === "folder_missing" ? null : chat.problem,
+        problem:
+          chat.problem?.kind === "folder_missing"
+            ? null
+            : (chat.problem ?? null),
         activity: "idle",
       });
     },
@@ -463,12 +959,86 @@ export function createMockChatClient(
       });
       patch(id, { activity: "idle", problem: null });
     },
+    async changeSetting(id, setting, value) {
+      const current = get(id).chat.settings?.[setting];
+      if (
+        !current?.options.some(
+          (option) => option.id === value && option.allowed,
+        )
+      )
+        return { value, state: "refused", reason: "not one of its choices" };
+      const change = {
+        value,
+        state: live(get(id).chat) ? "held" : "applied",
+      } as const;
+      patch(id, {
+        settings: {
+          ...get(id).chat.settings,
+          [setting]: {
+            ...current,
+            ...(change.state === "applied" && { current: value }),
+            change,
+          },
+        },
+      });
+      return change;
+    },
+    async openFolder(id) {
+      client.openedFiles.push(get(id).chat.folder.path);
+    },
+    async openFile(id, path) {
+      // As the host: only inside the Chat's folder, relative or absolute.
+      const folder = get(id).chat.folder.path.replace(/\/+$/, "");
+      const inside = path.startsWith("/")
+        ? path.startsWith(`${folder}/`)
+        : !path.split("/").includes("..");
+      if (!inside)
+        throw new ChatError(
+          "failed",
+          "That file is outside the Chat's folder.",
+        );
+      if (seed.goneFiles?.includes(path))
+        throw new ChatError(
+          "gone",
+          `${path.split("/").at(-1)} is no longer in this folder.`,
+        );
+      client.openedFiles.push(path);
+    },
     async saveAsDocument(id, responseId, title) {
       const response = get(id).items.find((item) => item.id === responseId);
-      if (response?.kind !== "response")
+      if (response?.kind !== "response" && response?.kind !== "plan")
         throw new ChatError("failed", "That response no longer exists.");
       client.savedDocuments.push(title);
       return `document-${client.savedDocuments.length}`;
+    },
+    async suggestions(_folder, linked) {
+      return (seed.suggestions ?? []).filter(
+        (suggestion) =>
+          suggestion.kind === "triage" ||
+          !linked.includes(suggestion.ticket.id),
+      );
+    },
+    markRead: async (id) => {
+      marked.delete(id);
+      patch(id, { unseen: false });
+    },
+    markUnread: async (id) => {
+      marked.add(id);
+      patch(id, { unseen: true });
+    },
+    // As the host: kept with the Chat for the next open, and announced to no view.
+    async readThrough(id, itemId) {
+      client.readThroughs.push(itemId);
+      const entry = get(id);
+      entry.chat = { ...entry.chat, read_through: itemId };
+    },
+    setMuted: async (id, muted) => patch(id, { muted }),
+    async setNotify(enabled) {
+      client.notify = enabled;
+    },
+    onOpenRequested(listener) {
+      openListeners.add(listener);
+      return () => openListeners.delete(listener);
     },
     onQuitRequested(listener) {
       quitListeners.add(listener);

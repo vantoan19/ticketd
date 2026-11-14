@@ -10,6 +10,28 @@ The local boundary containing tickets, Documents, Activities, projects, Plans, C
 **Chat**:
 A standalone conversation in a workspace, linked to a harness session. It can have optional links to multiple projects, tickets, and Documents without belonging to any one of them.
 
+**Harness**:
+The person's own installed agent program, such as Claude Code or Codex, that a Chat runs in. It owns authentication, billing, its settings and its native session; ticketd starts, supervises and answers it but never signs in for it or changes how it bills.
+_Avoid_: Provider, model, agent (for the program itself)
+
+**Turn**:
+One run of the harness from a message the person sent until it ends: completed, failed, stopped by the person, or cut off. A steer joins the running turn instead of starting another. A turn that ended is not evidence that its task succeeded.
+
+**Steer**:
+A message sent while a turn runs that the harness takes into that turn, where its capabilities allow, instead of waiting for the turn to end. What steering does to running tools is the harness's own behaviour and is said before the person chooses it.
+
+**Queue**:
+A Chat's messages waiting to go out, in order, each as its own turn once the current one ends. ticketd owns the queue: it can be paused, and a queued message can be sent now. Only a message known not to have been accepted falls back from a steer into it.
+
+**Seen and unseen**:
+A turn that ended after the person last viewed its Chat is unseen until the Chat is in view again (open in the detail pane with the window focused). The position the person has seen through is stored with the Chat. Mark as unread makes the last turn unseen again and Mark as read clears it; neither notifies.
+
+**Muted Chat**:
+A Chat whose outcomes never raise a system notification or count on the app icon. It still shows its status and counts in the sidebar.
+
+**Turn report**:
+What the harness reported about a turn besides its steps and final response: its reasoning, its plan and the files it changed. Each is kept in Chat history as the harness last reported it, and what it did not report is not shown.
+
 **Ticket**:
 A unit of work describing an intended outcome, optionally linked to one project. A ticket with subtickets still has its own outcome rather than serving only as a container.
 _Avoid_: Issue, task

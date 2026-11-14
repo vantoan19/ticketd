@@ -3,16 +3,18 @@
 //!
 //! Everything here is synchronous and runs on the protocol reader in arrival order.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::{Map, Value, json};
 
 use crate::{
-    ApprovalDecision, DeliveryEvidence, EventKind, InteractionAnswer, InteractionKind,
-    InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question, Refusal,
-    SubmissionId, ToolStatus, TurnOutcome, reset_time,
+    ApprovalDecision, DeliveryEvidence, EventKind, HarnessCommand, InteractionAnswer,
+    InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
+    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, Question,
+    Refusal, SubmissionId, ToolStatus, TurnOutcome, reset_time,
 };
+
+use super::report::{PLAN_TOOLS, Reports};
 
 #[derive(Debug)]
 struct Turn {
@@ -28,6 +30,8 @@ struct LiveRequest {
     /// For a question: whether each question takes several answers, by question id.
     /// `None` for a permission request.
     questions: Option<HashMap<String, bool>>,
+    /// For a permission request: the tool use it asks about.
+    tool_use: Option<String>,
     answered: bool,
 }
 
@@ -41,10 +45,13 @@ pub(super) struct Session {
     requests: HashMap<NativeRequestId, LiveRequest>,
     /// Name and input of each tool the open turn started, by tool-use id.
     tools: HashMap<String, (String, ProviderDetail)>,
+    /// Tool uses the person declined: their error result is the refusal, not a failure.
+    declined: HashSet<String>,
     /// Text blocks being streamed, oldest first, by content block index.
     streams: VecDeque<(i64, NativeItemId)>,
     /// When the limit Claude Code last reported as exhausted resets, if it said.
     limit_resets_at: Option<i64>,
+    reports: Reports,
 }
 
 fn text<'a>(event: &'a Value, field: &str) -> Option<&'a str> {
@@ -90,6 +97,7 @@ impl Session {
         self.turn = None;
         self.requests.clear();
         self.tools.clear();
+        self.declined.clear();
         self.streams.clear();
     }
 
@@ -139,6 +147,12 @@ impl Session {
                 }
             }
             "delta" => self.delta(event, &mut events),
+            "thinking" => {
+                let turn = self.turn(&mut events);
+                events.extend(self.reports.thinking(&turn, event));
+            }
+            "context_usage" => events.extend(Reports::context(event)),
+            "compacted" => events.push(EventKind::Compacted),
             "assistant_content" => self.assistant_content(event, &mut events),
             "tool_result" => self.tool_result(event, &mut events),
             "permission_request" => self.permission_request(event, &mut events),
@@ -190,6 +204,37 @@ impl Session {
                 detail: Some(ProviderDetail::new("session_info", &settings.to_string())),
             });
         }
+        events.extend(self.reports.session_info(event));
+    }
+
+    /// The effort the person picked, or a change Claude Code applied: in effect
+    /// until Claude Code reports another.
+    pub fn effort_in_effect(&mut self, effort: Option<String>) {
+        self.reports.effort_in_effect(effort);
+    }
+
+    /// `session_initialized`: the session's choosable settings and slash commands.
+    pub fn initialized(&mut self, event: &Value) -> Vec<EventKind> {
+        let mut events: Vec<EventKind> = self.reports.initialized(event).into_iter().collect();
+        // A bridge that does not list commands says nothing about them.
+        let Some(listed) = event["commands"].as_array() else {
+            return events;
+        };
+        let commands = listed
+            .iter()
+            .filter_map(|command| {
+                Some(HarnessCommand {
+                    name: text(command, "name")
+                        .filter(|name| !name.is_empty())?
+                        .to_owned(),
+                    description: text(command, "description")
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_owned),
+                })
+            })
+            .collect();
+        events.insert(0, EventKind::CommandsListed(commands));
+        events
     }
 
     fn delta(&mut self, event: &Value, events: &mut Vec<EventKind>) {
@@ -248,13 +293,25 @@ impl Session {
                         text: text(block, "text").unwrap_or_default().to_owned(),
                     });
                 }
+                Some("thinking") if !from_sub_agent => {
+                    let said = text(block, "text").unwrap_or_default();
+                    events.push(self.reports.thinking_text(&turn, said));
+                }
                 Some("text" | "thinking") => {}
+                // Redacted thinking has no text to show; its block start was reported.
+                Some("other") if text(block, "block_type") == Some("redacted_thinking") => {}
                 Some("tool_use") => {
                     let Some(id) = text(block, "id") else {
                         events.push(unknown("a tool use without an id", "tool_use", block));
                         continue;
                     };
                     let title = text(block, "name").unwrap_or("tool").to_owned();
+                    // The plan has no step rows: its tools update the plan instead.
+                    if PLAN_TOOLS.contains(&title.as_str()) {
+                        events.extend(self.reports.plan_tool(&turn, id, &title, &block["input"]));
+                        continue;
+                    }
+                    let changed = self.reports.file_tool(&turn, id, &title, &block["input"]);
                     let detail = ProviderDetail::new("tool_use", &block["input"].to_string());
                     self.tools
                         .insert(id.to_owned(), (title.clone(), detail.clone()));
@@ -266,6 +323,7 @@ impl Session {
                         output: None,
                         detail: Some(detail),
                     });
+                    events.extend(changed);
                 }
                 _ => events.push(unknown(
                     "Claude Code sent content ticketd does not show",
@@ -277,6 +335,17 @@ impl Session {
     }
 
     fn tool_result(&mut self, event: &Value, events: &mut Vec<EventKind>) {
+        let failed = event["is_error"] == true;
+        let tool_use = text(event, "tool_use_id").unwrap_or_default();
+        if self.reports.is_plan_tool(tool_use) {
+            let turn = self.turn(events);
+            events.extend(
+                self.reports
+                    .plan_result(&turn, tool_use, failed, &event["outcome"]),
+            );
+            return;
+        }
+        let declined = text(event, "tool_use_id").is_some_and(|id| self.declined.remove(id));
         let known = text(event, "tool_use_id").and_then(|id| Some((id, self.tools.get(id)?)));
         let (Some((id, (title, detail))), Some(turn)) = (known, self.active_turn()) else {
             let payload = json!({"tool_use_id": event.get("tool_use_id")});
@@ -291,18 +360,24 @@ impl Session {
             text(event, "text").unwrap_or_default(),
             event["truncated"] == true,
         );
+        let detail = with_line_counts(detail, &event["outcome"]);
         events.push(EventKind::ToolUpdated {
             turn: turn.clone(),
             item: NativeItemId::new(id),
             title: title.clone(),
-            status: if event["is_error"] == true {
-                ToolStatus::Failed
-            } else {
-                ToolStatus::Succeeded
+            status: match (failed, declined) {
+                (true, true) => ToolStatus::Declined,
+                (true, false) => ToolStatus::Failed,
+                (false, _) => ToolStatus::Succeeded,
             },
             output: Some(output),
-            detail: Some(detail.clone()),
+            detail: Some(detail),
         });
+        let turn = turn.clone();
+        events.extend(
+            self.reports
+                .file_result(&turn, id, failed, &event["outcome"]),
+        );
     }
 
     fn permission_request(&mut self, event: &Value, events: &mut Vec<EventKind>) {
@@ -335,12 +410,15 @@ impl Session {
             request.clone(),
             LiveRequest {
                 questions: None,
+                tool_use: text(event, "tool_use_id").map(str::to_owned),
                 answered: false,
             },
         );
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
+            // The bridge names the tool use a permission is asked for.
+            item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::approval(
                 subject,
                 reason,
@@ -405,12 +483,15 @@ impl Session {
                         .map(|question| (question.id.clone(), question.multi_select))
                         .collect(),
                 ),
+                tool_use: None,
                 answered: false,
             },
         );
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
+            // The AskUserQuestion tool use it was asked from: its row waits with it.
+            item: text(event, "tool_use_id").map(NativeItemId::new),
             kind: InteractionKind::Question { questions },
             detail: None,
         }));
@@ -438,10 +519,16 @@ impl Session {
         if !gone {
             if let Some(live) = self.requests.get_mut(request) {
                 live.answered = false;
+                if let Some(tool_use) = &live.tool_use {
+                    self.declined.remove(tool_use);
+                }
             }
             return None;
         }
-        self.requests.remove(request)?;
+        let live = self.requests.remove(request)?;
+        if let Some(tool_use) = &live.tool_use {
+            self.declined.remove(tool_use);
+        }
         Some(EventKind::InteractionResolved {
             request: request.clone(),
             resolution: InteractionResolution::Withdrawn,
@@ -483,6 +570,11 @@ impl Session {
             _ => return Err(Refusal::Unsupported),
         };
         live.answered = true;
+        if answer == &InteractionAnswer::Approval(ApprovalDecision::Deny)
+            && let Some(tool_use) = &live.tool_use
+        {
+            self.declined.insert(tool_use.clone());
+        }
         Ok(decision)
     }
 
@@ -491,7 +583,9 @@ impl Session {
         let id = self.turn(events);
         let turn = self.turn.take();
         self.tools.clear();
+        self.declined.clear();
         self.streams.clear();
+        self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");
         // ponytail: how Claude Code reports an interrupted turn is unverified; any
@@ -536,4 +630,25 @@ impl Session {
                 .collect(),
         });
     }
+}
+
+/// The tool's input with the lines its result said it added and removed, kept as
+/// `ticketd_lines` so the step row can show them; unchanged when it said none.
+fn with_line_counts(detail: &ProviderDetail, outcome: &Value) -> ProviderDetail {
+    let count = |key: &str| outcome[key].as_u64();
+    let (Some("file"), Some(added), Some(removed)) = (
+        text(outcome, "kind"),
+        count("added_lines"),
+        count("removed_lines"),
+    ) else {
+        return detail.clone();
+    };
+    let Ok(Value::Object(mut input)) = serde_json::from_str::<Value>(detail.payload()) else {
+        return detail.clone();
+    };
+    input.insert(
+        "ticketd_lines".to_owned(),
+        json!({ "added": added, "removed": removed }),
+    );
+    ProviderDetail::new(detail.kind(), &Value::Object(input).to_string())
 }

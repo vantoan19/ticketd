@@ -41,3 +41,14 @@ test("the label closes when a dialog opens over the button and stays closed when
   expect(screen.queryByRole("tooltip")).toBeNull();
   dialog.remove();
 });
+
+test("a shortcut shows in the tooltip after the label and stays out of the name", async () => {
+  render(
+    <IconButton label="Stop" shortcut="Esc">
+      <svg aria-hidden="true" />
+    </IconButton>,
+  );
+  const button = screen.getByRole("button", { name: "Stop" });
+  button.focus();
+  expect((await screen.findByRole("tooltip")).textContent).toBe("Stop · Esc");
+});

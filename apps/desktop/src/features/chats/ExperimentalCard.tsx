@@ -9,7 +9,6 @@ import {
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
-import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { useChatClient } from "@/features/chats/client";
 import { chatCount } from "@/features/chats/model";
@@ -60,7 +59,8 @@ export function ExperimentalCard() {
           .
         </AlertDescription>
       </Alert>
-      <SettingsSection title="Chat">
+      {/* The page is Chat already: its one row needs no "Chat" heading (LIVE-21). */}
+      <div className="settings-section">
         <SettingsList>
           <SettingsRow
             variant="top"
@@ -85,7 +85,7 @@ export function ExperimentalCard() {
             {failure}
           </p>
         )}
-      </SettingsSection>
+      </div>
       <DialogShell
         open={confirming !== null}
         onOpenChange={(open) => {

@@ -185,6 +185,92 @@ pub(crate) fn brief(kind: &EventKind) -> String {
             Some(turn) => format!("notice {kind:?} {} {message:?}", turn.0),
             None => format!("notice {kind:?}"),
         },
+        EventKind::ReasoningUpdated {
+            item,
+            running,
+            started_at,
+            ended_at,
+            text,
+            heading,
+            ..
+        } => format!(
+            "reasoning {} {} {started_at:?} {ended_at:?} {text:?} {heading:?}",
+            item.0,
+            if *running { "running" } else { "done" }
+        ),
+        EventKind::PlanUpdated { plan, .. } => {
+            let steps: Vec<String> = plan
+                .steps
+                .iter()
+                .map(|step| match &step.active_label {
+                    Some(label) => format!("{:?} {} ({label})", step.status, step.text),
+                    None => format!("{:?} {}", step.status, step.text),
+                })
+                .collect();
+            format!("plan {steps:?} {:?}", plan.explanation)
+        }
+        EventKind::FilesChanged { files, .. } => {
+            let files: Vec<String> = files
+                .iter()
+                .map(|file| {
+                    let counts = match (file.added_lines, file.removed_lines) {
+                        (Some(added), Some(removed)) => format!(" +{added} -{removed}"),
+                        _ => String::new(),
+                    };
+                    let unconfirmed = if file.confirmed { "" } else { " unconfirmed" };
+                    format!("{:?} {}{counts}{unconfirmed}", file.kind, file.path)
+                })
+                .collect();
+            format!("files {files:?}")
+        }
+        EventKind::ContextUsage(usage) => format!(
+            "context {} of {} {:?} {:?}",
+            usage.used,
+            usage.window,
+            usage
+                .categories
+                .iter()
+                .map(|category| format!("{} {}", category.name, category.tokens))
+                .collect::<Vec<_>>(),
+            usage.compacts_at
+        ),
+        EventKind::Compacted => "compacted".to_owned(),
+        EventKind::CommandsListed(commands) => format!(
+            "commands {}",
+            commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        EventKind::SettingsState(settings) => {
+            let one = |name: &str, setting: &Option<crate::Setting>| match setting {
+                None => String::new(),
+                Some(setting) => {
+                    let options: Vec<&str> =
+                        setting.options.iter().map(|o| o.id.as_str()).collect();
+                    let answered = setting
+                        .answered_by
+                        .as_ref()
+                        .map_or(String::new(), |model| format!(" answered by {model}"));
+                    let fixed = if setting.unchangeable.is_some() {
+                        " fixed"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        " {name}={}{options:?}{fixed}{answered}",
+                        setting.current.as_deref().unwrap_or("?")
+                    )
+                }
+            };
+            format!(
+                "settings{}{}{}",
+                one("model", &settings.model),
+                one("effort", &settings.effort),
+                one("permission", &settings.permission)
+            )
+        }
         EventKind::Unknown { detail, .. } => format!("unknown {}", detail.kind()),
     }
 }

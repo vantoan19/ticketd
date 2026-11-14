@@ -119,6 +119,17 @@ impl Workspace {
         find(&self.connection, id)
     }
 
+    /// The Project one of whose checkouts holds `folder`. Checkout paths are stored
+    /// canonical, so the folder is resolved first when it exists.
+    pub fn project_for_folder(&self, folder: &std::path::Path) -> Result<Option<Project>, Error> {
+        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        Ok(self.list_projects()?.into_iter().find(|project| {
+            std::iter::once(&project.path)
+                .chain(&project.paths)
+                .any(|path| !path.is_empty() && folder.starts_with(path))
+        }))
+    }
+
     pub fn list_projects(&self) -> Result<Vec<Project>, Error> {
         let mut statement = self
             .connection

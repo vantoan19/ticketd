@@ -8,8 +8,8 @@ use ticketd_chat_host::{
     ApprovalDecision, DeliveryEvidence, DispatchOutcome, EventKind, HarnessAdapter,
     InteractionAnswer, InteractionKind, InteractionRequest, InteractionResponse, InterruptOutcome,
     InterruptRequest, NativeRequestId, NativeTurnId, OpenRequest, OpenedRuntime, Refusal,
-    RespondOutcome, RuntimeGeneration, SessionStart, Submission, SubmissionId, SubmissionKind,
-    TurnOutcome,
+    RespondOutcome, RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId,
+    SubmissionKind, TurnOutcome,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(1);
@@ -20,6 +20,7 @@ async fn open(fake: &FakeAdapter, generation: RuntimeGeneration) -> OpenedRuntim
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("chat-folder"),
         session: SessionStart::New,
+        settings: StartSettings::default(),
     })
     .await
     .unwrap()
@@ -218,6 +219,7 @@ async fn a_live_request_accepts_one_answer_from_its_own_generation() {
     fake.emit(EventKind::InteractionRequested(InteractionRequest {
         request: request.clone(),
         turn: None,
+        item: None,
         kind: InteractionKind::Approval {
             description: "Run cargo test".to_owned(),
             reason: None,

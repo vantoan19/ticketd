@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::time::{sleep, timeout};
 
-use super::runtime::{Options, open_over, probe};
+use super::runtime::{Options, open_over, probe, probe_options};
 use super::{BRIDGE_SIDECAR_NAME, candidates, locate, verdict};
 use crate::install::{LaunchEnvironment, Os};
 use crate::scripted::{Peer, brief, pipes};
@@ -21,7 +21,7 @@ use crate::{
     HarnessRuntime, Inspection, InteractionAnswer, InteractionResponse, InterruptOutcome,
     InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId, OpenRequest,
     OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
-    RuntimeGeneration, SessionStart, Submission, SubmissionId, SubmissionKind,
+    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(7);
@@ -41,6 +41,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
+        settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
     let (opened, ()) = tokio::join!(opening, peer.play());
@@ -134,11 +135,14 @@ async fn handing_input_to_the_sdk_is_a_write_and_later_evidence_arrives_as_event
         [
             "session sess-1",
             "notice EffectiveSettings",
+            "settings model=claude-test[] permission=default[\"default\", \"acceptEdits\", \"plan\"]",
             "turn-started local-turn-1",
             "delta text-1 \"Here\"",
             &processing("sub-1", "local-turn-1"),
             "delta text-1 \" you go\"",
             "message text-1 \"Here you go\"",
+            // Thinking whose start the bridge did not report has no times.
+            "reasoning thinking-1 done None None Some(\"pondering\") None",
             "tool toolu_1 \"Bash\" Running None",
             "tool toolu_1 \"Bash\" Succeeded Some(\"a.txt\")",
             "message text-2 \"Done.\"",
@@ -201,6 +205,8 @@ async fn output_keeps_flowing_while_a_permission_or_question_waits_for_its_answe
             "turn-started local-turn-1",
             &processing("sub-1", "local-turn-1"),
             "tool toolu_1 \"Write\" Running None",
+            // Listed as soon as the edit starts; confirmed only by its result.
+            "files [\"Modified /work/chat-1/a.txt unconfirmed\"]",
             "approval 7-1 \"Write to a.txt\" None [Allow, Deny]",
             "delta text-1 \"Waiting\"",
         ]
@@ -599,12 +605,75 @@ async fn resuming_a_missing_session_reports_unavailable_history() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_options_probe_lists_models_with_their_efforts_and_closes_the_bridge() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("options"));
+
+    let probing = probe_options(io, Path::new(CLAUDE), Options::default());
+    let (options, ()) = tokio::join!(probing, async {
+        peer.play().await;
+        assert!(peer.stdin_closed().await);
+        peer.exit(0);
+    });
+
+    let options = options.expect("Claude Code listed its models");
+    let models: Vec<_> = options
+        .models
+        .iter()
+        .map(|choice| {
+            let efforts: Vec<_> = choice.efforts.iter().map(|e| e.id.as_str()).collect();
+            (choice.model.id.as_str(), choice.model.is_default, efforts)
+        })
+        .collect();
+    assert_eq!(
+        models,
+        [
+            ("default", true, vec!["low", "medium", "high", "max"]),
+            ("sonnet", false, vec![]),
+        ]
+    );
+    // The default row names what it runs; a row of its own name names nothing.
+    assert_eq!(options.models[0].runs_as.as_deref(), Some("Opus 5.5"));
+    assert_eq!(options.models[1].runs_as, None);
+    // Before a session Claude Code's own mode is unknown, and full access is no choice.
+    let permission = options.permission.expect("Claude Code's modes");
+    assert_eq!(permission.current, None);
+    assert!(
+        permission
+            .options
+            .iter()
+            .all(|o| o.permission != Some(crate::PermissionKind::FullAccess))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_session_opens_with_new_chats_picks() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("start_settings"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        settings: StartSettings {
+            model: Some("sonnet".to_owned()),
+            effort: Some("high".to_owned()),
+            permission: Some("acceptEdits".to_owned()),
+        },
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+#[tokio::test(start_paused = true)]
 async fn inspection_judges_the_pairing_without_opening_a_session() {
     let (mut peer, io) = pipes();
     peer.load(fixture!("inspect"));
 
     let probing = probe(io, Path::new(CLAUDE), Options::default());
-    let (inspection, ()) = tokio::join!(probing, async {
+    let ((inspection, offered), ()) = tokio::join!(probing, async {
         peer.play().await;
         assert!(peer.stdin_closed().await);
         peer.exit(0);
@@ -621,10 +690,33 @@ async fn inspection_judges_the_pairing_without_opening_a_session() {
     };
     assert_eq!(executable, PathBuf::from(CLAUDE));
     assert_eq!(version.as_deref(), Some("2.1.322"));
-    // Sign-in is Claude Code's business; steering is unvalidated, so not offered.
-    assert_eq!(login, LoginState::Unknown);
+    // Sign-in is what Claude Code says of its account; steering is unvalidated.
+    assert_eq!(login, LoginState::SignedIn);
+    assert!(
+        offered.is_some_and(|listed| listed.is_ok()),
+        "the check lists its options too"
+    );
     assert!(matches!(capabilities.steering, Capability::Unknown { .. }));
     assert!(capabilities.native_resume.behavior().is_some());
+}
+
+#[test]
+fn sign_in_is_read_from_how_claude_code_describes_its_account() {
+    use super::runtime::account_login;
+    let login = |account: Value| account_login(&account);
+    assert_eq!(
+        login(json!({"subscription_type": "pro"})),
+        LoginState::SignedIn
+    );
+    assert_eq!(
+        login(json!({"api_key_source": "ANTHROPIC_API_KEY"})),
+        LoginState::NonSubscription
+    );
+    assert_eq!(
+        login(json!({"api_provider": "bedrock"})),
+        LoginState::NonSubscription
+    );
+    assert_eq!(login(Value::Null), LoginState::Unknown);
 }
 
 #[test]
@@ -760,4 +852,274 @@ async fn closing_kills_a_process_that_stopped_reading_its_input_within_the_bound
     let outcome = timeout(crate::WRITE_TIMEOUT, writing).await;
     let outcome = outcome.expect("the write gives up").expect("the task ends");
     assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
+}
+
+/// A tool the person declined comes back as an error result; it is told as declined,
+/// and a later failure of another tool is still a failure.
+#[test]
+fn a_tool_the_person_declined_is_declined_not_failed() {
+    use super::session::Session;
+    use crate::ToolStatus;
+    let mut session = Session::default();
+    let tool_use = |id: &str| json!({"blocks": [{"type": "tool_use", "id": id, "name": "Bash", "input": {"command": "rm -rf node_modules"}}], "parent_tool_use_id": null});
+    let result = |id: &str| json!({"tool_use_id": id, "is_error": true, "text": "denied"});
+    let status = |events: Vec<EventKind>| match events.as_slice() {
+        [EventKind::ToolUpdated { status, .. }] => *status,
+        other => panic!("one tool update, got {other:?}"),
+    };
+    session.event("assistant_content", &tool_use("toolu_1"));
+    let (asked, _) = session
+        .event(
+            "permission_request",
+            &json!({"request_id": "req-1", "tool_name": "Bash", "tool_use_id": "toolu_1", "input": {"command": "rm -rf node_modules"}}),
+        )
+        .expect("modeled");
+    // The request names the tool use it is about, so its decision folds into that step.
+    assert!(asked.iter().any(|event| matches!(
+        event,
+        EventKind::InteractionRequested(request) if request.item == Some(crate::NativeItemId::new("toolu_1"))
+    )));
+    let deny = InteractionAnswer::Approval(ApprovalDecision::Deny);
+    session
+        .answer(&NativeRequestId::new("req-1"), &deny)
+        .expect("the request is live");
+    let (events, _) = session
+        .event("tool_result", &result("toolu_1"))
+        .expect("modeled");
+    assert_eq!(status(events), ToolStatus::Declined);
+
+    session.event("assistant_content", &tool_use("toolu_2"));
+    let (events, _) = session
+        .event("tool_result", &result("toolu_2"))
+        .expect("modeled");
+    assert_eq!(status(events), ToolStatus::Failed);
+}
+
+/// The lines an edit added and removed, from its result, stay with the tool so its
+/// step row can show them.
+#[test]
+fn an_edit_keeps_the_lines_its_result_counted() {
+    use super::session::Session;
+    let mut session = Session::default();
+    session.event("assistant_content", &json!({"blocks": [{"type": "tool_use", "id": "toolu_1", "name": "Edit", "input": {"file_path": "/w/a.ts"}}], "parent_tool_use_id": null}));
+    let (events, _) = session
+        .event(
+            "tool_result",
+            &json!({"tool_use_id": "toolu_1", "text": "ok", "outcome": {"kind": "file", "change": "update", "added_lines": 48, "removed_lines": 6}}),
+        )
+        .expect("modeled");
+    let kept = events.iter().find_map(|event| match event {
+        EventKind::ToolUpdated {
+            detail: Some(detail),
+            ..
+        } => serde_json::from_str::<serde_json::Value>(detail.payload()).ok(),
+        _ => None,
+    });
+    assert_eq!(
+        kept.map(|input| input["ticketd_lines"].clone()),
+        Some(json!({"added": 48, "removed": 6}))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn thinking_the_plan_files_and_context_carry_only_what_claude_code_reported() {
+    let (mut peer, runtime, mut events) = open().await;
+    peer.load(fixture!("reports"));
+    submit(&mut peer, &runtime, start_turn("sub-1", "Add a limiter")).await;
+    peer.play().await;
+
+    let seen = seen(&mut events).await;
+    let shown: Vec<&str> = seen
+        .iter()
+        .map(String::as_str)
+        .filter(|event| !event.starts_with("notice") && !event.starts_with("session"))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "settings model=claude-opus-test[] permission=default[\"default\", \"acceptEdits\", \"plan\"]",
+            "turn-started local-turn-1",
+            &processing("sub-1", "local-turn-1"),
+            "reasoning thinking-1 running Some(1730910000000) None None None",
+            "reasoning thinking-1 done Some(1730910000000) Some(1730910012000) None None",
+            "reasoning thinking-1 done Some(1730910000000) Some(1730910012000) Some(\"The handler has no limit.\") None",
+            // Redacted thinking is timed and has no text.
+            "reasoning thinking-2 running Some(1730910013000) None None None",
+            "reasoning thinking-2 done Some(1730910013000) Some(1730910014000) None None",
+            // The to-do list is the plan, never a step row.
+            "plan [\"Completed Read the handler (Reading the handler)\", \"InProgress Add the limiter (Adding the limiter)\"] None",
+            "tool toolu_edit \"Edit\" Running None",
+            "files [\"Modified /work/chat-1/src/handler.ts unconfirmed\"]",
+            "tool toolu_edit \"Edit\" Succeeded Some(\"edited\")",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\"]",
+            "tool toolu_write \"Write\" Running None",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Modified /work/chat-1/src/limiter.ts unconfirmed\"]",
+            "tool toolu_write \"Write\" Succeeded Some(\"created\")",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Added /work/chat-1/src/limiter.ts +1 -0\"]",
+            "tool toolu_bad \"Edit\" Running None",
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Added /work/chat-1/src/limiter.ts +1 -0\", \"Modified /work/chat-1/README.md unconfirmed\"]",
+            "tool toolu_bad \"Edit\" Failed Some(\"String not found\")",
+            // A failed edit changed nothing.
+            "files [\"Modified /work/chat-1/src/handler.ts +2 -1\", \"Added /work/chat-1/src/limiter.ts +1 -0\"]",
+            "compacted",
+            "turn-ended local-turn-1 Completed [\"sub-1\"]",
+            "context 124000 of 200000 [\"Messages 100000\"] Some(167000)",
+        ]
+    );
+
+    let refused = tokio::join!(
+        runtime.change_setting(crate::SettingChange {
+            generation: GENERATION,
+            setting: crate::SettingKey::Model,
+            value: "sonnet".to_owned(),
+        }),
+        peer.play()
+    )
+    .0;
+    assert_eq!(
+        refused,
+        crate::SettingOutcome::Refused {
+            reason: "model not available".to_owned()
+        }
+    );
+}
+
+#[test]
+fn the_slash_commands_claude_code_lists_reach_the_host() {
+    use super::session::Session;
+    let mut session = Session::default();
+    let init = json!({"models": [], "commands": [
+        {"name": "review", "description": "Review a pull request"},
+        {"name": "compact", "description": null},
+        {"name": "", "description": "nameless"},
+    ]});
+    let listed = session
+        .initialized(&init)
+        .into_iter()
+        .find_map(|event| match event {
+            EventKind::CommandsListed(commands) => Some(commands),
+            _ => None,
+        });
+    assert_eq!(
+        listed,
+        Some(vec![
+            crate::HarnessCommand {
+                name: "review".to_owned(),
+                description: Some("Review a pull request".to_owned()),
+            },
+            crate::HarnessCommand {
+                name: "compact".to_owned(),
+                description: None,
+            },
+        ])
+    );
+}
+
+/// LIVE2-2: Claude Code's `session_info` may leave its effort out; the effort the
+/// session was opened with stays the one shown until Claude Code says another.
+#[test]
+fn the_picked_effort_stays_until_claude_code_reports_another() {
+    use super::session::Session;
+    let mut session = Session::default();
+    session.effort_in_effect(Some("medium".to_owned()));
+    let models = json!({"models": [
+        {"value": "default", "resolved_model": "claude-opus-test", "display_name": "Default", "description": "", "effort_levels": ["low", "medium", "high"]},
+    ]});
+    let _ = session.initialized(&models);
+    let effort = |info: Value, session: &mut Session| {
+        let (events, _) = session.event("session_info", &info).expect("modeled");
+        let Some(EventKind::SettingsState(settings)) = events.last() else {
+            panic!("settings, got {events:?}");
+        };
+        settings.effort.as_ref().and_then(|e| e.current.clone())
+    };
+    assert_eq!(
+        effort(
+            json!({"model": "claude-opus-test", "permission_mode": "default"}),
+            &mut session
+        )
+        .as_deref(),
+        Some("medium")
+    );
+    assert_eq!(
+        effort(
+            json!({"model": "claude-opus-test", "permission_mode": "plan", "effort": "high"}),
+            &mut session
+        )
+        .as_deref(),
+        Some("high")
+    );
+}
+
+#[test]
+fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
+    use super::session::Session;
+    let mut session = Session::default();
+    let models = json!({"models": [
+        {"value": "default", "resolved_model": "claude-opus-test", "display_name": "Default", "description": "Recommended", "effort_levels": ["low", "medium", "high"]},
+        {"value": "haiku", "resolved_model": null, "display_name": "Haiku", "description": "", "effort_levels": []},
+    ]});
+    assert!(
+        !session
+            .initialized(&models)
+            .iter()
+            .any(|event| matches!(event, EventKind::SettingsState(_))),
+        "nothing in effect yet"
+    );
+    let info = |mode: &str| json!({"model": "claude-opus-test", "permission_mode": mode, "effort": "medium"});
+    let (events, _) = session
+        .event("session_info", &info("default"))
+        .expect("modeled");
+    let Some(EventKind::SettingsState(settings)) = events.last() else {
+        panic!("settings, got {events:?}");
+    };
+    // The model in effect is the option that resolves to it.
+    assert_eq!(
+        settings.model.as_ref().and_then(|m| m.current.as_deref()),
+        Some("default")
+    );
+    let effort = settings.effort.as_ref().expect("the model takes effort");
+    assert_eq!(effort.current.as_deref(), Some("medium"));
+    let permission = settings.permission.as_ref().expect("permission");
+    assert!(
+        permission
+            .options
+            .iter()
+            .all(|option| option.id != "bypassPermissions")
+    );
+
+    let (events, _) = session
+        .event("session_info", &info("bypassPermissions"))
+        .expect("modeled");
+    let Some(EventKind::SettingsState(settings)) = events.last() else {
+        panic!("settings, got {events:?}");
+    };
+    let permission = settings.permission.as_ref().expect("permission");
+    assert_eq!(
+        permission.unchangeable.as_deref(),
+        Some("Set in Claude Code's settings")
+    );
+    assert_eq!(
+        permission.refusal("acceptEdits").as_deref(),
+        Some("Set in Claude Code's settings")
+    );
+}
+
+/// LIVE2-11: a question names the AskUserQuestion tool use it was asked from, so
+/// that call's running row gives way to the question's card.
+#[test]
+fn a_question_names_the_tool_use_it_was_asked_from() {
+    use super::session::Session;
+    let mut session = Session::default();
+    let asked = json!({
+        "request_id": "q1",
+        "tool_use_id": "toolu_ask",
+        "questions": [{"question": "Which color?", "options": [{"label": "Blue"}]}],
+    });
+    let (events, _) = session.event("question_request", &asked).expect("modeled");
+    let item = events.iter().find_map(|event| match event {
+        EventKind::InteractionRequested(request) => Some(request.item.clone()),
+        _ => None,
+    });
+    assert_eq!(item, Some(Some(crate::NativeItemId::new("toolu_ask"))));
 }

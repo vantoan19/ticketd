@@ -22,6 +22,11 @@ const CLAUDE =
 /** Lets queued promise callbacks and async-iterator steps run. */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
+/** What the next query's `initializationResult()` lists as models. */
+let initModels: unknown[] = [];
+/** What the next query's `initializationResult()` lists as slash commands. */
+let initCommands: unknown[] = [];
+
 /** A scripted stand-in for one SDK `query()` handle. No process is started. */
 class FakeQuery {
   readonly options: Options;
@@ -80,7 +85,33 @@ class FakeQuery {
   }
 
   async initializationResult() {
-    return { claude_code_version: "2.1.322" };
+    return {
+      claude_code_version: "2.1.322",
+      models: initModels,
+      commands: initCommands,
+      account: { subscriptionType: "max", tokenSource: "claude.ai" },
+    };
+  }
+
+  settingsApplied: unknown[] = [];
+  settingError: Error | undefined;
+  contextUsage: unknown = undefined;
+
+  async setModel(model?: string) {
+    if (this.settingError) throw this.settingError;
+    this.settingsApplied.push({ model });
+  }
+
+  async setPermissionMode(mode: string) {
+    this.settingsApplied.push({ mode });
+  }
+
+  async applyFlagSettings(settings: Record<string, unknown>) {
+    this.settingsApplied.push(settings);
+  }
+
+  async getContextUsage() {
+    return this.contextUsage;
   }
 
   close() {
@@ -219,7 +250,59 @@ describe("hello and inspect", () => {
   });
 });
 
+describe("options", () => {
+  it("lists the models with a session that is never prompted, then closes it", async () => {
+    const h = harness();
+    initModels = [
+      {
+        value: "default",
+        displayName: "Default",
+        description: "Opus 5.5",
+        supportedEffortLevels: ["low", "high"],
+      },
+    ];
+    await h.send({ cmd: "options", claude_executable: CLAUDE });
+    initModels = [];
+
+    const [fake] = h.queries;
+    expect(fake?.closed).toBe(true);
+    expect(fake?.options).toMatchObject({
+      pathToClaudeCodeExecutable: CLAUDE,
+      persistSession: false,
+      settings: { disableAllHooks: true },
+    });
+    expect(h.named("options")).toEqual([
+      expect.objectContaining({
+        error: null,
+        account: expect.objectContaining({ subscription_type: "max" }),
+        models: [
+          expect.objectContaining({
+            value: "default",
+            effort_levels: ["low", "high"],
+          }),
+        ],
+      }),
+    ]);
+    // Nothing was handed to the SDK as a message.
+    expect(h.named("input_handed_to_sdk")).toHaveLength(0);
+  });
+});
+
 describe("open", () => {
+  it("opens a new session with New Chat's picks", async () => {
+    const h = harness();
+    const fake = await h.open(1, {
+      model: "sonnet",
+      effort: "high",
+      permission_mode: "acceptEdits",
+    });
+    expect(fake.options).toMatchObject({
+      model: "sonnet",
+      effort: "high",
+      permissionMode: "acceptEdits",
+    });
+  });
+
   it("starts the user's Claude Code with native settings and permissions intact", async () => {
     const h = harness();
     const fake = await h.open(1, { resume_session_id: "native-session" });
@@ -863,5 +946,210 @@ describe("process loss and unknown frames", () => {
     ]);
     expect(h.events[0]).toMatchObject({ id: null, code: "invalid_json" });
     expect(h.events[1]).toMatchObject({ id: "c1", code: "invalid_command" });
+  });
+});
+
+describe("reasoning, files, context and settings", () => {
+  it("says when a thinking block starts and stops, redacted ones included", async () => {
+    const h = harness();
+    const fake = await h.open();
+    const stream = (event: object) =>
+      fake.push({ type: "stream_event", parent_tool_use_id: null, event });
+    stream({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "thinking", thinking: "" },
+    });
+    stream({ type: "content_block_stop", index: 0 });
+    stream({
+      type: "content_block_start",
+      index: 1,
+      content_block: { type: "redacted_thinking", data: "x" },
+    });
+    // A text block's stop is framing, not thinking.
+    stream({
+      type: "content_block_start",
+      index: 2,
+      content_block: { type: "text", text: "" },
+    });
+    stream({ type: "content_block_stop", index: 2 });
+    await settle();
+    expect(
+      h.named("thinking").map(({ phase, index, redacted }) => ({
+        phase,
+        index,
+        redacted,
+      })),
+    ).toEqual([
+      { phase: "started", index: 0, redacted: false },
+      { phase: "stopped", index: 0, redacted: false },
+      { phase: "started", index: 1, redacted: true },
+    ]);
+  });
+
+  it("forwards what an edit's structured result reports, and nothing for other tools", async () => {
+    const h = harness();
+    const fake = await h.open();
+    const toolResult = (tool_use_result: unknown) =>
+      fake.push({
+        type: "user",
+        parent_tool_use_id: null,
+        tool_use_result,
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "t", content: "ok" }],
+        },
+      });
+    toolResult({
+      filePath: "/work/a.ts",
+      oldString: "a",
+      newString: "b",
+      structuredPatch: [
+        {
+          oldStart: 1,
+          oldLines: 2,
+          newStart: 1,
+          newLines: 3,
+          lines: ["-a", "+b", "+c", " d"],
+        },
+      ],
+    });
+    toolResult({
+      type: "create",
+      filePath: "/work/new.ts",
+      content: "one\ntwo\n",
+      structuredPatch: [],
+      originalFile: null,
+    });
+    toolResult({ task: { id: "1", subject: "Write tests" } });
+    toolResult({ file: { filePath: "/work/read.ts", content: "x" } });
+    await settle();
+    expect(h.named("tool_result").map((event) => event.outcome)).toEqual([
+      {
+        kind: "file",
+        path: "/work/a.ts",
+        change: null,
+        added_lines: 2,
+        removed_lines: 1,
+      },
+      {
+        kind: "file",
+        path: "/work/new.ts",
+        change: "create",
+        added_lines: 2,
+        removed_lines: 0,
+      },
+      { kind: "task_created", task_id: "1", subject: "Write tests" },
+      null,
+    ]);
+  });
+
+  it("reports the slash commands Claude Code lists at start", async () => {
+    initCommands = [
+      {
+        name: "review",
+        description: "Review a pull request",
+        argumentHint: "",
+      },
+      { name: "", description: "nameless" },
+      { name: "compact", description: "" },
+    ];
+    const h = harness();
+    await h.open();
+    initCommands = [];
+    expect(h.named("session_initialized")[0]?.commands).toEqual([
+      { name: "review", description: "Review a pull request" },
+      { name: "compact", description: null },
+    ]);
+  });
+
+  it("reports the models at start and the context Claude Code counts after a turn", async () => {
+    initModels = [
+      {
+        value: "default",
+        resolvedModel: "claude-opus-test",
+        displayName: "Default",
+        description: "Recommended",
+        supportedEffortLevels: ["low", "high"],
+      },
+      {
+        value: "haiku",
+        displayName: "Haiku",
+        description: "",
+        supportsEffort: false,
+      },
+    ];
+    const h = harness();
+    const fake = await h.open();
+    initModels = [];
+    expect(h.named("session_initialized")[0]?.models).toEqual([
+      {
+        value: "default",
+        resolved_model: "claude-opus-test",
+        display_name: "Default",
+        description: "Recommended",
+        effort_levels: ["low", "high"],
+      },
+      {
+        value: "haiku",
+        resolved_model: null,
+        display_name: "Haiku",
+        description: "",
+        effort_levels: [],
+      },
+    ]);
+    fake.contextUsage = {
+      totalTokens: 124_000,
+      maxTokens: 200_000,
+      isAutoCompactEnabled: true,
+      autoCompactThreshold: 167_000,
+      categories: [
+        { name: "Messages", tokens: 100_000, kind: "used", color: "" },
+        { name: "Free space", tokens: 76_000, kind: "free", color: "" },
+        { name: "Empty", tokens: 0, kind: "used", color: "" },
+      ],
+    };
+    fake.push(result(undefined));
+    fake.push({
+      type: "system",
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: 1 },
+    });
+    await settle();
+    expect(h.named("context_usage")[0]).toMatchObject({
+      total_tokens: 124_000,
+      max_tokens: 200_000,
+      categories: [{ name: "Messages", tokens: 100_000 }],
+      compacts_at: 167_000,
+    });
+    expect(h.named("compacted")).toHaveLength(1);
+  });
+
+  it("changes a setting through the SDK and never takes bypassPermissions", async () => {
+    const h = harness();
+    const fake = await h.open();
+    const set = (setting: object) =>
+      h.send({ cmd: "set_setting", generation: 1, setting });
+    await set({ kind: "model", value: "opus" });
+    await set({ kind: "effort", value: "high" });
+    await set({ kind: "permission", value: "acceptEdits" });
+    await set({ kind: "permission", value: "bypassPermissions" });
+    fake.settingError = new Error("unknown model");
+    await set({ kind: "model", value: "nope" });
+    expect(fake.settingsApplied).toEqual([
+      { model: "opus" },
+      { effortLevel: "high" },
+      { mode: "acceptEdits" },
+    ]);
+    expect(
+      h.events
+        .filter(
+          (event) =>
+            event.event === "setting_result" ||
+            event.event === "command_rejected",
+        )
+        .map((event) => ("outcome" in event ? event.outcome : event.event)),
+    ).toEqual(["applied", "applied", "applied", "command_rejected", "refused"]);
+    expect(h.named("setting_result").at(-1)?.message).toBe("unknown model");
   });
 });
