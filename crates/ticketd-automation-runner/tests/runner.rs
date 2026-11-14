@@ -16,7 +16,7 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
-    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatLinkKind, ChatListFilter,
+    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatItem, ChatLinkKind, ChatListFilter,
     Schedule, Step, StepAction, Ticket, Trigger, Workspace,
 };
 
@@ -1115,6 +1115,43 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
         } else {
             assert!(queued.is_empty(), "{how}: {queued:?}");
             assert!(submitted.is_empty(), "{how}: {submitted:?}");
+        }
+    }
+}
+
+/// #387 5A2: the run's first message may already be on its way to the harness (sent,
+/// not yet confirmed) when the run ends or is taken over. It is the run's, not the
+/// person's: they are never asked whether to send it again.
+#[tokio::test(start_paused = true)]
+async fn a_run_ended_with_its_first_message_unconfirmed_does_not_offer_to_send_it_again() {
+    for how in ["stop in the chat", "reply", "stop the run"] {
+        let f = Fixture::new();
+        let _submit = f.fake.hold_next_submit();
+        f.tag("Fix login");
+        f.tick().await;
+        let run = f.runs().remove(0);
+        let chat = f.chat();
+
+        match how {
+            "stop in the chat" => f.host.stop(&chat).await.unwrap(),
+            "reply" => {
+                f.host
+                    .send(&chat, None, "Hello", SendMode::Auto)
+                    .await
+                    .unwrap();
+            }
+            _ => {
+                f.core().stop_automation_run(&run.id).unwrap();
+                f.host.stop(&chat).await.unwrap();
+            }
+        }
+        settle().await;
+
+        let snapshot = f.core().chat_snapshot(&chat, 5_000).unwrap();
+        for item in snapshot.items {
+            if let ChatItem::Message(message) = item {
+                assert!(!message.awaits_decision(), "{how}: {message:?}");
+            }
         }
     }
 }

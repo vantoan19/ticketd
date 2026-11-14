@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_core::{ChatMessage, ChatSnapshot, Error, Workspace};
+use ticketd_core::{ChatItem, ChatMessage, ChatSnapshot, Error, Workspace};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
@@ -850,6 +850,7 @@ impl ChatHost {
         // not wait to be sent for them (a reply starts the queue). What the agent did
         // take is history, not queue, and stays.
         self.discard_queued_first_message(chat_id);
+        self.set_aside_unconfirmed_first_message(chat_id);
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
         self.inner
             .board
@@ -869,6 +870,26 @@ impl ChatHost {
         }
     }
 
+    /// The same message when it was already handed to the harness but never confirmed
+    /// (#387 5A2): closing the harness recorded its delivery as uncertain, which would
+    /// ask the person whether to send the agent's instructions as their own. The run
+    /// stays in history as it is; the person is not asked, and it is never sent again.
+    fn set_aside_unconfirmed_first_message(&self, chat_id: &str) {
+        let Ok(mut workspace) = self.workspace() else {
+            return;
+        };
+        let Ok(snapshot) = workspace.chat_snapshot(chat_id, UNCONFIRMED_SCAN) else {
+            return;
+        };
+        for item in snapshot.items {
+            if let ChatItem::Message(message) = item
+                && message.awaits_decision()
+            {
+                let _ = workspace.discard_uncertain_chat_submission(chat_id, &message.id);
+            }
+        }
+    }
+
     /// Takes the Chat's supervisor out of the host, for the caller to shut down.
     pub(crate) fn forget(&self, chat_id: &str) -> Option<mpsc::Sender<Command>> {
         self.chats().remove(chat_id)
@@ -885,6 +906,10 @@ impl ChatHost {
             .unwrap_or_else(PoisonError::into_inner)
     }
 }
+
+/// How many of a Chat's latest history items are looked through for the run's first
+/// message when its run ends: an unattended Chat has hardly any.
+const UNCONFIRMED_SCAN: usize = 50;
 
 /// The name a failed turn's problem kind is stored under.
 pub fn problem_key(kind: ProblemKind) -> &'static str {
