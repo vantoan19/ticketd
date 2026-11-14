@@ -3,7 +3,7 @@
 //! person takes a run over in its Chat.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ticketd_automation_runner::{Runner, TicketdCli, stop_and_turn_off};
@@ -29,7 +29,12 @@ struct Fixture {
     host: ChatHost,
     runner: Runner,
     automation: Automation,
+    /// Run on the Workspace each time the Chat host opens it, to make something
+    /// happen at a moment no call from outside can reach.
+    as_the_host_looks: HostLooks,
 }
+
+type HostLooks = Arc<Mutex<Option<Box<dyn Fn(&mut Workspace) + Send>>>>;
 
 fn opener(path: &Path) -> WorkspaceOpener {
     let path = path.to_owned();
@@ -106,8 +111,19 @@ impl Fixture {
         let automation = workspace
             .set_automation_enabled(&automation.id, true)
             .unwrap();
+        let as_the_host_looks = HostLooks::default();
+        let host_opener: WorkspaceOpener = {
+            let (path, looks) = (path.clone(), as_the_host_looks.clone());
+            Arc::new(move || {
+                let mut workspace = Workspace::open(&path)?;
+                if let Some(happens) = looks.lock().unwrap().as_ref() {
+                    happens(&mut workspace);
+                }
+                Ok(workspace)
+            })
+        };
         let host = ChatHost::new(
-            opener(&path),
+            host_opener,
             vec![Arc::new(fake.clone()) as Arc<dyn HarnessAdapter>],
         )
         .unwrap();
@@ -123,6 +139,7 @@ impl Fixture {
             host,
             runner,
             automation,
+            as_the_host_looks,
         }
     }
 
@@ -695,6 +712,41 @@ async fn taking_a_run_over_stops_the_agent_of_the_step_it_was_on() {
     assert_eq!(run.status, AutomationRunStatus::TakenOver);
     assert_eq!(run.steps[1].status, AutomationStepStatus::Failed);
     assert_eq!(run.steps.len(), 2);
+}
+
+/// The person replies in step 1's Chat just after the runner created step 2's Chat
+/// and before its agent is known to the host: the take-over finds no agent to stop
+/// there, so the runner must not start one afterwards.
+#[tokio::test(start_paused = true)]
+async fn a_run_taken_over_just_as_its_next_agent_would_start_starts_no_agent() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    let mut second = definition.steps[0].clone();
+    second.id = "second".into();
+    definition.steps.push(second);
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.agent_working().await;
+    let (first, automation) = (f.chat(), f.automation.id.clone());
+    // The take-over as the core records it, the moment step 2 has its Chat.
+    *f.as_the_host_looks.lock().unwrap() = Some(Box::new(move |workspace| {
+        let run = workspace.automation_runs(&automation).unwrap().remove(0);
+        let second_has_chat = run.steps.get(1).is_some_and(|step| step.chat_id.is_some());
+        if run.status == AutomationRunStatus::Running && second_has_chat {
+            workspace.take_over_automation_run(&first, true).unwrap();
+        }
+    }));
+
+    f.end_turn(TurnOutcome::Completed).await;
+    tokio::time::sleep(Duration::from_secs(6 * 60)).await;
+
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::TakenOver);
+    assert!(run.steps[1].chat_id.is_some());
+    // Only step 1's agent was ever started.
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 1, "{opens:?}");
 }
 
 #[tokio::test(start_paused = true)]

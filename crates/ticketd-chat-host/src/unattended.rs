@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use ticketd_core::{ChatTurn, ChatTurnState};
+use ticketd_core::{AutomationRunStatus, ChatTurn, ChatTurnState};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
@@ -49,6 +49,8 @@ impl ChatHost {
     /// this returns, whatever happened. When the person took the Chat over meanwhile,
     /// `take_over` closed it and this returns `TakenOver` without touching the
     /// session that is now theirs: neither the turn's end nor the time limit ends it.
+    /// When the run was taken over or stopped before the agent could start, even
+    /// just after its Chat was created, no agent starts and this returns `TakenOver`.
     pub async fn run_unattended(
         &self,
         chat_id: &str,
@@ -56,8 +58,9 @@ impl ChatHost {
         unattended: Unattended,
         time_limit: Duration,
     ) -> Result<TurnEnd, HostError> {
+        let run_id = unattended.run_id.clone();
         self.set_unattended(chat_id, Some(unattended));
-        let ended = self.first_turn(chat_id, text, time_limit).await;
+        let ended = self.first_turn(chat_id, &run_id, text, time_limit).await;
         if !self.end_unattended(chat_id).await {
             return Ok(TurnEnd::TakenOver);
         }
@@ -67,14 +70,30 @@ impl ChatHost {
     async fn first_turn(
         &self,
         chat_id: &str,
+        run_id: &str,
         text: &str,
         time_limit: Duration,
     ) -> Result<TurnEnd, HostError> {
         // Subscribed before the send, so no step of the turn is missed.
         let mut changed = self.changed();
-        let command_id = format!("{chat_id}:first");
-        self.submit(chat_id, Some(&command_id), text, SendMode::Auto)
-            .await?;
+        // Whoever ended the run before the Chat was registered as unattended found
+        // no agent to stop, so the run is looked at after registering. Whoever ends
+        // it from here on finds the registration, and `unattended_sender` sees that.
+        if self.workspace()?.automation_run(run_id)?.status != AutomationRunStatus::Running {
+            return Ok(TurnEnd::TakenOver);
+        }
+        let Some(agent) = self.unattended_sender(chat_id)? else {
+            return Ok(TurnEnd::TakenOver);
+        };
+        let (reply, sent) = oneshot::channel();
+        let first = Command::Send {
+            command_id: Some(format!("{chat_id}:first")),
+            text: text.to_owned(),
+            mode: SendMode::Auto,
+            reply,
+        };
+        agent.send(first).await.map_err(|_| HostError::Quitting)?;
+        sent.await.map_err(|_| HostError::Quitting)??;
         let waiting = async {
             loop {
                 if !self.is_unattended(chat_id) {
