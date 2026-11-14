@@ -208,7 +208,12 @@ impl Connection {
         if let Some(unattended) = &request.unattended {
             let (thread, turn) = super::unattended_params(unattended, &request.working_directory);
             merge(&mut params, thread);
+            let config = self.effective_config(&cwd).await;
+            params["config"] = super::personal_tools_off(config.as_ref());
             self.state().session.turn_overrides = Some(turn);
+        } else if request.resumes_unattended {
+            let config = self.effective_config(&cwd).await;
+            merge(&mut params, super::own_approvals(config.as_ref()));
         }
         let result = match self.call(method, |_| Ok((params, Call::OpenThread))).await {
             CallOutcome::Reply(result) => result,
@@ -232,6 +237,15 @@ impl Connection {
         }
         let version = result.pointer("/thread/cliVersion").and_then(Value::as_str);
         Ok(discovery::capabilities(version))
+    }
+
+    /// The person's Codex configuration as it applies in `cwd`, or `None` when Codex
+    /// would not say.
+    async fn effective_config(&self, cwd: &str) -> Option<Value> {
+        match self.request("config/read", json!({"cwd": cwd})).await {
+            CallOutcome::Reply(mut result) => Some(result["config"].take()),
+            _ => None,
+        }
     }
 
     fn startup_problem(&self, step: &str, outcome: CallOutcome) -> Problem {

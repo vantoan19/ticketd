@@ -107,6 +107,8 @@ pub(super) struct Session {
     pub(super) turn_overrides: Option<Value>,
     /// The tool Codex declined in the open turn of an unattended session.
     declined: Option<String>,
+    /// Why Codex could not start a command in the open turn of an unattended session.
+    not_started: Option<String>,
     rate_limits: Option<Value>,
     /// MCP servers whose failed start was already reported in this session.
     failed_servers: HashSet<String>,
@@ -385,15 +387,27 @@ impl Session {
     fn turn_completed(&mut self, turn: &Value) -> Option<Vec<EventKind>> {
         let id = text(turn, &["id"])?;
         let declined = self.declined.take();
+        let not_started = self.not_started.take();
+        let ended_by = |kind, message| {
+            TurnOutcome::Failed(Problem {
+                kind,
+                message,
+                detail: None,
+                resets_at: None,
+            })
+        };
         let outcome = match text(turn, &["status"])? {
             // Nobody approves for an unattended session, so a declined tool is one
             // the agent needed and was denied, even if it then ended its turn.
-            "completed" if declined.is_some() => TurnOutcome::Failed(Problem {
-                kind: ProblemKind::ToolDenied,
-                message: format!("Codex was denied: {}", declined.unwrap_or_default()),
-                detail: None,
-                resets_at: None,
-            }),
+            "completed" if declined.is_some() => ended_by(
+                ProblemKind::ToolDenied,
+                format!("Codex was denied: {}", declined.unwrap_or_default()),
+            ),
+            // Whatever the agent then said, it could not do its work (#387 D2).
+            "completed" if not_started.is_some() => ended_by(
+                ProblemKind::PermissionUnavailable,
+                not_started.unwrap_or_default(),
+            ),
             "completed" => TurnOutcome::Completed,
             "interrupted" => TurnOutcome::Interrupted,
             "failed" => {
@@ -544,6 +558,23 @@ impl Session {
         }]
     }
 
+    /// Codex could not start the command, so it never ran: it failed with no process,
+    /// the exit code Codex gives a command it could not run (-1), and no time taken.
+    /// A command that ran and failed has a process, its own exit code or a duration.
+    // ponytail: recognized by shape from items seen live (codex-cli 0.162.1, a Windows
+    // sandbox that would not set up: "Failed to create unified exec process: ...");
+    // the protocol documents no field for it.
+    fn never_started(item: &Value) -> bool {
+        let none_or = |field: &str, value: i64| {
+            item.get(field)
+                .is_none_or(|found| found.is_null() || found.as_i64() == Some(value))
+        };
+        text(item, &["status"]) == Some("failed")
+            && item.get("processId").is_none_or(Value::is_null)
+            && none_or("exitCode", -1)
+            && none_or("durationMs", 0)
+    }
+
     fn tool(
         &mut self,
         turn: &str,
@@ -555,6 +586,19 @@ impl Session {
     ) -> EventKind {
         if text(item, &["status"]) == Some("declined") && self.turn_overrides.is_some() {
             self.declined = Some(title.clone());
+        }
+        if kind == "commandExecution"
+            && self.turn_overrides.is_some()
+            && self.not_started.is_none()
+            && Self::never_started(item)
+        {
+            let output = text(item, &["aggregatedOutput"]).unwrap_or_default();
+            let reason = output.lines().map(str::trim).find(|line| !line.is_empty());
+            self.not_started = Some(
+                reason
+                    .unwrap_or("Codex could not start a command and gave no reason.")
+                    .to_owned(),
+            );
         }
         let status = match text(item, &["status"]) {
             Some("failed") => ToolStatus::Failed,

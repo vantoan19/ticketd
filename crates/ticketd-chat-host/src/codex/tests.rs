@@ -51,6 +51,8 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         working_directory: PathBuf::from("/work/chat-1"),
         session,
         unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -761,6 +763,8 @@ async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
         unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings {
             model: Some("gpt-b".to_owned()),
             effort: Some("high".to_owned()),
@@ -868,7 +872,6 @@ fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
             use_web,
         },
         turn_limit: 40,
-        ticketd_cli: None,
         ticketd_folders: vec![PathBuf::from("/data/ticketd")],
     }
 }
@@ -913,6 +916,8 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
         unattended: Some(unattended(false, false)),
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -948,6 +953,115 @@ fn a_declined_command_is_declined_not_failed() {
     };
     assert_eq!(completed("declined"), crate::ToolStatus::Declined);
     assert_eq!(completed("failed"), crate::ToolStatus::Failed);
+}
+
+/// L4: in an unattended session a command Codex could not start (the item seen live
+/// when its Windows sandbox would not set up) fails the turn with Codex's own words,
+/// though the agent then ended its turn. A command that ran and failed does not.
+#[test]
+fn a_command_codex_could_not_start_fails_an_unattended_turn() {
+    let not_started = json!({
+        "type": "commandExecution", "id": "exec-1", "command": "ticketd show T-1",
+        "commandActions": [], "cwd": "/work", "status": "failed", "source": "unifiedExecStartup",
+        "aggregatedOutput": "Failed to create unified exec process: helper_unknown_error: setup refresh had errors",
+        "exitCode": -1, "durationMs": 0, "processId": null,
+    });
+    let mut ran = not_started.clone();
+    ran["exitCode"] = json!(1);
+    ran["durationMs"] = json!(840);
+    ran["processId"] = json!("12");
+    ran["aggregatedOutput"] = json!("1 test failed");
+
+    let outcome = |item: &Value, unattended: bool| {
+        let mut session = Session::default();
+        session.turn_overrides = unattended.then(|| json!({}));
+        let params = json!({"turnId": "turn_1", "item": item});
+        session.notification("item/completed", &params);
+        let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
+        match session.notification("turn/completed", &turn).pop() {
+            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
+            other => panic!("the turn ended, got {other:?}"),
+        }
+    };
+
+    match outcome(&not_started, true) {
+        TurnOutcome::Failed(problem) => {
+            assert_eq!(problem.kind, ProblemKind::PermissionUnavailable);
+            assert_eq!(
+                problem.message,
+                "Failed to create unified exec process: helper_unknown_error: setup refresh had errors"
+            );
+        }
+        other => panic!("a failed turn, got {other:?}"),
+    }
+    assert_eq!(outcome(&ran, true), TurnOutcome::Completed);
+    // A person's Chat is theirs to judge: Codex said the turn completed.
+    assert_eq!(outcome(&not_started, false), TurnOutcome::Completed);
+}
+
+/// L5: an unattended thread starts none of the person's MCP servers (named from
+/// their configuration), plugins or apps.
+#[test]
+fn an_unattended_thread_turns_off_each_of_the_persons_mcp_servers_plugins_and_apps() {
+    let config = json!({"mcp_servers": {"docs": {"command": "docs-mcp"}, "web": {"url": "https://x"}}});
+    assert_eq!(
+        super::personal_tools_off(Some(&config)),
+        json!({
+            "features.plugins": false,
+            "features.apps": false,
+            "mcp_servers.docs.enabled": false,
+            "mcp_servers.web.enabled": false,
+        })
+    );
+    assert_eq!(
+        super::personal_tools_off(None),
+        json!({"features.plugins": false, "features.apps": false})
+    );
+}
+
+/// L2: a Chat taken over from a run resumes with the person's own approval policy
+/// and sandbox, and Codex's defaults for what their configuration leaves unset.
+#[test]
+fn a_taken_over_thread_resumes_with_the_persons_own_approvals() {
+    let config = json!({"approval_policy": "untrusted", "sandbox_mode": null});
+    assert_eq!(
+        super::own_approvals(Some(&config)),
+        json!({"approvalPolicy": "untrusted", "sandbox": "read-only"})
+    );
+    assert_eq!(
+        super::own_approvals(None),
+        json!({"approvalPolicy": "on-request", "sandbox": "read-only"})
+    );
+}
+
+/// L2 and L5 through the protocol: the fixtures check that an unattended thread
+/// reads the configuration and starts with the servers off, and that a taken-over
+/// thread reads it and resumes with the person's approvals.
+#[tokio::test(start_paused = true)]
+async fn a_taken_over_thread_is_resumed_with_its_configuration_read_first() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_taken_over"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("thr_1")),
+        unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: true,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let mut opened = opened.expect("the thread resumes");
+    let events = drain(&mut opened.events).await;
+    let notice = events.iter().find_map(|event| match event {
+        EventKind::Notice { message, .. } => Some(message.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        notice.as_deref(),
+        Some("Model gpt-test, approval policy on-request, sandbox workspaceWrite")
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -1017,6 +1131,8 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
         unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings::default(),
     };
     let listing = Options {
