@@ -1429,6 +1429,24 @@ impl Supervisor {
                 Ok(())
             }
             Err(problem) => {
+                // Codex records a thread id when it starts one but keeps nothing until
+                // the first turn runs, so a Chat whose session never completed a turn (a run
+                // taken over early) has nothing to resume: open a fresh session, with
+                // the same reply, rather than a dead Chat (#387 6A1).
+                if problem.kind == crate::ProblemKind::NativeHistoryUnavailable
+                    && opening.origin == ChatSessionOrigin::NativeResume
+                    && self.never_completed_a_turn()
+                    && let Ok(chat) = self.core(|core| core.chat(&self.chat_id))
+                {
+                    self.open(
+                        &chat,
+                        SessionStart::New,
+                        ChatSessionOrigin::New,
+                        opening.preamble,
+                        opening.reply,
+                    );
+                    return;
+                }
                 self.pause(ChatProblem::OpenFailed {
                     problem: problem.clone(),
                     native_resume: opening.origin == ChatSessionOrigin::NativeResume,
@@ -1439,6 +1457,19 @@ impl Supervisor {
         if let Some(reply) = opening.reply {
             let _ = reply.send(result);
         }
+    }
+
+    /// Whether no turn of this Chat ever completed, so the harness may have kept nothing.
+    /// Unreadable counts as having completed one.
+    fn never_completed_a_turn(&self) -> bool {
+        const SCAN: usize = 200;
+        self.core(|core| core.chat_snapshot(&self.chat_id, SCAN))
+            .is_ok_and(|snapshot| {
+                !snapshot.earlier
+                    && !snapshot.items.iter().any(|item| {
+                        matches!(item, ticketd_core::ChatItem::Turn(turn) if turn.state == ChatTurnState::Completed)
+                    })
+            })
     }
 
     /// Maps what the adapter observed about one submission to core observations. An

@@ -1197,6 +1197,41 @@ async fn a_run_taken_over_before_its_session_exists_opens_as_an_ordinary_chat() 
     }
 }
 
+/// #387 6A1: Codex answers `thread/start` with an id but keeps no conversation until
+/// its first turn. A run taken over before any turn has a session id Codex cannot
+/// resume; the Chat opens a fresh session instead of a dead one, and the reply is sent once.
+#[tokio::test(start_paused = true)]
+async fn a_run_taken_over_before_its_first_turn_opens_a_fresh_session_when_codex_cannot_resume() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    f.fake
+        .emit(EventKind::SessionIdentified {
+            native_session: NativeSessionId::new("never-persisted"),
+        })
+        .await;
+    settle().await;
+    f.fake.fail_next_open(Problem {
+        kind: ProblemKind::NativeHistoryUnavailable,
+        message: "Codex could not resume the session: no rollout found".to_owned(),
+        detail: None,
+        resets_at: None,
+    });
+
+    f.reply(&chat, "Hello").await;
+
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2, "{opens:?}");
+    assert_eq!(opens[1].session, SessionStart::New);
+    assert!(opens[1].taken_over && opens[1].unattended.is_none());
+    let submits = written(&f)
+        .into_iter()
+        .filter(|written| written == "submit: Hello")
+        .count();
+    assert_eq!(submits, 1);
+    assert!(!f.core().chat(&chat).unwrap().queue_paused);
+}
+
 #[tokio::test(start_paused = true)]
 async fn stopping_a_running_runs_chat_takes_the_run_over() {
     let f = Fixture::new();
