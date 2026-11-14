@@ -69,6 +69,7 @@ const open = async (
       onSaveAgent={nothing}
       onDeleteAgent={nothing}
       onFail={nothing}
+      onRead={nothing}
       openRun={null}
       onOpenRun={nothing}
     />,

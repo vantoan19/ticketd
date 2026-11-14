@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -18,6 +19,7 @@ import type {
 import { RunNavigation } from "@/features/automations/navigation";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
+import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 window.ResizeObserver = class {
@@ -51,10 +53,13 @@ const DEFAULTS = {
 let stored: AutomationAgent[] = [];
 let automations: Automation[] = [];
 let runs: ListedRun[] = [];
+/** While set, the fake Workspace refuses to read a run with it. */
+let runUnreadable: string | null = null;
 beforeEach(() => {
   stored = [];
   automations = [];
   runs = [];
+  runUnreadable = null;
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { id, settings, example } = (args ?? {}) as {
       id?: string;
@@ -71,6 +76,7 @@ beforeEach(() => {
       case "automation_run_list_all":
         return runs;
       case "automation_run_get":
+        if (runUnreadable) throw new Error(runUnreadable);
         return {
           ...runs.find((run) => run.id === id),
           definition: { name: "", trigger: null, conditions: [], steps: [] },
@@ -521,6 +527,36 @@ test("a switch that fails says so on the page until it is dismissed, not in the 
   expect(alert.closest(".ticket-list")).toBeNull();
   fireEvent.click(within(alert).getByRole("button", { name: "Dismiss" }));
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a read of the open run that fails says so only until that read works again", async () => {
+  automations = [TRIAGE];
+  runs = [listed("2", "needs_attention", "Login flickers")];
+  const page = (version: number) => (
+    <WorkspaceChangeProvider value={version}>
+      <ChatClientContext value={createMockChatClient()}>
+        <AutomationsView />
+      </ChatClientContext>
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(page(0));
+  fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Login flickers/ }),
+  );
+  await screen.findByRole("heading", { name: /Run on T-2/ });
+
+  // The Workspace changes while it is busy: the run cannot be read this once.
+  runUnreadable = "the workspace is busy";
+  act(() => rerender(page(1)));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("the workspace is busy");
+
+  // The next change reads it: nothing is wrong any more, so nothing says so.
+  runUnreadable = null;
+  act(() => rerender(page(2)));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(screen.getByRole("heading", { name: /Run on T-2/ })).toBeTruthy();
 });
 
 test("Run commands allows only the commands listed unless Any command is chosen", async () => {

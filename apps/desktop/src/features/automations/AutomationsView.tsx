@@ -34,6 +34,7 @@ import { AgentForm } from "@/features/automations/AgentForm";
 import { AutomationEditor } from "@/features/automations/AutomationEditor";
 import {
   automationsClient,
+  type ReportRead,
   HARNESS_NAMES,
   type Automation,
   type AutomationAgent,
@@ -193,12 +194,27 @@ export function AutomationsView({
     [],
   );
   /** `action` worked, so what it failed with before no longer stands. */
-  const worked = (action: string) =>
-    setFailure((current) => (current?.action === action ? null : current));
-  /** For what the open pane asks for itself: reading projects, runs, a new run. */
+  const worked = useCallback(
+    (action: string) =>
+      setFailure((current) => (current?.action === action ? null : current)),
+    [],
+  );
+  /** For what the open pane does when asked: a new run, choosing a folder. */
   const fail = useCallback(
     (reason: unknown) => failed("pane", "That did not work.")(reason),
     [failed],
+  );
+  /**
+   * For what the open pane reads by itself: a run, an Automation's runs, the
+   * projects. Those reads repeat whenever the Workspace changes, so one that
+   * failed says so only until the same read works.
+   */
+  const read = useCallback<ReportRead>(
+    (what, failure) => {
+      if (failure) failed(`read ${what}`, "That did not work.")(failure.reason);
+      else worked(`read ${what}`);
+    },
+    [failed, worked],
   );
   const load = useCallback(() => {
     const saved = saves.current;
@@ -574,6 +590,7 @@ export function AutomationsView({
       onSaveAgent={saveAgent}
       onDeleteAgent={(id) => void deleteAgent(id)}
       onFail={fail}
+      onRead={read}
     />
   ) : listedRun ? (
     <RunView
@@ -587,7 +604,7 @@ export function AutomationsView({
       {...paneProps}
       onBack={close}
       onOpenRun={openListedRun}
-      onFail={fail}
+      onRead={read}
     />
   ) : (
     <section

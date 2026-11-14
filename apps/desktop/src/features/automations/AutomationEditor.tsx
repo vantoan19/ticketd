@@ -38,6 +38,8 @@ import {
 } from "@/features/automations/canvas-layout";
 import {
   automationsClient,
+  reported,
+  type ReportRead,
   definitionOf,
   editSteps,
   stepPaths,
@@ -143,6 +145,7 @@ export function AutomationEditor({
   onSaveAgent,
   onDeleteAgent,
   onFail,
+  onRead,
 }: {
   automation: Automation;
   agents: AutomationAgent[];
@@ -173,6 +176,8 @@ export function AutomationEditor({
   onSaveAgent: (id: string, settings: AutomationAgentSettings) => void;
   onDeleteAgent: (id: string) => void;
   onFail: (reason: unknown) => void;
+  /** How the reads the editor and its views make by themselves went. */
+  onRead: ReportRead;
 }) {
   const headingId = useId();
   const section = useRef<HTMLElement>(null);
@@ -190,6 +195,8 @@ export function AutomationEditor({
   const [saveFailure, setSaveFailure] = useState<string | null>(null);
   /** What an edit left unfinished when it switched the Automation off. */
   const [switchedOff, setSwitchedOff] = useState<string | null>(null);
+  // On again: that switch-off is over, and a later one is not this edit's doing.
+  if (switchedOff !== null && automation.enabled) setSwitchedOff(null);
   /** A definition changed elsewhere while an edit here was not saved. */
   const [elsewhere, setElsewhere] = useState<AutomationDefinition | null>(null);
   if (arrived !== seen) {
@@ -224,8 +231,8 @@ export function AutomationEditor({
   /** For the project conditions: their names, and the ones to choose from. */
   const [projects, setProjects] = useState<Project[]>([]);
   useEffect(() => {
-    void client.listProjects().then(setProjects, onFail);
-  }, [onFail]);
+    void reported("projects", client.listProjects(), onRead, setProjects);
+  }, [onRead]);
 
   const setEnabled = (enabled: boolean) => {
     if (enabled) return onSetEnabled(true);
@@ -391,7 +398,7 @@ export function AutomationEditor({
         onClose={onClose}
         onBack={() => setOpenRun(null)}
         onOpenRun={setOpenRun}
-        onFail={onFail}
+        onRead={onRead}
       />
     );
   const left = automation.problems.length;
@@ -601,7 +608,7 @@ export function AutomationEditor({
         </div>
       </div>
       {view === "runs" ? (
-        <RunsList automation={automation} onOpen={setOpenRun} onFail={onFail} />
+        <RunsList automation={automation} onOpen={setOpenRun} onRead={onRead} />
       ) : (
         <div className="flow-body" data-panel={panel ? undefined : "none"}>
           <FlowCanvas
