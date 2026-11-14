@@ -48,6 +48,7 @@ import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
 import { ChatContext, ContextCount } from "@/features/chats/ChatContext";
 import { ComposerControls } from "@/features/chats/ComposerControls";
 import {
+  labelOf,
   settingLine,
   type AskedChange,
 } from "@/features/chats/composer-settings";
@@ -428,6 +429,8 @@ function Conversation({
   /** Stops the turn; the Stop button leaves, so the message box takes focus. */
   const stop = () => {
     messageBox.current?.focus();
+    // A refused change is about the session Stop ends, or the run it takes over.
+    setAsked(null);
     quietly(client.stop(id));
   };
   // When a menu, popover or picker last took an Esc: the next Esc a moment
@@ -705,7 +708,11 @@ function Conversation({
                         void client.changeSetting(id, setting, value).then(
                           (outcome) => {
                             setFailure("");
-                            setAsked({ setting, outcome });
+                            setAsked({
+                              setting,
+                              outcome,
+                              label: labelOf(chat.settings?.[setting], value),
+                            });
                           },
                           (reason: unknown) =>
                             setFailure(
