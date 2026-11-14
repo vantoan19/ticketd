@@ -381,7 +381,7 @@ async fn commands_the_harness_could_not_start_fail_the_step() {
 
     assert_eq!(
         f.needs_attention(),
-        "The agent could not run commands. Failed to create unified exec process: setup refresh had errors"
+        "The agent could not run commands. Failed to create unified exec process: setup refresh had errors."
     );
 }
 
@@ -565,6 +565,37 @@ async fn the_runs_at_once_setting_decides_how_many_runs_execute() {
     f.core().set_automation_runs_at_once(3).unwrap();
     f.tick().await;
     assert_eq!(statuses(), [Running, Running, Running]);
+}
+
+/// #387 M3, M17: turning Chat off ends the going run, says why, and starts none of
+/// the queued ones, which wait for Chat to be on again.
+#[tokio::test(start_paused = true)]
+async fn turning_chat_off_stops_the_going_run_and_leaves_queued_runs_queued() {
+    let f = Fixture::new();
+    f.core().set_automation_runs_at_once(1).unwrap();
+    for title in ["First", "Second", "Third"] {
+        f.tag(title);
+    }
+    f.tick().await;
+    let statuses =
+        || -> Vec<AutomationRunStatus> { f.runs().iter().map(|run| run.status).collect() };
+    use AutomationRunStatus::{NeedsAttention, Queued, Running};
+    assert_eq!(statuses(), [Running, Queued, Queued]);
+
+    f.host.turn_off().await;
+    settle().await;
+
+    assert_eq!(statuses(), [NeedsAttention, Queued, Queued]);
+    assert_eq!(
+        f.runs()[0].reason.as_deref(),
+        Some("Chat was turned off while this run was going.")
+    );
+    f.tick().await;
+    assert_eq!(statuses(), [NeedsAttention, Queued, Queued]);
+
+    f.host.turn_on();
+    f.tick().await;
+    assert_eq!(statuses(), [NeedsAttention, Running, Queued]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -865,7 +896,7 @@ async fn a_run_whose_agent_ticketd_stops_needs_attention_and_runs_nothing_more()
 
     assert_eq!(
         f.needs_attention(),
-        "ticketd stopped this run's agent before it finished."
+        "Chat was turned off while this run was going."
     );
     assert_eq!(f.runs()[0].steps.len(), 1);
 }

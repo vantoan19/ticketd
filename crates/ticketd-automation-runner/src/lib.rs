@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_chat_host::{ChatHost, TurnEnd, Unattended, WorkspaceOpener};
+use ticketd_chat_host::{ChatHost, StopCause, TurnEnd, Unattended, WorkspaceOpener};
 use ticketd_core::{
     AutomationAgent, AutomationNotification, AutomationRun, ChatLink, ChatLinkKind, Error, NewChat,
     RunAction, StepAction, StepOutcome,
@@ -26,17 +26,24 @@ const RESTARTED: &str = "ticketd closed while this run was going.";
 /// Why a run found Running that this runner is not executing ended: a restored
 /// backup brought it back, or its executor could not record how it ended.
 const ABANDONED: &str = "This run was still marked as going, but nothing was running it.";
-/// Why a run ended when ticketd closed its agent's harness: it was quitting, Chat
-/// was turned off, or a backup was being restored.
-const AGENT_STOPPED: &str = "ticketd stopped this run's agent before it finished.";
+/// Why a run ended when ticketd closed its agent's harness (#387 M17).
+fn agent_stopped(cause: StopCause) -> &'static str {
+    match cause {
+        StopCause::Quit => "ticketd quit while this run was going.",
+        StopCause::TurnedOff => "Chat was turned off while this run was going.",
+        StopCause::Restore => "A backup was restored while this run was going.",
+        StopCause::Unknown => "ticketd stopped this run's agent before it finished.",
+    }
+}
 
 /// How executing one step ended, for the loop that executes the run.
 enum Ran {
     Step(StepOutcome),
     /// The person took the run over: it has ended, and its Chat is theirs.
     TakenOver,
-    /// ticketd closed the agent's harness, so the run cannot go on.
-    AgentStopped,
+    /// ticketd closed the agent's harness, or would not start it, so the run
+    /// cannot go on.
+    AgentStopped(StopCause),
 }
 
 /// What an agent needs kept open so it can always run the ticketd CLI, whatever
@@ -136,7 +143,12 @@ impl Runner {
         matched.and(scheduled)
     }
 
+    /// Starts queued runs up to the limit, and none while Chat is not served (off,
+    /// quitting, restoring): they wait until it is again (#387 M3).
     fn start_queued(&self) -> Result<(), Error> {
+        if self.inner.host.serving().is_err() {
+            return Ok(());
+        }
         let started = {
             let mut going = self.going();
             // Read each time, so a change in Settings counts from the next run.
@@ -196,7 +208,7 @@ impl Runner {
             outcome = Some(match self.run_step(run, &step_id).await {
                 Ok(Ran::Step(outcome)) => outcome,
                 Ok(Ran::TakenOver) => return Ok(()),
-                Ok(Ran::AgentStopped) => return Err(AGENT_STOPPED.to_owned()),
+                Ok(Ran::AgentStopped(cause)) => return Err(agent_stopped(cause).to_owned()),
                 // A step the core refused has failed; the reason is the core's.
                 Err(error) => StepOutcome::Failed {
                     reason: error.to_string(),
@@ -302,7 +314,7 @@ impl Runner {
         Ok(match ended {
             Ok(TurnEnd::Finished) => Ran::Step(StepOutcome::Completed),
             Ok(TurnEnd::TakenOver) => Ran::TakenOver,
-            Ok(TurnEnd::Stopped) => Ran::AgentStopped,
+            Ok(TurnEnd::Stopped(cause)) => Ran::AgentStopped(cause),
             Ok(
                 end @ (TurnEnd::TurnLimitReached
                 | TurnEnd::TimeLimitReached
@@ -313,9 +325,17 @@ impl Runner {
             ) => Ran::Step(StepOutcome::Failed {
                 reason: failure_reason(&end, &agent),
             }),
-            Err(error) => Ran::Step(StepOutcome::Failed {
-                reason: format!("The agent could not be started. {error}"),
-            }),
+            // Chat went off, ticketd quit or a restore began between the pass
+            // that started the run and its agent (#387 M3).
+            Err(error) => match StopCause::of(&error) {
+                Some(cause) => Ran::AgentStopped(cause),
+                None => Ran::Step(StepOutcome::Failed {
+                    reason: format!(
+                        "The agent could not be started. {}",
+                        sentence(&error.to_string())
+                    ),
+                }),
+            },
         })
     }
 }
@@ -337,6 +357,18 @@ pub async fn stop_and_turn_off(
     Ok(())
 }
 
+/// `text` trimmed and ending as a sentence: a full stop is added unless it already
+/// ends with one, a question or exclamation mark, or a closing quote after one.
+fn sentence(text: &str) -> String {
+    let text = text.trim();
+    let ends = text.trim_end_matches(['"', '\'', ')', '`', '\u{201d}']);
+    if text.is_empty() || ends.ends_with(['.', '!', '?']) {
+        text.to_owned()
+    } else {
+        format!("{text}.")
+    }
+}
+
 /// "1 turn", "40 turns".
 fn counted(count: u32, noun: &str) -> String {
     if count == 1 {
@@ -348,17 +380,17 @@ fn counted(count: u32, noun: &str) -> String {
 
 /// Why the step failed, in plain words for the person.
 fn failure_reason(end: &TurnEnd, agent: &AutomationAgent) -> String {
-    let with = |sentence: &str, detail: &str| {
+    let with = |first: &str, detail: &str| {
         if detail.trim().is_empty() {
-            sentence.to_owned()
+            first.to_owned()
         } else {
-            format!("{sentence} {}", detail.trim())
+            format!("{first} {}", sentence(detail))
         }
     };
     let settings = &agent.settings;
     match end {
         // Not failures: the caller handles them before asking for a reason.
-        TurnEnd::Finished | TurnEnd::TakenOver | TurnEnd::Stopped => String::new(),
+        TurnEnd::Finished | TurnEnd::TakenOver | TurnEnd::Stopped(_) => String::new(),
         TurnEnd::TurnLimitReached => format!(
             "The agent reached its limit of {} before finishing.",
             counted(settings.turn_limit, "turn")
@@ -387,5 +419,16 @@ mod tests {
         assert_eq!(super::counted(1, "turn"), "1 turn");
         assert_eq!(super::counted(1, "minute"), "1 minute");
         assert_eq!(super::counted(40, "turn"), "40 turns");
+    }
+
+    /// M17: a detail from elsewhere ends the reason as a sentence, once.
+    #[test]
+    fn a_detail_ends_as_a_sentence() {
+        use super::sentence;
+        assert_eq!(sentence("Chat is turned off"), "Chat is turned off.");
+        assert_eq!(sentence(" Done. "), "Done.");
+        assert_eq!(sentence("Denied `ls`?"), "Denied `ls`?");
+        assert_eq!(sentence("It said \"no.\""), "It said \"no.\"");
+        assert_eq!(sentence(""), "");
     }
 }

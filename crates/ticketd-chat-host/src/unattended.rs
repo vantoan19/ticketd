@@ -44,7 +44,29 @@ pub enum TurnEnd {
     TakenOver,
     /// ticketd closed the Chat's harness: it is quitting, Chat was turned off, or a
     /// backup is being restored.
-    Stopped,
+    Stopped(StopCause),
+}
+
+/// Why ticketd closed an unattended harness, or refused to start one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopCause {
+    Quit,
+    TurnedOff,
+    Restore,
+    /// The supervisor went away and the host is still serving: no reason is known.
+    Unknown,
+}
+
+impl StopCause {
+    /// The cause behind a refusal from the host, if it is one of ticketd stopping.
+    pub fn of(error: &HostError) -> Option<Self> {
+        match error {
+            HostError::Quitting => Some(Self::Quit),
+            HostError::TurnedOff => Some(Self::TurnedOff),
+            HostError::Restoring => Some(Self::Restore),
+            _ => None,
+        }
+    }
 }
 
 impl ChatHost {
@@ -109,7 +131,9 @@ impl ChatHost {
                     return Ok(TurnEnd::TakenOver);
                 }
                 if !self.supervised(chat_id) {
-                    return Ok(TurnEnd::Stopped);
+                    let cause = self.serving().err();
+                    let cause = cause.as_ref().and_then(StopCause::of);
+                    return Ok(TurnEnd::Stopped(cause.unwrap_or(StopCause::Unknown)));
                 }
                 if let Some(end) = self.turn_end(chat_id)? {
                     return Ok(end);

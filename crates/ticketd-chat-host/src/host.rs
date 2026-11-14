@@ -696,6 +696,11 @@ impl ChatHost {
         self.inner.restoring.store(false, Ordering::SeqCst);
     }
 
+    /// Whether Chats are served: `Err` says why not (quitting, restoring, turned off).
+    pub fn serving(&self) -> Result<(), HostError> {
+        self.closed()
+    }
+
     /// Why no supervisor may be reached or started right now, if any reason.
     fn closed(&self) -> Result<(), HostError> {
         if self.inner.quitting.load(Ordering::SeqCst) {
