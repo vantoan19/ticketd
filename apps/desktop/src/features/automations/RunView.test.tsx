@@ -132,6 +132,7 @@ beforeEach(() => {
       case "automation_list":
         return [VERIFY];
       case "automation_run_list_all":
+      case "list_projects":
         return [];
       case "automation_agent_list":
         return [VERIFIER];
@@ -146,6 +147,13 @@ beforeEach(() => {
             : item,
         );
         return runs.find((item) => item.id === id);
+      case "automation_run_dismiss":
+        runs = runs.map((item) =>
+          item.id === id
+            ? { ...item, needs_you: false, answer: "dismissed" }
+            : item,
+        );
+        return null;
       case "automation_run_again": {
         const again = run({ id: "run-2", status: "queued", started_at: null });
         runs = [again, ...runs];
@@ -253,6 +261,32 @@ test("a run that needs attention opens on the canvas with each step's status and
     expect(cards()[1]).toBe("Run agent: Verifier, step 1 of 2, Waiting"),
   );
   expect(invoke).toHaveBeenCalledWith("automation_run_again", { id: "run-1" });
+});
+
+test("a run that needs you can be dismissed from its own view", async () => {
+  runs = [
+    run({
+      status: "needs_attention",
+      reason: "Limit",
+      needs_you: true,
+      ended_at: new Date().toISOString(),
+      steps: [reached("verify", "failed", "Limit")],
+    }),
+  ];
+  await openRun();
+
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe(
+      "Needs attention · dismissed",
+    ),
+  );
+  expect(invoke).toHaveBeenCalledWith("automation_run_dismiss", {
+    id: "run-1",
+  });
+  // Answered: there is nothing left to dismiss.
+  expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
 });
 
 test("a run whose Automation was deleted says so and offers no Run again", async () => {

@@ -370,6 +370,23 @@ export function RunView({
                 <RunMark run={run} />
                 {runStatusText(run)}
               </span>
+              {/* Answered here too, not only from its ticket's notice. */}
+              {run.needs_you && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() =>
+                    act(
+                      "It could not be dismissed.",
+                      automationsClient.dismissRun(id),
+                      () => void load(),
+                    )
+                  }
+                >
+                  Dismiss
+                </Button>
+              )}
               {active ? (
                 <Button
                   variant="outline"
