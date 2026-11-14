@@ -26,6 +26,7 @@ import { client, type Project } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
 import { nameFromFolder } from "@/features/projects/paths";
+import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { PathText } from "@/features/projects/PathText";
 import "./projects.css";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -421,7 +422,10 @@ export function Projects({
                 <section aria-labelledby={`project-${item.id}-name`}>
                   <CardHeader asChild>
                     <div className="project-card-header">
-                      <Folder aria-hidden />
+                      <ProjectIcon
+                        project={{ id: item.id, title: item.name }}
+                        size={20}
+                      />
                       <h2 id={`project-${item.id}-name`}>{item.name}</h2>
                       <span className="project-tickets">
                         {ticketsLabel(counts[item.id])}

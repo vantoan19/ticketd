@@ -37,7 +37,7 @@ import {
 import { StepPanel } from "@/features/automations/StepPanel";
 import { TakenOverLine } from "@/features/automations/TakenOver";
 import { ChatDetail } from "@/features/chats/ChatDetail";
-import { elapsed } from "@/features/chats/model";
+import { duration } from "@/features/chats/model";
 import { client, type Project } from "@/lib/api/client";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 
@@ -167,7 +167,7 @@ function RunPanel({
             <>
               <dt>Took</dt>
               <dd>
-                {elapsed(
+                {duration(
                   new Date(run.ended_at).getTime() -
                     new Date(run.started_at).getTime(),
                 )}

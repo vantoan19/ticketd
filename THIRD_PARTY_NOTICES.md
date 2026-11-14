@@ -59,6 +59,20 @@ Re-read the license file of the exact SDK release shipped before distributing a
 build. The bridge contains no Claude Code; it starts the Claude Code the user
 installed, which stays under the terms the user accepted for it.
 
+## Harness marks
+
+`apps/desktop/src/features/chats/HarnessMark.tsx` draws the Claude mark
+(Anthropic) for Claude Code and the OpenAI mark for Codex, one color each, to
+say which harness a Chat runs. The path data was copied verbatim from
+[T3 Code](https://github.com/pingdotgg/t3code)
+(`apps/web/src/components/Icons.tsx`, `ClaudeAI` and `OpenAI`), which is MIT
+licensed (Copyright (c) 2026 T3 Tools Inc.). The marks themselves are trademarks
+of Anthropic PBC and OpenAI and are not covered by that license.
+
+Still to confirm before distributing a build: that this use (a monochrome mark
+naming the tool beside its name, never altered or recolored) is within each
+publisher's brand guidelines.
+
 ## Package dependencies and distribution
 
 Rust dependencies are recorded in `Cargo.lock`; JavaScript dependencies are

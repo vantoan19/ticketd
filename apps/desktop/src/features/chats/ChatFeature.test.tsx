@@ -54,6 +54,19 @@ afterEach(() => {
 
 const waitingChat = () => ({
   chat: chatState({ id: "c1", title: "Limiter", activity: "waiting" }),
+  items: [
+    {
+      id: "req-1",
+      at: "2026-11-10T10:00:00Z",
+      kind: "request" as const,
+      request: "approval" as const,
+      title: "Codex wants to run",
+      subject: "npm test",
+      options: [{ id: "once", label: "Allow once" }],
+      free_text: false,
+      state: "pending" as const,
+    },
+  ],
 });
 const settings = (client: MockChatClient) =>
   render(
@@ -215,7 +228,7 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
   });
   app(client);
   const entry = await screen.findByRole("button", {
-    name: "Chats · 1 needs you",
+    name: "Chats, 1 waiting",
   });
   fireEvent.click(entry);
   expect(entry.getAttribute("aria-current")).toBe("page");

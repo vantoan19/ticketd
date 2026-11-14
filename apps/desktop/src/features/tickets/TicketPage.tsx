@@ -5,6 +5,7 @@ import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { Follow } from "@/features/tickets/Inbox";
 import { Reminder } from "@/features/tickets/Reminder";
 import { RailSection } from "@/features/tickets/RailSection";
+import { LinkedChats } from "@/features/chats/LinkedChats";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { TicketDocuments } from "@/features/tickets/TicketDocuments";
@@ -188,6 +189,16 @@ export function TicketPage({
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
     />
   );
+  const chats = active && (
+    <LinkedChats
+      ticket={ticket}
+      folder={
+        projects.find((project) => project.id === ticket.project_id)?.path ??
+        null
+      }
+      chip={narrow}
+    />
+  );
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
@@ -199,6 +210,7 @@ export function TicketPage({
       {narrow && (
         <TicketProperties
           layout="chips"
+          chats={chats}
           ticket={ticket}
           active={active}
           revision={revision}
@@ -336,6 +348,7 @@ export function TicketPage({
       {!narrow && (
         <TicketProperties
           ticket={ticket}
+          chats={chats}
           active={active}
           revision={revision}
           projects={projects}

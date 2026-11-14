@@ -114,7 +114,7 @@ pub(crate) fn migrate_run_counts(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-/// Format version 75: the configuration a source was last read with, so the first
+/// Format version 81: the configuration a source was last read with, so the first
 /// read after a change to it can be told from the ones that follow. NULL for a
 /// source last read before this was kept.
 pub(crate) fn migrate_refreshed_configuration(connection: &Connection) -> Result<(), Error> {

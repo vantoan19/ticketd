@@ -2,6 +2,7 @@ import {
   ContextGraphNavigation,
   DocumentNavigation,
   PlanNavigation,
+  ProjectNavigation,
 } from "@/features/documents/navigation";
 import { ContextGraph } from "@/features/documents/ContextGraph";
 import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
@@ -30,6 +31,7 @@ import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { WindowBar } from "@/components/layout/WindowBar";
 import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
 import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
@@ -76,6 +78,18 @@ function AppContent() {
   // Turning Chat off hides its screen at once; the Chats themselves are kept.
   if ((view === "chats" || view === "automations") && !chat.enabled)
     setViewState("tickets");
+  // A clicked Chat notification shows the Chats screen; it opens the Chat itself.
+  const [seenChatOpen, setSeenChatOpen] = useState(0);
+  if (chat.openRequest && chat.openRequest.n !== seenChatOpen) {
+    setSeenChatOpen(chat.openRequest.n);
+    setViewState("chats");
+  }
+  // A Chat asked for from a ticket shows the Chats screen; it opens the Chat itself.
+  const [seenChatRequest, setSeenChatRequest] = useState(0);
+  if (chat.chatRequest && chat.chatRequest.n !== seenChatRequest) {
+    setSeenChatRequest(chat.chatRequest.n);
+    setViewState("chats");
+  }
   const [newChatRequest, setNewChatRequest] = useState(0);
   const [attachmentPreview, setAttachmentPreview] = useState<Attachment | null>(
     null,
@@ -94,6 +108,17 @@ function AppContent() {
     if (view !== "settings" && returnToSettingsEntry.current) {
       returnToSettingsEntry.current = false;
       document.getElementById("sidebar-settings")?.focus();
+      // The sidebar comes back under a pointer that has not moved: the row it
+      // happens to rest on shows no hover fill until the pointer moves, so only
+      // the current view reads as selected (LIVE2-12).
+      const root = document.documentElement;
+      root.dataset.hoverHeld = "";
+      const release = () => {
+        delete root.dataset.hoverHeld;
+        document.removeEventListener("pointermove", release, true);
+      };
+      document.addEventListener("pointermove", release, true);
+      return release;
     }
   }, [view]);
   const [documentListRequest, setDocumentListRequest] = useState(0);
@@ -283,6 +308,16 @@ function AppContent() {
     setView("automations");
   };
   useAutomationNotifications(chat.enabled, openNotifiedTicket, openRun);
+  // What the sidebar's dots say, for the button that opens it in a narrow window:
+  // Chats waiting, and Automation runs that need the person.
+  const chatsWaiting = chat.overview.needs_you;
+  const runsWaiting = chat.enabled ? (counts?.runs_needing_you ?? 0) : 0;
+  const waitingNames = [
+    chatsWaiting > 0 &&
+      `${chatsWaiting} ${chatsWaiting === 1 ? "Chat" : "Chats"} waiting`,
+    runsWaiting > 0 &&
+      `${runsWaiting} ${runsWaiting === 1 ? "run needs" : "runs need"} you`,
+  ].filter((part): part is string => Boolean(part));
   return (
     // Runs open in the Automations page, which is there only while Chat is on.
     // Without it a run's Inbox entry opens its ticket instead.
@@ -300,345 +335,365 @@ function AppContent() {
               setView("tickets");
             }}
           >
-            <DocumentNavigation.Provider
-              value={(id, backLabel) => {
-                if (view !== "documents") {
-                  setDocumentReturn(view);
-                  setDocumentReturnLabel(
-                    backLabel ??
-                      (view === "tickets" && workspace.selected
-                        ? `Back to ${workspace.selected}`
-                        : null),
-                  );
-                }
-                setDocumentTarget({ id, key: Date.now() });
-                setView("documents");
+            <ProjectNavigation.Provider
+              value={(id) => {
+                navigate({});
+                scope("all", id);
               }}
             >
-              <SourceActivityContext.Provider
-                value={{
-                  refreshing: sourceHealth.refreshing || sourceRefresh.running,
-                  sources: sourceHealth.sources,
-                  entries: sourceEntries,
-                  intervalSecs: sourceHealth.interval_secs ?? null,
-                  openSettings: () => {
-                    openView("settings");
-                    setSettingsSection("source-github");
-                  },
-                  refreshAll: () => refreshSources(),
+              <DocumentNavigation.Provider
+                value={(id, backLabel) => {
+                  if (view !== "documents") {
+                    setDocumentReturn(view);
+                    setDocumentReturnLabel(
+                      backLabel ??
+                        (view === "tickets" && workspace.selected
+                          ? `Back to ${workspace.selected}`
+                          : null),
+                    );
+                  }
+                  setDocumentTarget({ id, key: Date.now() });
+                  setView("documents");
                 }}
               >
-                <SettingsStateProvider
-                  active={view === "settings"}
-                  onOpenPage={setSettingsSection}
+                <SourceActivityContext.Provider
+                  value={{
+                    refreshing:
+                      sourceHealth.refreshing || sourceRefresh.running,
+                    sources: sourceHealth.sources,
+                    entries: sourceEntries,
+                    intervalSecs: sourceHealth.interval_secs ?? null,
+                    openSettings: () => {
+                      openView("settings");
+                      setSettingsSection("source-github");
+                    },
+                    refreshAll: () => refreshSources(),
+                  }}
                 >
-                  <SidebarProvider open={!sidebarCollapsed}>
-                    <a
-                      className="skip-link"
-                      href="#main-content"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        document.getElementById("main-content")?.focus();
-                      }}
-                    >
-                      Skip to content
-                    </a>
-                    <WindowBar />
-                    <div
-                      className={
-                        view === "settings"
-                          ? "workspace settings-open"
-                          : "workspace"
-                      }
-                    >
-                      {view === "settings" ? (
-                        <SettingsNav
-                          selected={settingsSection}
-                          onSelect={setSettingsSection}
-                          onBack={() => {
-                            returnToSettingsEntry.current = true;
-                            setView(viewBeforeSettings);
-                          }}
-                        />
-                      ) : (
-                        <WorkspaceSidebar
-                          onCapture={openCapture}
-                          onNewChat={() => {
-                            setNewChatRequest((count) => count + 1);
-                            openView("chats");
-                          }}
-                          counts={counts}
-                          activePlanCount={
-                            view === "tickets" &&
-                            navigation.kind !== "trash" &&
-                            navigation.plan
-                              ? (workspace.scopeTotal ?? workspace.total)
-                              : undefined
-                          }
-                          view={view}
-                          workspaceGraphOpen={graphOrigin === "__workspace__"}
-                          setView={openView}
-                          projects={projects}
-                          plans={plans}
-                          scope={(...args) => {
-                            // A sidebar view always shows its list, not an open graph.
-                            navigate({});
-                            scope(...args);
-                          }}
-                          navigation={navigation}
-                          onError={workspace.setError}
-                          setCreating={(value) => {
-                            if (value) setCreateStatus(undefined);
-                            setCreating(value);
-                          }}
-                          createTriggerRef={createTriggerRef}
-                        />
-                      )}
-                      <main
-                        id="main-content"
-                        tabIndex={-1}
-                        className="content-panel"
+                  <SettingsStateProvider
+                    active={view === "settings"}
+                    onOpenPage={setSettingsSection}
+                  >
+                    <SidebarProvider open={!sidebarCollapsed}>
+                      <a
+                        className="skip-link"
+                        href="#main-content"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          document.getElementById("main-content")?.focus();
+                        }}
                       >
-                        {recoveryNotices}
-                        {isMobile && view !== "settings" && (
-                          <div className="mobile-nav-bar">
-                            <SidebarTrigger
-                              variant="ghost"
-                              size="sm"
-                              aria-label="Open navigation"
-                            >
-                              <Menu /> Navigation
-                            </SidebarTrigger>
-                          </div>
-                        )}
-                        {(workspaceGraphOpen || localGraphOrigin) &&
-                          graphOrigin === null && (
-                            <Button
-                              variant="ghost"
-                              onClick={() =>
-                                setGraphOrigin(
-                                  localGraphOrigin ?? "__workspace__",
-                                )
-                              }
-                            >
-                              {localGraphOrigin
-                                ? "Back to context graph"
-                                : "Back to workspace graph"}
-                            </Button>
-                          )}
-                        {error && (
-                          <p role="alert" className="global-error">
-                            {error}
-                          </p>
-                        )}
-                        <CreateTicketDialog
-                          key={`new-ticket:${recoveryGeneration}`}
-                          open={creating}
-                          onOpenChange={setCreating}
-                          triggerRef={createTriggerRef}
-                          navigation={navigation}
-                          {...(createStatus && { initialStatus: createStatus })}
-                          projects={projects}
-                          plans={plans}
-                          create={create}
-                        />
-                        {view === "settings" && graphOrigin === null && (
-                          <SettingsView
+                        Skip to content
+                      </a>
+                      <WindowBar />
+                      <div
+                        className={
+                          view === "settings"
+                            ? "workspace settings-open"
+                            : "workspace"
+                        }
+                      >
+                        {view === "settings" ? (
+                          <SettingsNav
                             selected={settingsSection}
                             onSelect={setSettingsSection}
-                            onOpenInbox={() => setView("inbox")}
-                            onRestore={async () => {
-                              setSelected(null);
-                              setDetails({});
-                              bulk.reset();
-                              await refresh();
+                            onBack={() => {
+                              returnToSettingsEntry.current = true;
+                              setView(viewBeforeSettings);
                             }}
                           />
-                        )}
-                        {view === "attachments" && graphOrigin === null && (
-                          <AttachmentLibrary
-                            onPreview={setAttachmentPreview}
-                            onOpenSettings={() => {
-                              // Opening Settings starts on Appearance, so choose the page after.
-                              openView("settings");
-                              setSettingsSection("attachments");
+                        ) : (
+                          <WorkspaceSidebar
+                            onCapture={openCapture}
+                            onNewChat={() => {
+                              setNewChatRequest((count) => count + 1);
+                              openView("chats");
                             }}
+                            counts={counts}
+                            activePlanCount={
+                              view === "tickets" &&
+                              navigation.kind !== "trash" &&
+                              navigation.plan
+                                ? (workspace.scopeTotal ?? workspace.total)
+                                : undefined
+                            }
+                            view={view}
+                            workspaceGraphOpen={graphOrigin === "__workspace__"}
+                            setView={openView}
+                            projects={projects}
+                            plans={plans}
+                            scope={(...args) => {
+                              // A sidebar view always shows its list, not an open graph.
+                              navigate({});
+                              scope(...args);
+                            }}
+                            navigation={navigation}
+                            onError={workspace.setError}
+                            setCreating={(value) => {
+                              if (value) setCreateStatus(undefined);
+                              setCreating(value);
+                            }}
+                            createTriggerRef={createTriggerRef}
                           />
                         )}
-                        {view === "attachments" &&
-                          graphOrigin === null &&
-                          attachmentPreview && (
-                            <AttachmentPreview
-                              target={{
-                                id: attachmentPreview.id,
-                                initial: attachmentPreview,
-                              }}
-                              onClose={() => setAttachmentPreview(null)}
-                            />
-                          )}
-                        {
-                          <div
-                            className="management"
-                            hidden={view !== "projects" || graphOrigin !== null}
-                          >
-                            <Projects
-                              projects={projects}
-                              loading={loading}
-                              onChange={refresh}
-                              onOpenTickets={(item) => {
-                                navigate({});
-                                scope("all", item.id);
-                              }}
-                              onShowUnassigned={() => {
-                                navigate({});
-                                scope("all", "unlinked");
-                              }}
-                            />
-                          </div>
-                        }
-                        {(view === "plans" || view === "archived-plans") &&
-                          graphOrigin === null && (
-                            <PlanList
-                              plans={plans}
-                              archived={view === "archived-plans"}
-                              onOpen={(id) => scope("all", "all", id)}
-                              onBrowsePlans={() => setView("plans")}
-                              refresh={refresh}
-                            />
-                          )}
-                        {view === "inbox" && graphOrigin === null && (
-                          <Inbox
-                            revision={revision}
-                            onBrowse={() => setView("tickets")}
-                            select={(reference, noteId) => {
-                              setInboxTarget(
-                                noteId
-                                  ? { reference, id: noteId, key: Date.now() }
-                                  : null,
-                              );
-                              setSelected(reference);
-                              setView("tickets");
-                            }}
-                          />
-                        )}
-                        <div
-                          className="context-view-wrapper"
-                          hidden={view !== "documents" || graphOrigin !== null}
+                        <main
+                          id="main-content"
+                          tabIndex={-1}
+                          className="content-panel"
                         >
-                          <Documents
-                            key={`documents:${recoveryGeneration}`}
-                            active={view === "documents"}
-                            listRequest={documentListRequest}
-                            target={documentTarget}
-                            backLabel={
-                              (documentReturn && documentReturnLabel) ||
-                              "Back to Documents"
-                            }
-                            capture={capture}
-                            onCapture={() => openCapture()}
-                            currentTicket={
-                              view === "tickets" ? workspace.selected : null
-                            }
-                            onOpenPlan={(id) => {
-                              // Leaving through a link ends the return trip.
-                              setDocumentReturn(null);
-                              scope("all", "all", id);
-                              setView("tickets");
-                            }}
-                            onOpenTicket={(reference) => {
-                              setDocumentReturn(null);
-                              setSelected(reference);
-                              setView("tickets");
-                            }}
-                            onDocumentClose={() => {
-                              if (documentReturn) {
-                                setView(documentReturn);
-                                setDocumentReturn(null);
-                              }
-                            }}
-                            onCaptureClose={closeCapture}
+                          {recoveryNotices}
+                          {isMobile && view !== "settings" && (
+                            <div className="mobile-nav-bar">
+                              <SidebarTrigger
+                                variant="ghost"
+                                size="sm"
+                                aria-label={[
+                                  "Open navigation",
+                                  ...waitingNames,
+                                ].join(", ")}
+                              >
+                                <Menu /> Navigation
+                                {waitingNames.length > 0 && (
+                                  <StatusDot tone="attention" />
+                                )}
+                              </SidebarTrigger>
+                            </div>
+                          )}
+                          {(workspaceGraphOpen || localGraphOrigin) &&
+                            graphOrigin === null && (
+                              <Button
+                                variant="ghost"
+                                onClick={() =>
+                                  setGraphOrigin(
+                                    localGraphOrigin ?? "__workspace__",
+                                  )
+                                }
+                              >
+                                {localGraphOrigin
+                                  ? "Back to context graph"
+                                  : "Back to workspace graph"}
+                              </Button>
+                            )}
+                          {error && (
+                            <p role="alert" className="global-error">
+                              {error}
+                            </p>
+                          )}
+                          <CreateTicketDialog
+                            key={`new-ticket:${recoveryGeneration}`}
+                            open={creating}
+                            onOpenChange={setCreating}
+                            triggerRef={createTriggerRef}
+                            navigation={navigation}
+                            {...(createStatus && {
+                              initialStatus: createStatus,
+                            })}
+                            projects={projects}
+                            plans={plans}
+                            create={create}
                           />
-                        </div>
-                        {workspaceGraphMounted && (
-                          <div
-                            className="context-view-wrapper"
-                            hidden={graphOrigin !== "__workspace__"}
-                          >
-                            <WorkspaceGraph
-                              active={graphOrigin === "__workspace__"}
+                          {view === "settings" && graphOrigin === null && (
+                            <SettingsView
+                              selected={settingsSection}
+                              onSelect={setSettingsSection}
+                              onOpenInbox={() => setView("inbox")}
+                              onRestore={async () => {
+                                setSelected(null);
+                                setDetails({});
+                                bulk.reset();
+                                await refresh();
+                              }}
+                            />
+                          )}
+                          {view === "attachments" && graphOrigin === null && (
+                            <AttachmentLibrary
+                              onPreview={setAttachmentPreview}
+                              onOpenSettings={() => {
+                                // Opening Settings starts on Appearance, so choose the page after.
+                                openView("settings");
+                                setSettingsSection("attachments");
+                              }}
+                            />
+                          )}
+                          {view === "attachments" &&
+                            graphOrigin === null &&
+                            attachmentPreview && (
+                              <AttachmentPreview
+                                target={{
+                                  id: attachmentPreview.id,
+                                  initial: attachmentPreview,
+                                }}
+                                onClose={() => setAttachmentPreview(null)}
+                              />
+                            )}
+                          {
+                            <div
+                              className="management"
+                              hidden={
+                                view !== "projects" || graphOrigin !== null
+                              }
+                            >
+                              <Projects
+                                projects={projects}
+                                loading={loading}
+                                onChange={refresh}
+                                onOpenTickets={(item) => {
+                                  navigate({});
+                                  scope("all", item.id);
+                                }}
+                                onShowUnassigned={() => {
+                                  navigate({});
+                                  scope("all", "unlinked");
+                                }}
+                              />
+                            </div>
+                          }
+                          {(view === "plans" || view === "archived-plans") &&
+                            graphOrigin === null && (
+                              <PlanList
+                                plans={plans}
+                                archived={view === "archived-plans"}
+                                onOpen={(id) => scope("all", "all", id)}
+                                onBrowsePlans={() => setView("plans")}
+                                refresh={refresh}
+                              />
+                            )}
+                          {view === "inbox" && graphOrigin === null && (
+                            <Inbox
                               revision={revision}
-                              onBack={() => {
-                                setGraphOrigin(null);
-                                setWorkspaceGraphOpen(false);
+                              onBrowse={() => setView("tickets")}
+                              select={(reference, noteId) => {
+                                setInboxTarget(
+                                  noteId
+                                    ? { reference, id: noteId, key: Date.now() }
+                                    : null,
+                                );
+                                setSelected(reference);
+                                setView("tickets");
                               }}
-                              onFocus={(id) => {
-                                setLocalGraphOrigin(id);
-                                setGraphOrigin(id);
-                              }}
-                              onOpen={openGraphItem}
                             />
-                          </div>
-                        )}
-                        {localGraphOrigin && (
+                          )}
                           <div
                             className="context-view-wrapper"
-                            hidden={graphOrigin !== localGraphOrigin}
+                            hidden={
+                              view !== "documents" || graphOrigin !== null
+                            }
                           >
-                            <ContextGraph
-                              key={localGraphOrigin}
-                              active={graphOrigin === localGraphOrigin}
-                              origin={localGraphOrigin}
-                              {...(workspaceGraphOpen && {
-                                originLabel: "workspace graph",
-                              })}
-                              onBack={(origin) => {
-                                setLocalGraphOrigin(null);
-                                if (workspaceGraphOpen)
-                                  setGraphOrigin("__workspace__");
-                                else if (origin) openGraphItem(origin);
-                                else setGraphOrigin(null);
+                            <Documents
+                              key={`documents:${recoveryGeneration}`}
+                              active={view === "documents"}
+                              listRequest={documentListRequest}
+                              target={documentTarget}
+                              backLabel={
+                                (documentReturn && documentReturnLabel) ||
+                                "Back to Documents"
+                              }
+                              capture={capture}
+                              onCapture={() => openCapture()}
+                              currentTicket={
+                                view === "tickets" ? workspace.selected : null
+                              }
+                              onOpenPlan={(id) => {
+                                // Leaving through a link ends the return trip.
+                                setDocumentReturn(null);
+                                scope("all", "all", id);
+                                setView("tickets");
                               }}
-                              onOpen={openGraphItem}
+                              onOpenTicket={(reference) => {
+                                setDocumentReturn(null);
+                                setSelected(reference);
+                                setView("tickets");
+                              }}
+                              onDocumentClose={() => {
+                                if (documentReturn) {
+                                  setView(documentReturn);
+                                  setDocumentReturn(null);
+                                }
+                              }}
+                              onCaptureClose={closeCapture}
                             />
                           </div>
-                        )}
-                        {chat.enabled && (
-                          <div
-                            className="context-view-wrapper"
-                            hidden={view !== "chats" || graphOrigin !== null}
-                          >
-                            <ChatsView newChatRequest={newChatRequest} />
-                          </div>
-                        )}
-                        {chat.enabled && view === "automations" && (
-                          <div
-                            className="context-view-wrapper"
-                            hidden={graphOrigin !== null}
-                          >
-                            <AutomationsView
-                              openRun={runTarget}
-                              onRunOpened={() => setRunTarget(null)}
-                            />
-                          </div>
-                        )}
-                        <TicketWorkspaceView
-                          key={`tickets:${recoveryGeneration}`}
-                          workspace={workspace}
-                          bulk={bulk}
-                          hidden={view !== "tickets" || graphOrigin !== null}
-                          inboxTarget={inboxTarget}
-                          onCreate={(trigger, status) => {
-                            createTriggerRef.current = trigger;
-                            setCreateStatus(status);
-                            setCreating(true);
-                          }}
-                        />
-                      </main>
-                    </div>
-                  </SidebarProvider>
-                </SettingsStateProvider>
-              </SourceActivityContext.Provider>
-            </DocumentNavigation.Provider>
+                          {workspaceGraphMounted && (
+                            <div
+                              className="context-view-wrapper"
+                              hidden={graphOrigin !== "__workspace__"}
+                            >
+                              <WorkspaceGraph
+                                active={graphOrigin === "__workspace__"}
+                                revision={revision}
+                                onBack={() => {
+                                  setGraphOrigin(null);
+                                  setWorkspaceGraphOpen(false);
+                                }}
+                                onFocus={(id) => {
+                                  setLocalGraphOrigin(id);
+                                  setGraphOrigin(id);
+                                }}
+                                onOpen={openGraphItem}
+                              />
+                            </div>
+                          )}
+                          {localGraphOrigin && (
+                            <div
+                              className="context-view-wrapper"
+                              hidden={graphOrigin !== localGraphOrigin}
+                            >
+                              <ContextGraph
+                                key={localGraphOrigin}
+                                active={graphOrigin === localGraphOrigin}
+                                origin={localGraphOrigin}
+                                {...(workspaceGraphOpen && {
+                                  originLabel: "workspace graph",
+                                })}
+                                onBack={(origin) => {
+                                  setLocalGraphOrigin(null);
+                                  if (workspaceGraphOpen)
+                                    setGraphOrigin("__workspace__");
+                                  else if (origin) openGraphItem(origin);
+                                  else setGraphOrigin(null);
+                                }}
+                                onOpen={openGraphItem}
+                              />
+                            </div>
+                          )}
+                          {chat.enabled && (
+                            <div
+                              className="context-view-wrapper"
+                              hidden={view !== "chats" || graphOrigin !== null}
+                            >
+                              <ChatsView newChatRequest={newChatRequest} />
+                            </div>
+                          )}
+                          {chat.enabled && view === "automations" && (
+                            <div
+                              className="context-view-wrapper"
+                              hidden={graphOrigin !== null}
+                            >
+                              <AutomationsView
+                                openRun={runTarget}
+                                onRunOpened={() => setRunTarget(null)}
+                              />
+                            </div>
+                          )}
+                          <TicketWorkspaceView
+                            key={`tickets:${recoveryGeneration}`}
+                            workspace={workspace}
+                            bulk={bulk}
+                            hidden={view !== "tickets" || graphOrigin !== null}
+                            inboxTarget={inboxTarget}
+                            onCreate={(trigger, status) => {
+                              createTriggerRef.current = trigger;
+                              setCreateStatus(status);
+                              setCreating(true);
+                            }}
+                          />
+                        </main>
+                      </div>
+                    </SidebarProvider>
+                  </SettingsStateProvider>
+                </SourceActivityContext.Provider>
+              </DocumentNavigation.Provider>
+            </ProjectNavigation.Provider>
           </PlanNavigation.Provider>
         </TicketNavigation.Provider>
       </ContextGraphNavigation.Provider>

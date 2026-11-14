@@ -11,8 +11,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
-    Harness, HarnessAdapter, Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind,
-    SteeringBehavior, Subscription, Unattended,
+    ContextUsage, Harness, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings,
+    Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey,
+    SettingOutcome, StartSettings, SteeringBehavior, Subscription, Unattended,
 };
 
 /// Provisional bounds, to be measured in #267.
@@ -28,6 +29,9 @@ pub const ADAPTER_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const _: () = assert!(ADAPTER_CLOSE_TIMEOUT.as_millis() < CLOSE_TIMEOUT.as_millis());
 /// How long one write to a harness may take before the harness counts as not reading.
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a harness check waits for sign-in and its options before it reports
+/// what it found without them.
+pub const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a written new turn may go without any confirmation before its delivery is
 /// recorded as uncertain and the Chat stops showing as working. Provisional (#267).
 pub const DELIVERY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -196,6 +200,65 @@ pub struct ChatLive {
     pub interactions: Vec<LiveInteraction>,
     pub stop: Option<StopState>,
     pub problem: Option<ChatProblem>,
+    /// The live session's last context report; a new session starts without one.
+    pub context: Option<ContextReport>,
+    /// The live session's settings, when its harness reported them. Boxed: it is
+    /// large and most updates do not carry it changed.
+    pub settings: Option<Box<LiveSettings>>,
+    /// The slash commands the live session's harness lists; empty when it lists none.
+    pub commands: Vec<HarnessCommand>,
+}
+
+impl ChatLive {
+    /// A Chat with nothing running and nothing asked.
+    pub fn idle() -> Self {
+        Self {
+            activity: Activity::Idle,
+            running: false,
+            opening: None,
+            steering: None,
+            delivery_unconfirmed: false,
+            sending: Vec::new(),
+            interactions: Vec::new(),
+            stop: None,
+            problem: None,
+            context: None,
+            settings: None,
+            commands: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextReport {
+    pub usage: ContextUsage,
+    /// When it was reported, in milliseconds since the Unix epoch.
+    pub at: i64,
+    /// When the session last compacted its context, if it did since it started.
+    pub compacted_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSettings {
+    pub reported: HarnessSettings,
+    /// The latest change the person asked for, per setting.
+    pub changes: Vec<LiveSettingChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSettingChange {
+    pub setting: SettingKey,
+    pub value: String,
+    pub state: SettingChangeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingChangeState {
+    /// Held while a turn runs; it is sent when the turn ends.
+    Held,
+    /// Sent to the harness; no answer yet.
+    Sent,
+    Done(SettingOutcome),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -390,6 +453,18 @@ impl ChatHost {
         self.ask(chat_id, Command::ResumeQueue).await
     }
 
+    /// Sends one queued input now, alone: it steers the turn in progress or starts one,
+    /// and a paused queue stays paused. Refused with `Working` while a turn that cannot
+    /// be steered runs. Returns once it is held to send; delivery is reported as usual.
+    pub async fn send_queued_now(&self, chat_id: &str, message_id: &str) -> Result<(), HostError> {
+        let message_id = message_id.to_owned();
+        self.ask(chat_id, |reply| Command::SendQueuedNow {
+            message_id,
+            reply,
+        })
+        .await
+    }
+
     pub async fn respond(
         &self,
         chat_id: &str,
@@ -403,6 +478,61 @@ impl ChatHost {
             reply,
         })
         .await
+    }
+
+    /// Asks the live session to use `value` for `setting` from the next turn. While a
+    /// turn runs the change is held and sent when it ends, so every turn runs on one
+    /// set of settings. Returns where the change stands; later states are in
+    /// `ChatLive::settings`. A value the harness did not offer, or full access, is
+    /// refused without being sent.
+    pub async fn change_setting(
+        &self,
+        chat_id: &str,
+        setting: SettingKey,
+        value: &str,
+    ) -> Result<SettingChangeState, HostError> {
+        // An unattended session runs on its agent's settings and is never widened:
+        // the person takes the run over (a reply or Stop) before changing anything.
+        if self.is_unattended(chat_id) {
+            return Ok(SettingChangeState::Done(SettingOutcome::Refused {
+                reason:
+                    "An Automation is running this Chat. Reply or stop it to take it over first."
+                        .to_owned(),
+            }));
+        }
+        let value = value.to_owned();
+        self.ask(chat_id, |reply| Command::ChangeSetting {
+            setting,
+            value,
+            reply,
+        })
+        .await
+    }
+
+    /// Opens the Chat's next new session with the person's New Chat picks. Sent before
+    /// the first message, so its first turn already uses them.
+    pub async fn start_with(
+        &self,
+        chat_id: &str,
+        settings: StartSettings,
+    ) -> Result<(), HostError> {
+        self.sender(chat_id)?
+            .send(Command::StartWith(settings))
+            .await
+            .map_err(|_| HostError::Quitting)
+    }
+
+    /// What the harness offers before any session: models, efforts, permissions.
+    pub async fn options(
+        &self,
+        harness: &str,
+    ) -> Result<Result<HarnessOptions, String>, HostError> {
+        let adapter = self
+            .inner
+            .adapters
+            .get(harness)
+            .ok_or_else(|| HostError::HarnessUnavailable(harness.to_owned()))?;
+        Ok(adapter.options().await)
     }
 
     /// Sends input again although its first delivery is uncertain, because the person

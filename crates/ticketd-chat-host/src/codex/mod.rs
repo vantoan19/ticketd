@@ -2,12 +2,15 @@
 //!
 //! Codex keeps its own sign-in, configuration and instructions. For a person's Chat
 //! the adapter passes only the working directory, so the approval policy and sandbox
-//! are theirs too. For an unattended session (an Automation run) it turns approvals
-//! off and limits writes to the step's folder and the Workspace data folder. It never
-//! reads credentials, grants full access or chooses how the user is billed.
+//! are theirs too; it overrides the model or effort only when the person chose one in
+//! the Chat, from that Chat's next turn. For an unattended session (an Automation
+//! run) it turns approvals off and limits writes to the step's folder and the
+//! Workspace data folder. It never reads credentials, grants full access or chooses
+//! how the user is billed.
 
 mod discovery;
 mod mapping;
+mod report;
 mod rpc;
 mod runtime;
 #[cfg(test)]
@@ -20,8 +23,8 @@ use serde_json::{Value, json};
 
 use crate::stdio::{Serving, spawn, version_output};
 use crate::{
-    Harness, HarnessAdapter, Inspection, OpenRequest, OpenedRuntime, Problem, ProblemKind,
-    ProviderDetail, Unattended,
+    Harness, HarnessAdapter, HarnessOptions, Inspection, OpenRequest, OpenedRuntime, Problem,
+    ProblemKind, ProviderDetail, Unattended,
 };
 
 use discovery::{LaunchEnvironment, Os};
@@ -125,6 +128,15 @@ impl HarnessAdapter for CodexAdapter {
             version,
             login,
         }
+    }
+
+    async fn options(&self) -> Result<HarnessOptions, String> {
+        let executable = self
+            .executable()
+            .ok_or_else(|| "Codex was not found".to_owned())?;
+        let io =
+            spawn(&executable, ARGUMENTS, Serving::Nothing).map_err(|error| error.to_string())?;
+        runtime::probe_options(io, Options::default()).await
     }
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {

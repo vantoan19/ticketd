@@ -1325,11 +1325,32 @@ the Chat. Chat identity, harness-session identity and editing-agent attribution
 remain distinct. A Chat keeps the harness it was created with; using another
 harness means starting a new Chat.
 
+New Chat chooses the harness, and may choose its model, effort and permission mode,
+before anything is sent. The choices offered are only those the installed harness
+reports when it is checked, without a prompt reaching a model; a harness that
+reports none starts with its own settings. The first turn runs on what was chosen,
+and what New Chat shows as chosen is passed explicitly, including the harness's
+listed defaults, so the harness's own configuration cannot silently differ.
+Full access is never offered.
+
 An execution folder is required but a Project is not. Offer an existing folder;
 otherwise use a persistent managed folder for the Chat. Context links do not move
 execution or create a Project. Multiple Chats may run concurrently, including in
 the same directory; show shared-directory use. No automatic isolation or worktree
-management is implied. Each Chat has at most one active turn.
+management is implied. Each Chat has at most one active turn. A Chat shows its
+folder's Project and the git branch checked out there, read from the folder and
+never changed by ticketd.
+
+A Chat can start from a ticket, linked to it, with its Project's folder offered and
+an unsent prompt; nothing is sent until the person sends it. Ticket detail lists the
+ticket's Chats with their observed status.
+
+While New Chat's message box is empty it may suggest up to three starts from local
+records: continuing the In progress tickets changed last (at most two), reviewing
+the latest In review ticket, and triaging the Inbox when anything is unread. The
+chosen folder's Project comes first; tickets already linked, or linked to a working
+Chat, are skipped. Choosing one fills the message and links its records as one undo
+step; it never sends.
 
 ### 21.3. Conversation and lifetime
 
@@ -1338,23 +1359,74 @@ human questions. Display observed activity as Idle, Working, Waiting for you,
 Interrupted or Failed, with a specific explanation when needed. Saved history is
 not evidence that execution is still alive or that a requested task succeeded.
 
+Tool activity is told as what it did (read, search, edit, create, delete, run,
+web or other), the same for every harness. A shell command is classified only
+when its literal text makes the effect clear; anything else is shown as the
+command that ran. A command that only calls the ticketd CLI is told as what it does
+("Set T-MP4 to In progress"), with the exact command one click away; one that does
+anything else, or expands anything, is shown as its command. A step the person declined, one the turn ended before, and one
+whose outcome was not observed are each told as such, never as done or failed.
+
+A turn's activity folds under one summary once the turn ends, whatever its
+outcome, while its final response stays in view. The summary gives the turn's
+duration, apart from the time it waited on the person, and its outcome, never "done":
+a finished turn is not evidence the task succeeded. Pending requests, unanswered or
+expired, and ticketd's own notices are never folded; the harness's own warnings fold
+with their turn as one line. Step and turn times come from the host's own records;
+history recorded without them shows no time.
+
 Sending while work is active steers it when the effective harness capability
 supports the intended behavior; otherwise the input is visibly queued. Steering
 capabilities must describe effects such as interrupting tools. Provide explicit
-Queue and Stop actions. Queue ownership remains with ticketd. Only input known
+Queue and Stop actions. Queue ownership remains with ticketd. A queued message can
+be sent now on its own, steering active work or starting a turn; a paused queue
+stays paused. Only input known
 not to have been accepted can automatically fall back from steering to the queue;
 ambiguous delivery is preserved for reconciliation.
 
 Stop pauses further automatic queue dispatch and requests interruption of the
 active turn, retaining unsent input. An interruption acknowledgment does not prove
 every tool stopped or undo completed effects. Distinguish confirmed interruption
-from a timeout or loss of contact.
+from a timeout or loss of contact; Stop can be requested again while unconfirmed.
 
 Execution belongs to the desktop backend, independently of the current view.
 Navigating away or closing the window keeps active work running. Reopening attaches
 to that work without creating a duplicate runtime. Explicit Quit stops app-owned
 execution and preserves history; an independent always-running service is not
 required. Ordinary ticketd CLI operations remain usable without the desktop.
+
+Every Chat has one ranked status, highest first: Approval needed, Question,
+Working, Failed, Done, Idle. A question includes input whose delivery is not
+confirmed. Failed covers a turn that ended with an error or was cut off without
+one (shown as Interrupted); a turn the person stopped, or Quit, is Idle, even
+when the harness reports the stopped turn as completed. Failed
+and Done are shown only until seen; afterwards the Chat is Idle and its row says
+the outcome in words. List rows, the sidebar count, the app-icon count and system
+notifications all read this one status.
+
+A Chat is in view while it is open in the detail pane and the window has focus.
+A turn that ended after the person last viewed the Chat is unseen; opening the
+Chat, or regaining focus with it open, marks it seen, and a Chat in view never
+becomes unseen. The seen position is stored with the Chat. Mark as unread makes
+the last turn unseen again; Mark as read clears an unseen outcome, never a live
+request. Neither notifies.
+
+The sidebar shows Chats waiting for the person (Approval needed, Question,
+Failed), else the number with an unseen outcome; Working never counts. The
+app-icon count is the waiting Chats that are not muted. An archived Chat that
+asks for approval or a question is listed with the active Chats until answered.
+
+A Chat not in view gets a system notification, with sound as the system allows,
+when it needs approval, asks a question or fails, at once and once each; when a
+turn finishes, only after a quiet window of about 1.5 seconds that a new turn or
+opening the Chat cancels. A newer notification replaces the Chat's older one, and
+one that no longer holds is withdrawn where the platform allows. Muting a Chat
+stops its notifications and its share of the app-icon count; turning off
+"Notify me about Chats" stops all of them. Rows and the sidebar always update.
+What is already there when ticketd starts is not announced. Clicking a
+notification brings the window back and opens the Chat; requests are answered
+only in the Chat. Notification permission is asked when the person sends their
+first Chat message.
 
 ### 21.4. Context, permissions and durable results
 
@@ -1367,6 +1439,8 @@ Links supply lightweight references; the agent fetches current record contents o
 demand through ticketd capabilities. Links do not replace native working-directory
 instructions. Preserve the user's harness settings, repository instructions,
 skills, plugins, hooks and MCP configuration under native trust/permission rules.
+Records mentioned with # or quoted are linked when the message is sent or queued.
+A quote is a copy; agents still read current records through ticketd.
 
 Use native permission modes and render native approvals/questions. ticketd adds no
 human-only gate for changing tickets or statuses. Agents can create and update
@@ -1374,7 +1448,12 @@ Documents, authored Activities, Implementation evidence and ticket statuses thro
 ordinary core workflows. External source authority and existing concurrency rules
 continue to apply. Provider events do not directly mutate domain records or bypass
 the CLI/core. Chat messages do not automatically become Activities or Documents;
-offer Save as Document for an assistant response.
+offer Save as Document for an assistant response, and for a plan a turn left
+unfinished, saved as a checklist in which only the completed steps are checked.
+
+A file a step names, or a file a turn changed, opens in the computer's default app
+for its type. Only files inside the Chat's execution folder open, resolved through
+links; a file no longer there says so, and a step's name for it is shown as text.
 
 ### 21.5. Retention and recovery
 

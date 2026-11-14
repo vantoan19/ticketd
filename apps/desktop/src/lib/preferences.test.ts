@@ -29,6 +29,7 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     followCreated: true,
     notifyReminders: false,
     chat: false,
+    notifyChats: true,
   });
   expect(setPreference("theme", "dark")).toBe(true);
   expect(setPreference("openTickets", "expanded")).toBe(true);

@@ -130,7 +130,7 @@ impl Workspace {
             ),
             (
                 "chat_tools",
-                "id, chat_id, position, turn_id, name, input, state, output, output_truncated",
+                "id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at",
             ),
             (
                 "chat_interactions",

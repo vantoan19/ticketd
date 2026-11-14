@@ -210,12 +210,16 @@ export function WorkspaceSidebar({
   const openGraph = useContext(ContextGraphNavigation);
   const unread = (counts?.unread_inbox ?? 0) > 0;
   const chat = useChatFeature();
-  // Waiting for an answer, uncertain delivery, or Failed.
+  // Waiting for the person (a request, uncertain delivery, an unseen failure),
+  // then finished turns not yet seen. Working never counts.
   const waiting = chat.overview.needs_you;
-  const chatsLabel =
-    waiting > 0
-      ? `Chats · ${waiting} ${waiting === 1 ? "needs" : "need"} you`
-      : "Chats";
+  const unreadChats = chat.overview.unread;
+  const chatCounts = [
+    waiting > 0 && `${waiting} waiting`,
+    unreadChats > 0 && `${unreadChats} unread`,
+  ].filter((part): part is string => Boolean(part));
+  const chatsLabel = ["Chats", ...chatCounts].join(" · ");
+  const chatsName = ["Chats", ...chatCounts].join(", ");
   // Ended as Needs attention, and not yet run again, taken over or dismissed.
   const runsWaiting = counts?.runs_needing_you ?? 0;
   const automationsLabel =
@@ -365,14 +369,14 @@ export function WorkspaceSidebar({
                 <SidebarMenuButton
                   isActive={view === "chats"}
                   tooltip={chatsLabel}
-                  aria-label={chatsLabel}
+                  aria-label={chatsName}
                   onClick={() => setView("chats")}
                 >
                   <MessagesSquare size={16} /> Chats
-                  {waiting > 0 && (
+                  {(waiting > 0 || unreadChats > 0) && (
                     <span className="sidebar-count" aria-hidden="true">
-                      <StatusDot tone="attention" />
-                      {waiting}
+                      <StatusDot tone={waiting > 0 ? "attention" : "unread"} />
+                      {waiting > 0 ? waiting : unreadChats}
                     </span>
                   )}
                 </SidebarMenuButton>
@@ -402,7 +406,9 @@ export function WorkspaceSidebar({
           {unread ? "Unread inbox items" : ""}
         </span>
         <span role="status" className="sr-only">
-          {waiting > 0 ? chatsLabel : ""}
+          {waiting > 0
+            ? `${waiting} ${waiting === 1 ? "Chat" : "Chats"} waiting`
+            : ""}
         </span>
         <span role="status" className="sr-only">
           {chat.enabled && runsWaiting > 0 ? automationsLabel : ""}

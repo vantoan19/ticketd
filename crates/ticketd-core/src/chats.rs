@@ -71,6 +71,121 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format 67: what the person has seen of each Chat, and whether it is muted. Chats
+/// that already exist count as seen through their last turn, so upgrading marks
+/// nothing unread and announces nothing.
+/// Like every migration step it may run again over a schema that already has it.
+pub(crate) fn migrate_attention(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'seen_through')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN seen_through INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE chats ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
+             UPDATE chats SET seen_through = COALESCE((SELECT MAX(position) FROM chat_turns WHERE chat_id = chats.id), 0);",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 67;")?;
+    Ok(())
+}
+
+/// Format 68: when each tool call started, so a running step can say how long it has
+/// run. Calls recorded before this have no start time and show no clock.
+/// Like every migration step it may run again over a schema that already has it.
+pub(crate) fn migrate_tool_start(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_tools') WHERE name = 'started_at')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch("ALTER TABLE chat_tools ADD COLUMN started_at TEXT;")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 68;")?;
+    Ok(())
+}
+
+/// Schema 72: a request keeps when it was asked and resolved, so a turn's time can
+/// leave out the time it waited on the person; a notice keeps whether the harness
+/// said it, so harness warnings fold with their turn while ticketd's own stay.
+pub(crate) fn migrate_request_times(connection: &Connection) -> Result<(), Error> {
+    let has = |table: &str, column: &str| -> Result<bool, Error> {
+        Ok(connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            params![table, column],
+            |row| row.get(0),
+        )?)
+    };
+    if !has("chat_interactions", "asked_at")? {
+        connection.execute_batch(
+            "ALTER TABLE chat_interactions ADD COLUMN asked_at TEXT;
+             ALTER TABLE chat_interactions ADD COLUMN resolved_at TEXT;",
+        )?;
+    }
+    if !has("chat_notices", "from_harness")? {
+        connection.execute_batch(
+            "ALTER TABLE chat_notices ADD COLUMN from_harness INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 72;")?;
+    Ok(())
+}
+
+/// Schema 71: Mark as unread is kept apart from an outcome the person has not seen,
+/// so a Chat they marked shows the blue dot on the words it had and never reads as
+/// a new Failed or Done that would notify.
+pub(crate) fn migrate_marked_unread(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'marked_unread')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN marked_unread INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 71;")?;
+    Ok(())
+}
+
+/// Schema 70: how far the person has read each Chat's transcript, so its New marker
+/// is placed the same way after ticketd restarts. Existing Chats start with nothing
+/// read through and place it from their unseen turn, as before.
+pub(crate) fn migrate_read_through(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chats') WHERE name = 'read_through')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch(
+            "ALTER TABLE chats ADD COLUMN read_through TEXT;
+             ALTER TABLE chats ADD COLUMN read_through_position INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    connection.execute_batch("PRAGMA user_version = 70;")?;
+    Ok(())
+}
+
+/// Schema 69: an approval remembers the tool call it was asked for, so its decision
+/// is told on that step and not on whichever step came next.
+pub(crate) fn migrate_interaction_tool(connection: &Connection) -> Result<(), Error> {
+    let has: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_interactions') WHERE name = 'tool_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has {
+        connection.execute_batch("ALTER TABLE chat_interactions ADD COLUMN tool_id TEXT;")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 69;")?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
@@ -130,7 +245,25 @@ pub struct Chat {
     pub links: Vec<ChatLink>,
     /// The turn last recorded as active. The host owns whether a process is behind it.
     pub active_turn: Option<ChatTurn>,
+    /// The position of the last ended turn the person has seen: a turn that ended at a
+    /// later position is unseen.
+    pub seen_through: i64,
+    /// The last record of the transcript that was in view in a focused window: the
+    /// New marker goes after it. `None` until the person has read any.
+    pub read_through: Option<String>,
+    /// The person marked the Chat unread. It reads as unread until it is next seen,
+    /// without making its last outcome unseen.
+    pub marked_unread: bool,
+    /// The person turned this Chat's notifications off.
+    pub muted: bool,
     pub created_at: String,
+}
+
+impl Chat {
+    /// Whether `turn` ended and the person has not seen it since.
+    pub fn unseen(&self, turn: &ChatTurn) -> bool {
+        turn.state != ChatTurnState::Active && turn.position > self.seen_through
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -347,6 +480,8 @@ pub enum ChatToolState {
     Running,
     Completed,
     Failed,
+    /// The person declined it when the harness asked, so it never ran.
+    Declined,
     Unknown,
 }
 
@@ -360,6 +495,9 @@ pub struct ChatTool {
     pub state: ChatToolState,
     pub output: Option<String>,
     pub output_truncated: bool,
+    /// When the host first recorded the call. `None` for calls recorded before
+    /// ticketd kept it.
+    pub started_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,6 +531,14 @@ pub struct ChatInteraction {
     pub reason: Option<String>,
     pub state: ChatInteractionState,
     pub response: Option<String>,
+    /// For an approval, the tool call it was asked for, when the harness said.
+    pub tool_id: Option<String>,
+    /// When it was asked and when it was answered or expired. `None` for requests
+    /// recorded before ticketd kept them.
+    #[serde(default)]
+    pub asked_at: Option<String>,
+    #[serde(default)]
+    pub resolved_at: Option<String>,
 }
 
 /// Changes listed for one turn at most; a turn that made more shows the first ones.
@@ -423,6 +569,9 @@ pub struct ChatNotice {
     pub position: i64,
     pub text: String,
     pub created_at: String,
+    /// Said by the harness (a warning, a retry), not by ticketd.
+    #[serde(default)]
+    pub from_harness: bool,
 }
 
 /// One entry of a Chat's history, ordered by `position`.
@@ -503,6 +652,8 @@ pub enum ChatObservation {
         prompt: String,
         /// Cut to `CHAT_NOTICE_LIMIT` characters when stored.
         reason: Option<String>,
+        /// For an approval, the tool call it is about, when the harness said.
+        tool_id: Option<String>,
     },
     /// `state` is `Answered` or `Expired`.
     InteractionResolved {
@@ -513,6 +664,9 @@ pub enum ChatObservation {
     Notice {
         notice_id: String,
         text: String,
+        /// Said by the harness rather than by ticketd.
+        #[serde(default)]
+        from_harness: bool,
     },
 }
 
@@ -536,6 +690,9 @@ pub struct ChatSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+// A change carries one record and lives only while a view applies it; boxing the Chat
+// would cost every reader a deref for no measurable saving.
+#[allow(clippy::large_enum_variant)]
 pub enum ChatRecord {
     Chat(Chat),
     Item(ChatItem),
@@ -642,7 +799,8 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
         .query_row(
             "SELECT id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
-                    (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1)
+                    (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
+                    seen_through, muted, read_through, marked_unread
              FROM chats WHERE id = ?1",
             [id],
             |row| {
@@ -658,6 +816,10 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
                     created_at: row.get(8)?,
                     effective_settings: row.get(9)?,
                     native_session_id: row.get(10)?,
+                    seen_through: row.get(11)?,
+                    muted: row.get(12)?,
+                    read_through: row.get(13)?,
+                    marked_unread: row.get(14)?,
                     links: Vec::new(),
                     active_turn: None,
                 })
@@ -757,7 +919,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Session),
         "tool" => connection
             .query_row(
-                "SELECT id, position, turn_id, name, input, state, output, output_truncated FROM chat_tools WHERE id = ?1",
+                "SELECT id, position, turn_id, name, input, state, output, output_truncated, started_at FROM chat_tools WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatTool {
@@ -769,6 +931,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         state: named(row, 5)?,
                         output: row.get(6)?,
                         output_truncated: row.get(7)?,
+                        started_at: row.get(8)?,
                     })
                 },
             )
@@ -776,7 +939,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Tool),
         "interaction" => connection
             .query_row(
-                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason FROM chat_interactions WHERE id = ?1",
+                "SELECT id, position, turn_id, kind, native_request_id, prompt, state, response, reason, tool_id, asked_at, resolved_at FROM chat_interactions WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatInteraction {
@@ -789,6 +952,9 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         state: named(row, 6)?,
                         response: row.get(7)?,
                         reason: row.get(8)?,
+                        tool_id: row.get(9)?,
+                        asked_at: row.get(10)?,
+                        resolved_at: row.get(11)?,
                     })
                 },
             )
@@ -796,7 +962,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             .map(ChatItem::Interaction),
         "notice" => connection
             .query_row(
-                "SELECT id, position, text, created_at FROM chat_notices WHERE id = ?1",
+                "SELECT id, position, text, created_at, from_harness FROM chat_notices WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(ChatNotice {
@@ -804,6 +970,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
                         position: row.get(1)?,
                         text: row.get(2)?,
                         created_at: row.get(3)?,
+                        from_harness: row.get(4)?,
                     })
                 },
             )
@@ -992,7 +1159,9 @@ fn expire_interactions(
         .collect::<Result<Vec<_>, _>>()?;
     for id in pending {
         connection.execute(
-            "UPDATE chat_interactions SET state = 'expired' WHERE id = ?1",
+            &format!(
+                "UPDATE chat_interactions SET state = 'expired', resolved_at = {NOW} WHERE id = ?1"
+            ),
             [&id],
         )?;
         log(connection, chat_id, "interaction", &id)?;
@@ -1163,7 +1332,7 @@ fn observe(
             } else {
                 let position = log(connection, chat_id, "tool", &tool_id)?;
                 connection.execute(
-                    "INSERT INTO chat_tools (id, chat_id, position, turn_id, name, input, state, output, output_truncated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    &format!("INSERT INTO chat_tools (id, chat_id, position, turn_id, name, input, state, output, output_truncated, started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, {NOW})"),
                     params![tool_id, chat_id, position, turn_id, tool_name, input, name(state)?, output, truncated],
                 )?;
             }
@@ -1176,6 +1345,7 @@ fn observe(
             native_request_id,
             prompt,
             reason,
+            tool_id,
         } => {
             require_turn(connection, chat_id, &turn_id)?;
             if owned(connection, "chat_interactions", chat_id, &interaction_id)? {
@@ -1185,8 +1355,8 @@ fn observe(
             let reason: Option<String> =
                 reason.map(|reason| reason.chars().take(CHAT_NOTICE_LIMIT).collect());
             connection.execute(
-                "INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')",
-                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason],
+                &format!("INSERT INTO chat_interactions (id, chat_id, position, turn_id, kind, native_request_id, prompt, reason, state, tool_id, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, {NOW})"),
+                params![interaction_id, chat_id, position, turn_id, name(kind)?, native_request_id, prompt, reason, tool_id],
             )?;
             Ok(())
         }
@@ -1220,21 +1390,25 @@ fn observe(
                 )));
             }
             connection.execute(
-                "UPDATE chat_interactions SET state = ?2, response = ?3 WHERE id = ?1",
+                &format!("UPDATE chat_interactions SET state = ?2, response = ?3, resolved_at = {NOW} WHERE id = ?1"),
                 params![interaction_id, name(state)?, response],
             )?;
             log(connection, chat_id, "interaction", &interaction_id)?;
             Ok(())
         }
-        ChatObservation::Notice { notice_id, text } => {
+        ChatObservation::Notice {
+            notice_id,
+            text,
+            from_harness,
+        } => {
             if owned(connection, "chat_notices", chat_id, &notice_id)? {
                 return Ok(());
             }
             let text: String = text.chars().take(CHAT_NOTICE_LIMIT).collect();
             let position = log(connection, chat_id, "notice", &notice_id)?;
             connection.execute(
-                "INSERT INTO chat_notices (id, chat_id, position, text) VALUES (?1, ?2, ?3, ?4)",
-                params![notice_id, chat_id, position, text],
+                "INSERT INTO chat_notices (id, chat_id, position, text, from_harness) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![notice_id, chat_id, position, text, from_harness],
             )?;
             Ok(())
         }
@@ -1554,6 +1728,93 @@ impl Workspace {
             )?;
             Ok(())
         })
+    }
+
+    /// The person saw the Chat's outcome: every turn that has ended is seen. Changes
+    /// nothing, and logs nothing, when nothing ended unseen.
+    pub fn mark_chat_seen(&mut self, id: &str) -> Result<Chat, Error> {
+        let chat = self.chat(id)?;
+        let through = self
+            .last_ended_turn(id)?
+            .filter(|through| *through > chat.seen_through);
+        if through.is_none() && !chat.marked_unread {
+            return Ok(chat);
+        }
+        self.update_chat(id, |connection| {
+            connection.execute(
+                "UPDATE chats SET seen_through = MAX(seen_through, ?2), marked_unread = 0 WHERE id = ?1",
+                params![id, through.unwrap_or(0)],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Mark as unread: the Chat reads as unread until it is next seen. Its last outcome
+    /// is not made unseen, so nothing is announced again. A Chat with no ended turn
+    /// has nothing to mark.
+    pub fn mark_chat_unread(&mut self, id: &str) -> Result<Chat, Error> {
+        let chat = self.chat(id)?;
+        if chat.marked_unread || self.last_ended_turn(id)?.is_none() {
+            return Ok(chat);
+        }
+        self.update_chat(id, |connection| {
+            connection.execute("UPDATE chats SET marked_unread = 1 WHERE id = ?1", [id])?;
+            Ok(())
+        })
+    }
+
+    /// The person had the transcript in view through `record` (a message, turn, tool,
+    /// request, notice or session of this Chat). It only moves forward; a record that
+    /// is not this Chat's, or is earlier than what was read, changes nothing. No Chat
+    /// change is logged: reading is not a change the views have to follow.
+    pub fn mark_chat_read_through(&mut self, id: &str, record: &str) -> Result<Chat, Error> {
+        let chat = self.chat(id)?;
+        let position: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT position FROM (
+                     SELECT position, id, chat_id FROM chat_sessions
+                     UNION ALL SELECT position, id, chat_id FROM chat_messages
+                     UNION ALL SELECT position, id, chat_id FROM chat_turns
+                     UNION ALL SELECT position, id, chat_id FROM chat_tools
+                     UNION ALL SELECT position, id, chat_id FROM chat_interactions
+                     UNION ALL SELECT position, id, chat_id FROM chat_notices)
+                 WHERE chat_id = ?1 AND id = ?2",
+                params![id, record],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(position) = position else {
+            return Ok(chat);
+        };
+        let moved = self.connection.execute(
+            "UPDATE chats SET read_through = ?2, read_through_position = ?3
+             WHERE id = ?1 AND read_through_position < ?3",
+            params![id, record, position],
+        )?;
+        if moved == 0 {
+            return Ok(chat);
+        }
+        self.chat(id)
+    }
+
+    /// Mute stops the Chat's notifications and its share of the app-icon count.
+    pub fn set_chat_muted(&mut self, id: &str, muted: bool) -> Result<Chat, Error> {
+        self.update_chat(id, |connection| {
+            connection.execute(
+                "UPDATE chats SET muted = ?2 WHERE id = ?1",
+                params![id, muted],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn last_ended_turn(&self, id: &str) -> Result<Option<i64>, Error> {
+        Ok(self.connection.query_row(
+            "SELECT MAX(position) FROM chat_turns WHERE chat_id = ?1 AND state <> 'active'",
+            [id],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn set_chat_queue_paused(&mut self, id: &str, paused: bool) -> Result<Chat, Error> {

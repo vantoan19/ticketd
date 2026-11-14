@@ -14,6 +14,21 @@ const workspaceInfoSchema = z.object({
 });
 export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
 
+const projectIconSchema = z
+  .object({
+    mime: z.enum([
+      "image/svg+xml",
+      "image/png",
+      "image/x-icon",
+      "image/jpeg",
+      "image/webp",
+      "image/gif",
+    ]),
+    bytes: z.array(z.number().int().min(0).max(255)),
+  })
+  .nullable();
+export type ProjectFavicon = NonNullable<z.infer<typeof projectIconSchema>>;
+
 const lastBackupSchema = z
   .object({ path: z.string(), completed_at: z.string() })
   .nullable();
@@ -132,6 +147,10 @@ export const workspaceClient = {
   /** Shows the workspace file in the platform file manager. */
   async reveal(path: string) {
     await revealItemInDir(path);
+  },
+  /** The favicon a Project's folder ships, probed now; null when it has none. */
+  async projectIcon(id: string) {
+    return projectIconSchema.parse(await invoke("project_icon", { id }));
   },
   /** Opens an https link in the default browser. */
   async openLink(url: string) {

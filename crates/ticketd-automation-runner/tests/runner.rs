@@ -11,7 +11,8 @@ use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
     InteractionKind, InteractionRequest, NativeRequestId, NativeSessionId, NativeTurnId, Problem,
-    ProblemKind, SendMode, SessionStart, TurnOutcome, WorkspaceOpener,
+    ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey, SettingOutcome,
+    TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -362,6 +363,7 @@ async fn a_harness_that_asks_for_approval_anyway_is_stopped_instead_of_waited_on
         .emit(EventKind::InteractionRequested(InteractionRequest {
             request: NativeRequestId::new("request-1"),
             turn: Some(NativeTurnId::new("turn-1")),
+            item: None,
             kind: InteractionKind::Approval {
                 description: "rm -rf build".into(),
                 reason: None,
@@ -377,6 +379,27 @@ async fn a_harness_that_asks_for_approval_anyway_is_stopped_instead_of_waited_on
         f.needs_attention()
             .starts_with("The agent needed something it is not allowed to do."),
     );
+}
+
+/// The Chat's own model and permission pickers do not reach an unattended session:
+/// the agent's settings hold until the person takes the run over.
+#[tokio::test(start_paused = true)]
+#[allow(clippy::unwrap_used)]
+async fn a_setting_cannot_be_changed_in_a_chat_an_automation_is_running() {
+    let f = Fixture::new();
+    f.agent_working().await;
+
+    let asked = f
+        .host
+        .change_setting(&f.chat(), SettingKey::Permission, "acceptEdits")
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        asked,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    assert!(!written(&f).contains(&"setting".to_owned()));
 }
 
 #[tokio::test(start_paused = true)]
@@ -589,6 +612,7 @@ fn written(f: &Fixture) -> Vec<String> {
             Written::Respond(_) => "respond".to_owned(),
             Written::Interrupt(_) => "interrupt".to_owned(),
             Written::Close(_) => "close".to_owned(),
+            Written::Setting(_) => "setting".to_owned(),
         })
         .collect()
 }

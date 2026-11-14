@@ -177,6 +177,12 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "chat",
   },
   {
+    title: "Notify me about Chats",
+    description: "Approvals, questions, failures and finished turns.",
+    keywords: "chat notification notifications alert sound badge dock mute",
+    section: "chat",
+  },
+  {
     title: "Runs at once",
     description:
       "Runs beyond this wait in a queue, in the order their events happened.",

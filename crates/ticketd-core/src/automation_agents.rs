@@ -112,11 +112,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     )?;
     // Views refresh on the change token, so an agent changed elsewhere shows up.
     crate::change_token::track(connection, "automation_agents")?;
-    connection.execute_batch("PRAGMA user_version = 68;")?;
+    connection.execute_batch("PRAGMA user_version = 74;")?;
     Ok(())
 }
 
-/// Format version 75: "any command" becomes a setting of its own. Until now an
+/// Format version 81: "any command" becomes a setting of its own. Until now an
 /// empty command list meant it, so agents saved that way keep what they were given.
 pub(crate) fn migrate_any_command(connection: &Connection) -> Result<(), Error> {
     let present: bool = connection.query_row(

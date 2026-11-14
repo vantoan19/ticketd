@@ -10,7 +10,9 @@ import {
 /**
  * A button that shows only an icon. `label` is required: it is the accessible
  * name and the tooltip that appears on hover and keyboard focus. It also works
- * as the child of a menu or popover trigger (`asChild`).
+ * as the child of a menu or popover trigger (`asChild`). `shortcut`, when
+ * given, follows the label in the tooltip only ("Stop · Esc"); pair it with
+ * `aria-keyshortcuts` for assistive technology.
  */
 // A tooltip only labels. It must not open, or outlive the moment, a menu or
 // dialog is layered over its trigger: a menu item that opens a dialog returns
@@ -21,9 +23,11 @@ function IconButton({
   label,
   variant = "ghost",
   size = "icon-sm",
+  shortcut,
   ...props
 }: Omit<React.ComponentProps<typeof Button>, "aria-label" | "children"> & {
   label: string;
+  shortcut?: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -48,7 +52,9 @@ function IconButton({
         <TooltipTrigger asChild>
           <Button aria-label={label} variant={variant} size={size} {...props} />
         </TooltipTrigger>
-        <TooltipContent>{label}</TooltipContent>
+        <TooltipContent>
+          {shortcut ? `${label} · ${shortcut}` : label}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

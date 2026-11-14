@@ -1,15 +1,17 @@
 import { useContext, useEffect, useState } from "react";
-import { FileText, FolderKanban, Plus, X } from "lucide-react";
+import { FileText, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Reference } from "@/components/ui/reference";
 import { DocumentNavigation } from "@/features/documents/navigation";
+import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { useChatClient, type LinkedRecord } from "@/features/chats/client";
@@ -19,7 +21,7 @@ export function RecordLabel({ record }: { record: LinkedRecord }) {
   if (record.kind === "project")
     return (
       <>
-        <FolderKanban size={14} aria-hidden />
+        <ProjectIcon project={record} />
         <span className="chat-chip-title">{record.title}</span>
       </>
     );
@@ -64,9 +66,16 @@ export function RecordChip({
           <RecordLabel record={record} />
         </span>
       ) : (
+        // The chip's own label, not a Button: the chip is the control's frame.
         <button
           type="button"
           aria-label={`Open ${name}`}
+          onKeyDown={(event) => {
+            if (event.key === "Delete") {
+              event.preventDefault();
+              onRemove();
+            }
+          }}
           onClick={() =>
             record.kind === "ticket"
               ? openTicket?.(record.reference)
@@ -76,6 +85,7 @@ export function RecordChip({
           <RecordLabel record={record} />
         </button>
       )}
+      {/* The chip's 14px remove mark; an IconButton (32px) does not fit inside it. */}
       <button
         type="button"
         aria-label={`Remove the link to ${name}`}
@@ -92,20 +102,32 @@ export function LinkPicker({
   linked,
   onPick,
   withLabel = false,
+  open: openFromOutside,
+  onOpenChange,
 }: {
   linked: LinkedRecord[];
   onPick: (record: LinkedRecord) => void;
   /** New Chat shows the word beside the plus. */
   withLabel?: boolean;
+  /**
+   * Opened from elsewhere (the Chat actions menu): the picker then has no
+   * button of its own and opens where it is placed.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const client = useChatClient();
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const controlled = openFromOutside !== undefined;
+  const open = openFromOutside ?? ownOpen;
+  const setOpen = (next: boolean) =>
+    controlled ? onOpenChange?.(next) : setOwnOpen(next);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LinkedRecord[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
-    // Search is by name: nothing is listed until something is typed.
-    if (!open || !query.trim()) return;
+    // Opened with nothing typed, the host lists recent records (LIVE-12).
+    if (!open) return;
     let current = true;
     client.searchRecords(query).then(
       (found) => {
@@ -120,7 +142,7 @@ export function LinkPicker({
     };
   }, [client, open, query]);
   const typed = query.trim() !== "";
-  const shown = (typed ? results : []).filter(
+  const shown = results.filter(
     (record) =>
       !linked.some(
         (known) => known.kind === record.kind && known.id === record.id,
@@ -134,21 +156,25 @@ export function LinkPicker({
         if (!next) setQuery("");
       }}
     >
-      <PopoverTrigger asChild>
-        {withLabel ? (
-          <Button
-            variant="ghost"
-            size="xs"
-            aria-label="Link a ticket, Document or Project"
-          >
-            <Plus aria-hidden /> Link
-          </Button>
-        ) : (
-          <IconButton label="Link a ticket, Document or Project">
-            <Plus aria-hidden />
-          </IconButton>
-        )}
-      </PopoverTrigger>
+      {controlled ? (
+        <PopoverAnchor />
+      ) : (
+        <PopoverTrigger asChild>
+          {withLabel ? (
+            <Button
+              variant="ghost"
+              size="xs"
+              aria-label="Link a ticket, Document or Project"
+            >
+              <Plus aria-hidden /> Link
+            </Button>
+          ) : (
+            <IconButton label="Link a ticket, Document or Project">
+              <Plus aria-hidden />
+            </IconButton>
+          )}
+        </PopoverTrigger>
+      )}
       <PopoverContent
         align="start"
         className="w-80"
@@ -168,9 +194,16 @@ export function LinkPicker({
               Search failed: {error}
             </p>
           )}
-          <ul className="chat-pick-results" aria-label="Results">
+          {!typed && shown.length > 0 && (
+            <p className="chat-picker-label">Recent</p>
+          )}
+          <ul
+            className="chat-pick-results"
+            aria-label={typed ? "Results" : "Recent"}
+          >
             {shown.map((record) => (
               <li key={`${record.kind}:${record.id}`}>
+                {/* A result row in the list, not a Button variant. */}
                 <button
                   type="button"
                   onClick={() => {

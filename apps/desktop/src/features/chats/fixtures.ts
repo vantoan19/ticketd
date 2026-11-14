@@ -45,14 +45,176 @@ const claude = {
   permissions: "Uses your Claude Code settings. It asks before editing files.",
 };
 
+/** A turn that ran, was steered, and finished: it reads result-first. */
+const inTurn = (item: TranscriptItem): TranscriptItem => ({
+  ...item,
+  turn_id: "ft",
+});
+const testOutput = Array.from(
+  { length: 30 },
+  (_, line) => `  ✓ limiter case ${line + 1}`,
+).join("\n");
+const finishedTurn: TranscriptItem[] = [
+  inTurn(you("f1", "Sketch a limiter that won't lock out shared office IPs.")),
+  {
+    id: "turn:ft",
+    at: minutesAgo(9),
+    kind: "turn",
+    turn_id: "ft",
+    started_at: minutesAgo(9),
+    ended_at: minutesAgo(9 - 133 / 60),
+    outcome: "completed",
+  },
+  inTurn(
+    reply(
+      "f2",
+      "I read the spec and T-12. I'll add a sliding-window limiter keyed by account and IP.",
+    ),
+  ),
+  inTurn({
+    id: "fw1",
+    at,
+    kind: "marker",
+    reason: "warning",
+    message:
+      "Codex could not start the MCP server github: exited with 1. Work that does not need it continues; MCP servers are set up in Codex's own MCP settings.",
+  }),
+  inTurn({
+    id: "fw2",
+    at,
+    kind: "marker",
+    reason: "warning",
+    message:
+      "Codex could not start the MCP server grafana: timed out after 30 seconds.",
+  }),
+  inTurn({
+    id: "ft1",
+    at,
+    kind: "steps",
+    steps: [
+      {
+        kind: "run",
+        target: "ticketd show T-12; ticketd document show d1",
+        command:
+          "T=/Users/me/ticketd/target/debug/ticketd\n$T show T-12; $T document show d1",
+        ticketd: [
+          { verb: "read", words: [{ text: "T-12", code: true }] },
+          {
+            verb: "read",
+            words: [{ text: "Document" }, { text: "d1", record: "document" }],
+          },
+        ],
+      },
+      {
+        kind: "run",
+        target:
+          'ticketd show T-12; ticketd change T-12 --status "In progress"; ticketd workspace',
+        command:
+          'T=/Users/me/ticketd/target/debug/ticketd; $T show T-12; echo ----; $T change T-12 --status "In progress"; $T workspace',
+        ticketd: [
+          { verb: "read", words: [{ text: "T-12", code: true }] },
+          {
+            verb: "set",
+            words: [{ text: "T-12", code: true }, { text: "to In progress" }],
+          },
+          { verb: "run", words: [{ text: "ticketd workspace", code: true }] },
+        ],
+      },
+    ],
+  }),
+  inTurn({
+    id: "f3",
+    at,
+    kind: "steps",
+    steps: ["login.ts", "session.ts", "limiter.ts"].map((file) => ({
+      kind: "read",
+      target: `src/auth/${file}`,
+      targets: [{ text: `src/auth/${file}` }],
+    })),
+  }),
+  inTurn({
+    id: "f4",
+    at,
+    kind: "records",
+    changes: [
+      {
+        kind: "status",
+        reference: "T-12",
+        title: t12.title,
+        from: "Todo",
+        to: "In progress",
+      },
+    ],
+  }),
+  inTurn({
+    id: "f5",
+    at: minutesAgo(8),
+    kind: "request",
+    request: "approval",
+    title: "Codex asked to run",
+    subject: "npm run test:all",
+    options: [],
+    free_text: false,
+    state: "answered",
+    outcome: "You allowed this for this session",
+    // It waited on you for 40s; the turn's time leaves that out.
+    resolved_at: minutesAgo(8 - 40 / 60),
+  }),
+  inTurn({
+    id: "f6",
+    at,
+    kind: "steps",
+    steps: [
+      {
+        kind: "run",
+        target: "npm run test:all",
+        command: "npm run test:all",
+        folder: "auth-service",
+        state: "failed",
+        exit_code: 1,
+        output: `${testOutput}\n  ✕ resets the window\n\nTests  1 failed | 30 passed`,
+      },
+      {
+        kind: "edit",
+        target: "src/auth/limiter.ts",
+        targets: [{ text: "src/auth/limiter.ts" }],
+      },
+      {
+        kind: "run",
+        target: "npm run test:all",
+        command: "npm run test:all",
+        output: "Tests  31 passed",
+      },
+    ],
+  }),
+  inTurn(
+    reply(
+      "f7",
+      "The limiter is in. Failed logins are now limited per account and per IP in a sliding 15-minute window, and `npm run test:all` passes.",
+    ),
+  ),
+];
+
 const chats: MockChat[] = [
+  {
+    updated_at: minutesAgo(1),
+    chat: chatState({
+      id: "finished",
+      title: "Sketch a limiter for shared IPs",
+      links: [t12],
+    }),
+    items: finishedTurn,
+  },
   {
     updated_at: minutesAgo(0),
     chat: chatState({
       id: "approval",
       title: "Alert on-call when logins spike",
       activity: "waiting",
-      links: [{ ...t12, id: "t13", reference: "T-13", title: "Page on-call" }],
+      links: [
+        { ...t12, id: "t13", reference: "T-13", title: "Page on-call" },
+        { kind: "project", id: "p-web", title: "Web App" },
+      ],
     }),
     items: [
       you("a1", "Page the on-call engineer when failed logins spike."),
@@ -61,8 +223,16 @@ const chats: MockChat[] = [
         at,
         kind: "request",
         request: "approval",
-        title: "Codex wants to run a command",
-        subject: "npm install @pagerduty/pdjs",
+        title: "Codex wants to",
+        subject: "ticketd project show p-web",
+        command: "/Users/me/ticketd/target/debug/ticketd project show p-web",
+        ticketd: [
+          {
+            verb: "read",
+            words: [{ text: "Project" }, { text: "p-web", record: "project" }],
+          },
+        ],
+        reason: "May I read the linked Project so I can follow its notes?",
         options: [
           { id: "once", label: "Allow once" },
           { id: "session", label: "Allow for this session" },
@@ -81,7 +251,72 @@ const chats: MockChat[] = [
       harness: claude,
       activity: "working",
       doing: { label: "Running npm test", since: minutesAgo(2) },
-      folder: { shared_with: ["Alert on-call when logins spike"] },
+      folder: {
+        shared_with: [
+          {
+            id: "alert",
+            title: "Alert on-call when logins spike",
+            retention: "active",
+          },
+        ],
+        branch: { kind: "branch", name: "rate-limit-logins" },
+        project: { id: "web", title: "Web App" },
+      },
+      settings: {
+        model: {
+          current: "opus",
+          options: [
+            {
+              id: "opus",
+              label: "Opus 5.5",
+              description: "Most capable, for complex multi-step work",
+              is_default: true,
+              allowed: true,
+            },
+            {
+              id: "sonnet",
+              label: "Sonnet 5",
+              description: "Fast and capable for everyday coding",
+              is_default: false,
+              allowed: true,
+            },
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+        effort: {
+          current: "high",
+          options: ["Low", "Medium", "High", "Max"].map((label) => ({
+            id: label.toLowerCase(),
+            label,
+            is_default: label === "High",
+            allowed: true,
+          })),
+          changeable: true,
+          applies_from: "next_turn",
+        },
+        permission: {
+          current: "accept_edits",
+          options: [
+            {
+              id: "ask",
+              label: "Ask before edits",
+              description: "Asks before editing files or running commands",
+              is_default: true,
+              allowed: true,
+            },
+            {
+              id: "accept_edits",
+              label: "Accept edits",
+              description: "Edits files in this folder without asking",
+              is_default: false,
+              allowed: true,
+            },
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+      },
       links: [t12, spec],
       queue: [{ id: "q1", text: "Then open a PR against main" }],
     }),
@@ -110,20 +345,35 @@ const chats: MockChat[] = [
         at,
         kind: "steps",
         steps: [
-          { verb: "read", target: "src/auth/login.ts", more: 5 },
           {
-            verb: "edited",
-            target: "src/auth/limiter.ts",
-            more: 0,
-            result: "+48",
+            kind: "read",
+            target: "src/auth/login.ts",
+            targets: [
+              { text: "src/auth/login.ts" },
+              { text: "src/auth/session.ts" },
+              { text: "src/auth/limiter.ts", lines: [1, 120] },
+            ],
           },
           {
-            verb: "ran",
+            kind: "edit",
+            target: "src/auth/limiter.ts",
+            targets: [{ text: "src/auth/limiter.ts" }],
+          },
+          {
+            kind: "run",
             target: "npm run test:all",
-            more: 0,
-            result: "1 failed",
+            command: "npm run test:all",
+            state: "failed",
+            exit_code: 1,
             output: "FAIL  src/auth/limiter.test.ts\n  ✕ resets the window",
             truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
+          },
+          {
+            kind: "run",
+            target: "npm run test:all",
+            command: "npm run test:all",
+            state: "running",
+            started_at: minutesAgo(0.2),
           },
         ],
       },
@@ -275,13 +525,14 @@ const chats: MockChat[] = [
         at,
         kind: "request",
         request: "approval",
-        title: "Codex asked for approval",
+        title: "Codex asked to run",
         subject: "Remove-Item hello.txt",
         reason: "Allow removing hello.txt from the current directory?",
         options: [],
         free_text: false,
         state: "answered",
-        outcome: "You denied this",
+        outcome: "You declined this",
+        folded: true,
       },
       { id: "m4", at, kind: "marker", reason: "stopped" },
     ],
@@ -373,6 +624,16 @@ export const fixtureChatClient = () =>
   createMockChatClient({
     enabled: true,
     chats,
+    // One harness not ready, so New Chat's picker shows that state too.
+    harnesses: [
+      { id: "claude-code", name: "Claude Code", status: "ready" },
+      {
+        id: "codex",
+        name: "Codex",
+        status: "not_signed_in",
+        command: "codex login",
+      },
+    ],
     now: new Date().toISOString(),
     records: [
       t12,
