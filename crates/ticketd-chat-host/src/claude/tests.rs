@@ -947,6 +947,24 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
     assert_eq!(options["allowed_tools"], json!(CLI_RULES));
 }
 
+/// #387 M12, D15: Claude Code's `Edit` refuses a file it has not read, so "Edit
+/// files" also allows `Read` (not `Glob` or `Grep`), even with "Read files" off.
+#[test]
+fn an_agent_that_edits_files_may_read_the_files_it_changes() {
+    let mut unattended = reader_that_tests();
+    unattended.tools.read_files = false;
+    unattended.tools.edit_files = true;
+    let options = super::unattended_options(&unattended);
+
+    let allowed = options["allowed_tools"].as_array().unwrap();
+    assert!(allowed.contains(&json!("Read")), "{allowed:?}");
+    assert!(allowed.contains(&json!("Edit")), "{allowed:?}");
+    assert_eq!(
+        options["disallowed_tools"],
+        json!(["Glob", "Grep", "WebFetch", "WebSearch"])
+    );
+}
+
 /// L1: a list of commands allows exactly those, in both shells, besides the CLI.
 /// No rule names the CLI's path: the agent runs it by name from its `PATH`.
 #[test]

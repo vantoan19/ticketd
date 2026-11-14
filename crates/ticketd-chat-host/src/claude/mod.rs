@@ -156,8 +156,11 @@ impl ClaudeAdapter {
 pub(super) fn unattended_options(unattended: &Unattended) -> Value {
     let tools = &unattended.tools;
     let (mut allowed, mut disallowed) = (Vec::new(), Vec::new());
+    // Claude Code's `Edit` refuses a file it has not read, so editing reads the
+    // files it changes; finding files stays with "read files" (#387 M12, D15).
     for (on, names) in [
-        (tools.read_files, ["Read", "Glob", "Grep"].as_slice()),
+        (tools.read_files || tools.edit_files, ["Read"].as_slice()),
+        (tools.read_files, &["Glob", "Grep"]),
         (tools.edit_files, &["Edit", "Write", "NotebookEdit"]),
         (tools.use_web, &["WebFetch", "WebSearch"]),
     ] {
