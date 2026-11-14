@@ -269,6 +269,18 @@ export const PATH_LABEL_SHAPE = {
 };
 
 export const cardName = (card: Card) => `${card.kind}: ${card.title}`;
+/**
+ * What a click or Enter on a card does: opens its panel, which takes focus as
+ * it opens. A panel that is already open is given focus again.
+ */
+export function openCard(
+  id: string,
+  selected: boolean,
+  onSelect: (id: string) => void,
+) {
+  onSelect(id);
+  if (selected) document.querySelector<HTMLElement>(".flow-panel")?.focus();
+}
 /** Moves focus to a card on the canvas, as when its panel closes. */
 export function focusCard(id: string) {
   for (const card of document.querySelectorAll<HTMLElement>("[data-flow-card]"))

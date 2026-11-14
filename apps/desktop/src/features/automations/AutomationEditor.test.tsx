@@ -597,6 +597,10 @@ test("Esc closes a step's panel and returns to the step, and Delete on the step 
   fireEvent.click(card);
   const panel = await screen.findByRole("complementary", { name: "Run agent" });
   expect(document.activeElement).toBe(panel);
+  // Enter again, from the card, goes back into the panel that is open.
+  card.focus();
+  fireEvent.click(card);
+  expect(document.activeElement).toBe(panel);
   // The step is selected while its panel is open: Delete asks there too.
   fireEvent.keyDown(panel, { key: "Delete" });
   fireEvent.click(

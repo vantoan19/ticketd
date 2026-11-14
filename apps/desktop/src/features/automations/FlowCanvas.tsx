@@ -54,6 +54,7 @@ import {
   CARD_ICONS,
   cardColor,
   cardName,
+  openCard,
   PATH_LABEL_SHAPE,
   PATH_LABELS,
   stepCard,
@@ -252,7 +253,7 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
           <button
             {...main}
             aria-pressed={selected}
-            onClick={() => onSelect(card.id)}
+            onClick={() => openCard(card.id, selected, onSelect)}
             // Delete on a step asks before it goes; the trigger stays.
             onKeyDown={(event) => {
               if (event.key === "Delete" && card.menu === "step")

@@ -25,6 +25,7 @@ import {
   CARD_ICONS,
   cardColor,
   cardName,
+  openCard,
   PATH_LABEL_SHAPE,
   PATH_LABELS,
   stepCard,
@@ -111,7 +112,7 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
           aria-label={label ? `${cardName(card)}, ${label}` : cardName(card)}
           aria-pressed={selected}
           data-flow-card={card.id}
-          onClick={() => onSelect(card.id)}
+          onClick={() => openCard(card.id, selected, onSelect)}
         >
           <span className="flow-card-icon">
             <Icon size={16} aria-hidden />
