@@ -72,6 +72,26 @@ export function everyStep(steps: AutomationStep[]): AutomationStep[] {
   });
 }
 
+/**
+ * Where each step is, by id: its place among the steps of its own path, and
+ * which path that is ("step 2 of 3", "Yes path, step 1 of 2"). Read in the
+ * order the steps run, it turns the diagram into an outline.
+ */
+export function stepPlaces(steps: AutomationStep[]): Map<string, string> {
+  const places = new Map<string, string>();
+  const walk = (list: AutomationStep[], path: string) => {
+    list.forEach((step, index) => {
+      places.set(step.id, `${path}step ${index + 1} of ${list.length}`);
+      const { on_failure, yes, no } = stepPaths(step);
+      walk(on_failure ?? [], "Failure path, ");
+      walk(yes ?? [], "Yes path, ");
+      walk(no ?? [], "No path, ");
+    });
+  };
+  walk(steps, "");
+  return places;
+}
+
 /** A run's status in the words the interface uses. */
 export const RUN_STATUS_LABELS: Record<AutomationRun["status"], string> = {
   queued: "Queued",

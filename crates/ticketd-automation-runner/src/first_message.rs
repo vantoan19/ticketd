@@ -11,12 +11,22 @@ pub fn first_message(instructions: &str, run: &AutomationRun) -> String {
     let mut message = instructions.trim().to_owned();
     let (Some(ticket), Some(event)) = (&run.ticket, &run.event) else {
         let started = match run.definition.trigger {
-            Some(Trigger::Schedule { .. }) => "on its schedule",
-            _ => "because the person pressed Run now",
+            Some(Trigger::Schedule { .. }) => "on its schedule. No ticket started it:",
+            Some(Trigger::ByHand) => "because the person pressed Run now. No ticket started it:",
+            // A ticket started it, and the run no longer says which.
+            Some(
+                Trigger::TicketCreated
+                | Trigger::TicketUpdated
+                | Trigger::StatusChanged { .. }
+                | Trigger::TagAdded { .. }
+                | Trigger::TagRemoved { .. }
+                | Trigger::ActivityCreated,
+            )
+            | None => "for a ticket it can no longer name:",
         };
         message.push_str(&format!(
             "\n\n---\n\
-             ticketd started this run {started}. No ticket started it: use the ticketd CLI \
+             ticketd started this run {started} use the ticketd CLI \
              to find the tickets your instructions are about.\n"
         ));
         return message;

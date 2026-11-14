@@ -114,6 +114,22 @@ pub(crate) fn migrate_run_counts(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format version 75: the configuration a source was last read with, so the first
+/// read after a change to it can be told from the ones that follow. NULL for a
+/// source last read before this was kept.
+pub(crate) fn migrate_refreshed_configuration(connection: &Connection) -> Result<(), Error> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_status') WHERE name = 'refreshed_configuration')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection
+            .execute_batch("ALTER TABLE source_status ADD COLUMN refreshed_configuration TEXT")?;
+    }
+    Ok(())
+}
+
 /// What one provider's run found, for [`record_run`].
 pub(crate) struct ProviderRun {
     pub provider: String,
@@ -126,20 +142,23 @@ pub(crate) struct ProviderRun {
 
 /// Records each provider's run in the refresh write transaction. A run that
 /// started before the one already recorded is older news and changes nothing.
+/// `configuration` is what a successful run read the source with, as stored.
 pub(crate) fn record_run(
     connection: &Connection,
     run: &ProviderRun,
+    configuration: Option<&str>,
     now: &str,
 ) -> Result<(), Error> {
     match &run.failure {
         None => {
             let partial = (!run.skipped.is_empty()).then(|| run.skipped.join("; "));
             connection.execute(
-                "INSERT INTO source_status (provider, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets) VALUES (?1, ?2, ?2, ?3, ?4) \
+                "INSERT INTO source_status (provider, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, refreshed_configuration) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
                  ON CONFLICT(provider) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
-                 error_code = NULL, error_message = NULL, failing_since = NULL, retry_after = NULL, partial_message = ?3, last_checked_tickets = ?4 \
+                 error_code = NULL, error_message = NULL, failing_since = NULL, retry_after = NULL, partial_message = ?3, last_checked_tickets = ?4, \
+                 refreshed_configuration = COALESCE(?5, refreshed_configuration) \
                  WHERE source_status.last_attempt_at IS NULL OR source_status.last_attempt_at <= ?2",
-                params![run.provider, now, partial, run.checked_tickets],
+                params![run.provider, now, partial, run.checked_tickets, configuration],
             )?;
         }
         Some(failure) => {

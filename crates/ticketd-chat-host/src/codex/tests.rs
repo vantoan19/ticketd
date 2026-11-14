@@ -759,6 +759,7 @@ fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
             read_files: true,
             edit_files,
             run_commands: true,
+            any_command: true,
             allowed_commands: Vec::new(),
             use_web,
         },

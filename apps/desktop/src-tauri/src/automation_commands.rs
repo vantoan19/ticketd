@@ -8,6 +8,7 @@ use ticketd_chat_host::WorkspaceOpener;
 use ticketd_core::{
     Automation, AutomationAgent, AutomationAgentSettings, AutomationDefinition, AutomationExample,
     AutomationRun, AutomationRunStatus, AutomationRunTicket, AutomationStepStatus,
+    DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE,
 };
 
 use crate::chat_commands::ChatBridge;
@@ -99,21 +100,40 @@ pub fn automation_duplicate(id: String) -> Result<Automation, String> {
 }
 
 /// Replaces the whole definition: renaming and reshaping are the same edit.
+///
+/// `typing` is an edit still being made, such as a field being typed in: it is
+/// stored unless that would switch the Automation off, and the answer is the
+/// Automation as it is stored either way.
 #[tauri::command]
 pub fn automation_update(
     id: String,
     definition: AutomationDefinition,
+    typing: bool,
 ) -> Result<Automation, String> {
     open_workspace()
-        .and_then(|mut workspace| workspace.update_automation(&id, definition))
+        .and_then(|mut workspace| {
+            if typing {
+                workspace.draft_automation(&id, definition)
+            } else {
+                workspace.update_automation(&id, definition)
+            }
+        })
         .map_err(|error| error.to_string())
 }
 
+/// Deletes an Automation, ends its active runs and interrupts the agents they
+/// were running: the core no longer takes those turns' outcomes.
 #[tauri::command]
-pub fn automation_delete(id: String) -> Result<(), String> {
-    open_workspace()
+pub async fn automation_delete(bridge: State<'_, ChatBridge>, id: String) -> Result<(), String> {
+    let chats = open_workspace()
         .and_then(|mut workspace| workspace.delete_automation(&id))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    for chat_id in chats {
+        // ponytail: as for Stop, an interrupt that fails leaves the agent to its
+        // turn and time limits; the run has ended either way.
+        let _ = bridge.chats().stop(&chat_id).await;
+    }
+    Ok(())
 }
 
 /// On or off for this device only.
@@ -126,13 +146,15 @@ pub fn automation_set_enabled(id: String, enabled: bool) -> Result<Automation, S
 
 /// A step's text with its fields filled in from the ticket changed most recently,
 /// and `tag` for the tag from the event. `None` while the Workspace has no ticket.
+/// With `has_ticket` false it reads as a run without a ticket fills it in.
 #[tauri::command]
 pub fn automation_text_preview(
     text: String,
     tag: Option<String>,
+    has_ticket: bool,
 ) -> Result<Option<String>, String> {
     open_workspace()
-        .and_then(|workspace| workspace.preview_automation_text(&text, tag.as_deref()))
+        .and_then(|workspace| workspace.preview_automation_text(&text, tag.as_deref(), has_ticket))
         .map_err(|error| error.to_string())
 }
 
@@ -284,11 +306,24 @@ pub async fn automation_stop_and_turn_off(
         .map_err(|error| error.to_string())
 }
 
-/// How many runs execute at once on this device.
+/// How many runs execute at once on this device, with what the setting starts at
+/// and the most it takes.
+#[derive(serde::Serialize)]
+pub struct RunsAtOnce {
+    runs: usize,
+    default: usize,
+    most: usize,
+}
+
 #[tauri::command]
-pub fn automation_runs_at_once() -> Result<usize, String> {
+pub fn automation_runs_at_once() -> Result<RunsAtOnce, String> {
     open_workspace()
         .and_then(|workspace| workspace.automation_runs_at_once())
+        .map(|runs| RunsAtOnce {
+            runs,
+            default: DEFAULT_AUTOMATION_RUNS_AT_ONCE,
+            most: MOST_AUTOMATION_RUNS_AT_ONCE,
+        })
         .map_err(|error| error.to_string())
 }
 

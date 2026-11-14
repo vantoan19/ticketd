@@ -433,18 +433,28 @@ export function ConditionRows({
               ) : (
                 <Pick
                   name={value ? `Source is: ${value}` : "Source is"}
-                  text={value ? `is ${value}` : "Choose a source"}
+                  text={value ? `is ${value}` : "Choose sources"}
                   menu="Source is"
                 >
+                  {/* One of several, like the projects. */}
                   {CONDITION_SOURCES.map((source) => (
-                    <DropdownMenuItem
+                    <DropdownMenuCheckboxItem
                       key={source}
-                      onSelect={() =>
-                        set(index, { ...condition, any_of: [source] })
+                      checked={condition.any_of.includes(source)}
+                      onCheckedChange={(checked) =>
+                        set(index, {
+                          ...condition,
+                          // Kept in the order the menu lists them.
+                          any_of: CONDITION_SOURCES.filter((item) =>
+                            item === source
+                              ? checked
+                              : condition.any_of.includes(item),
+                          ),
+                        })
                       }
                     >
                       {sourceName(source)}
-                    </DropdownMenuItem>
+                    </DropdownMenuCheckboxItem>
                   ))}
                 </Pick>
               )}

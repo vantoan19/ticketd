@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { AutomationEditor } from "@/features/automations/AutomationEditor";
+import { EditorUnderTest } from "@/features/automations/testing";
 import type {
   AutomationDefinition,
   AutomationStep,
@@ -46,7 +46,7 @@ let saved: AutomationDefinition | undefined;
 const open = async (steps: AutomationStep[] = []) => {
   saved = undefined;
   render(
-    <AutomationEditor
+    <EditorUnderTest
       automation={{
         id: "automation-1",
         name: "Verify on staging",
@@ -56,6 +56,7 @@ const open = async (steps: AutomationStep[] = []) => {
         enabled: false,
         arrived_off: false,
         problems: [],
+        has_ticket: true,
       }}
       agents={[]}
       expanded={false}
@@ -63,7 +64,7 @@ const open = async (steps: AutomationStep[] = []) => {
       onExpand={nothing}
       onReturn={nothing}
       onClose={nothing}
-      onChange={(definition) => (saved = definition)}
+      onSaved={(definition) => (saved = definition)}
       onSetEnabled={nothing}
       onStopAndTurnOff={nothing}
       onDelete={nothing}
@@ -88,8 +89,12 @@ const choose = async (button: HTMLElement, item: string) => {
   if (!found) throw new Error(`the menu has no ${item}`);
   fireEvent.click(found);
 };
+/** A button by its name. A card's name goes on to say where it is on its path. */
 const button = (within_: HTMLElement, name: string) =>
-  within(within_).getByRole("button", { name });
+  within(within_).getByRole("button", {
+    name: (accessible) =>
+      accessible === name || accessible.startsWith(`${name}, `),
+  });
 const places = (steps: HTMLElement) =>
   within(steps)
     .getAllByRole("button", { name: /^Add a step/ })

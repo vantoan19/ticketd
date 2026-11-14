@@ -162,11 +162,12 @@ pub(super) fn unattended_options(unattended: &Unattended) -> Value {
             .map(|command| format!("PowerShell({command} *)")),
     );
     const SHELLS: [&str; 2] = ["Bash", "PowerShell"];
-    match (tools.run_commands, tools.allowed_commands.as_slice()) {
+    // "Any command" is said outright: an empty list allows none.
+    match (tools.run_commands, tools.any_command) {
         (false, _) => {}
-        (true, []) => allowed.extend(SHELLS.map(str::to_owned)),
-        (true, commands) => {
-            for command in commands {
+        (true, true) => allowed.extend(SHELLS.map(str::to_owned)),
+        (true, false) => {
+            for command in &tools.allowed_commands {
                 allowed.extend(SHELLS.map(|shell| format!("{shell}({command} *)")));
             }
         }

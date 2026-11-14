@@ -294,6 +294,101 @@ fn different_fields_changed_on_two_desktops_merge_without_review() {
     }
 }
 
+/// Each desktop narrows the list by a different command. The merge leaves none,
+/// and none must mean none: nobody asked for "any command".
+#[test]
+fn two_desktops_each_removing_a_command_never_add_up_to_any_command() {
+    let mut devices = devices();
+    let (_, agent) = devices.shared_automation();
+    let settings = devices.workspaces[0]
+        .automation_agent(&agent)
+        .unwrap()
+        .settings;
+    let allowing = |commands: &[&str]| {
+        let mut tools = settings.tools.clone();
+        tools.run_commands = true;
+        tools.allowed_commands = commands.iter().map(|command| (*command).into()).collect();
+        AutomationAgentSettings {
+            tools,
+            ..settings.clone()
+        }
+    };
+    devices.workspaces[0]
+        .update_automation_agent(&agent, allowing(&["cargo test", "npm test"]))
+        .unwrap();
+    devices.settle();
+
+    devices.workspaces[0]
+        .update_automation_agent(&agent, allowing(&["cargo test"]))
+        .unwrap();
+    devices.workspaces[1]
+        .update_automation_agent(&agent, allowing(&["npm test"]))
+        .unwrap();
+    devices.settle();
+
+    for workspace in &devices.workspaces {
+        let tools = workspace.automation_agent(&agent).unwrap().settings.tools;
+        assert!(tools.run_commands);
+        assert_eq!(tools.allowed_commands, [] as [String; 0]);
+        assert!(!tools.any_command);
+    }
+
+    // "Any command" travels only when a desktop says it.
+    let mut any = allowing(&[]);
+    any.tools.any_command = true;
+    devices.workspaces[0]
+        .update_automation_agent(&agent, any)
+        .unwrap();
+    devices.settle();
+    let arrived = devices.workspaces[1].automation_agent(&agent).unwrap();
+    assert!(arrived.settings.tools.any_command);
+}
+
+#[test]
+fn a_schedule_changed_on_another_desktop_counts_again_from_when_it_arrives() {
+    use ticketd_core::Schedule;
+
+    let mut devices = devices();
+    let (id, agent) = devices.shared_automation();
+    let every = |hours: u32| AutomationDefinition {
+        trigger: Some(Trigger::Schedule {
+            schedule: Schedule::EveryHours { hours },
+        }),
+        ..triage(&agent)
+    };
+    devices.workspaces[0]
+        .update_automation(&id, every(5))
+        .unwrap();
+    devices.settle();
+    let b = &mut devices.workspaces[1];
+    b.set_automation_enabled(&id, true).unwrap();
+    // First seen on at 09:00: every five hours counts from then.
+    assert_eq!(
+        b.queue_scheduled_automation_runs(Some("2026-11-16T09:00:00"))
+            .unwrap(),
+        0
+    );
+
+    devices.workspaces[0]
+        .update_automation(&id, every(1))
+        .unwrap();
+    devices.settle();
+
+    // An hour has passed since 09:00, but the hourly schedule is new at 10:30.
+    let b = &mut devices.workspaces[1];
+    assert!(only(b).enabled);
+    assert_eq!(
+        b.queue_scheduled_automation_runs(Some("2026-11-16T10:30:00"))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        b.queue_scheduled_automation_runs(Some("2026-11-16T11:30:00"))
+            .unwrap(),
+        1
+    );
+}
+
 #[test]
 fn an_automation_deleted_on_one_desktop_is_gone_and_off_on_the_other() {
     let mut devices = devices();
@@ -398,6 +493,7 @@ time_limit_minutes: 20
 read_files: true
 edit_files: false
 run_commands: true
+any_command: false
 allowed_commands:
   - "cargo test"
   - "npm test"

@@ -46,8 +46,13 @@ pub enum WorkspaceActor {
     Person,
     /// An Automation's own step, or the CLI run by an Automation run's agent.
     Automation,
-    /// A ticket source refresh or Workspace sync brought the change in.
+    /// A refresh of an external ticket source (such as GitHub) brought the change
+    /// in. It starts Automations like a change made here.
     Sync,
+    /// Workspace sync applied a change made on another desktop, whoever made it
+    /// there. It starts no Automation here: each desktop reacts only to changes
+    /// made on it and to its ticket sources (ADR 0012; provisional).
+    WorkspaceSync,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +74,20 @@ pub struct WorkspaceEvent {
 /// Step 67. `ticket.updated` lists only the fields that differ, and `IS NOT` keeps a
 /// write that changes nothing out of the log.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
+    create(connection)?;
+    connection.execute_batch("PRAGMA user_version = 67;")?;
+    Ok(())
+}
+
+/// Format version 75: what Workspace sync applies is logged with an actor of its
+/// own, `workspace_sync`, apart from a ticket source's `sync`. Events already
+/// logged keep the actor they have.
+pub(crate) fn migrate_workspace_sync_actor(connection: &Connection) -> Result<(), Error> {
+    create(connection)
+}
+
+/// The log and its triggers, as they are now. Safe to run again.
+fn create(connection: &Connection) -> Result<(), Error> {
     let pairs = TICKET_FIELDS
         .map(|field| format!("SELECT '{field}' AS field, OLD.{field} AS old, NEW.{field} AS new"))
         .join(" UNION ALL ");
@@ -79,7 +98,8 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     // Workspace sync applies incoming files with capture switched off; that flag also
     // names the actor. Other actors are set per connection (`set_actor`).
     let log = "INSERT INTO workspace_events (type, ticket_id, previous, current, actor) SELECT";
-    let actor = "CASE (SELECT applying FROM sync_capture) WHEN 1 THEN 'sync' ELSE 'person' END";
+    let actor =
+        "CASE (SELECT applying FROM sync_capture) WHEN 1 THEN 'workspace_sync' ELSE 'person' END";
     connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS workspace_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,8 +141,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
              {log} 'activity.created', NEW.ticket_id, NULL,
                  json_object('id', NEW.id, 'brief', NEW.brief, 'editing_agent', NEW.editing_agent),
                  {actor};
-         END;
-         PRAGMA user_version = 67;"
+         END;"
     ))?;
     Ok(())
 }
@@ -136,7 +155,7 @@ fn created_values(row: &str) -> String {
 }
 
 /// The actor this connection's writes are logged with, in place of the default
-/// (`person`, or `sync` while Workspace sync applies incoming files).
+/// (`person`, or `workspace_sync` while Workspace sync applies incoming files).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Acting {
     Automation,

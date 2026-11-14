@@ -78,7 +78,10 @@ impl Workspace {
         let values = run.event.as_ref().and_then(|event| match event.kind {
             WorkspaceEventType::TicketTagAdded => event.current.as_ref(),
             WorkspaceEventType::TicketTagRemoved => event.previous.as_ref(),
-            _ => None,
+            WorkspaceEventType::TicketCreated
+            | WorkspaceEventType::TicketUpdated
+            | WorkspaceEventType::TicketStatusChanged
+            | WorkspaceEventType::ActivityCreated => None,
         });
         Ok(Fields {
             reference: ticket.reference,
@@ -189,11 +192,17 @@ impl Workspace {
 
     /// A step's text as it would read for the ticket changed most recently, with
     /// `tag` standing for the tag from the event. `None` while there is no ticket.
+    /// For an Automation whose runs have no ticket (`has_ticket` false) it reads as
+    /// such a run fills it in: every field empty.
     pub fn preview_automation_text(
         &self,
         text: &str,
         tag: Option<&str>,
+        has_ticket: bool,
     ) -> Result<Option<String>, Error> {
+        if !has_ticket {
+            return Ok(Some(resolve(text, &Fields::default())));
+        }
         let recent: Option<String> = self
             .connection
             .query_row(

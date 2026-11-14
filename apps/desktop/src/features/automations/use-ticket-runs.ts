@@ -20,7 +20,12 @@ export function useTicketRuns(reference: string, active: boolean) {
     if (!shown) return;
     let current = true;
     void automationsClient.ticketRuns(reference).then(
-      (found) => current && setRuns(found),
+      (found) => {
+        if (!current) return;
+        setRuns(found);
+        // A read that works again takes the earlier failure off the ticket.
+        setError("");
+      },
       (reason: unknown) => current && setError(String(reason)),
     );
     return () => {

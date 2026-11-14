@@ -284,7 +284,9 @@ function AppContent() {
   };
   useAutomationNotifications(chat.enabled, openNotifiedTicket, openRun);
   return (
-    <RunNavigation value={openRun}>
+    // Runs open in the Automations page, which is there only while Chat is on.
+    // Without it a run's Inbox entry opens its ticket instead.
+    <RunNavigation value={chat.enabled ? openRun : null}>
       <ContextGraphNavigation.Provider value={(id) => navigate({ graph: id })}>
         <TicketNavigation.Provider
           value={(reference) => {
@@ -613,7 +615,10 @@ function AppContent() {
                             className="context-view-wrapper"
                             hidden={graphOrigin !== null}
                           >
-                            <AutomationsView openRun={runTarget} />
+                            <AutomationsView
+                              openRun={runTarget}
+                              onRunOpened={() => setRunTarget(null)}
+                            />
                           </div>
                         )}
                         <TicketWorkspaceView

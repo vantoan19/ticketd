@@ -10,8 +10,8 @@ use ticketd_automation_runner::{Runner, TicketdCli, stop_and_turn_off};
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
-    InteractionKind, InteractionRequest, NativeRequestId, NativeTurnId, Problem, ProblemKind,
-    SendMode, TurnOutcome, WorkspaceOpener,
+    InteractionKind, InteractionRequest, NativeRequestId, NativeSessionId, NativeTurnId, Problem,
+    ProblemKind, SendMode, SessionStart, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
@@ -41,6 +41,7 @@ fn tools() -> AutomationAgentTools {
         read_files: true,
         edit_files: false,
         run_commands: true,
+        any_command: false,
         allowed_commands: vec!["npm test".into()],
         use_web: false,
     }
@@ -578,6 +579,220 @@ async fn a_message_from_the_person_takes_a_running_run_over_and_its_chat_becomes
     assert_eq!(run.steps.len(), 1);
 }
 
+/// What reached the fake harness, in words.
+fn written(f: &Fixture) -> Vec<String> {
+    f.fake
+        .written()
+        .into_iter()
+        .map(|written| match written {
+            Written::Submit(submission) => format!("submit: {}", submission.text),
+            Written::Respond(_) => "respond".to_owned(),
+            Written::Interrupt(_) => "interrupt".to_owned(),
+            Written::Close(_) => "close".to_owned(),
+        })
+        .collect()
+}
+
+/// Taking a going run over ends its unattended harness at once and opens the same
+/// conversation again as the person's own Chat, where neither the end of a turn
+/// nor the agent's time limit closes anything.
+#[tokio::test(start_paused = true)]
+async fn a_chat_taken_over_mid_run_goes_on_as_an_ordinary_chat_past_the_agents_limits() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    f.fake
+        .emit(EventKind::SessionIdentified {
+            native_session: NativeSessionId::new("native-1"),
+        })
+        .await;
+    settle().await;
+
+    f.reply(&chat, "Only check Safari 18.1").await;
+
+    // The agent's turn is ended and its process closed; the person's message opens
+    // the same conversation with nothing of the agent's settings, and is not lost.
+    let said = written(&f);
+    assert_eq!(
+        said[1..],
+        ["interrupt", "close", "submit: Only check Safari 18.1"]
+    );
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert!(opens[0].unattended.is_some());
+    assert_eq!(opens[1].unattended, None);
+    assert_eq!(opens[1].chat_id, chat);
+    assert_eq!(
+        opens[1].session,
+        SessionStart::Resume(NativeSessionId::new("native-1"))
+    );
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+
+    // The agent's five minutes pass, and the person's turn ends: nothing is closed.
+    tokio::time::sleep(Duration::from_secs(6 * 60)).await;
+    f.fake
+        .emit(EventKind::TurnEnded {
+            turn: NativeTurnId::new("turn-2"),
+            outcome: TurnOutcome::Completed,
+            submissions: Vec::new(),
+        })
+        .await;
+    settle().await;
+    assert_eq!(written(&f), said);
+    assert!(f.host.live()[&chat].running);
+
+    // The Chat still answers.
+    f.reply(&chat, "And Firefox").await;
+    assert_eq!(written(&f).last().unwrap(), "submit: And Firefox");
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+}
+
+/// Replying in the Chat of a step that has finished takes the run over while a
+/// later step's agent is working: that agent is stopped too.
+#[tokio::test(start_paused = true)]
+async fn taking_a_run_over_stops_the_agent_of_the_step_it_was_on() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    let mut second = definition.steps[0].clone();
+    second.id = "second".into();
+    definition.steps.push(second);
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.agent_working().await;
+    f.end_turn(TurnOutcome::Completed).await;
+    let run = f.runs().remove(0);
+    let [first, second] = &run.steps[..] else {
+        panic!("the run is on its second step, got {:?}", run.steps);
+    };
+    assert_eq!(second.status, AutomationStepStatus::Running);
+    let (first, second) = (
+        first.chat_id.clone().unwrap(),
+        second.chat_id.clone().unwrap(),
+    );
+    let before = written(&f).len();
+
+    f.reply(&first, "I will take it from here").await;
+
+    assert_eq!(
+        written(&f)[before..],
+        ["interrupt", "close", "submit: I will take it from here"]
+    );
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 3);
+    assert_eq!(
+        (opens[1].chat_id.as_str(), opens[1].unattended.is_some()),
+        (second.as_str(), true)
+    );
+    assert_eq!(
+        (opens[2].chat_id.as_str(), &opens[2].unattended),
+        (first.as_str(), &None)
+    );
+    // Only the Chat the person replied in joins their Chat list.
+    assert_eq!(f.listed_chats(), [first]);
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::TakenOver);
+    assert_eq!(run.steps[1].status, AutomationStepStatus::Failed);
+    assert_eq!(run.steps.len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_run_whose_agent_ticketd_stops_needs_attention_and_runs_nothing_more() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    let mut later = definition.steps[0].clone();
+    later.id = "later".into();
+    definition.steps.push(later);
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.agent_working().await;
+
+    // Chat is turned off (as on Quit, or before a backup is restored).
+    f.host.turn_off().await;
+    settle().await;
+
+    assert_eq!(
+        f.needs_attention(),
+        "ticketd stopped this run's agent before it finished."
+    );
+    assert_eq!(f.runs()[0].steps.len(), 1);
+}
+
+/// A run that is Running in the Workspace with nothing executing it, as after a
+/// backup taken mid-run is restored, is ended at the next pass, not at the next
+/// launch. The runs this runner is executing are left alone.
+#[tokio::test(start_paused = true)]
+async fn a_run_left_running_with_nothing_behind_it_needs_attention_at_the_next_pass() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    f.tag("Restored mid-run");
+    let mut core = f.core();
+    core.queue_automation_runs().unwrap();
+    let restored = core.start_automation_runs(2).unwrap().remove(0);
+
+    f.tick().await;
+
+    let runs = f.runs();
+    assert_eq!(runs[0].status, AutomationRunStatus::Running);
+    assert_eq!(runs[1].id, restored.id);
+    assert_eq!(runs[1].status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(
+        runs[1].reason.as_deref(),
+        Some("This run was still marked as going, but nothing was running it.")
+    );
+    // Its slot is free again.
+    assert_eq!(f.core().start_automation_runs(2).unwrap().len(), 0);
+    f.end_turn(TurnOutcome::Completed).await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Completed);
+}
+
+/// The Workspace cannot be opened when the agent's turn ends, so the run's record
+/// cannot be kept. The run must not stay Running: the next pass that can read the
+/// Workspace ends it, and the pass that could not says so.
+#[tokio::test(start_paused = true)]
+async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    let broken = Arc::new(AtomicBool::new(false));
+    let (path, flag) = (f.path.clone(), broken.clone());
+    let flaky: WorkspaceOpener = Arc::new(move || {
+        if flag.load(Ordering::SeqCst) {
+            return Err(ticketd_core::Error::AutomationRun(
+                "the disk is gone".into(),
+            ));
+        }
+        Workspace::open(&path)
+    });
+    let runner = Runner::new(
+        flaky,
+        f.host.clone(),
+        TicketdCli::default(),
+        Arc::new(|_| Ok(())),
+    )
+    .unwrap();
+    f.tag("Fix login");
+    runner.tick().unwrap();
+    settle().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+
+    broken.store(true, Ordering::SeqCst);
+    f.end_turn(TurnOutcome::Completed).await;
+    assert!(runner.tick().is_err());
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+
+    broken.store(false, Ordering::SeqCst);
+    runner.tick().unwrap();
+    settle().await;
+
+    assert_eq!(
+        f.needs_attention(),
+        "This run was still marked as going, but nothing was running it."
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn stopping_a_running_runs_chat_takes_the_run_over() {
     let f = Fixture::new();
@@ -588,13 +803,14 @@ async fn stopping_a_running_runs_chat_takes_the_run_over() {
     settle().await;
 
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
-    assert_eq!(f.listed_chats(), [chat]);
-    assert!(
-        f.fake
-            .written()
-            .iter()
-            .any(|written| matches!(written, Written::Interrupt(_))),
-    );
+    assert_eq!(f.listed_chats(), std::slice::from_ref(&chat));
+    // The agent is stopped and its unattended process closed, so what the person
+    // sends next starts a session of their own.
+    assert_eq!(written(&f)[1..], ["interrupt", "close"]);
+    f.reply(&chat, "Go on, but ask me first").await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].unattended, None);
 }
 
 #[tokio::test(start_paused = true)]

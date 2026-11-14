@@ -98,6 +98,7 @@ pub use attachments::{
 };
 mod automation_agents;
 mod automation_background;
+pub use automation_background::{DEFAULT_AUTOMATION_RUNS_AT_ONCE, MOST_AUTOMATION_RUNS_AT_ONCE};
 mod automation_examples;
 mod automation_matching;
 mod automation_run_machine;
@@ -141,7 +142,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 74;
+pub const FORMAT_VERSION: i64 = 75;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -981,6 +982,12 @@ impl Workspace {
         }
         if version < 74 {
             automations::migrate_schedule(&transaction)?;
+        }
+        if version < 75 {
+            automation_agents::migrate_any_command(&transaction)?;
+            source::migrate_refreshed_configuration(&transaction)?;
+            events::migrate_workspace_sync_actor(&transaction)?;
+            transaction.execute_batch("PRAGMA user_version = 75;")?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

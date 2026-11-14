@@ -166,3 +166,31 @@ test("while Chat is off, a ticket shows nothing about runs", async () => {
   expect(invoke).not.toHaveBeenCalled();
   expect(screen.queryByRole("region")).toBeNull();
 });
+
+test("a failed read of the ticket's runs stops showing once a later read works", async () => {
+  runs = [];
+  vi.mocked(invoke).mockRejectedValueOnce(new Error("the workspace is busy"));
+  const page = (version: number) => (
+    <WorkspaceChangeProvider value={version}>
+      <ChatFeatureContext
+        value={{
+          enabled: true,
+          setEnabled: async () => {},
+          overview: { needs_you: 0, working: 0 },
+          revision: 0,
+        }}
+      >
+        <Ticket />
+      </ChatFeatureContext>
+    </WorkspaceChangeProvider>
+  );
+  const view = render(page(0));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "the workspace is busy",
+  );
+
+  // The Workspace changes, the runs are read again, and this time it works.
+  view.rerender(page(1));
+
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});

@@ -17,7 +17,9 @@ export const automationAgentSettingsSchema = z.object({
     read_files: z.boolean(),
     edit_files: z.boolean(),
     run_commands: z.boolean(),
-    /** With `run_commands`, the only commands allowed; empty allows any. */
+    /** With `run_commands`: any command may run. Never read from an empty list. */
+    any_command: z.boolean(),
+    /** With `run_commands` and without `any_command`, the only commands allowed. */
     allowed_commands: z.array(z.string()),
     use_web: z.boolean(),
   }),
@@ -78,13 +80,6 @@ const triggerSchema = z.union([
   z.object({ kind: z.literal("by_hand") }),
 ]);
 export type AutomationTrigger = z.infer<typeof triggerSchema>;
-
-/** A schedule and Run now start a run without a ticket. */
-export function startsWithoutTicket(
-  trigger: AutomationTrigger | null,
-): boolean {
-  return trigger?.kind === "schedule" || trigger?.kind === "by_hand";
-}
 
 /** `source` holds provider ids ("github") and "local". */
 const conditionSchema = z.union([
@@ -179,6 +174,11 @@ const automationSchema = automationDefinitionSchema.extend({
   problems: z.array(
     z.object({ step_id: z.string().nullable(), message: z.string() }),
   ),
+  /**
+   * Whether its runs act on a ticket, as the core decides it. One started by a
+   * schedule or by hand has none: its conditions are kept but not asked.
+   */
+  has_ticket: z.boolean(),
 });
 export type Automation = z.infer<typeof automationSchema>;
 
@@ -320,13 +320,19 @@ export const automationsClient = {
   async duplicateAutomation(id: string): Promise<Automation> {
     return automationSchema.parse(await invoke("automation_duplicate", { id }));
   },
-  /** Replaces the whole definition: renaming and reshaping are the same edit. */
+  /**
+   * Replaces the whole definition: renaming and reshaping are the same edit.
+   * `typing` is an edit still being made in a text field: the core stores it
+   * unless that would switch the Automation off, and answers with the
+   * Automation as it is stored either way.
+   */
   async updateAutomation(
     id: string,
     definition: AutomationDefinition,
+    typing: boolean,
   ): Promise<Automation> {
     return automationSchema.parse(
-      await invoke("automation_update", { id, definition }),
+      await invoke("automation_update", { id, definition, typing }),
     );
   },
   async deleteAutomation(id: string): Promise<void> {
@@ -350,9 +356,14 @@ export const automationsClient = {
       await invoke("automation_stop_and_turn_off", { id }),
     );
   },
-  /** How many runs execute at once on this desktop. */
-  async runsAtOnce(): Promise<number> {
-    return limitSchema.parse(await invoke("automation_runs_at_once"));
+  /**
+   * How many runs execute at once on this desktop, with what the setting
+   * starts at and the most it takes.
+   */
+  async runsAtOnce(): Promise<{ runs: number; default: number; most: number }> {
+    return z
+      .object({ runs: limitSchema, default: limitSchema, most: limitSchema })
+      .parse(await invoke("automation_runs_at_once"));
   },
   async setRunsAtOnce(runs: number): Promise<void> {
     await invoke("set_automation_runs_at_once", { runs });
@@ -379,12 +390,17 @@ export const automationsClient = {
   /**
    * A step's text with its fields filled in from the most recent ticket, and
    * `tag` for the tag from the event. null while the Workspace has no ticket.
+   * For an Automation whose runs have no ticket, every field is left empty.
    */
-  async previewText(text: string, tag: string | null): Promise<string | null> {
+  async previewText(
+    text: string,
+    tag: string | null,
+    hasTicket: boolean,
+  ): Promise<string | null> {
     return z
       .string()
       .nullable()
-      .parse(await invoke("automation_text_preview", { text, tag }));
+      .parse(await invoke("automation_text_preview", { text, tag, hasTicket }));
   },
   async run(id: string): Promise<AutomationRunDetail> {
     return automationRunDetailSchema.parse(
@@ -414,13 +430,13 @@ export const automationsClient = {
   async dismissRun(id: string): Promise<void> {
     await invoke("automation_run_dismiss", { id });
   },
-  /** The runs that acted on a ticket, newest first. */
   /** The run the person took over through this Chat; null for any other Chat. */
   async takenOverIn(chatId: string): Promise<TicketRun | null> {
     return ticketRunSchema
       .nullable()
       .parse(await invoke("automation_run_taken_over_in", { chatId }));
   },
+  /** The runs that acted on a ticket, newest first. */
   async ticketRuns(reference: string): Promise<TicketRun[]> {
     return z
       .array(ticketRunSchema)

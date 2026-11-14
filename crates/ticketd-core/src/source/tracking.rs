@@ -1094,8 +1094,12 @@ impl Workspace {
         }
         let mut applied = Applied::default();
         // Workspace events: what a source brings in is logged with actor `sync`, and a
-        // source that has never been read successfully (its first import) logs nothing.
-        // A first run that fails partway stays silent on the next one too.
+        // first import logs nothing. That is every issue of a source that has never
+        // been read successfully, and every issue new to this Workspace in the first
+        // successful read after the source's configuration changed: a repository
+        // added or a rule loosened brings in its backlog, which is not news. A first
+        // read that fails partway stays silent on the next one too. Changes to
+        // tickets already here, and issues that arrive in later reads, log as `sync`.
         let logged = crate::events::head(&transaction)?;
         let own_actor = crate::events::actor(&transaction)?;
         for issue in &gathered.issues {
@@ -1108,17 +1112,34 @@ impl Workspace {
                 issue.reference.identity.provider.clone(),
                 issue.reference.identity.id.clone(),
             );
-            let read_before: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM source_status WHERE provider = ?1 AND last_refreshed_at IS NOT NULL)",
-                [&key.0],
-                |row| row.get(0),
-            )?;
+            let read: Option<Option<String>> = transaction
+                .query_row(
+                    "SELECT refreshed_configuration FROM source_status WHERE provider = ?1 AND last_refreshed_at IS NOT NULL",
+                    [&key.0],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let first_import = match read {
+                None => true,
+                // Last read before the configuration was kept: nothing to compare.
+                Some(None) => false,
+                Some(Some(read_with)) => {
+                    let widened = gathered.configurations.get(&key.0).is_some_and(|used| {
+                        serde_json::from_str::<super::ConfigValues>(&read_with)
+                            .ok()
+                            .as_ref()
+                            != Some(used)
+                    });
+                    widened
+                        && ticket_for_identity(&transaction, &issue.reference.identity)?.is_none()
+                }
+            };
             crate::events::set_actor(
                 &transaction,
-                Some(if read_before {
-                    crate::events::Acting::Sync
-                } else {
+                Some(if first_import {
                     crate::events::Acting::Silent
+                } else {
+                    crate::events::Acting::Sync
                 }),
             )?;
             apply_issue(
@@ -1214,7 +1235,12 @@ impl Workspace {
             if replaced.contains(&run.provider) {
                 continue;
             }
-            freshness::record_run(&transaction, run, now)?;
+            let configuration = gathered
+                .configurations
+                .get(&run.provider)
+                .map(serde_json::to_string)
+                .transpose()?;
+            freshness::record_run(&transaction, run, configuration.as_deref(), now)?;
         }
         transaction.commit()?;
         Ok(RefreshReport {

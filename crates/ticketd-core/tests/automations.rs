@@ -247,8 +247,8 @@ fn a_deleted_automation_is_gone_from_the_list_and_cannot_be_read_or_changed() {
         workspace
             .set_automation_enabled(&deleted.id, true)
             .map(drop),
-        workspace.delete_automation(&deleted.id),
-        workspace.delete_automation("missing"),
+        workspace.delete_automation(&deleted.id).map(drop),
+        workspace.delete_automation("missing").map(drop),
     ] {
         assert!(matches!(result, Err(Error::AutomationNotFound(_))));
     }
@@ -593,6 +593,87 @@ fn an_edit_that_leaves_a_step_unfinished_switches_the_automation_off() {
 }
 
 #[test]
+fn an_edit_still_being_typed_never_switches_the_automation_off() {
+    let (_dir, mut workspace) = workspace();
+    let (finished, _agent) = triage(&mut workspace);
+    let automation = workspace.create_automation(finished.clone()).unwrap();
+    workspace
+        .set_automation_enabled(&automation.id, true)
+        .unwrap();
+    let cursor = workspace.automation_cursor(&automation.id).unwrap();
+    let retagged = |tag: &str| AutomationDefinition {
+        trigger: tag_added(tag),
+        ..finished.clone()
+    };
+
+    // The tag is emptied on the way to another one: nothing is stored.
+    let emptied = workspace
+        .draft_automation(&automation.id, retagged(""))
+        .unwrap();
+    assert!(emptied.enabled);
+    assert_eq!(emptied.definition, finished);
+    assert_eq!(workspace.automation_cursor(&automation.id).unwrap(), cursor);
+
+    // Typed again, it can run, so it is stored as it is typed.
+    let typed = workspace
+        .draft_automation(&automation.id, retagged("ready"))
+        .unwrap();
+    assert!(typed.enabled);
+    assert_eq!(typed.definition.trigger, tag_added("ready"));
+
+    // Left empty for good, it is stored and the Automation goes off.
+    let left_empty = workspace
+        .update_automation(&automation.id, retagged(""))
+        .unwrap();
+    assert!(!left_empty.enabled);
+    assert_eq!(left_empty.definition.trigger, tag_added(""));
+    // One that is off has nothing to protect: its drafts are stored.
+    let off = workspace
+        .draft_automation(&automation.id, retagged(" "))
+        .unwrap();
+    assert_eq!(off.definition.trigger, tag_added(""));
+    assert_eq!(off.problems.len(), 1);
+}
+
+#[test]
+fn conditions_are_kept_and_not_asked_when_nothing_starts_from_a_ticket() {
+    let (_dir, mut workspace) = workspace();
+    let (finished, _agent) = triage(&mut workspace);
+    // One condition has no value yet: it holds up a ticket trigger only.
+    let conditions = vec![
+        Condition::Tag {
+            tag: "bug".into(),
+            has: true,
+        },
+        Condition::Project { any_of: Vec::new() },
+    ];
+    let from_a_ticket = workspace
+        .create_automation(AutomationDefinition {
+            conditions: conditions.clone(),
+            ..finished.clone()
+        })
+        .unwrap();
+    assert!(from_a_ticket.has_ticket);
+    assert_eq!(from_a_ticket.problems.len(), 1);
+
+    let by_hand = workspace
+        .update_automation(
+            &from_a_ticket.id,
+            AutomationDefinition {
+                trigger: Some(Trigger::ByHand),
+                conditions: conditions.clone(),
+                ..finished
+            },
+        )
+        .unwrap();
+
+    assert!(!by_hand.has_ticket);
+    assert_eq!(by_hand.definition.conditions, conditions);
+    assert_eq!(by_hand.problems, []);
+    assert!(workspace.run_automation_now(&by_hand.id).is_ok());
+}
+
+#[test]
 fn starting_without_a_ticket_switches_off_an_automation_that_branches_and_it_cannot_run() {
     let (_dir, mut workspace) = workspace();
     let (finished, agent) = triage(&mut workspace);
@@ -823,6 +904,46 @@ fn each_example_holds_what_can_be_built_now_and_says_what_is_left() {
     assert_eq!(
         example_needs(&mut workspace, AutomationExample::VerifyReadyForTesting),
         ["Needs an agent and a folder"]
+    );
+    // Verifying: the agent, then an If on the tag the agent adds when the work
+    // passes. Yes marks the ticket Done; No tags it for a fix.
+    let verify = workspace.automations().unwrap().remove(0);
+    assert_eq!(verify.definition.trigger, tag_added("ready-for-testing"));
+    let [agent, branch] = &verify.definition.steps[..] else {
+        panic!("the example has an agent step and an If");
+    };
+    assert!(matches!(agent.action, StepAction::RunAgent { .. }));
+    let StepAction::If { checks, yes, no } = &branch.action else {
+        panic!("the second step is an If");
+    };
+    assert_eq!(
+        checks,
+        &[Check::Tag {
+            tag: "verified".into(),
+            has: true
+        }]
+    );
+    let changes = |path: &[Step]| -> Vec<Option<StepChange>> {
+        path.iter()
+            .map(|step| match &step.action {
+                StepAction::ChangeTicket { change, .. } => change.clone(),
+                StepAction::RunAgent { .. } | StepAction::Notify { .. } | StepAction::If { .. } => {
+                    None
+                }
+            })
+            .collect()
+    };
+    assert_eq!(
+        changes(yes),
+        [Some(StepChange::SetStatus {
+            status: Status::Done
+        })]
+    );
+    assert_eq!(
+        changes(no),
+        [Some(StepChange::AddTag {
+            tag: "needs-fix".into()
+        })]
     );
     assert_eq!(
         example_needs(&mut workspace, AutomationExample::WeeklySummary),

@@ -27,7 +27,8 @@ import { useOnWorkspaceChange } from "@/lib/workspace-change";
 export function RunMark({ status }: { status: AutomationRun["status"] }) {
   switch (status) {
     case "queued":
-      return <Clock size={14} aria-hidden />;
+      // Grey wherever it is drawn, not the color of the text around it.
+      return <Clock size={14} className="text-muted-foreground" aria-hidden />;
     case "running":
       return (
         <LoaderCircle size={14} className="text-status-unread" aria-hidden />

@@ -18,15 +18,19 @@ pub(crate) struct TicketFacts {
 }
 
 /// An Automation's own changes never start an Automation, which is what keeps
-/// Automations from looping. Otherwise the event must match the trigger and every
-/// condition. A change that sync brought in counts like one made here.
+/// Automations from looping. Neither does a change Workspace sync applied from
+/// another desktop: the actor is not synchronized, so it could be an Automation's
+/// there, and the other desktop has already reacted to it. Otherwise the event
+/// must match the trigger and every condition; a change a ticket source brought in
+/// counts like one made here.
 pub(crate) fn matches(
     definition: &AutomationDefinition,
     event: &WorkspaceEvent,
     ticket: &TicketFacts,
 ) -> bool {
-    if event.actor == WorkspaceActor::Automation {
-        return false;
+    match event.actor {
+        WorkspaceActor::Automation | WorkspaceActor::WorkspaceSync => return false,
+        WorkspaceActor::Person | WorkspaceActor::Sync => {}
     }
     let is = |kind| event.kind == kind;
     let was = |field: &str| changed(&event.previous, field);

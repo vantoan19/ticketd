@@ -772,6 +772,7 @@ fn reader_that_tests() -> crate::Unattended {
             read_files: true,
             edit_files: false,
             run_commands: true,
+            any_command: false,
             allowed_commands: vec!["npm test".into()],
             use_web: false,
         },
@@ -790,6 +791,7 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
         read_files: false,
         edit_files: false,
         run_commands: false,
+        any_command: true,
         allowed_commands: vec!["npm test".into()],
         use_web: false,
     };
@@ -805,9 +807,8 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
         })
     );
 
-    // Running commands with no list allows any command.
+    // Running commands allows any command only when the agent says so outright.
     unattended.tools.run_commands = true;
-    unattended.tools.allowed_commands.clear();
     let options = super::unattended_options(&unattended);
     assert_eq!(
         options["allowed_tools"],
@@ -817,6 +818,15 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
             "Bash",
             "PowerShell"
         ])
+    );
+
+    // An empty list is not "any command": it allows none but the ticketd CLI.
+    unattended.tools.any_command = false;
+    unattended.tools.allowed_commands.clear();
+    let options = super::unattended_options(&unattended);
+    assert_eq!(
+        options["allowed_tools"],
+        json!(["Bash(ticketd *)", "PowerShell(ticketd *)"])
     );
 }
 

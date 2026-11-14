@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bell,
@@ -40,7 +40,6 @@ import {
   automationsClient,
   definitionOf,
   editSteps,
-  startsWithoutTicket,
   stepPaths,
   type Automation,
   type AutomationAgent,
@@ -92,11 +91,38 @@ const NEW_TRIGGERS: Record<TriggerChoice, AutomationTrigger> = {
   by_hand: { kind: "by_hand" },
 };
 
+/** The text fields of the editor: an edit made in one is still being typed. */
+const TEXT_FIELD = "input, textarea, [contenteditable]";
+
+const said = (reason: unknown) =>
+  reason instanceof Error ? reason.message : String(reason);
+
+/** What is left to finish, for the header: the trigger is not a step. */
+function leftToFinish(problems: Automation["problems"]): string {
+  const steps = problems.filter(
+    (problem) => problem.step_id !== null && problem.step_id !== TRIGGER_ID,
+  ).length;
+  return [
+    problems.some((problem) => problem.step_id === TRIGGER_ID) &&
+      "Trigger unfinished",
+    steps > 0 && (steps === 1 ? "1 step left" : `${steps} steps left`),
+    // What the Automation as a whole needs, such as "Add a step".
+    ...problems
+      .filter((problem) => problem.step_id === null)
+      .map((problem) => problem.message),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /**
- * One Automation, edited in place: every change is saved as it is made. Mount
- * it with the Automation's id as `key`; it keeps the definition being edited
- * and takes only what the core derives (on or off, what is unfinished) from
- * later changes to `automation`.
+ * One Automation, edited in place. A choice (a menu, a switch, a step added or
+ * removed) is saved as it is made. Text is saved as it is typed too, but as an
+ * edit still in progress: the core holds back one that would switch the
+ * Automation off, until the person leaves the field. Mount it with the
+ * Automation's id as `key`. It keeps the definition being edited, takes what
+ * the core derives (on or off, what is unfinished) from `automation`, and
+ * takes a definition changed elsewhere unless that would lose an edit.
  */
 export function AutomationEditor({
   automation,
@@ -128,7 +154,14 @@ export function AutomationEditor({
   /** The run open in place of the Automation; closing it returns to the runs. */
   openRun: string | null;
   onOpenRun: (id: string | null) => void;
-  onChange: (definition: AutomationDefinition) => void;
+  /**
+   * Saves the definition and resolves to the Automation as it is then stored.
+   * `typing` marks an edit still being made in a text field.
+   */
+  onChange: (
+    definition: AutomationDefinition,
+    typing: boolean,
+  ) => Promise<Automation>;
   onSetEnabled: (enabled: boolean) => void;
   /** Off, with the runs in progress ended as Needs attention. */
   onStopAndTurnOff: () => void;
@@ -142,7 +175,35 @@ export function AutomationEditor({
   onFail: (reason: unknown) => void;
 }) {
   const headingId = useId();
+  const section = useRef<HTMLElement>(null);
   const [draft, setDraft] = useState(() => definitionOf(automation));
+  /** The definition as the core last said it is stored, to tell a change made elsewhere. */
+  const arrived = JSON.stringify(definitionOf(automation));
+  const [stored, setStored] = useState(arrived);
+  const [seen, setSeen] = useState(arrived);
+  /** A typed edit the person has not left yet: it may not be stored. */
+  const [typed, setTyped] = useState(false);
+  /** Saves sent and not yet answered. */
+  const [saving, setSaving] = useState(0);
+  const sends = useRef(0);
+  /** Why the last save failed; the draft stays as it is until one works. */
+  const [saveFailure, setSaveFailure] = useState<string | null>(null);
+  /** What an edit left unfinished when it switched the Automation off. */
+  const [switchedOff, setSwitchedOff] = useState<string | null>(null);
+  /** A definition changed elsewhere while an edit here was not saved. */
+  const [elsewhere, setElsewhere] = useState<AutomationDefinition | null>(null);
+  if (arrived !== seen) {
+    setSeen(arrived);
+    // While a save is on its way, its answer says what is stored.
+    if (saving === 0 && arrived !== stored) {
+      const definition = definitionOf(automation);
+      if (typed || saveFailure !== null) setElsewhere(definition);
+      else {
+        setStored(arrived);
+        setDraft(definition);
+      }
+    }
+  }
   /** The flow being edited, or what running it has done. A run returns to the runs. */
   const [view, setView] = useState<"steps" | "runs">(
     openRun ? "runs" : "steps",
@@ -178,11 +239,46 @@ export function AutomationEditor({
     }, onFail);
   };
 
+  const save = (next: AutomationDefinition, typing: boolean) => {
+    const sent = ++sends.current;
+    const wasOn = automation.enabled;
+    setTyped(typing);
+    setSaving((count) => count + 1);
+    onChange(next, typing).then(
+      (saved) => {
+        setSaving((count) => count - 1);
+        setStored(JSON.stringify(definitionOf(saved)));
+        // Only the latest save says how things stand.
+        if (sent !== sends.current) return;
+        setSaveFailure(null);
+        const needs = saved.problems[0]?.message;
+        if (!typing && wasOn && !saved.enabled && needs) setSwitchedOff(needs);
+      },
+      (reason: unknown) => {
+        setSaving((count) => count - 1);
+        if (sent === sends.current) setSaveFailure(said(reason));
+      },
+    );
+  };
   const change = (patch: Partial<AutomationDefinition>) => {
     const next = { ...draft, ...patch };
     setDraft(next);
-    onChange(next);
+    const focused = document.activeElement;
+    // Typing: focus is in one of this editor's text fields.
+    save(
+      next,
+      focused instanceof HTMLElement &&
+        focused.matches(TEXT_FIELD) &&
+        (section.current?.contains(focused) ?? false),
+    );
   };
+  /** The person left the field: what they typed is now the edit they made. */
+  const commit = () => {
+    if (typed) save(draft, false);
+  };
+  // Closing the editor mid-field leaves the field too.
+  const commitOnClose = useEffectEvent(commit);
+  useEffect(() => () => commitOnClose(), []);
   const changeStep = (id: string, patch: Partial<AutomationStep>) =>
     change({
       steps: editSteps(draft.steps, (list) =>
@@ -220,15 +316,10 @@ export function AutomationEditor({
     else removeFailurePath(id);
   };
   const chooseTrigger = (kind: TriggerChoice) => {
-    // Choosing the kind it already has keeps what was set on it.
-    if (draft.trigger?.kind !== kind) {
-      const trigger = NEW_TRIGGERS[kind];
-      change({
-        trigger,
-        // Conditions are about a ticket; a run that has none could match nothing.
-        ...(startsWithoutTicket(trigger) && { conditions: [] }),
-      });
-    }
+    // Choosing the kind it already has keeps what was set on it. The conditions
+    // stay whatever is chosen: a trigger without a ticket does not ask them,
+    // and they are there again when a ticket trigger is chosen back.
+    if (draft.trigger?.kind !== kind) change({ trigger: NEW_TRIGGERS[kind] });
     setSelected(TRIGGER_ID);
   };
   const runNow = () =>
@@ -254,7 +345,7 @@ export function AutomationEditor({
                 kind,
                 text: "",
                 // Without a ticket there is only the run to open.
-                opens: startsWithoutTicket(draft.trigger) ? "run" : "ticket",
+                opens: automation.has_ticket ? "ticket" : "run",
                 on_failure: null,
               }
             : {
@@ -304,6 +395,7 @@ export function AutomationEditor({
       />
     );
   const left = automation.problems.length;
+  const leftText = leftToFinish(automation.problems);
   const step = everyStep(draft.steps).find((item) => item.id === selected);
   const openAgent = agents.find((agent) => agent.id === agentOpen);
   const trigger = draft.trigger;
@@ -320,7 +412,7 @@ export function AutomationEditor({
           trigger={trigger}
           onChange={(next) => change({ trigger: next })}
         />
-        {!startsWithoutTicket(trigger) && (
+        {automation.has_ticket && (
           <ConditionRows
             conditions={draft.conditions}
             projects={projects}
@@ -378,9 +470,14 @@ export function AutomationEditor({
           text={step.text}
           opens={step.opens}
           automationName={title}
+          // Either tag trigger fills "Tag from the event" with its tag.
           eventTag={
-            draft.trigger?.kind === "tag_added" ? draft.trigger.tag : null
+            draft.trigger?.kind === "tag_added" ||
+            draft.trigger?.kind === "tag_removed"
+              ? draft.trigger.tag
+              : null
           }
+          hasTicket={automation.has_ticket}
           onChange={(patch) => changeStep(step.id, patch)}
         />
       </StepPanel>
@@ -401,7 +498,12 @@ export function AutomationEditor({
     ) : null;
 
   return (
-    <section className="ticket-detail chat-pane" aria-labelledby={headingId}>
+    <section
+      ref={section}
+      className="ticket-detail chat-pane"
+      aria-labelledby={headingId}
+      onBlur={commit}
+    >
       <div className="detail-header">
         <div className="detail-title-group">
           {single && (
@@ -425,7 +527,7 @@ export function AutomationEditor({
         <div className="detail-actions">
           {left > 0 && (
             <span id={`${headingId}-left`} className="auto-left">
-              {left === 1 ? "1 step left" : `${left} steps left`}
+              {leftText}
             </span>
           )}
           {trigger?.kind === "by_hand" ? (
@@ -508,18 +610,78 @@ export function AutomationEditor({
             agents={agents}
             projects={projects}
             selected={panel ? selected : null}
-            only={conditionsLine(draft.conditions, projects)}
+            hasTicket={automation.has_ticket}
+            only={
+              // Kept, but not asked, while nothing starts it from a ticket.
+              automation.has_ticket
+                ? conditionsLine(draft.conditions, projects)
+                : undefined
+            }
             onSelect={setSelected}
             onChooseTrigger={chooseTrigger}
             onAddStep={addStep}
             onDeleteStep={setDeletingStep}
             onSetFailurePath={setFailurePath}
             notice={
-              automation.arrived_off && (
-                <Alert size="compact" role="status">
-                  <AlertTitle>Off on this desktop</AlertTitle>
+              saveFailure !== null ? (
+                <Alert size="compact" tone="error">
+                  <AlertTitle>Not saved</AlertTitle>
                   <AlertDescription>
-                    Synced from your other desktop.
+                    Your last change is still here but was not saved.{" "}
+                    {saveFailure}
+                  </AlertDescription>
+                  <AlertActions>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => save(draft, false)}
+                    >
+                      Retry
+                    </Button>
+                  </AlertActions>
+                </Alert>
+              ) : elsewhere ? (
+                <Alert size="compact">
+                  <AlertTitle>Changed somewhere else</AlertTitle>
+                  <AlertDescription>
+                    This Automation was changed elsewhere while you were editing
+                    it.
+                  </AlertDescription>
+                  <AlertActions>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setStored(JSON.stringify(elsewhere));
+                        setDraft(elsewhere);
+                        setTyped(false);
+                        setSaveFailure(null);
+                        setElsewhere(null);
+                      }}
+                    >
+                      Use that version
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setElsewhere(null);
+                        save(draft, false);
+                      }}
+                    >
+                      Keep mine
+                    </Button>
+                  </AlertActions>
+                </Alert>
+              ) : switchedOff !== null && !automation.enabled ? (
+                <Alert size="compact" role="status">
+                  <AlertTitle>Switched off</AlertTitle>
+                  <AlertDescription>
+                    Your edit left it unfinished ({switchedOff}), so it no
+                    longer runs.{" "}
+                    {left > 0
+                      ? "Finish it, then switch it back on."
+                      : "It is finished now."}
                   </AlertDescription>
                   <AlertActions>
                     <Button
@@ -531,10 +693,32 @@ export function AutomationEditor({
                       })}
                       onClick={() => onSetEnabled(true)}
                     >
-                      Turn on here
+                      Switch back on
                     </Button>
                   </AlertActions>
                 </Alert>
+              ) : (
+                automation.arrived_off && (
+                  <Alert size="compact" role="status">
+                    <AlertTitle>Off on this desktop</AlertTitle>
+                    <AlertDescription>
+                      Synced from your other desktop.
+                    </AlertDescription>
+                    <AlertActions>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={left > 0}
+                        {...(left > 0 && {
+                          "aria-describedby": `${headingId}-left`,
+                        })}
+                        onClick={() => onSetEnabled(true)}
+                      >
+                        Turn on here
+                      </Button>
+                    </AlertActions>
+                  </Alert>
+                )
               )
             }
           />

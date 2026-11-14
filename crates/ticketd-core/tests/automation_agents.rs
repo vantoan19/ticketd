@@ -17,12 +17,55 @@ fn triage() -> AutomationAgentSettings {
             read_files: true,
             edit_files: true,
             run_commands: true,
+            any_command: false,
             allowed_commands: vec!["npm test".into(), "  ".into(), " npm run lint ".into()],
             use_web: true,
         },
         turn_limit: 12,
         time_limit_minutes: 5,
     }
+}
+
+/// Until format 75 an empty command list meant "any command". Agents saved that way
+/// keep it; a list with commands, and commands switched off, never gain it.
+#[test]
+fn agents_saved_with_an_empty_command_list_keep_any_command_after_migrating() {
+    let (dir, mut workspace) = workspace();
+    let mut ids = Vec::new();
+    for (run_commands, commands) in [(true, "[]"), (true, "[\"npm test\"]"), (false, "[]")] {
+        let agent = workspace.create_automation_agent(triage()).unwrap();
+        ids.push((agent.id, run_commands, commands));
+    }
+    drop(workspace);
+    let path = dir.path().join("agents.sqlite3");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    for (id, run_commands, commands) in &ids {
+        db.execute(
+            "UPDATE automation_agents SET run_commands = ?2, allowed_commands = ?3 WHERE id = ?1",
+            rusqlite::params![id, run_commands, commands],
+        )
+        .unwrap();
+    }
+    db.execute_batch(
+        "ALTER TABLE automation_agents DROP COLUMN any_command; PRAGMA user_version = 74;",
+    )
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+
+    let any: Vec<bool> = ids
+        .iter()
+        .map(|(id, _, _)| {
+            workspace
+                .automation_agent(id)
+                .unwrap()
+                .settings
+                .tools
+                .any_command
+        })
+        .collect();
+    assert_eq!(any, [true, false, false]);
 }
 
 #[test]
@@ -42,6 +85,7 @@ fn a_new_agent_starts_from_the_defaults_and_is_listed() {
     assert!(agent.settings.tools.read_files);
     assert!(!agent.settings.tools.edit_files);
     assert!(!agent.settings.tools.run_commands);
+    assert!(!agent.settings.tools.any_command);
     assert!(!agent.settings.tools.use_web);
     assert_eq!(workspace.automation_agents().unwrap(), vec![agent]);
 }

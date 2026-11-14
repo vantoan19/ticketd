@@ -14,6 +14,7 @@ import type {
   Automation,
   AutomationDefinition,
 } from "@/features/automations/client";
+import { fakeStored } from "@/features/automations/fake-core";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
 
@@ -40,6 +41,7 @@ beforeEach(() => {
     enabled: false,
     arrived_off: false,
     problems: [],
+    has_ticket: true,
   };
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { definition, text, tag } = (args ?? {}) as {
@@ -55,7 +57,7 @@ beforeEach(() => {
       case "automation_agent_list":
         return [];
       case "automation_update":
-        stored = { ...stored, ...definition };
+        stored = fakeStored(stored, definition ?? {});
         return stored;
       // The core fills the fields in; here every field reads as the same ticket.
       case "automation_text_preview":
@@ -98,7 +100,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const open = async (trigger?: Automation["trigger"]) => {
-  if (trigger) stored = { ...stored, trigger };
+  if (trigger) stored = fakeStored(stored, { trigger });
   render(
     <ChatClientContext value={createMockChatClient()}>
       <AutomationsView />
@@ -137,7 +139,7 @@ test("a Change ticket step is added from the + and says on its card what it chan
   );
   expect(
     within(steps).getByRole("button", {
-      name: "Change ticket: Add tag needs-fix",
+      name: /^Change ticket: Add tag needs-fix, /,
     }),
   ).toBeTruthy();
 });
@@ -180,7 +182,7 @@ test("a field is inserted into a message as a named chip, saved as a plain refer
   // The card names the fields too.
   expect(
     within(steps).getByRole("button", {
-      name: "Notify me: Verified Ticket reference Tag from the event",
+      name: /^Notify me: Verified Ticket reference Tag from the event, /,
     }),
   ).toBeTruthy();
 
@@ -214,12 +216,12 @@ test("a notification that opens the run shows that run, with what each step did 
   const steps = await screen.findByRole("application", { name: /Steps/ });
   expect(
     within(steps).getByRole("button", {
-      name: "Change ticket: Set status to Done, Completed",
+      name: /^Change ticket: Set status to Done, .*Completed$/,
     }),
   ).toBeTruthy();
   expect(
     within(steps).getByRole("button", {
-      name: "Notify me: Ticket reference is done, Completed",
+      name: /^Notify me: Ticket reference is done, .*Completed$/,
     }),
   ).toBeTruthy();
 });

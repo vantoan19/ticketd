@@ -1995,6 +1995,56 @@ fn the_first_import_logs_no_workspace_events_and_later_inbound_changes_log_as_sy
     assert_eq!(after[0].actor, WorkspaceActor::Person);
 }
 
+/// A repository added to a source that has been read before brings in its backlog.
+/// That is a first import too: nothing is logged for it, so no Automation starts a
+/// run for every issue it held. What changes or arrives afterwards is news.
+#[test]
+fn a_backlog_a_widened_source_brings_in_logs_nothing_and_what_follows_logs_as_sync() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    let widened = json!({"repositories": ["o/r", "o/more"]});
+    f.workspace
+        .save_source(&f.engine, "fake", widened.as_object().unwrap())
+        .unwrap();
+    f.publish(issue(2, "Backlog"), true);
+    f.publish(issue(1, "Retitled"), true);
+
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    let kinds = |f: &Fixture, number: u32| {
+        let id = f.ticket(number).id;
+        f.workspace
+            .workspace_events_after(0, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.ticket_id == id)
+            .map(|event| (event.kind, event.actor))
+            .collect::<Vec<_>>()
+    };
+    // The backlog is silent; the ticket already here still logs its change.
+    assert_eq!(kinds(&f, 2), []);
+    assert_eq!(
+        kinds(&f, 1),
+        [(WorkspaceEventType::TicketUpdated, WorkspaceActor::Sync)]
+    );
+
+    // The widened source has now been read: a later change and a later arrival log.
+    f.publish(issue(2, "Backlog, retitled"), true);
+    f.publish(issue(3, "Arrived later"), true);
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(
+        kinds(&f, 2),
+        [(WorkspaceEventType::TicketUpdated, WorkspaceActor::Sync)]
+    );
+    assert_eq!(
+        kinds(&f, 3),
+        [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)]
+    );
+}
+
 #[test]
 fn a_change_a_refresh_brings_in_starts_an_automation_narrowed_to_that_source() {
     use ticketd_core::{

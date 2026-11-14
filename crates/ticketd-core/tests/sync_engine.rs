@@ -1968,7 +1968,7 @@ fn changes_arriving_through_sync_are_logged_as_workspace_events_by_sync() {
             })
             .collect::<Vec<_>>()
     };
-    let sync = WorkspaceActor::Sync;
+    let sync = WorkspaceActor::WorkspaceSync;
     assert_eq!(
         kinds(&devices.workspaces[1], 0),
         [
@@ -2009,7 +2009,7 @@ fn changes_arriving_through_sync_are_logged_as_workspace_events_by_sync() {
 }
 
 #[test]
-fn a_tag_arriving_through_sync_starts_the_automation_like_one_added_here() {
+fn a_tag_arriving_through_workspace_sync_starts_no_run_and_one_added_here_does() {
     use ticketd_core::{
         AutomationAgentSettings, AutomationDefinition, Step, StepAction, Trigger, WorkspaceActor,
     };
@@ -2052,18 +2052,23 @@ fn a_tag_arriving_through_sync_starts_the_automation_like_one_added_here() {
     b.add_tag(&local.reference, "ready-for-triage").unwrap();
 
     b.queue_automation_runs().unwrap();
-    let mut started: Vec<_> = b
+    // The other desktop made that change and reacts to it; this one reacts only to
+    // its own. The arriving tag is read past, so it never starts a run later either.
+    let started: Vec<_> = b
         .automation_runs(&automation.id)
         .unwrap()
         .into_iter()
         .map(|run| (run.ticket.unwrap().id, run.event.unwrap().actor))
         .collect();
-    started.sort_by_key(|(_, actor)| *actor == WorkspaceActor::Person);
+    assert_eq!(started, [(local.id, WorkspaceActor::Person)]);
     assert_eq!(
-        started,
-        [
-            (arriving.id, WorkspaceActor::Sync),
-            (local.id, WorkspaceActor::Person)
-        ]
+        b.automation_cursor(&automation.id).unwrap(),
+        Some(b.workspace_event_head().unwrap())
+    );
+    assert!(
+        b.show_ticket(&arriving.reference)
+            .unwrap()
+            .tags
+            .contains(&"ready-for-triage".to_owned())
     );
 }

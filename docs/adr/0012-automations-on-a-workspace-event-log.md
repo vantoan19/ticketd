@@ -8,11 +8,16 @@ ticket change the core commits also appends one Workspace event in the same
 transaction: a type (`ticket.created`, `ticket.updated`,
 `ticket.status_changed`, `ticket.tag_added`, `ticket.tag_removed`,
 `activity.created`), the ticket, the previous and current values of what
-changed, the time, and the actor kind: person, Automation, or synchronization.
+changed, the time, and the actor kind: person, Automation, a ticket source's
+refresh (`sync`), or Workspace sync applying a change from another desktop
+(`workspace_sync`).
 A ticket created with tags emits one `ticket.tag_added` per tag. The first
-import of a ticket source emits nothing. Each Automation keeps a cursor into the
-log, so changes made while the desktop was not running (by the CLI or arriving
-through synchronization) fire when it next starts. Schedule and run-now triggers
+import of a ticket source emits nothing: every issue of a source read for the
+first time, and every issue new to the Workspace in the first read after the
+source's configuration changed (a repository added, a rule loosened). Each
+Automation keeps a cursor into the log, so changes made while the desktop was
+not running (by the CLI or arriving from a ticket source) fire when it next
+starts. Schedule and run-now triggers
 do not go through the log; a schedule missed while the desktop was not running
 fires once at the next start.
 
@@ -32,7 +37,15 @@ failure path when one is defined, and the run then counts as completed with the
 step marked failed; without a failure path the run ends as needing attention.
 Nothing retries automatically.
 
-Events whose actor is an Automation never trigger Automations. One run is
+Events whose actor is an Automation never trigger Automations. Neither do
+events whose actor is Workspace sync: each desktop reacts only to changes made
+on it and to changes arriving from an external ticket source such as GitHub. A
+change another desktop made, whoever made it there, starts no run here. The
+actor is not synchronized, so without this an Automation's change made on one
+desktop would arrive on another as an ordinary change and could start an
+Automation there, and two desktops could answer each other without end. This
+rule is provisional (decided 2026-11-15): a way for devices to agree on which
+one runs an Automation has yet to be designed. One run is
 active per ticket per Automation, and a configurable number of runs (default 2)
 execute at once; the rest queue in event order.
 
@@ -66,6 +79,13 @@ that forgets to record its result sends the branch down the No path.
 Keeping on/off per device means the person must switch an Automation on again
 on a second desktop. The alternative, a synchronized switch, would let one tag
 start the same agent on two machines, since no device knows another is running.
+
+Ignoring what Workspace sync brings in means an Automation runs only where the
+change was made: a tag added on the laptop starts nothing on the desktop that
+is always on, and a change made while the only desktop with the Automation on
+was not the one used is never acted on. Matching synchronized changes instead
+would bring back the loop and the doubled runs above. A locking or hand-over
+mechanism between devices could give both, and is left for a later decision.
 
 Running in the tray means Automations stop when the person quits ticketd or
 logs out. A standalone service would remove that limit at the cost of a second

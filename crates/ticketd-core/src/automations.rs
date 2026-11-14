@@ -14,6 +14,9 @@ use crate::{Error, Status, Workspace};
 /// converts older records when it reads them.
 const SCHEMA_VERSION: u32 = 1;
 
+/// Why a run ended when its Automation was deleted.
+const DELETED: &str = "You deleted this Automation.";
+
 /// The `step_id` of a problem with the trigger, which is a card but not a step.
 pub const AUTOMATION_TRIGGER_ID: &str = "trigger";
 
@@ -57,7 +60,7 @@ pub enum Trigger {
 
 impl Trigger {
     /// Schedule and by-hand Automations run without a ticket.
-    fn has_ticket(&self) -> bool {
+    pub fn has_ticket(&self) -> bool {
         !matches!(self, Self::Schedule { .. } | Self::ByHand)
     }
 }
@@ -233,6 +236,9 @@ pub struct Automation {
     pub arrived_off: bool,
     /// Empty when it can be switched on. In the order the steps run.
     pub problems: Vec<AutomationProblem>,
+    /// Whether its runs act on a ticket. One started by a schedule or by hand has
+    /// none: its conditions are kept but not asked, and it takes no ticket step.
+    pub has_ticket: bool,
 }
 
 impl Automation {
@@ -334,8 +340,14 @@ fn problems(definition: &AutomationDefinition, agents: &HashSet<String>) -> Vec<
         Condition::Tag { tag, .. } if blank(tag) => Some("A condition needs a tag"),
         Condition::Project { .. } | Condition::Source { .. } | Condition::Tag { .. } => None,
     };
-    let trigger_needs =
-        trigger_needs.or_else(|| definition.conditions.iter().find_map(condition_needs));
+    let has_ticket = definition.trigger.as_ref().is_none_or(Trigger::has_ticket);
+    // Conditions are about a ticket. An Automation that starts without one keeps
+    // them, for when its trigger changes back, and is not held up by them.
+    let trigger_needs = trigger_needs.or_else(|| {
+        has_ticket
+            .then(|| definition.conditions.iter().find_map(condition_needs))
+            .flatten()
+    });
     if let Some(message) = trigger_needs {
         found.push(AutomationProblem {
             step_id: Some(AUTOMATION_TRIGGER_ID.to_owned()),
@@ -348,7 +360,6 @@ fn problems(definition: &AutomationDefinition, agents: &HashSet<String>) -> Vec<
             message: "Add a step".to_owned(),
         });
     }
-    let has_ticket = definition.trigger.as_ref().is_none_or(Trigger::has_ticket);
     step_problems(&definition.steps, has_ticket, agents, &mut found);
     found
 }
@@ -561,6 +572,7 @@ fn load(connection: &Connection, id: Option<&str>) -> Result<Vec<Automation>, Er
             Ok(Automation {
                 id,
                 problems: problems(&definition, &agents),
+                has_ticket: definition.trigger.as_ref().is_none_or(Trigger::has_ticket),
                 enabled,
                 // A by-hand Automation is never on, here or anywhere.
                 arrived_off: arrived && !enabled && definition.trigger != Some(Trigger::ByHand),
@@ -611,6 +623,40 @@ pub(crate) fn from_file_body(body: &str) -> Result<String, Error> {
         ));
     }
     encode(&definition)
+}
+
+/// Before Workspace sync replaces an Automation's definition with `stored`: a
+/// schedule counts again from a change to what starts the Automation, as it does
+/// after such an edit on this device, so an old count never fires the new
+/// schedule at once. A definition that cannot be read counts as changed.
+pub(crate) fn restart_schedule_if_trigger_changes(
+    connection: &Connection,
+    id: &str,
+    stored: &str,
+) -> Result<(), Error> {
+    let trigger = |stored: &str| {
+        serde_json::from_str::<Stored>(stored)
+            .ok()
+            .map(|stored| stored.trigger)
+    };
+    let before: Option<String> = connection
+        .query_row(
+            "SELECT definition FROM automations WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let kept = match (before.as_deref().and_then(trigger), trigger(stored)) {
+        (Some(before), Some(after)) => before == after,
+        (None, _) | (_, None) => false,
+    };
+    if !kept {
+        connection.execute(
+            "UPDATE automation_device_state SET schedule_from = NULL WHERE automation_id = ?1",
+            [id],
+        )?;
+    }
+    Ok(())
 }
 
 /// A record that Workspace sync brought to this device for the first time, before
@@ -695,6 +741,29 @@ impl Workspace {
         id: &str,
         definition: AutomationDefinition,
     ) -> Result<Automation, Error> {
+        self.store_automation(id, definition, true)
+    }
+
+    /// Saves an edit the person is still making, such as a field being typed in.
+    /// It is stored like any edit unless that would switch the Automation off
+    /// here: a field emptied on the way to another value must not stop an
+    /// Automation that is on. Then nothing is stored and the Automation is
+    /// returned as it is; `update_automation` stores the edit, and switches the
+    /// Automation off if it is still unfinished, once the person has made it.
+    pub fn draft_automation(
+        &mut self,
+        id: &str,
+        definition: AutomationDefinition,
+    ) -> Result<Automation, Error> {
+        self.store_automation(id, definition, false)
+    }
+
+    fn store_automation(
+        &mut self,
+        id: &str,
+        definition: AutomationDefinition,
+        may_switch_off: bool,
+    ) -> Result<Automation, Error> {
         let definition = tidied(definition)?;
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
@@ -718,6 +787,11 @@ impl Workspace {
         }
         let mut automation = one(&transaction, id)?;
         if automation.enabled && !automation.can_be_on() {
+            if !may_switch_off {
+                // Dropping the savepoint leaves the Automation as it was stored.
+                drop(transaction);
+                return one(&self.connection, id);
+            }
             transaction.execute(
                 "DELETE FROM automation_device_state WHERE automation_id = ?1",
                 [id],
@@ -728,8 +802,11 @@ impl Workspace {
         Ok(automation)
     }
 
-    /// A deleted Automation is also off.
-    pub fn delete_automation(&mut self, id: &str) -> Result<(), Error> {
+    /// A deleted Automation is also off, and its Queued and Running runs end: it
+    /// "will no longer run". They end as Needs attention with the reason, already
+    /// answered, since the person asked for this and has nothing left to do.
+    /// Returns the Chats of the agents that were working, for the host to interrupt.
+    pub fn delete_automation(&mut self, id: &str) -> Result<Vec<String>, Error> {
         let transaction = self.connection.savepoint()?;
         crate::transaction_write_lock(&transaction)?;
         let changed = transaction.execute(
@@ -743,8 +820,13 @@ impl Workspace {
             "DELETE FROM automation_device_state WHERE automation_id = ?1",
             [id],
         )?;
+        let chats = crate::automation_background::end_active_runs(&transaction, id, DELETED)?;
+        transaction.execute(
+            "UPDATE automation_runs SET attention_cleared = 1 WHERE automation_id = ?1 AND reason = ?2",
+            params![id, DELETED],
+        )?;
         transaction.commit()?;
-        Ok(())
+        Ok(chats)
     }
 
     pub fn automation(&self, id: &str) -> Result<Automation, Error> {
