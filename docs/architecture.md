@@ -307,7 +307,9 @@ by name only: every Chat's harness process has the CLI's folder first on its
 Codex runs with approval policy `never` and a
 `workspaceWrite` sandbox whose only writable places are the step's folder and the
 folder holding the Workspace, with no network unless the web is allowed, and with
-the person's MCP servers, plugins and apps turned off. A command Codex could not
+the person's MCP servers, plugins and apps turned off. Codex still reads the
+person's own `AGENTS.md` files and lists their skills: its app-server has no
+setting that leaves them out, and the agent editor says so. A command Codex could not
 start fails the step: the agent could not do its work. A Chat taken over from a
 run resumes its Codex thread with the person's own approval policy and sandbox
 from their Codex configuration (`on-request` and `read-only` when it sets none). Codex

@@ -57,12 +57,15 @@ let runs: ListedRun[] = [];
 let runUnreadable: string | null = null;
 /** While set, the fake Workspace refuses to save an agent with it. */
 let agentUnsavable: string | null = null;
+/** While set, a save of an agent waits for it before it is answered. */
+let agentSaveHeld: Promise<void> | null = null;
 beforeEach(() => {
   stored = [];
   automations = [];
   runs = [];
   runUnreadable = null;
   agentUnsavable = null;
+  agentSaveHeld = null;
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { id, settings, example } = (args ?? {}) as {
       id?: string;
@@ -104,6 +107,8 @@ beforeEach(() => {
             { step_id: "step-1", message: "Needs an agent and a folder" },
           ],
         });
+      case "automation_create":
+        return add({ ...TRIAGE, id: "new-1", name: "", trigger: null });
       case "automation_duplicate":
         return add({ ...TRIAGE, id: "copy-1", name: `${TRIAGE.name} copy` });
       case "automation_agent_list":
@@ -114,7 +119,10 @@ beforeEach(() => {
         return agent;
       }
       case "automation_agent_update": {
-        if (agentUnsavable) throw new Error(agentUnsavable);
+        // Refused or not as things stood when it was sent.
+        const refused = agentUnsavable;
+        if (agentSaveHeld) await agentSaveHeld;
+        if (refused) throw new Error(refused);
         const agent = { ...settings, id } as AutomationAgent;
         stored = stored.map((item) => (item.id === id ? agent : item));
         return agent;
@@ -202,7 +210,9 @@ test("the Agents list starts empty, explains what an agent is, and New agent ope
 
   const form = await screen.findByRole("region", { name: "New agent" });
   const field = (name: string) =>
-    within(form).getByRole("textbox", { name }) as HTMLInputElement;
+    within(form).getByRole("textbox", {
+      name: new RegExp(`^${name}`),
+    }) as HTMLInputElement;
   expect(field("Name").value).toBe("");
   expect(
     within(form)
@@ -276,9 +286,9 @@ test("an edit is saved as it is made and shows in the list", async () => {
     within(form).getByRole("textbox", { name: "Allowed commands" }),
     { target: { value: "npm test\nnpm run lint\n" } },
   );
-  fireEvent.change(within(form).getByRole("spinbutton", { name: "Turns" }), {
-    target: { value: "12" },
-  });
+  const turns = within(form).getByRole("spinbutton", { name: "Turns" });
+  fireEvent.change(turns, { target: { value: "12" } });
+  fireEvent.blur(turns);
 
   await waitFor(() =>
     expect(stored[0]).toMatchObject({
@@ -330,7 +340,45 @@ test("a limit outside its range is not saved and says why under the field, until
   );
 
   fireEvent.change(turns, { target: { value: "500" } });
+  fireEvent.blur(turns);
   await waitFor(() => expect(stored[0]).toMatchObject({ turn_limit: 500 }));
+});
+
+test("a limit is saved when it is finished, not as each digit is typed", async () => {
+  await open(undefined, [
+    { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = await screen.findByRole("region", { name: "Triage" });
+  const turns = within(form).getByRole("spinbutton", {
+    name: "Turns",
+  }) as HTMLInputElement;
+  const saves = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "automation_agent_update");
+
+  // 501 is typed on the way through 5 and 50, both limits in their own right.
+  for (const typed of ["5", "50", "501"])
+    fireEvent.change(turns, { target: { value: typed } });
+  fireEvent.blur(turns);
+  expect(saves()).toHaveLength(0);
+  expect(turns.value).toBe("40");
+
+  // Enter finishes it as leaving the field does.
+  fireEvent.change(turns, { target: { value: "12" } });
+  fireEvent.change(turns, { target: { value: "120" } });
+  fireEvent.keyDown(turns, { key: "Enter" });
+  await waitFor(() => expect(stored[0]).toMatchObject({ turn_limit: 120 }));
+  expect(saves()).toHaveLength(1);
+
+  // Typed just before the form closes, it is still kept.
+  const minutes = within(form).getByRole("spinbutton", { name: "Minutes" });
+  fireEvent.change(minutes, { target: { value: "30" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Close agent" }));
+  await waitFor(() =>
+    expect(stored[0]).toMatchObject({ time_limit_minutes: 30 }),
+  );
 });
 
 test("switching the harness clears a model typed for the other one", async () => {
@@ -753,4 +801,104 @@ test("an agent changed elsewhere under a change that was not saved asks which to
   await waitFor(() => expect(name.value).toBe("Triage bugs"));
   expect(screen.queryByText("Changed somewhere else")).toBeNull();
   expect(stored[0]?.name).toBe("Triage bugs");
+});
+
+test("a save that works after a change elsewhere ends the question, and the form holds what is stored", async () => {
+  stored = [ANY_COMMAND];
+  const workspaceChanged = showChanging();
+  const form = await openAgent();
+  const field = (name: string) =>
+    within(form).getByRole("textbox", {
+      name: new RegExp(`^${name}`),
+    }) as HTMLInputElement;
+  agentUnsavable = "the workspace is busy";
+  fireEvent.change(field("Model"), { target: { value: "FAILME-1" } });
+  await screen.findByText(/was not saved/);
+
+  agentUnsavable = null;
+  stored = [{ ...ANY_COMMAND, name: "Triage bugs" }];
+  workspaceChanged();
+  await screen.findByText("Changed somewhere else");
+
+  // The next change is saved whole, over the other one: nothing is left to ask.
+  fireEvent.change(field("Model"), { target: { value: "" } });
+  await waitFor(() =>
+    expect(screen.queryByText("Changed somewhere else")).toBeNull(),
+  );
+  expect(stored[0]).toMatchObject({ name: "Triage", model: null });
+  expect(field("Name").value).toBe("Triage");
+});
+
+test("a change made elsewhere while a save is on its way, which then fails, is asked about before anything overwrites it", async () => {
+  stored = [ANY_COMMAND];
+  const workspaceChanged = showChanging();
+  const form = await openAgent();
+  const field = (name: string) =>
+    within(form).getByRole("textbox", {
+      name: new RegExp(`^${name}`),
+    }) as HTMLInputElement;
+  let answer = () => {};
+  agentSaveHeld = new Promise((resolve) => (answer = resolve));
+  agentUnsavable = "the workspace is busy";
+  fireEvent.change(field("Model"), { target: { value: "FAILME-C" } });
+
+  // While it waits, another desktop renames the agent.
+  stored = [{ ...ANY_COMMAND, name: "Triage bugs" }];
+  workspaceChanged();
+  // The page has read the rename before the save is answered.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  await act(async () => answer());
+  agentSaveHeld = null;
+  agentUnsavable = null;
+
+  const notice = (await screen.findByText("Changed somewhere else")).closest(
+    "[data-slot=alert]",
+  ) as HTMLElement;
+  expect(stored[0]?.name).toBe("Triage bugs");
+  fireEvent.click(
+    within(notice).getByRole("button", { name: "Use that version" }),
+  );
+  await waitFor(() => expect(field("Name").value).toBe("Triage bugs"));
+  expect(field("Model").value).toBe("");
+});
+
+test("New Automation while a run is open opens the new Automation, not the run", async () => {
+  automations = [TRIAGE];
+  runs = [listed("2", "needs_attention", "Login flickers")];
+  render(
+    <ChatClientContext value={createMockChatClient()}>
+      <AutomationsView openRun={{ id: "2", key: 1 }} />
+    </ChatClientContext>,
+  );
+  await screen.findByRole("heading", { name: /Run on T-2/ });
+
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "New Automation" })[0]!,
+  );
+
+  await waitFor(() => expect(automations).toHaveLength(2));
+  await screen.findByRole("application", { name: "Steps" });
+  expect(screen.queryByRole("heading", { name: /› Run/ })).toBeNull();
+});
+
+test("a form opened again shows what the last check found while it asks again, and a check that fails says it could not check", async () => {
+  const client = createMockChatClient();
+  await open(client, [
+    { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const claude = () => screen.getByRole("radio", { name: /Claude Code/ });
+  await waitFor(() => expect(claude().textContent).toContain("Ready"));
+  fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
+
+  client.harnesses = () => Promise.reject(new Error("probe failed"));
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  expect(claude().textContent).toContain("Ready");
+  await waitFor(() =>
+    expect(claude().textContent).toContain("Could not check"),
+  );
+  expect(screen.getByRole("radio", { name: /Codex/ }).textContent).toContain(
+    "Could not check",
+  );
+  expect(screen.queryByText(/cannot run on this computer/)).toBeNull();
 });
