@@ -403,8 +403,9 @@ test("a run whose failed step had a failure path is Completed, with the step Fai
   ).toContain(WENT_ON);
 });
 
+// #387 3B4: it also says what the Chat is allowed once taken over.
 const TAKE_OVER =
-  "A run of Verify on staging. Reply to take it over; it moves to your Chats.";
+  "A run of Verify on staging. Reply to take it over; it moves to your Chats and Codex uses your own approval settings.";
 const failedRun = (owned: boolean) =>
   run({
     status: owned ? "needs_attention" : "taken_over",
