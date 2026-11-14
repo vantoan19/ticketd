@@ -428,6 +428,28 @@ test("deleting an agent asks first, then removes it from the list", async () => 
   expect(screen.getByText("An agent is who a step runs")).toBeTruthy();
 });
 
+test("cancelling or dismissing the agent delete dialog returns focus to Agent actions", async () => {
+  await open(undefined, [
+    { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  await screen.findByRole("region", { name: "Triage" });
+  const actions = screen.getByRole("button", { name: "Agent actions" });
+
+  for (const close of ["Cancel", "Escape"]) {
+    actions.focus();
+    fireEvent.keyDown(actions, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+    const dialog = await screen.findByRole("dialog");
+    if (close === "Cancel")
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    else fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(actions));
+  }
+  expect(stored).toHaveLength(1);
+});
+
 test("with Codex chosen, the switches it cannot enforce are fixed on and the turn limit is not applied; Claude Code brings the agent's own choices back", async () => {
   await open(undefined, [
     {

@@ -227,6 +227,8 @@ export function AgentForm({
     unsaved && saving === 0 && arrived !== stored && arrived !== loaded;
   const statusOf = useHarnessStatus();
   const [deleting, setDeleting] = useState(false);
+  /** Where the delete dialog returns focus: the menu item that opened it is gone. */
+  const actions = useRef<HTMLButtonElement>(null);
 
   const save = (next: AutomationAgentSettings) => {
     const sent = ++sends.current;
@@ -286,7 +288,7 @@ export function AgentForm({
         <div className="detail-actions">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <IconButton label="Agent actions">
+              <IconButton ref={actions} label="Agent actions">
                 <Ellipsis aria-hidden />
               </IconButton>
             </DropdownMenuTrigger>
@@ -539,6 +541,7 @@ export function AgentForm({
         primaryLabel="Delete"
         primaryVariant="destructive"
         blockedReason={null}
+        returnFocus={actions}
         onSubmit={() => {
           setDeleting(false);
           onDelete();
