@@ -103,7 +103,10 @@ function RunRow({
           {automationName === undefined ? (
             run.reason && <span title={run.reason}>{run.reason}</span>
           ) : (
-            <span className="auto-row-start">
+            <span
+              className="auto-row-start"
+              title={automationName.trim() || "New Automation"}
+            >
               <Workflow size={12} aria-hidden />
               {automationName.trim() || "New Automation"}
             </span>
