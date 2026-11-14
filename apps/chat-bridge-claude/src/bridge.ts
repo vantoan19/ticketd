@@ -408,6 +408,14 @@ export function createBridge(deps: BridgeDeps) {
         // sign-in or environment set through those files. Settings an
         // administrator manages still apply.
         settingSources: [],
+        // None of the person's MCP servers, claude.ai connectors or skills
+        // either: the agent has Claude Code's own tools and nothing they added.
+        mcpServers: {},
+        strictMcpConfig: true,
+        skills: [],
+        // The SDK replaces the environment when `env` is given, so the bridge's
+        // own (with the ticketd CLI's folder on PATH) is passed on whole.
+        env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
         allowedTools: command.unattended.allowed_tools,
         disallowedTools: command.unattended.disallowed_tools,
         maxTurns: command.unattended.max_turns,
@@ -1009,9 +1017,12 @@ export function createBridge(deps: BridgeDeps) {
       errors: strings(message.errors),
       stop_reason: text(message.stop_reason),
       terminal_reason: text(message.terminal_reason),
-      denied_tool_names: blocks(message.permission_denials).flatMap(
-        (denial) => text(denial.tool_name) ?? [],
-      ),
+      denials: blocks(message.permission_denials).flatMap((denial) => {
+        const tool = text(denial.tool_name);
+        if (!tool) return [];
+        const input = isObject(denial.tool_input) ? denial.tool_input : {};
+        return [{ tool_name: tool, command: text(input.command) }];
+      }),
       queued_turn_count: number(message.queued_turn_count),
       num_turns: number(message.num_turns),
       duration_ms: number(message.duration_ms),

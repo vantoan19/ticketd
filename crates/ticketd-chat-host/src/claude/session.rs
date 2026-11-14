@@ -590,7 +590,7 @@ impl Session {
         self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");
-        let denied = strings(event, "denied_tool_names");
+        let denied = denials(event);
         let ended_by = |kind, message: String| {
             TurnOutcome::Failed(Problem {
                 kind,
@@ -611,7 +611,7 @@ impl Session {
             // but it did not do what it set out to do with that tool.
             ended_by(
                 ProblemKind::ToolDenied,
-                format!("Claude Code was denied {}.", denied.join(", ")),
+                format!("Claude Code was denied: {}.", denied.join("; ")),
             )
         } else if !failed {
             TurnOutcome::Completed
@@ -624,7 +624,7 @@ impl Session {
                 "errors": errors,
                 "stop_reason": event.get("stop_reason"),
                 "terminal_reason": event.get("terminal_reason"),
-                "denied_tool_names": event.get("denied_tool_names"),
+                "denials": event.get("denials"),
             });
             let kind = match turn.and_then(|turn| turn.error).as_deref() {
                 Some("authentication_failed") => ProblemKind::LoginRequired,
@@ -653,6 +653,31 @@ impl Session {
                 .collect(),
         });
     }
+}
+
+/// Each distinct thing Claude Code denied in a turn, once: the tool, and for a shell
+/// its command on one line ("PowerShell `node test.js`").
+fn denials(event: &Value) -> Vec<String> {
+    const MAX_COMMAND_CHARS: usize = 120;
+    let mut said: Vec<String> = Vec::new();
+    for denial in event["denials"].as_array().into_iter().flatten() {
+        let Some(tool) = denial["tool_name"].as_str() else {
+            continue;
+        };
+        let line = match denial["command"].as_str() {
+            Some(command) => {
+                let command = command.split_whitespace().collect::<Vec<_>>().join(" ");
+                let short: String = command.chars().take(MAX_COMMAND_CHARS).collect();
+                let more = if short.len() < command.len() { "…" } else { "" };
+                format!("{tool} `{short}{more}`")
+            }
+            None => tool.to_owned(),
+        };
+        if !said.contains(&line) {
+            said.push(line);
+        }
+    }
+    said
 }
 
 /// The tool's input with the lines its result said it added and removed, kept as

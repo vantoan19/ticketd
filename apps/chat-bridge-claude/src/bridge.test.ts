@@ -374,6 +374,18 @@ describe("open", () => {
     // None of the person's user, project or local settings are loaded, so an allow
     // rule there cannot widen what the agent may do.
     expect(fake.options.settingSources).toEqual([]);
+    // L32: no MCP server, claude.ai connector or skill of the person's either.
+    expect(fake.options).toMatchObject({
+      mcpServers: {},
+      strictMcpConfig: true,
+      skills: [],
+    });
+    // L1: the environment is the bridge's own, with the ticketd CLI on PATH, since
+    // the SDK replaces the environment when `env` is given.
+    expect(fake.options.env).toEqual({
+      ...process.env,
+      ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+    });
 
     // A request that still reaches the bridge is denied here, never sent to the host.
     const asked = fake.askPermission("Bash", { command: "rm -rf build" });
@@ -577,6 +589,38 @@ describe("input lifecycle", () => {
         subtype: "error_during_execution",
         is_error: true,
         errors: ["boom"],
+      },
+    ]);
+  });
+
+  it("names the command of each shell tool Claude Code denied", async () => {
+    const h = harness();
+    const fake = await h.open();
+    await h.send(submit("s1"));
+    const written = await fake.readInput();
+    fake.push(
+      result([written.uuid as string], {
+        permission_denials: [
+          {
+            tool_name: "PowerShell",
+            tool_use_id: "toolu_1",
+            tool_input: { command: "node test.js" },
+          },
+          {
+            tool_name: "Write",
+            tool_use_id: "toolu_2",
+            tool_input: { file_path: "a.txt" },
+          },
+        ],
+      }),
+    );
+    await settle();
+    expect(h.named("turn_result")).toMatchObject([
+      {
+        denials: [
+          { tool_name: "PowerShell", command: "node test.js" },
+          { tool_name: "Write", command: null },
+        ],
       },
     ]);
   });
