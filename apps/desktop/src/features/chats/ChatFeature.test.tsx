@@ -168,6 +168,10 @@ test("turning Chat off while a run is going and no Chat works asks first, naming
   expect(dialog.textContent).toContain(
     "2 runs are working. Turning Chat off stops them first.",
   );
+  // #387 M28: what happens to the runs it stops, and to queued ones.
+  expect(dialog.textContent).toContain(
+    "A stopped run ends as Needs attention. Queued runs wait until Chat is on again.",
+  );
   fireEvent.click(within(dialog).getByRole("button", { name: "Keep Chat on" }));
   expect(await client.getEnabled()).toBe(true);
 

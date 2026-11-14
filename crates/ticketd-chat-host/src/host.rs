@@ -458,7 +458,13 @@ impl ChatHost {
         text: &str,
         mode: SendMode,
     ) -> Result<ChatMessage, HostError> {
-        self.take_over(chat_id, true).await?;
+        // A reply sent to wait behind the agent's turn (a harness that cannot steer)
+        // waits for nothing once the take-over ended that turn: it is the resumed
+        // Chat's first turn (#387 M2).
+        let mode = match self.take_over(chat_id, true).await? {
+            Some(_) => SendMode::Auto,
+            None => mode,
+        };
         self.submit(chat_id, command_id, text, mode).await
     }
 
@@ -468,21 +474,21 @@ impl ChatHost {
     /// in `run_unattended` ends. A harness cannot change how it runs in place, so
     /// the Chat's next supervisor opens a new process that resumes the same
     /// conversation as an ordinary Chat: the person's own settings and approvals, no
-    /// run marker on what it writes, and no time limit. Returns whether this Chat's
-    /// harness was closed.
-    async fn take_over(&self, chat_id: &str, replied: bool) -> Result<bool, HostError> {
+    /// run marker on what it writes, and no time limit. Returns `None` when there was
+    /// no run to take over, else whether this Chat's harness was closed.
+    async fn take_over(&self, chat_id: &str, replied: bool) -> Result<Option<bool>, HostError> {
         let Some(run) = self
             .workspace()?
             .take_over_automation_run(chat_id, replied)?
         else {
-            return Ok(false);
+            return Ok(None);
         };
         let mut closed = false;
         // The Chat acted on, and the Chat of a later step whose agent was working.
         for step in run.steps.iter().filter_map(|step| step.chat_id.as_deref()) {
             closed |= self.end_unattended(step, TicketdStop::TakenOver).await && step == chat_id;
         }
-        Ok(closed)
+        Ok(Some(closed))
     }
 
     /// Sends input to the Chat's supervisor, starting one when it has none.
@@ -507,7 +513,14 @@ impl ChatHost {
     /// the Chat of an Automation run that is going, it takes the run over, which
     /// stops the agent by closing its unattended harness.
     pub async fn stop(&self, chat_id: &str) -> Result<(), HostError> {
-        if self.take_over(chat_id, false).await? {
+        if self.take_over(chat_id, false).await? == Some(true) {
+            return Ok(());
+        }
+        // Still unattended with no run left to take over: whoever ended the run
+        // (Stop on the run, "Stop it and turn off", deleting the Automation) wants its
+        // agent gone. Closing the harness, after an open in progress, also ends the
+        // wait in `run_unattended`; an interrupt alone misses a turn not begun (#387 M4).
+        if self.end_unattended(chat_id, TicketdStop::RunEnded).await {
             return Ok(());
         }
         self.ask(chat_id, Command::Stop).await
@@ -688,6 +701,11 @@ impl ChatHost {
     /// The restore is over, whether or not it replaced anything; requests are served again.
     pub fn finish_restore(&self) {
         self.inner.restoring.store(false, Ordering::SeqCst);
+    }
+
+    /// Whether Chats are served: `Err` says why not (quitting, restoring, turned off).
+    pub fn serving(&self) -> Result<(), HostError> {
+        self.closed()
     }
 
     /// Why no supervisor may be reached or started right now, if any reason.

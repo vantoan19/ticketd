@@ -32,4 +32,4 @@ pub use host::*;
 pub use subscription::{
     ChatUpdate, SUBSCRIBER_BACKLOG_BYTES, SUBSCRIBER_BACKLOG_ITEMS, Subscription,
 };
-pub use unattended::TurnEnd;
+pub use unattended::{StopCause, TurnEnd};

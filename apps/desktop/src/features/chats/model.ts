@@ -1058,7 +1058,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
+        body: `${past ? "The last turn stopped here. " : ""}${sentence(problem.message ?? "Its sandbox failed to start on this computer.")} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
       };

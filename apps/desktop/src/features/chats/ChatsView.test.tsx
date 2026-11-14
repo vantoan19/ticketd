@@ -574,6 +574,7 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
     client.patch("c1", {
       problem: {
         kind: "sandbox_unavailable",
+        message: "helper_unknown_error: setup refresh had errors",
         help_url: "https://example.com/sandbox",
       },
     }),
@@ -581,6 +582,10 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
   const sandbox = await screen.findByText("Codex can't run commands here");
   expect(sandbox.closest("[data-tone]")?.getAttribute("data-tone")).toBe(
     "error",
+  );
+  // #387 M18: the harness's message ends as a sentence before ticketd's.
+  expect(sandbox.parentElement?.textContent).toContain(
+    "setup refresh had errors. ticketd won't lower its permissions",
   );
   expect(button(/Sandbox help/)).toBeTruthy();
 
@@ -2266,6 +2271,47 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   await waitFor(() =>
     expect(asked).toEqual(["model=sonnet", "permission=ask"]),
   );
+});
+
+test("a refused change names its choice after the options go, and Stop clears it (#387 M16)", async () => {
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      harness: { id: "claude-code", name: "Claude Code" },
+      settings: {
+        model: {
+          current: "opus",
+          options: [
+            option("opus", "Opus 5.5", true),
+            option("sonnet", "Sonnet 5"),
+          ],
+          changeable: true,
+          applies_from: "next_turn",
+        },
+      },
+    }),
+  );
+  client.changeSetting = async (_id, _setting, value) => ({
+    value,
+    state: "refused",
+    reason: "An Automation is running this Chat.",
+  });
+  fireEvent.click(button("Claude Code, model Opus 5.5"));
+  fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  const line =
+    "Claude Code didn't switch to Sonnet 5: An Automation is running this Chat.";
+  expect(await screen.findByText(line)).toBeTruthy();
+  // The session that listed the options closes: the line keeps the choice's name.
+  act(() => client.patch("c1", { settings: null }));
+  expect(await screen.findByText(line)).toBeTruthy();
+
+  fireEvent.click(button("Stop"));
+  await waitFor(() => expect(screen.queryByText(line)).toBeNull());
 });
 
 test("a change held for the turn's end shows the new value, From your next message", async () => {

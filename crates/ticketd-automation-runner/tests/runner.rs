@@ -381,7 +381,7 @@ async fn commands_the_harness_could_not_start_fail_the_step() {
 
     assert_eq!(
         f.needs_attention(),
-        "The agent could not run commands. Failed to create unified exec process: setup refresh had errors"
+        "The agent could not run commands. Failed to create unified exec process: setup refresh had errors."
     );
 }
 
@@ -567,6 +567,37 @@ async fn the_runs_at_once_setting_decides_how_many_runs_execute() {
     assert_eq!(statuses(), [Running, Running, Running]);
 }
 
+/// #387 M3, M17: turning Chat off ends the going run, says why, and starts none of
+/// the queued ones, which wait for Chat to be on again.
+#[tokio::test(start_paused = true)]
+async fn turning_chat_off_stops_the_going_run_and_leaves_queued_runs_queued() {
+    let f = Fixture::new();
+    f.core().set_automation_runs_at_once(1).unwrap();
+    for title in ["First", "Second", "Third"] {
+        f.tag(title);
+    }
+    f.tick().await;
+    let statuses =
+        || -> Vec<AutomationRunStatus> { f.runs().iter().map(|run| run.status).collect() };
+    use AutomationRunStatus::{NeedsAttention, Queued, Running};
+    assert_eq!(statuses(), [Running, Queued, Queued]);
+
+    f.host.turn_off().await;
+    settle().await;
+
+    assert_eq!(statuses(), [NeedsAttention, Queued, Queued]);
+    assert_eq!(
+        f.runs()[0].reason.as_deref(),
+        Some("Chat was turned off while this run was going.")
+    );
+    f.tick().await;
+    assert_eq!(statuses(), [NeedsAttention, Queued, Queued]);
+
+    f.host.turn_on();
+    f.tick().await;
+    assert_eq!(statuses(), [NeedsAttention, Running, Queued]);
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_automation_switched_off_mid_run_lets_its_agent_finish_and_starts_nothing_new() {
     let f = Fixture::new();
@@ -719,6 +750,50 @@ async fn a_chat_taken_over_mid_run_goes_on_as_an_ordinary_chat_past_the_agents_l
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
 }
 
+/// #387 M2: with a harness that cannot steer, the composer sends a reply to a going
+/// run as "Queue". The turn it would wait for ends with the take-over, so the reply
+/// is the resumed Chat's first turn at once, sent once, and nothing is left paused.
+#[tokio::test(start_paused = true)]
+async fn a_reply_queued_behind_the_agents_turn_is_sent_when_it_takes_the_run_over() {
+    let f = Fixture::on(AgentHarness::ClaudeCode);
+    f.agent_working().await;
+    let chat = f.chat();
+    f.fake
+        .emit(EventKind::SessionIdentified {
+            native_session: NativeSessionId::new("native-1"),
+        })
+        .await;
+    settle().await;
+
+    f.host
+        .send(&chat, None, "Reply with hello", SendMode::Queue)
+        .await
+        .unwrap();
+    settle().await;
+
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert_eq!(
+        written(&f)[1..],
+        ["interrupt", "close", "submit: Reply with hello"]
+    );
+    assert!(!f.core().chat(&chat).unwrap().queue_paused);
+    // The agent's turn the take-over interrupted does not pause what comes next.
+    f.fake
+        .emit(EventKind::TurnEnded {
+            turn: NativeTurnId::new("turn-2"),
+            outcome: TurnOutcome::Completed,
+            submissions: Vec::new(),
+        })
+        .await;
+    settle().await;
+    f.host
+        .send(&chat, None, "And again", SendMode::Queue)
+        .await
+        .unwrap();
+    settle().await;
+    assert_eq!(written(&f).last().unwrap(), "submit: And again");
+}
+
 /// Replying in the Chat of a step that has finished takes the run over while a
 /// later step's agent is working: that agent is stopped too.
 #[tokio::test(start_paused = true)]
@@ -821,7 +896,7 @@ async fn a_run_whose_agent_ticketd_stops_needs_attention_and_runs_nothing_more()
 
     assert_eq!(
         f.needs_attention(),
-        "ticketd stopped this run's agent before it finished."
+        "Chat was turned off while this run was going."
     );
     assert_eq!(f.runs()[0].steps.len(), 1);
 }
@@ -897,6 +972,40 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
         f.needs_attention(),
         "This run was still marked as going, but nothing was running it."
     );
+}
+
+/// #387 M4: a run stopped while its agent's harness is still opening ends that
+/// harness as soon as it has opened; no idle agent waits for the time limit.
+#[tokio::test(start_paused = true)]
+async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
+    let f = Fixture::new();
+    let open = f.fake.hold_next_open();
+    f.tag("Fix login");
+    f.tick().await;
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::Running);
+    let chat = f.chat();
+
+    // What "Stop" on the run does: the core ends the run, then the host stops its Chat.
+    f.core().stop_automation_run(&run.id).unwrap();
+    let stopping = f.host.stop(&chat);
+    let ((), stopped) = tokio::join!(
+        async {
+            settle().await;
+            open.send(()).unwrap();
+        },
+        stopping
+    );
+    stopped.unwrap();
+    settle().await;
+
+    assert_eq!(written(&f), ["close"]);
+    assert!(!f.host.live().get(&chat).is_some_and(|live| live.running));
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::NeedsAttention);
+    // The agent's time limit passes: nothing more happens to the run or the Chat.
+    tokio::time::sleep(Duration::from_secs(6 * 60)).await;
+    assert_eq!(written(&f), ["close"]);
+    assert_eq!(f.listed_chats(), [] as [String; 0]);
 }
 
 #[tokio::test(start_paused = true)]

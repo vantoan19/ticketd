@@ -673,6 +673,29 @@ async fn a_new_session_opens_with_new_chats_picks() {
     assert!(opened.is_ok(), "the session opens");
 }
 
+/// #387 M1, D11: a Chat taken over from a run resumes the agent's session with what
+/// an untouched New Chat sends ("Ask before edits" on Claude Code's default model),
+/// never the agent's "don't ask" nor whatever Claude Code's own `defaultMode` says.
+#[tokio::test(start_paused = true)]
+async fn a_chat_taken_over_from_a_run_resumes_with_new_chats_defaults() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("takeover_resume"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("sess-9")),
+        unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: true,
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
 #[tokio::test(start_paused = true)]
 async fn inspection_judges_the_pairing_without_opening_a_session() {
     let (mut peer, io) = pipes();
@@ -922,6 +945,34 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
     unattended.tools.allowed_commands.clear();
     let options = super::unattended_options(&unattended);
     assert_eq!(options["allowed_tools"], json!(CLI_RULES));
+}
+
+/// #387 M12, D15: Claude Code's `Edit` refuses a file it has not read, so "Edit
+/// files" also allows `Read` (not `Glob` or `Grep`), even with "Read files" off.
+#[test]
+fn an_agent_that_edits_files_may_read_the_files_it_changes() {
+    let mut unattended = reader_that_tests();
+    unattended.tools.read_files = false;
+    unattended.tools.edit_files = true;
+    let options = super::unattended_options(&unattended);
+
+    let allowed = options["allowed_tools"].as_array().unwrap();
+    assert!(allowed.contains(&json!("Read")), "{allowed:?}");
+    assert!(allowed.contains(&json!("Edit")), "{allowed:?}");
+    assert_eq!(
+        options["disallowed_tools"],
+        json!(["Glob", "Grep", "WebFetch", "WebSearch"])
+    );
+}
+
+/// #387 M19: a denied command's control characters (here a backspace, as `\b` in a
+/// Windows path written into JSON becomes) never reach the run's reason.
+#[test]
+fn a_denied_commands_control_characters_are_not_printed() {
+    let denied = super::session::denials(&json!({"denials": [
+        {"tool_name": "PowerShell", "command": "& \"C:\\x\u{8}in\\ticketd.exe\" add-tag\u{7}"}
+    ]}));
+    assert_eq!(denied, ["PowerShell `& \"C:\\x in\\ticketd.exe\" add-tag`"]);
 }
 
 /// L1: a list of commands allows exactly those, in both shells, besides the CLI.
@@ -1239,6 +1290,41 @@ fn settings_offer_the_sdk_models_and_never_offer_skipping_permissions() {
         permission.refusal("acceptEdits").as_deref(),
         Some("Set in Claude Code's settings")
     );
+}
+
+/// #387 M15: modes ticketd does not offer are named in words, and a run's agent
+/// reports its settings read-only, with why, instead of offering refused choices.
+#[test]
+fn a_runs_agent_reports_its_settings_read_only_and_named() {
+    use super::session::Session;
+    let label = |settings: &crate::HarnessSettings| {
+        let permission = settings.permission.as_ref().expect("permission");
+        let current = permission.current.clone().unwrap();
+        let option = permission.options.iter().find(|o| o.id == current).unwrap();
+        (option.label.clone(), permission.unchangeable.clone())
+    };
+    let settings_after = |session: &mut Session, mode: &str| {
+        let info = json!({"model": "claude-haiku-test", "permission_mode": mode});
+        let (events, _) = session.event("session_info", &info).expect("modeled");
+        match events.last() {
+            Some(EventKind::SettingsState(settings)) => settings.clone(),
+            other => panic!("settings, got {other:?}"),
+        }
+    };
+
+    let mut agent = Session::default();
+    agent.mark_unattended();
+    let settings = settings_after(&mut agent, "dontAsk");
+    let locked = Some(
+        "An Automation is running this Chat. Reply or stop it to take it over first.".to_owned(),
+    );
+    assert_eq!(label(&settings), ("Never asks".to_owned(), locked.clone()));
+    assert_eq!(settings.model.as_ref().unwrap().unchangeable, locked);
+
+    let mut chat = Session::default();
+    let settings = settings_after(&mut chat, "auto");
+    assert_eq!(label(&settings), ("Auto".to_owned(), None));
+    assert_eq!(settings.model.as_ref().unwrap().unchangeable, None);
 }
 
 /// LIVE2-11: a question names the AskUserQuestion tool use it was asked from, so

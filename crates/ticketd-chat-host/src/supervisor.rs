@@ -1808,8 +1808,12 @@ impl Supervisor {
                     self.active = None;
                     self.stop = None;
                     self.stop_deadline = None;
-                    if state != ChatTurnState::Completed {
-                        // Queued input does not follow a turn that did not complete.
+                    // Queued input does not follow a turn that did not complete. A
+                    // take-over ends the agent's turn for the person, who is about to
+                    // send (#387 M2): their Chat's queue is not paused for it.
+                    if state != ChatTurnState::Completed
+                        && self.shut_down_for != Some(TicketdStop::TakenOver)
+                    {
                         let chat = self.chat_id.clone();
                         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                         self.direct.clear();

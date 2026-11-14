@@ -359,11 +359,23 @@ impl Connection {
         });
         if let Some(unattended) = &request.unattended {
             open["unattended"] = super::unattended_options(unattended);
-            self.state().session.unattended = true;
+            self.state().session.mark_unattended();
         }
         // New Chat's picks, when the person made them. The bridge accepts no mode
-        // that skips permissions.
-        let picks = &request.settings;
+        // that skips permissions. A Chat taken over from a run is an ordinary Chat
+        // from here on (#387 M1, D11): what was not picked is what an untouched New
+        // Chat sends, so neither the agent's "don't ask" nor Claude Code's own
+        // `defaultMode` decides how the person's session asks.
+        let mut picks = request.settings.clone();
+        if request.resumes_unattended {
+            picks
+                .model
+                .get_or_insert_with(|| super::report::DEFAULT_MODEL.to_owned());
+            picks
+                .permission
+                .get_or_insert_with(|| super::report::DEFAULT_PERMISSION_MODE.to_owned());
+        }
+        let picks = &picks;
         for (field, value) in [
             ("model", &picks.model),
             ("effort", &picks.effort),

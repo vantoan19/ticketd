@@ -219,7 +219,9 @@ start and every five seconds while Chat is on. A pass asks the core to queue a r
 for each Workspace event after a switched-on Automation's cursor that matches its
 trigger and conditions, and to start queued runs, oldest event first, until as
 many are running as the device's "Runs at once" setting allows (2 unless changed,
-at most 10; read on every pass, so a change counts from the next run). The core
+at most 10; read on every pass, so a change counts from the next run). A run that
+ends also starts the next queued one, but nothing starts while the Chat host is not
+serving (Chat off, Quit, a restore): queued runs wait for it. The core
 holds the rules: an event with actor `automation` matches
 nothing, a ticket has one active run per Automation (a partial unique index), and a
 run keeps the Automation definition it was created with. Each of the six event types
@@ -277,7 +279,8 @@ that was Running or needed attention ends as Taken over, with the step it was on
 ended there and nothing after it run. Stop takes over only a Running run, since
 nothing is going in the Chat of one that ended; that is also why stopping a run
 from the run view, which ends the run before it interrupts the Chat, stays Needs
-attention. A Completed run stays Completed when the person replies in its Chat.
+attention; its Stop then ends the Chat's unattended session as well, which closes
+an agent still opening. A Completed run stays Completed when the person replies in its Chat.
 Taking over a run that is going also ends its agents' unattended sessions at once:
 a harness cannot change how it runs in place, so the host interrupts the turn and
 closes the harness process of every Chat the run had working, and the wait in
@@ -285,6 +288,10 @@ closes the harness process of every Chat the run had working, and the wait in
 opens a new process that resumes the same conversation as an ordinary Chat, with
 their own settings and approvals, no run marker on what it writes, and no time
 limit; the Chat of a later step that was working stays closed and out of the list.
+It opens as a new ordinary Chat would: Claude Code with New Chat's default model
+and "Ask before edits", whatever its own `defaultMode` says. The message that took
+the run over is that session's first turn, even when it was sent to wait behind the
+agent's turn, and the turn the take-over ended does not pause the Chat's queue.
 The run's own first message goes through a path that takes nothing over, and it
 starts an agent only while the run is still going and the Chat is still the
 agent's: a run taken over or stopped just after a step's Chat was created starts
@@ -297,7 +304,8 @@ Chat list. The host opens its harness with an `Unattended` request: the agent's
 model, allowed tools and turn limit. An adapter given one never asks for approval
 and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
-switch that is off disallowed. It loads none of the person's user, project or
+switch that is off disallowed; "Edit files" also allows `Read`, since Claude Code
+edits only a file it has read. It loads none of the person's user, project or
 local Claude Code settings, so an allow rule there cannot widen the allowlist;
 that also leaves out their hooks, `CLAUDE.md` and anything else those files set,
 and it loads none of their MCP servers, claude.ai connectors or skills.
