@@ -713,10 +713,10 @@ fn missing_harness_guidance_includes_install_help_and_its_own_sign_in_command() 
         ),
     ] {
         let status = harness_status(id, name, Inspection::NotInstalled);
-        assert_eq!(status.status, "not_installed");
+        assert_eq!(status.status, HarnessState::NotInstalled);
         assert_eq!(status.command.as_deref(), Some(command));
         assert_eq!(status.help_url.as_deref(), Some(help));
-        assert!(!usable(status.status));
+        assert!(!status.status.usable());
     }
 }
 
