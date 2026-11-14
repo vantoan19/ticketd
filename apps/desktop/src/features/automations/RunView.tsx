@@ -39,6 +39,7 @@ import {
 import { StepPanel } from "@/features/automations/StepPanel";
 import { TakenOverLine } from "@/features/automations/TakenOver";
 import { ChatDetail } from "@/features/chats/ChatDetail";
+import { useChatClient } from "@/features/chats/client";
 import { duration } from "@/features/chats/model";
 import { client, type Project } from "@/lib/api/client";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
@@ -254,6 +255,28 @@ export function RunView({
     if (namesProject)
       void reported("projects", client.listProjects(), onRead, setProjects);
   }, [namesProject, onRead]);
+  /**
+   * The open Chat when it belongs to a step that has ended with nothing said in
+   * it: the agent never started. Nothing arrives in it later, so one read does.
+   */
+  const chats = useChatClient();
+  const [emptyChat, setEmptyChat] = useState<string | null>(null);
+  const chatEnded =
+    run?.steps.some(
+      (step) => step.chat_id === chat && step.status !== "running",
+    ) ?? false;
+  useEffect(() => {
+    if (!chat || !chatEnded) return;
+    let current = true;
+    chats.openChat(chat).then(
+      (opened) => current && opened.items.length === 0 && setEmptyChat(chat),
+      // ChatDetail reads the same Chat and says why it could not.
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [chats, chat, chatEnded]);
 
   if (chat)
     return (
@@ -268,7 +291,9 @@ export function RunView({
         }
         notice={
           run?.steps.some((step) => step.chat_id === chat && step.chat_owned)
-            ? `A run of ${automationName}. Reply to take it over; it moves to your Chats.`
+            ? emptyChat === chat
+              ? "The agent never started, so this Chat is empty."
+              : `A run of ${automationName}. Reply to take it over; it moves to your Chats.`
             : run?.status === "taken_over" && (
                 <TakenOverLine
                   automationName={automationName}
@@ -326,9 +351,15 @@ export function RunView({
           <IconButton label="Back to runs" onClick={onBack}>
             <ArrowLeft aria-hidden />
           </IconButton>
-          <h2 id={headingId} className="chat-head-title" tabIndex={-1}>
+          <h2
+            id={headingId}
+            className="chat-head-title run-title"
+            tabIndex={-1}
+          >
             <span className="run-crumb">{automationName} › </span>
-            {run?.ticket ? `Run on ${run.ticket.reference}` : "Run"}
+            <span className="run-own-title">
+              {run?.ticket ? `Run on ${run.ticket.reference}` : "Run"}
+            </span>
           </h2>
         </div>
         <div className="detail-actions">
@@ -354,11 +385,7 @@ export function RunView({
                   <Square aria-hidden />
                   Stop
                 </Button>
-              ) : run.automation_deleted ? (
-                <span className="run-status text-muted-foreground">
-                  Its Automation was deleted.
-                </span>
-              ) : (
+              ) : run.automation_deleted ? null : (
                 <Button
                   variant="outline"
                   size="sm"
@@ -393,6 +420,9 @@ export function RunView({
           </IconButton>
         </div>
       </div>
+      {run?.automation_deleted && !active && (
+        <p className="run-note">Its Automation was deleted.</p>
+      )}
       {failure && (
         <div className="run-failure">
           <Alert size="compact" tone="error">

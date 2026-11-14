@@ -160,7 +160,22 @@ afterEach(cleanup);
 
 const chat = createMockChatClient({
   enabled: true,
-  chats: [{ chat: chatState({ id: "chat-1", title: "Verify T-ZB7" }) }],
+  chats: [
+    {
+      chat: chatState({ id: "chat-1", title: "Verify T-ZB7" }),
+      items: [
+        {
+          id: "u1",
+          at: new Date().toISOString(),
+          kind: "user",
+          text: "Verify T-ZB7",
+          delivery: "delivered",
+        },
+      ],
+    },
+    // The Chat of a step whose agent never started: nothing was said in it.
+    { chat: chatState({ id: "chat-never", title: "Verify T-ZB7" }) },
+  ],
 });
 const page = (version: number) => (
   <WorkspaceChangeProvider value={version}>
@@ -257,6 +272,10 @@ test("a run whose Automation was deleted says so and offers no Run again", async
     "Needs attention · dismissed",
   );
   expect(screen.getByText("Its Automation was deleted.")).toBeTruthy();
+  // Said under the header, not beside the status where it pushes the title out.
+  expect(
+    screen.getByText("Its Automation was deleted.").closest(".detail-header"),
+  ).toBeNull();
   expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
 });
 
@@ -393,6 +412,30 @@ const failedRun = (owned: boolean) =>
     ended_at: new Date().toISOString(),
     steps: [{ ...reached("verify", "failed", "Limit"), chat_owned: owned }],
   });
+
+test("the Chat of a step whose agent never started says it is empty instead of inviting a take-over", async () => {
+  runs = [
+    run({
+      status: "needs_attention",
+      needs_you: true,
+      ended_at: new Date().toISOString(),
+      steps: [
+        {
+          ...reached("verify", "failed", "The agent could not be started."),
+          chat_id: "chat-never",
+        },
+      ],
+    }),
+  ];
+  await openRun();
+
+  fireEvent.click(screen.getByRole("button", { name: "Open Chat" }));
+
+  expect(
+    await screen.findByText("The agent never started, so this Chat is empty."),
+  ).toBeTruthy();
+  expect(screen.queryByText(TAKE_OVER)).toBeNull();
+});
 
 test("a run's Chat that is still being read shows its title and says it is opening", async () => {
   runs = [failedRun(true)];

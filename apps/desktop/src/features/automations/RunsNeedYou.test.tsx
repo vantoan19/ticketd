@@ -155,7 +155,7 @@ test("an Inbox entry for a run that needs attention says which Automation and wh
 
   fireEvent.click(entry);
 
-  const heading = await screen.findByText("Run on T-ZB8");
+  const heading = await screen.findByRole("heading", { level: 2 });
   expect(heading.textContent).toBe("Triage new tickets › Run on T-ZB8");
   // Reading the entry and opening the run is not acting on it.
   expect(

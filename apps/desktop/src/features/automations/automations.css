@@ -89,6 +89,15 @@
   margin-right: 4px;
   vertical-align: -2px;
 }
+/* In All runs the status is short and the Automation's name tells rows apart:
+   the status keeps its width and the name takes the rest. */
+.chat-row-sub:has(> .auto-row-start) > span:first-child {
+  flex: none;
+}
+.chat-row-sub > span + span.auto-row-start {
+  flex: 1 1 0;
+  max-width: none;
+}
 
 /* --- An Automation's runs: a list under day headings. --- */
 .chat-pane > .detail-header .chat-head-title + [data-slot="segmented-control"] {
@@ -549,9 +558,28 @@
 }
 
 /* --- A run: the same canvas, read only, saying what happened. --- */
+/* The run's own title stays whole; the Automation's name before it gives way. */
+.run-title {
+  display: flex;
+}
 .run-crumb {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted-foreground);
   font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.run-own-title {
+  flex: none;
+}
+.run-note {
+  flex: none;
+  margin: 8px 16px 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .run-status {
   display: inline-flex;
