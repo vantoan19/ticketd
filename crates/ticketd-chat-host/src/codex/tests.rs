@@ -1003,7 +1003,8 @@ fn a_command_codex_could_not_start_fails_an_unattended_turn() {
 /// their configuration), plugins or apps.
 #[test]
 fn an_unattended_thread_turns_off_each_of_the_persons_mcp_servers_plugins_and_apps() {
-    let config = json!({"mcp_servers": {"docs": {"command": "docs-mcp"}, "web": {"url": "https://x"}}});
+    let config =
+        json!({"mcp_servers": {"docs": {"command": "docs-mcp"}, "web": {"url": "https://x"}}});
     assert_eq!(
         super::personal_tools_off(Some(&config)),
         json!({

@@ -668,7 +668,11 @@ fn denials(event: &Value) -> Vec<String> {
             Some(command) => {
                 let command = command.split_whitespace().collect::<Vec<_>>().join(" ");
                 let short: String = command.chars().take(MAX_COMMAND_CHARS).collect();
-                let more = if short.len() < command.len() { "…" } else { "" };
+                let more = if short.len() < command.len() {
+                    "…"
+                } else {
+                    ""
+                };
                 format!("{tool} `{short}{more}`")
             }
             None => tool.to_owned(),

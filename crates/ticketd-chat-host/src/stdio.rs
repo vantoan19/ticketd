@@ -397,7 +397,10 @@ mod tests {
     #[test]
     fn only_the_chat_of_an_automation_run_is_started_with_the_run_id() {
         let id = ticketd_core::AUTOMATION_RUN_ID_VARIABLE;
-        assert_eq!(variable(chat(Some("run-1")), id), Some(Some("run-1".into())));
+        assert_eq!(
+            variable(chat(Some("run-1")), id),
+            Some(Some("run-1".into()))
+        );
         assert_eq!(variable(chat(None), id), Some(None));
     }
 
