@@ -574,6 +574,7 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
     client.patch("c1", {
       problem: {
         kind: "sandbox_unavailable",
+        message: "helper_unknown_error: setup refresh had errors",
         help_url: "https://example.com/sandbox",
       },
     }),
@@ -581,6 +582,10 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
   const sandbox = await screen.findByText("Codex can't run commands here");
   expect(sandbox.closest("[data-tone]")?.getAttribute("data-tone")).toBe(
     "error",
+  );
+  // #387 M18: the harness's message ends as a sentence before ticketd's.
+  expect(sandbox.parentElement?.textContent).toContain(
+    "setup refresh had errors. ticketd won't lower its permissions",
   );
   expect(button(/Sandbox help/)).toBeTruthy();
 
