@@ -670,7 +670,8 @@ pub(super) fn denials(event: &Value) -> Vec<String> {
         let Some(tool) = denial["tool_name"].as_str() else {
             continue;
         };
-        let line = match denial["command"].as_str() {
+        // A shell's command, or the path a file tool was refused (#387 3B1).
+        let line = match denial["command"].as_str().or(denial["path"].as_str()) {
             Some(command) => {
                 // Control characters (a backspace from a `\b` in a JSON-written
                 // path) print as nothing useful: each becomes a space (#387 M19).

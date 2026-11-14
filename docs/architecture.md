@@ -305,7 +305,12 @@ model, allowed tools and turn limit. An adapter given one never asks for approva
 and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
 switch that is off disallowed; "Edit files" also allows `Read`, since Claude Code
-edits only a file it has read. It loads none of the person's user, project or
+edits only a file it has read. File tools are kept to the step's folder, Claude
+Code's only working directory: the bridge turns on
+`permissions.blockReadsOutsideWorkingDirectories` and
+`blockWritesOutsideWorkingDirectories`, no file tool is allowed by its bare name,
+and edits are allowed by `Edit(./**)` alone. Commands the agent may run are not
+kept to the folder. It loads none of the person's user, project or
 local Claude Code settings, so an allow rule there cannot widen the allowlist;
 that also leaves out their hooks, `CLAUDE.md` and anything else those files set,
 and it loads none of their MCP servers, claude.ai connectors or skills.
@@ -321,7 +326,9 @@ setting that leaves them out, and the agent editor says so. A command Codex coul
 start fails the step: the agent could not do its work. A Chat taken over from a
 run resumes its Codex thread with the person's own approval policy and sandbox
 from their Codex configuration (`on-request` and `read-only` when it sets none). Codex
-reads files and runs commands inside that sandbox whatever the switches say and
+reads files and runs commands inside that sandbox whatever the switches say (its
+`workspaceWrite` policy limits writes, not reads, so it can read any file the
+person can) and
 has no turn limit to set, so the agent editor shows those as fixed for Codex; a
 read-only sandbox would stop the ticketd CLI recording the agent's result, so
 "Edit files" does not apply to Codex either. `ChatHost::run_unattended` sends the first
