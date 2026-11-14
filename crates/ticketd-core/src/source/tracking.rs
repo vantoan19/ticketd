@@ -717,6 +717,11 @@ struct Gathered {
     failures: Vec<Found>,
     /// How each fully refreshed provider fared, for its persisted status.
     runs: Vec<ProviderRun>,
+    /// The part of its source each discovered issue belongs to, by (provider,
+    /// external id).
+    partitions: HashMap<(String, String), String>,
+    /// Per provider, the parts tickets were already imported from.
+    imported_partitions: HashMap<String, HashSet<String>>,
 }
 
 struct Tracked {
@@ -775,6 +780,8 @@ impl Workspace {
             runs: Vec::new(),
             discovery: Vec::new(),
             configurations: HashMap::new(),
+            partitions: HashMap::new(),
+            imported_partitions: HashMap::new(),
         };
         let saved = self.saved_sources()?;
         let providers: Vec<String> = if options.ticket.is_some() {
@@ -808,9 +815,32 @@ impl Workspace {
             let mut retry_after_secs: Option<u64> = None;
             let mut discovery_failed: Option<SourceFailure> = None;
             let mut skipped: Vec<String> = Vec::new();
+            let mut read_partitions: Vec<String> = Vec::new();
+            let mut skipped_partitions: Vec<String> = Vec::new();
             if let (None, Some(source)) = (&options.ticket, config) {
+                gathered.imported_partitions.insert(
+                    provider.clone(),
+                    tracked
+                        .iter()
+                        .filter(|ticket| ticket.provider == provider)
+                        .map(|ticket| {
+                            let reference = ExternalRef {
+                                identity: ExternalIdentity {
+                                    provider: provider.clone(),
+                                    id: ticket.external_id.clone(),
+                                },
+                                locator: ticket.locator.clone(),
+                            };
+                            engine.partition(&provider, &reference)
+                        })
+                        .collect(),
+                );
                 let result = engine.discover(&provider, &source.config, |issue| {
                     seen.insert(issue.reference.identity.id.clone());
+                    gathered.partitions.insert(
+                        (provider.clone(), issue.reference.identity.id.clone()),
+                        engine.partition(&provider, &issue.reference),
+                    );
                     gathered.issues.push(issue);
                     ControlFlow::Continue(())
                 });
@@ -819,6 +849,16 @@ impl Workspace {
                         if summary.complete && summary.skipped.is_empty() {
                             gathered.discovery.push((provider.clone(), seen.clone()));
                         }
+                        skipped_partitions = summary
+                            .skipped
+                            .iter()
+                            .map(|part| part.partition.clone())
+                            .collect();
+                        // Rules that cannot be read name no part, so none becomes read.
+                        read_partitions = engine
+                            .partitions(&provider, &source.config)
+                            .unwrap_or_default();
+                        read_partitions.retain(|part| !skipped_partitions.contains(part));
                         for part in summary.skipped {
                             skipped.push(part.message.clone());
                             gathered.failures.push(Found {
@@ -927,6 +967,8 @@ impl Workspace {
                     failure: discovery_failed.or(blocked),
                     retry_after_secs,
                     skipped,
+                    read_partitions,
+                    skipped_partitions,
                     checked_tickets: u32::try_from(seen.len()).unwrap_or(u32::MAX),
                 });
             }
@@ -1094,14 +1136,31 @@ impl Workspace {
         }
         let mut applied = Applied::default();
         // Workspace events: what a source brings in is logged with actor `sync`, and a
-        // first import logs nothing. That is every issue of a source that has never
-        // been read successfully, and every issue new to this Workspace in the first
-        // successful read after the source's configuration changed: a repository
-        // added or a rule loosened brings in its backlog, which is not news. A first
-        // read that fails partway stays silent on the next one too. Changes to
-        // tickets already here, and issues that arrive in later reads, log as `sync`.
+        // first import logs nothing. That is every issue new to this Workspace that
+        // comes from a part of its source (for GitHub, a repository) no run has read
+        // yet: the backlog of a new source or of a repository added to one is not
+        // news. A part counts as read once a successful run read it, so a first read
+        // that fails partway, or that skips a repository it cannot see, stays silent
+        // for it the next time too. Changes to tickets already here, and issues that
+        // arrive in a part already read, log as `sync`.
         let logged = crate::events::head(&transaction)?;
         let own_actor = crate::events::actor(&transaction)?;
+        let mut read_before: HashMap<&str, HashSet<String>> = HashMap::new();
+        for provider in gathered
+            .issues
+            .iter()
+            .map(|issue| &issue.reference.identity.provider)
+            .chain(gathered.runs.iter().map(|run| &run.provider))
+        {
+            if !read_before.contains_key(provider.as_str()) {
+                let read = freshness::read_partitions(
+                    &transaction,
+                    provider,
+                    gathered.imported_partitions.get(provider),
+                )?;
+                read_before.insert(provider, read);
+            }
+        }
         for issue in &gathered.issues {
             if replaced.contains(&issue.reference.identity.provider)
                 && ticket_for_identity(&transaction, &issue.reference.identity)?.is_none()
@@ -1112,28 +1171,13 @@ impl Workspace {
                 issue.reference.identity.provider.clone(),
                 issue.reference.identity.id.clone(),
             );
-            let read: Option<Option<String>> = transaction
-                .query_row(
-                    "SELECT refreshed_configuration FROM source_status WHERE provider = ?1 AND last_refreshed_at IS NOT NULL",
-                    [&key.0],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let first_import = match read {
-                None => true,
-                // Last read before the configuration was kept: nothing to compare.
-                Some(None) => false,
-                Some(Some(read_with)) => {
-                    let widened = gathered.configurations.get(&key.0).is_some_and(|used| {
-                        serde_json::from_str::<super::ConfigValues>(&read_with)
-                            .ok()
-                            .as_ref()
-                            != Some(used)
-                    });
-                    widened
-                        && ticket_for_identity(&transaction, &issue.reference.identity)?.is_none()
-                }
-            };
+            // Only discovery brings in an issue that is not here yet.
+            let first_import = gathered.partitions.get(&key).is_some_and(|part| {
+                !read_before
+                    .get(key.0.as_str())
+                    .is_some_and(|read| read.contains(part))
+            }) && ticket_for_identity(&transaction, &issue.reference.identity)?
+                .is_none();
             crate::events::set_actor(
                 &transaction,
                 Some(if first_import {
@@ -1235,12 +1279,9 @@ impl Workspace {
             if replaced.contains(&run.provider) {
                 continue;
             }
-            let configuration = gathered
-                .configurations
-                .get(&run.provider)
-                .map(serde_json::to_string)
-                .transpose()?;
-            freshness::record_run(&transaction, run, configuration.as_deref(), now)?;
+            let none = HashSet::new();
+            let read = read_before.get(run.provider.as_str()).unwrap_or(&none);
+            freshness::record_run(&transaction, run, read, now)?;
         }
         transaction.commit()?;
         Ok(RefreshReport {

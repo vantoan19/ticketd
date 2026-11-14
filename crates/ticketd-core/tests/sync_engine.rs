@@ -1083,7 +1083,7 @@ fn an_uploaded_file_is_readable_in_the_storage() {
     let (name, text) = devices.remote_text(RemoteKind::Ticket, &blocked.id);
 
     assert_eq!(name, format!("{} Fix login.md", blocked.reference));
-    assert!(text.starts_with("---\n# synced from: Desk A\nkind: ticket\nformat: 1\n"));
+    assert!(text.starts_with("---\n# synced from: Desk A\nkind: ticket\nformat: 2\n"));
     assert!(text.contains(&format!(
         "parent: \"{}\" # {}\n",
         blocker.id, blocker.reference
@@ -1171,9 +1171,9 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
     // A higher format number, with or without what else this version does not know.
     for (from, to) in [
-        ("format: 1\n", "format: 2\n"),
-        ("format: 1\n", "format: 2\nmood: \"happy\"\n"),
-        ("format: 1\n", "format: 2\n---\n<!-- ticketd:mood -->\n"),
+        ("format: 2\n", "format: 3\n"),
+        ("format: 2\n", "format: 3\nmood: \"happy\"\n"),
+        ("format: 2\n", "format: 3\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");

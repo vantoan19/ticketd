@@ -12,9 +12,11 @@ changed, the time, and the actor kind: person, Automation, a ticket source's
 refresh (`sync`), or Workspace sync applying a change from another desktop
 (`workspace_sync`).
 A ticket created with tags emits one `ticket.tag_added` per tag. The first
-import of a ticket source emits nothing: every issue of a source read for the
-first time, and every issue new to the Workspace in the first read after the
-source's configuration changed (a repository added, a rule loosened). Each
+import of a ticket source emits nothing, and that is decided per repository:
+an issue new to the Workspace logs nothing when it comes from a repository no
+successful read has covered yet. A read that skips a repository it cannot see
+has not read it. Whatever arrives in a repository after its first read is
+logged, and so is every change to a ticket already here. Each
 Automation keeps a cursor into the log, so changes made while the desktop was
 not running (by the CLI or arriving from a ticket source) fire when it next
 starts. Schedule and run-now triggers

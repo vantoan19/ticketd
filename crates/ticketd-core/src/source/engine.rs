@@ -483,6 +483,23 @@ impl Engine {
             .map(AsRef::as_ref)
     }
 
+    /// The part of its source an issue belongs to; see [`Connector::partition`].
+    pub(crate) fn partition(&self, provider: &str, reference: &ExternalRef) -> String {
+        self.find(provider)
+            .map(|connector| connector.partition(reference))
+            .unwrap_or_default()
+    }
+
+    /// The parts `raw` asks discovery to read; see [`Connector::partitions`].
+    pub(crate) fn partitions(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<Vec<String>, SourceError> {
+        let config = self.validate(provider, raw)?;
+        Ok(self.connector(provider)?.partitions(&config))
+    }
+
     fn connector(&self, provider: &str) -> Result<&dyn Connector, SourceError> {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))
