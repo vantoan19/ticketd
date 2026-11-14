@@ -153,9 +153,33 @@ export function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
+type Tools = AutomationAgent["tools"];
+
+/**
+ * The switches Codex does not follow. It reads files and runs any command inside
+ * its own sandbox, and that sandbox always lets it write in the step's folder, so
+ * with Codex these are on whatever is stored. The agent keeps its own choices
+ * for Claude Code.
+ */
+export const FIXED_ON_FOR_CODEX: ReadonlySet<keyof Tools> = new Set([
+  "read_files",
+  "edit_files",
+  "run_commands",
+]);
+
 /** What an agent may do, in a sentence: its reach, shown where it is used. */
 export function agentReach(agent: AutomationAgent): string {
-  const { tools } = agent;
+  const tools: Tools =
+    agent.harness === "codex"
+      ? // FIXED_ON_FOR_CODEX, and its commands are not limited to a list.
+        {
+          ...agent.tools,
+          read_files: true,
+          edit_files: true,
+          run_commands: true,
+          any_command: true,
+        }
+      : agent.tools;
   const commands = tools.allowed_commands.length;
   const may = [
     tools.read_files && "read files",

@@ -91,6 +91,33 @@ fn a_new_agent_starts_from_the_defaults_and_is_listed() {
 }
 
 #[test]
+fn new_agents_are_numbered_so_two_fresh_ones_differ_and_a_freed_name_is_reused() {
+    let (_dir, mut workspace) = workspace();
+
+    let first = workspace.create_new_automation_agent().unwrap();
+    let second = workspace.create_new_automation_agent().unwrap();
+    assert_eq!(first.settings.name, "New agent");
+    assert_eq!(second.settings.name, "New agent 2");
+    assert_eq!(first.settings.turn_limit, 40);
+
+    workspace.delete_automation_agent(&first.id).unwrap();
+    let third = workspace.create_new_automation_agent().unwrap();
+    assert_eq!(third.settings.name, "New agent");
+
+    // Names need not be unique: renaming one to another's name is kept.
+    let renamed = workspace
+        .update_automation_agent(
+            &second.id,
+            AutomationAgentSettings {
+                name: "New agent".into(),
+                ..second.settings.clone()
+            },
+        )
+        .unwrap();
+    assert_eq!(renamed.settings.name, "New agent");
+}
+
+#[test]
 fn an_agent_keeps_every_setting_it_was_given() {
     let (dir, mut workspace) = workspace();
 
@@ -139,7 +166,7 @@ fn updating_an_agent_replaces_its_settings_and_moves_the_change_token() {
 }
 
 #[test]
-fn a_limit_below_one_is_refused_and_nothing_changes() {
+fn a_limit_outside_its_range_is_refused_and_nothing_changes() {
     let (_dir, mut workspace) = workspace();
     let agent = workspace.create_automation_agent(triage()).unwrap();
 
@@ -150,6 +177,14 @@ fn a_limit_below_one_is_refused_and_nothing_changes() {
         },
         AutomationAgentSettings {
             time_limit_minutes: 0,
+            ..triage()
+        },
+        AutomationAgentSettings {
+            turn_limit: 501,
+            ..triage()
+        },
+        AutomationAgentSettings {
+            time_limit_minutes: 241,
             ..triage()
         },
     ] {
