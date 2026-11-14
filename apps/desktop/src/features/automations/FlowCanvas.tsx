@@ -254,6 +254,11 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
             {...main}
             aria-pressed={selected}
             onClick={() => onSelect(card.id)}
+            // Delete on a step asks before it goes; the trigger stays.
+            onKeyDown={(event) => {
+              if (event.key === "Delete" && card.menu === "step")
+                onDeleteStep(card.id);
+            }}
           >
             {face}
           </button>

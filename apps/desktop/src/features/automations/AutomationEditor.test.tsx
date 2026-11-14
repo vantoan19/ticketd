@@ -576,3 +576,43 @@ test("an Automation that has not run yet says so", async () => {
     ),
   ).toBeTruthy();
 });
+
+test("Esc closes a step's panel and returns to the step, and Delete on the step asks before removing it with what is on its paths", async () => {
+  const steps = await openFirst([
+    automation({
+      trigger: { kind: "tag_added", tag: "ready-for-triage" },
+      steps: [
+        {
+          ...runAgent("s1", "agent-1", "C:\\code"),
+          on_failure: [runAgent("s2", "agent-1", "C:\\code")],
+        },
+      ],
+    }),
+  ]);
+  const card = within(steps).getAllByRole("button", {
+    name: "Run agent: Triage",
+  })[0]!;
+
+  // Enter on a card is a click on it: the panel opens and takes focus.
+  fireEvent.click(card);
+  const panel = await screen.findByRole("complementary", { name: "Run agent" });
+  expect(document.activeElement).toBe(panel);
+  // The step is selected while its panel is open: Delete asks there too.
+  fireEvent.keyDown(panel, { key: "Delete" });
+  fireEvent.click(
+    within(
+      await screen.findByRole("dialog", { name: "Delete step?" }),
+    ).getByRole("button", { name: "Cancel" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.keyDown(panel, { key: "Escape" });
+  expect(screen.queryByRole("complementary")).toBeNull();
+  expect(document.activeElement).toBe(card);
+
+  fireEvent.keyDown(card, { key: "Delete" });
+  const dialog = await screen.findByRole("dialog", { name: "Delete step?" });
+  // Nothing goes until the person says so.
+  expect(automations[0]?.steps).toHaveLength(1);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(automations[0]?.steps).toEqual([]));
+});

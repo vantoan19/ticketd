@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   ArrowLeft,
   Maximize2,
@@ -19,6 +19,8 @@ import {
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
+  cardName,
+  focusCard,
   stepCard,
   triggerCard,
 } from "@/features/automations/flow-cards";
@@ -42,6 +44,32 @@ const when = (timestamp: string) =>
     hour: "numeric",
     minute: "2-digit",
   });
+
+/**
+ * What to say of the steps that were running in `before` and have ended in
+ * `after`: "Run agent: Triage finished". Nothing when none has.
+ */
+function stepsEnded(
+  before: AutomationRunDetail,
+  after: AutomationRunDetail,
+  agents: AutomationAgent[],
+): string {
+  const running = new Set(
+    before.steps
+      .filter((step) => step.status === "running")
+      .map((step) => step.step_id),
+  );
+  const steps = everyStep(after.definition.steps);
+  return after.steps
+    .flatMap((record) => {
+      const step = steps.find((item) => item.id === record.step_id);
+      if (!step || !running.has(record.step_id) || record.status === "running")
+        return [];
+      const ended = record.status === "failed" ? "failed" : "finished";
+      return `${cardName(stepCard(step, agents))} ${ended}`;
+    })
+    .join(". ");
+}
 
 /** What the panel says about the selected card: the step's outcome, then the run. */
 function RunPanel({
@@ -186,9 +214,16 @@ export function RunView({
   /** The Chat of an agent step, open in place of the run. */
   const [chat, setChat] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The step that last finished or failed while this was open, for a screen reader. */
+  const [ended, setEnded] = useState("");
+  const last = useRef<AutomationRunDetail | null>(null);
   const load = useCallback(
     () =>
       automationsClient.run(id).then((loaded) => {
+        // Said once: it changes only when a step that was running has ended.
+        const said = last.current && stepsEnded(last.current, loaded, agents);
+        if (said) setEnded(said);
+        last.current = loaded;
         setRun(loaded);
         // A run that failed opens on why. Later changes leave the panel alone.
         setSelected((current) =>
@@ -198,7 +233,7 @@ export function RunView({
             : current,
         );
       }, onFail),
-    [id, onFail],
+    [id, agents, onFail],
   );
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());
@@ -228,10 +263,7 @@ export function RunView({
     const card = selected;
     setSelected(null);
     // Back to the card the panel was opened from.
-    if (card)
-      document
-        .querySelector<HTMLElement>(`[data-flow-card="${CSS.escape(card)}"]`)
-        ?.focus();
+    if (card) focusCard(card);
   };
   const active = run?.status === "queued" || run?.status === "running";
   const panel = run && selected && (
@@ -305,6 +337,10 @@ export function RunView({
           </IconButton>
         </div>
       </div>
+      {/* A live region and no more: focus stays where the person left it. */}
+      <p className="sr-only" aria-live="polite">
+        {ended}
+      </p>
       {run && (
         <div className="flow-body" data-panel={panel ? undefined : "none"}>
           <RunCanvas

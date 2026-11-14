@@ -227,7 +227,8 @@ test("a run that needs attention opens on the canvas with each step's status and
   await waitFor(() =>
     expect(screen.getByRole("status").textContent).toBe("Queued"),
   );
-  expect(cards()[1]).toBe("Run agent: Verifier, Waiting");
+  // The canvas draws its cards a moment after the run loads.
+  await waitFor(() => expect(cards()[1]).toBe("Run agent: Verifier, Waiting"));
   expect(invoke).toHaveBeenCalledWith("automation_run_again", { id: "run-1" });
 });
 
@@ -265,6 +266,42 @@ test("a run in progress follows the Workspace as it goes, and Stop ends it needi
   await screen.findByRole("button", { name: "Run again" });
   expect(screen.getByRole("status").textContent).toBe("Needs attention");
   expect(invoke).toHaveBeenCalledWith("automation_run_stop", { id: "run-1" });
+});
+
+test("a running step says once, where a screen reader hears it, that it finished or failed", async () => {
+  runs = [run({ steps: [reached("verify", "running")] })];
+  const view = await openRun();
+  const said = () => document.querySelector("[aria-live=polite].sr-only");
+  expect(said()?.textContent).toBe("");
+  const steps = screen.getByRole("application", { name: "Steps" });
+  const card = within(steps).getByRole("button", { name: /^Run agent/ });
+  card.focus();
+
+  runs = [
+    run({
+      steps: [reached("verify", "completed"), reached("passed", "running")],
+    }),
+  ];
+  view.rerender(page(1));
+  await waitFor(() =>
+    expect(said()?.textContent).toBe("Run agent: Verifier finished"),
+  );
+  // Focus stays where the person left it.
+  expect(document.activeElement).toBe(card);
+
+  runs = [
+    run({
+      status: "needs_attention",
+      steps: [
+        reached("verify", "completed"),
+        reached("passed", "failed", "The ticket is gone."),
+      ],
+    }),
+  ];
+  view.rerender(page(2));
+  await waitFor(() =>
+    expect(said()?.textContent).toBe("If: Ticket has tag verified failed"),
+  );
 });
 
 test("a run whose failed step had a failure path is Completed, with the step Failed, its reason, and the path it took", async () => {
