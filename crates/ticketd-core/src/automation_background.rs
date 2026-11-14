@@ -7,18 +7,48 @@ use rusqlite::{Connection, params};
 use crate::{Error, Workspace};
 
 /// The most runs the setting allows. Each one is an agent process on this computer.
-const MOST_RUNS_AT_ONCE: usize = 10;
+pub const MOST_AUTOMATION_RUNS_AT_ONCE: usize = 10;
+/// How many runs execute at once until the person says otherwise.
+pub const DEFAULT_AUTOMATION_RUNS_AT_ONCE: usize = 2;
 /// Why a run ended when its Automation was switched off with "Stop it and turn off".
 const TURNED_OFF: &str = "You stopped this run when you turned the Automation off.";
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
-    connection.execute_batch(
+    connection.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS automation_settings (id INTEGER PRIMARY KEY CHECK(id = 1), runs_at_once INTEGER NOT NULL CHECK(runs_at_once > 0));
-         INSERT OR IGNORE INTO automation_settings VALUES (1, 2);
+         INSERT OR IGNORE INTO automation_settings VALUES (1, {DEFAULT_AUTOMATION_RUNS_AT_ONCE});
          PRAGMA user_version = 72;",
-    )?;
+    ))?;
     Ok(())
+}
+
+/// Ends an Automation's Queued and Running runs as Needs attention with `reason`,
+/// failing the step each was on. Returns the Chats of the agents that were working.
+pub(crate) fn end_active_runs(
+    connection: &Connection,
+    automation_id: &str,
+    reason: &str,
+) -> Result<Vec<String>, Error> {
+    const ACTIVE: &str = "SELECT id FROM automation_runs WHERE automation_id = ?1 AND status IN ('queued', 'running')";
+    let chats = {
+        let mut statement = connection.prepare(&format!(
+            "SELECT chat_id FROM automation_run_steps WHERE status = 'running' AND chat_id IS NOT NULL AND run_id IN ({ACTIVE})"
+        ))?;
+        statement
+            .query_map([automation_id], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?
+    };
+    // Steps first: afterwards the runs are no longer active to find them by.
+    connection.execute(
+        &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE status = 'running' AND run_id IN ({ACTIVE})"),
+        params![automation_id, reason],
+    )?;
+    connection.execute(
+        &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?2, ended_at = {NOW} WHERE automation_id = ?1 AND status IN ('queued', 'running')"),
+        params![automation_id, reason],
+    )?;
+    Ok(chats)
 }
 
 impl Workspace {
@@ -34,9 +64,9 @@ impl Workspace {
 
     /// Applies from the next run that starts; runs already going are left alone.
     pub fn set_automation_runs_at_once(&self, runs: usize) -> Result<(), Error> {
-        if !(1..=MOST_RUNS_AT_ONCE).contains(&runs) {
+        if !(1..=MOST_AUTOMATION_RUNS_AT_ONCE).contains(&runs) {
             return Err(Error::AutomationRun(format!(
-                "runs at once must be between 1 and {MOST_RUNS_AT_ONCE}"
+                "runs at once must be between 1 and {MOST_AUTOMATION_RUNS_AT_ONCE}"
             )));
         }
         self.connection.execute(
@@ -66,24 +96,7 @@ impl Workspace {
             "DELETE FROM automation_device_state WHERE automation_id = ?1",
             [id],
         )?;
-        const ACTIVE: &str = "SELECT id FROM automation_runs WHERE automation_id = ?1 AND status IN ('queued', 'running')";
-        let chats = {
-            let mut statement = transaction.prepare(&format!(
-                "SELECT chat_id FROM automation_run_steps WHERE status = 'running' AND chat_id IS NOT NULL AND run_id IN ({ACTIVE})"
-            ))?;
-            statement
-                .query_map([id], |row| row.get(0))?
-                .collect::<Result<Vec<String>, _>>()?
-        };
-        // Steps first: afterwards the runs are no longer active to find them by.
-        transaction.execute(
-            &format!("UPDATE automation_run_steps SET status = 'failed', reason = ?2, ended_at = {NOW} WHERE status = 'running' AND run_id IN ({ACTIVE})"),
-            params![id, TURNED_OFF],
-        )?;
-        transaction.execute(
-            &format!("UPDATE automation_runs SET status = 'needs_attention', reason = ?2, ended_at = {NOW} WHERE automation_id = ?1 AND status IN ('queued', 'running')"),
-            params![id, TURNED_OFF],
-        )?;
+        let chats = end_active_runs(&transaction, id, TURNED_OFF)?;
         crate::automation_runs::announce(&transaction)?;
         transaction.commit()?;
         Ok(chats)

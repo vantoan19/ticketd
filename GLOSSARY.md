@@ -186,7 +186,7 @@ A named, reusable definition of who an Automation step runs: harness, model, ins
 One firing of an Automation: the Workspace event that started it, the steps taken, its outcome, and the Chat of each agent step. The interface calls it a run. It is local to the device that ran it.
 
 **Workspace event**:
-A logged fact that something in the Workspace changed (for example a tag added to a ticket), with the previous and current values and whether a person, an Automation or synchronization made the change. Automations are triggered from this log. It is distinct from an Activity's automatic event, which is ticket history shown to the person.
+A logged fact that something in the Workspace changed (for example a tag added to a ticket), with the previous and current values and who made the change: a person, an Automation, a refresh of an external ticket source, or Workspace sync applying a change from another desktop. Automations are triggered from this log by the changes a person or a ticket source made. A change that arrived through Workspace sync starts no Automation, whoever made it on the other desktop; this rule is provisional until running Automations across devices is designed. It is distinct from an Activity's automatic event, which is ticket history shown to the person.
 
 **Implementation evidence**:
 Named material associated with a ticket that locates its implementation or records verification, such as a pull request, commit, branch, worktree, or verification result.

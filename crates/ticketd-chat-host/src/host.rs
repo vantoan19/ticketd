@@ -322,7 +322,7 @@ impl ChatHost {
     /// The person's message. Saves the input, then dispatches, steers or queues it.
     /// Returns once it is saved; delivery is reported through the Chat's records. In
     /// the Chat of an Automation run it takes the run over first, so the Chat is the
-    /// person's from this message on.
+    /// person's from this message on: see `take_over`.
     pub async fn send(
         &self,
         chat_id: &str,
@@ -330,8 +330,31 @@ impl ChatHost {
         text: &str,
         mode: SendMode,
     ) -> Result<ChatMessage, HostError> {
-        self.workspace()?.take_over_automation_run(chat_id, true)?;
+        self.take_over(chat_id, true).await?;
         self.submit(chat_id, command_id, text, mode).await
+    }
+
+    /// The person replied in (`replied`) or stopped a Chat. When that takes an
+    /// Automation run over, every agent the run had working stops being unattended
+    /// at once: its turn is interrupted, its harness process is closed and the wait
+    /// in `run_unattended` ends. A harness cannot change how it runs in place, so
+    /// the Chat's next supervisor opens a new process that resumes the same
+    /// conversation as an ordinary Chat: the person's own settings and approvals, no
+    /// run marker on what it writes, and no time limit. Returns whether this Chat's
+    /// harness was closed.
+    async fn take_over(&self, chat_id: &str, replied: bool) -> Result<bool, HostError> {
+        let Some(run) = self
+            .workspace()?
+            .take_over_automation_run(chat_id, replied)?
+        else {
+            return Ok(false);
+        };
+        let mut closed = false;
+        // The Chat acted on, and the Chat of a later step whose agent was working.
+        for step in run.steps.iter().filter_map(|step| step.chat_id.as_deref()) {
+            closed |= self.end_unattended(step).await && step == chat_id;
+        }
+        Ok(closed)
     }
 
     /// Sends input without it counting as the person's: a run's own first message.
@@ -353,9 +376,12 @@ impl ChatHost {
     }
 
     /// Pauses queue dispatch and asks the harness to interrupt the active turn. In
-    /// the Chat of an Automation run that is going, it takes the run over.
+    /// the Chat of an Automation run that is going, it takes the run over, which
+    /// stops the agent by closing its unattended harness.
     pub async fn stop(&self, chat_id: &str) -> Result<(), HostError> {
-        self.workspace()?.take_over_automation_run(chat_id, false)?;
+        if self.take_over(chat_id, false).await? {
+            return Ok(());
+        }
         self.ask(chat_id, Command::Stop).await
     }
 
@@ -549,6 +575,36 @@ impl ChatHost {
             Some(unattended) => self.unattended().insert(chat_id.to_owned(), unattended),
             None => self.unattended().remove(chat_id),
         };
+    }
+
+    /// Whether the Chat is running unattended: an Automation run's agent is working
+    /// in it and nobody has taken it over.
+    pub(crate) fn is_unattended(&self, chat_id: &str) -> bool {
+        self.unattended().contains_key(chat_id)
+    }
+
+    /// Whether the Chat has a supervisor in this host. Quit, a restore and turning
+    /// Chat off take every supervisor out.
+    pub(crate) fn supervised(&self, chat_id: &str) -> bool {
+        self.chats().contains_key(chat_id)
+    }
+
+    /// Ends the Chat's unattended running, if it is running so: forgets the agent's
+    /// settings, so the next supervisor is an ordinary one, and closes the harness.
+    /// Whoever gets here first does the closing, so a run that ends and a person who
+    /// takes it over at the same moment never close the person's new session.
+    /// Returns whether it was running unattended.
+    pub(crate) async fn end_unattended(&self, chat_id: &str) -> bool {
+        if self.unattended().remove(chat_id).is_none() {
+            return false;
+        }
+        self.close(chat_id).await;
+        // Wakes the wait in `run_unattended`, also when no supervisor had started.
+        self.inner
+            .board
+            .changed
+            .send_modify(|count| *count = count.wrapping_add(1));
+        true
     }
 
     /// Takes the Chat's supervisor out of the host, for the caller to shut down.

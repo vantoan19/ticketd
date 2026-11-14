@@ -252,13 +252,24 @@ fn a_notification_carries_the_automations_name_the_filled_in_text_and_what_it_op
 
 #[test]
 fn a_preview_fills_in_the_text_with_the_ticket_changed_most_recently() {
-    let (_dir, mut workspace) = workspace();
+    let (dir, mut workspace) = workspace();
     let text = "{{ticket.reference}} {{ticket.title}} ({{ticket.status}}) got {{event.tag}}";
-    assert_eq!(workspace.preview_automation_text(text, None).unwrap(), None);
+    assert_eq!(
+        workspace.preview_automation_text(text, None, true).unwrap(),
+        None
+    );
     let first = workspace.create_ticket("Fix login").unwrap();
     workspace.create_ticket("Untouched").unwrap();
     let trashed = workspace.create_ticket("Trashed").unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    // The three were made long ago, so the changes below are the most recent
+    // whatever the clock does between two writes.
+    rusqlite::Connection::open(dir.path().join("steps.sqlite3"))
+        .unwrap()
+        .execute(
+            "UPDATE tickets SET updated_at = '2020-01-01T00:00:00.000Z'",
+            [],
+        )
+        .unwrap();
     workspace
         .change_ticket(
             &first.reference,
@@ -268,13 +279,12 @@ fn a_preview_fills_in_the_text_with_the_ticket_changed_most_recently() {
             },
         )
         .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(5));
     workspace
         .set_trashed(&trashed.reference, true, None)
         .unwrap();
 
     let preview = workspace
-        .preview_automation_text(text, Some("needs-fix"))
+        .preview_automation_text(text, Some("needs-fix"), true)
         .unwrap();
 
     assert_eq!(
@@ -284,6 +294,19 @@ fn a_preview_fills_in_the_text_with_the_ticket_changed_most_recently() {
             first.reference
         ))
     );
+}
+
+#[test]
+fn a_preview_for_an_automation_without_a_ticket_leaves_every_field_empty() {
+    let (_dir, mut workspace) = workspace();
+    workspace.create_ticket("Fix login").unwrap();
+
+    let preview = workspace
+        .preview_automation_text("Week of {{ticket.title}}{{event.tag}} is up", None, false)
+        .unwrap();
+
+    // What a run started by a schedule or by hand will send: no ticket stands in.
+    assert_eq!(preview.as_deref(), Some("Week of  is up"));
 }
 
 fn branch(id: &str, checks: Vec<Check>) -> Step {

@@ -74,17 +74,27 @@ fn ticketd_cli(app_version: &str) -> TicketdCli {
 fn pass(runner: Option<Runner>, host: ChatHost, app: &AppHandle) -> Option<Runner> {
     let runner = match runner {
         Some(runner) => runner,
-        None => Runner::new(
-            Arc::new(crate::open_workspace),
-            host,
-            ticketd_cli(&app.package_info().version.to_string()),
-            notifier(app.clone()),
-        )
-        .ok()?,
+        None => {
+            let built = Runner::new(
+                Arc::new(crate::open_workspace),
+                host,
+                ticketd_cli(&app.package_info().version.to_string()),
+                notifier(app.clone()),
+            );
+            match built {
+                Ok(runner) => runner,
+                Err(error) => {
+                    eprintln!("ticketd: the Automation runner could not start: {error}");
+                    return None;
+                }
+            }
+        }
     };
-    // ponytail: a pass that fails (the Workspace is busy or unreadable) is tried
-    // again at the next tick; nothing shows the failure.
-    let _ = runner.tick();
+    // A pass that fails (the Workspace is busy or unreadable) is tried again at the
+    // next tick, which also ends any run the failure left Running.
+    if let Err(error) = runner.tick() {
+        eprintln!("ticketd: an Automation pass failed: {error}");
+    }
     Some(runner)
 }
 

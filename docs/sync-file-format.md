@@ -199,15 +199,16 @@ A project file has no text after its header.
 
 ### Automation agent
 
-| Field                                                 | Value                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| `name`                                                | The agent's name.                                                        |
-| `harness`                                             | Required: claude-code or codex.                                          |
-| `model`                                               | The model; left out for the harness's own default.                       |
-| `turn_limit`, `time_limit_minutes`                    | Required. Whole numbers of at least 1.                                   |
-| `read_files`, `edit_files`, `run_commands`, `use_web` | What the agent may do.                                                   |
-| `allowed_commands`                                    | With `run_commands`, the only commands allowed. Their order is not kept. |
-| `trashed`                                             | Whether the agent was deleted.                                           |
+| Field                                                 | Value                                                                                                                        |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `name`                                                | The agent's name.                                                                                                            |
+| `harness`                                             | Required: claude-code or codex.                                                                                              |
+| `model`                                               | The model; left out for the harness's own default.                                                                           |
+| `turn_limit`, `time_limit_minutes`                    | Required. Whole numbers of at least 1.                                                                                       |
+| `read_files`, `edit_files`, `run_commands`, `use_web` | What the agent may do.                                                                                                       |
+| `any_command`                                         | With `run_commands`, any command may run. Left out or false: only the listed ones.                                           |
+| `allowed_commands`                                    | With `run_commands`, and without `any_command`, the only commands allowed; none listed allows none. Their order is not kept. |
+| `trashed`                                             | Whether the agent was deleted.                                                                                               |
 
 The text after the header is the agent's instructions.
 

@@ -608,7 +608,7 @@ fn runs_left_running_by_a_process_that_is_gone_end_needing_attention() {
 
     assert_eq!(
         workspace
-            .end_running_automation_runs("ticketd was restarted")
+            .end_running_automation_runs(&[], "ticketd was restarted")
             .unwrap(),
         1
     );
@@ -619,6 +619,123 @@ fn runs_left_running_by_a_process_that_is_gone_end_needing_attention() {
     assert_eq!(ended.steps[0].status, AutomationStepStatus::Failed);
     // The queued run was never started, so it still runs.
     assert_eq!(workspace.start_automation_runs(2).unwrap().len(), 1);
+}
+
+#[test]
+fn only_running_runs_nobody_is_executing_are_ended_as_left_behind() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let going = started(&mut workspace);
+    let left = started(&mut workspace);
+
+    assert_eq!(
+        workspace
+            .end_running_automation_runs(std::slice::from_ref(&going.id), "left behind")
+            .unwrap(),
+        1
+    );
+
+    let status = |id: &str| workspace.automation_run(id).unwrap().status;
+    assert_eq!(status(&going.id), AutomationRunStatus::Running);
+    assert_eq!(status(&left.id), AutomationRunStatus::NeedsAttention);
+}
+
+#[test]
+fn a_run_its_executor_cannot_go_on_with_ends_needing_attention_with_the_reason() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, _chat) = on_agent_step(&mut workspace);
+
+    assert!(workspace.fail_automation_run(&run.id, "lost").unwrap());
+
+    let failed = workspace.automation_run(&run.id).unwrap();
+    assert_eq!(failed.status, AutomationRunStatus::NeedsAttention);
+    assert_eq!(failed.reason.as_deref(), Some("lost"));
+    assert_eq!(failed.steps[0].status, AutomationStepStatus::Failed);
+    assert!(failed.needs_you);
+    // The slot is free again, and a run that has ended stays as it ended.
+    assert_eq!(workspace.start_automation_runs(1).unwrap().len(), 0);
+    assert!(!workspace.fail_automation_run(&run.id, "again").unwrap());
+    assert_eq!(workspace.automation_run(&run.id).unwrap(), failed);
+}
+
+#[test]
+fn a_run_stopped_before_its_agents_chat_is_created_leaves_no_chat_behind() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let run = started(&mut workspace);
+    workspace.advance_automation_run(&run.id, None).unwrap();
+    workspace.stop_automation_run(&run.id).unwrap();
+
+    assert!(
+        workspace
+            .create_automation_run_chat(&run.id, "triage", chat_for(&run))
+            .is_err()
+    );
+
+    assert_eq!(listed_chats(&workspace), [] as [String; 0]);
+    assert_eq!(
+        workspace.automation_run(&run.id).unwrap().steps[0].chat_id,
+        None
+    );
+}
+
+#[test]
+fn running_again_is_refused_while_the_automation_is_unfinished() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    let (run, _chat) = needing_attention(&mut workspace);
+    // The step loses its folder: the Automation can no longer run as it is.
+    let mut definition = automation.definition.clone();
+    definition.steps = vec![step(
+        "triage",
+        StepAction::RunAgent {
+            agent_id: None,
+            execution_folder: None,
+            on_failure: None,
+        },
+    )];
+    workspace
+        .update_automation(&automation.id, definition)
+        .unwrap();
+
+    let refused = workspace.run_automation_again(&run.id);
+
+    assert!(
+        matches!(&refused, Err(ticketd_core::Error::AutomationUnfinished(reason)) if reason == "Run agent: needs an agent and a folder"),
+        "{refused:?}"
+    );
+    assert_eq!(runs(&workspace, &automation).len(), 1);
+    assert!(workspace.automation_run(&run.id).unwrap().needs_you);
+}
+
+#[test]
+fn deleting_an_automation_ends_its_active_runs_and_asks_nothing_of_the_person() {
+    let (_dir, mut workspace) = workspace();
+    let automation = triage(&mut workspace);
+    let (running, chat) = on_agent_step(&mut workspace);
+    tagged(&mut workspace, "Still queued");
+    workspace.queue_automation_runs().unwrap();
+
+    // The agent that was working is handed back for the host to interrupt.
+    assert_eq!(workspace.delete_automation(&automation.id).unwrap(), [chat]);
+
+    let ended = workspace.all_automation_runs().unwrap();
+    assert_eq!(ended.len(), 2);
+    for run in &ended {
+        assert_eq!(run.status, AutomationRunStatus::NeedsAttention);
+        assert_eq!(run.reason.as_deref(), Some("You deleted this Automation."));
+        assert!(!run.needs_you);
+    }
+    assert_eq!(needing_you(&workspace), 0);
+    assert_eq!(workspace.inbox(10, 0).unwrap(), []);
+    // Nothing is left to start, and the agent's outcome is refused.
+    assert_eq!(workspace.start_automation_runs(2).unwrap().len(), 0);
+    assert!(
+        workspace
+            .advance_automation_run(&running.id, Some(StepOutcome::Completed))
+            .is_err()
+    );
 }
 
 #[test]
@@ -893,7 +1010,9 @@ fn a_run_the_person_stopped_or_ticketd_left_behind_needs_them_too() {
     let (stopped, _chat) = on_agent_step(&mut workspace);
     workspace.stop_automation_run(&stopped.id).unwrap();
     let (left, _chat) = on_agent_step(&mut workspace);
-    workspace.end_running_automation_runs("closed").unwrap();
+    workspace
+        .end_running_automation_runs(&[], "closed")
+        .unwrap();
     let (turned_off, _chat) = on_agent_step(&mut workspace);
     workspace
         .stop_and_turn_off_automation(&automation.id)

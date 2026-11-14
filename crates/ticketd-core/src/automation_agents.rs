@@ -41,7 +41,13 @@ pub struct AutomationAgentTools {
     pub read_files: bool,
     pub edit_files: bool,
     pub run_commands: bool,
-    /// With `run_commands`, the only commands allowed. Empty allows any command.
+    /// With `run_commands`, the agent may run any command. It is said outright,
+    /// never read from an empty list, so that a list two desktops shortened and
+    /// Workspace sync merged to nothing still allows nothing.
+    #[serde(default)]
+    pub any_command: bool,
+    /// With `run_commands` and without `any_command`, the only commands allowed.
+    /// Empty allows none.
     pub allowed_commands: Vec<String>,
     pub use_web: bool,
 }
@@ -52,6 +58,7 @@ impl Default for AutomationAgentTools {
             read_files: true,
             edit_files: false,
             run_commands: false,
+            any_command: false,
             allowed_commands: Vec::new(),
             use_web: false,
         }
@@ -95,7 +102,7 @@ pub struct AutomationAgent {
     pub settings: AutomationAgentSettings,
 }
 
-const COLUMNS: &str = "id, name, harness, model, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes";
+const COLUMNS: &str = "id, name, harness, model, instructions, read_files, edit_files, run_commands, allowed_commands, use_web, turn_limit, time_limit_minutes, any_command";
 
 /// `trashed` is the delete: Workspace sync has no deletions, so a record that will
 /// synchronize is hidden rather than removed.
@@ -106,6 +113,23 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     // Views refresh on the change token, so an agent changed elsewhere shows up.
     crate::change_token::track(connection, "automation_agents")?;
     connection.execute_batch("PRAGMA user_version = 68;")?;
+    Ok(())
+}
+
+/// Format version 75: "any command" becomes a setting of its own. Until now an
+/// empty command list meant it, so agents saved that way keep what they were given.
+pub(crate) fn migrate_any_command(connection: &Connection) -> Result<(), Error> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('automation_agents') WHERE name = 'any_command')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection.execute_batch(
+            "ALTER TABLE automation_agents ADD COLUMN any_command INTEGER NOT NULL DEFAULT 0;
+             UPDATE automation_agents SET any_command = 1 WHERE run_commands = 1 AND allowed_commands = '[]';",
+        )?;
+    }
     Ok(())
 }
 
@@ -143,6 +167,7 @@ fn read(row: &Row<'_>) -> rusqlite::Result<(AutomationAgent, String, String)> {
                     read_files: row.get(5)?,
                     edit_files: row.get(6)?,
                     run_commands: row.get(7)?,
+                    any_command: row.get(12)?,
                     allowed_commands: Vec::new(),
                     use_web: row.get(9)?,
                 },
@@ -181,7 +206,7 @@ impl Workspace {
         };
         let s = &agent.settings;
         self.connection.execute(
-            &format!("INSERT INTO automation_agents ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"),
+            &format!("INSERT INTO automation_agents ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"),
             params![
                 agent.id,
                 s.name,
@@ -194,7 +219,8 @@ impl Workspace {
                 commands_json(s)?,
                 s.tools.use_web,
                 s.turn_limit,
-                s.time_limit_minutes
+                s.time_limit_minutes,
+                s.tools.any_command
             ],
         )?;
         Ok(agent)
@@ -208,7 +234,7 @@ impl Workspace {
     ) -> Result<AutomationAgent, Error> {
         let s = validated(settings)?;
         let changed = self.connection.execute(
-            "UPDATE automation_agents SET name = ?2, harness = ?3, model = ?4, instructions = ?5, read_files = ?6, edit_files = ?7, run_commands = ?8, allowed_commands = ?9, use_web = ?10, turn_limit = ?11, time_limit_minutes = ?12 WHERE id = ?1 AND trashed = 0",
+            "UPDATE automation_agents SET name = ?2, harness = ?3, model = ?4, instructions = ?5, read_files = ?6, edit_files = ?7, run_commands = ?8, allowed_commands = ?9, use_web = ?10, turn_limit = ?11, time_limit_minutes = ?12, any_command = ?13 WHERE id = ?1 AND trashed = 0",
             params![
                 id,
                 s.name,
@@ -221,7 +247,8 @@ impl Workspace {
                 commands_json(&s)?,
                 s.tools.use_web,
                 s.turn_limit,
-                s.time_limit_minutes
+                s.time_limit_minutes,
+                s.tools.any_command
             ],
         )?;
         if changed == 0 {

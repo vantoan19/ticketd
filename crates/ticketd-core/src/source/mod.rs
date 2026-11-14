@@ -98,6 +98,12 @@ pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(),
 }
 
 /// Step 29: preserve the count belonging to the last accepted provider run.
+pub(crate) fn migrate_refreshed_configuration(
+    connection: &rusqlite::Connection,
+) -> Result<(), Error> {
+    freshness::migrate_refreshed_configuration(connection)
+}
+
 pub(crate) fn migrate_run_counts(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate_run_counts(connection)
 }

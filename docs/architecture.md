@@ -223,7 +223,11 @@ at most 10; read on every pass, so a change counts from the next run). The core
 holds the rules: an event with actor `automation` matches
 nothing, a ticket has one active run per Automation (a partial unique index), and a
 run keeps the Automation definition it was created with. Each of the six event types
-is a trigger, and an event with actor `sync` matches like one with actor `person`.
+is a trigger. An event with actor `sync`, which a refresh of an external ticket
+source logs, matches like one with actor `person`. An event with actor
+`workspace_sync`, which Workspace sync logs for a change made on another desktop,
+matches nothing: each desktop reacts only to changes made on it and to its ticket
+sources (provisional, ADR 0012).
 Conditions are tested against the ticket as it is when the event is matched, not as
 it was when the event was logged: its project, its tags, and its source, which is
 the provider that owns it now (`github`) or `local`, the same rule as the ticket
@@ -274,6 +278,13 @@ ended there and nothing after it run. Stop takes over only a Running run, since
 nothing is going in the Chat of one that ended; that is also why stopping a run
 from the run view, which ends the run before it interrupts the Chat, stays Needs
 attention. A Completed run stays Completed when the person replies in its Chat.
+Taking over a run that is going also ends its agents' unattended sessions at once:
+a harness cannot change how it runs in place, so the host interrupts the turn and
+closes the harness process of every Chat the run had working, and the wait in
+`run_unattended` ends without reporting a step. The Chat the person acted in then
+opens a new process that resumes the same conversation as an ordinary Chat, with
+their own settings and approvals, no run marker on what it writes, and no time
+limit; the Chat of a later step that was working stays closed and out of the list.
 The run's own first message goes through a path that takes nothing over. Retention
 deletes a run with the Chats it still owns, so a Chat the person took over is kept.
 

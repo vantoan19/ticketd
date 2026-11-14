@@ -8,8 +8,9 @@
 
 mod first_message;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use ticketd_chat_host::{ChatHost, TurnEnd, Unattended, WorkspaceOpener};
@@ -22,6 +23,21 @@ pub use first_message::first_message;
 
 /// Why runs left Running by an earlier process ended.
 const RESTARTED: &str = "ticketd closed while this run was going.";
+/// Why a run found Running that this runner is not executing ended: a restored
+/// backup brought it back, or its executor could not record how it ended.
+const ABANDONED: &str = "This run was still marked as going, but nothing was running it.";
+/// Why a run ended when ticketd closed its agent's harness: it was quitting, Chat
+/// was turned off, or a backup was being restored.
+const AGENT_STOPPED: &str = "ticketd stopped this run's agent before it finished.";
+
+/// How executing one step ended, for the loop that executes the run.
+enum Ran {
+    Step(StepOutcome),
+    /// The person took the run over: it has ended, and its Chat is theirs.
+    TakenOver,
+    /// ticketd closed the agent's harness, so the run cannot go on.
+    AgentStopped,
+}
 
 /// Where the ticketd CLI is, so an agent can be allowed to run it whatever else it
 /// may do.
@@ -47,6 +63,18 @@ struct Inner {
     host: ChatHost,
     cli: TicketdCli,
     notifier: Notifier,
+    /// The runs this runner is executing. A run that is Running in the Workspace
+    /// and not here has nothing behind it.
+    going: Mutex<HashSet<String>>,
+}
+
+/// Takes a run out of the runs being executed when its task ends, however it ends.
+struct Going<'a>(&'a Runner, &'a str);
+
+impl Drop for Going<'_> {
+    fn drop(&mut self) {
+        self.0.going().remove(self.1);
+    }
 }
 
 impl Runner {
@@ -58,60 +86,119 @@ impl Runner {
         cli: TicketdCli,
         notifier: Notifier,
     ) -> Result<Self, Error> {
-        open_workspace()?.end_running_automation_runs(RESTARTED)?;
+        open_workspace()?.end_running_automation_runs(&[], RESTARTED)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 open_workspace,
                 host,
                 cli,
                 notifier,
+                going: Mutex::new(HashSet::new()),
             }),
         })
     }
 
-    /// One pass of the loop: queue a run for each new matching event and each
-    /// schedule that has come due, then start queued runs up to the limit. The first
-    /// pass after a start is what fires a schedule missed while ticketd was not
-    /// running. Started runs execute on tasks of their own, so this returns at once;
-    /// it must be called inside a Tokio runtime.
+    fn going(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.inner
+            .going
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// One pass of the loop: end the runs left Running with nothing behind them
+    /// (after a restored backup, or bookkeeping that failed), queue a run for each
+    /// new matching event and each schedule that has come due, then start queued
+    /// runs up to the limit. The first pass after a start is what fires a schedule
+    /// missed while ticketd was not running. Started runs execute on tasks of their
+    /// own, so this returns at once; it must be called inside a Tokio runtime.
+    ///
+    /// Every part is tried, so one that fails does not hold up the others; the
+    /// first failure is returned for the host to report.
     pub fn tick(&self) -> Result<(), Error> {
+        let recovered = self.recover();
+        let queued = self.queue();
+        let started = self.start_queued();
+        recovered.and(queued).and(started)
+    }
+
+    /// Ends every Running run this runner is not executing as Needs attention.
+    fn recover(&self) -> Result<(), Error> {
+        // Held across the write, so a run `start_queued` is starting is either not
+        // Running yet or already listed.
+        let going = self.going();
+        let ids: Vec<String> = going.iter().cloned().collect();
+        (self.inner.open_workspace)()?.end_running_automation_runs(&ids, ABANDONED)?;
+        Ok(())
+    }
+
+    fn queue(&self) -> Result<(), Error> {
         let mut workspace = (self.inner.open_workspace)()?;
-        workspace.queue_automation_runs()?;
-        workspace.queue_scheduled_automation_runs(None)?;
-        drop(workspace);
-        self.start_queued()
+        let matched = workspace.queue_automation_runs().map(drop);
+        let scheduled = workspace.queue_scheduled_automation_runs(None).map(drop);
+        matched.and(scheduled)
     }
 
     fn start_queued(&self) -> Result<(), Error> {
-        // Read each time, so a change in Settings counts from the next run.
-        let mut workspace = (self.inner.open_workspace)()?;
-        let started = workspace.start_automation_runs(workspace.automation_runs_at_once()?)?;
-        drop(workspace);
+        let started = {
+            let mut going = self.going();
+            // Read each time, so a change in Settings counts from the next run.
+            let mut workspace = (self.inner.open_workspace)()?;
+            let started = workspace.start_automation_runs(workspace.automation_runs_at_once()?)?;
+            going.extend(started.iter().map(|run| run.id.clone()));
+            started
+        };
         for run in started {
             let runner = self.clone();
             tokio::spawn(async move {
-                // ponytail: a storage failure mid-run has nowhere to be shown; the run
-                // stays Running until the next start ends it as Needs attention.
-                let _ = runner.execute(&run).await;
+                {
+                    let _going = Going(&runner, &run.id);
+                    if let Err(reason) = runner.execute(&run).await {
+                        runner.abandon(&run.id, &reason);
+                    }
+                }
                 // A slot is free: the next queued run need not wait for the timer.
-                let _ = runner.start_queued();
+                if let Err(error) = runner.start_queued() {
+                    eprintln!("ticketd: queued Automation runs could not be started: {error}");
+                }
             });
         }
         Ok(())
     }
 
+    /// A run this runner cannot go on with ends as Needs attention with `reason`,
+    /// so it never stays Running with nothing behind it. One that has already
+    /// ended, because the person stopped it or took it over, is left as it ended.
+    fn abandon(&self, run_id: &str, reason: &str) {
+        let ended = (self.inner.open_workspace)()
+            .and_then(|mut workspace| workspace.fail_automation_run(run_id, reason));
+        match ended {
+            Ok(true) => eprintln!("ticketd: Automation run {run_id} ended: {reason}"),
+            Ok(false) => {}
+            // The next pass finds it Running with nothing behind it and ends it.
+            Err(error) => {
+                eprintln!("ticketd: Automation run {run_id} could not be ended ({reason}): {error}")
+            }
+        }
+    }
+
     /// Executes a started run to its end: the core says which step is next, this
-    /// runs it and reports how it ended.
-    async fn execute(&self, run: &AutomationRun) -> Result<(), Error> {
+    /// runs it and reports how it ended. The error is why the run cannot go on, in
+    /// words for the person.
+    async fn execute(&self, run: &AutomationRun) -> Result<(), String> {
+        let lost = |error: Error| format!("ticketd could not keep this run's record. {error}");
         let mut outcome = None;
         loop {
-            let action = (self.inner.open_workspace)()?.advance_automation_run(&run.id, outcome)?;
+            let action = (self.inner.open_workspace)()
+                .and_then(|mut workspace| workspace.advance_automation_run(&run.id, outcome))
+                .map_err(lost)?;
             let step_id = match action {
                 RunAction::RunStep { step_id } => step_id,
                 RunAction::End(_) => return Ok(()),
             };
             outcome = Some(match self.run_step(run, &step_id).await {
-                Ok(outcome) => outcome,
+                Ok(Ran::Step(outcome)) => outcome,
+                Ok(Ran::TakenOver) => return Ok(()),
+                Ok(Ran::AgentStopped) => return Err(AGENT_STOPPED.to_owned()),
                 // A step the core refused has failed; the reason is the core's.
                 Err(error) => StepOutcome::Failed {
                     reason: error.to_string(),
@@ -120,11 +207,11 @@ impl Runner {
         }
     }
 
-    async fn run_step(&self, run: &AutomationRun, step_id: &str) -> Result<StepOutcome, Error> {
+    async fn run_step(&self, run: &AutomationRun, step_id: &str) -> Result<Ran, Error> {
         let failed = |reason: &str| {
-            Ok(StepOutcome::Failed {
+            Ok(Ran::Step(StepOutcome::Failed {
                 reason: reason.to_owned(),
-            })
+            }))
         };
         let Some(step) = run.step(step_id) else {
             return failed("This step is no longer part of the run.");
@@ -139,12 +226,12 @@ impl Runner {
             // A change the core refuses is the step's failure, in the core's words.
             StepAction::ChangeTicket { .. } => (self.inner.open_workspace)()?
                 .apply_automation_change(&run.id, step_id)
-                .map(|()| StepOutcome::Completed),
+                .map(|()| Ran::Step(StepOutcome::Completed)),
             StepAction::Notify { .. } => {
                 let notification =
                     (self.inner.open_workspace)()?.automation_notification(&run.id, step_id)?;
                 match (self.inner.notifier)(notification) {
-                    Ok(()) => Ok(StepOutcome::Completed),
+                    Ok(()) => Ok(Ran::Step(StepOutcome::Completed)),
                     Err(reason) => {
                         failed(&format!("The notification could not be shown. {reason}"))
                     }
@@ -153,7 +240,7 @@ impl Runner {
             // The core reads the ticket now, so the answer follows what earlier steps did.
             StepAction::If { .. } => (self.inner.open_workspace)()?
                 .automation_if_passes(&run.id, step_id)
-                .map(|yes| StepOutcome::Branched { yes }),
+                .map(|yes| Ran::Step(StepOutcome::Branched { yes })),
         }
     }
 
@@ -165,14 +252,14 @@ impl Runner {
         step_id: &str,
         agent_id: &str,
         folder: &str,
-    ) -> Result<StepOutcome, Error> {
+    ) -> Result<Ran, Error> {
         let mut workspace = (self.inner.open_workspace)()?;
         let agent = match workspace.automation_agent(agent_id) {
             Ok(agent) => agent,
             Err(Error::AutomationAgentNotFound(_)) => {
-                return Ok(StepOutcome::Failed {
+                return Ok(Ran::Step(StepOutcome::Failed {
                     reason: "The agent this step runs was deleted.".to_owned(),
-                });
+                }));
             }
             Err(error) => return Err(error),
         };
@@ -216,13 +303,21 @@ impl Runner {
             .run_unattended(&chat.id, &message, unattended, time_limit)
             .await;
         Ok(match ended {
-            Ok(TurnEnd::Finished) => StepOutcome::Completed,
-            Ok(end) => StepOutcome::Failed {
+            Ok(TurnEnd::Finished) => Ran::Step(StepOutcome::Completed),
+            Ok(TurnEnd::TakenOver) => Ran::TakenOver,
+            Ok(TurnEnd::Stopped) => Ran::AgentStopped,
+            Ok(
+                end @ (TurnEnd::TurnLimitReached
+                | TurnEnd::TimeLimitReached
+                | TurnEnd::ToolDenied { .. }
+                | TurnEnd::Crashed { .. }
+                | TurnEnd::Failed { .. }),
+            ) => Ran::Step(StepOutcome::Failed {
                 reason: failure_reason(&end, &agent),
-            },
-            Err(error) => StepOutcome::Failed {
+            }),
+            Err(error) => Ran::Step(StepOutcome::Failed {
                 reason: format!("The agent could not be started. {error}"),
-            },
+            }),
         })
     }
 }
@@ -255,7 +350,8 @@ fn failure_reason(end: &TurnEnd, agent: &AutomationAgent) -> String {
     };
     let settings = &agent.settings;
     match end {
-        TurnEnd::Finished => String::new(),
+        // Not failures: the caller handles them before asking for a reason.
+        TurnEnd::Finished | TurnEnd::TakenOver | TurnEnd::Stopped => String::new(),
         TurnEnd::TurnLimitReached => format!(
             "The agent reached its limit of {} turns before finishing.",
             settings.turn_limit

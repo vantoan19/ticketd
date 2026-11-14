@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::automations::{
-    Automation, AutomationDefinition, Schedule, Step, StepAction, StepChange, Trigger, Weekday,
+    Automation, AutomationDefinition, Check, Schedule, Step, StepAction, StepChange, Trigger,
+    Weekday,
 };
 use crate::{Error, Status, Workspace};
 
@@ -71,17 +72,30 @@ impl Workspace {
             AutomationExample::TriageTaggedTickets => {
                 (tag_added("ready-for-triage"), vec![run_agent])
             }
-            // The agent checks the work, then the ticket moves on. A step the agent
-            // fails ends the run, so only checked work is marked Done.
+            // The agent records its result on the ticket: it adds the tag `verified`
+            // when the work passes. An agent that finds the work broken has still
+            // finished its step, so the If reads the tag, not how the step ended.
             AutomationExample::VerifyReadyForTesting => (
                 tag_added("ready-for-testing"),
                 vec![
                     run_agent,
-                    step(StepAction::ChangeTicket {
-                        change: Some(StepChange::SetStatus {
-                            status: Status::Done,
-                        }),
-                        on_failure: None,
+                    step(StepAction::If {
+                        checks: vec![Check::Tag {
+                            tag: "verified".to_owned(),
+                            has: true,
+                        }],
+                        yes: vec![step(StepAction::ChangeTicket {
+                            change: Some(StepChange::SetStatus {
+                                status: Status::Done,
+                            }),
+                            on_failure: None,
+                        })],
+                        no: vec![step(StepAction::ChangeTicket {
+                            change: Some(StepChange::AddTag {
+                                tag: "needs-fix".to_owned(),
+                            }),
+                            on_failure: None,
+                        })],
                     }),
                 ],
             ),

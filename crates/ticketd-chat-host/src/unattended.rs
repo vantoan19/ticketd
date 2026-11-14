@@ -34,13 +34,21 @@ pub enum TurnEnd {
     Failed {
         detail: String,
     },
+    /// The person replied in or stopped the Chat (or another Chat of the same run):
+    /// the run is theirs, and so is this Chat from here on.
+    TakenOver,
+    /// ticketd closed the Chat's harness: it is quitting, Chat was turned off, or a
+    /// backup is being restored.
+    Stopped,
 }
 
 impl ChatHost {
     /// Sends `text` as the first message of a Chat nobody watches and returns how its
     /// turn ended. The harness runs with `unattended`'s settings; a turn still active
-    /// after `time_limit` is stopped. The harness process is closed before this
-    /// returns, whatever happened.
+    /// after `time_limit` is stopped. The unattended harness process is closed before
+    /// this returns, whatever happened. When the person took the Chat over meanwhile,
+    /// `take_over` closed it and this returns `TakenOver` without touching the
+    /// session that is now theirs: neither the turn's end nor the time limit ends it.
     pub async fn run_unattended(
         &self,
         chat_id: &str,
@@ -50,8 +58,9 @@ impl ChatHost {
     ) -> Result<TurnEnd, HostError> {
         self.set_unattended(chat_id, Some(unattended));
         let ended = self.first_turn(chat_id, text, time_limit).await;
-        self.close(chat_id).await;
-        self.set_unattended(chat_id, None);
+        if !self.end_unattended(chat_id).await {
+            return Ok(TurnEnd::TakenOver);
+        }
         ended
     }
 
@@ -68,6 +77,12 @@ impl ChatHost {
             .await?;
         let waiting = async {
             loop {
+                if !self.is_unattended(chat_id) {
+                    return Ok(TurnEnd::TakenOver);
+                }
+                if !self.supervised(chat_id) {
+                    return Ok(TurnEnd::Stopped);
+                }
                 if let Some(end) = self.turn_end(chat_id)? {
                     return Ok(end);
                 }
@@ -90,7 +105,7 @@ impl ChatHost {
     }
 
     /// Stops the Chat's supervisor and its harness process with bounded cleanup.
-    async fn close(&self, chat_id: &str) {
+    pub(crate) async fn close(&self, chat_id: &str) {
         let Some(commands) = self.forget(chat_id) else {
             return;
         };

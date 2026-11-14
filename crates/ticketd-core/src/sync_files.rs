@@ -261,6 +261,9 @@ const AUTOMATION_AGENT: &[Field] = &[
     ("read_files", Type::Flag, false),
     ("edit_files", Type::Flag, false),
     ("run_commands", Type::Flag, false),
+    // A field of its own, so it merges as one value: two desktops that each
+    // shorten `allowed_commands` to nothing never add up to "any command".
+    ("any_command", Type::Flag, false),
     ("allowed_commands", Type::Texts, false),
     ("use_web", Type::Flag, false),
     ("trashed", Type::Flag, false),
@@ -1147,7 +1150,7 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
             &["name", "body", "archived", "spec"],
         )],
         SyncKind::AutomationAgent => &[(
-            "SELECT name, harness, model, CAST(turn_limit AS TEXT), CAST(time_limit_minutes AS TEXT), read_files, edit_files, run_commands, allowed_commands, use_web, instructions, trashed FROM automation_agents WHERE id = ?1",
+            "SELECT name, harness, model, CAST(turn_limit AS TEXT), CAST(time_limit_minutes AS TEXT), read_files, edit_files, run_commands, any_command, allowed_commands, use_web, instructions, trashed FROM automation_agents WHERE id = ?1",
             &[
                 "name",
                 "harness",
@@ -1157,6 +1160,7 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
                 "read_files",
                 "edit_files",
                 "run_commands",
+                "any_command",
                 "allowed_commands",
                 "use_web",
                 "body",
@@ -1469,7 +1473,7 @@ impl Apply<'_> {
             }
             (
                 SyncKind::AutomationAgent,
-                "read_files" | "edit_files" | "run_commands" | "use_web",
+                "read_files" | "edit_files" | "run_commands" | "any_command" | "use_web",
             ) => {
                 put(c, table, field, id, &flag)?;
             }
@@ -1480,6 +1484,7 @@ impl Apply<'_> {
             }
             (SyncKind::Automation, "body") => {
                 let definition = crate::automations::from_file_body(value.unwrap_or(""))?;
+                crate::automations::restart_schedule_if_trigger_changes(c, id, &definition)?;
                 put(c, table, "definition", id, &definition)?;
             }
             // Neither needs a name.
@@ -1851,7 +1856,7 @@ project: name
 document: title created_at tags origin_activity trashed kept pinned
 plan: name archived spec documents
 ticket: ref title status project plan parent blocked_by blocked_since blocked_by_removed parent_removed related discovered duplicate_of duplicate_restore tags documents attachments trashed following reminder source_provider source_external_id source_locator source_display source_url source_origin source_linked_at source_authority source_authority_changed_at source_state source_closure_reason source_updated_at
-automation_agent: name harness model turn_limit time_limit_minutes read_files edit_files run_commands allowed_commands use_web trashed
+automation_agent: name harness model turn_limit time_limit_minutes read_files edit_files run_commands any_command allowed_commands use_web trashed
 automation: name trashed
 <!-- ticketd:activity -->: reported_at updated_at agent document
 <!-- ticketd:evidence -->: kind name value created_at updated_at agent

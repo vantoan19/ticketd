@@ -1368,6 +1368,17 @@ impl Workspace {
 
     /// Create a Chat. Repeating `command_id` with the same content returns the first Chat.
     pub fn create_chat(&mut self, command_id: Option<&str>, chat: NewChat) -> Result<Chat, Error> {
+        self.create_chat_with(command_id, chat, |_, _| Ok(()))
+    }
+
+    /// Creates a Chat and, in the same transaction, runs `also` with its id: when
+    /// `also` refuses, no Chat is left behind.
+    pub(crate) fn create_chat_with(
+        &mut self,
+        command_id: Option<&str>,
+        chat: NewChat,
+        also: impl FnOnce(&Connection, &str) -> Result<(), Error>,
+    ) -> Result<Chat, Error> {
         if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
             return Err(invalid("a Chat needs a harness and an execution folder"));
         }
@@ -1386,6 +1397,7 @@ impl Workspace {
                 log(connection, &id, "chat", &id)?;
                 Ok(id)
             })?;
+            also(connection, &id)?;
             read_chat(connection, &id)
         })
     }
