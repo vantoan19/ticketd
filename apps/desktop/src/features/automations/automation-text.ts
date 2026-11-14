@@ -137,12 +137,21 @@ export function textParts(text: string): (string | { field: TextField })[] {
     .filter((part) => part !== "");
 }
 
-/** Stored text in words on one line, each field by its name: for a card. */
+/** A field as a card marks it: short, since the card already says "Ticket". */
+const FIELD_MARKS: Record<TextField, string> = {
+  "ticket.reference": "[reference]",
+  "ticket.title": "[title]",
+  "ticket.status": "[status]",
+  "event.tag": "[tag]",
+};
+
+/**
+ * Stored text on one line, each field marked as one ("Ticket [reference]
+ * changed"), so a field never reads as words of the message: for a card.
+ */
 export function textInWords(text: string): string {
   return textParts(text)
-    .map((part) =>
-      typeof part === "string" ? part : ` ${TEXT_FIELDS[part.field]} `,
-    )
+    .map((part) => (typeof part === "string" ? part : FIELD_MARKS[part.field]))
     .join("")
     .replace(/\s+/g, " ")
     .trim();
@@ -182,7 +191,8 @@ export function agentReach(agent: AutomationAgent): string {
       : agent.tools;
   const commands = tools.allowed_commands.length;
   const may = [
-    tools.read_files && "read files",
+    // Editing lets it read too: Claude Code changes only a file it has read.
+    (tools.read_files || tools.edit_files) && "read files",
     tools.edit_files && "edit files",
     // "Any command" is said outright; an empty list allows none.
     tools.run_commands &&

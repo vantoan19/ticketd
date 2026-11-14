@@ -41,6 +41,7 @@ import {
   END_SIZE,
   GAP,
   layoutFlow,
+  LEAST_ZOOM,
   type FlowList,
 } from "@/features/automations/canvas-layout";
 import {
@@ -592,7 +593,7 @@ export function FlowCanvas({
             edges={edges}
             nodeTypes={nodeTypes}
             // As far out as the zoom control goes, for an overview.
-            minZoom={0.25}
+            minZoom={LEAST_ZOOM}
             maxZoom={1.5}
             panOnScroll
             nodesDraggable={false}

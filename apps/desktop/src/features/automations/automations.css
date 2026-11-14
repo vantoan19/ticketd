@@ -254,15 +254,18 @@
   z-index: 5;
 }
 /* The bar across the top of the canvas: switched off, not saved, changed
-   elsewhere. Narrow, its buttons go under the sentence instead of squeezing it. */
+   elsewhere. Narrow, its buttons go under the sentence instead of squeezing it;
+   the agent form's notice does the same. */
 .flow-notice {
   flex: none;
   padding: 16px 16px 0;
 }
-.flow-notice .ui-notice-compact {
+.flow-notice .ui-notice-compact,
+.agent-column .ui-notice-compact {
   flex-wrap: wrap;
 }
-.flow-notice .ui-notice-compact .ui-notice-description {
+.flow-notice .ui-notice-compact .ui-notice-description,
+.agent-column .ui-notice-compact .ui-notice-description {
   flex-basis: 160px;
 }
 .flow-canvas .react-flow__background {

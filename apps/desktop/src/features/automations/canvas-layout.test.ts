@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   layoutFlow,
+  focusZoom,
   readableViewport,
 } from "@/features/automations/canvas-layout";
 
@@ -290,4 +291,36 @@ test("a selected card whose failure path does not fit beside it is shown whole a
   );
 
   expect(view.x).toBe(16);
+});
+
+test("a selected card and the first step of its failure path are shown together beside the panel, below the readable size if need be but not below half", () => {
+  // A Run agent card with its failure path, as an editor 1280 px wide shows it
+  // with the panel open: a canvas 363 px wide (round 2's M7).
+  const layout = layoutFlow([{ id: "agent", on_failure: [{ id: "retry" }] }]);
+  const at = (id: string) => {
+    const item = layout.items.find((found) => found.id === id)!;
+    return { x: item.x, y: item.y, width: 240, height: 76 };
+  };
+  const agent = at("agent");
+  const retry = at("retry");
+  const focus = {
+    x: agent.x,
+    y: agent.y,
+    width: retry.x + retry.width - agent.x,
+    height: retry.y + retry.height - agent.y,
+  };
+  const flow = { x: 0, y: 0, width: focus.x + focus.width, height: 600 };
+  const canvas = { width: 363, height: 640 };
+
+  const zoom = focusZoom(focus, canvas);
+  const view = readableViewport(flow, focus, canvas, false, zoom);
+
+  expect(zoom).toBeLessThan(0.75);
+  expect(zoom).toBeGreaterThanOrEqual(0.5);
+  expect(view.x + focus.x * zoom).toBeGreaterThanOrEqual(16);
+  expect(view.x + (focus.x + focus.width) * zoom).toBeLessThanOrEqual(363 - 16);
+  // Room enough at the readable size: it stays there.
+  expect(focusZoom(focus, { width: 1200, height: 800 })).toBe(0.75);
+  // Never below half, however narrow.
+  expect(focusZoom(focus, { width: 200, height: 640 })).toBe(0.5);
 });

@@ -167,6 +167,27 @@ fn schedule_and_by_hand_triggers_are_stored() {
 }
 
 #[test]
+fn a_schedule_repeats_at_most_once_a_week() {
+    let (_dir, mut workspace) = workspace();
+    let every = |hours| AutomationDefinition {
+        trigger: Some(Trigger::Schedule {
+            schedule: Schedule::EveryHours { hours },
+        }),
+        ..AutomationDefinition::default()
+    };
+    let weekly = workspace.create_automation(every(168)).unwrap();
+    let refused = workspace.update_automation(&weekly.id, every(169));
+    assert_eq!(
+        refused.unwrap_err().to_string(),
+        "invalid Automation: a schedule can repeat at most every 168 hours (a week)"
+    );
+    assert!(matches!(
+        workspace.create_automation(every(u32::MAX)),
+        Err(Error::InvalidAutomation(_))
+    ));
+}
+
+#[test]
 fn a_new_automation_is_empty_off_and_listed_newest_first() {
     let (_dir, mut workspace) = workspace();
     assert!(workspace.automations().unwrap().is_empty());

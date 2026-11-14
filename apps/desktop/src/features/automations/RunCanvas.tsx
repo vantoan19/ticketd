@@ -15,6 +15,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import {
   CARD_WIDTH,
   layoutFlow,
+  LEAST_ZOOM,
   TRIGGER_ID,
 } from "@/features/automations/canvas-layout";
 import type {
@@ -241,7 +242,7 @@ export function RunCanvas({
           edges={edges}
           nodeTypes={nodeTypes}
           // As far out as the zoom control goes, for an overview.
-          minZoom={0.25}
+          minZoom={LEAST_ZOOM}
           maxZoom={1.5}
           panOnScroll
           nodesDraggable={false}

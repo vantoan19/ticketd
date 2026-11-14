@@ -14,6 +14,10 @@ import {
   type AutomationAgent,
 } from "@/features/automations/client";
 import { agentReach, folderName } from "@/features/automations/automation-text";
+import {
+  harnessStanding,
+  useHarnessStatus,
+} from "@/features/automations/use-harnesses";
 import { useChatClient } from "@/features/chats/client";
 import { withoutVerbatim } from "@/features/projects/paths";
 import type { Project } from "@/lib/api/client";
@@ -97,6 +101,17 @@ export function RunAgentFields({
   const chat = useChatClient();
   const agent = agents.find((item) => item.id === agentId);
   const agentName = agent ? agent.name.trim() || "New agent" : null;
+  const statusOf = useHarnessStatus();
+  // A hint only: the Automation may sync to a desktop that has the harness,
+  // and a run that cannot start here says why.
+  const harnessMissing =
+    agent && !harnessStanding(statusOf(agent.harness)).usable
+      ? `${HARNESS_NAMES[agent.harness]} ${
+          statusOf(agent.harness) === "not_installed"
+            ? "is not installed on"
+            : "cannot run on"
+        } this computer, so this step cannot run here.`
+      : null;
   return (
     <>
       <div className="flow-panel-section">
@@ -150,6 +165,7 @@ export function RunAgentFields({
             </button>
           </p>
         )}
+        {harnessMissing && <p className="flow-panel-note">{harnessMissing}</p>}
       </div>
       <div className="flow-panel-section">
         <span aria-hidden="true">Folder</span>

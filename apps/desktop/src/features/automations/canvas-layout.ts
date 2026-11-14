@@ -196,7 +196,32 @@ const TOP = 32;
 export const ZOOM_ROOM = 48;
 
 /**
- * Where a flow too big to show whole goes at the readable size, one axis at a
+ * The smallest a canvas goes, by the zoom control or Fit: small enough that
+ * Fit shows a wide flow whole in the narrowest canvas beside the panel.
+ */
+export const LEAST_ZOOM = 0.1;
+/** The least a selected card is shrunk to so its failure path shows beside it (#387 D13). */
+export const LEAST_FOCUS_ZOOM = 0.5;
+
+/**
+ * The size that shows all of `focus` (a selected card with the first step of
+ * its failure path): the readable size when it fits there, else smaller, but
+ * never below LEAST_FOCUS_ZOOM.
+ */
+export function focusZoom(
+  focus: Box,
+  canvas: { width: number; height: number },
+) {
+  const fits = Math.min(
+    (canvas.width - 2 * VIEW_MARGIN) / focus.width,
+    (canvas.height - TOP - ZOOM_ROOM) / focus.height,
+  );
+  return Math.min(READABLE_ZOOM, Math.max(LEAST_FOCUS_ZOOM, fits));
+}
+
+/**
+ * Where a flow too big to show whole goes at `zoom`, the readable size unless
+ * said otherwise, one axis at a
  * time. An axis the flow fits is centered on the whole flow. On one it does
  * not, `focus` is shown, centered, or with its top at the top when `fromTop`,
  * but the view never runs past either end of the flow.
@@ -206,8 +231,8 @@ export function readableViewport(
   focus: Box,
   canvas: { width: number; height: number },
   fromTop: boolean,
+  zoom = READABLE_ZOOM,
 ) {
-  const zoom = READABLE_ZOOM;
   const place = (
     start: number,
     length: number,

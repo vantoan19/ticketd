@@ -360,6 +360,9 @@ export function AutomationsView({
         worked("new-automation");
         setAutomations((current) => [automation, ...(current ?? [])]);
         setTab("automations");
+        // As setOpenId does: the run and what failed belonged to the pane before.
+        setRun(null);
+        setFailure(null);
         setOpenIds((current) => ({ ...current, automations: automation.id }));
       },
       failed("new-automation", "The Automation could not be made."),

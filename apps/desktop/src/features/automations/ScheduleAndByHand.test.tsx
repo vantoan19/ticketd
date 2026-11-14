@@ -192,9 +192,9 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
     kind: "schedule",
     schedule: { kind: "every_hours", hours: 6 },
   });
-  fireEvent.change(within(panel).getByRole("spinbutton", { name: "Hours" }), {
-    target: { value: "2" },
-  });
+  const hours = within(panel).getByRole("spinbutton", { name: "Hours" });
+  fireEvent.change(hours, { target: { value: "2" } });
+  fireEvent.blur(hours);
   expect(stored.trigger).toEqual({
     kind: "schedule",
     schedule: { kind: "every_hours", hours: 2 },
@@ -202,6 +202,25 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
   expect(triggerCard(steps).getAttribute("aria-label")).toBe(
     "On a schedule: Every 2 hours",
   );
+
+  // At most a week; more is said under the field and never sent.
+  for (const typed of ["169", "99999999999"]) {
+    fireEvent.change(hours, { target: { value: typed } });
+    expect(within(panel).getByRole("alert").textContent).toBe(
+      "Every 1 to 168 hours. For longer, use At set times.",
+    );
+    fireEvent.blur(hours);
+    expect(stored.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "every_hours", hours: 2 },
+    });
+  }
+  fireEvent.change(hours, { target: { value: "168" } });
+  fireEvent.keyDown(hours, { key: "Enter" });
+  expect(stored.trigger).toEqual({
+    kind: "schedule",
+    schedule: { kind: "every_hours", hours: 168 },
+  });
   // A schedule is switched on like any Automation.
   expect(
     screen.getByRole("switch", { name: "On for this desktop" }),

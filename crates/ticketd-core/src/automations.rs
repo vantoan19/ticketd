@@ -20,6 +20,9 @@ const DELETED: &str = "You deleted this Automation.";
 /// The longest name an Automation may have, in characters. The Rename dialog
 /// (`AutomationEditor.tsx`) stops at the same length.
 pub const AUTOMATION_NAME_LIMIT: usize = 120;
+/// The most hours an "Every N hours" schedule may wait, a week; longer schedules
+/// use weekdays. The trigger panel (`TriggerPanel.tsx`) offers the same range.
+pub const MOST_SCHEDULE_HOURS: u32 = 168;
 
 /// The `step_id` of a problem with the trigger, which is a card but not a step.
 pub const AUTOMATION_TRIGGER_ID: &str = "trigger";
@@ -511,6 +514,15 @@ fn tidied(mut definition: AutomationDefinition) -> Result<AutomationDefinition, 
     if definition.name.chars().count() > AUTOMATION_NAME_LIMIT {
         return Err(Error::InvalidAutomation(format!(
             "a name can be at most {AUTOMATION_NAME_LIMIT} characters"
+        )));
+    }
+    if let Some(Trigger::Schedule {
+        schedule: Schedule::EveryHours { hours },
+    }) = &definition.trigger
+        && *hours > MOST_SCHEDULE_HOURS
+    {
+        return Err(Error::InvalidAutomation(format!(
+            "a schedule can repeat at most every {MOST_SCHEDULE_HOURS} hours (a week)"
         )));
     }
     if let Some(Trigger::TagAdded { tag } | Trigger::TagRemoved { tag }) = &mut definition.trigger {

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Ellipsis, Maximize2, Minimize2, X } from "lucide-react";
 import {
   Alert,
@@ -27,7 +27,11 @@ import {
   type AutomationAgentSettings,
 } from "@/features/automations/client";
 import { FIXED_ON_FOR_CODEX } from "@/features/automations/automation-text";
-import { useChatClient, type HarnessStatus } from "@/features/chats/client";
+import {
+  harnessStanding,
+  useHarnessStatus,
+} from "@/features/automations/use-harnesses";
+import { useWholeNumber } from "@/features/automations/whole-number";
 import {
   SettingsList,
   SettingsListFooter,
@@ -41,32 +45,6 @@ const HARNESSES: { id: Harness; name: string }[] = [
   { id: "claude-code", name: "Claude Code" },
   { id: "codex", name: "Codex" },
 ];
-
-/** What a harness tile says about this computer, and whether it can be chosen. */
-function harnessStanding(status: HarnessStatus["status"] | undefined): {
-  label: string;
-  tone: "positive" | "attention" | "neutral";
-  usable: boolean;
-} {
-  switch (status) {
-    case undefined:
-      return { label: "Checking…", tone: "neutral", usable: true };
-    case "ready":
-    case "not_subscription":
-    case "sign_in_unknown":
-      return { label: "Ready", tone: "positive", usable: true };
-    case "not_signed_in":
-      return { label: "Not signed in", tone: "attention", usable: true };
-    case "unknown":
-      return { label: "Could not check", tone: "neutral", usable: true };
-    case "not_installed":
-      return { label: "Not installed", tone: "neutral", usable: false };
-    case "incompatible":
-      return { label: "Needs an update", tone: "neutral", usable: false };
-    case "unavailable":
-      return { label: "Not available", tone: "neutral", usable: false };
-  }
-}
 
 /**
  * One line of the agent editor: what it is, a note that gives way first, and
@@ -106,7 +84,8 @@ const TOOLS: {
   {
     key: "edit_files",
     title: "Edit files",
-    description: "In the step’s folder",
+    // Claude Code changes only a file it has read, so this lets it read too.
+    description: "In the step’s folder; it can also read files",
   },
   {
     key: "run_commands",
@@ -125,8 +104,8 @@ const MOST_TURNS = 500;
 const MOST_MINUTES = 240;
 
 /**
- * A limit row: a whole number from 1 to `most`, saved only while it is one and
- * said under the field while it is not.
+ * A limit row: a whole number from 1 to `most`, saved when it is finished and
+ * said under the field while what is typed is not one.
  */
 function LimitRow({
   title,
@@ -144,33 +123,20 @@ function LimitRow({
   onSave: (value: number) => void;
 }) {
   const noteId = useId();
-  const [text, setText] = useState(String(value));
-  const inRange = (next: number) =>
-    Number.isInteger(next) && next >= 1 && next <= most;
-  const invalid = !disabled && !inRange(Number(text));
+  const field = useWholeNumber({ value, most, onCommit: onSave });
+  const invalid = !disabled && field.invalid;
   return (
     <ToolRow
       title={title}
       description={description}
       control={
         <Input
-          type="number"
-          min={1}
-          max={most}
-          step={1}
+          {...field.inputProps}
           className="h-8 w-18"
           aria-label={title}
           aria-invalid={invalid || undefined}
           aria-describedby={invalid ? noteId : undefined}
           disabled={disabled}
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            const next = Number(event.target.value);
-            if (inRange(next)) onSave(next);
-          }}
-          // Leaving the field with something that is not a limit shows the saved one.
-          onBlur={() => setText(String(value))}
         />
       }
     >
@@ -214,15 +180,18 @@ export function AgentForm({
   onSave: (settings: AutomationAgentSettings) => Promise<AutomationAgent>;
   onDelete: () => void;
 }) {
-  const client = useChatClient();
   const fieldId = useId();
   const [draft, setDraft] = useState(() => settingsOf(agent));
   /** The command list as typed: one per line, blank lines and all. */
   const [commands, setCommands] = useState(
     agent.tools.allowed_commands.join("\n"),
   );
-  /** The settings as the core last said they are stored, to tell a change made elsewhere. */
+  /**
+   * The settings as last received. The page passes the agent as the core last
+   * said it is stored: read after a change, or the answer to a save.
+   */
   const arrived = JSON.stringify(settingsOf(agent));
+  /** What the draft was taken from or last saved as, to tell a change made elsewhere. */
   const [stored, setStored] = useState(arrived);
   const [seen, setSeen] = useState(arrived);
   /** Saves sent and not yet answered. */
@@ -230,41 +199,27 @@ export function AgentForm({
   const sends = useRef(0);
   /** The last save failed: the draft holds a change that is not stored. */
   const [unsaved, setUnsaved] = useState(false);
-  /** Settings changed elsewhere while a change here was not saved. */
-  const [elsewhere, setElsewhere] = useState<AutomationAgentSettings | null>(
-    null,
-  );
-  /** Counts the settings taken from elsewhere, to restart fields that keep their own text. */
-  const [taken, setTaken] = useState(0);
   const take = (settings: AutomationAgentSettings) => {
     setStored(JSON.stringify(settings));
     setDraft(settings);
     setCommands(settings.tools.allowed_commands.join("\n"));
-    setTaken((count) => count + 1);
     setUnsaved(false);
-    setElsewhere(null);
   };
   if (arrived !== seen) {
     setSeen(arrived);
-    // While a save is on its way, its answer says what is stored.
-    if (saving === 0 && arrived !== stored) {
-      if (unsaved) setElsewhere(settingsOf(agent));
-      else take(settingsOf(agent));
-    }
+    // With nothing of its own unsaved, the form takes it silently. While a
+    // save is on its way, its answer says what is stored.
+    if (saving === 0 && !unsaved && arrived !== stored) take(settingsOf(agent));
   }
-  /** null until the probe answers: seconds, while each harness is asked. */
-  const [found, setFound] = useState<HarnessStatus[] | null>(null);
+  /**
+   * Changed elsewhere while a change here is not stored: asked about until the
+   * person chooses or a save works. It follows from what is stored and
+   * received, so a change that came during a save that then failed is asked
+   * about too, and a save that works ends it.
+   */
+  const elsewhere = unsaved && saving === 0 && arrived !== stored;
+  const statusOf = useHarnessStatus();
   const [deleting, setDeleting] = useState(false);
-  useEffect(() => {
-    let current = true;
-    client.harnesses().then(
-      (harnesses) => current && setFound(harnesses),
-      () => current && setFound([]),
-    );
-    return () => {
-      current = false;
-    };
-  }, [client]);
 
   const save = (next: AutomationAgentSettings) => {
     const sent = ++sends.current;
@@ -272,9 +227,11 @@ export function AgentForm({
     onSave(next).then(
       (saved) => {
         setSaving((count) => count - 1);
+        // Only the latest save says how things stand; the page passes on only
+        // its answer too, so an earlier one would look like a change elsewhere.
+        if (sent !== sends.current) return;
         setStored(JSON.stringify(settingsOf(saved)));
-        // Only the latest save says how things stand.
-        if (sent === sends.current) setUnsaved(false);
+        setUnsaved(false);
       },
       () => {
         setSaving((count) => count - 1);
@@ -297,12 +254,7 @@ export function AgentForm({
     HARNESSES.find((item) => item.id === draft.harness)?.name ?? "Harness";
   const standings = HARNESSES.map((harness) => ({
     ...harness,
-    standing: harnessStanding(
-      found
-        ? (found.find((item) => item.id === harness.id)?.status ??
-            "not_installed")
-        : undefined,
-    ),
+    standing: harnessStanding(statusOf(harness.id)),
   }));
   const missing = standings.filter((harness) => !harness.standing.usable);
 
@@ -375,25 +327,18 @@ export function AgentForm({
             <Alert size="compact">
               <AlertTitle>Changed somewhere else</AlertTitle>
               <AlertDescription>
-                This agent was changed elsewhere while your last change was not
-                saved.
+                Changed elsewhere while your change was not saved.
               </AlertDescription>
               <AlertActions>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => take(elsewhere)}
+                  // The agent as received now is what is stored.
+                  onClick={() => take(settingsOf(agent))}
                 >
                   Use that version
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setElsewhere(null);
-                    save(draft);
-                  }}
-                >
+                <Button variant="outline" size="sm" onClick={() => save(draft)}>
                   Keep mine
                 </Button>
               </AlertActions>
@@ -542,7 +487,8 @@ export function AgentForm({
               <p className="agent-hint">
                 Codex applies its own sandbox: it reads files, runs any command,
                 and writes only in the step’s folder and your ticketd data. Your
-                own choices are kept for Claude Code.
+                own choices are kept for Claude Code. Codex also reads your own
+                AGENTS.md and skills; ticketd cannot switch that off.
               </p>
             ) : (
               <p className="agent-hint">
@@ -559,7 +505,6 @@ export function AgentForm({
             </span>
             <SettingsList>
               <LimitRow
-                key={`turns-${taken}`}
                 title="Turns"
                 description={
                   codex
@@ -572,7 +517,6 @@ export function AgentForm({
                 onSave={(turn_limit) => change({ turn_limit })}
               />
               <LimitRow
-                key={`minutes-${taken}`}
                 title="Minutes"
                 description="How long one step may run"
                 most={MOST_MINUTES}
