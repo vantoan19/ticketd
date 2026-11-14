@@ -18,7 +18,8 @@ use ticketd_core::{
         DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
         ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
         FailureScope, FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport,
-        SchemaField, SourceError, SourceFilter, SourceHealth, TargetProblem, ValueFormat,
+        SchemaField, SkippedPartition, SourceError, SourceFilter, SourceHealth, TargetProblem,
+        ValueFormat,
     },
 };
 
@@ -28,6 +29,8 @@ struct Remote {
     /// Ids the discovery rules match (only open ones are listed, like GitHub).
     matching: Vec<u64>,
     matching_by_repository: BTreeMap<String, Vec<u64>>,
+    /// Repositories the account cannot read: discovery skips them and says so.
+    inaccessible: Vec<String>,
     pause_next_discovery: Option<DiscoveryPause>,
     page_size: usize,
     outage: Option<String>,
@@ -119,8 +122,27 @@ impl Connector for Fake {
             .iter()
             .filter_map(|id| remote.issues.get(id))
             .filter(|issue| issue.state == ExternalState::Open)
+            .filter(|issue| {
+                !remote
+                    .inaccessible
+                    .contains(&repository_of(&issue.reference))
+            })
             .cloned()
             .collect();
+        // Said with the first page only: a connector reports a skipped part once.
+        let skipped = if request.cursor.is_none() {
+            remote.inaccessible.clone()
+        } else {
+            Vec::new()
+        }
+        .into_iter()
+        .map(|repository| SkippedPartition {
+            code: "not_found".into(),
+            message: format!("{repository} was not found"),
+            field: None,
+            partition: repository,
+        })
+        .collect();
         let size = remote.page_size.max(1);
         let pause = remote.pause_next_discovery.take();
         drop(remote);
@@ -132,8 +154,21 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues: listed[start..end].to_vec(),
             next_cursor: (end < listed.len()).then(|| end.to_string()),
-            skipped: Vec::new(),
+            skipped,
         })
+    }
+
+    fn partition(&self, reference: &ExternalRef) -> String {
+        repository_of(reference)
+    }
+
+    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
+        config["repositories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|repository| repository.as_str().unwrap().to_owned())
+            .collect()
     }
 
     fn fetch(
@@ -167,6 +202,19 @@ impl Connector for Fake {
         }
         Ok(remote.conversations.get(&id).cloned().unwrap_or_default())
     }
+}
+
+/// The repository of an issue the fake holds, read from its `owner/name#id` locator.
+fn repository_of(reference: &ExternalRef) -> String {
+    reference.locator.split('#').next().unwrap().to_owned()
+}
+
+/// An issue of `repository` instead of `o/r`.
+fn issue_in(repository: &str, id: u64, title: &str) -> ExternalIssue {
+    let mut issue = issue(id, title);
+    issue.reference.locator = format!("{repository}#{id}");
+    issue.display = issue.reference.locator.clone();
+    issue
 }
 
 fn issue(id: u64, title: &str) -> ExternalIssue {
@@ -2009,7 +2057,7 @@ fn a_backlog_a_widened_source_brings_in_logs_nothing_and_what_follows_logs_as_sy
     f.workspace
         .save_source(&f.engine, "fake", widened.as_object().unwrap())
         .unwrap();
-    f.publish(issue(2, "Backlog"), true);
+    f.publish(issue_in("o/more", 2, "Backlog"), true);
     f.publish(issue(1, "Retitled"), true);
 
     f.refresh_at("2026-02-02T00:00:00Z");
@@ -2031,9 +2079,9 @@ fn a_backlog_a_widened_source_brings_in_logs_nothing_and_what_follows_logs_as_sy
         [(WorkspaceEventType::TicketUpdated, WorkspaceActor::Sync)]
     );
 
-    // The widened source has now been read: a later change and a later arrival log.
-    f.publish(issue(2, "Backlog, retitled"), true);
-    f.publish(issue(3, "Arrived later"), true);
+    // The added repository has now been read: a later change and a later arrival log.
+    f.publish(issue_in("o/more", 2, "Backlog, retitled"), true);
+    f.publish(issue_in("o/more", 3, "Arrived later"), true);
     f.refresh_at("2026-02-03T00:00:00Z");
     assert_eq!(
         kinds(&f, 2),
@@ -2043,6 +2091,123 @@ fn a_backlog_a_widened_source_brings_in_logs_nothing_and_what_follows_logs_as_sy
         kinds(&f, 3),
         [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)]
     );
+}
+
+/// The events logged for the ticket numbered `number`, as (type, actor).
+fn logged(
+    f: &Fixture,
+    number: u32,
+) -> Vec<(
+    ticketd_core::WorkspaceEventType,
+    ticketd_core::WorkspaceActor,
+)> {
+    let id = f.ticket(number).id;
+    f.workspace
+        .workspace_events_after(0, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.ticket_id == id)
+        .map(|event| (event.kind, event.actor))
+        .collect()
+}
+
+/// "First import" is per repository. A read that skips a repository has not read
+/// it: its backlog is still silent when it can be read at last. Meanwhile the
+/// repository read before goes on logging what arrives in it.
+#[test]
+fn a_repository_skipped_when_added_is_silent_when_first_read_and_the_rest_keep_logging() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let created = [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)];
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    // A repository is added before the account can read it.
+    let widened = json!({"repositories": ["o/r", "o/more"]});
+    f.workspace
+        .save_source(&f.engine, "fake", widened.as_object().unwrap())
+        .unwrap();
+    f.remote(|remote| remote.inaccessible = vec!["o/more".into()]);
+    f.publish(issue_in("o/more", 2, "Backlog"), true);
+    f.publish(issue(3, "Arrived where it was read before"), true);
+
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    // Issue 3 is the second ticket: the skipped repository brought nothing in.
+    assert_eq!(f.ticket(2).title, "Arrived where it was read before");
+    assert_eq!(logged(&f, 2), created);
+
+    // Access is granted: this is the first time the repository is read.
+    f.remote(|remote| remote.inaccessible.clear());
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(f.ticket(3).title, "Backlog");
+    assert_eq!(logged(&f, 3), []);
+
+    // From then on what arrives in it is news, and a later skip does not undo that.
+    f.remote(|remote| remote.inaccessible = vec!["o/more".into()]);
+    f.refresh_at("2026-02-04T00:00:00Z");
+    f.remote(|remote| remote.inaccessible.clear());
+    f.publish(issue_in("o/more", 4, "Arrived later"), true);
+    f.refresh_at("2026-02-05T00:00:00Z");
+    assert_eq!(logged(&f, 4), created);
+}
+
+/// A Workspace from before the repositories read were kept: one with tickets
+/// already imported counts as read, one without does not.
+#[test]
+fn before_the_repositories_read_were_kept_one_with_imported_tickets_counts_as_read() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Original"), true);
+    f.refresh();
+    let widened = json!({"repositories": ["o/r", "o/more"]});
+    f.workspace
+        .save_source(&f.engine, "fake", widened.as_object().unwrap())
+        .unwrap();
+    let db = rusqlite::Connection::open(f.path()).unwrap();
+    db.execute("UPDATE source_status SET read_partitions = NULL", [])
+        .unwrap();
+    drop(db);
+    f.publish(issue(2, "Arrived where tickets were imported"), true);
+    f.publish(issue_in("o/more", 3, "Backlog"), true);
+
+    f.refresh_at("2026-02-02T00:00:00Z");
+
+    assert_eq!(
+        logged(&f, 2),
+        [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)]
+    );
+    assert_eq!(logged(&f, 3), []);
+}
+
+/// Format 82 replaces the configuration unreleased builds kept with the repositories read.
+#[test]
+fn a_format_81_workspace_gains_the_repositories_read_and_loses_the_configuration() {
+    let f = Fixture::new();
+    let path = f.path();
+    drop(f.workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "ALTER TABLE source_status DROP COLUMN read_partitions; \
+         ALTER TABLE source_status ADD COLUMN refreshed_configuration TEXT; \
+         PRAGMA user_version = 81;",
+    )
+    .unwrap();
+    drop(db);
+
+    drop(Workspace::open(&path).unwrap());
+
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let columns: Vec<String> = db
+        .prepare("SELECT name FROM pragma_table_info('source_status')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(columns.contains(&"read_partitions".to_owned()));
+    assert!(!columns.contains(&"refreshed_configuration".to_owned()));
 }
 
 #[test]

@@ -1,5 +1,12 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Ellipsis, Maximize2, Minimize2, X } from "lucide-react";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
@@ -157,10 +164,15 @@ function LimitInput({
   );
 }
 
+/** What is edited and sent back on a save: the agent without its id. */
+const settingsOf = (agent: AutomationAgent): AutomationAgentSettings =>
+  automationAgentSettingsSchema.parse(agent);
+
 /**
  * One Automation agent, edited in place: every change is saved as it is made.
- * Mount it with the agent's id as `key`; it keeps the text being typed and does
- * not follow later changes to `agent`.
+ * Mount it with the agent's id as `key`. It keeps the settings being edited and
+ * takes an agent changed elsewhere (Workspace sync, another window) unless that
+ * would lose a change of its own that was not saved; then it asks.
  */
 export function AgentForm({
   agent,
@@ -179,19 +191,48 @@ export function AgentForm({
   onExpand?: () => void;
   onReturn: () => void;
   onClose: () => void;
-  onSave: (settings: AutomationAgentSettings) => void;
+  /** Saves the settings and resolves to the agent as it is then stored. */
+  onSave: (settings: AutomationAgentSettings) => Promise<AutomationAgent>;
   onDelete: () => void;
 }) {
   const client = useChatClient();
   const fieldId = useId();
-  const [draft, setDraft] = useState<AutomationAgentSettings>(() =>
-    // Parsing drops the id, leaving only what is sent back on a save.
-    automationAgentSettingsSchema.parse(agent),
-  );
+  const [draft, setDraft] = useState(() => settingsOf(agent));
   /** The command list as typed: one per line, blank lines and all. */
   const [commands, setCommands] = useState(
     agent.tools.allowed_commands.join("\n"),
   );
+  /** The settings as the core last said they are stored, to tell a change made elsewhere. */
+  const arrived = JSON.stringify(settingsOf(agent));
+  const [stored, setStored] = useState(arrived);
+  const [seen, setSeen] = useState(arrived);
+  /** Saves sent and not yet answered. */
+  const [saving, setSaving] = useState(0);
+  const sends = useRef(0);
+  /** The last save failed: the draft holds a change that is not stored. */
+  const [unsaved, setUnsaved] = useState(false);
+  /** Settings changed elsewhere while a change here was not saved. */
+  const [elsewhere, setElsewhere] = useState<AutomationAgentSettings | null>(
+    null,
+  );
+  /** Counts the settings taken from elsewhere, to restart fields that keep their own text. */
+  const [taken, setTaken] = useState(0);
+  const take = (settings: AutomationAgentSettings) => {
+    setStored(JSON.stringify(settings));
+    setDraft(settings);
+    setCommands(settings.tools.allowed_commands.join("\n"));
+    setTaken((count) => count + 1);
+    setUnsaved(false);
+    setElsewhere(null);
+  };
+  if (arrived !== seen) {
+    setSeen(arrived);
+    // While a save is on its way, its answer says what is stored.
+    if (saving === 0 && arrived !== stored) {
+      if (unsaved) setElsewhere(settingsOf(agent));
+      else take(settingsOf(agent));
+    }
+  }
   /** null until the probe answers: seconds, while each harness is asked. */
   const [found, setFound] = useState<HarnessStatus[] | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -206,10 +247,26 @@ export function AgentForm({
     };
   }, [client]);
 
+  const save = (next: AutomationAgentSettings) => {
+    const sent = ++sends.current;
+    setSaving((count) => count + 1);
+    onSave(next).then(
+      (saved) => {
+        setSaving((count) => count - 1);
+        setStored(JSON.stringify(settingsOf(saved)));
+        // Only the latest save says how things stand.
+        if (sent === sends.current) setUnsaved(false);
+      },
+      () => {
+        setSaving((count) => count - 1);
+        if (sent === sends.current) setUnsaved(true);
+      },
+    );
+  };
   const change = (patch: Partial<AutomationAgentSettings>) => {
     const next = { ...draft, ...patch };
     setDraft(next);
-    onSave(next);
+    save(next);
   };
   const changeTools = (patch: Partial<Tools>) =>
     change({ tools: { ...draft.tools, ...patch } });
@@ -295,6 +352,34 @@ export function AgentForm({
       </div>
       <div className="agent-form">
         <div className="agent-column">
+          {elsewhere && (
+            <Alert size="compact">
+              <AlertTitle>Changed somewhere else</AlertTitle>
+              <AlertDescription>
+                This agent was changed elsewhere while your last change was not
+                saved.
+              </AlertDescription>
+              <AlertActions>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => take(elsewhere)}
+                >
+                  Use that version
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setElsewhere(null);
+                    save(draft);
+                  }}
+                >
+                  Keep mine
+                </Button>
+              </AlertActions>
+            </Alert>
+          )}
           <div className="agent-field">
             <label className="agent-label" htmlFor={`${fieldId}-name`}>
               Name
@@ -461,6 +546,7 @@ export function AgentForm({
                 }
                 control={
                   <LimitInput
+                    key={taken}
                     label="Turns"
                     disabled={codex}
                     value={draft.turn_limit}
@@ -473,6 +559,7 @@ export function AgentForm({
                 description="How long one step may run"
                 control={
                   <LimitInput
+                    key={taken}
                     label="Minutes"
                     value={draft.time_limit_minutes}
                     onSave={(time_limit_minutes) =>

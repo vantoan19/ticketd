@@ -22,7 +22,7 @@ A file is a YAML header between two `---` lines, then the record's Markdown text
 ---
 # synced from: Studio desktop
 kind: ticket
-format: 1
+format: 2
 id: "3f2c9a1e-5b7d-4c1a-9e2f-0a1b2c3d4e5f"
 ref: "T-KQ43"
 title: "Fix login"
@@ -53,7 +53,7 @@ Reproduced with an expired session cookie.
 
 The same record always produces the same bytes, so a file changes only when its record does.
 
-- `kind` comes first, then `format`, the number of the file format (1), then `id`.
+- `kind` comes first, then `format`, the number of the file format (2), then `id`.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. A whole number is written bare. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
@@ -69,7 +69,7 @@ A file edited by hand may use ordinary YAML: unquoted text, `[a, b]` lists, comm
 - A relationship to a ticket (`parent`, `blocked_by`, `related`, `discovered`, `duplicate_of`) may name it by its Ticket reference instead of its GUID: `blocked_by: [T-3F12]`. The reference is resolved in the Workspace that reads the file. A reference no ticket there holds is kept as written and waits like a record that has not arrived.
 - A status may differ in letter case and use `-` or `_` for the space: `status: in-progress`.
 
-`format` may be left out, which means 1.
+`format` may be left out, which means 1. Format 2 added `any_command` to an Automation agent and changed nothing else. This version reads formats 1 and 2 and writes 2, so a ticketd that reads only format 1 leaves every file this version writes alone until it is updated.
 
 A file is rejected as a whole, with the reason, when:
 
@@ -225,7 +225,7 @@ The text after the header is one `json` code block holding the trigger, the cond
 ``````text
 ---
 kind: automation
-format: 1
+format: 2
 id: "5a1d7c3e-9b2f-4e6a-8c0d-1f2e3a4b5c6d"
 name: "Triage new bugs"
 trashed: false

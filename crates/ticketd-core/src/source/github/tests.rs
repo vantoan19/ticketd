@@ -415,6 +415,36 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
     );
 }
 
+/// The repositories asked for, the one an issue is in and a skipped one are named
+/// alike, whatever case the settings use: ticketd compares them to tell a
+/// repository's first read.
+#[test]
+fn a_repository_has_one_name_as_a_part_of_the_source() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/O/Gone/issues?state=open&per_page=100"),
+        status(404, json!({"message": "Not Found"}), &[]),
+    );
+    fixture.respond(
+        &format!("{API}/repos/o/Live/issues?state=open&per_page=100"),
+        ok(json!([issue(1, 1, "o/Live")])),
+    );
+    let values = config(json!({"repositories": ["O/Gone", "o/Live"]}));
+    let mut found = Vec::new();
+    let summary = engine
+        .discover("github", &values, |issue| {
+            found.push(engine.partition("github", &issue.reference));
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+    assert_eq!(
+        engine.partitions("github", &values).unwrap(),
+        ["o/gone", "o/live"]
+    );
+    assert_eq!(found, ["o/live"]);
+    assert_eq!(summary.skipped[0].partition, "o/gone");
+}
+
 #[test]
 fn a_credential_is_never_sent_over_plain_http_except_to_this_machine() {
     for (url, allowed) in [

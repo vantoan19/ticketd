@@ -20,7 +20,9 @@
 //! ticket's content, status or ownership, and it has no grace period.
 //! A rate limit is *delayed*, not unavailable.
 
-use rusqlite::{Connection, params};
+use std::collections::{BTreeSet, HashSet};
+
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::{FailureScope, RefreshFailure, SourceFailure, contract::FailureCode};
@@ -114,20 +116,50 @@ pub(crate) fn migrate_run_counts(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-/// Format version 81: the configuration a source was last read with, so the first
-/// read after a change to it can be told from the ones that follow. NULL for a
-/// source last read before this was kept.
-pub(crate) fn migrate_refreshed_configuration(connection: &Connection) -> Result<(), Error> {
-    let present: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_status') WHERE name = 'refreshed_configuration')",
-        [],
-        |row| row.get(0),
-    )?;
-    if !present {
+/// Format version 82: `read_partitions`, the parts of a source (for GitHub, its
+/// repositories) that have been read, as a JSON list, so the first read of each
+/// can be told from the ones that follow. NULL for a source last read before
+/// this was kept; [`read_partitions`] says what counts as read then. It replaces
+/// `refreshed_configuration`, which only unreleased builds kept.
+pub(crate) fn migrate_read_partitions(connection: &Connection) -> Result<(), Error> {
+    let has = |column: &str| {
+        connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_status') WHERE name = ?1)",
+            [column],
+            |row| row.get::<_, bool>(0),
+        )
+    };
+    if has("refreshed_configuration")? {
         connection
-            .execute_batch("ALTER TABLE source_status ADD COLUMN refreshed_configuration TEXT")?;
+            .execute_batch("ALTER TABLE source_status DROP COLUMN refreshed_configuration")?;
     }
+    if !has("read_partitions")? {
+        connection.execute_batch("ALTER TABLE source_status ADD COLUMN read_partitions TEXT")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 82;")?;
     Ok(())
+}
+
+/// The parts of `provider` that have been read. For a source read before they
+/// were kept, those are the parts tickets were already imported from
+/// (`imported`): a part nothing came from is read again as if for the first time.
+pub(crate) fn read_partitions(
+    connection: &Connection,
+    provider: &str,
+    imported: Option<&HashSet<String>>,
+) -> Result<HashSet<String>, Error> {
+    let stored: Option<(Option<String>, bool)> = connection
+        .query_row(
+            "SELECT read_partitions, last_refreshed_at IS NOT NULL FROM source_status WHERE provider = ?1",
+            [provider],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(match stored {
+        Some((Some(kept), _)) => serde_json::from_str(&kept)?,
+        Some((None, true)) => imported.cloned().unwrap_or_default(),
+        Some((None, false)) | None => HashSet::new(),
+    })
 }
 
 /// What one provider's run found, for [`record_run`].
@@ -137,28 +169,44 @@ pub(crate) struct ProviderRun {
     pub retry_after_secs: Option<u64>,
     /// Discovery rules the run skipped because they could not be read.
     pub skipped: Vec<String>,
+    /// The parts of the source the run read in full, and the ones it skipped.
+    pub read_partitions: Vec<String>,
+    pub skipped_partitions: Vec<String>,
     pub checked_tickets: u32,
 }
 
 /// Records each provider's run in the refresh write transaction. A run that
 /// started before the one already recorded is older news and changes nothing.
-/// `configuration` is what a successful run read the source with, as stored.
+/// A successful run leaves as read the parts it read, and the parts it skipped
+/// that `read_before` holds: a part that cannot be read for a while stays read,
+/// one that was never read stays unread, and one no longer asked for is
+/// forgotten, so adding it again is a first read again.
 pub(crate) fn record_run(
     connection: &Connection,
     run: &ProviderRun,
-    configuration: Option<&str>,
+    read_before: &HashSet<String>,
     now: &str,
 ) -> Result<(), Error> {
     match &run.failure {
         None => {
+            let read: BTreeSet<&String> = run
+                .read_partitions
+                .iter()
+                .chain(
+                    run.skipped_partitions
+                        .iter()
+                        .filter(|part| read_before.contains(*part)),
+                )
+                .collect();
+            let read = serde_json::to_string(&read)?;
             let partial = (!run.skipped.is_empty()).then(|| run.skipped.join("; "));
             connection.execute(
-                "INSERT INTO source_status (provider, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, refreshed_configuration) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
+                "INSERT INTO source_status (provider, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, read_partitions) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
                  ON CONFLICT(provider) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
                  error_code = NULL, error_message = NULL, failing_since = NULL, retry_after = NULL, partial_message = ?3, last_checked_tickets = ?4, \
-                 refreshed_configuration = COALESCE(?5, refreshed_configuration) \
+                 read_partitions = ?5 \
                  WHERE source_status.last_attempt_at IS NULL OR source_status.last_attempt_at <= ?2",
-                params![run.provider, now, partial, run.checked_tickets, configuration],
+                params![run.provider, now, partial, run.checked_tickets, read],
             )?;
         }
         Some(failure) => {

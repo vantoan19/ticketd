@@ -11,6 +11,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   automationsClient,
+  reported,
+  type ReportRead,
   type Automation,
   type AutomationRun,
   type ListedRun,
@@ -153,17 +155,19 @@ export function AllRunsList({
 export function RunsList({
   automation,
   onOpen,
-  onFail,
+  onRead,
 }: {
   automation: Automation;
   /** Opens a run's own view. */
   onOpen: (runId: string) => void;
-  onFail: (reason: unknown) => void;
+  /** How reading the runs went. */
+  onRead: ReportRead;
 }) {
   const [runs, setRuns] = useState<AutomationRun[] | null>(null);
   const load = useCallback(
-    () => automationsClient.runs(automation.id).then(setRuns, onFail),
-    [automation.id, onFail],
+    () =>
+      reported("runs", automationsClient.runs(automation.id), onRead, setRuns),
+    [automation.id, onRead],
   );
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());

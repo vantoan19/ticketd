@@ -299,6 +299,28 @@ export const HARNESS_NAMES = {
   codex: "Codex",
 } as const;
 
+/**
+ * How a pane says how a read it makes by itself went: `what` names the read,
+ * and `failure` is given when it failed.
+ */
+export type ReportRead = (what: string, failure?: { reason: unknown }) => void;
+
+/** Runs `read` and reports how it went; `then` gets what it read. */
+export function reported<T>(
+  what: string,
+  read: Promise<T>,
+  onRead: ReportRead,
+  then: (value: T) => void,
+) {
+  return read.then(
+    (value) => {
+      onRead(what);
+      then(value);
+    },
+    (reason: unknown) => onRead(what, { reason }),
+  );
+}
+
 export const automationsClient = {
   async automations(): Promise<Automation[]> {
     return z.array(automationSchema).parse(await invoke("automation_list"));

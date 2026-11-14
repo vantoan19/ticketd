@@ -34,6 +34,7 @@ import { AgentForm } from "@/features/automations/AgentForm";
 import { AutomationEditor } from "@/features/automations/AutomationEditor";
 import {
   automationsClient,
+  type ReportRead,
   HARNESS_NAMES,
   type Automation,
   type AutomationAgent,
@@ -193,12 +194,27 @@ export function AutomationsView({
     [],
   );
   /** `action` worked, so what it failed with before no longer stands. */
-  const worked = (action: string) =>
-    setFailure((current) => (current?.action === action ? null : current));
-  /** For what the open pane asks for itself: reading projects, runs, a new run. */
+  const worked = useCallback(
+    (action: string) =>
+      setFailure((current) => (current?.action === action ? null : current)),
+    [],
+  );
+  /** For what the open pane does when asked: a new run, choosing a folder. */
   const fail = useCallback(
     (reason: unknown) => failed("pane", "That did not work.")(reason),
     [failed],
+  );
+  /**
+   * For what the open pane reads by itself: a run, an Automation's runs, the
+   * projects. Those reads repeat whenever the Workspace changes, so one that
+   * failed says so only until the same read works.
+   */
+  const read = useCallback<ReportRead>(
+    (what, failure) => {
+      if (failure) failed(`read ${what}`, "That did not work.")(failure.reason);
+      else worked(`read ${what}`);
+    },
+    [failed, worked],
   );
   const load = useCallback(() => {
     const saved = saves.current;
@@ -210,8 +226,10 @@ export function AutomationsView({
       ([foundAutomations, foundAgents, foundRuns]) => {
         // Read before a save that has been made since: it would put the old
         // definition back under the editor. The save's own change reads again.
-        if (saved === saves.current) setAutomations(foundAutomations);
-        setAgents(foundAgents);
+        if (saved === saves.current) {
+          setAutomations(foundAutomations);
+          setAgents(foundAgents);
+        }
         setRuns(foundRuns);
         setError("");
       },
@@ -298,22 +316,26 @@ export function AutomationsView({
       },
       failed("new-agent", "The agent could not be made."),
     );
+  /** Saves the agent and resolves to it as it is then stored. */
   const saveAgent = (id: string, settings: AutomationAgentSettings) => {
-    setAgents(
-      (current) =>
-        current?.map((agent) =>
-          agent.id === id ? { ...agent, ...settings } : agent,
-        ) ?? null,
+    const save = ++saves.current;
+    const saved = automationsClient.updateAgent(id, settings);
+    void saved.then(
+      (agent) => {
+        worked("save-agent");
+        // An earlier save's answer would undo what was typed since.
+        if (save === saves.current)
+          setAgents(
+            (current) =>
+              current?.map((item) => (item.id === id ? agent : item)) ?? null,
+          );
+      },
+      failed(
+        "save-agent",
+        "Your last change to the agent was not saved; change it again to retry.",
+      ),
     );
-    automationsClient
-      .updateAgent(id, settings)
-      .then(
-        () => worked("save-agent"),
-        failed(
-          "save-agent",
-          "Your last change to the agent was not saved; change it again to retry.",
-        ),
-      );
+    return saved;
   };
   const deleteAgent = (id: string) =>
     automationsClient.deleteAgent(id).then(
@@ -574,6 +596,7 @@ export function AutomationsView({
       onSaveAgent={saveAgent}
       onDeleteAgent={(id) => void deleteAgent(id)}
       onFail={fail}
+      onRead={read}
     />
   ) : listedRun ? (
     <RunView
@@ -587,7 +610,7 @@ export function AutomationsView({
       {...paneProps}
       onBack={close}
       onOpenRun={openListedRun}
-      onFail={fail}
+      onRead={read}
     />
   ) : (
     <section

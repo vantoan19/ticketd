@@ -15,6 +15,8 @@ import { conditionsLine } from "@/features/automations/automation-text";
 import { TRIGGER_ID } from "@/features/automations/canvas-layout";
 import {
   automationsClient,
+  reported,
+  type ReportRead,
   stepPaths,
   type AutomationAgent,
   type AutomationRunDetail,
@@ -196,7 +198,7 @@ export function RunView({
   onClose,
   onBack,
   onOpenRun,
-  onFail,
+  onRead,
 }: {
   id: string;
   automationName: string;
@@ -209,7 +211,8 @@ export function RunView({
   /** Back to the Automation's runs. */
   onBack: () => void;
   onOpenRun: (id: string) => void;
-  onFail: (reason: unknown) => void;
+  /** How the reads this view makes by itself went. */
+  onRead: ReportRead;
 }) {
   const headingId = useId();
   const [run, setRun] = useState<AutomationRunDetail | null>(null);
@@ -225,7 +228,7 @@ export function RunView({
   const last = useRef<AutomationRunDetail | null>(null);
   const load = useCallback(
     () =>
-      automationsClient.run(id).then((loaded) => {
+      reported("run", automationsClient.run(id), onRead, (loaded) => {
         // Said once: it changes only when a step that was running has ended.
         const said = last.current && stepsEnded(last.current, loaded, agents);
         if (said) setEnded(said);
@@ -238,8 +241,8 @@ export function RunView({
               null)
             : current,
         );
-      }, onFail),
-    [id, agents, onFail],
+      }),
+    [id, agents, onRead],
   );
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());
@@ -248,8 +251,9 @@ export function RunView({
   const namesProject =
     run?.definition.conditions.some((item) => item.kind === "project") ?? false;
   useEffect(() => {
-    if (namesProject) void client.listProjects().then(setProjects, onFail);
-  }, [namesProject, onFail]);
+    if (namesProject)
+      void reported("projects", client.listProjects(), onRead, setProjects);
+  }, [namesProject, onRead]);
 
   if (chat)
     return (

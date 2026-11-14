@@ -285,7 +285,10 @@ closes the harness process of every Chat the run had working, and the wait in
 opens a new process that resumes the same conversation as an ordinary Chat, with
 their own settings and approvals, no run marker on what it writes, and no time
 limit; the Chat of a later step that was working stays closed and out of the list.
-The run's own first message goes through a path that takes nothing over. Retention
+The run's own first message goes through a path that takes nothing over, and it
+starts an agent only while the run is still going and the Chat is still the
+agent's: a run taken over or stopped just after a step's Chat was created starts
+no agent in it. Retention
 deletes a run with the Chats it still owns, so a Chat the person took over is kept.
 
 A Run agent step is an ordinary Chat, created in the step's folder, linked to the

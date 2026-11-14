@@ -420,8 +420,8 @@ impl ChatHost {
         Ok(closed)
     }
 
-    /// Sends input without it counting as the person's: a run's own first message.
-    pub(crate) async fn submit(
+    /// Sends input to the Chat's supervisor, starting one when it has none.
+    async fn submit(
         &self,
         chat_id: &str,
         command_id: Option<&str>,
@@ -670,17 +670,45 @@ impl ChatHost {
             .entry(chat_id.to_owned())
             .and_modify(|commands| {
                 if commands.is_closed() {
-                    *commands = self.spawn(&chat, adapter.clone());
+                    *commands = self.spawn(&chat, adapter.clone(), self.settings(&chat.id));
                 }
             })
-            .or_insert_with(|| self.spawn(&chat, adapter.clone()));
+            .or_insert_with(|| self.spawn(&chat, adapter.clone(), self.settings(&chat.id)));
         Ok(commands.clone())
+    }
+
+    /// The supervisor for an Automation run's agent that is about to work in the
+    /// Chat, started with the agent's settings, or `None` when the Chat is no
+    /// longer registered as unattended: the run was taken over or stopped first.
+    /// The registration is read under the lock `close` takes a supervisor out
+    /// with. So whoever ends the Chat's unattended running either did it before,
+    /// and no agent starts, or does it after and finds this supervisor to stop.
+    /// An agent's first message never starts an ordinary harness.
+    pub(crate) fn unattended_sender(
+        &self,
+        chat_id: &str,
+    ) -> Result<Option<mpsc::Sender<Command>>, HostError> {
+        self.closed()?;
+        let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
+        let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
+        let mut chats = self.chats();
+        self.closed()?;
+        let Some(unattended) = self.settings(chat_id) else {
+            return Ok(None);
+        };
+        if let Some(commands) = chats.get(chat_id).filter(|c| !c.is_closed()) {
+            return Ok(Some(commands.clone()));
+        }
+        let commands = self.spawn(&chat, adapter, Some(unattended));
+        chats.insert(chat_id.to_owned(), commands.clone());
+        Ok(Some(commands))
     }
 
     fn spawn(
         &self,
         chat: &ticketd_core::Chat,
         adapter: Option<Arc<dyn HarnessAdapter>>,
+        unattended: Option<Unattended>,
     ) -> mpsc::Sender<Command> {
         Supervisor::spawn(
             chat,
@@ -688,8 +716,13 @@ impl ChatHost {
             adapter,
             self.inner.context.clone(),
             self.inner.board.clone(),
-            self.unattended().get(&chat.id).cloned(),
+            unattended,
         )
+    }
+
+    /// The agent's settings while the Chat is registered as unattended.
+    fn settings(&self, chat_id: &str) -> Option<Unattended> {
+        self.unattended().get(chat_id).cloned()
     }
 
     fn unattended(&self) -> MutexGuard<'_, HashMap<String, Unattended>> {

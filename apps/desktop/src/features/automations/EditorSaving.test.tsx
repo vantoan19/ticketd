@@ -109,9 +109,10 @@ function Page() {
       onDelete={() => {}}
       onDuplicate={() => {}}
       onCreateAgent={async () => undefined}
-      onSaveAgent={() => {}}
+      onSaveAgent={() => new Promise(() => {})}
       onDeleteAgent={() => {}}
       onFail={() => {}}
+      onRead={() => {}}
       openRun={null}
       onOpenRun={() => {}}
     />
@@ -260,4 +261,25 @@ test("the header says what is left without calling the trigger a step", async ()
       { step_id: "b", message: "Needs a folder" },
     ]),
   ).toBe("2 steps left");
+});
+
+test("the Switched off notice does not come back when the person later switches the Automation off", async () => {
+  const tag = await open();
+  type(tag, "");
+  fireEvent.blur(tag);
+  const notice = await screen.findByText("Switched off");
+  type(tag, "bug");
+  fireEvent.blur(tag);
+  const back = within(
+    notice.closest("[data-slot=alert]") as HTMLElement,
+  ).getByRole("button", { name: "Switch back on" }) as HTMLButtonElement;
+  await waitFor(() => expect(back.disabled).toBe(false));
+  fireEvent.click(back);
+  await waitFor(() => expect(screen.queryByText("Switched off")).toBeNull());
+
+  // Off again, this time by the person: no edit of theirs did it.
+  act(() => arrive({ enabled: false } as Partial<AutomationDefinition>));
+
+  expect(onSwitch().getAttribute("aria-checked")).toBe("false");
+  expect(screen.queryByText("Switched off")).toBeNull();
 });
