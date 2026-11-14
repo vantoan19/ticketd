@@ -317,13 +317,16 @@ and it loads none of their MCP servers, claude.ai connectors or skills.
 The ticketd CLI is allowed in both of Claude Code's shells, Bash and PowerShell,
 by name only: every Chat's harness process has the CLI's folder first on its
 `PATH`, and the Chat's context tells the agent to run `ticketd` by that name.
-Codex runs with approval policy `never` and a
+Codex runs with approval policy `on-request`, and ticketd declines every approval
+request at once (with `never`, Codex reports a patch its policy rejects as no item at all, so
+the step could not fail), and a
 `workspaceWrite` sandbox whose only writable places are the step's folder and the
 folder holding the Workspace, with no network unless the web is allowed, and with
 the person's MCP servers, plugins and apps turned off. Codex still reads the
 person's own `AGENTS.md` files and lists their skills: its app-server has no
 setting that leaves them out, and the agent editor says so. A command Codex could not
-start fails the step: the agent could not do its work. A Chat taken over from a
+start fails the step: the agent could not do its work. So does a tool Codex declined and a
+file change it declined or failed to write, with a reason naming the file. A Chat taken over from a
 run resumes its Codex thread with the person's own approval policy and sandbox
 from their Codex configuration (`on-request` and `read-only` when it sets none). Codex
 reads files and runs commands inside that sandbox whatever the switches say (its
