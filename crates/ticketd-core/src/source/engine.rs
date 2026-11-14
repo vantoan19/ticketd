@@ -500,6 +500,22 @@ impl Engine {
         Ok(self.connector(provider)?.partitions(&config))
     }
 
+    /// What to append to the name of a part to name it as read under the
+    /// discovery rules of `raw` (see [`Connector::discovery_scope`]): empty when
+    /// no rule narrows discovery, so such a part keeps its bare name.
+    pub(crate) fn partition_scope(&self, provider: &str, raw: &ConfigValues) -> String {
+        let scope = self
+            .find(provider)
+            .zip(self.validate(provider, raw).ok())
+            .map(|(connector, config)| connector.discovery_scope(&config))
+            .unwrap_or_default();
+        if scope.is_empty() {
+            scope
+        } else {
+            format!("?{scope}")
+        }
+    }
+
     fn connector(&self, provider: &str) -> Result<&dyn Connector, SourceError> {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))

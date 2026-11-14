@@ -580,6 +580,12 @@
 .ui-menu {
   box-shadow: var(--shadow-menu);
 }
+/* Dark: the menu's ring falls on the black under-ring and vanishes against a
+   panel of the menu's own colour, so menus wear an edge of their own. */
+:root[data-theme="dark"] .ui-menu,
+[data-theme-preview="dark"] .ui-menu {
+  border: 1px solid var(--border);
+}
 .ui-dialog,
 .ui-sheet {
   color: var(--popover-foreground);
