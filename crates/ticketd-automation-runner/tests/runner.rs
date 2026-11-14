@@ -974,6 +974,40 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
     );
 }
 
+/// #387 M4: a run stopped while its agent's harness is still opening ends that
+/// harness as soon as it has opened; no idle agent waits for the time limit.
+#[tokio::test(start_paused = true)]
+async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
+    let f = Fixture::new();
+    let open = f.fake.hold_next_open();
+    f.tag("Fix login");
+    f.tick().await;
+    let run = f.runs().remove(0);
+    assert_eq!(run.status, AutomationRunStatus::Running);
+    let chat = f.chat();
+
+    // What "Stop" on the run does: the core ends the run, then the host stops its Chat.
+    f.core().stop_automation_run(&run.id).unwrap();
+    let stopping = f.host.stop(&chat);
+    let ((), stopped) = tokio::join!(
+        async {
+            settle().await;
+            open.send(()).unwrap();
+        },
+        stopping
+    );
+    stopped.unwrap();
+    settle().await;
+
+    assert_eq!(written(&f), ["close"]);
+    assert!(!f.host.live().get(&chat).is_some_and(|live| live.running));
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::NeedsAttention);
+    // The agent's time limit passes: nothing more happens to the run or the Chat.
+    tokio::time::sleep(Duration::from_secs(6 * 60)).await;
+    assert_eq!(written(&f), ["close"]);
+    assert_eq!(f.listed_chats(), [] as [String; 0]);
+}
+
 #[tokio::test(start_paused = true)]
 async fn stopping_a_running_runs_chat_takes_the_run_over() {
     let f = Fixture::new();

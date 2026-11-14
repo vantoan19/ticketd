@@ -516,6 +516,13 @@ impl ChatHost {
         if self.take_over(chat_id, false).await? == Some(true) {
             return Ok(());
         }
+        // Still unattended with no run left to take over: whoever ended the run
+        // (Stop on the run, "Stop it and turn off", deleting the Automation) wants its
+        // agent gone. Closing the harness, after an open in progress, also ends the
+        // wait in `run_unattended`; an interrupt alone misses a turn not begun (#387 M4).
+        if self.end_unattended(chat_id, TicketdStop::RunEnded).await {
+            return Ok(());
+        }
         self.ask(chat_id, Command::Stop).await
     }
 
