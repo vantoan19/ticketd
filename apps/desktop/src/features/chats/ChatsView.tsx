@@ -18,6 +18,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { useNow } from "@/lib/use-now";
 import type { ChatSummary, Retention } from "@/features/chats/client";
+import { useTakenOverLine } from "@/features/automations/use-taken-over-line";
 import { ChatDetail } from "@/features/chats/ChatDetail";
 import { chatTime, summaryLine } from "@/features/chats/model";
 import { NewChat } from "@/features/chats/NewChat";
@@ -111,6 +112,7 @@ export function ChatsView({
 }) {
   const [scope, setScope] = useState<Retention>("active");
   const [open, setOpen] = useState<Open>(null);
+  const takenOver = useTakenOverLine(open?.kind === "chat" ? open.id : null);
   const [expanded, setExpanded] = useState(false);
   const [seenRequest, setSeenRequest] = useState(0);
   if (seenRequest !== newChatRequest) {
@@ -222,7 +224,12 @@ export function ChatsView({
         }}
       />
     ) : open ? (
-      <ChatDetail key={open.id} id={open.id} {...paneProps} />
+      <ChatDetail
+        key={open.id}
+        id={open.id}
+        notice={takenOver}
+        {...paneProps}
+      />
     ) : (
       <section className="ticket-detail chat-pane" aria-label="No Chat open">
         <p className="chat-list-empty">Open a Chat, or start a new one.</p>

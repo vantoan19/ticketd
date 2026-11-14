@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { conditionsLine } from "@/features/automations/automation-text";
 import { TRIGGER_ID } from "@/features/automations/canvas-layout";
 import {
   automationsClient,
@@ -33,8 +34,10 @@ import {
   stepStates,
 } from "@/features/automations/runs-model";
 import { StepPanel } from "@/features/automations/StepPanel";
+import { TakenOverLine } from "@/features/automations/TakenOver";
 import { ChatDetail } from "@/features/chats/ChatDetail";
 import { elapsed } from "@/features/chats/model";
+import { client, type Project } from "@/lib/api/client";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 
 const when = (timestamp: string) =>
@@ -237,6 +240,13 @@ export function RunView({
   );
   useEffect(() => void load(), [load]);
   useOnWorkspaceChange(() => void load());
+  /** The projects, read only when a condition names one, to say which. */
+  const [projects, setProjects] = useState<Project[]>([]);
+  const namesProject =
+    run?.definition.conditions.some((item) => item.kind === "project") ?? false;
+  useEffect(() => {
+    if (namesProject) void client.listProjects().then(setProjects, onFail);
+  }, [namesProject, onFail]);
 
   if (chat)
     return (
@@ -244,8 +254,14 @@ export function RunView({
         key={chat}
         id={chat}
         notice={
-          run?.steps.some((step) => step.chat_id === chat && step.chat_owned) &&
-          `A run of ${automationName}. Reply to take it over; it moves to your Chats.`
+          run?.steps.some((step) => step.chat_id === chat && step.chat_owned)
+            ? `A run of ${automationName}. Reply to take it over; it moves to your Chats.`
+            : run?.status === "taken_over" && (
+                <TakenOverLine
+                  automationName={automationName}
+                  onViewRun={() => setChat(null)}
+                />
+              )
         }
         expanded={expanded}
         single={single}
@@ -346,6 +362,7 @@ export function RunView({
           <RunCanvas
             run={run}
             agents={agents}
+            only={conditionsLine(run.definition.conditions, projects)}
             selected={(panel && selected) || null}
             onSelect={setSelected}
           />

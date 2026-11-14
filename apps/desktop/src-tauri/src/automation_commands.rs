@@ -194,6 +194,15 @@ pub fn automation_run_list_for_ticket(reference: String) -> Result<Vec<ListedRun
         .map_err(|error| error.to_string())
 }
 
+/// The run the person took over through this Chat, if they did.
+#[tauri::command]
+pub fn automation_run_taken_over_in(chat_id: String) -> Result<Option<ListedRun>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.automation_run_taken_over_in(&chat_id))
+        .map(|run| listed(run.into_iter().collect()).pop())
+        .map_err(|error| error.to_string())
+}
+
 /// One run with the definition it executes and each step it reached.
 #[tauri::command]
 pub fn automation_run_get(id: String) -> Result<AutomationRun, String> {

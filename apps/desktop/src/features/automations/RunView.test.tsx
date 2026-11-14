@@ -375,9 +375,18 @@ test("a run's Chat opens in the page and says above the composer that replying t
   expect(await screen.findByText(TAKE_OVER)).toBeTruthy();
   expect(screen.getByRole("textbox")).toBeTruthy();
 
-  // The person replied: the Chat is theirs, and the line goes.
-  runs = [failedRun(false)];
+  // The person replied: the Chat is theirs, and the line says where it came from.
+  runs = [{ ...failedRun(false), status: "taken_over" }];
   view.rerender(page(1));
   await waitFor(() => expect(screen.queryByText(TAKE_OVER)).toBeNull());
   expect(screen.getByRole("textbox")).toBeTruthy();
+  expect(
+    screen.getByText(
+      /You took this over from a run of .+\. The run ended here\./,
+    ),
+  ).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "View run" }));
+  await screen.findByRole("application", { name: "Steps" });
+  expect(screen.getByRole("status").textContent).toBe("Taken over");
 });

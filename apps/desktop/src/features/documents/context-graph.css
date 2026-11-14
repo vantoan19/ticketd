@@ -393,61 +393,11 @@
   text-decoration: underline;
 }
 
-/* One control: zoom out, percentage, zoom in, Fit. */
+/* The zoom control sits under the canvas, at its left. */
 .context-graph-zoom {
   flex: none;
   align-self: flex-start;
   margin: 0 16px 16px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  font-size: var(--text-caption);
-  color: var(--muted-foreground);
-}
-.context-graph-zoom button {
-  height: 32px;
-  min-width: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--radius);
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.context-graph-zoom button:hover {
-  color: var(--foreground);
-  background: var(--accent);
-}
-.context-graph-zoom button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.context-graph-zoom svg {
-  width: 14px;
-  height: 14px;
-}
-.context-graph-zoom > span:not(.context-graph-zoom-rule) {
-  width: 44px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.context-graph-zoom > span[role="status"] {
-  width: auto;
-  padding: 0 8px;
-  white-space: nowrap;
-}
-.context-graph-zoom-rule {
-  width: 1px;
-  height: 16px;
-  background: var(--border);
 }
 
 /* Cards: reference, title, then the kind and state. Theme tokens only. */

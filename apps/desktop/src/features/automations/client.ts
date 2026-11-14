@@ -415,6 +415,12 @@ export const automationsClient = {
     await invoke("automation_run_dismiss", { id });
   },
   /** The runs that acted on a ticket, newest first. */
+  /** The run the person took over through this Chat; null for any other Chat. */
+  async takenOverIn(chatId: string): Promise<TicketRun | null> {
+    return ticketRunSchema
+      .nullable()
+      .parse(await invoke("automation_run_taken_over_in", { chatId }));
+  },
   async ticketRuns(reference: string): Promise<TicketRun[]> {
     return z
       .array(ticketRunSchema)

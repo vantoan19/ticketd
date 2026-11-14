@@ -1548,6 +1548,7 @@ pub fn run() -> Result<(), tauri::Error> {
             automation_commands::automation_run_again,
             automation_commands::automation_run_now,
             automation_commands::automation_run_dismiss,
+            automation_commands::automation_run_taken_over_in,
             automation_commands::automation_run_list_for_ticket,
             automation_commands::automation_stop_and_turn_off,
             automation_commands::automation_runs_at_once,

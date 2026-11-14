@@ -1,12 +1,10 @@
-import { createContext, use, useEffect, useMemo, type ReactNode } from "react";
+import { createContext, use, useMemo, type ReactNode } from "react";
 import {
   Background,
   Handle,
   Position,
   ReactFlow,
   ReactFlowProvider,
-  useReactFlow,
-  useStore,
   type Edge,
   type Node,
   type NodeProps,
@@ -62,6 +60,7 @@ import {
   triggerCard,
   type Card,
 } from "@/features/automations/flow-cards";
+import { FlowView } from "@/features/automations/FlowView";
 import { everyStep, flowSteps } from "@/features/automations/runs-model";
 import type { Project } from "@/lib/api/client";
 
@@ -412,20 +411,6 @@ function AddNode({ data }: NodeProps<Node<AddData>>) {
 const nodeTypes = { card: CardNode, add: AddNode };
 
 /**
- * Brings the whole flow back into view when a step is added or removed, and
- * when the canvas changes width, as when a panel opens beside it: paths side
- * by side are wide.
- */
-function Refit({ shape }: { shape: string }) {
-  const { fitView } = useReactFlow();
-  const width = useStore((state) => state.width);
-  useEffect(() => {
-    void fitView({ maxZoom: 1, padding: 0.2 });
-  }, [shape, width, fitView]);
-  return null;
-}
-
-/**
  * An Automation's steps as a diagram, arranged by `layoutFlow`: nothing is
  * dragged or wired by hand. Cards and + buttons are ordinary buttons in the
  * order the steps run, so Tab walks the flow.
@@ -564,7 +549,7 @@ export function FlowCanvas({
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            // Let a flow with nested paths fit beside the panel.
+            // As far out as the zoom control goes, for an overview.
             minZoom={0.25}
             maxZoom={1.5}
             panOnScroll
@@ -578,8 +563,9 @@ export function FlowCanvas({
             proOptions={{ hideAttribution: true }}
           >
             <Background />
-            <Refit shape={shape} />
           </ReactFlow>
+          {/* After the steps in the Tab order. */}
+          <FlowView shape={shape} selected={selected} />
         </ReactFlowProvider>
       </ActionsContext>
     </div>
