@@ -191,7 +191,12 @@ export function AgentForm({
    * said it is stored: read after a change, or the answer to a save.
    */
   const arrived = JSON.stringify(settingsOf(agent));
-  /** What the draft was taken from or last saved as, to tell a change made elsewhere. */
+  /**
+   * What the draft was last taken from, and what this form's saves last
+   * stored: a change made elsewhere is neither. Each save that works counts,
+   * not only the latest, so quick saves before one that failed count too.
+   */
+  const [loaded, setLoaded] = useState(arrived);
   const [stored, setStored] = useState(arrived);
   const [seen, setSeen] = useState(arrived);
   /** Saves sent and not yet answered. */
@@ -200,6 +205,7 @@ export function AgentForm({
   /** The last save failed: the draft holds a change that is not stored. */
   const [unsaved, setUnsaved] = useState(false);
   const take = (settings: AutomationAgentSettings) => {
+    setLoaded(JSON.stringify(settings));
     setStored(JSON.stringify(settings));
     setDraft(settings);
     setCommands(settings.tools.allowed_commands.join("\n"));
@@ -217,7 +223,8 @@ export function AgentForm({
    * received, so a change that came during a save that then failed is asked
    * about too, and a save that works ends it.
    */
-  const elsewhere = unsaved && saving === 0 && arrived !== stored;
+  const elsewhere =
+    unsaved && saving === 0 && arrived !== stored && arrived !== loaded;
   const statusOf = useHarnessStatus();
   const [deleting, setDeleting] = useState(false);
 
@@ -227,11 +234,9 @@ export function AgentForm({
     onSave(next).then(
       (saved) => {
         setSaving((count) => count - 1);
-        // Only the latest save says how things stand; the page passes on only
-        // its answer too, so an earlier one would look like a change elsewhere.
-        if (sent !== sends.current) return;
         setStored(JSON.stringify(settingsOf(saved)));
-        setUnsaved(false);
+        // Only the latest save says whether the draft is stored.
+        if (sent === sends.current) setUnsaved(false);
       },
       () => {
         setSaving((count) => count - 1);

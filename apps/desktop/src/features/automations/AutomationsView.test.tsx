@@ -862,6 +862,31 @@ test("a change made elsewhere while a save is on its way, which then fails, is a
   expect(field("Model").value).toBe("");
 });
 
+test("a failed save after quick saves of its own that worked is not taken for a change elsewhere", async () => {
+  stored = [ANY_COMMAND];
+  const workspaceChanged = showChanging();
+  const form = await openAgent();
+  const model = within(form).getByRole("textbox", { name: /^Model/ });
+  let answer = () => {};
+  agentSaveHeld = new Promise((resolve) => (answer = resolve));
+  // Typed fast: the first saves are still on their way when the last is sent.
+  fireEvent.change(model, { target: { value: "F" } });
+  fireEvent.change(model, { target: { value: "FA" } });
+  agentUnsavable = "the workspace is busy";
+  fireEvent.change(model, { target: { value: "FAILME" } });
+  await act(async () => answer());
+  agentSaveHeld = null;
+  agentUnsavable = null;
+  await screen.findByText(/was not saved/);
+
+  // The page reads again and finds what this form's own saves stored.
+  workspaceChanged();
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  expect(stored[0]?.model).toBe("FA");
+  expect(screen.queryByText("Changed somewhere else")).toBeNull();
+});
+
 test("New Automation while a run is open opens the new Automation, not the run", async () => {
   automations = [TRIAGE];
   runs = [listed("2", "needs_attention", "Login flickers")];
