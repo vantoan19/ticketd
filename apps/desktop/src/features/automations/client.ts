@@ -199,6 +199,10 @@ const automationRunSchema = z.object({
    * it over or dismissed it.
    */
   needs_you: z.boolean(),
+  /** How the person answered it, once a Needs attention run no longer needs them. */
+  answer: z.enum(["dismissed", "ran_again"]).nullable(),
+  /** Its Automation was deleted since, so it cannot be run again. */
+  automation_deleted: z.boolean(),
   /** The ticket it acts on, as it is called now. */
   ticket: z
     .object({ id: z.string(), reference: z.string(), title: z.string() })

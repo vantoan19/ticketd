@@ -6,6 +6,7 @@ import type {
 import {
   runsByDay,
   runsByNeed,
+  runStatusText,
   stepStates,
 } from "@/features/automations/runs-model";
 
@@ -58,6 +59,8 @@ const states = (
       status,
       reason: null,
       needs_you: false,
+      answer: null,
+      automation_deleted: false,
       ticket: null,
       created_at: "2026-11-14T10:00:00.000Z",
       started_at: null,
@@ -120,6 +123,8 @@ const run = (id: string, created_at: string): AutomationRun => ({
   status: "completed",
   reason: null,
   needs_you: false,
+  answer: null,
+  automation_deleted: false,
   ticket: null,
   created_at,
 });
@@ -149,7 +154,39 @@ test("runs are grouped by the local day they started on, newest day first", () =
   ]);
 });
 
-test("every run is grouped by whether it is going, needs the person, or is over, in the order given", () => {
+test("in Now the running runs come first, then the queued ones in the order they start", () => {
+  const of = (id: string, status: AutomationRun["status"]) => ({
+    ...run(id, "2026-11-14T10:00:00Z"),
+    status,
+  });
+
+  // Newest first, as the core lists them.
+  const [now] = runsByNeed([
+    of("queued-newest", "queued"),
+    of("queued-oldest", "queued"),
+    of("running", "running"),
+  ]);
+
+  expect(now?.runs.map((item) => item.id)).toEqual([
+    "running",
+    "queued-oldest",
+    "queued-newest",
+  ]);
+});
+
+test("an answered Needs attention run says how it was answered", () => {
+  expect(runStatusText({ status: "needs_attention", answer: null })).toBe(
+    "Needs attention",
+  );
+  expect(
+    runStatusText({ status: "needs_attention", answer: "dismissed" }),
+  ).toBe("Needs attention · dismissed");
+  expect(
+    runStatusText({ status: "needs_attention", answer: "ran_again" }),
+  ).toBe("Needs attention · run again");
+});
+
+test("every run is grouped by whether it is going, needs the person, or is over", () => {
   const of = (id: string, status: AutomationRun["status"]) => ({
     ...run(id, "2026-11-14T10:00:00Z"),
     status,
@@ -167,7 +204,7 @@ test("every run is grouped by whether it is going, needs the person, or is over,
   expect(
     groups.map((group) => [group.label, group.runs.map((item) => item.id)]),
   ).toEqual([
-    ["Now", ["b", "d"]],
+    ["Now", ["d", "b"]],
     ["Needs you", ["c"]],
     ["Earlier", ["a", "e"]],
   ]);

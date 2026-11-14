@@ -119,7 +119,7 @@ pub use automation_examples::AutomationExample;
 pub use automation_run_machine::{RunAction, RunEnd, StepOutcome, next_action};
 pub use automation_runs::{
     AutomationRun, AutomationRunStatus, AutomationRunStep, AutomationRunTicket,
-    AutomationStepStatus,
+    AutomationStepStatus, RunAnswer,
 };
 pub use automation_steps::AutomationNotification;
 pub use automations::{
@@ -244,6 +244,8 @@ pub enum Error {
     AutomationRunNotFound(String),
     #[error("Automation run: {0}")]
     AutomationRun(String),
+    #[error("Its Automation was deleted, so it cannot be run again.")]
+    AutomationRunAutomationDeleted,
     #[error("invalid Automation: {0}")]
     InvalidAutomation(String),
     #[error("This Automation cannot run yet. {0}.")]

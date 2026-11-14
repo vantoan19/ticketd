@@ -32,7 +32,7 @@ import { RunCanvas, StepMark } from "@/features/automations/RunCanvas";
 import { RunMark } from "@/features/automations/RunsList";
 import {
   everyStep,
-  RUN_STATUS_LABELS,
+  runStatusText,
   STEP_STATE_LABELS,
   stepStates,
 } from "@/features/automations/runs-model";
@@ -329,8 +329,8 @@ export function RunView({
           {run && (
             <>
               <span className="run-status" role="status">
-                <RunMark status={run.status} />
-                {RUN_STATUS_LABELS[run.status]}
+                <RunMark run={run} />
+                {runStatusText(run)}
               </span>
               {active ? (
                 <Button
@@ -348,6 +348,10 @@ export function RunView({
                   <Square aria-hidden />
                   Stop
                 </Button>
+              ) : run.automation_deleted ? (
+                <span className="run-status text-muted-foreground">
+                  Its Automation was deleted.
+                </span>
               ) : (
                 <Button
                   variant="outline"
