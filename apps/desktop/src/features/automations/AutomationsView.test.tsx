@@ -428,6 +428,28 @@ test("deleting an agent asks first, then removes it from the list", async () => 
   expect(screen.getByText("An agent is who a step runs")).toBeTruthy();
 });
 
+test("cancelling or dismissing the agent delete dialog returns focus to Agent actions", async () => {
+  await open(undefined, [
+    { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  await screen.findByRole("region", { name: "Triage" });
+  const actions = screen.getByRole("button", { name: "Agent actions" });
+
+  for (const close of ["Cancel", "Escape"]) {
+    actions.focus();
+    fireEvent.keyDown(actions, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+    const dialog = await screen.findByRole("dialog");
+    if (close === "Cancel")
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    else fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(actions));
+  }
+  expect(stored).toHaveLength(1);
+});
+
 test("with Codex chosen, the switches it cannot enforce are fixed on and the turn limit is not applied; Claude Code brings the agent's own choices back", async () => {
   await open(undefined, [
     {
@@ -860,6 +882,80 @@ test("a change made elsewhere while a save is on its way, which then fails, is a
   );
   await waitFor(() => expect(field("Name").value).toBe("Triage bugs"));
   expect(field("Model").value).toBe("");
+});
+
+test("a failed save after quick saves of its own that worked is not taken for a change elsewhere", async () => {
+  stored = [ANY_COMMAND];
+  const workspaceChanged = showChanging();
+  const form = await openAgent();
+  const model = within(form).getByRole("textbox", { name: /^Model/ });
+  // A save of its own that the page passes back: what arrives is then older
+  // than what the quick saves below store.
+  fireEvent.change(model, { target: { value: "A" } });
+  await waitFor(() => expect(stored[0]?.model).toBe("A"));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  let answer = () => {};
+  agentSaveHeld = new Promise((resolve) => (answer = resolve));
+  // Typed fast: the first saves are still on their way when the last is sent.
+  fireEvent.change(model, { target: { value: "F" } });
+  fireEvent.change(model, { target: { value: "FA" } });
+  agentUnsavable = "the workspace is busy";
+  fireEvent.change(model, { target: { value: "FAILME" } });
+  await act(async () => answer());
+  agentSaveHeld = null;
+  agentUnsavable = null;
+  await screen.findByText(/Your last change to the agent was not saved/);
+  expect(screen.queryByText("Changed somewhere else")).toBeNull();
+
+  // The page reads again and finds what this form's own saves stored.
+  workspaceChanged();
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  expect(stored[0]?.model).toBe("FA");
+  expect(screen.queryByText("Changed somewhere else")).toBeNull();
+});
+
+test("a list row names a status trigger with what changes, and gives every name in full on hover", async () => {
+  const long = "Mark quick for the weekly release train, stage one of three";
+  automations = [
+    {
+      ...TRIAGE,
+      name: long,
+      trigger: { kind: "status_changed", to: "Done", from: null },
+    },
+  ];
+  stored = [
+    { id: "a1", ...DEFAULTS, name: "Verifier" } as unknown as AutomationAgent,
+  ];
+  runs = [
+    { ...listed("2", "completed", "Login flickers"), automation_name: long },
+  ];
+  show();
+
+  const row = within(
+    await screen.findByRole("list", { name: "Automations" }),
+  ).getByRole("button");
+  expect(row.querySelector(".chat-row-title")?.getAttribute("title")).toBe(
+    long,
+  );
+  expect(row.querySelector(".auto-row-start")?.textContent).toBe(
+    "Status → Done",
+  );
+  expect(row.querySelector(".auto-row-start svg")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("radio", { name: /^Agents/ }));
+  const agent = within(
+    await screen.findByRole("list", { name: "Agents" }),
+  ).getByRole("button");
+  expect(agent.querySelector(".chat-row-title")?.getAttribute("title")).toBe(
+    "Verifier",
+  );
+
+  fireEvent.click(screen.getByRole("radio", { name: /^Runs/ }));
+  const run = await screen.findByRole("button", { name: /Login flickers/ });
+  expect(run.querySelector(".chat-row-title")?.getAttribute("title")).toBe(
+    "T-2 Login flickers",
+  );
 });
 
 test("New Automation while a run is open opens the new Automation, not the run", async () => {

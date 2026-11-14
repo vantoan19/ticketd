@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
   layoutFlow,
+  automaticViewport,
   focusZoom,
+  LEAST_ZOOM,
   readableViewport,
 } from "@/features/automations/canvas-layout";
 
@@ -323,4 +325,78 @@ test("a selected card and the first step of its failure path are shown together 
   expect(focusZoom(focus, { width: 1200, height: 800 })).toBe(0.75);
   // Never below half, however narrow.
   expect(focusZoom(focus, { width: 200, height: 640 })).toBe(0.5);
+});
+
+test("the automatic view keeps the selected card whole and cuts no card in half at an edge", () => {
+  // Round 3's flow (3A4, 3C3): Run agent with a failure path, then an If whose
+  // No path holds another If.
+  const layout = layoutFlow([
+    { id: "agent", on_failure: [{ id: "tell" }] },
+    {
+      id: "check",
+      yes: [{ id: "done" }],
+      no: [{ id: "inner", yes: [{ id: "a" }], no: [{ id: "b" }] }],
+    },
+  ]);
+  const cards = layout.items
+    .filter((item) => item.kind === "card")
+    .map((item) => ({ x: item.x, y: item.y, width: 240, height: 76 }));
+  const at = (id: string) => {
+    const item = layout.items.find((found) => found.id === id)!;
+    return { x: item.x, y: item.y, width: 240, height: 76 };
+  };
+  const span = (
+    boxes: { x: number; y: number; width: number; height: number }[],
+  ) => {
+    const x = Math.min(...boxes.map((box) => box.x));
+    const y = Math.min(...boxes.map((box) => box.y));
+    return {
+      x,
+      y,
+      width: Math.max(...boxes.map((box) => box.x + box.width)) - x,
+      height: Math.max(...boxes.map((box) => box.y + box.height)) - y,
+    };
+  };
+  const flow = span(cards);
+  const agent = at("agent");
+  const focus = span([agent, at("tell")]);
+
+  // Beside the panel at 1280, 1100, 900 and 760 px windows, and at 720.
+  for (const canvas of [
+    { width: 363, height: 640 },
+    { width: 520, height: 640 },
+    { width: 700, height: 500 },
+    { width: 300, height: 600 },
+  ]) {
+    const view = automaticViewport(
+      flow,
+      focus,
+      canvas,
+      false,
+      focusZoom(focus, canvas),
+      cards,
+      agent,
+    );
+    const zoom = view.zoom;
+    // Smaller only as it takes, never below the floor the canvas allows.
+    expect(zoom).toBeGreaterThanOrEqual(LEAST_ZOOM);
+    const screen = (box: typeof agent) => ({
+      left: view.x + box.x * zoom,
+      right: view.x + (box.x + box.width) * zoom,
+      top: view.y + box.y * zoom,
+      bottom: view.y + (box.y + box.height) * zoom,
+    });
+    const shown = screen(agent);
+    expect(shown.left).toBeGreaterThanOrEqual(0);
+    expect(shown.right).toBeLessThanOrEqual(canvas.width);
+    for (const card of cards) {
+      const { left, right, top, bottom } = screen(card);
+      const cut = (low: number, high: number, edge: number) =>
+        low < edge - 0.5 && high > edge + 0.5;
+      expect(cut(left, right, 0) || cut(left, right, canvas.width)).toBe(false);
+      expect(cut(top, bottom, 0) || cut(top, bottom, canvas.height)).toBe(
+        false,
+      );
+    }
+  }
 });

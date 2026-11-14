@@ -191,8 +191,14 @@ export function AgentForm({
    * said it is stored: read after a change, or the answer to a save.
    */
   const arrived = JSON.stringify(settingsOf(agent));
-  /** What the draft was taken from or last saved as, to tell a change made elsewhere. */
+  /** What the draft was taken from or this form's last save that worked stored. */
   const [stored, setStored] = useState(arrived);
+  /**
+   * That, and every save of this form that worked since the draft was taken:
+   * the page may pass on any of them, older ones too, and a change made
+   * elsewhere is none of them.
+   */
+  const [own, setOwn] = useState([arrived]);
   const [seen, setSeen] = useState(arrived);
   /** Saves sent and not yet answered. */
   const [saving, setSaving] = useState(0);
@@ -201,6 +207,7 @@ export function AgentForm({
   const [unsaved, setUnsaved] = useState(false);
   const take = (settings: AutomationAgentSettings) => {
     setStored(JSON.stringify(settings));
+    setOwn([JSON.stringify(settings)]);
     setDraft(settings);
     setCommands(settings.tools.allowed_commands.join("\n"));
     setUnsaved(false);
@@ -217,9 +224,11 @@ export function AgentForm({
    * received, so a change that came during a save that then failed is asked
    * about too, and a save that works ends it.
    */
-  const elsewhere = unsaved && saving === 0 && arrived !== stored;
+  const elsewhere = unsaved && saving === 0 && !own.includes(arrived);
   const statusOf = useHarnessStatus();
   const [deleting, setDeleting] = useState(false);
+  /** Where the delete dialog returns focus: the menu item that opened it is gone. */
+  const actions = useRef<HTMLButtonElement>(null);
 
   const save = (next: AutomationAgentSettings) => {
     const sent = ++sends.current;
@@ -227,11 +236,12 @@ export function AgentForm({
     onSave(next).then(
       (saved) => {
         setSaving((count) => count - 1);
-        // Only the latest save says how things stand; the page passes on only
-        // its answer too, so an earlier one would look like a change elsewhere.
-        if (sent !== sends.current) return;
-        setStored(JSON.stringify(settingsOf(saved)));
-        setUnsaved(false);
+        const json = JSON.stringify(settingsOf(saved));
+        setStored(json);
+        // ponytail: kept only as far back as an answer can lag; drop the cap if a slower path appears.
+        setOwn((current) => [...current.slice(-49), json]);
+        // Only the latest save says whether the draft is stored.
+        if (sent === sends.current) setUnsaved(false);
       },
       () => {
         setSaving((count) => count - 1);
@@ -281,7 +291,7 @@ export function AgentForm({
         <div className="detail-actions">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <IconButton label="Agent actions">
+              <IconButton ref={actions} label="Agent actions">
                 <Ellipsis aria-hidden />
               </IconButton>
             </DropdownMenuTrigger>
@@ -351,6 +361,8 @@ export function AgentForm({
             <Input
               id={`${fieldId}-name`}
               placeholder="e.g. Triage"
+              // The core's AUTOMATION_NAME_LIMIT, as for an Automation's name.
+              maxLength={120}
               value={draft.name}
               onChange={(event) => change({ name: event.target.value })}
             />
@@ -534,6 +546,7 @@ export function AgentForm({
         primaryLabel="Delete"
         primaryVariant="destructive"
         blockedReason={null}
+        returnFocus={actions}
         onSubmit={() => {
           setDeleting(false);
           onDelete();

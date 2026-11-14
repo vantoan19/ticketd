@@ -227,6 +227,35 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
   ).toBeTruthy();
 });
 
+test("hours left right after hours committed with Enter are stored too", async () => {
+  const steps = await open({
+    trigger: { kind: "schedule", schedule: { kind: "every_hours", hours: 6 } },
+  });
+  fireEvent.click(triggerCard(steps));
+  const panel = await screen.findByRole("complementary");
+  const hours = within(panel).getByRole("spinbutton", { name: "Hours" });
+  const hoursStored = () =>
+    stored.trigger?.kind === "schedule" &&
+    stored.trigger.schedule.kind === "every_hours" &&
+    stored.trigger.schedule.hours;
+
+  hours.focus();
+  fireEvent.change(hours, { target: { value: "100" } });
+  fireEvent.keyDown(hours, { key: "Enter" });
+  expect(hoursStored()).toBe(100);
+  fireEvent.change(hours, { target: { value: "7" } });
+  // Leaving by focus moving on, as Tab does: the editor hears it leave too.
+  within(panel).getByRole("radio", { name: "Every few hours" }).focus();
+
+  await waitFor(() =>
+    expect(triggerCard(steps).getAttribute("aria-label")).toBe(
+      "On a schedule: Every 7 hours",
+    ),
+  );
+  // What the card says is what is stored.
+  expect(hoursStored()).toBe(7);
+});
+
 test("a by-hand Automation has Run now in place of the On switch, and is not listed as off", async () => {
   const steps = await open({ trigger: { kind: "by_hand" } });
 

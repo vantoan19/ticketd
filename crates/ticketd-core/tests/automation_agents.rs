@@ -252,3 +252,36 @@ fn a_workspace_in_the_previous_format_gains_agent_storage_quietly() {
     workspace.delete_automation_agent(&agent.id).unwrap();
     assert_eq!(workspace.workspace_event_head().unwrap(), events);
 }
+
+/// The same limit as an Automation's name, counted after the name is trimmed.
+#[test]
+fn a_name_longer_than_an_automation_name_may_be_is_refused() {
+    let (_dir, mut workspace) = workspace();
+    let agent = workspace.create_automation_agent(triage()).unwrap();
+    let longest = format!("  {} ", "a".repeat(120));
+    let longer = "a".repeat(121);
+
+    let saved = workspace
+        .update_automation_agent(
+            &agent.id,
+            AutomationAgentSettings {
+                name: longest,
+                ..triage()
+            },
+        )
+        .unwrap();
+    assert_eq!(saved.settings.name, "a".repeat(120));
+    let too_long = AutomationAgentSettings {
+        name: longer,
+        ..triage()
+    };
+    assert!(matches!(
+        workspace.update_automation_agent(&agent.id, too_long.clone()),
+        Err(Error::InvalidAutomationAgent(_))
+    ));
+    assert!(matches!(
+        workspace.create_automation_agent(too_long),
+        Err(Error::InvalidAutomationAgent(_))
+    ));
+    assert_eq!(workspace.automation_agents().unwrap(), vec![saved]);
+}
