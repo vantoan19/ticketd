@@ -219,12 +219,73 @@ export function focusZoom(
   return Math.min(READABLE_ZOOM, Math.max(LEAST_FOCUS_ZOOM, fits));
 }
 
+/** Where cards may be cut: at or past half a pixel over a line. */
+const CUT = 0.5;
+
+/** Whether a card (`spans` on one axis) is cut in half at 0 or `edge`. */
+function cutAt(
+  offset: number,
+  zoom: number,
+  edge: number,
+  spans: [number, number][],
+) {
+  return spans.some(([from, to]) =>
+    [0, edge].some(
+      (line) =>
+        offset + from * zoom < line - CUT && offset + to * zoom > line + CUT,
+    ),
+  );
+}
+
+/**
+ * `offset` on one axis, moved as little as it takes so no card (`spans`, from
+ * and to on that axis) is cut in half at either edge of the canvas (0 and
+ * `edge`) while `keep` stays whole; showing all of `focus` too comes first.
+ * Unchanged when nothing is cut, or when no such place exists.
+ */
+function uncut(
+  offset: number,
+  zoom: number,
+  edge: number,
+  lead: number,
+  tail: number,
+  spans: [number, number][],
+  keep: [number, number],
+  focus: [number, number],
+) {
+  const at = (o: number, value: number) => o + value * zoom;
+  const cuts = (o: number) => cutAt(o, zoom, edge, spans);
+  const whole = (o: number, [from, to]: [number, number]) =>
+    at(o, from) >= -CUT && at(o, to) <= edge + CUT;
+  if (!cuts(offset)) return offset;
+  // Every place where some card meets a margin or an edge exactly: the ends
+  // of each stretch where nothing is cut, and the margins inside them.
+  const fine = spans
+    .flatMap(([from, to]) => [
+      lead - from * zoom,
+      tail - to * zoom,
+      -from * zoom,
+      -to * zoom,
+      edge - from * zoom,
+      edge - to * zoom,
+    ])
+    .filter((o) => !cuts(o) && whole(o, keep));
+  const cost = (o: number) =>
+    (whole(o, focus) ? 0 : edge * 100) + Math.abs(o - offset);
+  return fine.reduce<number>(
+    (best, o) => (cost(o) < cost(best) ? o : best),
+    fine[0] ?? offset,
+  );
+}
+
 /**
  * Where a flow too big to show whole goes at `zoom`, the readable size unless
  * said otherwise, one axis at a
  * time. An axis the flow fits is centered on the whole flow. On one it does
  * not, `focus` is shown, centered, or with its top at the top when `fromTop`,
- * but the view never runs past either end of the flow.
+ * but the view never runs past either end of the flow. Given the `cards`, it
+ * then moves the least it takes to cut none in half at an edge, keeping
+ * `keep` (the selected card) whole.
  */
 export function readableViewport(
   flow: Box,
@@ -232,6 +293,8 @@ export function readableViewport(
   canvas: { width: number; height: number },
   fromTop: boolean,
   zoom = READABLE_ZOOM,
+  cards: Box[] = [],
+  keep: Box = focus,
 ) {
   const place = (
     start: number,
@@ -241,6 +304,9 @@ export function readableViewport(
     room: number,
     lead: number,
     alignStart: boolean,
+    edge: number,
+    spans: [number, number][],
+    kept: [number, number],
   ) => {
     // Whole, even if that leaves less than the margin at its sides.
     if (length * zoom <= room) return room / 2 - (start + length / 2) * zoom;
@@ -251,7 +317,16 @@ export function readableViewport(
         : room / 2 - (focusStart + focusLength / 2) * zoom;
     const first = lead - start * zoom;
     const last = room - VIEW_MARGIN - (start + length) * zoom;
-    return Math.min(first, Math.max(last, wanted));
+    return uncut(
+      Math.min(first, Math.max(last, wanted)),
+      zoom,
+      edge,
+      lead,
+      room - VIEW_MARGIN,
+      spans,
+      kept,
+      [focusStart, focusStart + focusLength],
+    );
   };
   return {
     x: place(
@@ -262,6 +337,9 @@ export function readableViewport(
       canvas.width,
       VIEW_MARGIN,
       false,
+      canvas.width,
+      cards.map((card) => [card.x, card.x + card.width]),
+      [keep.x, keep.x + keep.width],
     ),
     y: place(
       flow.y,
@@ -271,7 +349,52 @@ export function readableViewport(
       canvas.height - ZOOM_ROOM,
       TOP,
       fromTop,
+      canvas.height,
+      cards.map((card) => [card.y, card.y + card.height]),
+      [keep.y, keep.y + keep.height],
     ),
     zoom,
   };
+}
+
+/** How much smaller each try of the automatic view is than the last. */
+const ZOOM_STEP = 0.01;
+
+/**
+ * The view a flow too big to show whole opens at: `readableViewport` at
+ * `zoom`, or a little smaller where only that cuts no card in half at an edge
+ * of the canvas. Small enough, the whole flow shows, which cuts none.
+ */
+export function automaticViewport(
+  flow: Box,
+  focus: Box,
+  canvas: { width: number; height: number },
+  fromTop: boolean,
+  zoom: number,
+  cards: Box[],
+  keep: Box,
+) {
+  const xs = cards.map((card): [number, number] => [
+    card.x,
+    card.x + card.width,
+  ]);
+  const ys = cards.map((card): [number, number] => [
+    card.y,
+    card.y + card.height,
+  ]);
+  for (let at = zoom; ; at -= ZOOM_STEP) {
+    const view = readableViewport(
+      flow,
+      focus,
+      canvas,
+      fromTop,
+      at,
+      cards,
+      keep,
+    );
+    const clean =
+      !cutAt(view.x, at, canvas.width, xs) &&
+      !cutAt(view.y, at, canvas.height, ys);
+    if (clean || at - ZOOM_STEP < LEAST_ZOOM) return view;
+  }
 }

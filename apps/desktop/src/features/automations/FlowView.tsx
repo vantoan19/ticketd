@@ -2,9 +2,9 @@ import { useEffect, useEffectEvent } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
 import { ZoomControl } from "@/components/ui/zoom-control";
 import {
+  automaticViewport,
   focusZoom,
   READABLE_ZOOM,
-  readableViewport,
   VIEW_MARGIN as MARGIN,
   ZOOM_ROOM,
 } from "@/features/automations/canvas-layout";
@@ -19,7 +19,8 @@ const PADDING = 0.2;
  * read whole is not shrunk to fit: it stays at a readable size, showing the
  * `selected` card with the start of its failure path (shrunk to half at most,
  * so the two show together), or else the `start` cards (the top of the flow
- * when there are none), and the rest is a scroll away. The Fit button shows
+ * when there are none), and the rest is a scroll away. No card is left cut in
+ * half at an edge: the view moves, or shrinks a little more, until none is. The Fit button shows
  * the whole flow, as small as that takes. Whatever takes focus on the canvas
  * is brought into view.
  */
@@ -66,14 +67,20 @@ export function FlowView({
     const focus = shown.length > 0 ? shown : first ? [first] : [];
     if (focus.length === 0) return;
     const focusBox = flow.getNodesBounds(focus);
+    const cards = nodes
+      .filter((node) => node.type === "card")
+      .map((node) => flow.getNodesBounds([node]));
     void flow.setViewport(
-      readableViewport(
+      automaticViewport(
         bounds,
         focusBox,
         { width, height },
         selected === null,
         // Shrunk, within limits, so the failure path shows beside its card.
         failure ? focusZoom(focusBox, { width, height }) : READABLE_ZOOM,
+        cards,
+        // The selected card (or the first shown) stays whole, whatever else does not fit.
+        flow.getNodesBounds(focus.slice(0, 1)),
       ),
     );
   };
