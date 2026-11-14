@@ -251,6 +251,14 @@
   pointer-events: none;
 }
 
+/* React Flow takes pointer events off a node that can be neither dragged nor
+   selected, and everything in it inherits that. The cards and the + buttons
+   are the controls here, so they take the pointer back. */
+.flow-card,
+.flow-gap {
+  pointer-events: auto;
+}
+
 /* A card: what kind of step, what it does, and its detail or what it needs. */
 .flow-card {
   position: relative;

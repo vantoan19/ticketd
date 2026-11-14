@@ -4,7 +4,10 @@ import { ZoomControl } from "@/components/ui/zoom-control";
 
 /** The smallest a flow is drawn without being asked: its cards still read. */
 const READABLE_ZOOM = 0.75;
+/** Around a flow that fits with room to spare. */
 const PADDING = 0.2;
+/** The least kept clear around a flow at its smallest readable size. */
+const MARGIN = 16;
 /** Above the first card when the flow is too tall to show whole. */
 const TOP = 32;
 
@@ -30,8 +33,8 @@ export function FlowView({
   const fit = () => {
     const nodes = flow.getNodes();
     const bounds = flow.getNodesBounds(nodes);
-    const room = (1 - 2 * PADDING) / READABLE_ZOOM;
-    if (bounds.width <= width * room && bounds.height <= height * room)
+    const room = (side: number) => (side - 2 * MARGIN) / READABLE_ZOOM;
+    if (bounds.width <= room(width) && bounds.height <= room(height))
       return void flow.fitView({
         minZoom: READABLE_ZOOM,
         maxZoom: 1,
