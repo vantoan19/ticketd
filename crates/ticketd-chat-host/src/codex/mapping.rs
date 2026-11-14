@@ -105,7 +105,8 @@ pub(super) struct Session {
     /// Set for an unattended session: what every `turn/start` adds, which keeps
     /// approvals off and the sandbox as the agent's allowed tools set it.
     pub(super) turn_overrides: Option<Value>,
-    /// The tool Codex declined in the open turn of an unattended session.
+    /// Why the open turn of an unattended session fails: the first tool Codex
+    /// declined, or file it declined or could not change.
     declined: Option<String>,
     /// Why Codex could not start a command in the open turn of an unattended session.
     not_started: Option<String>,
@@ -408,7 +409,7 @@ impl Session {
             // the agent needed and was denied, even if it then ended its turn.
             "completed" if declined.is_some() => ended_by(
                 ProblemKind::ToolDenied,
-                format!("Codex was denied: {}", declined.unwrap_or_default()),
+                declined.unwrap_or_default(),
             ),
             // Whatever the agent then said, it could not do its work (#387 D2).
             "completed" if not_started.is_some() => ended_by(
@@ -582,6 +583,33 @@ impl Session {
             && none_or("durationMs", 0)
     }
 
+    /// What an unattended turn fails on in this item, if anything: a tool Codex
+    /// declined, or a file it declined or could not change. Nobody approves for an
+    /// unattended session (see `server_request`), so a declined file change is one
+    /// outside the folders Codex may write to.
+    fn denial(kind: &str, title: &str, item: &Value) -> Option<String> {
+        let status = text(item, &["status"])?;
+        if kind != "fileChange" {
+            return (status == "declined").then(|| format!("Codex was denied: {title}"));
+        }
+        let paths: Vec<&str> = item
+            .get("changes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|change| text(change, &["path"]))
+            .collect();
+        let why = match status {
+            "declined" => "it is outside the step's folder",
+            "failed" => "the file could not be written",
+            _ => return None,
+        };
+        Some(format!(
+            "Codex could not change {}: {why}.",
+            paths.join(", ")
+        ))
+    }
+
     fn tool(
         &mut self,
         turn: &str,
@@ -591,8 +619,8 @@ impl Session {
         item: &Value,
         completed: bool,
     ) -> EventKind {
-        if text(item, &["status"]) == Some("declined") && self.turn_overrides.is_some() {
-            self.declined = Some(title.clone());
+        if self.turn_overrides.is_some() && self.declined.is_none() {
+            self.declined = Self::denial(kind, &title, item);
         }
         if kind == "commandExecution"
             && self.turn_overrides.is_some()
@@ -688,6 +716,19 @@ impl Session {
         if self.requests.contains_key(&request) {
             // Redelivery of a request that is already on screen.
             return (Vec::new(), None);
+        }
+        if self.turn_overrides.is_some() {
+            // Nobody is there to approve: decline, and Codex reports the item declined.
+            let result = match method {
+                "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+                    Some(json!({"decision": "decline"}))
+                }
+                "item/permissions/requestApproval" => Some(json!({"permissions": {}})),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return (Vec::new(), Some(json!({"id": id, "result": result})));
+            }
         }
         let reason = text(params, &["reason"]);
         let (kind, shown) = match method {

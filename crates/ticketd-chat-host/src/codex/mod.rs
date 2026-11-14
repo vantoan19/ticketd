@@ -63,7 +63,9 @@ impl CodexAdapter {
 }
 
 /// What `thread/start` and every `turn/start` are told for an unattended session:
-/// approvals off, and Codex's own sandbox. Codex reads files and runs commands
+/// no approvals given (Codex may ask, and the session declines at once: with the
+/// policy "never" Codex reports a patch it rejects as nothing at all, 4B1), and
+/// Codex's own sandbox. Codex reads files and runs commands
 /// inside the sandbox whatever the switches say, and a read-only sandbox would stop
 /// the ticketd CLI recording the agent's result, so "read files", "edit files",
 /// "run commands" and the list of allowed commands do not apply here. The sandbox
@@ -79,12 +81,12 @@ pub(super) fn unattended_params(
         .chain(unattended.ticketd_folders.iter().map(PathBuf::as_path))
         .map(Path::to_string_lossy)
         .collect();
-    let mut thread = json!({"approvalPolicy": "never", "sandbox": "workspace-write"});
+    let mut thread = json!({"approvalPolicy": "on-request", "sandbox": "workspace-write"});
     if let Some(model) = &unattended.model {
         thread["model"] = json!(model);
     }
     let turn = json!({
-        "approvalPolicy": "never",
+        "approvalPolicy": "on-request",
         "sandboxPolicy": {
             "type": "workspaceWrite",
             "networkAccess": unattended.tools.use_web,

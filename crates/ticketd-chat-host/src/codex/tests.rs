@@ -920,12 +920,12 @@ fn an_unattended_sandbox_writes_to_the_steps_folder_and_the_workspace_data_folde
             super::unattended_params(&unattended(edit_files, use_web), Path::new("/work/chat-1"));
         assert_eq!(
             thread,
-            json!({"approvalPolicy": "never", "sandbox": "workspace-write", "model": "gpt-test"})
+            json!({"approvalPolicy": "on-request", "sandbox": "workspace-write", "model": "gpt-test"})
         );
         assert_eq!(
             turn,
             json!({
-                "approvalPolicy": "never",
+                "approvalPolicy": "on-request",
                 "sandboxPolicy": {
                     "type": "workspaceWrite",
                     "networkAccess": use_web,
@@ -1031,6 +1031,80 @@ fn a_command_codex_could_not_start_fails_an_unattended_turn() {
     assert_eq!(outcome(&ran, true), TurnOutcome::Completed);
     // A person's Chat is theirs to judge: Codex said the turn completed.
     assert_eq!(outcome(&not_started, false), TurnOutcome::Completed);
+}
+
+/// 4B1: a file change Codex declined (outside the writable folders) or failed to write
+/// fails an unattended turn naming the file, though the agent then ended its turn. In
+/// a person's Chat the same items fail nothing.
+#[test]
+fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_naming_the_file() {
+    let item = |status: &str| {
+        json!({"type": "fileChange", "id": "fc_1", "status": status,
+            "changes": [{"path": "/elsewhere/a.txt", "kind": {"type": "add"}, "diff": "hi\n"}]})
+    };
+    let outcome = |status: &str, unattended: bool| {
+        let mut session = Session::default();
+        session.turn_overrides = unattended.then(|| json!({}));
+        let params = json!({"turnId": "turn_1", "item": item(status)});
+        session.notification("item/completed", &params);
+        let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
+        match session.notification("turn/completed", &turn).pop() {
+            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
+            other => panic!("the turn ended, got {other:?}"),
+        }
+    };
+    for (status, message) in [
+        (
+            "declined",
+            "Codex could not change /elsewhere/a.txt: it is outside the step's folder.",
+        ),
+        (
+            "failed",
+            "Codex could not change /elsewhere/a.txt: the file could not be written.",
+        ),
+    ] {
+        match outcome(status, true) {
+            TurnOutcome::Failed(problem) => {
+                assert_eq!(problem.kind, ProblemKind::ToolDenied, "{status}");
+                assert_eq!(problem.message, message);
+            }
+            other => panic!("{status}: a failed turn, got {other:?}"),
+        }
+        assert_eq!(outcome(status, false), TurnOutcome::Completed, "{status}");
+    }
+    assert_eq!(outcome("completed", true), TurnOutcome::Completed);
+}
+
+/// 4B1: Codex reports nothing at all for a patch its sandbox policy rejects outright
+/// (approvals off), so an unattended session lets Codex ask, and ticketd declines at
+/// once: the declined item names the file. A person's Chat still waits for the person.
+#[test]
+fn an_unattended_session_declines_every_approval_request_at_once() {
+    let ask = |session: &mut Session, method: &str| {
+        let params = json!({"threadId": "thr_1", "turnId": "turn_1", "itemId": "fc_1"});
+        session.server_request(&json!(0), method, &params)
+    };
+    let mut unattended = Session::default();
+    unattended.turn_overrides = Some(json!({}));
+    for (method, reply) in [
+        (
+            "item/fileChange/requestApproval",
+            json!({"id": 0, "result": {"decision": "decline"}}),
+        ),
+        (
+            "item/commandExecution/requestApproval",
+            json!({"id": 0, "result": {"decision": "decline"}}),
+        ),
+        (
+            "item/permissions/requestApproval",
+            json!({"id": 0, "result": {"permissions": {}}}),
+        ),
+    ] {
+        let (events, frame) = ask(&mut unattended, method);
+        assert_eq!((events.len(), frame), (0, Some(reply)), "{method}");
+    }
+    let (events, frame) = ask(&mut Session::default(), "item/fileChange/requestApproval");
+    assert_eq!((events.len(), frame), (1, None));
 }
 
 /// L5: an unattended thread starts none of the person's MCP servers (named from
