@@ -751,6 +751,8 @@ export function AutomationEditor({
         <Input
           aria-label="Name"
           placeholder="e.g. Triage new tickets"
+          // The core's AUTOMATION_NAME_LIMIT.
+          maxLength={120}
           value={renaming ?? ""}
           onChange={(event) => setRenaming(event.target.value)}
         />
