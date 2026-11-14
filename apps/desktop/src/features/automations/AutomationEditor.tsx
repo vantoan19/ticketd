@@ -210,6 +210,12 @@ export function AutomationEditor({
   const [seen, setSeen] = useState(arrived);
   /** A typed edit the person has not left yet: it may not be stored. */
   const [typed, setTyped] = useState(false);
+  /**
+   * That typed edit, as last sent; null once a finished edit is sent. Leaving
+   * the editor reads it, not the render's `draft`: a field that saves as it is
+   * left saves first in the same event, and the render's draft is older.
+   */
+  const typedEdit = useRef<AutomationDefinition | null>(null);
   /** Saves sent and not yet answered. */
   const [saving, setSaving] = useState(0);
   const sends = useRef(0);
@@ -286,6 +292,7 @@ export function AutomationEditor({
   const save = (next: AutomationDefinition, typing: boolean) => {
     const sent = ++sends.current;
     const wasOn = automation.enabled;
+    typedEdit.current = typing ? next : null;
     setTyped(typing);
     setSaving((count) => count + 1);
     onChange(next, typing).then(
@@ -318,7 +325,7 @@ export function AutomationEditor({
   };
   /** The person left the field: what they typed is now the edit they made. */
   const commit = () => {
-    if (typed) save(draft, false);
+    if (typedEdit.current) save(typedEdit.current, false);
   };
   // Closing the editor mid-field leaves the field too.
   const commitOnClose = useEffectEvent(commit);
@@ -705,6 +712,7 @@ export function AutomationEditor({
                       onClick={() => {
                         setStored(JSON.stringify(elsewhere));
                         setDraft(elsewhere);
+                        typedEdit.current = null;
                         setTyped(false);
                         setSaveFailure(null);
                         setElsewhere(null);
