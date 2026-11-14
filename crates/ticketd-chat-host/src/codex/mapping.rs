@@ -607,7 +607,10 @@ impl Session {
                     .to_owned(),
             );
         }
-        let cut_off = self.interrupted.as_ref().is_some_and(|stopped| stopped.0 == turn);
+        let cut_off = self
+            .interrupted
+            .as_ref()
+            .is_some_and(|stopped| stopped.0 == turn);
         let status = match text(item, &["status"]) {
             // Left unfinished: the turn shows it as not finished (#387 3B3).
             Some("failed") if cut_off => ToolStatus::Running,

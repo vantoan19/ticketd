@@ -378,7 +378,9 @@ fn unusable_folder(folder: &str) -> Option<String> {
     }
     match std::fs::metadata(path) {
         Ok(found) if found.is_dir() => None,
-        Ok(_) => Some(format!("The step's folder is a file, not a folder: {shown}.")),
+        Ok(_) => Some(format!(
+            "The step's folder is a file, not a folder: {shown}."
+        )),
         Err(_) => Some(format!("The step's folder doesn't exist: {shown}.")),
     }
 }
