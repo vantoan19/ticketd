@@ -359,7 +359,7 @@ impl Connection {
         });
         if let Some(unattended) = &request.unattended {
             open["unattended"] = super::unattended_options(unattended);
-            self.state().session.unattended = true;
+            self.state().session.mark_unattended();
         }
         // New Chat's picks, when the person made them. The bridge accepts no mode
         // that skips permissions. A Chat taken over from a run is an ordinary Chat

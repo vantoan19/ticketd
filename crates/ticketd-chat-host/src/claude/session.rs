@@ -52,7 +52,7 @@ pub(super) struct Session {
     /// When the limit Claude Code last reported as exhausted resets, if it said.
     limit_resets_at: Option<i64>,
     /// Nobody approves for this session: a tool Claude Code denied fails the turn.
-    pub(super) unattended: bool,
+    unattended: bool,
     reports: Reports,
 }
 
@@ -92,6 +92,12 @@ impl Session {
         if let Some(turn) = &mut self.turn {
             turn.interrupt_written = true;
         }
+    }
+
+    /// The session runs an Automation's agent, with nobody there to approve.
+    pub fn mark_unattended(&mut self) {
+        self.unattended = true;
+        self.reports.unattended();
     }
 
     /// The runtime is gone: nothing is live any more.
@@ -657,7 +663,7 @@ impl Session {
 
 /// Each distinct thing Claude Code denied in a turn, once: the tool, and for a shell
 /// its command on one line ("PowerShell `node test.js`").
-fn denials(event: &Value) -> Vec<String> {
+pub(super) fn denials(event: &Value) -> Vec<String> {
     const MAX_COMMAND_CHARS: usize = 120;
     let mut said: Vec<String> = Vec::new();
     for denial in event["denials"].as_array().into_iter().flatten() {
@@ -666,6 +672,12 @@ fn denials(event: &Value) -> Vec<String> {
         };
         let line = match denial["command"].as_str() {
             Some(command) => {
+                // Control characters (a backspace from a `\b` in a JSON-written
+                // path) print as nothing useful: each becomes a space (#387 M19).
+                let command: String = command
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect();
                 let command = command.split_whitespace().collect::<Vec<_>>().join(" ");
                 let short: String = command.chars().take(MAX_COMMAND_CHARS).collect();
                 let more = if short.len() < command.len() {
