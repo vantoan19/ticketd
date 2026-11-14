@@ -921,7 +921,9 @@ test("a list row names a status trigger with what changes, and gives every name 
   stored = [
     { id: "a1", ...DEFAULTS, name: "Verifier" } as unknown as AutomationAgent,
   ];
-  runs = [{ ...listed("2", "completed", "Login flickers"), automation_name: long }];
+  runs = [
+    { ...listed("2", "completed", "Login flickers"), automation_name: long },
+  ];
   show();
 
   const row = within(
