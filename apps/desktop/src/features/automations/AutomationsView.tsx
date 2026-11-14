@@ -226,8 +226,10 @@ export function AutomationsView({
       ([foundAutomations, foundAgents, foundRuns]) => {
         // Read before a save that has been made since: it would put the old
         // definition back under the editor. The save's own change reads again.
-        if (saved === saves.current) setAutomations(foundAutomations);
-        setAgents(foundAgents);
+        if (saved === saves.current) {
+          setAutomations(foundAutomations);
+          setAgents(foundAgents);
+        }
         setRuns(foundRuns);
         setError("");
       },
@@ -314,22 +316,26 @@ export function AutomationsView({
       },
       failed("new-agent", "The agent could not be made."),
     );
+  /** Saves the agent and resolves to it as it is then stored. */
   const saveAgent = (id: string, settings: AutomationAgentSettings) => {
-    setAgents(
-      (current) =>
-        current?.map((agent) =>
-          agent.id === id ? { ...agent, ...settings } : agent,
-        ) ?? null,
+    const save = ++saves.current;
+    const saved = automationsClient.updateAgent(id, settings);
+    void saved.then(
+      (agent) => {
+        worked("save-agent");
+        // An earlier save's answer would undo what was typed since.
+        if (save === saves.current)
+          setAgents(
+            (current) =>
+              current?.map((item) => (item.id === id ? agent : item)) ?? null,
+          );
+      },
+      failed(
+        "save-agent",
+        "Your last change to the agent was not saved; change it again to retry.",
+      ),
     );
-    automationsClient
-      .updateAgent(id, settings)
-      .then(
-        () => worked("save-agent"),
-        failed(
-          "save-agent",
-          "Your last change to the agent was not saved; change it again to retry.",
-        ),
-      );
+    return saved;
   };
   const deleteAgent = (id: string) =>
     automationsClient.deleteAgent(id).then(

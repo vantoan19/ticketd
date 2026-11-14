@@ -173,7 +173,11 @@ export function AutomationEditor({
   onDelete: () => void;
   /** Makes a new agent; resolves to nothing when that failed. */
   onCreateAgent: () => Promise<AutomationAgent | undefined>;
-  onSaveAgent: (id: string, settings: AutomationAgentSettings) => void;
+  /** Saves an agent and resolves to it as it is then stored. */
+  onSaveAgent: (
+    id: string,
+    settings: AutomationAgentSettings,
+  ) => Promise<AutomationAgent>;
   onDeleteAgent: (id: string) => void;
   onFail: (reason: unknown) => void;
   /** How the reads the editor and its views make by themselves went. */

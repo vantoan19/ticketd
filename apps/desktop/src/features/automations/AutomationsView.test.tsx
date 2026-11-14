@@ -55,11 +55,14 @@ let automations: Automation[] = [];
 let runs: ListedRun[] = [];
 /** While set, the fake Workspace refuses to read a run with it. */
 let runUnreadable: string | null = null;
+/** While set, the fake Workspace refuses to save an agent with it. */
+let agentUnsavable: string | null = null;
 beforeEach(() => {
   stored = [];
   automations = [];
   runs = [];
   runUnreadable = null;
+  agentUnsavable = null;
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { id, settings, example } = (args ?? {}) as {
       id?: string;
@@ -111,6 +114,7 @@ beforeEach(() => {
         return agent;
       }
       case "automation_agent_update": {
+        if (agentUnsavable) throw new Error(agentUnsavable);
         const agent = { ...settings, id } as AutomationAgent;
         stored = stored.map((item) => (item.id === id ? agent : item));
         return agent;
@@ -156,6 +160,23 @@ const show = () =>
       <AutomationsView />
     </ChatClientContext>,
   );
+
+/**
+ * Shows the page under a Workspace change count and answers with what moves
+ * it, as the poll does when something changed: the page then reads again.
+ */
+const showChanging = () => {
+  const page = (version: number) => (
+    <WorkspaceChangeProvider value={version}>
+      <ChatClientContext value={createMockChatClient()}>
+        <AutomationsView />
+      </ChatClientContext>
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(page(0));
+  let version = 0;
+  return () => act(() => rerender(page(++version)));
+};
 
 const open = async (
   harnesses = createMockChatClient(),
@@ -532,14 +553,7 @@ test("a switch that fails says so on the page until it is dismissed, not in the 
 test("a read of the open run that fails says so only until that read works again", async () => {
   automations = [TRIAGE];
   runs = [listed("2", "needs_attention", "Login flickers")];
-  const page = (version: number) => (
-    <WorkspaceChangeProvider value={version}>
-      <ChatClientContext value={createMockChatClient()}>
-        <AutomationsView />
-      </ChatClientContext>
-    </WorkspaceChangeProvider>
-  );
-  const { rerender } = render(page(0));
+  const workspaceChanged = showChanging();
   fireEvent.click(await screen.findByRole("radio", { name: /^Runs/ }));
   fireEvent.click(
     await screen.findByRole("button", { name: /Login flickers/ }),
@@ -548,13 +562,13 @@ test("a read of the open run that fails says so only until that read works again
 
   // The Workspace changes while it is busy: the run cannot be read this once.
   runUnreadable = "the workspace is busy";
-  act(() => rerender(page(1)));
+  workspaceChanged();
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("the workspace is busy");
 
   // The next change reads it: nothing is wrong any more, so nothing says so.
   runUnreadable = null;
-  act(() => rerender(page(2)));
+  workspaceChanged();
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect(screen.getByRole("heading", { name: /Run on T-2/ })).toBeTruthy();
 });
@@ -590,4 +604,93 @@ test("Run commands allows only the commands listed unless Any command is chosen"
   expect(
     within(form).queryByRole("textbox", { name: "Allowed commands" }),
   ).toBeNull();
+});
+
+const ANY_COMMAND = {
+  ...DEFAULTS,
+  id: "a1",
+  name: "Triage",
+  tools: { ...DEFAULTS.tools, run_commands: true, any_command: true },
+  used_by: [],
+} as unknown as AutomationAgent;
+
+/** Opens the one agent the fake Workspace holds; answers with its form. */
+const openAgent = async () => {
+  fireEvent.click(await screen.findByRole("radio", { name: /^Agents/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Triage/ }));
+  return screen.findByRole("region", { name: "Triage" });
+};
+
+test("an agent changed elsewhere is taken by the open form, so the next edit does not put the old one back", async () => {
+  stored = [ANY_COMMAND];
+  const workspaceChanged = showChanging();
+  const form = await openAgent();
+
+  // Another desktop narrows it to one command and lowers a limit; sync brings that here.
+  stored = [
+    {
+      ...ANY_COMMAND,
+      turn_limit: 7,
+      tools: {
+        ...ANY_COMMAND.tools,
+        any_command: false,
+        allowed_commands: ["npm test"],
+      },
+    },
+  ];
+  workspaceChanged();
+
+  const commands = await within(form).findByRole("textbox", {
+    name: "Allowed commands",
+  });
+  expect((commands as HTMLTextAreaElement).value).toBe("npm test");
+  expect(
+    (
+      within(form).getByRole("spinbutton", {
+        name: "Turns",
+      }) as HTMLInputElement
+    ).value,
+  ).toBe("7");
+  expect(screen.queryByText("Changed somewhere else")).toBeNull();
+
+  fireEvent.change(within(form).getByRole("textbox", { name: "Name" }), {
+    target: { value: "Verifier" },
+  });
+
+  await waitFor(() => expect(stored[0]?.name).toBe("Verifier"));
+  expect(stored[0]).toMatchObject({
+    turn_limit: 7,
+    tools: { any_command: false, allowed_commands: ["npm test"] },
+  });
+});
+
+test("an agent changed elsewhere under a change that was not saved asks which to keep", async () => {
+  stored = [ANY_COMMAND];
+  const workspaceChanged = showChanging();
+  const form = await openAgent();
+  const name = within(form).getByRole("textbox", {
+    name: "Name",
+  }) as HTMLInputElement;
+  agentUnsavable = "the workspace is busy";
+  fireEvent.change(name, { target: { value: "Verifier" } });
+  await screen.findByRole("alert");
+
+  agentUnsavable = null;
+  stored = [{ ...ANY_COMMAND, name: "Triage bugs" }];
+  workspaceChanged();
+
+  const notice = (await screen.findByText("Changed somewhere else")).closest(
+    "[data-slot=alert]",
+  ) as HTMLElement;
+  // Nothing is overwritten, here or there, until the person says.
+  expect(name.value).toBe("Verifier");
+  expect(stored[0]?.name).toBe("Triage bugs");
+
+  fireEvent.click(
+    within(notice).getByRole("button", { name: "Use that version" }),
+  );
+
+  await waitFor(() => expect(name.value).toBe("Triage bugs"));
+  expect(screen.queryByText("Changed somewhere else")).toBeNull();
+  expect(stored[0]?.name).toBe("Triage bugs");
 });

@@ -109,7 +109,7 @@ function Page() {
       onDelete={() => {}}
       onDuplicate={() => {}}
       onCreateAgent={async () => undefined}
-      onSaveAgent={() => {}}
+      onSaveAgent={() => new Promise(() => {})}
       onDeleteAgent={() => {}}
       onFail={() => {}}
       onRead={() => {}}

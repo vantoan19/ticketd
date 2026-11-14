@@ -70,7 +70,7 @@ const open = async (steps: AutomationStep[] = []) => {
       onDelete={nothing}
       onDuplicate={nothing}
       onCreateAgent={async () => undefined}
-      onSaveAgent={nothing}
+      onSaveAgent={() => new Promise(() => {})}
       onDeleteAgent={nothing}
       onFail={nothing}
       onRead={nothing}
