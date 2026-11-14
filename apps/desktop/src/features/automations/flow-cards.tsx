@@ -227,8 +227,8 @@ export function stepCard(
 }
 
 /**
- * One check in words: "has tag verified", "status is not Done". A tag check
- * with no tag yet says nothing.
+ * One check in words: "has tag verified", "status is not Done". A check with
+ * nothing chosen yet says nothing.
  */
 export function checkWords(
   check: AutomationCheck,
@@ -239,7 +239,10 @@ export function checkWords(
       ? `${check.has ? "has" : "does not have"} tag ${check.tag.trim()}`
       : "";
   if (check.kind === "status")
-    return `status ${check.is ? "is" : "is not"} ${check.status}`;
+    return check.status
+      ? `status ${check.is ? "is" : "is not"} ${check.status}`
+      : "";
+  if (check.project_id === undefined) return "";
   if (check.project_id === null)
     return check.is ? "has no project" : "has a project";
   // A run shows the Automation as it was, without the list of projects.

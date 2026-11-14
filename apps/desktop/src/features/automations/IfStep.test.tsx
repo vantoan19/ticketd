@@ -135,10 +135,22 @@ test("checks on tags, status and project are rows in the If's panel and words on
     target: { value: "Verified" },
   });
   await add("Status");
-  await choose(button(panel, "Status is: Todo"), "In review");
-  await choose(button(panel, "Status: is"), "is not");
   await add("Project");
-  await choose(button(panel, "Project is: No project"), "web-app");
+  // A check starts with nothing chosen, and says nothing on the card until it has.
+  expect(saved?.steps).toMatchObject([
+    {
+      checks: [
+        { kind: "tag" },
+        { kind: "status", status: null, is: true },
+        { kind: "project", is: true },
+      ],
+    },
+  ]);
+  expect(JSON.stringify(saved?.steps)).not.toContain("project_id");
+  expect(button(steps, "If: Ticket has tag verified")).toBeTruthy();
+  await choose(button(panel, "Status is: Choose a status"), "In review");
+  await choose(button(panel, "Status: is"), "is not");
+  await choose(button(panel, "Project is: Choose a project"), "web-app");
 
   expect(saved?.steps).toMatchObject([
     {

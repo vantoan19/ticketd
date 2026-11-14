@@ -78,11 +78,11 @@ fn verify_on_staging() -> AutomationDefinition {
                             has: true,
                         },
                         Check::Status {
-                            status: Status::InReview,
+                            status: Some(Status::InReview),
                             is: true,
                         },
                         Check::Project {
-                            project_id: None,
+                            project_id: Some(None),
                             is: false,
                         },
                     ],
@@ -422,7 +422,31 @@ fn problems_are_found_on_every_path_in_the_order_the_steps_run() {
                             on_failure: None,
                         },
                     )],
-                    no: vec![run_agent("other", None, None)],
+                    no: vec![
+                        run_agent("other", None, None),
+                        // Checks as they are when first added: nothing chosen.
+                        step(
+                            "untouched",
+                            StepAction::If {
+                                checks: vec![Check::Status {
+                                    status: None,
+                                    is: true,
+                                }],
+                                yes: Vec::new(),
+                                no: vec![step(
+                                    "unplaced",
+                                    StepAction::If {
+                                        checks: vec![Check::Project {
+                                            project_id: None,
+                                            is: true,
+                                        }],
+                                        yes: Vec::new(),
+                                        no: Vec::new(),
+                                    },
+                                )],
+                            },
+                        ),
+                    ],
                 },
             ),
         ],
@@ -436,6 +460,8 @@ fn problems_are_found_on_every_path_in_the_order_the_steps_run() {
             ("branch", "Needs a check"),
             ("change", "Needs a change"),
             ("other", "Needs an agent and a folder"),
+            ("untouched", "Needs a status"),
+            ("unplaced", "Needs a project"),
         ])
     );
 }

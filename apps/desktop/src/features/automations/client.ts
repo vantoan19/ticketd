@@ -95,17 +95,20 @@ const conditionSchema = z.union([
   z.object({ kind: z.literal("tag"), tag: z.string(), has: z.boolean() }),
 ]);
 export type AutomationCondition = z.infer<typeof conditionSchema>;
-/** What an If asks of the ticket. `project_id` null is "No project". */
+/**
+ * What an If asks of the ticket. A status check has no status, and a project
+ * check no `project_id`, until one is chosen; `project_id` null is "No project".
+ */
 const checkSchema = z.union([
   z.object({ kind: z.literal("tag"), tag: z.string(), has: z.boolean() }),
   z.object({
     kind: z.literal("status"),
-    status: statusSchema,
+    status: statusSchema.nullable(),
     is: z.boolean(),
   }),
   z.object({
     kind: z.literal("project"),
-    project_id: z.string().nullable(),
+    project_id: z.string().nullable().optional(),
     is: z.boolean(),
   }),
 ]);
