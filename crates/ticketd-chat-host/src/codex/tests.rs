@@ -1110,10 +1110,7 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
         reason(&[guide], true),
         "Codex could not change /elsewhere/a.txt: it is outside the step's folder."
     );
-    assert_eq!(
-        reason(&[guide, "ls"], false),
-        "Codex could not run ls."
-    );
+    assert_eq!(reason(&[guide, "ls"], false), "Codex could not run ls.");
     // Only the guide was declined: the agent still could not do its work.
     assert_eq!(
         reason(&[guide], false),

@@ -16,8 +16,8 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
-    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatItem, ChatLinkKind, ChatListFilter,
-    Schedule, Step, StepAction, Ticket, Trigger, Workspace,
+    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatItem, ChatLinkKind,
+    ChatListFilter, Schedule, Step, StepAction, Ticket, Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
