@@ -1074,25 +1074,51 @@ fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_nami
     }
     assert_eq!(outcome("completed", true), TurnOutcome::Completed);
 
-    // Each denial is named, in order: a declined command does not hide the file.
-    let mut session = Session::default();
-    session.turn_overrides = Some(json!({}));
-    let command =
-        json!({"type": "commandExecution", "id": "c_1", "command": "ls", "status": "declined"});
-    for item in [command, item("declined")] {
-        session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
-    }
-    let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
-    match session.notification("turn/completed", &turn).pop() {
-        Some(EventKind::TurnEnded {
-            outcome: TurnOutcome::Failed(problem),
-            ..
-        }) => assert_eq!(
-            problem.message,
-            "Codex was denied: ls Codex could not change /elsewhere/a.txt: it is outside the step's folder."
-        ),
-        other => panic!("a failed turn, got {other:?}"),
-    }
+    // #387 5A3: the file leads, each denial is its own sentence, and ticketd's own
+    // guide command, which the person never asked for, is not named.
+    let reason = |commands: &[&str], files: bool| {
+        let mut session = Session::default();
+        session.turn_overrides = Some(json!({}));
+        let mut items: Vec<Value> = commands
+            .iter()
+            .map(|command| {
+                json!({"type": "commandExecution", "id": "c_1", "command": command,
+                    "status": "declined"})
+            })
+            .collect();
+        if files {
+            items.push(item("declined"));
+        }
+        for item in items {
+            session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
+        }
+        let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
+        match session.notification("turn/completed", &turn).pop() {
+            Some(EventKind::TurnEnded {
+                outcome: TurnOutcome::Failed(problem),
+                ..
+            }) => problem.message,
+            other => panic!("a failed turn, got {other:?}"),
+        }
+    };
+    let guide = "pwsh -Command 'ticketd skills get chat'";
+    assert_eq!(
+        reason(&["ls"], true),
+        "Codex could not change /elsewhere/a.txt: it is outside the step's folder. Codex could not run ls."
+    );
+    assert_eq!(
+        reason(&[guide], true),
+        "Codex could not change /elsewhere/a.txt: it is outside the step's folder."
+    );
+    assert_eq!(
+        reason(&[guide, "ls"], false),
+        "Codex could not run ls."
+    );
+    // Only the guide was declined: the agent still could not do its work.
+    assert_eq!(
+        reason(&[guide], false),
+        "Codex could not run commands in this step."
+    );
 }
 
 /// 4B1: Codex reports nothing at all for a patch its sandbox policy rejects outright
