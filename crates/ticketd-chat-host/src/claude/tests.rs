@@ -927,7 +927,8 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
         json!({
             "allowed_tools": CLI_RULES,
             "disallowed_tools": [
-                "Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"
+                "Read", "Glob", "Grep", "LSP", "Edit", "Write", "NotebookEdit", "WebFetch",
+                "WebSearch"
             ],
             "max_turns": 40,
         })
@@ -948,7 +949,9 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
 }
 
 /// #387 M12, D15: Claude Code's `Edit` refuses a file it has not read, so "Edit
-/// files" also allows `Read` (not `Glob` or `Grep`), even with "Read files" off.
+/// files" also leaves `Read` on (not `Glob` or `Grep`), even with "Read files" off.
+/// 3B1: edits are allowed only below the step's folder, Claude Code's working
+/// directory, by the one rule that covers Edit, Write and NotebookEdit there.
 #[test]
 fn an_agent_that_edits_files_may_read_the_files_it_changes() {
     let mut unattended = reader_that_tests();
@@ -956,13 +959,36 @@ fn an_agent_that_edits_files_may_read_the_files_it_changes() {
     unattended.tools.edit_files = true;
     let options = super::unattended_options(&unattended);
 
-    let allowed = options["allowed_tools"].as_array().unwrap();
-    assert!(allowed.contains(&json!("Read")), "{allowed:?}");
-    assert!(allowed.contains(&json!("Edit")), "{allowed:?}");
+    let mut expected = vec!["Edit(./**)"];
+    expected.extend(CLI_RULES);
+    expected.extend(["Bash(npm test *)", "PowerShell(npm test *)"]);
+    assert_eq!(options["allowed_tools"], json!(expected));
     assert_eq!(
         options["disallowed_tools"],
-        json!(["Glob", "Grep", "WebFetch", "WebSearch"])
+        json!(["Glob", "Grep", "LSP", "WebFetch", "WebSearch"])
     );
+}
+
+/// #387 3B1: no switch allows a file tool by its bare name, which Claude Code reads
+/// as "on any path". Reading needs no rule in the step's folder (and is refused
+/// outside it); editing is allowed below the folder only.
+#[test]
+fn no_switch_allows_a_file_tool_outside_the_steps_folder() {
+    for (read_files, edit_files) in [(true, false), (false, true), (true, true)] {
+        let mut unattended = reader_that_tests();
+        unattended.tools.read_files = read_files;
+        unattended.tools.edit_files = edit_files;
+        let options = super::unattended_options(&unattended);
+        let file_rules: Vec<_> = options["allowed_tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|rule| rule.as_str())
+            .filter(|rule| !rule.starts_with("Bash(") && !rule.starts_with("PowerShell("))
+            .collect();
+        let expected: &[&str] = if edit_files { &["Edit(./**)"] } else { &[] };
+        assert_eq!(file_rules, expected, "read {read_files}, edit {edit_files}");
+    }
 }
 
 /// #387 M19: a denied command's control characters (here a backspace, as `\b` in a
@@ -973,6 +999,25 @@ fn a_denied_commands_control_characters_are_not_printed() {
         {"tool_name": "PowerShell", "command": "& \"C:\\x\u{8}in\\ticketd.exe\" add-tag\u{7}"}
     ]}));
     assert_eq!(denied, ["PowerShell `& \"C:\\x in\\ticketd.exe\" add-tag`"]);
+}
+
+/// #387 3B1: a file tool refused outside the step's folder is named with its path,
+/// so the run's reason says what the agent tried to reach.
+#[test]
+fn a_denied_file_tool_is_named_with_its_path() {
+    let denied = super::session::denials(&json!({"denials": [
+        {"tool_name": "Write", "command": null, "path": "C:\\outside\\w.txt"},
+        {"tool_name": "Read", "command": null, "path": "C:\\Users\\me\\notes.txt"},
+        {"tool_name": "WebSearch", "command": null, "path": null},
+    ]}));
+    assert_eq!(
+        denied,
+        [
+            "Write `C:\\outside\\w.txt`",
+            "Read `C:\\Users\\me\\notes.txt`",
+            "WebSearch"
+        ]
+    );
 }
 
 /// L1: a list of commands allows exactly those, in both shells, besides the CLI.
@@ -1080,6 +1125,35 @@ fn a_tool_the_person_declined_is_declined_not_failed() {
         .event("tool_result", &result("toolu_2"))
         .expect("modeled");
     assert_eq!(status(events), ToolStatus::Failed);
+}
+
+/// #387 3B3: Claude Code answers the tool a Stop cuts off with an error result ("The
+/// user doesn't want to proceed with this tool use", seen in live transcripts). It
+/// is left unfinished, which the turn then shows as "not finished", not failed.
+#[test]
+fn a_tool_cut_off_by_a_stop_is_not_reported_as_failed() {
+    use super::session::Session;
+    use crate::ToolStatus;
+    let mut session = Session::default();
+    session.event("assistant_content", &json!({"blocks": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ticketd list"}}], "parent_tool_use_id": null}));
+    session.interrupt_written();
+    let (events, _) = session
+        .event(
+            "tool_result",
+            &json!({"tool_use_id": "toolu_1", "is_error": true, "text": "The user doesn't want to proceed with this tool use."}),
+        )
+        .expect("modeled");
+
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventKind::ToolUpdated {
+                status: ToolStatus::Failed,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
 }
 
 /// The lines an edit added and removed, from its result, stay with the tool so its

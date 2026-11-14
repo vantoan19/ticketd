@@ -845,8 +845,14 @@ impl Workspace {
             "UPDATE chats SET automation_run_id = NULL WHERE id = ?1",
             [chat_id],
         )?;
-        // The Chat list follows the Chat log.
+        // The Chat list follows the Chat log. A view of the run follows the change
+        // token, which Chat tables leave alone, and for a Completed run nothing
+        // else here moves it (#387 3B2).
         crate::chats::log(&transaction, chat_id, "chat", chat_id)?;
+        transaction.execute(
+            "UPDATE workspace_changes SET token = token + 1 WHERE id = 1",
+            [],
+        )?;
         if status != AutomationRunStatus::Completed {
             answer(&transaction, &run_id, DISMISSED)?;
             transaction.execute(

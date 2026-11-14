@@ -369,12 +369,19 @@ impl Session {
             event["truncated"] == true,
         );
         let detail = with_line_counts(detail, &event["outcome"]);
+        // Claude Code answers the tool a Stop cuts off with an error result; it is
+        // left unfinished, and the turn shows it as not finished (#387 3B3).
+        let cut_off = self
+            .turn
+            .as_ref()
+            .is_some_and(|turn| turn.interrupt_written);
         events.push(EventKind::ToolUpdated {
             turn: turn.clone(),
             item: NativeItemId::new(id),
             title: title.clone(),
             status: match (failed, declined) {
                 (true, true) => ToolStatus::Declined,
+                (true, false) if cut_off => ToolStatus::Running,
                 (true, false) => ToolStatus::Failed,
                 (false, _) => ToolStatus::Succeeded,
             },
@@ -670,7 +677,8 @@ pub(super) fn denials(event: &Value) -> Vec<String> {
         let Some(tool) = denial["tool_name"].as_str() else {
             continue;
         };
-        let line = match denial["command"].as_str() {
+        // A shell's command, or the path a file tool was refused (#387 3B1).
+        let line = match denial["command"].as_str().or(denial["path"].as_str()) {
             Some(command) => {
                 // Control characters (a backspace from a `\b` in a JSON-written
                 // path) print as nothing useful: each becomes a space (#387 M19).

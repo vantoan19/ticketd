@@ -26,6 +26,8 @@ const INSTRUCTIONS: &str = "Triage this ticket and tag it.";
 struct Fixture {
     _dir: tempfile::TempDir,
     path: PathBuf,
+    /// The agent step's folder, which exists.
+    folder: PathBuf,
     fake: FakeAdapter,
     host: ChatHost,
     runner: Runner,
@@ -82,6 +84,8 @@ impl Fixture {
         };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
+        let folder = dir.path().join("app");
+        std::fs::create_dir(&folder).unwrap();
         let mut workspace = Workspace::open(&path).unwrap();
         let agent = workspace
             .create_automation_agent(AutomationAgentSettings {
@@ -103,7 +107,7 @@ impl Fixture {
                     id: "triage".into(),
                     action: StepAction::RunAgent {
                         agent_id: Some(agent.id),
-                        execution_folder: Some("/work/app".into()),
+                        execution_folder: Some(folder.to_string_lossy().into_owned()),
                         on_failure: None,
                     },
                 }],
@@ -135,6 +139,7 @@ impl Fixture {
         Self {
             _dir: dir,
             path,
+            folder,
             fake,
             host,
             runner,
@@ -254,7 +259,7 @@ async fn tagging_a_ticket_runs_the_agent_as_a_chat_owned_by_the_run() {
     assert_eq!(opens.len(), 1);
     let run = f.runs().remove(0);
     assert_eq!(run.status, AutomationRunStatus::Running);
-    assert_eq!(opens[0].working_directory, PathBuf::from("/work/app"));
+    assert_eq!(opens[0].working_directory, f.folder);
     let unattended = opens[0].unattended.clone().unwrap();
     assert_eq!(unattended.run_id, run.id);
     assert_eq!(unattended.model.as_deref(), Some("gpt-test"));
@@ -313,7 +318,7 @@ async fn either_harness_is_told_the_steps_folder_the_cli_and_the_workspace_data_
         f.agent_working().await;
 
         let open = f.fake.opens().remove(0);
-        assert_eq!(open.working_directory, PathBuf::from("/work/app"));
+        assert_eq!(open.working_directory, f.folder);
         let unattended = open.unattended.unwrap();
         assert!(!unattended.tools.edit_files);
         assert_eq!(open.ticketd_cli, ticketd_chat_host::cli::executable());
@@ -364,6 +369,49 @@ async fn a_denied_tool_fails_the_step_and_names_what_was_denied() {
         f.needs_attention(),
         "The agent needed something it is not allowed to do. Claude Code was denied Write."
     );
+}
+
+/// #387 3C1: a step whose folder is gone fails before any harness starts, saying so
+/// in plain words, instead of with whatever the harness makes of a missing folder.
+#[tokio::test(start_paused = true)]
+async fn a_step_whose_folder_is_gone_fails_without_starting_the_agent() {
+    let f = Fixture::on(AgentHarness::ClaudeCode);
+    std::fs::remove_dir(&f.folder).unwrap();
+    f.tag("Fix login");
+
+    f.tick().await;
+
+    assert_eq!(
+        f.needs_attention(),
+        format!("The step's folder doesn't exist: {}.", f.folder.display())
+    );
+    assert!(f.fake.opens().is_empty());
+}
+
+/// #387 3C1: a folder that is not a full path (here with a line break typed into
+/// it) fails the step plainly, with the break shown as a space.
+#[tokio::test(start_paused = true)]
+async fn a_step_whose_folder_is_not_a_full_path_fails_without_starting_the_agent() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    if let StepAction::RunAgent {
+        execution_folder, ..
+    } = &mut definition.steps[0].action
+    {
+        *execution_folder = Some("app\nfolder".into());
+    }
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.tag("Fix login");
+
+    f.tick().await;
+
+    assert_eq!(
+        f.needs_attention(),
+        "The step's folder isn't a full path to a folder: app folder."
+    );
+    assert!(f.fake.opens().is_empty());
 }
 
 /// L4: commands the harness could not start are not a finished step, whatever the

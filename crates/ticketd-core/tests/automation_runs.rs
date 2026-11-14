@@ -1205,6 +1205,7 @@ fn replying_in_the_chat_of_a_completed_run_makes_it_an_ordinary_chat_of_a_comple
     workspace
         .advance_automation_run(&run.id, Some(StepOutcome::Completed))
         .unwrap();
+    let token = workspace.change_token().unwrap();
 
     let after = workspace
         .take_over_automation_run(&chat, true)
@@ -1212,7 +1213,11 @@ fn replying_in_the_chat_of_a_completed_run_makes_it_an_ordinary_chat_of_a_comple
         .unwrap();
 
     assert_eq!(after.status, AutomationRunStatus::Completed);
+    assert!(!after.steps[0].chat_owned);
     assert_eq!(listed_chats(&workspace), [chat]);
+    // #387 3B2: the run itself is unchanged, yet a view of it must hear that its
+    // Chat is no longer the run's.
+    assert_ne!(workspace.change_token().unwrap(), token);
 }
 
 #[test]

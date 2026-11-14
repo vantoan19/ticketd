@@ -109,6 +109,8 @@ pub(super) struct Session {
     declined: Option<String>,
     /// Why Codex could not start a command in the open turn of an unattended session.
     not_started: Option<String>,
+    /// The turn a Stop was sent for: a tool of it that then fails was cut off.
+    interrupted: Option<NativeTurnId>,
     rate_limits: Option<Value>,
     /// MCP servers whose failed start was already reported in this session.
     failed_servers: HashSet<String>,
@@ -131,6 +133,11 @@ impl Session {
             self.written_submissions.pop_front();
         }
         self.written_submissions.push_back(submission.clone());
+    }
+
+    /// A Stop was sent for `turn`.
+    pub fn interrupt_asked(&mut self, turn: &NativeTurnId) {
+        self.interrupted = Some(turn.clone());
     }
 
     /// The runtime is gone: nothing is active and no request can be answered.
@@ -600,7 +607,13 @@ impl Session {
                     .to_owned(),
             );
         }
+        let cut_off = self
+            .interrupted
+            .as_ref()
+            .is_some_and(|stopped| stopped.0 == turn);
         let status = match text(item, &["status"]) {
+            // Left unfinished: the turn shows it as not finished (#387 3B3).
+            Some("failed") if cut_off => ToolStatus::Running,
             Some("failed") => ToolStatus::Failed,
             Some("declined") => ToolStatus::Declined,
             Some("inProgress") => ToolStatus::Running,

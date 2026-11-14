@@ -79,18 +79,19 @@ const TOOLS: {
   {
     key: "read_files",
     title: "Read files",
-    description: "In the step’s folder",
+    description: "Only in the step’s folder",
   },
   {
     key: "edit_files",
     title: "Edit files",
     // Claude Code changes only a file it has read, so this lets it read too.
-    description: "In the step’s folder; it can also read files",
+    description: "Only in the step’s folder; it can also read files there",
   },
   {
     key: "run_commands",
     title: "Run commands",
-    description: "Any command, or only the ones you list",
+    description:
+      "Any command, or only the ones you list; commands are not kept to the step’s folder",
   },
   {
     key: "use_web",
@@ -497,16 +498,18 @@ export function AgentForm({
             </SettingsList>
             {codex ? (
               <p className="agent-hint">
-                Codex applies its own sandbox: it reads files, runs any command,
-                and writes only in the step’s folder and your ticketd data. Your
-                own choices are kept for Claude Code. Codex also reads your own
-                AGENTS.md and skills; ticketd cannot switch that off.
+                Codex applies its own sandbox: it can read any file you can read
+                on this computer, runs any command, and writes only in the
+                step’s folder and your ticketd data. Your own choices are kept
+                for Claude Code. Codex also reads your own AGENTS.md and skills;
+                ticketd cannot switch that off.
               </p>
             ) : (
               <p className="agent-hint">
-                Claude Code may still run shell commands that only read, such as
-                listing a folder or printing a file, with “Read files” and “Run
-                commands” off. ticketd cannot switch that off.
+                Claude Code may still run shell commands that only read in the
+                step’s folder, such as listing it or printing a file there, with
+                “Read files” and “Run commands” off. ticketd cannot switch that
+                off.
               </p>
             )}
           </div>

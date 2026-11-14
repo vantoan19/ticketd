@@ -408,6 +408,18 @@ export function createBridge(deps: BridgeDeps) {
         // sign-in or environment set through those files. Settings an
         // administrator manages still apply.
         settingSources: [],
+        // The agent's file tools stay in the step's folder (its working directory,
+        // and no other is added): Claude Code refuses Read, Glob, Grep and LSP
+        // outside it, and Edit, Write and NotebookEdit there, in every mode and
+        // whatever an allow rule says. Shell commands Claude Code recognizes as
+        // reading a path outside it are asked about, so "don't ask" denies them
+        // (#387 3B1; settings reference, `permissions.block*OutsideWorkingDirectories`).
+        settings: {
+          permissions: {
+            blockReadsOutsideWorkingDirectories: true,
+            blockWritesOutsideWorkingDirectories: true,
+          },
+        },
         // None of the person's MCP servers, claude.ai connectors or skills
         // either: the agent has Claude Code's own tools and nothing they added.
         mcpServers: {},
@@ -1021,7 +1033,17 @@ export function createBridge(deps: BridgeDeps) {
         const tool = text(denial.tool_name);
         if (!tool) return [];
         const input = isObject(denial.tool_input) ? denial.tool_input : {};
-        return [{ tool_name: tool, command: text(input.command) }];
+        return [
+          {
+            tool_name: tool,
+            command: text(input.command),
+            // The file tools' path fields, as `sdk-tools.d.ts` names them.
+            path:
+              text(input.file_path) ??
+              text(input.notebook_path) ??
+              text(input.path),
+          },
+        ];
       }),
       queued_turn_count: number(message.queued_turn_count),
       num_turns: number(message.num_turns),

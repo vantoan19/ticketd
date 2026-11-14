@@ -9,7 +9,7 @@
 mod first_message;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -296,6 +296,11 @@ impl Runner {
             },
         )?;
         drop(workspace);
+        // Checked here, not left to the harness, which words a missing folder as
+        // anything from a missing folder to a wrong binary (#387 3C1).
+        if let Some(reason) = unusable_folder(folder) {
+            return Ok(Ran::Step(StepOutcome::Failed { reason }));
+        }
         let settings = &agent.settings;
         let unattended = Unattended {
             run_id: run.id.clone(),
@@ -355,6 +360,29 @@ pub async fn stop_and_turn_off(
         let _ = host.stop(&chat_id).await;
     }
     Ok(())
+}
+
+/// Why the step's folder cannot be an agent's working directory, if it cannot.
+/// Control characters in the path are shown as spaces.
+fn unusable_folder(folder: &str) -> Option<String> {
+    let shown: String = folder
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let path = Path::new(folder);
+    if !path.is_absolute() || folder.chars().any(char::is_control) {
+        return Some(format!(
+            "The step's folder isn't a full path to a folder: {}.",
+            shown.trim()
+        ));
+    }
+    match std::fs::metadata(path) {
+        Ok(found) if found.is_dir() => None,
+        Ok(_) => Some(format!(
+            "The step's folder is a file, not a folder: {shown}."
+        )),
+        Err(_) => Some(format!("The step's folder doesn't exist: {shown}.")),
+    }
 }
 
 /// `text` trimmed and ending as a sentence: a full stop is added unless it already

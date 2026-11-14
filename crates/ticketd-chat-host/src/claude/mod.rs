@@ -155,17 +155,32 @@ impl ClaudeAdapter {
 /// did not match as written in either shell (live check, #387 L1), so none is given.
 pub(super) fn unattended_options(unattended: &Unattended) -> Value {
     let tools = &unattended.tools;
-    let (mut allowed, mut disallowed) = (Vec::new(), Vec::new());
-    // Claude Code's `Edit` refuses a file it has not read, so editing reads the
-    // files it changes; finding files stays with "read files" (#387 M12, D15).
+    let (mut allowed, mut disallowed) = (Vec::new(), Vec::<String>::new());
+    // A file tool's bare name would allow it on any path (#387 3B1). The step's
+    // folder is Claude Code's working directory, where reading needs no rule and
+    // outside which the bridge has Claude Code refuse every file tool. So a switch
+    // that is on allows reading by not taking it away, and editing by the one rule
+    // for Edit, Write and NotebookEdit below the working directory (Claude Code's
+    // permissions documentation, "Read and Edit"). Claude Code's `Edit` refuses a
+    // file it has not read, so editing keeps `Read`; finding files stays with "read
+    // files" (#387 M12, D15).
     for (on, names) in [
         (tools.read_files || tools.edit_files, ["Read"].as_slice()),
-        (tools.read_files, &["Glob", "Grep"]),
+        (tools.read_files, &["Glob", "Grep", "LSP"]),
         (tools.edit_files, &["Edit", "Write", "NotebookEdit"]),
-        (tools.use_web, &["WebFetch", "WebSearch"]),
     ] {
-        let list = if on { &mut allowed } else { &mut disallowed };
-        list.extend(names.iter().map(|name| (*name).to_owned()));
+        if !on {
+            disallowed.extend(names.iter().map(|name| (*name).to_owned()));
+        }
+    }
+    if tools.edit_files {
+        allowed.push("Edit(./**)".to_owned());
+    }
+    let web = ["WebFetch", "WebSearch"].map(str::to_owned);
+    if tools.use_web {
+        allowed.extend(web);
+    } else {
+        disallowed.extend(web);
     }
     const SHELLS: [&str; 2] = ["Bash", "PowerShell"];
     // The ticketd CLI is always allowed, by its name, with or without `.exe`.

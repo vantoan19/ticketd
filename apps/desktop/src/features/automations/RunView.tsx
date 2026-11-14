@@ -56,6 +56,31 @@ const when = (timestamp: string) =>
  * What to say of the steps that were running in `before` and have ended in
  * `after`: "Run agent: Triage finished". Nothing when none has.
  */
+/**
+ * What a run's Chat is allowed once the person takes it over, before they reply
+ * (#387 3B4): Claude Code resumes as a new Chat does, Codex with the person's
+ * own approval policy and sandbox (`supervisor.rs`, D11 and D3).
+ */
+const TAKEN_OVER_ASKS: Record<string, string> = {
+  "claude-code": " and Claude Code asks before edits",
+  codex: " and Codex uses your own approval settings",
+};
+
+/** The harness of the agent whose step ran in `chat`. */
+function chatHarness(
+  run: AutomationRunDetail,
+  chat: string,
+  agents: AutomationAgent[],
+) {
+  const record = run.steps.find((step) => step.chat_id === chat);
+  const step = everyStep(run.definition.steps).find(
+    (item) => item.id === record?.step_id,
+  );
+  return step?.kind === "run_agent"
+    ? agents.find((agent) => agent.id === step.agent_id)?.harness
+    : undefined;
+}
+
 function stepsEnded(
   before: AutomationRunDetail,
   after: AutomationRunDetail,
@@ -293,7 +318,7 @@ export function RunView({
           run?.steps.some((step) => step.chat_id === chat && step.chat_owned)
             ? emptyChat === chat
               ? "The agent never started, so this Chat is empty."
-              : `A run of ${automationName}. Reply to take it over; it moves to your Chats.`
+              : `A run of ${automationName}. Reply to take it over; it moves to your Chats${TAKEN_OVER_ASKS[chatHarness(run, chat, agents) ?? ""] ?? ""}.`
             : run?.status === "taken_over" && (
                 <TakenOverLine
                   automationName={automationName}
