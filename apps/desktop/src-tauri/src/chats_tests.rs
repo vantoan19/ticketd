@@ -287,7 +287,6 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
             model: None,
             tools: ticketd_core::AutomationAgentTools::default(),
             turn_limit: 5,
-            ticketd_cli: None,
             ticketd_folders: Vec::new(),
         };
         let _ = host
