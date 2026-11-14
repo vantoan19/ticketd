@@ -255,6 +255,41 @@ test("a Run agent step can make a new agent without leaving the editor", async (
   );
 });
 
+test("a Run agent step says when its agent's harness cannot run on this computer, and can still be switched on", async () => {
+  chat.setHarnesses([
+    { id: "claude-code", name: "Claude Code", status: "not_installed" },
+    { id: "codex", name: "Codex", status: "ready" },
+  ]);
+  try {
+    const steps = await openFirst([
+      automation({
+        trigger: { kind: "tag_added", tag: "bug" },
+        steps: [runAgent("s1", "agent-1", "C:\\code\\web-app")],
+      }),
+    ]);
+    fireEvent.click(
+      within(steps).getByRole("button", { name: /^Run agent: Triage, / }),
+    );
+    const panel = await screen.findByRole("complementary", {
+      name: "Run agent",
+    });
+    expect(
+      await within(panel).findByText(
+        "Claude Code is not installed on this computer, so this step cannot run here.",
+      ),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("switch", { name: /^On/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  } finally {
+    chat.setHarnesses([
+      { id: "claude-code", name: "Claude Code", status: "ready" },
+      { id: "codex", name: "Codex", status: "ready" },
+    ]);
+  }
+});
+
 test("the + on a line is in the Tab order between the two cards it joins, and the path ends with a +", async () => {
   const steps = await openFirst([
     automation({

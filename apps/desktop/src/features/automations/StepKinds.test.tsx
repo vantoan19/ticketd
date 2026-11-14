@@ -184,7 +184,7 @@ test("a field is inserted into a message as a named chip, saved as a plain refer
   // The card names the fields too.
   expect(
     within(steps).getByRole("button", {
-      name: /^Notify me: Verified Ticket reference Tag from the event, /,
+      name: /^Notify me: Verified \[reference\]\[tag\], /,
     }),
   ).toBeTruthy();
 
@@ -223,7 +223,7 @@ test("a notification that opens the run shows that run, with what each step did 
   ).toBeTruthy();
   expect(
     within(steps).getByRole("button", {
-      name: /^Notify me: Ticket reference is done, .*Completed$/,
+      name: /^Notify me: \[reference\] is done, .*Completed$/,
     }),
   ).toBeTruthy();
 });
