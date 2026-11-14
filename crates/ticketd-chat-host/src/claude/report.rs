@@ -25,6 +25,12 @@ pub(super) const PLAN_TOOLS: &[&str] = &[
 /// Tools that change one file, named by `file_path` (`notebook_path` for notebooks).
 const FILE_TOOLS: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit"];
 
+/// The model row the SDK lists for Claude Code's own default, which New Chat marks
+/// as its default.
+pub(super) const DEFAULT_MODEL: &str = "default";
+/// The permission mode New Chat marks as its default: "Ask before edits".
+pub(super) const DEFAULT_PERMISSION_MODE: &str = "default";
+
 /// Permission modes ticketd can offer: never `bypassPermissions`.
 const PERMISSION_MODES: &[(&str, &str, PermissionKind)] = &[
     ("default", "Ask before edits", PermissionKind::Ask),
@@ -530,7 +536,7 @@ fn model_option(entry: &Value) -> Option<SettingOption> {
             .filter(|text| !text.is_empty())
             .map(str::to_owned),
         // The SDK lists Claude Code's default as the `default` row.
-        is_default: id == "default",
+        is_default: id == DEFAULT_MODEL,
         permission: None,
         allowed: true,
         id,
@@ -562,7 +568,7 @@ fn permission_options() -> Vec<SettingOption> {
             id: (*id).to_owned(),
             label: (*label).to_owned(),
             description: None,
-            is_default: *id == "default",
+            is_default: *id == DEFAULT_PERMISSION_MODE,
             permission: Some(*kind),
             allowed: true,
         })

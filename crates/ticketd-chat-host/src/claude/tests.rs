@@ -673,6 +673,29 @@ async fn a_new_session_opens_with_new_chats_picks() {
     assert!(opened.is_ok(), "the session opens");
 }
 
+/// #387 M1, D11: a Chat taken over from a run resumes the agent's session with what
+/// an untouched New Chat sends ("Ask before edits" on Claude Code's default model),
+/// never the agent's "don't ask" nor whatever Claude Code's own `defaultMode` says.
+#[tokio::test(start_paused = true)]
+async fn a_chat_taken_over_from_a_run_resumes_with_new_chats_defaults() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("takeover_resume"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("sess-9")),
+        unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: true,
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
 #[tokio::test(start_paused = true)]
 async fn inspection_judges_the_pairing_without_opening_a_session() {
     let (mut peer, io) = pipes();
