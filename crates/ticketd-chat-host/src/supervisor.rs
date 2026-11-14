@@ -1429,12 +1429,16 @@ impl Supervisor {
                 Ok(())
             }
             Err(problem) => {
-                // Codex records a thread id when it starts one but keeps nothing until
+                // A take-over: Codex records a thread id when it starts one but keeps nothing until
                 // the first turn runs, so a Chat whose session never completed a turn (a run
                 // taken over early) has nothing to resume: open a fresh session, with
                 // the same reply, rather than a dead Chat (#387 6A1).
                 if problem.kind == crate::ProblemKind::NativeHistoryUnavailable
                     && opening.origin == ChatSessionOrigin::NativeResume
+                    && self.unattended.is_none()
+                    && self
+                        .core(|core| core.chat_ran_an_automation_agent(&self.chat_id))
+                        .unwrap_or(false)
                     && self.never_completed_a_turn()
                     && let Ok(chat) = self.core(|core| core.chat(&self.chat_id))
                 {
