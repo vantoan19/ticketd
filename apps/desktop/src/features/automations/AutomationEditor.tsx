@@ -41,6 +41,7 @@ import {
   definitionOf,
   editSteps,
   startsWithoutTicket,
+  stepPaths,
   type Automation,
   type AutomationAgent,
   type AutomationAgentSettings,
@@ -151,6 +152,8 @@ export function AutomationEditor({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deletingStep, setDeletingStep] = useState<string | null>(null);
+  /** The step whose failure path, which has steps, is about to be removed. */
+  const [removingPath, setRemovingPath] = useState<string | null>(null);
   /** The agent open over the editor, to set up or change. */
   const [agentOpen, setAgentOpen] = useState<string | null>(null);
   /** The runs in progress, while the person is asked how to switch off. */
@@ -187,6 +190,34 @@ export function AutomationEditor({
         ),
       ),
     });
+  /** Saves `steps` after some were taken out, with their paths. */
+  const removeSteps = (steps: AutomationStep[]) => {
+    change({ steps });
+    // The open panel may be of a step that went.
+    if (
+      selected !== TRIGGER_ID &&
+      !everyStep(steps).some((item) => item.id === selected)
+    )
+      setSelected(null);
+  };
+  const failurePath = (id: string | null) => {
+    const owner = everyStep(draft.steps).find((item) => item.id === id);
+    return (owner && stepPaths(owner).on_failure) ?? [];
+  };
+  const removeFailurePath = (id: string) =>
+    removeSteps(
+      editSteps(draft.steps, (list) =>
+        list.map((item) =>
+          item.id === id ? { ...item, on_failure: null } : item,
+        ),
+      ),
+    );
+  const setFailurePath = (id: string, on: boolean) => {
+    if (on) changeStep(id, { on_failure: [] });
+    // Steps go with the path, so ask first when it has any.
+    else if (failurePath(id).length > 0) setRemovingPath(id);
+    else removeFailurePath(id);
+  };
   const chooseTrigger = (kind: TriggerChoice) => {
     // Choosing the kind it already has keeps what was set on it.
     if (draft.trigger?.kind !== kind) {
@@ -480,6 +511,7 @@ export function AutomationEditor({
             onChooseTrigger={chooseTrigger}
             onAddStep={addStep}
             onDeleteStep={setDeletingStep}
+            onSetFailurePath={setFailurePath}
             notice={
               automation.arrived_off && (
                 <Alert size="compact" role="status">
@@ -550,18 +582,35 @@ export function AutomationEditor({
         primaryVariant="destructive"
         blockedReason={null}
         onSubmit={() => {
-          const steps = editSteps(draft.steps, (list) =>
-            list.filter((item) => item.id !== deletingStep),
+          removeSteps(
+            editSteps(draft.steps, (list) =>
+              list.filter((item) => item.id !== deletingStep),
+            ),
           );
-          change({ steps });
-          // The open panel may be of a step on a path that went with it.
-          if (!everyStep(steps).some((item) => item.id === selected))
-            setSelected(null);
           setDeletingStep(null);
         }}
       >
         <p className="chat-dialog-text">
           The step is removed from {title}, with anything on its paths.
+        </p>
+      </DialogShell>
+      <DialogShell
+        open={removingPath !== null}
+        onOpenChange={(open) => !open && setRemovingPath(null)}
+        title="Remove failure path?"
+        primaryLabel="Remove"
+        primaryVariant="destructive"
+        blockedReason={null}
+        onSubmit={() => {
+          if (removingPath) removeFailurePath(removingPath);
+          setRemovingPath(null);
+        }}
+      >
+        <p className="chat-dialog-text">
+          {failurePath(removingPath).length === 1
+            ? "The step on it is removed"
+            : `The ${failurePath(removingPath).length} steps on it are removed`}{" "}
+          from {title}. If the step fails after that, the run needs attention.
         </p>
       </DialogShell>
       <Sheet

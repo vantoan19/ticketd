@@ -239,6 +239,68 @@ async fn a_change_the_workspace_refuses_fails_the_run_and_the_steps_after_it_do_
     assert_eq!(f.shown(), []);
 }
 
+/// `step` with the path the run takes when it fails.
+fn or_else(mut step: Step, path: Vec<Step>) -> Step {
+    match &mut step.action {
+        StepAction::RunAgent { on_failure, .. }
+        | StepAction::ChangeTicket { on_failure, .. }
+        | StepAction::Notify { on_failure, .. } => *on_failure = Some(path),
+        StepAction::If { .. } => {}
+    }
+    step
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_step_that_fails_with_a_failure_path_runs_the_path_and_the_run_completes() {
+    let f = Fixture::new(
+        vec![
+            or_else(
+                change(
+                    "done",
+                    StepChange::SetStatus {
+                        status: Status::Done,
+                    },
+                ),
+                vec![
+                    notify("tell", "Could not close {{ticket.reference}}"),
+                    notify("tell-again", "Still open"),
+                ],
+            ),
+            notify("never-reached", "Closed"),
+        ],
+        true,
+    );
+    let ticket = f.tag("Fix login");
+    // A trashed ticket takes no changes.
+    f.core().set_trashed(&ticket.reference, true, None).unwrap();
+
+    f.tick().await;
+
+    use AutomationStepStatus::{Completed, Failed};
+    let run = f.run();
+    // The failure was handled: nothing asks for the person.
+    assert_eq!(run.status, AutomationRunStatus::Completed);
+    assert_eq!(run.reason, None);
+    assert_eq!(
+        steps(&run),
+        [
+            ("done", Failed),
+            ("tell", Completed),
+            ("tell-again", Completed)
+        ]
+    );
+    // The step still says why it failed.
+    let reason = run.steps[0].reason.as_deref().unwrap();
+    assert!(reason.contains(&ticket.reference), "{reason}");
+    let shown = f.shown();
+    assert_eq!(shown.len(), 2);
+    assert_eq!(
+        shown[0].body,
+        format!("Could not close {}", ticket.reference)
+    );
+    assert_eq!(shown[1].body, "Still open");
+}
+
 fn has_tag(id: &str, tag: &str, yes: Vec<Step>, no: Vec<Step>) -> Step {
     Step {
         id: id.into(),

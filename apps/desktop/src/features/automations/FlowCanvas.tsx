@@ -50,6 +50,7 @@ import {
   type Automation,
   type AutomationAgent,
   type AutomationDefinition,
+  stepPaths,
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
@@ -116,6 +117,9 @@ export type TriggerChoice = (
   typeof TICKET_TRIGGERS | typeof OTHER_TRIGGERS
 )[number]["kind"];
 
+/** What each path is called where a step is added on it. */
+const PATH_NAMES = { ...PATH_LABELS, failure: "failure" };
+
 /** Why a step that acts on the ticket cannot be added. */
 const NEEDS_TICKET =
   "Needs a ticket, and this Automation does not start from one";
@@ -132,6 +136,8 @@ type Actions = {
    */
   onAddStep: (index: number, kind: StepChoice, list?: FlowList) => void;
   onDeleteStep: (id: string) => void;
+  /** Gives the step a failure path with nothing on it yet, or takes its path away. */
+  onSetFailurePath: (id: string, on: boolean) => void;
 };
 type CanvasContext = Actions & {
   /** The Automation starts without a ticket, so no step can change one. */
@@ -188,11 +194,20 @@ function TriggerMenu({ children }: { children: ReactNode }) {
   );
 }
 
-type CardData = { card: Card; selected: boolean; needs: string | undefined };
+type CardData = {
+  card: Card;
+  selected: boolean;
+  needs: string | undefined;
+  /**
+   * How many steps are on the step's failure path; null while it has no such
+   * path, and absent on a card that cannot have one.
+   */
+  failureSteps?: number | null;
+};
 
 function CardNode({ data }: NodeProps<Node<CardData>>) {
-  const { card, selected, needs } = data;
-  const { onSelect, onDeleteStep } = useActions();
+  const { card, selected, needs, failureSteps } = data;
+  const { onSelect, onDeleteStep, onSetFailurePath } = useActions();
   const Icon = CARD_ICONS[card.icon];
   const face = (
     <>
@@ -256,6 +271,28 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" aria-label="Step actions">
+                {failureSteps === null && (
+                  <DropdownMenuItem
+                    className="items-start whitespace-normal"
+                    onSelect={() => onSetFailurePath(card.id, true)}
+                  >
+                    <span className="flow-menu-item-text">
+                      Add failure path
+                      <small>Steps that run only if this step fails</small>
+                    </span>
+                  </DropdownMenuItem>
+                )}
+                {typeof failureSteps === "number" && (
+                  <DropdownMenuItem
+                    onSelect={() => onSetFailurePath(card.id, false)}
+                  >
+                    {/* It asks first when steps would go with the path. */}
+                    {failureSteps > 0
+                      ? "Remove failure path…"
+                      : "Remove failure path"}
+                  </DropdownMenuItem>
+                )}
+                {failureSteps !== undefined && <DropdownMenuSeparator />}
                 <DropdownMenuItem
                   variant="destructive"
                   onSelect={() => onDeleteStep(card.id)}
@@ -267,7 +304,14 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
           </span>
         )}
       </div>
+      {/* The line to the next step leaves the bottom; a failure path, the side. */}
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
+      <Handle
+        id="failure"
+        type="source"
+        position={Position.Right}
+        isConnectable={false}
+      />
     </>
   );
 }
@@ -399,15 +443,20 @@ export function FlowCanvas({
   notice?: ReactNode;
 } & Actions) {
   const { trigger, steps } = definition;
-  const shape = everyStep(steps)
-    .map((step) => step.id)
-    .join(" ");
+  // Every step and every path, so that a path added with nothing on it counts.
+  const shape = JSON.stringify(flowSteps(steps));
   const { nodes, edges } = useMemo(() => {
     const cards = new Map(
       [
         triggerCard(trigger, only),
         ...everyStep(steps).map((step) => stepCard(step, agents, projects)),
       ].map((card) => [card.id, card]),
+    );
+    // Only a step that can fail takes a failure path: not an If, not the trigger.
+    const failureSteps = new Map(
+      everyStep(steps)
+        .filter((step) => step.kind !== "if")
+        .map((step) => [step.id, stepPaths(step).on_failure?.length ?? null]),
     );
     const cardOf = (id: string) => {
       const card = cards.get(id);
@@ -429,6 +478,9 @@ export function FlowCanvas({
             selected: item.id === selected,
             needs: problems.find((problem) => problem.step_id === item.id)
               ?.message,
+            ...(failureSteps.has(item.id) && {
+              failureSteps: failureSteps.get(item.id) ?? null,
+            }),
           } satisfies CardData,
         };
       const end = item.kind === "end";
@@ -444,7 +496,7 @@ export function FlowCanvas({
           // The first place on a path is not after its step: it is on the path.
           name:
             item.list && item.index === 0
-              ? `Add a step on the ${PATH_LABELS[item.list.path]} path of ${cardName(cardOf(item.after))}`
+              ? `Add a step on the ${PATH_NAMES[item.list.path]} path of ${cardName(cardOf(item.after))}`
               : `Add a step after ${cardName(cardOf(item.after))}`,
           end,
         } satisfies AddData,
@@ -456,14 +508,40 @@ export function FlowCanvas({
       type: path ? "smoothstep" : "straight",
       focusable: false,
       ...(path && { label: PATH_LABELS[path] }),
+      // A failure path leaves the side of its step, dashed, so it never reads
+      // as the next step.
+      ...(path === "failure" && {
+        sourceHandle: "failure",
+        className: "flow-edge-failure",
+      }),
     }));
     return { nodes, edges };
   }, [trigger, only, steps, agents, projects, problems, selected]);
-  const { onSelect, onChooseTrigger, onAddStep, onDeleteStep } = actions;
+  const {
+    onSelect,
+    onChooseTrigger,
+    onAddStep,
+    onDeleteStep,
+    onSetFailurePath,
+  } = actions;
   const ticketless = startsWithoutTicket(trigger);
   const context = useMemo(
-    () => ({ onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless }),
-    [onSelect, onChooseTrigger, onAddStep, onDeleteStep, ticketless],
+    () => ({
+      onSelect,
+      onChooseTrigger,
+      onAddStep,
+      onDeleteStep,
+      onSetFailurePath,
+      ticketless,
+    }),
+    [
+      onSelect,
+      onChooseTrigger,
+      onAddStep,
+      onDeleteStep,
+      onSetFailurePath,
+      ticketless,
+    ],
   );
   return (
     <div className="flow-canvas">

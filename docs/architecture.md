@@ -317,6 +317,16 @@ Yes path when every check passes and down the No path otherwise. Paths never
 rejoin: the end of a path is the end of the run, and the editor places no step
 after an If.
 
+A Run agent, Change ticket or Notify me step may carry a failure path, a list of
+steps like any other (`on_failure`); null means it has none. When such a step
+fails, the run marks it Failed with its reason and goes down that path to its end,
+and the run ends Completed: the failure was handled, so nothing asks for the
+person. A path with no steps handles the failure by ending the run. A step that
+fails with no failure path ends the run as Needs attention with the step's reason.
+Only a step's own failure takes the path: a run the person stops, switches off
+with "Stop it and turn off" or takes over has left Running, so the outcome its
+executor reports later is refused and the path does not run.
+
 Keep view reattachment and replacement-process native resume distinct; a broken
 stdio transport means the process is gone, so there is no separate live-process
 recovery. Only a live request registry can answer approvals. Native resume failure

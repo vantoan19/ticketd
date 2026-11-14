@@ -267,6 +267,58 @@ test("a run in progress follows the Workspace as it goes, and Stop ends it needi
   expect(invoke).toHaveBeenCalledWith("automation_run_stop", { id: "run-1" });
 });
 
+test("a run whose failed step had a failure path is Completed, with the step Failed, its reason, and the path it took", async () => {
+  const handled = (path: Automation["steps"]) =>
+    run({
+      status: "completed",
+      ended_at: new Date().toISOString(),
+      definition: {
+        name: VERIFY.name,
+        trigger: VERIFY.trigger,
+        conditions: [],
+        steps: [{ ...VERIFY.steps[0]!, on_failure: path }, VERIFY.steps[1]!],
+      },
+      steps: [
+        reached("verify", "failed", "The agent reached its limit of 1 turns."),
+        ...path.map((step) => reached(step.id, "completed")),
+      ],
+    });
+  const WENT_ON = "The run went on down this step’s failure path.";
+  runs = [
+    handled([
+      { id: "say-so", kind: "notify", text: "Not verified", opens: "run" },
+    ]),
+  ];
+  const view = await openRun();
+
+  expect(screen.getByRole("status").textContent).toBe("Completed");
+  // The failure path follows its step; the steps after the one that failed did
+  // not run.
+  expect(cards().slice(1)).toEqual([
+    "Run agent: Verifier, Failed",
+    "Notify me, Completed",
+    "If: Ticket has tag verified, Not run",
+    "Notify me, Not run",
+    "Change ticket, Not run",
+  ]);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Run agent: Verifier, Failed" }),
+  );
+  const panel = screen.getByRole("complementary", { name: "Run agent" });
+  expect(panel.textContent).toContain(
+    "The agent reached its limit of 1 turns.",
+  );
+  expect(panel.textContent).toContain(WENT_ON);
+
+  // A failure path with no steps handles the failure all the same.
+  runs = [handled([])];
+  view.rerender(page(1));
+  await waitFor(() => expect(cards()).toHaveLength(5));
+  expect(
+    screen.getByRole("complementary", { name: "Run agent" }).textContent,
+  ).toContain(WENT_ON);
+});
+
 const TAKE_OVER =
   "A run of Verify on staging. Reply to take it over; it moves to your Chats.";
 const failedRun = (owned: boolean) =>

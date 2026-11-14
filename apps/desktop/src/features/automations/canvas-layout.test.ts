@@ -114,6 +114,55 @@ test("an If puts its Yes and No paths side by side below it, and a failure path 
   ]);
 });
 
+test("a step with a failure path keeps its next step directly below it, and the path starts beside them", () => {
+  // A path just added, with nothing on it yet: only its +.
+  const added = layoutFlow([{ id: "a", on_failure: [] }, { id: "b" }]);
+
+  expect(cards(added)).toEqual({
+    trigger: [0, 0],
+    a: [0, 132],
+    b: [0, 264],
+  });
+  expect(added.items.filter((item) => item.kind === "end")).toEqual([
+    // Level with the next step and clear of it, so the line from the side of
+    // "a" turns down once and crosses nothing.
+    {
+      kind: "end",
+      id: "add-a.failure-0",
+      index: 0,
+      after: "a",
+      list: { step: "a", path: "failure" },
+      x: 392,
+      y: 264,
+    },
+    { kind: "end", id: "add-2", index: 2, after: "b", x: 104, y: 396 },
+  ]);
+  expect(added.edges).toEqual([
+    { id: "trigger>a", source: "trigger", target: "a" },
+    {
+      id: "a>add-a.failure-0",
+      source: "a",
+      target: "add-a.failure-0",
+      path: "failure",
+    },
+    { id: "a>b", source: "a", target: "b" },
+    { id: "b>add-2", source: "b", target: "add-2" },
+  ]);
+
+  // Steps on the path, one with a failure path of its own, widen only the side.
+  const filled = layoutFlow([
+    { id: "a", on_failure: [{ id: "f1", on_failure: [{ id: "f2" }] }] },
+    { id: "b" },
+  ]);
+  expect(cards(filled)).toEqual({
+    trigger: [0, 0],
+    a: [0, 132],
+    f1: [288, 264],
+    f2: [576, 396],
+    b: [0, 264],
+  });
+});
+
 test("in the editor a nested If gives every path its own +, and nothing is added after an If", () => {
   const layout = layoutFlow([
     { id: "agent" },
