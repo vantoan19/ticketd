@@ -195,6 +195,11 @@ const TOP = 32;
 /** Kept clear at the bottom for the zoom control: its height and its offset. */
 export const ZOOM_ROOM = 48;
 
+/**
+ * The smallest a canvas goes, by the zoom control or Fit: small enough that
+ * Fit shows a wide flow whole in the narrowest canvas beside the panel.
+ */
+export const LEAST_ZOOM = 0.1;
 /** The least a selected card is shrunk to so its failure path shows beside it (#387 D13). */
 export const LEAST_FOCUS_ZOOM = 0.5;
 
