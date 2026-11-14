@@ -211,7 +211,7 @@ impl Connection {
             let config = self.effective_config(&cwd).await;
             params["config"] = super::personal_tools_off(config.as_ref());
             self.state().session.turn_overrides = Some(turn);
-        } else if request.resumes_unattended {
+        } else if request.taken_over {
             let config = self.effective_config(&cwd).await;
             merge(&mut params, super::own_approvals(config.as_ref()));
         }

@@ -367,7 +367,7 @@ impl Connection {
         // Chat sends, so neither the agent's "don't ask" nor Claude Code's own
         // `defaultMode` decides how the person's session asks.
         let mut picks = request.settings.clone();
-        if request.resumes_unattended {
+        if request.taken_over {
             picks
                 .model
                 .get_or_insert_with(|| super::report::DEFAULT_MODEL.to_owned());

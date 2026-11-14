@@ -909,11 +909,11 @@ impl Supervisor {
         let source = self.context.clone();
         self.generations += 1;
         let generation = RuntimeGeneration(self.generations);
-        // A Chat the person took over from a run resumes the agent's session, which
-        // must not keep the agent's settings. Unreadable is taken as taken over: the
-        // person's own settings are the safe ones to send.
-        let resumes_unattended = self.unattended.is_none()
-            && matches!(session, SessionStart::Resume(_))
+        // A Chat the person took over from a run is ordinary from here on, whether it
+        // resumes the agent's session or, because the run never got one, opens a fresh
+        // one: neither keeps the agent's settings. Unreadable is taken as taken over:
+        // the person's own settings are the safe ones to send.
+        let taken_over = self.unattended.is_none()
             && self
                 .core(|core| core.chat_ran_an_automation_agent(&chat.id))
                 .unwrap_or(true);
@@ -929,7 +929,7 @@ impl Supervisor {
             session,
             unattended: self.unattended.clone(),
             ticketd_cli: None,
-            resumes_unattended,
+            taken_over,
         };
         self.opening = Some(Opening {
             generation,

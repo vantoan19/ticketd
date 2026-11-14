@@ -43,7 +43,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         session,
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -660,7 +660,7 @@ async fn a_new_session_opens_with_new_chats_picks() {
         session: SessionStart::New,
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings {
             model: Some("sonnet".to_owned()),
             effort: Some("high".to_owned()),
@@ -687,7 +687,28 @@ async fn a_chat_taken_over_from_a_run_resumes_with_new_chats_defaults() {
         session: SessionStart::Resume(NativeSessionId::new("sess-9")),
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: true,
+        taken_over: true,
+        settings: StartSettings::default(),
+    };
+    let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
+    let (opened, ()) = tokio::join!(opening, peer.play());
+
+    assert!(opened.is_ok(), "the session opens");
+}
+
+/// #387 5A1: the same when the run never got a session, so the Chat opens a fresh one.
+#[tokio::test(start_paused = true)]
+async fn a_chat_taken_over_before_its_session_exists_opens_with_new_chats_defaults() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("takeover_fresh"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: true,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -1048,7 +1069,7 @@ async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_
         session: SessionStart::New,
         unattended: Some(reader_that_tests()),
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());

@@ -394,7 +394,7 @@ impl Session {
 
     fn turn_completed(&mut self, turn: &Value) -> Option<Vec<EventKind>> {
         let id = text(turn, &["id"])?;
-        let declined = std::mem::take(&mut self.declined);
+        let declined = Self::denied_reason(std::mem::take(&mut self.declined));
         let not_started = self.not_started.take();
         let ended_by = |kind, message| {
             TurnOutcome::Failed(Problem {
@@ -407,8 +407,8 @@ impl Session {
         let outcome = match text(turn, &["status"])? {
             // Nobody approves for an unattended session, so a declined tool is one
             // the agent needed and was denied, even if it then ended its turn.
-            "completed" if !declined.is_empty() => {
-                ended_by(ProblemKind::ToolDenied, declined.join(" "))
+            "completed" if let Some(declined) = declined => {
+                ended_by(ProblemKind::ToolDenied, declined)
             }
             // Whatever the agent then said, it could not do its work (#387 D2).
             "completed" if not_started.is_some() => ended_by(
@@ -582,6 +582,21 @@ impl Session {
             && none_or("durationMs", 0)
     }
 
+    /// The turn's denials as separate sentences, a file Codex could not change before a
+    /// command it could not run. An empty entry stands for a denial not worth naming.
+    fn denied_reason(mut denials: Vec<String>) -> Option<String> {
+        if denials.is_empty() {
+            return None;
+        }
+        denials.sort_by_key(|denial| !denial.starts_with("Codex could not change"));
+        denials.retain(|denial| !denial.is_empty());
+        Some(if denials.is_empty() {
+            "Codex could not run commands in this step.".to_owned()
+        } else {
+            denials.join(" ")
+        })
+    }
+
     /// What an unattended turn fails on in this item, if anything: a tool Codex
     /// declined, or a file it declined or could not change. Nobody approves for an
     /// unattended session (see `server_request`), so a declined file change is one
@@ -589,7 +604,7 @@ impl Session {
     fn denial(kind: &str, title: &str, item: &Value) -> Option<String> {
         let status = text(item, &["status"])?;
         if kind != "fileChange" {
-            return (status == "declined").then(|| format!("Codex was denied: {title}"));
+            return (status == "declined").then(|| format!("Codex could not run {title}."));
         }
         let paths: Vec<&str> = item
             .get("changes")
@@ -622,7 +637,13 @@ impl Session {
             && let Some(denial) = Self::denial(kind, &title, item)
             && !self.declined.contains(&denial)
         {
-            self.declined.push(denial);
+            // ticketd's own guide command is not what the person needs to hear about
+            // (#387 5A3): it still ends the turn as failed, with the generic reason.
+            if title.contains("ticketd skills get") {
+                self.declined.push(String::new());
+            } else {
+                self.declined.push(denial);
+            }
         }
         if kind == "commandExecution"
             && self.turn_overrides.is_some()
