@@ -889,6 +889,11 @@ test("a failed save after quick saves of its own that worked is not taken for a 
   const workspaceChanged = showChanging();
   const form = await openAgent();
   const model = within(form).getByRole("textbox", { name: /^Model/ });
+  // A save of its own that the page passes back: what arrives is then older
+  // than what the quick saves below store.
+  fireEvent.change(model, { target: { value: "A" } });
+  await waitFor(() => expect(stored[0]?.model).toBe("A"));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
   let answer = () => {};
   agentSaveHeld = new Promise((resolve) => (answer = resolve));
   // Typed fast: the first saves are still on their way when the last is sent.
@@ -899,7 +904,8 @@ test("a failed save after quick saves of its own that worked is not taken for a 
   await act(async () => answer());
   agentSaveHeld = null;
   agentUnsavable = null;
-  await screen.findByText(/was not saved/);
+  await screen.findByText(/Your last change to the agent was not saved/);
+  expect(screen.queryByText("Changed somewhere else")).toBeNull();
 
   // The page reads again and finds what this form's own saves stored.
   workspaceChanged();

@@ -191,13 +191,14 @@ export function AgentForm({
    * said it is stored: read after a change, or the answer to a save.
    */
   const arrived = JSON.stringify(settingsOf(agent));
-  /**
-   * What the draft was last taken from, and what this form's saves last
-   * stored: a change made elsewhere is neither. Each save that works counts,
-   * not only the latest, so quick saves before one that failed count too.
-   */
-  const [loaded, setLoaded] = useState(arrived);
+  /** What the draft was taken from or this form's last save that worked stored. */
   const [stored, setStored] = useState(arrived);
+  /**
+   * That, and every save of this form that worked since the draft was taken:
+   * the page may pass on any of them, older ones too, and a change made
+   * elsewhere is none of them.
+   */
+  const [own, setOwn] = useState([arrived]);
   const [seen, setSeen] = useState(arrived);
   /** Saves sent and not yet answered. */
   const [saving, setSaving] = useState(0);
@@ -205,8 +206,8 @@ export function AgentForm({
   /** The last save failed: the draft holds a change that is not stored. */
   const [unsaved, setUnsaved] = useState(false);
   const take = (settings: AutomationAgentSettings) => {
-    setLoaded(JSON.stringify(settings));
     setStored(JSON.stringify(settings));
+    setOwn([JSON.stringify(settings)]);
     setDraft(settings);
     setCommands(settings.tools.allowed_commands.join("\n"));
     setUnsaved(false);
@@ -223,8 +224,7 @@ export function AgentForm({
    * received, so a change that came during a save that then failed is asked
    * about too, and a save that works ends it.
    */
-  const elsewhere =
-    unsaved && saving === 0 && arrived !== stored && arrived !== loaded;
+  const elsewhere = unsaved && saving === 0 && !own.includes(arrived);
   const statusOf = useHarnessStatus();
   const [deleting, setDeleting] = useState(false);
   /** Where the delete dialog returns focus: the menu item that opened it is gone. */
@@ -236,7 +236,10 @@ export function AgentForm({
     onSave(next).then(
       (saved) => {
         setSaving((count) => count - 1);
-        setStored(JSON.stringify(settingsOf(saved)));
+        const json = JSON.stringify(settingsOf(saved));
+        setStored(json);
+        // ponytail: kept only as far back as an answer can lag; drop the cap if a slower path appears.
+        setOwn((current) => [...current.slice(-49), json]);
         // Only the latest save says whether the draft is stored.
         if (sent === sends.current) setUnsaved(false);
       },

@@ -330,13 +330,14 @@ export function AutomationsView({
     const saved = automationsClient.updateAgent(id, settings);
     void saved.then(
       (agent) => {
+        // An earlier save's answer would undo what was typed since, or clear
+        // the failure of a later save answered before it.
+        if (save !== saves.current) return;
         worked("save-agent");
-        // An earlier save's answer would undo what was typed since.
-        if (save === saves.current)
-          setAgents(
-            (current) =>
-              current?.map((item) => (item.id === id ? agent : item)) ?? null,
-          );
+        setAgents(
+          (current) =>
+            current?.map((item) => (item.id === id ? agent : item)) ?? null,
+        );
       },
       failed(
         "save-agent",
