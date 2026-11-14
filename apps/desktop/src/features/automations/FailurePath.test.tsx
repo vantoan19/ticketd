@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -107,7 +108,7 @@ const choose = async (opener: HTMLElement, item: string) => {
 const actions = (steps: HTMLElement, card: string) =>
   within(button(steps, card).closest<HTMLElement>(".flow-card")!).getByRole(
     "button",
-    { name: "Step actions" },
+    { name: /^Actions for / },
   );
 const places = (steps: HTMLElement) =>
   within(steps)
@@ -220,6 +221,13 @@ test("a step that needs a ticket cannot be added on a failure path of an Automat
     ),
     // Run agent, Change ticket, Notify me, If.
   ).toEqual([false, true, false, true]);
+  // Still reached by the arrow keys, so its reason is heard; choosing it does nothing.
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+  await waitFor(() =>
+    expect(document.activeElement?.textContent).toContain("Needs a ticket"),
+  );
+  fireEvent.click(document.activeElement!);
+  expect(saved).toBeUndefined();
 });
 
 test("an empty failure path is removed from the step's menu at once", async () => {
@@ -245,7 +253,7 @@ test("removing a failure path that has steps asks first, and takes the steps and
       ...CLOSE,
       on_failure: [
         { ...TELL, id: "failed", text: "Could not close" },
-        { ...AGENT, id: "retry" },
+        { ...AGENT, id: "retry", on_failure: [{ ...TELL, id: "gave-up" }] },
       ],
     },
     TELL,
@@ -259,7 +267,8 @@ test("removing a failure path that has steps asks first, and takes the steps and
   });
   // Nothing is removed until the person says so.
   expect(saved).toBeUndefined();
-  expect(dialog.textContent).toContain("The 2 steps on it are removed");
+  // Every step that goes, the one on the agent's own failure path too.
+  expect(dialog.textContent).toContain("The 3 steps on it are removed");
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
 
   expect(saved?.steps).toMatchObject([
@@ -268,4 +277,33 @@ test("removing a failure path that has steps asks first, and takes the steps and
   ]);
   expect(screen.queryByRole("complementary", { name: "Notify me" })).toBeNull();
   expect(within(steps).queryByRole("button", { name: AGENT_CARD })).toBeNull();
+  // Focus goes back to the step whose path went, not to the page.
+  await waitFor(() =>
+    expect(document.activeElement).toBe(button(steps, CLOSE_CARD)),
+  );
+});
+
+test("focus stays on the flow: after a step is deleted it is on the step before, after Cancel on the step, and after one is added in its panel", async () => {
+  const steps = await open([CLOSE, TELL]);
+
+  fireEvent.keyDown(button(steps, TELL_CARD), { key: "Delete" });
+  let dialog = await screen.findByRole("dialog", { name: "Delete step?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(button(steps, TELL_CARD)),
+  );
+
+  fireEvent.keyDown(button(steps, TELL_CARD), { key: "Delete" });
+  dialog = await screen.findByRole("dialog", { name: "Delete step?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(button(steps, CLOSE_CARD)),
+  );
+
+  await choose(button(steps, `Add a step after ${CLOSE_CARD}`), "Notify me");
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("complementary", { name: "Notify me" }),
+    ),
+  );
 });

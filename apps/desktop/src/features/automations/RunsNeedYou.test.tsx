@@ -128,8 +128,8 @@ const app = () =>
 
 test.each([
   [0, "Automations"],
-  [1, "Automations · 1 run needs you"],
-  [3, "Automations · 3 runs need you"],
+  [1, "Automations, 1 run needs you"],
+  [3, "Automations, 3 runs need you"],
 ])(
   "with %i runs needing attention the sidebar entry is named %s",
   async (count, name) => {
@@ -157,7 +157,7 @@ test("an Inbox entry for a run that needs attention says which Automation and wh
   expect(heading.textContent).toBe("Triage new tickets › Run on T-ZB8");
   // Reading the entry and opening the run is not acting on it.
   expect(
-    screen.getByRole("button", { name: "Automations · 1 run needs you" }),
+    screen.getByRole("button", { name: "Automations, 1 run needs you" }),
   ).toBeTruthy();
   expect(
     screen

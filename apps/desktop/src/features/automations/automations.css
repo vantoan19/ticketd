@@ -217,12 +217,20 @@
 .flow-body[data-panel="none"] {
   grid-template-columns: minmax(0, 1fr);
 }
+/* A column: the notice bar, when there is one, then the flow under it, so the
+   flow is fitted to the room the bar leaves and never sits beneath it. */
 .flow-canvas {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--background);
+}
+.flow-canvas > .react-flow {
+  flex: 1;
+  min-height: 0;
 }
 /* The zoom control, over the canvas at its lower left. */
 .flow-zoom {
@@ -231,13 +239,17 @@
   bottom: 16px;
   z-index: 5;
 }
-/* The bar over the canvas: off on this desktop. */
+/* The bar across the top of the canvas: switched off, not saved, changed
+   elsewhere. Narrow, its buttons go under the sentence instead of squeezing it. */
 .flow-notice {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  right: 16px;
-  z-index: 6;
+  flex: none;
+  padding: 16px 16px 0;
+}
+.flow-notice .ui-notice-compact {
+  flex-wrap: wrap;
+}
+.flow-notice .ui-notice-compact .ui-notice-description {
+  flex-basis: 160px;
 }
 .flow-canvas .react-flow__background {
   background: var(--background);
@@ -331,8 +343,8 @@
   background: var(--foreground);
   color: var(--surface);
 }
-/* A prompt, or a step a run did not reach, has no color yet. */
-.flow-card[data-unset] .flow-card-icon,
+/* A step a run did not reach has no color. An unfinished card keeps its kind's
+   color: its dashed edge already says it is unfinished. */
 .flow-card[data-run="waiting"] .flow-card-icon,
 .flow-card[data-run="not_run"] .flow-card-icon {
   background: var(--recessed);
@@ -368,6 +380,12 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+/* Text in a flex row is cut without "…" unless it has a box of its own. */
+.flow-card-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .flow-card-menu {
   position: absolute;

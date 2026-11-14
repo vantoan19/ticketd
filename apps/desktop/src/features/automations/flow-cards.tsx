@@ -35,7 +35,7 @@ export const TRIGGER_KINDS: Record<AutomationTrigger["kind"], string> = {
   status_changed: "When the status changes",
   tag_added: "When a tag is added",
   tag_removed: "When a tag is removed",
-  activity_created: "When an update is added",
+  activity_created: "When an update is posted",
   schedule: "On a schedule",
   by_hand: "By hand",
 };
@@ -164,25 +164,31 @@ export function stepCard(
   const kind = STEP_KINDS[step.kind];
   if (step.kind === "change_ticket") {
     const change = step.change;
-    const title =
+    // Named by its action as soon as one is chosen, as the panel shows it; the
+    // card's "Needs" line says what is still missing.
+    const [title, finished] =
       change?.action === "add_tag"
-        ? change.tag.trim() && `Add tag ${change.tag.trim()}`
+        ? change.tag.trim()
+          ? [`Add tag ${change.tag.trim()}`, true]
+          : ["Add a tag", false]
         : change?.action === "remove_tag"
-          ? change.tag.trim() && `Remove tag ${change.tag.trim()}`
+          ? change.tag.trim()
+            ? [`Remove tag ${change.tag.trim()}`, true]
+            : ["Remove a tag", false]
           : change?.action === "set_status"
-            ? `Set status to ${change.status}`
+            ? [`Set status to ${change.status}`, true]
             : change?.action === "post_update"
-              ? change.text.trim() && "Post an update"
-              : "";
+              ? ["Post an update", change.text.trim() !== ""]
+              : ["Choose a change", false];
     const detail =
       change?.action === "post_update" ? textInWords(change.text) : "";
     return {
       id: step.id,
       kind,
-      title: title || "Choose a change",
+      title,
       ...(detail && { detail }),
       icon: "change",
-      unset: !title,
+      unset: !finished,
       menu: "step",
     };
   }
@@ -281,11 +287,13 @@ export function openCard(
   onSelect(id);
   if (selected) document.querySelector<HTMLElement>(".flow-panel")?.focus();
 }
+/** A card's button on the canvas, by the card's id. */
+export const cardElement = (id: string) =>
+  [...document.querySelectorAll<HTMLElement>("[data-flow-card]")].find(
+    (card) => card.dataset.flowCard === id,
+  ) ?? null;
 /** Moves focus to a card on the canvas, as when its panel closes. */
-export function focusCard(id: string) {
-  for (const card of document.querySelectorAll<HTMLElement>("[data-flow-card]"))
-    if (card.dataset.flowCard === id) card.focus();
-}
+export const focusCard = (id: string) => cardElement(id)?.focus();
 /** The kind a card is colored by: every trigger alike, each step by its own. */
 export const cardColor = (card: Card) =>
   card.menu === "step" ? card.icon : "trigger";

@@ -133,7 +133,7 @@ function startedBy(trigger: Automation["trigger"]) {
 const ROW_TRIGGERS = {
   ticket_created: "Ticket created",
   ticket_updated: "Ticket updated",
-  activity_created: "Update added",
+  activity_created: "Update posted",
 } as const;
 
 /**
@@ -576,6 +576,11 @@ export function AutomationsView({
       automation={openAutomation}
       agents={agents ?? []}
       {...paneProps}
+      needsYou={
+        runs?.some(
+          (item) => item.automation_id === openAutomation.id && item.needs_you,
+        ) ?? false
+      }
       openRun={run}
       onOpenRun={setRun}
       onChange={(definition, typing) =>

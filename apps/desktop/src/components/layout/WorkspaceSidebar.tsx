@@ -220,7 +220,7 @@ export function WorkspaceSidebar({
   const runsWaiting = counts?.runs_needing_you ?? 0;
   const automationsLabel =
     runsWaiting > 0
-      ? `Automations · ${runsWaiting} ${runsWaiting === 1 ? "run needs" : "runs need"} you`
+      ? `Automations, ${runsWaiting} ${runsWaiting === 1 ? "run needs" : "runs need"} you`
       : "Automations";
   const archivedPlans = plans.filter((e) => e.archived).length;
   return (
