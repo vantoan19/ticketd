@@ -1056,6 +1056,64 @@ async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
     assert_eq!(f.listed_chats(), [] as [String; 0]);
 }
 
+/// #387 4A1: the agent's first message is the run's, not the person's. Whoever ends the
+/// run before the agent took it (Stop in the Chat, a reply, Stop on the run, Chat turned
+/// off) leaves no such message queued in the Chat, and nothing the person did not write
+/// is ever sent: after a reply only the reply reaches the harness.
+#[tokio::test(start_paused = true)]
+async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queued() {
+    for how in ["stop in the chat", "reply", "stop the run", "chat turned off"] {
+        let f = Fixture::new();
+        let open = f.fake.hold_next_open();
+        f.tag("Fix login");
+        f.tick().await;
+        let run = f.runs().remove(0);
+        let chat = f.chat();
+        assert_eq!(f.core().chat_queue(&chat).unwrap().len(), 1, "{how}");
+
+        let ending = async {
+            match how {
+                "stop in the chat" => f.host.stop(&chat).await.unwrap(),
+                "reply" => {
+                    f.host
+                        .send(&chat, None, "Hello", SendMode::Auto)
+                        .await
+                        .unwrap();
+                }
+                "stop the run" => {
+                    f.core().stop_automation_run(&run.id).unwrap();
+                    f.host.stop(&chat).await.unwrap();
+                }
+                _ => {
+                    f.host.turn_off().await;
+                }
+            }
+        };
+        tokio::join!(ending, async {
+            settle().await;
+            let _ = open.send(());
+        });
+        settle().await;
+
+        let queue = f.core().chat_queue(&chat).unwrap();
+        let queued: Vec<_> = queue.iter().map(|m| m.text.as_str()).collect();
+        let submitted: Vec<_> = written(&f)
+            .into_iter()
+            .filter(|w| w.starts_with("submit"))
+            .collect();
+        if how == "reply" {
+            assert!(queued.iter().all(|t| *t == "Hello"), "{how}: {queued:?}");
+            assert!(
+                submitted.iter().all(|w| w == "submit: Hello"),
+                "{how}: {submitted:?}"
+            );
+        } else {
+            assert!(queued.is_empty(), "{how}: {queued:?}");
+            assert!(submitted.is_empty(), "{how}: {submitted:?}");
+        }
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn stopping_a_running_runs_chat_takes_the_run_over() {
     let f = Fixture::new();

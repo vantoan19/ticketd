@@ -845,12 +845,28 @@ impl ChatHost {
             return false;
         }
         self.close(chat_id, why).await;
+        // While a Chat is unattended, whatever is still queued in it is the agent's first
+        // message, which the agent never took: the person did not write it, and it must
+        // not wait to be sent for them (a reply starts the queue). What the agent did
+        // take is history, not queue, and stays.
+        self.discard_queued_first_message(chat_id);
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
         self.inner
             .board
             .changed
             .send_modify(|count| *count = count.wrapping_add(1));
         true
+    }
+
+    /// Withdraws the Chat's queued input. Best effort: when the Workspace cannot be
+    /// read the run's own failure handling reports the problem.
+    fn discard_queued_first_message(&self, chat_id: &str) {
+        let Ok(mut workspace) = self.workspace() else {
+            return;
+        };
+        for message in workspace.chat_queue(chat_id).unwrap_or_default() {
+            let _ = workspace.withdraw_chat_input(chat_id, &message.id);
+        }
     }
 
     /// Takes the Chat's supervisor out of the host, for the caller to shut down.
