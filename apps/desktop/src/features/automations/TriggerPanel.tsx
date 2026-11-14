@@ -6,6 +6,8 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -29,6 +31,10 @@ import type { Project } from "@/lib/api/client";
 import { ticketStatuses } from "@/lib/statuses";
 
 /* What the trigger's panel holds: the trigger's own values, then its conditions. */
+
+/** The status a radio item stands for; "" (Any status) is none. */
+const statusNamed = (value: string) =>
+  ticketStatuses.find((status) => status === value) ?? null;
 
 /** A value chosen from a menu. `name` is the control's name with its value. */
 export function Pick({
@@ -232,18 +238,23 @@ export function TriggerFields({
           <div className="flow-panel-section">
             <span aria-hidden="true">To</span>
             <Pick
-              name={trigger.to ? `To: ${trigger.to}` : "To"}
+              name={`To: ${trigger.to ?? "choose a status"}`}
               text={trigger.to ?? "Choose a status"}
               menu="To"
             >
-              {ticketStatuses.map((status) => (
-                <DropdownMenuItem
-                  key={status}
-                  onSelect={() => onChange({ ...trigger, to: status })}
-                >
-                  {status}
-                </DropdownMenuItem>
-              ))}
+              {/* Radio items, so the menu says which one is chosen. */}
+              <DropdownMenuRadioGroup
+                value={trigger.to ?? ""}
+                onValueChange={(to) =>
+                  onChange({ ...trigger, to: statusNamed(to) })
+                }
+              >
+                {ticketStatuses.map((status) => (
+                  <DropdownMenuRadioItem key={status} value={status}>
+                    {status}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
             </Pick>
           </div>
           <div className="flow-panel-section">
@@ -253,20 +264,23 @@ export function TriggerFields({
               text={trigger.from ?? "Any status"}
               menu="From"
             >
-              <DropdownMenuItem
-                onSelect={() => onChange({ ...trigger, from: null })}
+              {/* "" is Any status: a radio value cannot be null. */}
+              <DropdownMenuRadioGroup
+                value={trigger.from ?? ""}
+                onValueChange={(from) =>
+                  onChange({ ...trigger, from: statusNamed(from) })
+                }
               >
-                Any status
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {ticketStatuses.map((status) => (
-                <DropdownMenuItem
-                  key={status}
-                  onSelect={() => onChange({ ...trigger, from: status })}
-                >
-                  {status}
-                </DropdownMenuItem>
-              ))}
+                <DropdownMenuRadioItem value="">
+                  Any status
+                </DropdownMenuRadioItem>
+                <DropdownMenuSeparator />
+                {ticketStatuses.map((status) => (
+                  <DropdownMenuRadioItem key={status} value={status}>
+                    {status}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
             </Pick>
           </div>
         </>
@@ -414,6 +428,8 @@ export function ConditionRows({
                   {projects.map((project) => (
                     <DropdownMenuCheckboxItem
                       key={project.id}
+                      // Open for the next pick: one condition names several.
+                      onSelect={(event) => event.preventDefault()}
                       checked={condition.any_of.includes(project.id)}
                       onCheckedChange={(checked) =>
                         set(index, {
@@ -440,6 +456,8 @@ export function ConditionRows({
                   {CONDITION_SOURCES.map((source) => (
                     <DropdownMenuCheckboxItem
                       key={source}
+                      // Open for the next pick: one condition names several.
+                      onSelect={(event) => event.preventDefault()}
                       checked={condition.any_of.includes(source)}
                       onCheckedChange={(checked) =>
                         set(index, {
@@ -489,8 +507,16 @@ export function ConditionRows({
               <DropdownMenuItem
                 key={label}
                 className="items-start whitespace-normal"
-                disabled={taken}
-                onSelect={() => onChange([...conditions, blank])}
+                // Not `disabled`, which the arrow keys skip: it stays in reach
+                // and says why it is unavailable.
+                {...(taken
+                  ? {
+                      "aria-disabled": true,
+                      // Drawn as a disabled item is.
+                      "data-disabled": "",
+                      onSelect: (event: Event) => event.preventDefault(),
+                    }
+                  : { onSelect: () => onChange([...conditions, blank]) })}
               >
                 <span className="flow-menu-item-text">
                   {label}

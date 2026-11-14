@@ -54,6 +54,7 @@ import {
 import { conditionsLine } from "@/features/automations/automation-text";
 import {
   CARD_ICONS,
+  cardElement,
   focusCard,
   TRIGGER_KINDS,
   triggerCard,
@@ -118,6 +119,20 @@ function leftToFinish(problems: Automation["problems"]): string {
 }
 
 /**
+ * The card above a step: the one before it on its path, or the step the path
+ * leaves from (the trigger, for the first step).
+ */
+function cardBefore(steps: AutomationStep[], id: string): string {
+  let before: string = TRIGGER_ID;
+  editSteps(steps, (list, owner) => {
+    const at = list.findIndex((step) => step.id === id);
+    if (at >= 0) before = list[at - 1]?.id ?? owner?.step ?? TRIGGER_ID;
+    return list;
+  });
+  return before;
+}
+
+/**
  * One Automation, edited in place. A choice (a menu, a switch, a step added or
  * removed) is saved as it is made. Text is saved as it is typed too, but as an
  * edit still in progress: the core holds back one that would switch the
@@ -131,6 +146,7 @@ export function AutomationEditor({
   agents,
   expanded,
   single,
+  needsYou = false,
   onExpand,
   onReturn,
   onClose,
@@ -151,6 +167,8 @@ export function AutomationEditor({
   agents: AutomationAgent[];
   expanded: boolean;
   single: boolean;
+  /** One of its runs ended needing the person and is not answered yet. */
+  needsYou?: boolean;
   onExpand: () => void;
   onReturn: () => void;
   onClose: () => void;
@@ -223,8 +241,17 @@ export function AutomationEditor({
   const [selected, setSelected] = useState<string | null>(null);
   /** The name being typed in the Rename dialog; null while it is closed. */
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  /** Its runs in progress, while the person is asked to delete it. */
+  const [deleting, setDeleting] = useState<AutomationRun[] | null>(null);
   const [deletingStep, setDeletingStep] = useState<string | null>(null);
+  /**
+   * The card a confirmation returns focus to as it closes: what opened it may
+   * be gone, as the card of a step just deleted is.
+   */
+  const returnTo = useRef<HTMLElement | null>(null);
+  const returnToCard = (id: string | null) => {
+    returnTo.current = id ? cardElement(id) : null;
+  };
   /** The step whose failure path, which has steps, is about to be removed. */
   const [removingPath, setRemovingPath] = useState<string | null>(null);
   /** The agent open over the editor, to set up or change. */
@@ -238,13 +265,19 @@ export function AutomationEditor({
     void reported("projects", client.listProjects(), onRead, setProjects);
   }, [onRead]);
 
+  /** Its runs that are queued or running, as the core has them now. */
+  const activeRuns = () =>
+    automationsClient
+      .runs(automation.id)
+      .then((runs) =>
+        runs.filter(
+          (run) => run.status === "queued" || run.status === "running",
+        ),
+      );
   const setEnabled = (enabled: boolean) => {
     if (enabled) return onSetEnabled(true);
     // Stopping an agent is a decision: with a run in progress, ask first.
-    automationsClient.runs(automation.id).then((runs) => {
-      const active = runs.filter(
-        (run) => run.status === "queued" || run.status === "running",
-      );
+    activeRuns().then((active) => {
       if (active.length > 0) setTurningOff(active);
       else onSetEnabled(false);
     }, onFail);
@@ -406,6 +439,7 @@ export function AutomationEditor({
       />
     );
   const left = automation.problems.length;
+  const removedSteps = everyStep(failurePath(removingPath)).length;
   const leftText = leftToFinish(automation.problems);
   const step = everyStep(draft.steps).find((item) => item.id === selected);
   const openAgent = agents.find((agent) => agent.id === agentOpen);
@@ -443,6 +477,7 @@ export function AutomationEditor({
           agentId={step.agent_id}
           folder={step.execution_folder}
           agents={agents}
+          projects={projects}
           onChange={(patch) => changeStep(step.id, patch)}
           onNewAgent={() =>
             void onCreateAgent().then((agent) => {
@@ -531,7 +566,11 @@ export function AutomationEditor({
             onValueChange={setView}
             options={[
               { value: "steps", label: "Steps" },
-              { value: "runs", label: "Runs" },
+              {
+                value: "runs",
+                label: "Runs",
+                ...(needsYou && { attention: "a run needs you" }),
+              },
             ]}
           />
         </div>
@@ -589,7 +628,8 @@ export function AutomationEditor({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
-                onSelect={() => setDeleting(true)}
+                // Deleting ends its runs in progress, so the dialog says so.
+                onSelect={() => void activeRuns().then(setDeleting, onFail)}
               >
                 Delete…
               </DropdownMenuItem>
@@ -687,12 +727,9 @@ export function AutomationEditor({
               ) : switchedOff !== null && !automation.enabled ? (
                 <Alert size="compact" role="status">
                   <AlertTitle>Switched off</AlertTitle>
+                  {/* One short sentence: the canvas may be narrow beside the panel. */}
                   <AlertDescription>
-                    Your edit left it unfinished ({switchedOff}), so it no
-                    longer runs.{" "}
-                    {left > 0
-                      ? "Finish it, then switch it back on."
-                      : "It is finished now."}
+                    {left > 0 ? `${switchedOff}.` : "It is finished now."}
                   </AlertDescription>
                   <AlertActions>
                     <Button
@@ -756,29 +793,41 @@ export function AutomationEditor({
         />
       </DialogShell>
       <DialogShell
-        open={deleting}
-        onOpenChange={setDeleting}
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
         title="Delete Automation?"
         primaryLabel="Delete"
         primaryVariant="destructive"
         blockedReason={null}
         onSubmit={() => {
-          setDeleting(false);
+          setDeleting(null);
           onDelete();
         }}
       >
         <p className="chat-dialog-text">
-          {title} is removed and will no longer run. This cannot be undone.
+          {title} is removed and will no longer run.{" "}
+          {deleting?.length === 1
+            ? `The run ${deleting[0]?.ticket ? `on ${deleting[0].ticket.reference}` : "in progress"} is ended now. `
+            : deleting && deleting.length > 1
+              ? `Its ${deleting.length} runs in progress are ended now. `
+              : ""}
+          This cannot be undone.
         </p>
       </DialogShell>
       <DialogShell
         open={deletingStep !== null}
-        onOpenChange={(open) => !open && setDeletingStep(null)}
+        onOpenChange={(open) => {
+          if (open) return;
+          returnToCard(deletingStep);
+          setDeletingStep(null);
+        }}
         title="Delete step?"
         primaryLabel="Delete"
         primaryVariant="destructive"
         blockedReason={null}
+        returnFocus={returnTo}
         onSubmit={() => {
+          if (deletingStep) returnToCard(cardBefore(draft.steps, deletingStep));
           removeSteps(
             editSteps(draft.steps, (list) =>
               list.filter((item) => item.id !== deletingStep),
@@ -793,20 +842,27 @@ export function AutomationEditor({
       </DialogShell>
       <DialogShell
         open={removingPath !== null}
-        onOpenChange={(open) => !open && setRemovingPath(null)}
+        onOpenChange={(open) => {
+          if (open) return;
+          returnToCard(removingPath);
+          setRemovingPath(null);
+        }}
         title="Remove failure path?"
         primaryLabel="Remove"
         primaryVariant="destructive"
         blockedReason={null}
+        returnFocus={returnTo}
         onSubmit={() => {
+          returnToCard(removingPath);
           if (removingPath) removeFailurePath(removingPath);
           setRemovingPath(null);
         }}
       >
         <p className="chat-dialog-text">
-          {failurePath(removingPath).length === 1
+          {/* Every step goes with it, those on its steps' own paths too. */}
+          {removedSteps === 1
             ? "The step on it is removed"
-            : `The ${failurePath(removingPath).length} steps on it are removed`}{" "}
+            : `The ${removedSteps} steps on it are removed`}{" "}
           from {title}. If the step fails after that, the run needs attention.
         </p>
       </DialogShell>
@@ -872,7 +928,9 @@ function TurnOffMenu({
         <span className="auto-on-anchor" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align="start"
+        // Toward the window's middle, and never against its edge.
+        align="end"
+        collisionPadding={8}
         // The anchor has no name to lend the menu.
         aria-labelledby={undefined}
         aria-label="Turn off"

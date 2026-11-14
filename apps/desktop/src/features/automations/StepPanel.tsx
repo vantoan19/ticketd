@@ -15,6 +15,7 @@ import {
 } from "@/features/automations/client";
 import { agentReach, folderName } from "@/features/automations/automation-text";
 import { useChatClient } from "@/features/chats/client";
+import type { Project } from "@/lib/api/client";
 
 /**
  * The panel beside the canvas that sets up the selected card. It takes focus
@@ -45,7 +46,15 @@ export function StepPanel({
       onKeyDown={(event) => {
         if (event.key === "Delete" && event.target === event.currentTarget)
           onDelete?.();
-        if (event.key !== "Escape" || event.defaultPrevented) return;
+        if (event.key !== "Escape") return;
+        // A menu or dialog in the panel closes first. A tooltip also takes the
+        // key, but it is not what the person is closing.
+        if (
+          event.defaultPrevented &&
+          event.target instanceof Element &&
+          event.target.closest("[role=menu],[role=dialog]")
+        )
+          return;
         event.stopPropagation();
         onClose();
       }}
@@ -68,6 +77,7 @@ export function RunAgentFields({
   agentId,
   folder,
   agents,
+  projects,
   onChange,
   onNewAgent,
   onEditAgent,
@@ -76,6 +86,8 @@ export function RunAgentFields({
   agentId: string | null;
   folder: string | null;
   agents: AutomationAgent[];
+  /** Their folders are offered as the step's folder. */
+  projects: Project[];
   onChange: (patch: { agent_id?: string; execution_folder?: string }) => void;
   onNewAgent: () => void;
   onEditAgent: (id: string) => void;
@@ -140,24 +152,57 @@ export function RunAgentFields({
       </div>
       <div className="flow-panel-section">
         <span aria-hidden="true">Folder</span>
-        <Button
-          variant="outline"
-          className="w-full justify-start"
-          aria-label={folder ? `Folder: ${folder}` : "Folder"}
-          onClick={() =>
-            void chat
-              .pickFolder()
-              .then(
-                (path) => path && onChange({ execution_folder: path }),
-                onFail,
-              )
-          }
-        >
-          <Folder aria-hidden />
-          <span className="flow-pick-text">
-            {folder ? folderName(folder) : "Choose a folder…"}
-          </span>
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              aria-label={folder ? `Folder: ${folder}` : "Folder"}
+            >
+              <Folder aria-hidden />
+              <span className="flow-pick-text">
+                {folder ? folderName(folder) : "Choose a folder"}
+              </span>
+              <ChevronDown aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="w-70"
+            aria-label="Folder"
+          >
+            {/* The projects' folders first: most agents work in one. */}
+            {projects.flatMap((project) =>
+              project.paths.map((path) => (
+                <DropdownMenuItem
+                  key={`${project.id} ${path}`}
+                  className="items-start whitespace-normal"
+                  onSelect={() => onChange({ execution_folder: path })}
+                >
+                  <span className="flow-menu-item-text min-w-0">
+                    {project.name}
+                    <small className="break-all">{path}</small>
+                  </span>
+                </DropdownMenuItem>
+              )),
+            )}
+            {projects.some((project) => project.paths.length > 0) && (
+              <DropdownMenuSeparator />
+            )}
+            <DropdownMenuItem
+              onSelect={() =>
+                void chat
+                  .pickFolder()
+                  .then(
+                    (path) => path && onChange({ execution_folder: path }),
+                    onFail,
+                  )
+              }
+            >
+              Choose a folder…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <p className="flow-panel-note">
           {folder ? <code>{folder}</code> : "The agent works in this folder."}
         </p>

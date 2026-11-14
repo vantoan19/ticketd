@@ -71,10 +71,16 @@ const automation = (patch: Partial<Automation>): Automation => ({
 let automations: Automation[] = [];
 let agents: AutomationAgent[] = [];
 let runs: AutomationRun[] = [];
+/** Every run, for the page's list of them. */
+let allRuns: (AutomationRun & { automation_name: string })[] = [];
+let projects: { id: string; name: string; path: string; paths: string[] }[] =
+  [];
 beforeEach(() => {
   automations = [];
   agents = [TRIAGE];
   runs = [];
+  allRuns = [];
+  projects = [];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     const { id, definition, enabled } = (args ?? {}) as {
       id?: string;
@@ -91,11 +97,11 @@ beforeEach(() => {
       case "automation_list":
         return automations;
       case "automation_run_list_all":
-        return [];
+        return allRuns;
       case "automation_agent_list":
         return agents;
       case "list_projects":
-        return [];
+        return projects;
       case "automation_run_list":
         return runs;
       case "automation_create": {
@@ -150,7 +156,7 @@ const cardNames = (steps: HTMLElement) =>
   within(steps)
     .getAllByRole("button")
     .map((button) => button.getAttribute("aria-label"))
-    .filter((name) => name && !/actions$|^Change what/.test(name));
+    .filter((name) => name && !/^Actions for |^Change what/.test(name));
 
 test("a simple Automation is built from a trigger card and one +, each set up in the panel beside the canvas", async () => {
   chat.nextFolder = "C:\\code\\web-app";
@@ -200,7 +206,10 @@ test("a simple Automation is built from a trigger card and one +, each set up in
       /Claude Code\. Can read files and run 2 commands, and use the ticketd command line\./,
     ),
   ).toBeTruthy();
-  fireEvent.click(within(stepPanel).getByRole("button", { name: "Folder" }));
+  await choose(
+    within(stepPanel).getByRole("button", { name: "Folder" }),
+    /Choose a folder/,
+  );
 
   await waitFor(() =>
     expect(automations[0]).toMatchObject({
@@ -214,10 +223,12 @@ test("a simple Automation is built from a trigger card and one +, each set up in
       ],
     }),
   );
-  expect(
-    within(steps).getByRole("button", { name: /^Run agent: Triage, / })
-      .textContent,
-  ).toContain("Claude Code · in web-app");
+  await waitFor(() =>
+    expect(
+      within(steps).getByRole("button", { name: /^Run agent: Triage, / })
+        .textContent,
+    ).toContain("Claude Code · in web-app"),
+  );
 });
 
 test("a Run agent step can make a new agent without leaving the editor", async () => {
@@ -283,6 +294,12 @@ test("an unfinished step says what it needs and the Automation cannot be switche
     within(steps).getByRole("button", { name: /^Run agent: Choose an agent, / })
       .textContent,
   ).toContain("Needs an agent and a folder");
+  // The whole reason, where the card cuts it short.
+  expect(
+    within(steps)
+      .getByRole("button", { name: /^Run agent: Choose an agent, / })
+      .getAttribute("title"),
+  ).toBe("Needs an agent and a folder");
   expect(screen.getByText("1 step left")).toBeTruthy();
   const off = screen.getByRole("switch", {
     name: "On for this desktop",
@@ -435,7 +452,7 @@ test("an Automation is renamed and deleted from its menu, and a step is deleted 
   await screen.findByRole("heading", { name: "Triage new tickets" });
 
   await choose(
-    within(steps).getByRole("button", { name: "Step actions" }),
+    within(steps).getByRole("button", { name: /^Actions for / }),
     /Delete step/,
   );
   fireEvent.click(
@@ -623,4 +640,91 @@ test("Esc closes a step's panel and returns to the step, and Delete on the step 
   expect(automations[0]?.steps).toHaveLength(1);
   fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(automations[0]?.steps).toEqual([]));
+});
+
+test("deleting an Automation with a run in progress says the run is ended", async () => {
+  await openRunning([]);
+  await waitFor(() => expect(automations[0]?.enabled).toBe(false));
+  runs = [run({})];
+
+  await choose(
+    screen.getByRole("button", { name: "Automation actions" }),
+    /Delete/,
+  );
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "Delete Automation?",
+  });
+  expect(dialog.textContent).toContain("The run on T-ZB7 is ended now.");
+});
+
+test("the Runs switch of an Automation has the attention dot while one of its runs needs the person", async () => {
+  allRuns = [
+    {
+      ...run({ automation_id: "automation-1", status: "needs_attention" }),
+      needs_you: true,
+      automation_name: "Triage",
+    },
+  ];
+  await openFirst([
+    automation({ name: "Triage", trigger: { kind: "by_hand" } }),
+  ]);
+
+  const show = screen.getAllByRole("radiogroup", { name: "Show" }).at(-1)!;
+  expect(
+    within(show).getByRole("radio", { name: "Runs , a run needs you" }),
+  ).toBeTruthy();
+});
+
+test("a Run agent step's folder can be one of the projects' folders, or any folder", async () => {
+  projects = [
+    {
+      id: "p1",
+      name: "web-app",
+      path: "C:\\code\\web-app",
+      paths: ["C:\\code\\web-app"],
+    },
+  ];
+  await openFirst([
+    automation({
+      trigger: { kind: "tag_added", tag: "ready-for-triage" },
+      steps: [runAgent("s1", "agent-1", null)],
+    }),
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /^Run agent: Triage/ }));
+  const panel = await screen.findByRole("complementary", { name: "Run agent" });
+
+  const folder = within(panel).getByRole("button", { name: "Folder" });
+  fireEvent.keyDown(folder, { key: "Enter" });
+  const menu = await screen.findByRole("menu");
+  expect(
+    within(menu)
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent),
+  ).toEqual(["web-appC:\\code\\web-app", "Choose a folder…"]);
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /^web-app/ }));
+
+  await waitFor(() =>
+    expect(automations[0]?.steps).toMatchObject([
+      { execution_folder: "C:\\code\\web-app" },
+    ]),
+  );
+});
+
+test("one Esc closes a step's panel from its Close button, though the button's tooltip takes the key too", async () => {
+  await openFirst([
+    automation({
+      trigger: { kind: "tag_added", tag: "ready-for-triage" },
+      steps: [runAgent("s1", "agent-1", null)],
+    }),
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /^Run agent: Triage/ }));
+  const panel = await screen.findByRole("complementary", { name: "Run agent" });
+  const close = within(panel).getByRole("button", { name: "Close panel" });
+  // As an open tooltip does: it handles Escape and marks it handled.
+  close.addEventListener("keydown", (event) => event.preventDefault());
+
+  fireEvent.keyDown(close, { key: "Escape" });
+
+  await waitFor(() => expect(screen.queryByRole("complementary")).toBeNull());
 });
