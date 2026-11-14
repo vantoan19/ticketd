@@ -17,6 +17,10 @@ const SCHEMA_VERSION: u32 = 1;
 /// Why a run ended when its Automation was deleted.
 const DELETED: &str = "You deleted this Automation.";
 
+/// The longest name an Automation may have, in characters. The Rename dialog
+/// (`AutomationEditor.tsx`) stops at the same length.
+pub const AUTOMATION_NAME_LIMIT: usize = 120;
+
 /// The `step_id` of a problem with the trigger, which is a card but not a step.
 pub const AUTOMATION_TRIGGER_ID: &str = "trigger";
 
@@ -504,6 +508,11 @@ fn tidy_steps(steps: &mut [Step], seen: &mut HashSet<String>) -> Result<(), Erro
 /// store them, and every step with an id of its own.
 fn tidied(mut definition: AutomationDefinition) -> Result<AutomationDefinition, Error> {
     definition.name = definition.name.trim().to_owned();
+    if definition.name.chars().count() > AUTOMATION_NAME_LIMIT {
+        return Err(Error::InvalidAutomation(format!(
+            "a name can be at most {AUTOMATION_NAME_LIMIT} characters"
+        )));
+    }
     if let Some(Trigger::TagAdded { tag } | Trigger::TagRemoved { tag }) = &mut definition.trigger {
         *tag = tag.trim().to_lowercase();
     }
@@ -707,6 +716,40 @@ pub(crate) fn using_agent(connection: &Connection, agent: &str) -> Result<Vec<St
         .collect())
 }
 
+/// The name for a copy of `name`: its own " copy" or " copy N" ending dropped, then
+/// the first of " copy", " copy 2", … that no Automation in `taken` has, shortened
+/// to fit the name limit.
+fn copy_name(name: &str, taken: &HashSet<String>) -> String {
+    let base = match name.rsplit_once(" copy") {
+        Some((base, "")) => base,
+        Some((base, number))
+            if number
+                .strip_prefix(' ')
+                .is_some_and(|n| n.parse::<u32>().is_ok()) =>
+        {
+            base
+        }
+        _ => name,
+    };
+    let mut n = 1;
+    loop {
+        let ending = if n == 1 {
+            " copy".to_owned()
+        } else {
+            format!(" copy {n}")
+        };
+        let room = AUTOMATION_NAME_LIMIT.saturating_sub(ending.chars().count());
+        let candidate = format!(
+            "{}{ending}",
+            base.chars().take(room).collect::<String>().trim_end()
+        );
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
 impl Workspace {
     /// A new Automation is off on every device until it is switched on there.
     pub fn create_automation(
@@ -723,11 +766,16 @@ impl Workspace {
     }
 
     /// A new Automation with the same trigger, conditions and steps, named as a
-    /// copy. Like any new Automation it is off, whatever the original is.
+    /// copy: "Triage copy", then "Triage copy 2", also when a copy is copied. Like
+    /// any new Automation it is off, whatever the original is.
     pub fn duplicate_automation(&mut self, id: &str) -> Result<Automation, Error> {
         let mut definition = one(&self.connection, id)?.definition;
         if !definition.name.is_empty() {
-            definition.name.push_str(" copy");
+            let taken: HashSet<String> = load(&self.connection, None)?
+                .into_iter()
+                .map(|automation| automation.definition.name)
+                .collect();
+            definition.name = copy_name(&definition.name, &taken);
         }
         // Step ids only have to be unique within one Automation, so the copy keeps them.
         self.create_automation(definition)

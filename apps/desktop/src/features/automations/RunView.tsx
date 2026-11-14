@@ -260,6 +260,12 @@ export function RunView({
       <ChatDetail
         key={chat}
         id={chat}
+        // The title the runner gives a run's Chat (`run_agent`), until it is read.
+        title={
+          run?.ticket
+            ? `${run.definition.name}: ${run.ticket.reference} ${run.ticket.title}`
+            : run?.definition.name
+        }
         notice={
           run?.steps.some((step) => step.chat_id === chat && step.chat_owned)
             ? `A run of ${automationName}. Reply to take it over; it moves to your Chats.`

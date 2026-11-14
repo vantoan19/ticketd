@@ -1035,6 +1035,41 @@ test("a stopped turn folds too, with its stop marker below the response", async 
   ).toBeTruthy();
 });
 
+test("a turn ticketd stopped for a take-over says so, not that ticketd quit", async () => {
+  await open(
+    one({ id: "c1", title: "Migrate" }, [
+      youSaid,
+      turnTiming("quit", "2026-11-10T10:00:40Z"),
+      { id: "t1", at, kind: "marker", reason: "taken_over", turn_id: "t1" },
+    ]),
+    "Migrate",
+  );
+  expect(
+    await screen.findByText(
+      "You took this run over. Edits already made are kept.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/ticketd quit/)).toBeNull();
+});
+
+test("a failure message without a full stop still ends its sentence", async () => {
+  const client = await open(one({ id: "c1", title: "Migrate" }), "Migrate");
+  act(() =>
+    client.patch("c1", {
+      problem: {
+        kind: "failed",
+        message: "The Claude bridge did not answer open within 30 seconds",
+      },
+    }),
+  );
+  expect(
+    (await screen.findByText("Codex stopped with an error")).parentElement
+      ?.textContent,
+  ).toContain(
+    "The Claude bridge did not answer open within 30 seconds. What it finished before that is kept;",
+  );
+});
+
 test("while a turn runs its steps show as they start, and the working line only between steps", async () => {
   const client = await open(
     one(

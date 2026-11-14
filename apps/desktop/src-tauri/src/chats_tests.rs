@@ -113,7 +113,7 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
     assert!(f.chats.create(f.input("first")).await.is_err());
     assert_eq!(f.chats.working(), 0);
     assert_eq!(
-        close_action(f.chats.enabled(), f.chats.working(), false),
+        close_action(f.chats.enabled(), f.chats.stopping(), false),
         CloseAction::Exit
     );
 
@@ -122,7 +122,7 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
     assert_eq!(f.chats.working(), 1);
     assert_eq!(f.chats.overview().unwrap().working, 1);
     assert_eq!(
-        close_action(f.chats.enabled(), f.chats.working(), false),
+        close_action(f.chats.enabled(), f.chats.stopping(), false),
         CloseAction::KeepRunning
     );
 
@@ -219,12 +219,91 @@ async fn new_chat_starts_its_session_with_the_picks_the_harness_offered() {
 
 #[test]
 fn closing_keeps_chats_running_only_when_some_are_working_and_quit_asks_before_stopping_them() {
-    assert_eq!(close_action(false, 0, false), CloseAction::Exit);
-    assert_eq!(close_action(true, 0, false), CloseAction::Exit);
-    assert_eq!(close_action(true, 2, false), CloseAction::KeepRunning);
-    assert_eq!(quit_action(0, false), QuitAction::Quit);
-    assert_eq!(quit_action(2, false), QuitAction::Confirm(2));
-    assert_eq!(quit_action(2, true), QuitAction::Quit);
+    let none = Stopping::default();
+    let chats = Stopping { chats: 2, runs: 0 };
+    let run = Stopping { chats: 0, runs: 1 };
+    assert_eq!(close_action(false, none, false), CloseAction::Exit);
+    assert_eq!(close_action(true, none, false), CloseAction::Exit);
+    assert_eq!(close_action(true, chats, false), CloseAction::KeepRunning);
+    assert_eq!(close_action(true, run, false), CloseAction::KeepRunning);
+    assert_eq!(quit_action(none, false), QuitAction::Quit);
+    assert_eq!(quit_action(chats, false), QuitAction::Confirm(chats));
+    assert_eq!(quit_action(run, false), QuitAction::Confirm(run));
+    assert_eq!(quit_action(chats, true), QuitAction::Quit);
+}
+
+/// L3: a run's Chat is kept out of the Chat list, so counting list rows missed every
+/// run. What turning Chat off or quitting would stop counts runs that are going, each
+/// once, beside the working Chats.
+#[tokio::test(start_paused = true)]
+async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_chats() {
+    let f = Fixture::new().await;
+    let mut core = f.core();
+    let automation = core
+        .create_automation(ticketd_core::AutomationDefinition {
+            name: "Tidy".into(),
+            trigger: Some(ticketd_core::Trigger::ByHand),
+            conditions: Vec::new(),
+            steps: vec![ticketd_core::Step {
+                id: "agent".into(),
+                action: ticketd_core::StepAction::Notify {
+                    text: "Done".into(),
+                    opens: ticketd_core::NotifyTarget::Run,
+                    on_failure: None,
+                },
+            }],
+        })
+        .unwrap();
+    let queued = core.run_automation_now(&automation.id).unwrap();
+    assert_eq!(
+        f.chats.stopping(),
+        Stopping::default(),
+        "a queued run waits"
+    );
+
+    core.start_automation_runs(1).unwrap();
+    core.advance_automation_run(&queued.id, None).unwrap();
+    assert_eq!(f.chats.stopping(), Stopping { chats: 0, runs: 1 });
+
+    // The run's agent working in its own Chat is still one run, not a Chat too.
+    let run_chat = core
+        .create_automation_run_chat(
+            &queued.id,
+            "agent",
+            NewChat {
+                title: None,
+                harness: "codex".into(),
+                execution_folder: f.dir.path().to_string_lossy().into_owned(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let host = f.chats.automation_host().unwrap();
+    let run_id = queued.id.clone();
+    tokio::spawn(async move {
+        let unattended = ticketd_chat_host::Unattended {
+            run_id,
+            model: None,
+            tools: ticketd_core::AutomationAgentTools::default(),
+            turn_limit: 5,
+            ticketd_cli: None,
+            ticketd_folders: Vec::new(),
+        };
+        let _ = host
+            .run_unattended(&run_chat.id, "go", unattended, Duration::from_secs(600))
+            .await;
+    });
+    settle().await;
+    assert_eq!(f.chats.working(), 1, "the run's agent is working");
+    assert_eq!(f.chats.stopping(), Stopping { chats: 0, runs: 1 });
+    assert_eq!(f.chats.overview().unwrap().working, 0, "the old count");
+
+    f.chat().await;
+    assert_eq!(f.chats.stopping(), Stopping { chats: 1, runs: 1 });
+
+    f.chats.set_enabled(false).await;
+    assert_eq!(f.chats.stopping(), Stopping::default());
 }
 
 #[tokio::test(start_paused = true)]
@@ -233,7 +312,7 @@ async fn closing_keeps_ticketd_in_the_tray_while_an_automation_is_on() {
     let closing = || {
         close_action(
             f.chats.enabled(),
-            f.chats.working(),
+            f.chats.stopping(),
             f.chats.automations_on(),
         )
     };
@@ -268,7 +347,8 @@ async fn closing_keeps_ticketd_in_the_tray_while_an_automation_is_on() {
 #[test]
 fn an_automation_that_is_on_does_not_keep_ticketd_running_while_chat_is_off() {
     // With Chat off nothing runs Automations, so there is nothing to stay for.
-    assert_eq!(close_action(false, 0, true), CloseAction::Exit);
+    let run = Stopping { chats: 0, runs: 1 };
+    assert_eq!(close_action(false, run, true), CloseAction::Exit);
 }
 
 #[test]

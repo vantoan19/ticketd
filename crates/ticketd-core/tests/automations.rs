@@ -1014,3 +1014,53 @@ fn a_duplicate_is_its_own_automation_with_the_same_flow_and_starts_off() {
         Err(Error::AutomationNotFound(_))
     ));
 }
+
+/// L38: copies of copies are numbered instead of piling up "copy copy copy".
+#[test]
+fn copies_are_numbered_from_the_original_name_and_fit_the_name_limit() {
+    let (_dir, mut workspace) = workspace();
+    let named = |name: &str| AutomationDefinition {
+        name: name.into(),
+        ..AutomationDefinition::default()
+    };
+    let original = workspace.create_automation(named("Quick mark")).unwrap();
+    let name = |automation: ticketd_core::Automation| automation.definition.name;
+
+    let first = workspace.duplicate_automation(&original.id).unwrap();
+    assert_eq!(name(first.clone()), "Quick mark copy");
+    let of_copy = workspace.duplicate_automation(&first.id).unwrap();
+    assert_eq!(name(of_copy.clone()), "Quick mark copy 2");
+    assert_eq!(
+        name(workspace.duplicate_automation(&of_copy.id).unwrap()),
+        "Quick mark copy 3"
+    );
+    // A deleted copy frees its number.
+    workspace.delete_automation(&first.id).unwrap();
+    assert_eq!(
+        name(workspace.duplicate_automation(&original.id).unwrap()),
+        "Quick mark copy"
+    );
+    // A name that only ends in a word like it is kept whole.
+    let photocopy = workspace
+        .create_automation(named("Sort photo copy room"))
+        .unwrap();
+    assert_eq!(
+        name(workspace.duplicate_automation(&photocopy.id).unwrap()),
+        "Sort photo copy room copy"
+    );
+
+    // L26: a name is at most 120 characters; a copy of a long one is shortened.
+    let longest = "n".repeat(120);
+    let long = workspace.create_automation(named(&longest)).unwrap();
+    let copy = name(workspace.duplicate_automation(&long.id).unwrap());
+    assert_eq!(copy.chars().count(), 120);
+    assert!(copy.ends_with(" copy"));
+    assert!(matches!(
+        workspace.create_automation(named(&format!("{longest}n"))),
+        Err(Error::InvalidAutomation(_))
+    ));
+    assert!(matches!(
+        workspace.update_automation(&long.id, named(&format!("{longest}n"))),
+        Err(Error::InvalidAutomation(_))
+    ));
+}
