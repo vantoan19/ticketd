@@ -105,9 +105,12 @@ const addMenu = async (steps: HTMLElement) => {
 };
 
 test("a schedule reads as a person would say it", () => {
-  const weekly = (weekdays: string[], time = "09:00") =>
-    scheduleText({ kind: "weekly", time, weekdays } as never);
+  const weekly = (weekdays: string[], time = "09:00", hour12 = false) =>
+    scheduleText({ kind: "weekly", time, weekdays } as never, hour12);
   expect(weekly(["mon"])).toBe("Mondays at 9:00");
+  // On a 12-hour clock the card reads as the time field beside it does.
+  expect(weekly(["mon"], "17:30", true)).toBe("Mondays at 5:30 PM");
+  expect(weekly(["mon"], "00:05", true)).toBe("Mondays at 12:05 AM");
   expect(weekly(["mon", "wed", "fri"], "17:30")).toBe(
     "Mon, Wed, and Fri at 17:30",
   );
@@ -157,8 +160,9 @@ test("a schedule is a time on chosen weekdays, or every few hours", async () => 
   expect(panel.textContent).toContain(
     "If ticketd is closed then, it runs once when ticketd next starts.",
   );
-  expect(triggerCard(steps).getAttribute("aria-label")).toBe(
-    "On a schedule: Mondays at 9:00",
+  // The clock, 12-hour or 24, is the computer's.
+  expect(triggerCard(steps).getAttribute("aria-label")).toMatch(
+    /^On a schedule: Mondays at 9:00( AM)?$/,
   );
 
   // Days are kept in the order of the week, whatever order they are chosen in.

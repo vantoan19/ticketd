@@ -149,8 +149,14 @@ impl Workspace {
         let ticket = self.show_ticket(&ticket.reference)?;
         Ok(checks.iter().all(|check| match check {
             Check::Tag { tag, has } => ticket.tags.contains(tag) == *has,
-            Check::Status { status, is } => (ticket.status == *status) == *is,
-            Check::Project { project_id, is } => (ticket.project_id == *project_id) == *is,
+            // A check with nothing chosen passes nothing; such an If cannot be
+            // switched on, so this is only what a definition from elsewhere gets.
+            Check::Status { status, is } => {
+                status.is_some_and(|status| (ticket.status == status) == *is)
+            }
+            Check::Project { project_id, is } => project_id
+                .as_ref()
+                .is_some_and(|project| (ticket.project_id == *project) == *is),
         }))
     }
 

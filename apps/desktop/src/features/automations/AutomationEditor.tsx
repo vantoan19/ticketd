@@ -53,6 +53,7 @@ import {
 import { conditionsLine } from "@/features/automations/automation-text";
 import {
   CARD_ICONS,
+  focusCard,
   TRIGGER_KINDS,
   triggerCard,
 } from "@/features/automations/flow-cards";
@@ -281,10 +282,7 @@ export function AutomationEditor({
     const card = selected;
     setSelected(null);
     // Back to the card the panel was opened from.
-    if (card)
-      document
-        .querySelector<HTMLElement>(`[data-flow-card="${CSS.escape(card)}"]`)
-        ?.focus();
+    if (card) focusCard(card);
   };
 
   const title = draft.name.trim() || "New Automation";
@@ -336,6 +334,7 @@ export function AutomationEditor({
         title="Run agent"
         icon={<Bot size={16} aria-hidden />}
         onClose={closePanel}
+        onDelete={() => setDeletingStep(step.id)}
       >
         <RunAgentFields
           agentId={step.agent_id}
@@ -359,6 +358,7 @@ export function AutomationEditor({
         title="Change ticket"
         icon={<SquarePen size={16} aria-hidden />}
         onClose={closePanel}
+        onDelete={() => setDeletingStep(step.id)}
       >
         <ChangeTicketFields
           change={step.change ?? { action: "add_tag", tag: "" }}
@@ -372,6 +372,7 @@ export function AutomationEditor({
         title="Notify me"
         icon={<Bell size={16} aria-hidden />}
         onClose={closePanel}
+        onDelete={() => setDeletingStep(step.id)}
       >
         <NotifyFields
           text={step.text}
@@ -389,6 +390,7 @@ export function AutomationEditor({
         title="If"
         icon={<Split size={16} aria-hidden />}
         onClose={closePanel}
+        onDelete={() => setDeletingStep(step.id)}
       >
         <IfFields
           checks={step.checks}

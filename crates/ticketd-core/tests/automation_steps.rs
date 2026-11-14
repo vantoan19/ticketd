@@ -310,7 +310,7 @@ fn an_if_tests_the_ticket_as_it_is_when_asked_and_passes_when_every_check_does()
                     has: true,
                 },
                 Check::Status {
-                    status: Status::Done,
+                    status: Some(Status::Done),
                     is: true,
                 },
             ],
@@ -344,7 +344,7 @@ fn an_if_checks_for_a_project_no_project_and_what_the_ticket_is_not() {
         .create_project("Web", &dir.path().to_string_lossy())
         .unwrap();
     let in_project = |is| Check::Project {
-        project_id: Some(project.id.clone()),
+        project_id: Some(Some(project.id.clone())),
         is,
     };
     automation_on(
@@ -355,7 +355,7 @@ fn an_if_checks_for_a_project_no_project_and_what_the_ticket_is_not() {
             branch(
                 "none",
                 vec![Check::Project {
-                    project_id: None,
+                    project_id: Some(None),
                     is: true,
                 }],
             ),
@@ -363,7 +363,7 @@ fn an_if_checks_for_a_project_no_project_and_what_the_ticket_is_not() {
                 "open",
                 vec![
                     Check::Status {
-                        status: Status::Done,
+                        status: Some(Status::Done),
                         is: false,
                     },
                     Check::Tag {

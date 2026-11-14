@@ -35,6 +35,39 @@
   font-weight: 400;
   line-height: var(--text-caption-line);
 }
+/* A tool or a limit: one line, the note giving way before the name does. */
+.agent-tool {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 48px;
+  padding: 6px 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.agent-tool + .agent-tool {
+  border-top: 1px solid var(--border);
+}
+.agent-tool-title {
+  font-weight: 500;
+}
+.agent-tool-desc {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool-control {
+  display: inline-flex;
+  align-items: center;
+}
+.agent-tool-more {
+  grid-column: 1 / -1;
+  padding: 2px 0 6px;
+}
 .agent-standing {
   display: inline-flex;
   align-items: center;
@@ -191,6 +224,13 @@
   overflow: hidden;
   background: var(--background);
 }
+/* The zoom control, over the canvas at its lower left. */
+.flow-zoom {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
+}
 /* The bar over the canvas: off on this desktop. */
 .flow-notice {
   position: absolute;
@@ -209,6 +249,14 @@
 .flow-canvas .react-flow__handle {
   opacity: 0;
   pointer-events: none;
+}
+
+/* React Flow takes pointer events off a node that can be neither dragged nor
+   selected, and everything in it inherits that. The cards and the + buttons
+   are the controls here, so they take the pointer back. */
+.flow-card,
+.flow-gap {
+  pointer-events: auto;
 }
 
 /* A card: what kind of step, what it does, and its detail or what it needs. */
@@ -239,7 +287,7 @@
 }
 .flow-card-main {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   column-gap: 10px;
   align-items: start;
   box-sizing: border-box;
@@ -254,8 +302,40 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
-.flow-card-main > svg {
+/* The icon tile says what kind of step it is: the trigger blue, Run agent
+   solid, If violet, Change ticket teal, Notify me pink. */
+.flow-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   margin-top: 2px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tile, transparent) 14%, transparent);
+  color: var(--tile, var(--muted-foreground));
+}
+.flow-card[data-kind="trigger"] {
+  --tile: var(--interactive);
+}
+.flow-card[data-kind="if"] {
+  --tile: var(--violet);
+}
+.flow-card[data-kind="change"] {
+  --tile: var(--teal);
+}
+.flow-card[data-kind="notify"] {
+  --tile: var(--pink);
+}
+.flow-card[data-kind="agent"]:not([data-run]) .flow-card-icon {
+  background: var(--foreground);
+  color: var(--surface);
+}
+/* A prompt, or a step a run did not reach, has no color yet. */
+.flow-card[data-unset] .flow-card-icon,
+.flow-card[data-run="waiting"] .flow-card-icon,
+.flow-card[data-run="not_run"] .flow-card-icon {
+  background: var(--recessed);
   color: var(--muted-foreground);
 }
 .flow-card-text {
@@ -459,15 +539,15 @@
   line-height: var(--text-ui-line);
   white-space: nowrap;
 }
-/* A step's icon takes the color of where it stands. */
-.flow-card[data-run="running"] .flow-card-main > svg {
-  color: var(--status-unread);
+/* In a run, a step's tile takes the color of where it stands instead. */
+.flow-card[data-run="running"] {
+  --tile: var(--status-unread);
 }
-.flow-card[data-run="completed"] .flow-card-main > svg {
-  color: var(--status-ready);
+.flow-card[data-run="completed"] {
+  --tile: var(--status-ready);
 }
-.flow-card[data-run="failed"] .flow-card-main > svg {
-  color: var(--status-blocked);
+.flow-card[data-run="failed"] {
+  --tile: var(--status-blocked);
 }
 .flow-card-status strong {
   color: var(--foreground);
@@ -510,6 +590,19 @@
 .flow-canvas .react-flow__edge-text {
   fill: var(--muted-foreground);
   font-size: var(--text-caption);
+}
+/* Yes and "If it fails" carry a color as well as their words. */
+.flow-canvas .flow-edge-yes .react-flow__edge-textbg {
+  fill: color-mix(in srgb, var(--status-ready) 14%, var(--surface));
+}
+.flow-canvas .flow-edge-yes .react-flow__edge-text {
+  fill: color-mix(in srgb, var(--status-ready) 70%, var(--foreground));
+}
+.flow-canvas .flow-edge-failure .react-flow__edge-textbg {
+  fill: color-mix(in srgb, var(--status-blocked) 16%, var(--surface));
+}
+.flow-canvas .flow-edge-failure .react-flow__edge-text {
+  fill: color-mix(in srgb, var(--status-blocked) 60%, var(--foreground));
 }
 .run-reason {
   margin: 0;

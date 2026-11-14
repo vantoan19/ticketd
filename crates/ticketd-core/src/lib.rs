@@ -419,7 +419,7 @@ pub struct TicketPatch {
     pub plan_id: Option<Option<String>>,
 }
 
-fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)

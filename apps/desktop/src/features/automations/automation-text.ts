@@ -42,11 +42,20 @@ const DAY_NAMES: Record<
 };
 export const dayName = (day: (typeof WEEKDAYS)[number]) => DAY_NAMES[day].long;
 
+/** Whether this computer shows times on the 12-hour clock, as its time fields do. */
+const systemHour12 = () =>
+  new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions()
+    .hour12 ?? false;
+
 /**
  * A schedule in words ("Mondays at 9:00", "Every 6 hours"), or what it still
- * needs. Times read on the 24-hour clock, as they are stored.
+ * needs. Times are stored on the 24-hour clock and read on the computer's
+ * (`hour12`), so a card agrees with the time field that sets it.
  */
-export function scheduleText(schedule: AutomationSchedule): string {
+export function scheduleText(
+  schedule: AutomationSchedule,
+  hour12 = systemHour12(),
+): string {
   if (schedule.kind === "every_hours")
     return schedule.hours < 1
       ? "Choose how often"
@@ -65,7 +74,10 @@ export function scheduleText(schedule: AutomationSchedule): string {
         : days.length === 1 && days[0]
           ? `${DAY_NAMES[days[0]].long}s`
           : LIST.format(days.map((day) => DAY_NAMES[day].short));
-  return `${on} at ${Number(hour)}:${minute}`;
+  const at = hour12
+    ? `${Number(hour) % 12 || 12}:${minute} ${Number(hour) < 12 ? "AM" : "PM"}`
+    : `${Number(hour)}:${minute}`;
+  return `${on} at ${at}`;
 }
 
 /**

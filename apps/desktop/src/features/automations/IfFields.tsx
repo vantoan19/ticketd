@@ -16,7 +16,10 @@ import { Pick } from "@/features/automations/TriggerPanel";
 import type { Project } from "@/lib/api/client";
 import { ticketStatuses } from "@/lib/statuses";
 
-/** The check kinds, as the Add check menu offers them, each as it starts. */
+/**
+ * The check kinds, as the Add check menu offers them, each as it starts: with
+ * nothing chosen, like a new condition, so an untouched check is unfinished.
+ */
 const ADDABLE: { label: string; note: string; blank: AutomationCheck }[] = [
   {
     label: "Tags",
@@ -26,12 +29,12 @@ const ADDABLE: { label: string; note: string; blank: AutomationCheck }[] = [
   {
     label: "Status",
     note: "Is, or is not, a status you choose",
-    blank: { kind: "status", status: "Todo", is: true },
+    blank: { kind: "status", status: null, is: true },
   },
   {
     label: "Project",
     note: "Is, or is not, a project you choose",
-    blank: { kind: "project", project_id: null, is: true },
+    blank: { kind: "project", is: true },
   },
 ];
 const LABELS = { tag: "Tag", status: "Status", project: "Project" };
@@ -85,12 +88,14 @@ export function IfFields({
       <h4>Check the ticket</h4>
       {checks.map((check, index) => {
         const label = LABELS[check.kind];
-        const words = checkWords(check, projects) || "tag";
+        const words = checkWords(check, projects) || label.toLowerCase();
         const project =
           check.kind === "project" &&
-          (check.project_id === null
-            ? NO_PROJECT
-            : projectName(check.project_id, projects));
+          (check.project_id === undefined
+            ? "Choose a project"
+            : check.project_id === null
+              ? NO_PROJECT
+              : projectName(check.project_id, projects));
         return (
           // Rows have no identity of their own, and none is reordered.
           <div key={index} className="flow-condition flow-check">
@@ -133,8 +138,8 @@ export function IfFields({
                   />
                   {check.kind === "status" ? (
                     <Pick
-                      name={`Status is: ${check.status}`}
-                      text={check.status}
+                      name={`Status is: ${check.status ?? "Choose a status"}`}
+                      text={check.status ?? "Choose a status"}
                       menu="Status is"
                     >
                       {ticketStatuses.map((status) => (

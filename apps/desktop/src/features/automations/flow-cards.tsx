@@ -227,8 +227,8 @@ export function stepCard(
 }
 
 /**
- * One check in words: "has tag verified", "status is not Done". A tag check
- * with no tag yet says nothing.
+ * One check in words: "has tag verified", "status is not Done". A check with
+ * nothing chosen yet says nothing.
  */
 export function checkWords(
   check: AutomationCheck,
@@ -239,7 +239,10 @@ export function checkWords(
       ? `${check.has ? "has" : "does not have"} tag ${check.tag.trim()}`
       : "";
   if (check.kind === "status")
-    return `status ${check.is ? "is" : "is not"} ${check.status}`;
+    return check.status
+      ? `status ${check.is ? "is" : "is not"} ${check.status}`
+      : "";
+  if (check.project_id === undefined) return "";
   if (check.project_id === null)
     return check.is ? "has no project" : "has a project";
   // A run shows the Automation as it was, without the list of projects.
@@ -259,8 +262,33 @@ function ifTitle(checks: AutomationCheck[], projects?: Project[]): string {
 
 /** What each line that is not simply the next step says. */
 export const PATH_LABELS = { yes: "Yes", no: "No", failure: "If it fails" };
+/** The pill a path's label sits in, for React Flow's edge label. */
+export const PATH_LABEL_SHAPE = {
+  labelBgPadding: [6, 3] as [number, number],
+  labelBgBorderRadius: 4,
+};
 
 export const cardName = (card: Card) => `${card.kind}: ${card.title}`;
+/**
+ * What a click or Enter on a card does: opens its panel, which takes focus as
+ * it opens. A panel that is already open is given focus again.
+ */
+export function openCard(
+  id: string,
+  selected: boolean,
+  onSelect: (id: string) => void,
+) {
+  onSelect(id);
+  if (selected) document.querySelector<HTMLElement>(".flow-panel")?.focus();
+}
+/** Moves focus to a card on the canvas, as when its panel closes. */
+export function focusCard(id: string) {
+  for (const card of document.querySelectorAll<HTMLElement>("[data-flow-card]"))
+    if (card.dataset.flowCard === id) card.focus();
+}
+/** The kind a card is colored by: every trigger alike, each step by its own. */
+export const cardColor = (card: Card) =>
+  card.menu === "step" ? card.icon : "trigger";
 /** The icon a card leads with. */
 export const CARD_ICONS = {
   trigger: Zap,

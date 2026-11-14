@@ -19,16 +19,19 @@ import { useChatClient } from "@/features/chats/client";
 /**
  * The panel beside the canvas that sets up the selected card. It takes focus
  * when it opens, and Esc closes it; the editor returns focus to the card.
+ * Delete, pressed on the panel and not in one of its fields, is `onDelete`.
  */
 export function StepPanel({
   title,
   icon,
   onClose,
+  onDelete,
   children,
 }: {
   title: string;
   icon: ReactNode;
   onClose: () => void;
+  onDelete?: () => void;
   children: ReactNode;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -40,6 +43,8 @@ export function StepPanel({
       aria-label={title}
       tabIndex={-1}
       onKeyDown={(event) => {
+        if (event.key === "Delete" && event.target === event.currentTarget)
+          onDelete?.();
         if (event.key !== "Escape" || event.defaultPrevented) return;
         event.stopPropagation();
         onClose();

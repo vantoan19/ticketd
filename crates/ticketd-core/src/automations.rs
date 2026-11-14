@@ -193,13 +193,20 @@ pub enum Check {
         tag: String,
         has: bool,
     },
+    /// `None` until a status is chosen.
     Status {
-        status: Status,
+        #[serde(default)]
+        status: Option<Status>,
         is: bool,
     },
-    /// `None` is "No project".
+    /// Absent until a project is chosen; `Some(None)` is "No project".
     Project {
-        project_id: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "crate::deserialize_project_patch"
+        )]
+        project_id: Option<Option<String>>,
         is: bool,
     },
 }
@@ -402,6 +409,10 @@ fn step_needs(
             }
             checks.iter().find_map(|check| match check {
                 Check::Tag { tag, .. } => tag_needed(tag),
+                Check::Status { status: None, .. } => Some("Needs a status"),
+                Check::Project {
+                    project_id: None, ..
+                } => Some("Needs a project"),
                 Check::Status { .. } | Check::Project { .. } => None,
             })
         }

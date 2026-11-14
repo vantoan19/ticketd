@@ -39,7 +39,7 @@ export function RunMark({ status }: { status: AutomationRun["status"] }) {
     case "needs_attention":
       return <StatusDot tone="attention" />;
     case "taken_over":
-      return <UserRound size={14} aria-hidden />;
+      return <UserRound size={14} className="text-violet" aria-hidden />;
   }
 }
 

@@ -227,7 +227,8 @@ test("a run that needs attention opens on the canvas with each step's status and
   await waitFor(() =>
     expect(screen.getByRole("status").textContent).toBe("Queued"),
   );
-  expect(cards()[1]).toBe("Run agent: Verifier, Waiting");
+  // The canvas draws its cards a moment after the run loads.
+  await waitFor(() => expect(cards()[1]).toBe("Run agent: Verifier, Waiting"));
   expect(invoke).toHaveBeenCalledWith("automation_run_again", { id: "run-1" });
 });
 
@@ -265,6 +266,42 @@ test("a run in progress follows the Workspace as it goes, and Stop ends it needi
   await screen.findByRole("button", { name: "Run again" });
   expect(screen.getByRole("status").textContent).toBe("Needs attention");
   expect(invoke).toHaveBeenCalledWith("automation_run_stop", { id: "run-1" });
+});
+
+test("a running step says once, where a screen reader hears it, that it finished or failed", async () => {
+  runs = [run({ steps: [reached("verify", "running")] })];
+  const view = await openRun();
+  const said = () => document.querySelector("[aria-live=polite].sr-only");
+  expect(said()?.textContent).toBe("");
+  const steps = screen.getByRole("application", { name: "Steps" });
+  const card = within(steps).getByRole("button", { name: /^Run agent/ });
+  card.focus();
+
+  runs = [
+    run({
+      steps: [reached("verify", "completed"), reached("passed", "running")],
+    }),
+  ];
+  view.rerender(page(1));
+  await waitFor(() =>
+    expect(said()?.textContent).toBe("Run agent: Verifier finished"),
+  );
+  // Focus stays where the person left it.
+  expect(document.activeElement).toBe(card);
+
+  runs = [
+    run({
+      status: "needs_attention",
+      steps: [
+        reached("verify", "completed"),
+        reached("passed", "failed", "The ticket is gone."),
+      ],
+    }),
+  ];
+  view.rerender(page(2));
+  await waitFor(() =>
+    expect(said()?.textContent).toBe("If: Ticket has tag verified failed"),
+  );
 });
 
 test("a run whose failed step had a failure path is Completed, with the step Failed, its reason, and the path it took", async () => {
@@ -338,9 +375,18 @@ test("a run's Chat opens in the page and says above the composer that replying t
   expect(await screen.findByText(TAKE_OVER)).toBeTruthy();
   expect(screen.getByRole("textbox")).toBeTruthy();
 
-  // The person replied: the Chat is theirs, and the line goes.
-  runs = [failedRun(false)];
+  // The person replied: the Chat is theirs, and the line says where it came from.
+  runs = [{ ...failedRun(false), status: "taken_over" }];
   view.rerender(page(1));
   await waitFor(() => expect(screen.queryByText(TAKE_OVER)).toBeNull());
   expect(screen.getByRole("textbox")).toBeTruthy();
+  expect(
+    screen.getByText(
+      /You took this over from a run of .+\. The run ended here\./,
+    ),
+  ).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "View run" }));
+  await screen.findByRole("application", { name: "Steps" });
+  expect(screen.getByRole("status").textContent).toBe("Taken over");
 });

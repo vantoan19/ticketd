@@ -793,6 +793,23 @@ impl Workspace {
         Ok(Some(run))
     }
 
+    /// The run the person took over by replying in or stopping this Chat, which
+    /// was one of its steps'. `None` for any other Chat.
+    pub fn automation_run_taken_over_in(
+        &self,
+        chat_id: &str,
+    ) -> Result<Option<AutomationRun>, Error> {
+        let run: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT run_id FROM automation_run_steps JOIN automation_runs ON automation_runs.id = run_id WHERE chat_id = ?1 AND automation_runs.status = 'taken_over' LIMIT 1",
+                [chat_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        run.map(|id| one(&self.connection, &id)).transpose()
+    }
+
     pub fn automation_run(&self, id: &str) -> Result<AutomationRun, Error> {
         one(&self.connection, id)
     }

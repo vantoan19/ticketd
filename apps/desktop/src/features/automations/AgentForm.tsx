@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { ArrowLeft, Ellipsis, Maximize2, Minimize2, X } from "lucide-react";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { DialogShell } from "@/components/ui/dialog-shell";
@@ -22,7 +22,6 @@ import { useChatClient, type HarnessStatus } from "@/features/chats/client";
 import {
   SettingsList,
   SettingsListFooter,
-  SettingsRow,
 } from "@/features/settings/layout/SettingsList";
 import "@/features/settings/layout/settings-layout.css";
 
@@ -58,6 +57,31 @@ function harnessStanding(status: HarnessStatus["status"] | undefined): {
     case "unavailable":
       return { label: "Not available", tone: "neutral", usable: false };
   }
+}
+
+/**
+ * One line of the agent editor: what it is, a note that gives way first, and
+ * its control. `children` go underneath, across the row.
+ */
+function ToolRow({
+  title,
+  description,
+  control,
+  children,
+}: {
+  title: string;
+  description: string;
+  control?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="agent-tool">
+      <span className="agent-tool-title">{title}</span>
+      <span className="agent-tool-desc">{description}</span>
+      <span className="agent-tool-control">{control}</span>
+      {children && <div className="agent-tool-more">{children}</div>}
+    </div>
+  );
 }
 
 const TOOLS: {
@@ -348,12 +372,11 @@ export function AgentForm({
               {TOOLS.map(({ key, title: tool, description }) => {
                 const fixed = codex && FIXED_ON_FOR_CODEX.has(key);
                 return (
-                  <SettingsRow
+                  <ToolRow
                     key={key}
-                    tight
                     title={tool}
                     description={fixed ? "Always on with Codex" : description}
-                    trailing={
+                    control={
                       <Switch
                         aria-label={tool}
                         disabled={fixed}
@@ -367,7 +390,6 @@ export function AgentForm({
                       draft.tools.run_commands && (
                         <Textarea
                           aria-label="Allowed commands"
-                          className="mt-2"
                           placeholder="One command per line. Leave empty to allow any command."
                           value={commands}
                           onChange={(event) => {
@@ -381,11 +403,10 @@ export function AgentForm({
                           }}
                         />
                       )}
-                  </SettingsRow>
+                  </ToolRow>
                 );
               })}
-              <SettingsRow
-                tight
+              <ToolRow
                 title="ticketd command line"
                 description="Always allowed"
               />
@@ -408,15 +429,14 @@ export function AgentForm({
               <small>A step that reaches one fails</small>
             </span>
             <SettingsList>
-              <SettingsRow
-                tight
+              <ToolRow
                 title="Turns"
                 description={
                   codex
                     ? "Not applied with Codex"
                     : "How many turns one step may take"
                 }
-                trailing={
+                control={
                   <LimitInput
                     label="Turns"
                     disabled={codex}
@@ -425,11 +445,10 @@ export function AgentForm({
                   />
                 }
               />
-              <SettingsRow
-                tight
+              <ToolRow
                 title="Minutes"
                 description="How long one step may run"
-                trailing={
+                control={
                   <LimitInput
                     label="Minutes"
                     value={draft.time_limit_minutes}

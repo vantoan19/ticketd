@@ -947,6 +947,7 @@ fn replying_in_the_chat_of_a_run_that_needs_attention_takes_it_over() {
     triage(&mut workspace);
     let (run, chat) = needing_attention(&mut workspace);
     assert_eq!(listed_chats(&workspace), [] as [String; 0]);
+    assert_eq!(workspace.automation_run_taken_over_in(&chat).unwrap(), None);
 
     let taken = workspace
         .take_over_automation_run(&chat, true)
@@ -954,6 +955,11 @@ fn replying_in_the_chat_of_a_run_that_needs_attention_takes_it_over() {
         .unwrap();
 
     assert_eq!(taken.id, run.id);
+    // The Chat can say which run it was taken over from.
+    assert_eq!(
+        workspace.automation_run_taken_over_in(&chat).unwrap(),
+        Some(taken.clone())
+    );
     assert_eq!(taken.status, AutomationRunStatus::TakenOver);
     assert!(!taken.needs_you);
     assert_eq!(needing_you(&workspace), 0);

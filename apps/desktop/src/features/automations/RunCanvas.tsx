@@ -1,12 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Background,
   Handle,
   Position,
   ReactFlow,
   ReactFlowProvider,
-  useReactFlow,
-  useStore,
   type Edge,
   type Node,
   type NodeProps,
@@ -25,12 +23,17 @@ import type {
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
+  cardColor,
   cardName,
+  openCard,
+  PATH_LABEL_SHAPE,
   PATH_LABELS,
   stepCard,
   triggerCard,
   type Card,
 } from "@/features/automations/flow-cards";
+import { FlowView } from "@/features/automations/FlowView";
+import { elapsed } from "@/features/chats/model";
 import {
   everyStep,
   flowSteps,
@@ -65,8 +68,25 @@ export function StepMark({ state }: { state: StepState }) {
   }
 }
 
+/** How long a step has been running, counted here; the name of the step does not tick. */
+function Elapsed({ since }: { since: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <span aria-hidden="true">
+      {" "}
+      · {elapsed(now - new Date(since).getTime())}
+    </span>
+  );
+}
+
 type RunCardData = {
   card: Card;
+  /** When the step started, while it is running. */
+  since: string | undefined;
   /** null for the trigger, which has no status. */
   state: StepState | null;
   selected: boolean;
@@ -74,7 +94,7 @@ type RunCardData = {
 };
 
 function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
-  const { card, state, selected, onSelect } = data;
+  const { card, state, since, selected, onSelect } = data;
   const Icon = CARD_ICONS[card.icon];
   const label = state && STEP_STATE_LABELS[state];
   return (
@@ -82,6 +102,7 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <div
         className="flow-card"
+        data-kind={cardColor(card)}
         data-selected={selected || undefined}
         data-run={state ?? undefined}
       >
@@ -91,9 +112,11 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
           aria-label={label ? `${cardName(card)}, ${label}` : cardName(card)}
           aria-pressed={selected}
           data-flow-card={card.id}
-          onClick={() => onSelect(card.id)}
+          onClick={() => openCard(card.id, selected, onSelect)}
         >
-          <Icon size={16} aria-hidden />
+          <span className="flow-card-icon">
+            <Icon size={16} aria-hidden />
+          </span>
           <span className="flow-card-text">
             <span className="flow-card-kind">{card.kind}</span>
             <span className="flow-card-title">{card.shown ?? card.title}</span>
@@ -104,6 +127,7 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
               <span className="flow-card-status">
                 <StepMark state={state} />
                 {state === "failed" ? <strong>{label}</strong> : label}
+                {since && <Elapsed since={since} />}
               </span>
             )}
           </span>
@@ -124,19 +148,6 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
 const nodeTypes = { card: RunCardNode };
 
 /**
- * Keeps the whole run in view. It fits again whenever the canvas changes
- * width, as when the panel opens beside it; a run's steps never change.
- */
-function FitRun() {
-  const { fitView } = useReactFlow();
-  const width = useStore((state) => state.width);
-  useEffect(() => {
-    void fitView({ maxZoom: 1, padding: 0.2 });
-  }, [width, fitView]);
-  return null;
-}
-
-/**
  * What a run did, on the canvas its Automation is built on: every step of the
  * definition the run executes with where it stands, the steps it did not reach
  * dashed, and the lines it followed marked. Nothing here can be changed.
@@ -144,11 +155,14 @@ function FitRun() {
 export function RunCanvas({
   run,
   agents,
+  only,
   selected,
   onSelect,
 }: {
   run: AutomationRunDetail;
   agents: AutomationAgent[];
+  /** The line the conditions add to the trigger's card. */
+  only?: string | undefined;
   /** The card whose panel is open: a step's id, or the trigger's. */
   selected: string | null;
   onSelect: (id: string) => void;
@@ -157,7 +171,7 @@ export function RunCanvas({
     const { trigger, steps } = run.definition;
     const states = stepStates(run);
     const cards = new Map([
-      [TRIGGER_ID, triggerCard(trigger)],
+      [TRIGGER_ID, triggerCard(trigger, only)],
       ...everyStep(steps).map(
         (step) => [step.id, stepCard(step, agents)] as const,
       ),
@@ -175,6 +189,9 @@ export function RunCanvas({
         data: {
           card,
           state: states.get(item.id) ?? null,
+          since: run.steps.find(
+            (step) => step.step_id === item.id && step.status === "running",
+          )?.started_at,
           selected: item.id === selected,
           onSelect,
         } satisfies RunCardData,
@@ -194,8 +211,9 @@ export function RunCanvas({
         type: path ? "smoothstep" : "straight",
         focusable: false,
         ...(path === "failure" && { sourceHandle: "failure" }),
-        ...(path && { label: PATH_LABELS[path] }),
+        ...(path && { label: PATH_LABELS[path], ...PATH_LABEL_SHAPE }),
         className: [
+          path === "yes" && "flow-edge-yes",
           path === "failure" && "flow-edge-failure",
           reached(target) ? "flow-edge-taken" : "flow-edge-idle",
         ]
@@ -203,7 +221,7 @@ export function RunCanvas({
           .join(" "),
       }));
     return { nodes, edges };
-  }, [run, agents, selected, onSelect]);
+  }, [run, agents, only, selected, onSelect]);
   return (
     <div className="flow-canvas">
       <ReactFlowProvider>
@@ -212,8 +230,7 @@ export function RunCanvas({
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
-          // A flow with paths side by side is wide: let all of it fit beside
-          // the panel.
+          // As far out as the zoom control goes, for an overview.
           minZoom={0.25}
           maxZoom={1.5}
           panOnScroll
@@ -227,8 +244,9 @@ export function RunCanvas({
           proOptions={{ hideAttribution: true }}
         >
           <Background />
-          <FitRun />
         </ReactFlow>
+        {/* A run's steps never change, so only the canvas's size refits it. */}
+        <FlowView shape="" selected={selected} />
       </ReactFlowProvider>
     </div>
   );
