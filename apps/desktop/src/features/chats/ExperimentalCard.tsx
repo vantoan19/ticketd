@@ -119,6 +119,13 @@ export function ExperimentalCard() {
             ? `${text.subject} working. Turning Chat off stops ${text.one ? "it" : "them"} first.`
             : "Chats and runs may be working. Turning Chat off stops them first."}
         </p>
+        {confirming !== null &&
+          (confirming === "unknown" || confirming.runs > 0) && (
+            <p className="chat-fine">
+              A stopped run ends as Needs attention. Queued runs wait until Chat
+              is on again.
+            </p>
+          )}
         <p className="chat-fine">
           Your Chats are kept. Turn Chat back on to see them again; nothing
           restarts by itself.
