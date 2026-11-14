@@ -618,12 +618,11 @@ impl Session {
         item: &Value,
         completed: bool,
     ) -> EventKind {
-        if self.turn_overrides.is_some() {
-            if let Some(denial) = Self::denial(kind, &title, item) {
-                if !self.declined.contains(&denial) {
-                    self.declined.push(denial);
-                }
-            }
+        if self.turn_overrides.is_some()
+            && let Some(denial) = Self::denial(kind, &title, item)
+            && !self.declined.contains(&denial)
+        {
+            self.declined.push(denial);
         }
         if kind == "commandExecution"
             && self.turn_overrides.is_some()
