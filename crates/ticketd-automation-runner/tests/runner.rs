@@ -1119,6 +1119,47 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
     }
 }
 
+/// #387 5A1: a run taken over before its agent had a harness session (so there is no
+/// native session to resume) still becomes an ordinary Chat, opened as one: the open is
+/// marked as a take-over, so the adapter sends New Chat's defaults, not Claude Code's
+/// own `defaultMode`.
+#[tokio::test(start_paused = true)]
+async fn a_run_taken_over_before_its_session_exists_opens_as_an_ordinary_chat() {
+    for how in ["reply", "stop then message"] {
+        let f = Fixture::new();
+        let open = f.fake.hold_next_open();
+        f.tag("Fix login");
+        f.tick().await;
+        let chat = f.chat();
+
+        let taking = async {
+            if how == "reply" {
+                f.host
+                    .send(&chat, None, "Hello", SendMode::Auto)
+                    .await
+                    .unwrap();
+            } else {
+                f.host.stop(&chat).await.unwrap();
+            }
+        };
+        tokio::join!(taking, async {
+            settle().await;
+            let _ = open.send(());
+        });
+        settle().await;
+        if how != "reply" {
+            f.reply(&chat, "Hello").await;
+        }
+
+        assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver, "{how}");
+        let opens = f.fake.opens();
+        let ordinary = opens.last().unwrap();
+        assert!(opens.len() >= 2, "{how}: {opens:?}");
+        assert_eq!(ordinary.unattended, None, "{how}");
+        assert!(ordinary.taken_over, "{how}: {ordinary:?}");
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn stopping_a_running_runs_chat_takes_the_run_over() {
     let f = Fixture::new();

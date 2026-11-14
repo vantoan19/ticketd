@@ -52,7 +52,7 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         session,
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -764,7 +764,7 @@ async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
         session: SessionStart::New,
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings {
             model: Some("gpt-b".to_owned()),
             effort: Some("high".to_owned()),
@@ -951,7 +951,7 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
         session: SessionStart::New,
         unattended: Some(unattended(false, false)),
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -1177,7 +1177,7 @@ async fn a_taken_over_thread_is_resumed_with_its_configuration_read_first() {
         session: SessionStart::Resume(NativeSessionId::new("thr_1")),
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: true,
+        taken_over: true,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -1261,7 +1261,7 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         session: SessionStart::New,
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let listing = Options {

@@ -22,7 +22,7 @@ async fn open(fake: &FakeAdapter, generation: RuntimeGeneration) -> OpenedRuntim
         session: SessionStart::New,
         unattended: None,
         ticketd_cli: None,
-        resumes_unattended: false,
+        taken_over: false,
         settings: StartSettings::default(),
     })
     .await

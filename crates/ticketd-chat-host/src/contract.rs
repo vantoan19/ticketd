@@ -149,10 +149,10 @@ pub struct OpenRequest {
     /// The ticketd CLI executable. Its folder goes first on the harness process's
     /// `PATH`, so the agent runs it by its name, `ticketd`, and never needs its path.
     pub ticketd_cli: Option<PathBuf>,
-    /// The native session to resume was started unattended, by an Automation run,
-    /// and the Chat is the person's now: the harness must be told the person's own
+    /// The Chat began as an Automation run's (its session, if any, started unattended),
+    /// and is the person's now, resumed or opened fresh: the harness must be told the person's own
     /// approvals and sandbox, or it would keep the agent's.
-    pub resumes_unattended: bool,
+    pub taken_over: bool,
 }
 
 /// How a harness runs when nobody is there to approve: it never asks, and anything
