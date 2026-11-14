@@ -259,8 +259,21 @@ function ifTitle(checks: AutomationCheck[], projects?: Project[]): string {
 
 /** What each line that is not simply the next step says. */
 export const PATH_LABELS = { yes: "Yes", no: "No", failure: "If it fails" };
+/** The pill a path's label sits in, for React Flow's edge label. */
+export const PATH_LABEL_SHAPE = {
+  labelBgPadding: [6, 3] as [number, number],
+  labelBgBorderRadius: 4,
+};
 
 export const cardName = (card: Card) => `${card.kind}: ${card.title}`;
+/** Moves focus to a card on the canvas, as when its panel closes. */
+export function focusCard(id: string) {
+  for (const card of document.querySelectorAll<HTMLElement>("[data-flow-card]"))
+    if (card.dataset.flowCard === id) card.focus();
+}
+/** The kind a card is colored by: every trigger alike, each step by its own. */
+export const cardColor = (card: Card) =>
+  card.menu === "step" ? card.icon : "trigger";
 /** The icon a card leads with. */
 export const CARD_ICONS = {
   trigger: Zap,

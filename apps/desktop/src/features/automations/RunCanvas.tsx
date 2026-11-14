@@ -25,7 +25,9 @@ import type {
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
+  cardColor,
   cardName,
+  PATH_LABEL_SHAPE,
   PATH_LABELS,
   stepCard,
   triggerCard,
@@ -82,6 +84,7 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <div
         className="flow-card"
+        data-kind={cardColor(card)}
         data-selected={selected || undefined}
         data-run={state ?? undefined}
       >
@@ -93,7 +96,9 @@ function RunCardNode({ data }: NodeProps<Node<RunCardData>>) {
           data-flow-card={card.id}
           onClick={() => onSelect(card.id)}
         >
-          <Icon size={16} aria-hidden />
+          <span className="flow-card-icon">
+            <Icon size={16} aria-hidden />
+          </span>
           <span className="flow-card-text">
             <span className="flow-card-kind">{card.kind}</span>
             <span className="flow-card-title">{card.shown ?? card.title}</span>
@@ -194,8 +199,9 @@ export function RunCanvas({
         type: path ? "smoothstep" : "straight",
         focusable: false,
         ...(path === "failure" && { sourceHandle: "failure" }),
-        ...(path && { label: PATH_LABELS[path] }),
+        ...(path && { label: PATH_LABELS[path], ...PATH_LABEL_SHAPE }),
         className: [
+          path === "yes" && "flow-edge-yes",
           path === "failure" && "flow-edge-failure",
           reached(target) ? "flow-edge-taken" : "flow-edge-idle",
         ]

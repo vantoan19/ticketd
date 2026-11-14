@@ -54,7 +54,9 @@ import {
 } from "@/features/automations/client";
 import {
   CARD_ICONS,
+  cardColor,
   cardName,
+  PATH_LABEL_SHAPE,
   PATH_LABELS,
   stepCard,
   triggerCard,
@@ -211,7 +213,9 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
   const Icon = CARD_ICONS[card.icon];
   const face = (
     <>
-      <Icon size={16} aria-hidden />
+      <span className="flow-card-icon">
+        <Icon size={16} aria-hidden />
+      </span>
       <span className="flow-card-text">
         <span className="flow-card-kind">{card.kind}</span>
         <span className="flow-card-title">{card.shown ?? card.title}</span>
@@ -237,6 +241,7 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <div
         className="flow-card"
+        data-kind={cardColor(card)}
         data-selected={selected || undefined}
         data-unset={card.unset || undefined}
       >
@@ -507,7 +512,8 @@ export function FlowCanvas({
       // A line to a path bends to reach it, and says which path it is.
       type: path ? "smoothstep" : "straight",
       focusable: false,
-      ...(path && { label: PATH_LABELS[path] }),
+      ...(path && { label: PATH_LABELS[path], ...PATH_LABEL_SHAPE }),
+      ...(path === "yes" && { className: "flow-edge-yes" }),
       // A failure path leaves the side of its step, dashed, so it never reads
       // as the next step.
       ...(path === "failure" && {

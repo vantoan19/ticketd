@@ -129,6 +129,11 @@
   --status-blocked: #ff990a;
   --status-unread: #0062d1;
   --status-neutral: var(--disabled-foreground);
+  /* Indicator colors beyond the status set: Taken over and If, Change ticket,
+     Notify me (DESIGN.md section 2). */
+  --violet: #7820bc;
+  --teal: #067a6e;
+  --pink: #ea3e83;
   --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--ring);
   --motion-swift: cubic-bezier(0.175, 0.885, 0.32, 1.1);
   --sidebar: var(--background);
@@ -185,6 +190,9 @@
   --status-blocked: #ff990a;
   --status-unread: #0062d1;
   --status-neutral: var(--disabled-foreground);
+  --violet: #bf89ec;
+  --teal: #45dec5;
+  --pink: #ea3e83;
   --syntax-keyword: #d2a8ff;
   --syntax-string: #a5d6ff;
   --syntax-number: #79c0ff;
@@ -216,6 +224,7 @@
   --color-status-blocked: var(--status-blocked);
   --color-status-unread: var(--status-unread);
   --color-status-neutral: var(--status-neutral);
+  --color-violet: var(--violet);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

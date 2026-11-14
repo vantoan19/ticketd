@@ -61,6 +61,8 @@ Primary actions invert the existing primary/elevated pair: `#171717` fill and `#
 
 The reference also supplies indicator colors: blue `#0062D1`, cyan `#52AEFF`, teal `#45DEC5` / `#067A6E`, green `#398E4A` / `#45A557` / `#6CDA75`, orange `#FF990A`, red `#E5484D`, pink `#EA3E83`, and purple `#7820BC` / `#BF89EC`. Reserve these for small indicators, approximately 10px, when the meaning requires color. Do not introduce colored status panels. Ticketd keeps status icons neutral; status color appears only as a small dot beside a word (see Status and state vocabulary), never as a fill, panel, or icon tint.
 
+The Automation canvas is the one exception, because a flow is read by the kind of each step and a run by where each step stands. There a card's 28px icon tile takes a color: in the editor the trigger is blue (`--interactive`), Run agent is solid (`--foreground`), If is violet, Change ticket teal and Notify me pink; in a run the tile takes the step's status color instead, and Taken over is violet. The three added tokens use the reference indicators: `--violet` `#7820BC` light and `#BF89EC` dark, `--teal` `#067A6E` and `#45DEC5`, `--pink` `#EA3E83` in both. Every tile still sits beside the step's kind and its status in words.
+
 ### Dark theme and error extensions
 
 The linked reference does not specify a dark palette or complete error callouts. The following are explicit ticketd extensions, not claimed source values. Keep the reference’s sizes, spacing, typography, and elevation structure in both themes.
