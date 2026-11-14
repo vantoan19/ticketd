@@ -484,7 +484,7 @@ fn syncing_an_automation_logs_no_workspace_event_and_moves_the_change_token() {
 
 const AGENT_FILE: &str = r#"---
 kind: automation_agent
-format: 1
+format: 2
 id: "AGENT"
 name: "Triage"
 harness: "claude-code"
@@ -507,7 +507,7 @@ Then label it.
 
 const AUTOMATION_FILE: &str = r#"---
 kind: automation
-format: 1
+format: 2
 id: "AUTOMATION"
 name: "Triage new bugs"
 trashed: false
