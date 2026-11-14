@@ -192,31 +192,29 @@ fn strip_terminal_codes(text: &str) -> String {
 pub(crate) enum Serving<'a> {
     /// A probe: no Chat and no run.
     Nothing,
-    Chat(&'a str),
-    /// The Chat of an Automation run.
-    Run {
+    Chat {
         chat_id: &'a str,
-        run_id: &'a str,
+        /// Set for the Chat of an Automation run.
+        run_id: Option<&'a str>,
+        ticketd_cli: Option<&'a Path>,
     },
 }
 
 impl<'a> Serving<'a> {
     pub(crate) fn of(request: &'a crate::OpenRequest) -> Self {
-        match &request.unattended {
-            Some(unattended) => Self::Run {
-                chat_id: &request.chat_id,
-                run_id: &unattended.run_id,
-            },
-            None => Self::Chat(&request.chat_id),
+        Self::Chat {
+            chat_id: &request.chat_id,
+            run_id: request.unattended.as_ref().map(|run| run.run_id.as_str()),
+            ticketd_cli: request.ticketd_cli.as_deref(),
         }
     }
 }
 
 /// Starts `executable` on piped stdio with the launch environment unchanged, so the
 /// harness finds its own configuration and sign-in. A runtime for a Chat also gets
-/// that Chat's ID in `CHAT_ID_VARIABLE`, and one for an Automation run the run's ID
-/// in `AUTOMATION_RUN_ID_VARIABLE`, and nothing else; the commands the harness runs
-/// inherit them.
+/// that Chat's ID in `CHAT_ID_VARIABLE`, one for an Automation run the run's ID in
+/// `AUTOMATION_RUN_ID_VARIABLE`, and the ticketd CLI's folder first on `PATH`, and
+/// nothing else; the commands the harness runs inherit them.
 pub(crate) fn spawn(executable: &Path, arguments: &[&str], serving: Serving) -> io::Result<Io> {
     let mut child = command(executable, arguments, serving).spawn()?;
     let missing = || io::Error::other("the process has no standard streams");
@@ -236,11 +234,17 @@ fn command(executable: &Path, arguments: &[&str], serving: Serving) -> Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let (chat_id, run_id) = match serving {
-        Serving::Nothing => (None, None),
-        Serving::Chat(chat_id) => (Some(chat_id), None),
-        Serving::Run { chat_id, run_id } => (Some(chat_id), Some(run_id)),
+    let (chat_id, run_id, cli) = match serving {
+        Serving::Nothing => (None, None, None),
+        Serving::Chat {
+            chat_id,
+            run_id,
+            ticketd_cli,
+        } => (Some(chat_id), run_id, ticketd_cli),
     };
+    if let Some(path) = cli.and_then(|cli| path_with(cli.parent()?)) {
+        command.env("PATH", path);
+    }
     // What is not served is removed: an ID ticketd itself inherited must not pass on.
     for (variable, value) in [
         (ticketd_core::CHAT_ID_VARIABLE, chat_id),
@@ -253,6 +257,14 @@ fn command(executable: &Path, arguments: &[&str], serving: Serving) -> Command {
     }
     hide_console(&mut command);
     command
+}
+
+/// This process's `PATH` with `folder` first. `None` when `folder` cannot be on a
+/// `PATH` (it holds the separator); the agent then has no `ticketd` command.
+fn path_with(folder: &Path) -> Option<std::ffi::OsString> {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let rest = std::env::split_paths(&inherited).filter(|entry| entry != folder);
+    std::env::join_paths(std::iter::once(folder.to_owned()).chain(rest)).ok()
 }
 
 /// What `<executable> --version` printed.
@@ -355,41 +367,66 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
 
+    fn variable(serving: Serving, name: &str) -> Option<Option<std::ffi::OsString>> {
+        command(Path::new("harness"), &[], serving)
+            .as_std()
+            .get_envs()
+            .find(|(variable, _)| variable.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.map(OsStr::to_owned))
+    }
+
+    fn chat(run_id: Option<&str>) -> Serving<'_> {
+        Serving::Chat {
+            chat_id: "chat-1",
+            run_id,
+            ticketd_cli: None,
+        }
+    }
+
     /// N2: a Chat's harness process carries the Chat's ID, so the ticketd CLI it runs
     /// credits that Chat; a probe carries none.
     #[test]
     fn a_chat_runtime_is_started_with_its_chat_id_and_a_probe_without() {
-        let variable = |serving| {
-            command(Path::new("harness"), &[], serving)
-                .as_std()
-                .get_envs()
-                .find(|(name, _)| *name == OsStr::new(ticketd_core::CHAT_ID_VARIABLE))
-                .map(|(_, value)| value.map(OsStr::to_owned))
-        };
-        assert_eq!(
-            variable(Serving::Chat("chat-1")),
-            Some(Some("chat-1".into()))
-        );
-        assert_eq!(variable(Serving::Nothing), Some(None));
+        let id = ticketd_core::CHAT_ID_VARIABLE;
+        assert_eq!(variable(chat(None), id), Some(Some("chat-1".into())));
+        assert_eq!(variable(Serving::Nothing, id), Some(None));
     }
 
     /// The agent of an Automation run carries the run's ID, so the ticketd CLI it runs
     /// logs its writes as an Automation's; a person's Chat carries none.
     #[test]
     fn only_the_chat_of_an_automation_run_is_started_with_the_run_id() {
-        let variable = |serving| {
-            command(Path::new("harness"), &[], serving)
-                .as_std()
-                .get_envs()
-                .find(|(name, _)| *name == OsStr::new(ticketd_core::AUTOMATION_RUN_ID_VARIABLE))
-                .map(|(_, value)| value.map(OsStr::to_owned))
-        };
-        let run = Serving::Run {
+        let id = ticketd_core::AUTOMATION_RUN_ID_VARIABLE;
+        assert_eq!(
+            variable(chat(Some("run-1")), id),
+            Some(Some("run-1".into()))
+        );
+        assert_eq!(variable(chat(None), id), Some(None));
+    }
+
+    /// L1: the agent runs the ticketd CLI by its name, because its folder comes first
+    /// on the harness's `PATH`; the rest of `PATH` is kept. A probe's is unchanged.
+    #[test]
+    fn a_chat_runtime_has_the_ticketd_cli_folder_first_on_its_path() {
+        let folder = std::env::temp_dir().join("ticketd cli");
+        let cli = folder.join("ticketd.exe");
+        let serving = Serving::Chat {
             chat_id: "chat-1",
-            run_id: "run-1",
+            run_id: Some("run-1"),
+            ticketd_cli: Some(&cli),
         };
-        assert_eq!(variable(run), Some(Some("run-1".into())));
-        assert_eq!(variable(Serving::Chat("chat-1")), Some(None));
+        let path = variable(serving, "PATH").flatten().expect("PATH is set");
+        let entries: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(entries.first(), Some(&folder));
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        assert_eq!(
+            entries.len(),
+            1 + std::env::split_paths(&inherited)
+                .filter(|entry| *entry != folder)
+                .count()
+        );
+        assert_eq!(variable(Serving::Nothing, "PATH"), None);
+        assert_eq!(variable(chat(None), "PATH"), None);
     }
 
     #[test]

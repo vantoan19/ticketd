@@ -42,6 +42,8 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         working_directory: PathBuf::from("/work/chat-1"),
         session,
         unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -657,6 +659,8 @@ async fn a_new_session_opens_with_new_chats_picks() {
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
         unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings {
             model: Some("sonnet".to_owned()),
             effort: Some("high".to_owned()),
@@ -870,16 +874,22 @@ fn reader_that_tests() -> crate::Unattended {
             use_web: false,
         },
         turn_limit: 40,
-        ticketd_cli: Some(PathBuf::from("/opt/ticketd/ticketd")),
         ticketd_folders: Vec::new(),
     }
 }
+
+/// The ticketd CLI by its name, in both shells: the rules every agent has.
+const CLI_RULES: [&str; 4] = [
+    "Bash(ticketd *)",
+    "PowerShell(ticketd *)",
+    "Bash(ticketd.exe *)",
+    "PowerShell(ticketd.exe *)",
+];
 
 #[test]
 fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else() {
     let mut unattended = reader_that_tests();
     unattended.model = None;
-    unattended.ticketd_cli = None;
     unattended.tools = ticketd_core::AutomationAgentTools {
         read_files: false,
         edit_files: false,
@@ -892,7 +902,7 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
     assert_eq!(
         super::unattended_options(&unattended),
         json!({
-            "allowed_tools": ["Bash(ticketd *)", "PowerShell(ticketd *)"],
+            "allowed_tools": CLI_RULES,
             "disallowed_tools": [
                 "Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"
             ],
@@ -903,49 +913,28 @@ fn an_agent_with_every_switch_off_may_still_run_the_ticketd_cli_and_nothing_else
     // Running commands allows any command only when the agent says so outright.
     unattended.tools.run_commands = true;
     let options = super::unattended_options(&unattended);
-    assert_eq!(
-        options["allowed_tools"],
-        json!([
-            "Bash(ticketd *)",
-            "PowerShell(ticketd *)",
-            "Bash",
-            "PowerShell"
-        ])
-    );
+    let mut any = CLI_RULES.to_vec();
+    any.extend(["Bash", "PowerShell"]);
+    assert_eq!(options["allowed_tools"], json!(any));
 
     // An empty list is not "any command": it allows none but the ticketd CLI.
     unattended.tools.any_command = false;
     unattended.tools.allowed_commands.clear();
     let options = super::unattended_options(&unattended);
-    assert_eq!(
-        options["allowed_tools"],
-        json!(["Bash(ticketd *)", "PowerShell(ticketd *)"])
-    );
+    assert_eq!(options["allowed_tools"], json!(CLI_RULES));
 }
 
-/// Claude Code matches a rule against the command as the agent wrote it, and on
-/// Windows the agent's main shell is PowerShell. So the ticketd CLI is allowed in
-/// both shells, under its name and under each way its path is written there.
+/// L1: a list of commands allows exactly those, in both shells, besides the CLI.
+/// No rule names the CLI's path: the agent runs it by name from its `PATH`.
 #[test]
-fn the_ticketd_cli_is_allowed_by_its_path_as_either_shell_writes_it() {
+fn an_agent_with_a_command_list_may_run_those_and_the_ticketd_cli_by_name() {
     let mut unattended = reader_that_tests();
-    unattended.tools.run_commands = false;
     unattended.tools.read_files = false;
-    unattended.ticketd_cli = Some(PathBuf::from(r"C:\Program Files\ticketd\ticketd.exe"));
-
+    let mut expected = CLI_RULES.to_vec();
+    expected.extend(["Bash(npm test *)", "PowerShell(npm test *)"]);
     assert_eq!(
         super::unattended_options(&unattended)["allowed_tools"],
-        json!([
-            "Bash(ticketd *)",
-            r"Bash(C:\Program Files\ticketd\ticketd.exe *)",
-            r#"Bash("C:\Program Files\ticketd\ticketd.exe" *)"#,
-            "Bash(C:/Program Files/ticketd/ticketd.exe *)",
-            r#"Bash("C:/Program Files/ticketd/ticketd.exe" *)"#,
-            "PowerShell(ticketd *)",
-            r"PowerShell(C:\Program Files\ticketd\ticketd.exe *)",
-            r#"PowerShell(& "C:\Program Files\ticketd\ticketd.exe" *)"#,
-            r"PowerShell(& 'C:\Program Files\ticketd\ticketd.exe' *)",
-        ])
+        json!(expected)
     );
 }
 
@@ -962,6 +951,8 @@ async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
         unattended: Some(reader_that_tests()),
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings::default(),
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -989,12 +980,13 @@ async fn an_unattended_session_opens_with_the_agents_settings_and_reports_limit_
         ended(&mut peer, "sub-1").await.0,
         ProblemKind::TurnLimitReached
     );
-    // The agent ended its turn itself, but without the tool it was denied.
+    // The agent ended its turn itself, but without the tool it was denied. L6: each
+    // distinct denial is named once, a shell's with its command on one line.
     assert_eq!(
         ended(&mut peer, "sub-2").await,
         (
             ProblemKind::ToolDenied,
-            "Claude Code was denied Write.".to_owned()
+            "Claude Code was denied: PowerShell `node test.js`; Write.".to_owned()
         )
     );
 }

@@ -345,7 +345,8 @@ type EventBody =
       errors: string[];
       stop_reason: string | null;
       terminal_reason: string | null;
-      denied_tool_names: string[];
+      /** What Claude Code denied: the tool, and the command when it was a shell. */
+      denials: { tool_name: string; command: string | null }[];
       queued_turn_count: number | null;
       num_turns: number | null;
       duration_ms: number | null;

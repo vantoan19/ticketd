@@ -146,6 +146,13 @@ pub struct OpenRequest {
     /// The person's picks for a new session; empty for the harness's own settings.
     /// An unattended run leaves it empty: its model comes from `unattended`.
     pub settings: StartSettings,
+    /// The ticketd CLI executable. Its folder goes first on the harness process's
+    /// `PATH`, so the agent runs it by its name, `ticketd`, and never needs its path.
+    pub ticketd_cli: Option<PathBuf>,
+    /// The native session to resume was started unattended, by an Automation run,
+    /// and the Chat is the person's now: the harness must be told the person's own
+    /// approvals and sandbox, or it would keep the agent's.
+    pub resumes_unattended: bool,
 }
 
 /// How a harness runs when nobody is there to approve: it never asks, and anything
@@ -164,9 +171,6 @@ pub struct Unattended {
     /// How many turns the agent may take, where the harness can cap them. Codex
     /// cannot.
     pub turn_limit: u32,
-    /// The ticketd CLI executable, which the agent may always run. `None` when it
-    /// was not found; the bare `ticketd` command is allowed either way.
-    pub ticketd_cli: Option<PathBuf>,
     /// Folders the ticketd CLI writes to. A harness that sandboxes writes must always
     /// keep them writable, whatever `tools` says, or the always-allowed CLI fails.
     pub ticketd_folders: Vec<PathBuf>,

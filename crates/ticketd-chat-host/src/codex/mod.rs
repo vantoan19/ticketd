@@ -4,8 +4,10 @@
 //! the adapter passes only the working directory, so the approval policy and sandbox
 //! are theirs too; it overrides the model or effort only when the person chose one in
 //! the Chat, from that Chat's next turn. For an unattended session (an Automation
-//! run) it turns approvals off and limits writes to the step's folder and the
-//! Workspace data folder. It never reads credentials, grants full access or chooses
+//! run) it turns approvals off, limits writes to the step's folder and the
+//! Workspace data folder, and starts none of the person's MCP servers, plugins or
+//! apps. A Chat taken over from a run resumes with the person's approvals and
+//! sandbox again. It never reads credentials, grants full access or chooses
 //! how the user is billed.
 
 mod discovery;
@@ -92,6 +94,42 @@ pub(super) fn unattended_params(
         },
     });
     (thread, turn)
+}
+
+/// The `config` overrides of an unattended thread: none of the person's own MCP
+/// servers, plugins (which bring servers and skills of their own) or ChatGPT apps
+/// start, so the agent has only what Codex itself gives it (#387 L5, D4).
+/// `config` is the person's configuration (`config/read`), which names their servers;
+/// Codex merges an override table into theirs, so each is turned off by name.
+// ponytail: a server added to the person's configuration between the read and
+// `thread/start` still starts; the next run reads it again.
+pub(super) fn personal_tools_off(config: Option<&Value>) -> Value {
+    let mut off = json!({"features.plugins": false, "features.apps": false});
+    let servers = config
+        .and_then(|config| config["mcp_servers"].as_object())
+        .into_iter()
+        .flat_map(|servers| servers.keys());
+    for server in servers {
+        off[format!("mcp_servers.{server}.enabled")] = json!(false);
+    }
+    off
+}
+
+/// What `thread/resume` is told for a Chat the person took over from a run: the
+/// approval policy and sandbox their own configuration sets, or Codex's defaults
+/// when it sets none. Without them the thread keeps the agent's (#387 L2, D3).
+pub(super) fn own_approvals(config: Option<&Value>) -> Value {
+    let setting = |key: &str, default: &str| {
+        config
+            .map(|config| &config[key])
+            .filter(|value| !value.is_null())
+            .cloned()
+            .unwrap_or_else(|| json!(default))
+    };
+    json!({
+        "approvalPolicy": setting("approval_policy", "on-request"),
+        "sandbox": setting("sandbox_mode", "read-only"),
+    })
 }
 
 #[async_trait]

@@ -909,7 +909,15 @@ impl Supervisor {
         let source = self.context.clone();
         self.generations += 1;
         let generation = RuntimeGeneration(self.generations);
-        let request = OpenRequest {
+        // A Chat the person took over from a run resumes the agent's session, which
+        // must not keep the agent's settings. Unreadable is taken as taken over: the
+        // person's own settings are the safe ones to send.
+        let resumes_unattended = self.unattended.is_none()
+            && matches!(session, SessionStart::Resume(_))
+            && self
+                .core(|core| core.chat_ran_an_automation_agent(&chat.id))
+                .unwrap_or(true);
+        let mut request = OpenRequest {
             generation,
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
@@ -920,6 +928,8 @@ impl Supervisor {
             },
             session,
             unattended: self.unattended.clone(),
+            ticketd_cli: None,
+            resumes_unattended,
         };
         self.opening = Some(Opening {
             generation,
@@ -936,6 +946,10 @@ impl Supervisor {
                     .unwrap_or_else(|error| Err(error.to_string())),
                 None => Ok(None),
             };
+            request.ticketd_cli = tokio::task::spawn_blocking(crate::cli::executable)
+                .await
+                .ok()
+                .flatten();
             let result = adapter.open(request).await;
             let _ = done.send(Done::Opened {
                 generation,

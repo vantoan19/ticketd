@@ -43,6 +43,9 @@ const MAX_REASON_CHARS: usize = 500;
 pub(super) struct Options {
     /// How long a command waits for the event that settles it.
     pub reply_timeout: Duration,
+    /// How long `open` waits: Claude Code starting, or resuming a session, takes
+    /// longer than other replies, most on a busy machine (#387 L16).
+    pub open_timeout: Duration,
     /// How long `close` waits for the bridge to exit after its input closes.
     pub close_timeout: Duration,
 }
@@ -51,6 +54,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             reply_timeout: Duration::from_secs(30),
+            open_timeout: Duration::from_secs(90),
             close_timeout: ADAPTER_CLOSE_TIMEOUT,
         }
     }
@@ -239,6 +243,12 @@ impl Connection {
         &self,
         prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
     ) -> CallOutcome {
+        let mut opening = false;
+        let prepare = |session: &mut Session| {
+            let prepared = prepare(session);
+            opening = matches!(prepared, Ok((_, Kind::Open)));
+            prepared
+        };
         let (id, mut receiver) = match self.write(true, prepare).await {
             Ok((id, Some(receiver))) => (id, receiver),
             Ok((_, None)) | Err(WriteFailure::Lost) => return CallOutcome::Lost,
@@ -250,7 +260,12 @@ impl Connection {
             Some(Reply::NotDelivered) => CallOutcome::NotDelivered,
             None => CallOutcome::Lost,
         };
-        match timeout(self.options.reply_timeout, &mut receiver).await {
+        let bound = if opening {
+            self.options.open_timeout
+        } else {
+            self.options.reply_timeout
+        };
+        match timeout(bound, &mut receiver).await {
             Ok(reply) => settled(reply.ok()),
             Err(_) => {
                 let mut state = self.state();
@@ -275,7 +290,12 @@ impl Connection {
             CallOutcome::Rejected(reason) => format!("The Claude bridge refused {step}: {reason}"),
             CallOutcome::TimedOut => format!(
                 "The Claude bridge did not answer {step} within {} seconds",
-                self.options.reply_timeout.as_secs()
+                if step == "open" {
+                    self.options.open_timeout
+                } else {
+                    self.options.reply_timeout
+                }
+                .as_secs()
             ),
             _ => format!("The Claude bridge stopped during {step}"),
         };

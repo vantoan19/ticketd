@@ -25,6 +25,11 @@ pub enum TurnEnd {
     ToolDenied {
         detail: String,
     },
+    /// The harness could not start the agent's commands, so none ran. A command
+    /// that ran and failed is not this: the agent saw its result.
+    CommandsUnavailable {
+        detail: String,
+    },
     /// The harness process went away mid-turn.
     Crashed {
         detail: String,
@@ -180,13 +185,15 @@ fn recorded_end(turn: &ChatTurn) -> Option<TurnEnd> {
             match problem_kind(turn.problem.as_deref().unwrap_or_default()) {
                 ProblemKind::TurnLimitReached => TurnEnd::TurnLimitReached,
                 ProblemKind::ToolDenied => TurnEnd::ToolDenied { detail: detail() },
+                ProblemKind::PermissionUnavailable => {
+                    TurnEnd::CommandsUnavailable { detail: detail() }
+                }
                 ProblemKind::NotInstalled
                 | ProblemKind::IncompatibleVersion
                 | ProblemKind::LoginRequired
                 | ProblemKind::QuotaExhausted
                 | ProblemKind::NativeHistoryUnavailable
                 | ProblemKind::SessionInUse
-                | ProblemKind::PermissionUnavailable
                 | ProblemKind::Other => TurnEnd::Failed { detail: detail() },
             },
         ),

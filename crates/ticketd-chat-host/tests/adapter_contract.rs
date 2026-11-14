@@ -21,6 +21,8 @@ async fn open(fake: &FakeAdapter, generation: RuntimeGeneration) -> OpenedRuntim
         working_directory: PathBuf::from("chat-folder"),
         session: SessionStart::New,
         unattended: None,
+        ticketd_cli: None,
+        resumes_unattended: false,
         settings: StartSettings::default(),
     })
     .await
