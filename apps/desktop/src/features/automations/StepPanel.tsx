@@ -15,6 +15,7 @@ import {
 } from "@/features/automations/client";
 import { agentReach, folderName } from "@/features/automations/automation-text";
 import { useChatClient } from "@/features/chats/client";
+import { withoutVerbatim } from "@/features/projects/paths";
 import type { Project } from "@/lib/api/client";
 
 /**
@@ -173,7 +174,8 @@ export function RunAgentFields({
           >
             {/* The projects' folders first: most agents work in one. */}
             {projects.flatMap((project) =>
-              project.paths.map((path) => (
+              // As a person writes the path: without the verbatim prefix.
+              project.paths.map(withoutVerbatim).map((path) => (
                 <DropdownMenuItem
                   key={`${project.id} ${path}`}
                   className="items-start whitespace-normal"

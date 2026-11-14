@@ -219,9 +219,11 @@ export function readableViewport(
   ) => {
     // Whole, even if that leaves less than the margin at its sides.
     if (length * zoom <= room) return room / 2 - (start + length / 2) * zoom;
-    const wanted = alignStart
-      ? lead - focusStart * zoom
-      : room / 2 - (focusStart + focusLength / 2) * zoom;
+    // A focus wider than the room shows its start whole: the selected card.
+    const wanted =
+      alignStart || focusLength * zoom > room - 2 * VIEW_MARGIN
+        ? lead - focusStart * zoom
+        : room / 2 - (focusStart + focusLength / 2) * zoom;
     const first = lead - start * zoom;
     const last = room - VIEW_MARGIN - (start + length) * zoom;
     return Math.min(first, Math.max(last, wanted));

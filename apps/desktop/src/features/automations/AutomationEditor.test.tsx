@@ -681,8 +681,9 @@ test("a Run agent step's folder can be one of the projects' folders, or any fold
     {
       id: "p1",
       name: "web-app",
-      path: "C:\\code\\web-app",
-      paths: ["C:\\code\\web-app"],
+      path: "\\\\?\\C:\\code\\web-app",
+      // As the core gives it, with the verbatim prefix it is shown without.
+      paths: ["\\\\?\\C:\\code\\web-app"],
     },
   ];
   await openFirst([

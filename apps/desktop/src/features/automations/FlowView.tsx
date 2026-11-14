@@ -80,6 +80,16 @@ export function FlowView({
       const target = event.target;
       if (!(target instanceof Element) || !target.closest(".react-flow__node"))
         return;
+      // The browser has already scrolled the canvas's clipped boxes to show
+      // it, which the transform does not know of: undo that, then pan.
+      for (
+        let box: Element | null = target.parentElement;
+        box && canvas.contains(box);
+        box = box.parentElement
+      ) {
+        box.scrollLeft = 0;
+        box.scrollTop = 0;
+      }
       const box = canvas.getBoundingClientRect();
       const item = target.getBoundingClientRect();
       const by = (low: number, high: number, from: number, to: number) =>

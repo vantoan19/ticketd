@@ -276,3 +276,18 @@ test("a flow too wide to read whole shows the chosen card, but never scrolls pas
 
   expect(view.x).toBe(16);
 });
+
+test("a selected card whose failure path does not fit beside it is shown whole at the left, its path going on to the right", () => {
+  const flow = { x: -200, y: 0, width: 1400, height: 400 };
+  // The card at x 0 and the first step of its failure path, 760 wide together.
+  const focus = { x: 0, y: 100, width: 760, height: 76 };
+
+  const view = readableViewport(
+    flow,
+    focus,
+    { width: 540, height: 800 },
+    false,
+  );
+
+  expect(view.x).toBe(16);
+});
