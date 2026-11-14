@@ -299,11 +299,18 @@ and never widens to full access. Claude Code runs in the Agent SDK's `dontAsk`
 permission mode with the allowed tools as its allowlist and the tools of each
 switch that is off disallowed. It loads none of the person's user, project or
 local Claude Code settings, so an allow rule there cannot widen the allowlist;
-that also leaves out their hooks, `CLAUDE.md` and anything else those files set.
+that also leaves out their hooks, `CLAUDE.md` and anything else those files set,
+and it loads none of their MCP servers, claude.ai connectors or skills.
 The ticketd CLI is allowed in both of Claude Code's shells, Bash and PowerShell,
-by name and by path. Codex runs with approval policy `never` and a
+by name only: every Chat's harness process has the CLI's folder first on its
+`PATH`, and the Chat's context tells the agent to run `ticketd` by that name.
+Codex runs with approval policy `never` and a
 `workspaceWrite` sandbox whose only writable places are the step's folder and the
-folder holding the Workspace, with no network unless the web is allowed. Codex
+folder holding the Workspace, with no network unless the web is allowed, and with
+the person's MCP servers, plugins and apps turned off. A command Codex could not
+start fails the step: the agent could not do its work. A Chat taken over from a
+run resumes its Codex thread with the person's own approval policy and sandbox
+from their Codex configuration (`on-request` and `read-only` when it sets none). Codex
 reads files and runs commands inside that sandbox whatever the switches say and
 has no turn limit to set, so the agent editor shows those as fixed for Codex; a
 read-only sandbox would stop the ticketd CLI recording the agent's result, so

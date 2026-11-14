@@ -39,12 +39,10 @@ enum Ran {
     AgentStopped,
 }
 
-/// Where the ticketd CLI is, so an agent can be allowed to run it whatever else it
-/// may do.
+/// What an agent needs kept open so it can always run the ticketd CLI, whatever
+/// else it may do. The host puts the CLI itself on the agent's `PATH`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TicketdCli {
-    /// The executable, when one was found.
-    pub executable: Option<PathBuf>,
     /// The folders it writes to: the one holding the Workspace.
     pub folders: Vec<PathBuf>,
 }
@@ -292,7 +290,6 @@ impl Runner {
             model: settings.model.clone(),
             tools: settings.tools.clone(),
             turn_limit: settings.turn_limit,
-            ticketd_cli: self.inner.cli.executable.clone(),
             ticketd_folders: self.inner.cli.folders.clone(),
         };
         let time_limit = Duration::from_secs(u64::from(settings.time_limit_minutes) * 60);
@@ -310,6 +307,7 @@ impl Runner {
                 end @ (TurnEnd::TurnLimitReached
                 | TurnEnd::TimeLimitReached
                 | TurnEnd::ToolDenied { .. }
+                | TurnEnd::CommandsUnavailable { .. }
                 | TurnEnd::Crashed { .. }
                 | TurnEnd::Failed { .. }),
             ) => Ran::Step(StepOutcome::Failed {
@@ -339,6 +337,15 @@ pub async fn stop_and_turn_off(
     Ok(())
 }
 
+/// "1 turn", "40 turns".
+fn counted(count: u32, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
+}
+
 /// Why the step failed, in plain words for the person.
 fn failure_reason(end: &TurnEnd, agent: &AutomationAgent) -> String {
     let with = |sentence: &str, detail: &str| {
@@ -353,18 +360,32 @@ fn failure_reason(end: &TurnEnd, agent: &AutomationAgent) -> String {
         // Not failures: the caller handles them before asking for a reason.
         TurnEnd::Finished | TurnEnd::TakenOver | TurnEnd::Stopped => String::new(),
         TurnEnd::TurnLimitReached => format!(
-            "The agent reached its limit of {} turns before finishing.",
-            settings.turn_limit
+            "The agent reached its limit of {} before finishing.",
+            counted(settings.turn_limit, "turn")
         ),
         TurnEnd::TimeLimitReached => format!(
-            "The agent was still working after its limit of {} minutes and was stopped.",
-            settings.time_limit_minutes
+            "The agent was still working after its limit of {} and was stopped.",
+            counted(settings.time_limit_minutes, "minute")
         ),
         TurnEnd::ToolDenied { detail } => with(
             "The agent needed something it is not allowed to do.",
             detail,
         ),
+        TurnEnd::CommandsUnavailable { detail } => {
+            with("The agent could not run commands.", detail)
+        }
         TurnEnd::Crashed { detail } => with("The agent's process stopped unexpectedly.", detail),
         TurnEnd::Failed { detail } => with("The agent could not finish.", detail),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// L27: a limit of 1 reads "1 turn", not "1 turns".
+    #[test]
+    fn a_limit_is_counted_in_the_singular_only_when_it_is_one() {
+        assert_eq!(super::counted(1, "turn"), "1 turn");
+        assert_eq!(super::counted(1, "minute"), "1 minute");
+        assert_eq!(super::counted(40, "turn"), "40 turns");
     }
 }
