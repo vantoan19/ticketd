@@ -511,6 +511,15 @@ pub trait Connector: Send + Sync {
         vec![String::new()]
     }
 
+    /// The rules in `config` that narrow which issues of a part discovery lists
+    /// (for GitHub, the assignee and labels), as one stable text; empty when
+    /// nothing narrows them. ticketd keeps a part as read under these rules, so
+    /// loosening them reads the part as if for the first time: the issues that
+    /// become visible are a backlog, not news.
+    fn discovery_scope(&self, _config: &ConfigValues) -> String {
+        String::new()
+    }
+
     /// Returns every comment and timeline event of one issue, following the
     /// provider's paging itself. Only called when the descriptor declares
     /// [`Capability::Comments`].

@@ -579,6 +579,24 @@ impl Connector for GithubConnector {
             .collect()
     }
 
+    // GitHub matches logins and label names without regard to case.
+    fn discovery_scope(&self, config: &ConfigValues) -> String {
+        let mut scope = Vec::new();
+        if let Some(assignee) = config.get("assignee").and_then(Value::as_str) {
+            scope.push(format!("assignee={}", assignee.to_lowercase()));
+        }
+        let mut labels: Vec<String> = strings(config.get("labels"))
+            .iter()
+            .map(|label| label.to_lowercase())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        if !labels.is_empty() {
+            scope.push(format!("labels={}", labels.join(",")));
+        }
+        scope.join("&")
+    }
+
     fn publish(
         &self,
         _config: &ConfigValues,

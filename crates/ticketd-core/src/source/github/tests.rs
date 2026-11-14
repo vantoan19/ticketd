@@ -445,6 +445,23 @@ fn a_repository_has_one_name_as_a_part_of_the_source() {
     assert_eq!(summary.skipped[0].partition, "o/gone");
 }
 
+/// A repository is read under its assignee and labels, named alike whatever their
+/// case or order, and by its bare name when neither narrows discovery.
+#[test]
+fn a_repository_is_read_under_its_assignee_and_labels() {
+    let (_fixture, engine) = setup(Some(TOKEN));
+    let scope = |values: serde_json::Value| engine.partition_scope("github", &config(values));
+    assert_eq!(scope(json!({"repositories": ["o/r"]})), "");
+    assert_eq!(
+        scope(json!({"repositories": ["o/r"], "assignee": "Octo", "labels": ["Bug", "a"]})),
+        "?assignee=octo&labels=a,bug"
+    );
+    assert_eq!(
+        scope(json!({"repositories": ["o/r"], "assignee": "octo", "labels": ["bug", "A"]})),
+        "?assignee=octo&labels=a,bug"
+    );
+}
+
 #[test]
 fn a_credential_is_never_sent_over_plain_http_except_to_this_machine() {
     for (url, allowed) in [

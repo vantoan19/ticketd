@@ -14,8 +14,11 @@ refresh (`sync`), or Workspace sync applying a change from another desktop
 A ticket created with tags emits one `ticket.tag_added` per tag. The first
 import of a ticket source emits nothing, and that is decided per repository:
 an issue new to the Workspace logs nothing when it comes from a repository no
-successful read has covered yet. A read that skips a repository it cannot see
-has not read it. Whatever arrives in a repository after its first read is
+successful read has covered yet under the source's current assignee and labels.
+A read that skips a repository it cannot see has not read it, and loosening a
+filter shows a backlog, so its issues log nothing either; an issue that arrives
+in the same refresh as a filter change cannot be told from that backlog and
+logs nothing too. Whatever arrives in a repository after its first read is
 logged, and so is every change to a ticket already here. Each
 Automation keeps a cursor into the log, so changes made while the desktop was
 not running (by the CLI or arriving from a ticket source) fire when it next

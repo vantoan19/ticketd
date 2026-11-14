@@ -818,6 +818,10 @@ impl Workspace {
             let mut read_partitions: Vec<String> = Vec::new();
             let mut skipped_partitions: Vec<String> = Vec::new();
             if let (None, Some(source)) = (&options.ticket, config) {
+                // Every part is named as read under these discovery rules, so a
+                // part read under narrower ones is not read under these.
+                let scope = engine.partition_scope(&provider, &source.config);
+                let scoped = |part: String| part + &scope;
                 gathered.imported_partitions.insert(
                     provider.clone(),
                     tracked
@@ -831,7 +835,7 @@ impl Workspace {
                                 },
                                 locator: ticket.locator.clone(),
                             };
-                            engine.partition(&provider, &reference)
+                            scoped(engine.partition(&provider, &reference))
                         })
                         .collect(),
                 );
@@ -839,7 +843,7 @@ impl Workspace {
                     seen.insert(issue.reference.identity.id.clone());
                     gathered.partitions.insert(
                         (provider.clone(), issue.reference.identity.id.clone()),
-                        engine.partition(&provider, &issue.reference),
+                        scoped(engine.partition(&provider, &issue.reference)),
                     );
                     gathered.issues.push(issue);
                     ControlFlow::Continue(())
@@ -852,12 +856,15 @@ impl Workspace {
                         skipped_partitions = summary
                             .skipped
                             .iter()
-                            .map(|part| part.partition.clone())
+                            .map(|part| scoped(part.partition.clone()))
                             .collect();
                         // Rules that cannot be read name no part, so none becomes read.
                         read_partitions = engine
                             .partitions(&provider, &source.config)
-                            .unwrap_or_default();
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(scoped)
+                            .collect();
                         read_partitions.retain(|part| !skipped_partitions.contains(part));
                         for part in summary.skipped {
                             skipped.push(part.message.clone());
@@ -1138,8 +1145,11 @@ impl Workspace {
         // Workspace events: what a source brings in is logged with actor `sync`, and a
         // first import logs nothing. That is every issue new to this Workspace that
         // comes from a part of its source (for GitHub, a repository) no run has read
-        // yet: the backlog of a new source or of a repository added to one is not
-        // news. A part counts as read once a successful run read it, so a first read
+        // yet under the discovery rules it is read with now: the backlog of a new
+        // source, of a repository added to one, or shown by a loosened filter is not
+        // news. An issue that arrives in the same refresh as such a change cannot be
+        // told from that backlog and is silent too. A part counts as read once a
+        // successful run read it, so a first read
         // that fails partway, or that skips a repository it cannot see, stays silent
         // for it the next time too. Changes to tickets already here, and issues that
         // arrive in a part already read, log as `sync`.

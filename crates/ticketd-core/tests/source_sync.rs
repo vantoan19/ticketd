@@ -74,19 +74,34 @@ impl Connector for Fake {
                 Capability::Comments,
             ],
             schema: ConfigSchema {
-                fields: vec![SchemaField {
-                    key: "repositories".into(),
-                    label: "Repositories".into(),
-                    help: None,
-                    required: true,
-                    kind: FieldKind::MultiSelect {
-                        options: OptionSource::Dynamic { depends_on: vec![] },
-                        allow_custom: true,
-                        min_items: 1,
-                        max_items: 3,
-                        format: Some(ValueFormat::OwnerName),
+                fields: vec![
+                    SchemaField {
+                        key: "repositories".into(),
+                        label: "Repositories".into(),
+                        help: None,
+                        required: true,
+                        kind: FieldKind::MultiSelect {
+                            options: OptionSource::Dynamic { depends_on: vec![] },
+                            allow_custom: true,
+                            min_items: 1,
+                            max_items: 3,
+                            format: Some(ValueFormat::OwnerName),
+                        },
                     },
-                }],
+                    SchemaField {
+                        key: "labels".into(),
+                        label: "Labels".into(),
+                        help: None,
+                        required: false,
+                        kind: FieldKind::MultiSelect {
+                            options: OptionSource::Dynamic { depends_on: vec![] },
+                            allow_custom: true,
+                            min_items: 0,
+                            max_items: 3,
+                            format: None,
+                        },
+                    },
+                ],
             },
         }
     }
@@ -118,10 +133,12 @@ impl Connector for Fake {
             .and_then(|repository| repository.as_str())
             .and_then(|repository| remote.matching_by_repository.get(repository))
             .unwrap_or(&remote.matching);
+        let wanted = labels_of(request.config);
         let listed: Vec<ExternalIssue> = matching
             .iter()
             .filter_map(|id| remote.issues.get(id))
             .filter(|issue| issue.state == ExternalState::Open)
+            .filter(|issue| wanted.iter().all(|label| issue.labels.contains(label)))
             .filter(|issue| {
                 !remote
                     .inaccessible
@@ -171,6 +188,10 @@ impl Connector for Fake {
             .collect()
     }
 
+    fn discovery_scope(&self, config: &ConfigValues) -> String {
+        labels_of(config).join(",")
+    }
+
     fn fetch(
         &self,
         _: &ConfigValues,
@@ -202,6 +223,17 @@ impl Connector for Fake {
         }
         Ok(remote.conversations.get(&id).cloned().unwrap_or_default())
     }
+}
+
+/// The labels an issue must all have to be discovered; none means any issue.
+fn labels_of(config: &ConfigValues) -> Vec<String> {
+    config
+        .get("labels")
+        .and_then(|labels| labels.as_array())
+        .into_iter()
+        .flatten()
+        .map(|label| label.as_str().unwrap().to_owned())
+        .collect()
 }
 
 /// The repository of an issue the fake holds, read from its `owner/name#id` locator.
@@ -2150,6 +2182,95 @@ fn a_repository_skipped_when_added_is_silent_when_first_read_and_the_rest_keep_l
     f.publish(issue_in("o/more", 4, "Arrived later"), true);
     f.refresh_at("2026-02-05T00:00:00Z");
     assert_eq!(logged(&f, 4), created);
+}
+
+fn save_labels(f: &mut Fixture, labels: &[&str]) {
+    let config = json!({"repositories": ["o/r"], "labels": labels});
+    f.workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap();
+}
+
+fn labelled(id: u64, title: &str, labels: &[&str]) -> ExternalIssue {
+    let mut issue = issue(id, title);
+    issue.labels = labels.iter().map(|label| (*label).to_owned()).collect();
+    issue
+}
+
+/// A repository is read under its discovery rules. Loosening a filter shows a
+/// backlog that was always there, so its issues come in silently, as on a first
+/// read; changes to tickets already here, and what arrives once the loosened rules
+/// have been read, log as `sync` and start Automations.
+#[test]
+fn loosening_a_filter_brings_its_backlog_in_silently_and_what_follows_logs() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let created = [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)];
+    let mut f = Fixture::new();
+    save_labels(&mut f, &["triage"]);
+    f.publish(labelled(1, "Bug", &["bug"]), true);
+    f.publish(labelled(2, "Triage", &["triage"]), true);
+    f.refresh();
+    assert_eq!(f.ticket(1).title, "Triage");
+    assert_eq!(logged(&f, 1), []);
+
+    // With the rules unchanged, an old issue that gains the label is news.
+    f.publish(labelled(1, "Bug", &["bug", "triage"]), true);
+    f.refresh_at("2026-02-02T00:00:00Z");
+    assert_eq!(f.ticket(2).title, "Bug");
+    assert_eq!(logged(&f, 2), created);
+
+    // Loosened: the backlog it shows is silent, the ticket already here still logs.
+    f.publish(labelled(3, "Enhancement", &["enhancement"]), true);
+    f.publish(labelled(2, "Triage, retitled", &["triage"]), true);
+    save_labels(&mut f, &[]);
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(f.ticket(3).title, "Enhancement");
+    assert_eq!(logged(&f, 3), []);
+    assert_eq!(
+        logged(&f, 1),
+        [(WorkspaceEventType::TicketUpdated, WorkspaceActor::Sync)]
+    );
+
+    // Read under the loosened rules, what arrives next is news.
+    f.publish(labelled(4, "Arrived later", &["question"]), true);
+    f.refresh_at("2026-02-04T00:00:00Z");
+    assert_eq!(logged(&f, 4), created);
+}
+
+/// Tightened, then loosened again: the loosened rules were forgotten when they
+/// stopped being asked for, so what reappears is a backlog again and is silent.
+/// An issue that arrives in the same refresh as a change of rules cannot be told
+/// from that backlog, and is silent too: the safer side.
+#[test]
+fn a_filter_tightened_then_loosened_and_an_arrival_with_the_change_stay_silent() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType};
+
+    let mut f = Fixture::new();
+    f.publish(labelled(1, "Triage", &["triage"]), true);
+    f.refresh();
+    save_labels(&mut f, &["triage"]);
+    f.refresh_at("2026-02-02T00:00:00Z");
+    // Hidden while the rules were tight, arriving with the change back.
+    f.publish(labelled(2, "Hidden while tight", &["bug"]), true);
+    f.refresh_at("2026-02-03T00:00:00Z");
+    f.publish(labelled(3, "Arrived with the change", &["bug"]), true);
+    save_labels(&mut f, &[]);
+    f.refresh_at("2026-02-04T00:00:00Z");
+    assert_eq!(f.ticket(2).title, "Hidden while tight");
+    assert_eq!(logged(&f, 2), []);
+    assert_eq!(f.ticket(3).title, "Arrived with the change");
+    assert_eq!(logged(&f, 3), []);
+
+    // A new issue the tightened rules match still logs while they apply.
+    save_labels(&mut f, &["triage"]);
+    f.refresh_at("2026-02-05T00:00:00Z");
+    f.publish(labelled(4, "Triage arrival", &["triage"]), true);
+    f.refresh_at("2026-02-06T00:00:00Z");
+    assert_eq!(
+        logged(&f, 4),
+        [(WorkspaceEventType::TicketCreated, WorkspaceActor::Sync)]
+    );
 }
 
 /// A Workspace from before the repositories read were kept: one with tickets
