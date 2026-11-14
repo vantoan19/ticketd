@@ -134,7 +134,7 @@ const navItem = (name: string | RegExp) =>
     { name: typeof name === "string" ? new RegExp(`^${name}`) : name },
   );
 
-test("the nav lists the groups and sections in order, with Chat marked Experimental", async () => {
+test("the nav lists the groups and sections in order; Experimental is said on Chat's page, not in the nav", async () => {
   render(<Settings />);
   await act(async () => {});
   const nav = screen.getByRole("navigation", { name: "Settings sections" });
@@ -153,7 +153,7 @@ test("the nav lists the groups and sections in order, with Chat marked Experimen
     ["Connections", ["Google Drive"]],
     ["Help", ["Keyboard shortcuts", "About"]],
   ]);
-  expect(navItem(/^Chat/).textContent).toContain("Experimental");
+  expect(navItem(/^Chat/).textContent).not.toContain("Experimental");
   expect(navItem("Appearance").getAttribute("aria-current")).toBe("page");
 });
 

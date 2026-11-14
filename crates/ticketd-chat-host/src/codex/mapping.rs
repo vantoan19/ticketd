@@ -14,6 +14,7 @@ use crate::{
     SubmissionId, ToolStatus, TurnOutcome, reset_time,
 };
 
+use super::report::Reports;
 use super::rpc::{Reply, RpcError};
 
 /// Live tool output kept between a command's start and its authoritative completion.
@@ -33,35 +34,26 @@ const IGNORED_NOTIFICATIONS: &[&str] = &[
     "item/fileChange/outputDelta",
     "item/fileChange/patchUpdated",
     "item/mcpToolCall/progress",
-    "item/plan/delta",
+    // A new summary part is seen by its first delta; raw reasoning text is not shown.
     "item/reasoning/summaryPartAdded",
-    "item/reasoning/summaryTextDelta",
     "item/reasoning/textDelta",
     "mcpServer/startupStatus/updated",
     "modelProvider/authRecoveryCompleted",
     "remoteControl/status/changed",
     "skills/changed",
-    "thread/compacted",
     "thread/goal/cleared",
     "thread/goal/updated",
     "thread/name/updated",
-    "thread/settings/updated",
     "thread/started",
     "thread/status/changed",
-    "thread/tokenUsage/updated",
-    "turn/diff/updated",
-    "turn/plan/updated",
 ];
 
 /// Item types that are neither assistant text nor tool activity.
 const IGNORED_ITEMS: &[&str] = &[
-    "contextCompaction",
     "enteredReviewMode",
     "exitedReviewMode",
     "functionCallOutput",
     "hookPrompt",
-    "plan",
-    "reasoning",
     "sleep",
     "subAgentActivity",
 ];
@@ -74,6 +66,8 @@ pub(super) enum Call {
     OpenThread,
     StartTurn(SubmissionId),
     Steer(SubmissionId),
+    ListModels,
+    ListPermissionProfiles,
 }
 
 #[derive(Debug)]
@@ -111,6 +105,7 @@ pub(super) struct Session {
     rate_limits: Option<Value>,
     /// MCP servers whose failed start was already reported in this session.
     failed_servers: HashSet<String>,
+    pub(super) reports: Reports,
 }
 
 impl Session {
@@ -145,6 +140,14 @@ impl Session {
     pub fn reply(&mut self, call: &Call, reply: &Reply, late: bool) -> Vec<EventKind> {
         match (call, reply) {
             (Call::Plain, _) | (Call::OpenThread, Err(_)) => Vec::new(),
+            (Call::ListModels, reply) => {
+                let reply = reply.as_ref().map_err(rejection_reason);
+                vec![self.reports.models_listed(reply)]
+            }
+            (Call::ListPermissionProfiles, reply) => {
+                let reply = reply.as_ref().map_err(rejection_reason);
+                vec![self.reports.profiles_listed(reply)]
+            }
             (Call::OpenThread, Ok(result)) => self.thread_opened(result),
             (Call::StartTurn(submission), Ok(result)) => {
                 let Some(turn) = text(result, &["turn", "id"]) else {
@@ -194,6 +197,7 @@ impl Session {
             EventKind::SessionIdentified {
                 native_session: NativeSessionId::new(thread),
             },
+            self.reports.thread_opened(result),
             EventKind::Notice {
                 turn: None,
                 kind: NoticeKind::EffectiveSettings,
@@ -254,6 +258,7 @@ impl Session {
         let events = match method {
             "turn/started" => text(params, &["turn", "id"]).map(|turn| {
                 self.turn_is_active(turn);
+                self.reports.turn_started();
                 vec![EventKind::TurnStarted {
                     turn: NativeTurnId::new(turn),
                 }]
@@ -270,8 +275,24 @@ impl Session {
                     text: text.to_owned(),
                 }]
             }),
+            // A proposed plan is Markdown, shown like a response.
+            "item/plan/delta" => delta(params).map(|(turn, item, text)| {
+                vec![EventKind::TextDelta {
+                    turn,
+                    item,
+                    text: text.to_owned(),
+                }]
+            }),
             "item/commandExecution/outputDelta" => {
                 delta(params).map(|(turn, item, text)| vec![self.tool_output(turn, item, text)])
+            }
+            "item/reasoning/summaryTextDelta" => Some(self.reports.reasoning_delta(params)),
+            "turn/plan/updated" => Reports::plan(params).map(|plan| vec![plan]),
+            "turn/diff/updated" => Some(self.reports.turn_diff(params).into_iter().collect()),
+            "thread/tokenUsage/updated" => Some(Reports::token_usage(params).into_iter().collect()),
+            "thread/compacted" => Some(vec![EventKind::Compacted]),
+            "thread/settings/updated" => {
+                Some(self.reports.settings_updated(params).into_iter().collect())
             }
             "error" => self.error(params),
             "serverRequest/resolved" => params
@@ -296,18 +317,21 @@ impl Session {
                 )])
             }
             // The model that was asked for is not the one answering.
-            "model/rerouted" => Some(vec![EventKind::Notice {
-                turn: text(params, &["turnId"]).map(NativeTurnId::new),
-                kind: NoticeKind::CapabilityUnavailable,
-                message: match (text(params, &["fromModel"]), text(params, &["toModel"])) {
-                    (Some(from), Some(to)) => {
-                        format!("Codex rerouted this turn from {from} to {to}.")
-                    }
-                    (_, Some(to)) => format!("Codex rerouted this turn to {to}."),
-                    _ => "Codex rerouted this turn to a different model".to_owned(),
+            "model/rerouted" => Some(vec![
+                self.reports.rerouted(params),
+                EventKind::Notice {
+                    turn: text(params, &["turnId"]).map(NativeTurnId::new),
+                    kind: NoticeKind::CapabilityUnavailable,
+                    message: match (text(params, &["fromModel"]), text(params, &["toModel"])) {
+                        (Some(from), Some(to)) => {
+                            format!("Codex rerouted this turn from {from} to {to}.")
+                        }
+                        (_, Some(to)) => format!("Codex rerouted this turn to {to}."),
+                        _ => "Codex rerouted this turn to a different model".to_owned(),
+                    },
+                    detail: Some(detail(method, params)),
                 },
-                detail: Some(detail(method, params)),
-            }]),
+            ]),
             // ponytail: the field names come from the app-server schema and were not
             // seen in a live session; any other shape stays ignored, as before.
             "mcpServer/startupStatus/updated" if text(params, &["status"]) == Some("failed") => {
@@ -378,6 +402,7 @@ impl Session {
         self.ended_turns.push_back(id.to_owned());
         self.turn_errors.remove(id);
         self.tools.clear();
+        self.reports.turn_ended(id);
 
         // The turn's unanswered requests can no longer be answered.
         let mut events = Vec::new();
@@ -457,8 +482,25 @@ impl Session {
                 text: text(item, &["text"])?.to_owned(),
             }],
             "agentMessage" => Vec::new(),
+            "plan" if completed => vec![EventKind::MessageCompleted {
+                turn: NativeTurnId::new(turn),
+                item: NativeItemId::new(id),
+                text: text(item, &["text"])?.to_owned(),
+            }],
+            "plan" => Vec::new(),
+            "reasoning" if completed => vec![self.reports.reasoning_completed(turn, item, params)],
+            "reasoning" => vec![self.reports.reasoning_started(turn, item, params)],
+            "contextCompaction" if completed => vec![EventKind::Compacted],
+            "contextCompaction" => Vec::new(),
             "userMessage" => self.user_message(turn, item),
             ignored if IGNORED_ITEMS.contains(&ignored) => Vec::new(),
+            "fileChange" => {
+                let title = tool_title(kind, item).unwrap_or_default();
+                vec![
+                    self.tool(turn, id, kind, title, item, completed),
+                    self.reports.file_change(turn, item),
+                ]
+            }
             _ => match tool_title(kind, item) {
                 Some(title) => vec![self.tool(turn, id, kind, title, item, completed)],
                 None if completed => vec![unknown(&format!("item/{kind}"), item)],
@@ -495,7 +537,8 @@ impl Session {
         completed: bool,
     ) -> EventKind {
         let status = match text(item, &["status"]) {
-            Some("failed" | "declined") => ToolStatus::Failed,
+            Some("failed") => ToolStatus::Failed,
+            Some("declined") => ToolStatus::Declined,
             Some("inProgress") => ToolStatus::Running,
             Some("completed") => ToolStatus::Succeeded,
             _ if completed => ToolStatus::Succeeded,
@@ -614,6 +657,10 @@ impl Session {
             },
             _ => return refuse(id, method, params),
         };
+        // A command or file change approval names the item it would run or apply.
+        let item = matches!(kind, RequestKind::Approval { .. })
+            .then(|| text(params, &["itemId"]).map(NativeItemId::new))
+            .flatten();
         let turn = text(params, &["turnId"]);
         self.requests.insert(
             request.clone(),
@@ -627,6 +674,7 @@ impl Session {
         let requested = EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: turn.map(NativeTurnId::new),
+            item,
             kind: shown,
             detail: Some(detail(method, params)),
         });

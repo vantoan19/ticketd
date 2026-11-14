@@ -140,6 +140,24 @@ pub struct OpenRequest {
     pub chat_id: String,
     pub working_directory: PathBuf,
     pub session: SessionStart,
+    /// The person's picks for a new session; empty for the harness's own settings.
+    pub settings: StartSettings,
+}
+
+/// Settings a new session opens with, as chosen in New Chat. `None` leaves the
+/// harness's own setting. Values are option ids the harness listed; full access is
+/// never among them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StartSettings {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission: Option<String>,
+}
+
+impl StartSettings {
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none() && self.effort.is_none() && self.permission.is_none()
+    }
 }
 
 /// Resuming restores native history only. It never resubmits input.
@@ -191,6 +209,23 @@ pub struct QuestionAnswer {
     pub values: Vec<String>,
 }
 
+/// One harness setting a person can choose for the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingKey {
+    Model,
+    Effort,
+    Permission,
+}
+
+/// Asks the harness to use `value` (an option id it reported) for `setting`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingChange {
+    pub generation: RuntimeGeneration,
+    pub setting: SettingKey,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterruptRequest {
     pub generation: RuntimeGeneration,
@@ -214,6 +249,19 @@ pub enum Refusal {
     Unsupported,
     /// The runtime was closed, replaced or lost before the write.
     RuntimeClosed,
+}
+
+impl Refusal {
+    /// Why a command was not sent, as a person reads it after "because".
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::StaleGeneration { .. } => "the harness session had been replaced",
+            Self::TurnMismatch { .. } => "the turn it was meant for had ended",
+            Self::UnknownRequest => "the request was no longer open",
+            Self::Unsupported => "the harness can't do that here",
+            Self::RuntimeClosed => "the harness session had closed",
+        }
+    }
 }
 
 /// Submission evidence available when `submit` returns. It never describes task
@@ -249,6 +297,19 @@ pub enum InterruptOutcome {
     NotSent(Refusal),
     /// Written without an acknowledgment: timeout or loss of contact.
     Unconfirmed,
+}
+
+/// What the harness did with a [`SettingChange`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingOutcome {
+    /// The harness accepted it; it takes effect as [`Setting::applies_from`] says.
+    Applied,
+    /// The harness, or ticketd before writing, refused it.
+    Refused { reason: String },
+    /// Written without an answer in time: the harness may still use the old value.
+    Unconfirmed,
+    /// This harness cannot change this setting from ticketd.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,11 +394,221 @@ pub enum EventKind {
         message: String,
         detail: Option<ProviderDetail>,
     },
+    /// The latest state of one reasoning item, replacing its earlier state. Times are
+    /// milliseconds since the Unix epoch, as the harness reported them or as its
+    /// events were observed; `text` is only what the harness showed, and is `None`
+    /// when it showed nothing or redacted it.
+    ReasoningUpdated {
+        turn: NativeTurnId,
+        item: NativeItemId,
+        running: bool,
+        started_at: Option<i64>,
+        ended_at: Option<i64>,
+        text: Option<String>,
+        /// A heading the harness itself marked, never one made from the text's words.
+        heading: Option<String>,
+    },
+    /// The turn's whole plan as the harness reported it, replacing its earlier one.
+    PlanUpdated {
+        turn: NativeTurnId,
+        plan: Plan,
+    },
+    /// Every file the turn changed so far, replacing the earlier list.
+    FilesChanged {
+        turn: NativeTurnId,
+        files: Vec<FileChange>,
+    },
+    /// How full the session's context window is, as the harness reported it.
+    ContextUsage(ContextUsage),
+    /// The harness compacted the session's context.
+    Compacted,
+    /// The session's choosable settings and their current values, replacing the earlier.
+    SettingsState(HarnessSettings),
+    /// The slash commands the harness lists for the session, replacing the earlier.
+    CommandsListed(Vec<HarnessCommand>),
     /// Provider traffic the adapter does not model. Never completion or approval.
     Unknown {
         summary: String,
         detail: ProviderDetail,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    pub steps: Vec<PlanStep>,
+    /// The harness's own note about the plan.
+    pub explanation: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanStep {
+    pub text: String,
+    pub status: PlanStepStatus,
+    /// The words the harness shows while this step runs ("Running tests").
+    pub active_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanStepStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChange {
+    /// As the harness named it: absolute, or relative to the working directory.
+    pub path: String,
+    pub kind: FileChangeKind,
+    /// Line counts only when the harness reported the change's lines.
+    pub added_lines: Option<u32>,
+    pub removed_lines: Option<u32>,
+    /// The harness reported the change as made, not only as attempted.
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    Renamed { from: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextUsage {
+    /// Tokens in use.
+    pub used: u64,
+    /// The window's size in tokens.
+    pub window: u64,
+    /// What the harness says fills the window; empty when it did not say.
+    pub categories: Vec<ContextCategory>,
+    /// Where the harness compacts on its own, in tokens.
+    pub compacts_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextCategory {
+    pub name: String,
+    pub tokens: u64,
+}
+
+/// A slash command the harness offers, as the composer's `/` menu lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessCommand {
+    /// Without its slash: "review".
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// The settings a harness reports for the session. `None` is a setting it did not
+/// report, which is never offered as a choice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HarnessSettings {
+    pub model: Option<Setting>,
+    pub effort: Option<Setting>,
+    pub permission: Option<Setting>,
+}
+
+impl HarnessSettings {
+    pub fn get(&self, key: SettingKey) -> Option<&Setting> {
+        match key {
+            SettingKey::Model => self.model.as_ref(),
+            SettingKey::Effort => self.effort.as_ref(),
+            SettingKey::Permission => self.permission.as_ref(),
+        }
+    }
+
+    pub fn get_mut(&mut self, key: SettingKey) -> Option<&mut Setting> {
+        match key {
+            SettingKey::Model => self.model.as_mut(),
+            SettingKey::Effort => self.effort.as_mut(),
+            SettingKey::Permission => self.permission.as_mut(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Setting {
+    /// The option id in effect, when the harness said.
+    pub current: Option<String>,
+    /// In the harness's order; effort levels from lowest to highest.
+    pub options: Vec<SettingOption>,
+    /// Why ticketd cannot change it, when it cannot.
+    pub unchangeable: Option<String>,
+    pub applies_from: AppliesFrom,
+    /// The model the harness says answered, when it is not the one chosen.
+    pub answered_by: Option<String>,
+}
+
+impl Setting {
+    /// Why `value` cannot be chosen, or `None` when it can. Full access is never a
+    /// choice through ticketd, whatever the harness allows.
+    pub fn refusal(&self, value: &str) -> Option<String> {
+        if let Some(reason) = &self.unchangeable {
+            return Some(reason.clone());
+        }
+        match self.options.iter().find(|option| option.id == value) {
+            None => Some(format!("{value} is not one of the choices it offers")),
+            Some(option) if option.permission == Some(PermissionKind::FullAccess) => {
+                Some("ticketd never turns on full access".to_owned())
+            }
+            Some(option) if !option.allowed => {
+                Some(format!("{} is not allowed by its settings", option.label))
+            }
+            Some(_) => None,
+        }
+    }
+}
+
+/// What a harness offers before any session exists, as it reported it: the models it
+/// lists, each with its own effort levels, and its permission modes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HarnessOptions {
+    pub models: Vec<ModelChoice>,
+    /// `current` is the harness's own setting when it said; `unchangeable` when
+    /// ticketd cannot choose it.
+    pub permission: Option<Setting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelChoice {
+    pub model: SettingOption,
+    /// From lowest to highest; `is_default` marks the model's own default.
+    pub efforts: Vec<SettingOption>,
+    /// The model this choice runs, by name, when the harness lists it as an alias
+    /// ("Default" runs "Opus 5.5"). `None` when it is its own name or unknown.
+    pub runs_as: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub is_default: bool,
+    /// For a permission option, what it allows, when known.
+    pub permission: Option<PermissionKind>,
+    /// The harness's own policy allows choosing it.
+    pub allowed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionKind {
+    ReadOnly,
+    Ask,
+    AcceptEdits,
+    /// Bypasses approvals. Never offered as a choice through ticketd.
+    FullAccess,
+}
+
+/// When a change the harness accepted takes effect in the harness itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppliesFrom {
+    NextTurn,
+    /// From the harness's next model request, which may be inside a running turn.
+    NextRequest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,12 +640,17 @@ pub enum ToolStatus {
     Running,
     Succeeded,
     Failed,
+    /// The person declined it when the harness asked, so it never ran.
+    Declined,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InteractionRequest {
     pub request: NativeRequestId,
     pub turn: Option<NativeTurnId>,
+    /// The tool item an approval is about, when the harness names it: its decision is
+    /// told on that step.
+    pub item: Option<NativeItemId>,
     pub kind: InteractionKind,
     pub detail: Option<ProviderDetail>,
 }
@@ -534,6 +810,12 @@ pub trait HarnessAdapter: Send + Sync {
     /// Starts a provider process for `request.generation` with a new or resumed
     /// native session.
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem>;
+
+    /// Asks the installed harness what it offers, without starting a session or
+    /// sending anything to a model. `Err` says why it could not tell.
+    async fn options(&self) -> Result<HarnessOptions, String> {
+        Err("this harness does not report its options before a session".to_owned())
+    }
 }
 
 #[derive(Debug)]
@@ -557,6 +839,13 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
 
     /// Requests interruption of the expected active turn.
     async fn interrupt(&self, request: InterruptRequest) -> InterruptOutcome;
+
+    /// Changes a session setting. The supervisor calls it only between turns, so each
+    /// turn runs on one set of settings.
+    async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
+        let _ = change;
+        SettingOutcome::Unsupported
+    }
 
     /// Stops the owned process tree with bounded cleanup and ends the event stream.
     async fn close(&self) -> CloseOutcome;

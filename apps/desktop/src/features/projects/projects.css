@@ -211,3 +211,56 @@
   padding: 0 10px;
   box-shadow: var(--shadow-border-base);
 }
+
+/* A Project's icon (#368): a 16px frame, 20px on cards. A transparent favicon
+   is its shape in the text color, an opaque one its picture in grays on the
+   boundary ring, and none a letter tile. Never the favicon's own colors. */
+.project-icon {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+  border-radius: var(--radius-segment);
+}
+.project-icon[data-size="20"] {
+  width: 20px;
+  height: 20px;
+}
+.project-icon[data-look="letter"] {
+  background: var(--recessed);
+  box-shadow: inset var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  font-weight: 500;
+}
+.project-icon[data-size="20"][data-look="letter"] {
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.project-icon[data-look="shape"] {
+  border-radius: 0;
+  background: currentColor;
+  mask-position: center;
+  mask-size: 14px 14px;
+  mask-repeat: no-repeat;
+}
+.project-icon[data-size="20"][data-look="shape"] {
+  mask-size: 18px 18px;
+}
+.project-icon[data-look="picture"] img {
+  width: 100%;
+  height: 100%;
+  filter: grayscale(1);
+}
+.project-icon[data-look="picture"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset var(--shadow-border-base);
+}

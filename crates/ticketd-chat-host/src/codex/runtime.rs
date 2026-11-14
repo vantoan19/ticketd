@@ -15,9 +15,10 @@ use tokio::time::timeout;
 
 use crate::{
     Capabilities, CloseOutcome, DispatchOutcome, EVENT_BUFFER, EventKind, EventStream,
-    HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest, LoginState,
-    NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
-    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission, SubmissionKind,
+    HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest,
+    LoginState, NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
+    Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SettingChange,
+    SettingOutcome, Submission, SubmissionKind,
 };
 
 pub(super) use crate::stdio::{ChildProcess, Io, Reader, Writer};
@@ -26,6 +27,7 @@ use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 
 use super::discovery;
 use super::mapping::{Call, Session, rejection_reason, unknown};
+use super::report::{self, Overrides};
 use super::rpc::{self, Frame, MAX_FRAME_BYTES, Pending, Reply, Resolved, RpcError, StderrTail};
 
 /// How long a loss waits to learn the exit code before reporting without one.
@@ -38,6 +40,8 @@ pub(super) struct Options {
     pub rpc_timeout: Duration,
     /// How long `close` waits for the process to exit after its input closes.
     pub close_timeout: Duration,
+    /// Ask for the models and permission profiles once the thread is open.
+    pub list_settings: bool,
 }
 
 impl Default for Options {
@@ -46,6 +50,7 @@ impl Default for Options {
             client_version: env!("CARGO_PKG_VERSION").to_owned(),
             rpc_timeout: Duration::from_secs(30),
             close_timeout: ADAPTER_CLOSE_TIMEOUT,
+            list_settings: true,
         }
     }
 }
@@ -403,15 +408,37 @@ pub(super) async fn open_over(
     options: Options,
 ) -> Result<OpenedRuntime, Problem> {
     let (connection, events) = Connection::start(io, request.generation, options);
+    // New Chat's picks go out with the first turn, as a later change would.
+    connection.state().session.reports.overrides = Overrides {
+        model: request.settings.model.clone(),
+        effort: request.settings.effort.clone(),
+    };
     match connection.open_thread(request).await {
-        Ok(capabilities) => Ok(OpenedRuntime {
-            runtime: Arc::new(CodexRuntime {
-                steering: capabilities.steering.behavior().is_some(),
-                connection,
-            }),
-            events,
-            capabilities,
-        }),
+        Ok(capabilities) => {
+            if connection.options.list_settings {
+                // The lists may take Codex a network round trip: the session opens
+                // without waiting, and their replies become settings as they arrive.
+                let cwd = request.working_directory.to_string_lossy().into_owned();
+                let lists = Arc::clone(&connection);
+                tokio::spawn(async move {
+                    let models = lists.call("model/list", |_| Ok((json!({}), Call::ListModels)));
+                    let _ = models.await;
+                    let params = json!({"cwd": cwd});
+                    let profiles = lists.call("permissionProfile/list", |_| {
+                        Ok((params, Call::ListPermissionProfiles))
+                    });
+                    let _ = profiles.await;
+                });
+            }
+            Ok(OpenedRuntime {
+                runtime: Arc::new(CodexRuntime {
+                    steering: capabilities.steering.behavior().is_some(),
+                    connection,
+                }),
+                events,
+                capabilities,
+            })
+        }
         Err(problem) => {
             connection.close().await;
             Err(problem)
@@ -423,18 +450,75 @@ pub(super) async fn open_over(
 /// thread; the process is closed afterwards.
 pub(super) async fn probe_login(io: Io, options: Options) -> LoginState {
     let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
-    let login = match connection.initialize().await {
-        Ok(()) => match connection
-            .request("account/read", json!({"refreshToken": false}))
-            .await
-        {
-            CallOutcome::Reply(account) => login_state(&account),
-            _ => LoginState::Unknown,
-        },
-        Err(_) => LoginState::Unknown,
+    let read = async {
+        match connection.initialize().await {
+            Ok(()) => match connection
+                .request("account/read", json!({"refreshToken": false}))
+                .await
+            {
+                CallOutcome::Reply(account) => login_state(&account),
+                _ => LoginState::Unknown,
+            },
+            Err(_) => LoginState::Unknown,
+        }
     };
+    // A Codex that is slow to start (its MCP servers, say) is "not checked", not a
+    // check that never ends.
+    let login = timeout(crate::CHECK_TIMEOUT, read)
+        .await
+        .unwrap_or(LoginState::Unknown);
     connection.close().await;
     login
+}
+
+/// Asks app-server for its models, each with its efforts, and its permission
+/// profiles. Starts no thread and sends nothing to a model; the process is closed
+/// afterwards. `Err` says why Codex did not list its models.
+pub(super) async fn probe_options(io: Io, options: Options) -> Result<HarnessOptions, String> {
+    let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
+    let listed = list_options(&connection).await;
+    connection.close().await;
+    listed
+}
+
+async fn list_options(connection: &Connection) -> Result<HarnessOptions, String> {
+    connection
+        .initialize()
+        .await
+        .map_err(|problem| problem.message)?;
+    let models = list_all(connection, "model/list").await?;
+    // Profiles are optional: an older Codex has no such list.
+    let profiles = list_all(connection, "permissionProfile/list").await.ok();
+    Ok(report::listed_options(&models, profiles.as_deref()))
+}
+
+/// Every page of a `*/list` request, following `nextCursor`.
+async fn list_all(connection: &Connection, method: &str) -> Result<Vec<Value>, String> {
+    let mut all = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let params = match &cursor {
+            Some(cursor) => json!({"cursor": cursor}),
+            None => json!({}),
+        };
+        let reply = match connection.request(method, params).await {
+            CallOutcome::Reply(reply) => reply,
+            CallOutcome::Error(error) => return Err(rejection_reason(&error)),
+            CallOutcome::TimedOut => return Err(format!("Codex did not answer {method}")),
+            CallOutcome::Lost | CallOutcome::Refused(_) => {
+                return Err(format!("Codex app-server stopped during {method}"));
+            }
+        };
+        let page = reply
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("Codex answered {method} without a list"))?;
+        all.extend(page.iter().cloned());
+        match reply.get("nextCursor").and_then(Value::as_str) {
+            Some(next) if cursor.as_deref() != Some(next) => cursor = Some(next.to_owned()),
+            _ => return Ok(all),
+        }
+    }
 }
 
 pub(super) fn login_state(account: &Value) -> LoginState {
@@ -508,10 +592,19 @@ impl HarnessRuntime for CodexRuntime {
                 let input = json!([{"type": "text", "text": text, "text_elements": []}]);
                 let prepared = match kind {
                     SubmissionKind::StartTurn if active.is_some() => return mismatch,
-                    SubmissionKind::StartTurn => (
-                        json!({"threadId": thread, "clientUserMessageId": id.0, "input": input}),
-                        Call::StartTurn(id.clone()),
-                    ),
+                    SubmissionKind::StartTurn => {
+                        let mut params =
+                            json!({"threadId": thread, "clientUserMessageId": id.0, "input": input});
+                        // The person's choices, for this turn and the ones after it.
+                        let overrides = &session.reports.overrides;
+                        if let Some(model) = &overrides.model {
+                            params["model"] = json!(model);
+                        }
+                        if let Some(effort) = &overrides.effort {
+                            params["effort"] = json!(effort);
+                        }
+                        (params, Call::StartTurn(id.clone()))
+                    }
                     SubmissionKind::Steer { .. } if !self.steering => {
                         return Err(Refusal::Unsupported);
                     }
@@ -598,6 +691,31 @@ impl HarnessRuntime for CodexRuntime {
             CallOutcome::Error(_) | CallOutcome::TimedOut | CallOutcome::Lost => {
                 InterruptOutcome::Unconfirmed
             }
+        }
+    }
+
+    /// Codex takes model and effort as overrides on `turn/start`, so a change is kept
+    /// and goes out with the next turn; the thread keeps it for the turns after.
+    async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
+        if self.stale(change.generation).is_some() {
+            return SettingOutcome::Refused {
+                reason: "the session it was meant for has ended".to_owned(),
+            };
+        }
+        let mut state = self.connection.state();
+        if state.closed {
+            return SettingOutcome::Refused {
+                reason: "the session has ended".to_owned(),
+            };
+        }
+        if state
+            .session
+            .reports
+            .override_setting(change.setting, &change.value)
+        {
+            SettingOutcome::Applied
+        } else {
+            SettingOutcome::Unsupported
         }
     }
 

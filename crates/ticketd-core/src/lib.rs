@@ -97,10 +97,12 @@ pub use attachments::{
     DEFAULT_ATTACHMENT_LIMIT,
 };
 mod change_token;
+mod chat_suggestions;
 mod chats;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
 };
+pub use chat_suggestions::{ChatSuggestion, SuggestedTicket};
 pub use chats::{
     CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE,
     CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatAgentChange,
@@ -116,7 +118,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 66;
+pub const FORMAT_VERSION: i64 = 72;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -917,6 +919,24 @@ impl Workspace {
         if version < 66 {
             chats::migrate(&transaction)?;
         }
+        if version < 67 {
+            chats::migrate_attention(&transaction)?;
+        }
+        if version < 68 {
+            chats::migrate_tool_start(&transaction)?;
+        }
+        if version < 69 {
+            chats::migrate_interaction_tool(&transaction)?;
+        }
+        if version < 70 {
+            chats::migrate_read_through(&transaction)?;
+        }
+        if version < 71 {
+            chats::migrate_marked_unread(&transaction)?;
+        }
+        if version < 72 {
+            chats::migrate_request_times(&transaction)?;
+        }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
                 r.get(0)
@@ -1255,6 +1275,15 @@ impl Workspace {
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
         self.list_by_trash(false)
+    }
+
+    /// The `limit` tickets out of the trash whose content or organization changed
+    /// last, most recent first.
+    pub fn recently_updated_tickets(&self, limit: usize) -> Result<Vec<Ticket>, Error> {
+        let mut tickets = self.list_tickets()?;
+        tickets.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        tickets.truncate(limit);
+        Ok(tickets)
     }
 
     pub fn list_trash(&self) -> Result<Vec<Ticket>, Error> {

@@ -24,8 +24,9 @@ pub enum ChatUpdate {
         turn_id: String,
         delta: String,
     },
-    /// State that exists only while the host runs.
-    Live(ChatLive),
+    /// State that exists only while the host runs. Boxed: it is far larger than the
+    /// other updates.
+    Live(Box<ChatLive>),
     /// The view fell behind. This is the last update; attach again for a new snapshot.
     Resync,
 }

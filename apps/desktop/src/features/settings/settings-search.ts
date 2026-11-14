@@ -176,6 +176,12 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "chat",
   },
   {
+    title: "Notify me about Chats",
+    description: "Approvals, questions, failures and finished turns.",
+    keywords: "chat notification notifications alert sound badge dock mute",
+    section: "chat",
+  },
+  {
     title: "Google Drive",
     description:
       "Keep this workspace in sync between your desktops through a folder in your own Google Drive.",

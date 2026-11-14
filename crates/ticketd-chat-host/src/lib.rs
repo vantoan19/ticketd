@@ -4,19 +4,25 @@
 //! write workspace storage and never decide queue policy; the supervisor does both
 //! through core workflows.
 
+pub mod attention;
 mod claude;
 pub mod cli;
 mod codex;
+pub mod conditions;
 pub mod context;
 mod contract;
+pub mod diffstat;
 mod host;
 mod install;
+pub mod records;
 #[cfg(test)]
 mod scripted;
 mod stdio;
+pub mod step_kind;
 mod subscription;
 mod supervisor;
 pub mod testing;
+mod wire;
 
 pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter};
 pub use codex::CodexAdapter;
