@@ -16,8 +16,8 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
-    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatItem, ChatLinkKind,
-    ChatListFilter, Schedule, Step, StepAction, Ticket, Trigger, Workspace,
+    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
+    ChatLinkKind, ChatListFilter, Schedule, Step, StepAction, Ticket, Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -1230,6 +1230,67 @@ async fn a_run_taken_over_before_its_first_turn_opens_a_fresh_session_when_codex
         .count();
     assert_eq!(submits, 1);
     assert!(!f.core().chat(&chat).unwrap().queue_paused);
+}
+
+/// #406: a run taken over while its harness is still starting never sent its first
+/// message, which was queued. It stays in the Chat's history, set aside and never
+/// sent, with a row saying the person took the run over, as after a first turn.
+#[tokio::test(start_paused = true)]
+async fn a_run_taken_over_while_starting_keeps_its_instructions_set_aside() {
+    for harness in [AgentHarness::Codex, AgentHarness::ClaudeCode] {
+        for how in ["reply", "stop then message"] {
+            let f = Fixture::on(harness);
+            let open = f.fake.hold_next_open();
+            f.tag("Fix login");
+            f.tick().await;
+            let chat = f.chat();
+
+            let taking = async {
+                if how == "reply" {
+                    f.host
+                        .send(&chat, None, "Hello", SendMode::Auto)
+                        .await
+                        .unwrap();
+                } else {
+                    f.host.stop(&chat).await.unwrap();
+                }
+            };
+            tokio::join!(taking, async {
+                settle().await;
+                let _ = open.send(());
+            });
+            settle().await;
+            if how != "reply" {
+                f.reply(&chat, "Hello").await;
+            }
+
+            let items = f.core().chat_snapshot(&chat, 5_000).unwrap().items;
+            let label = format!("{harness:?} {how}: {items:?}");
+            let instructions: Vec<_> = items
+                .iter()
+                .filter_map(|item| match item {
+                    ChatItem::Message(m) if m.text.contains(INSTRUCTIONS) => Some(m),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(instructions.len(), 1, "{label}");
+            assert_eq!(
+                instructions[0].standing(),
+                ChatInputStanding::SetAside,
+                "{label}"
+            );
+            assert!(
+                items.iter().any(|item| matches!(item,
+                    ChatItem::Notice(n) if n.text == "You took this run over.")),
+                "{label}"
+            );
+            let submitted: Vec<_> = written(&f)
+                .into_iter()
+                .filter(|w| w.starts_with("submit"))
+                .collect();
+            assert_eq!(submitted, ["submit: Hello"], "{label}");
+        }
+    }
 }
 
 #[tokio::test(start_paused = true)]

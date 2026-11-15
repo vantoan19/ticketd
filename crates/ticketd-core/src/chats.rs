@@ -1900,6 +1900,38 @@ impl Workspace {
         })
     }
 
+    /// Set queued input aside without sending it: it moves from the queue to the end of
+    /// the history as input that was never delivered and is never sent. For input the
+    /// person did not write, which must not wait to go out for them.
+    pub fn set_aside_queued_chat_input(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<ChatMessage, Error> {
+        self.chat_write(|connection| {
+            let message = require_input(connection, chat_id, message_id)?;
+            if !message.queued {
+                return Err(invalid("this input is not in the queue"));
+            }
+            connection.execute(
+                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, decision) VALUES (?1, ?2, ?3, ?4, 'not_delivered', 'discarded')",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    chat_id,
+                    message_id,
+                    name(ChatSubmissionIntent::NewTurn)?
+                ],
+            )?;
+            let sequence = log(connection, chat_id, "message", message_id)?;
+            connection.execute(
+                "UPDATE chat_messages SET position = ?1 WHERE id = ?2",
+                params![sequence, message_id],
+            )?;
+            trim(connection, chat_id)?;
+            read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
+        })
+    }
+
     /// Queued input in the order it was saved.
     pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
         read_chat(&self.connection, chat_id)?;
