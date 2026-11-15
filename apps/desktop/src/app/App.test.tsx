@@ -572,6 +572,51 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
   expect(screen.queryAllByRole("tooltip")).toHaveLength(0);
 });
 
+test("New ticket opens over the current view instead of switching to Tickets", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await openNewTicket();
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  // Behind the dialog, which hides the rest of the window from the tree.
+  expect(
+    screen.getByRole("heading", { name: "Attachments", hidden: true }),
+  ).toBeTruthy();
+});
+
+test("a sidebar choice that could not be saved stays reported after the list loads again", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const setItem = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  setItem.mockRestore();
+  const notice = /Could not save the sidebar state/;
+  expect(screen.getByRole("alert").textContent).toMatch(notice);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByText(notice)).toBeTruthy();
+  // A save that works clears it.
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  expect(screen.queryByText(notice)).toBeNull();
+});
+
 test("moves focus between ticket rows without opening them until Enter, and retains selection on refresh", async () => {
   vi.useFakeTimers();
   let tickets = [

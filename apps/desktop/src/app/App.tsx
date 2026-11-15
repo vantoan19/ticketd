@@ -247,6 +247,9 @@ function AppContent() {
     null,
   );
   const [creating, setCreating] = useState(false);
+  // A sidebar choice that could not be saved. Its own state: a list load
+  // clears the workspace error, but not this, which lasts until a save works.
+  const [preferenceError, setPreferenceError] = useState("");
   // The status a group's Add action asked for; the sidebar's New ticket has none.
   const [createStatus, setCreateStatus] = useState<string | undefined>();
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -403,7 +406,7 @@ function AppContent() {
                             scope(...args);
                           }}
                           navigation={navigation}
-                          onError={workspace.setError}
+                          onError={setPreferenceError}
                           setCreating={(value) => {
                             if (value) setCreateStatus(undefined);
                             setCreating(value);
@@ -453,6 +456,11 @@ function AppContent() {
                         {error && (
                           <p role="alert" className="global-error">
                             {error}
+                          </p>
+                        )}
+                        {preferenceError && (
+                          <p role="alert" className="global-error">
+                            {preferenceError}
                           </p>
                         )}
                         <CreateTicketDialog

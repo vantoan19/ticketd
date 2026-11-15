@@ -194,6 +194,7 @@ export function WorkspaceSidebar({
   ) => void;
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
+  /** Says a sidebar choice could not be saved; "" once one saves again. */
   onError: (message: string) => void;
 }) {
   // While the workspace graph is open no other entry reads as current.
@@ -232,12 +233,13 @@ export function WorkspaceSidebar({
           {!isMobile && (
             <IconButton
               label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              onClick={() => {
-                if (!setPreference("sidebarCollapsed", !collapsed))
-                  onError(
-                    "Could not save the sidebar state. Check local storage and try again.",
-                  );
-              }}
+              onClick={() =>
+                onError(
+                  setPreference("sidebarCollapsed", !collapsed)
+                    ? ""
+                    : "Could not save the sidebar state. Check local storage and try again.",
+                )
+              }
             >
               {collapsed ? (
                 <PanelLeftOpen aria-hidden="true" />
@@ -267,7 +269,7 @@ export function WorkspaceSidebar({
                 onSelect={() => {
                   chose.current = true;
                   createTriggerRef.current = newTrigger.current;
-                  setView("tickets");
+                  // Opens over the current view, as Capture does.
                   // After the menu has closed, so it cannot take focus back.
                   window.setTimeout(() => setCreating(true), 0);
                 }}

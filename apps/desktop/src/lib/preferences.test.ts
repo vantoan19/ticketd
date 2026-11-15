@@ -97,3 +97,15 @@ test("the window background follows the resolved theme", async () => {
   expect(bg).toHaveBeenLastCalledWith("#0A0A0A");
   cleanup();
 });
+
+test("the stored theme reaches the native window before anything renders", async () => {
+  const { windowClient } = await import("@/lib/api/window");
+  const { applyStoredTheme } = await import("@/lib/preferences");
+  const setTheme = vi.spyOn(windowClient, "setTheme").mockResolvedValue();
+  const bg = vi.spyOn(windowClient, "setBackgroundColor").mockResolvedValue();
+  setPreference("theme", "dark");
+  applyStoredTheme();
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(setTheme).toHaveBeenCalledWith("dark");
+  expect(bg).toHaveBeenCalledWith("#0A0A0A");
+});
