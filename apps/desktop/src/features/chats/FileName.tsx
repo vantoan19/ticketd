@@ -1,3 +1,4 @@
+import { failureText } from "@/lib/api/describe-failure";
 import { useContext, useState } from "react";
 import { ChatError } from "@/features/chats/client";
 import { ChatFilesContext } from "@/features/chats/files";
@@ -48,10 +49,7 @@ export function FileName({
             if (reason instanceof ChatError && reason.code === "gone") {
               setGone(true);
               onFailed(`${shown} is no longer in this folder.`);
-            } else
-              onFailed(
-                reason instanceof Error ? reason.message : String(reason),
-              );
+            } else onFailed(failureText(reason, `open ${shown}`));
           },
         )
       }

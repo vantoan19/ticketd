@@ -1,3 +1,4 @@
+import { failureText } from "@/lib/api/describe-failure";
 import {
   useEffect,
   useEffectEvent,
@@ -279,7 +280,7 @@ export function ComposerField({
           key: openKey,
           options: [],
           state: "failed",
-          error: reason instanceof Error ? reason.message : String(reason),
+          error: failureText(reason, "search"),
         }),
     );
     return () => {
@@ -451,7 +452,7 @@ export function ComposerField({
   const empty =
     shown && shown.state !== "searching" && options.length === 0
       ? shown.state === "failed"
-        ? `Search failed: ${shown.error ?? ""}`
+        ? (shown.error ?? "Couldn't search.")
         : shown.trigger.char === "@"
           ? query
             ? `No file or folder matches “${query}”.`

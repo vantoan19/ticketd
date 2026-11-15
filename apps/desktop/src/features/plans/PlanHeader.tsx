@@ -14,7 +14,7 @@ import {
   Pencil,
   Plus,
 } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -64,7 +64,7 @@ export function PlanHeader({
   mode: "list" | "board" | "dependencies";
   onModeChange: (mode: "list" | "board" | "dependencies") => void;
 }) {
-  const { view, loadError, pending, actionError, run } = state;
+  const { view, loadError, reload, pending, actionError, retry, run } = state;
   const openGraph = useContext(ContextGraphNavigation);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
@@ -108,7 +108,12 @@ export function PlanHeader({
       return;
     }
     setNameError("");
-    if (await run(() => plansClient.change(plan.id, name, null)))
+    if (
+      await run(
+        () => plansClient.change(plan.id, name, null),
+        `rename ${current.name}`,
+      )
+    )
       setRenaming(false);
   }
   function renameKey(event: KeyboardEvent) {
@@ -186,7 +191,10 @@ export function PlanHeader({
               size="sm"
               disabled={pending}
               onClick={() =>
-                void run(() => plansClient.change(plan.id, null, false))
+                void run(
+                  () => plansClient.change(plan.id, null, false),
+                  `reactivate ${current.name}`,
+                )
               }
             >
               <ArchiveRestore data-icon="inline-start" /> Reactivate
@@ -255,11 +263,12 @@ export function PlanHeader({
           className="plan-purpose-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void run(() => plansClient.setPurpose(plan.id, purpose)).then(
-              (saved) => {
-                if (saved) setEditingPurpose(false);
-              },
-            );
+            void run(
+              () => plansClient.setPurpose(plan.id, purpose),
+              "save the purpose",
+            ).then((saved) => {
+              if (saved) setEditingPurpose(false);
+            });
           }}
         >
           <FieldLabel htmlFor="plan-purpose">Purpose</FieldLabel>
@@ -303,10 +312,16 @@ export function PlanHeader({
           )}
         </div>
       )}
-      {(actionError || loadError) && (
-        <Alert tone="error" role="alert">
-          <AlertDescription>{actionError || loadError}</AlertDescription>
-        </Alert>
+      {actionError && !archiving ? (
+        <FailureAlert
+          size="compact"
+          failure={actionError}
+          onRetry={() => void retry()}
+        />
+      ) : (
+        loadError && (
+          <FailureAlert size="compact" failure={loadError} onRetry={reload} />
+        )
       )}
       {view && (
         <div className="plan-summary">
@@ -350,6 +365,17 @@ export function PlanHeader({
               searchable and unchanged, and you can reactivate it later.
             </DialogDescription>
           </DialogHeader>
+          {actionError && (
+            <FailureAlert
+              size="compact"
+              failure={actionError}
+              onRetry={() =>
+                void retry().then((archived) => {
+                  if (archived) setArchiving(false);
+                })
+              }
+            />
+          )}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setArchiving(false)}>
               Cancel
@@ -357,9 +383,13 @@ export function PlanHeader({
             <Button
               disabled={pending}
               onClick={() =>
-                void run(() => plansClient.change(plan.id, null, true)).then(
-                  () => setArchiving(false),
-                )
+                void run(
+                  () => plansClient.change(plan.id, null, true),
+                  `archive ${current.name}`,
+                ).then((archived) => {
+                  // A failed archive keeps the dialog open with the reason.
+                  if (archived) setArchiving(false);
+                })
               }
             >
               Archive

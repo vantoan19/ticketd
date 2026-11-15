@@ -16,6 +16,12 @@ import {
 import { client } from "@/lib/api/client";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IconButton } from "@/components/ui/icon-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -218,7 +224,7 @@ export function DocumentEditor({
   const [links, setLinks] = useState<
     Awaited<ReturnType<typeof documents.links>>
   >([[], []]);
-  const [linkError, setLinkError] = useState("");
+  const [linkError, setLinkError] = useState<FailureDescription | null>(null);
   const [suggestion, setSuggestion] = useState(
     recovered ? recovered.draft.suggestion : (currentTicket ?? null),
   );
@@ -233,7 +239,9 @@ export function DocumentEditor({
           linksKey.current = key;
           setLinks(next);
         })
-        .catch((error: unknown) => setLinkError(String(error)));
+        .catch((error: unknown) =>
+          setLinkError(describeFailure(error, "load the connections")),
+        );
   };
   const refreshLinksRef = useRef(refreshLinks);
   useEffect(() => {
@@ -258,7 +266,13 @@ export function DocumentEditor({
     null,
   );
   const [failed, setFailed] = useState(false);
-  const [failureDetail, setFailureDetail] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  const [createError, setCreateError] = useState<FailureDescription | null>(
+    null,
+  );
+  // A close or navigation that waited on a save that failed: the person may
+  // still leave, keeping the draft on this device.
+  const [leaveBlocked, setLeaveBlocked] = useState<(() => void) | null>(null);
   const [failedTrash, setFailedTrash] = useState(false);
   // Editor state model. A Trash/Restore click is a one-shot intent: it is queued in
   // `transition` until the draft is saved, and dropped (remembered in `failedTransition`
@@ -372,7 +386,12 @@ export function DocumentEditor({
       transition.current = null;
       setFailed(true);
       setFailedTrash(true);
-      setFailureDetail(String(error));
+      setFailure(
+        describeFailure(
+          error,
+          failedTransition.current?.trashed ? "move it to Trash" : "restore it",
+        ),
+      );
       setStatus("Not saved");
     } finally {
       setTransitioning(false);
@@ -422,6 +441,7 @@ export function DocumentEditor({
     saving.current = true;
     setStatus("Saving…");
     setFailed(false);
+    setLeaveBlocked(null);
     const slow = window.setTimeout(() => setStatus("Still saving…"), 2000);
     try {
       // Flush first: an explicit save clears a latched recovery failure, so the
@@ -462,10 +482,13 @@ export function DocumentEditor({
     } catch (error) {
       window.clearTimeout(slow);
       saving.current = false;
+      const leaving = closeRequested.current
+        ? (afterSave.current ?? close.current)
+        : null;
       closeRequested.current = false;
       afterSave.current = null;
       transition.current = null;
-      if (String(error).includes("changed elsewhere") && id.current) {
+      if (toFailure(error).kind === "conflict" && id.current) {
         // The stored Document moved on since it was loaded: keep the draft and let
         // the conflict notice decide. If nothing differs, retry on the new revision.
         try {
@@ -482,7 +505,13 @@ export function DocumentEditor({
       }
       setFailed(true);
       setFailedTrash(false);
-      setFailureDetail(String(error));
+      const described = describeFailure(error, "save the Document");
+      setFailure({
+        ...described,
+        sentence: `${described.sentence} Your draft is kept on this device.`,
+      });
+      // Closing never waits on a save that keeps failing (DR-08).
+      setLeaveBlocked(() => leaving);
       setStatus("Not saved");
     }
   };
@@ -714,21 +743,27 @@ export function DocumentEditor({
       )}
     </span>
   );
-  const saveError = failed && (
-    <div role="alert" className="document-save-error">
-      <p>
-        {failedTrash
-          ? "We couldn’t update Trash. Nothing was lost."
-          : "We couldn’t save your changes. Your draft is still here."}
-      </p>
-      <Button onClick={retry}>Retry</Button>
-      {failureDetail && (
-        <details>
-          <summary>Details</summary>
-          <pre>{failureDetail}</pre>
-        </details>
-      )}
-    </div>
+  const saveError = failed && failure && (
+    <FailureAlert
+      failure={failure}
+      onRetry={retry}
+      actions={
+        leaveBlocked && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              const leave = leaveBlocked;
+              setLeaveBlocked(null);
+              leave();
+            }}
+          >
+            {capture ? "Close and keep draft" : "Leave and keep draft"}
+          </Button>
+        )
+      }
+    />
   );
   const connected = groupConnections(links);
   // A Plan link with no passage is a Plan attachment: the designated spec, or (attached) a supporting
@@ -1121,7 +1156,16 @@ export function DocumentEditor({
       </div>
       {initial && (
         <aside className="document-rail" aria-label="Document details">
-          {linkError && <p role="alert">{linkError}</p>}
+          {linkError && (
+            <FailureAlert
+              size="compact"
+              failure={linkError}
+              onRetry={() => {
+                setLinkError(null);
+                refreshLinks();
+              }}
+            />
+          )}
           {mentions.length > 0 && (
             <section aria-label="Mentions">
               <h2>Mentions</h2>
@@ -1212,7 +1256,7 @@ export function DocumentEditor({
                       : link;
                     draft.current = { ...draft.current, body: next };
                     setBody(next);
-                    setLinkError("");
+                    setLinkError(null);
                     setPickerOpen(false);
                   }}
                 />
@@ -1269,6 +1313,7 @@ export function DocumentEditor({
                     id: crypto.randomUUID(),
                   };
                 creatingTicket.current = true;
+                setCreateError(null);
                 void documents
                   .createTicket(
                     initial.id,
@@ -1278,7 +1323,9 @@ export function DocumentEditor({
                   .then((ticket) =>
                     navigate(() => onOpenTicket?.(ticket.reference)),
                   )
-                  .catch((error: unknown) => setLinkError(String(error)))
+                  .catch((error: unknown) =>
+                    setCreateError(describeFailure(error, "create the ticket")),
+                  )
                   .finally(() => {
                     creatingTicket.current = false;
                   });
@@ -1286,6 +1333,9 @@ export function DocumentEditor({
             >
               Create ticket
             </Button>
+            {createError && (
+              <FailureAlert size="compact" failure={createError} />
+            )}
           </div>
         </aside>
       )}

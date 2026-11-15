@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { Button } from "@/components/ui/button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { layoutFailure } from "./graph-failure";
 import { ListHeader } from "@/components/ui/list-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
@@ -78,8 +84,13 @@ export function ContextGraph({
   const [originNode, setOriginNode] = useState<Graph["nodes"][number] | null>(
     null,
   );
-  const [error, setError] = useState("");
-  const [layoutError, setLayoutError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // Bumped by Retry after a layout failure: a new canvas lays the graph out again.
+  const [layoutRun, setLayoutRun] = useState(0);
+  const [layoutError, setLayoutError] = useState<FailureDescription | null>(
+    null,
+  );
   // Every change (token, centre, expansion) starts a request; only the newest
   // request's answer is applied, so a slow older answer never hides a newer one.
   const latestRequest = useRef(0);
@@ -119,13 +130,15 @@ export function ContextGraph({
             ? previous
             : value.center,
         );
-        setError("");
+        setError(null);
       })
       .catch((reason: unknown) => {
         if (mounted.current && request === latestRequest.current)
-          setError(String(reason));
+          setError(describeFailure(reason, "load the context graph"));
       });
+    // `attempt` reloads after Retry.
   }, [
+    attempt,
     active,
     center,
     origin,
@@ -352,8 +365,22 @@ export function ContextGraph({
         )}
       </ListHeader>
       <div className="context-graph-body">
-        {error && <p role="alert">{error}</p>}
-        {layoutError && <p role="alert">{layoutError}</p>}
+        {error && (
+          <FailureState
+            failure={error}
+            onRetry={() => setAttempt((value) => value + 1)}
+          />
+        )}
+        {layoutError && (
+          <FailureAlert
+            size="compact"
+            failure={layoutError}
+            onRetry={() => {
+              setLayoutError(null);
+              setLayoutRun((value) => value + 1);
+            }}
+          />
+        )}
         {!showMap && preview && (
           <div className="context-graph-strip">
             <span>{kindNames[preview.kind]}</span>
@@ -369,6 +396,7 @@ export function ContextGraph({
           <div className="context-graph-main">
             {active && (
               <ContextGraphCanvas
+                key={layoutRun}
                 nodes={(graph?.nodes ?? []).map((node) => ({
                   id: node.id,
                   label: nodeAriaLabel(node),
@@ -380,13 +408,13 @@ export function ContextGraph({
                 selected={selected}
                 positions={positions}
                 onPositions={(value) => {
-                  setLayoutError("");
+                  setLayoutError(null);
                   setPositions(value);
                 }}
                 viewport={viewport}
                 onViewport={setViewport}
                 onSelect={setSelected}
-                onError={setLayoutError}
+                onError={(details) => setLayoutError(layoutFailure(details))}
                 fit={fit}
                 centerOn={centerOn}
                 centerId={graph?.center}

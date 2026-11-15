@@ -1,3 +1,4 @@
+import { failureText } from "@/lib/api/describe-failure";
 import { useEffect, useId, useState } from "react";
 import {
   Brain,
@@ -308,9 +309,7 @@ function FileRow({
               void onOpen(file.open_path).then(
                 () => setFailure(""),
                 (reason: unknown) =>
-                  setFailure(
-                    reason instanceof Error ? reason.message : String(reason),
-                  ),
+                  setFailure(failureText(reason, `open ${fileLabel(file)}`)),
               )
             }
           >

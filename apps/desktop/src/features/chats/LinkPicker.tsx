@@ -1,3 +1,4 @@
+import { failureText } from "@/lib/api/describe-failure";
 import { useContext, useEffect, useState } from "react";
 import { FileText, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -135,7 +136,8 @@ export function LinkPicker({
         setResults(found);
         setError("");
       },
-      (reason: unknown) => current && setError(String(reason)),
+      (reason: unknown) =>
+        current && setError(failureText(reason, "search records")),
     );
     return () => {
       current = false;
@@ -191,7 +193,7 @@ export function LinkPicker({
           />
           {error && (
             <p className="chat-fine" role="alert">
-              Search failed: {error}
+              {error}
             </p>
           )}
           {!typed && shown.length > 0 && (

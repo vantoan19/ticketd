@@ -1,3 +1,8 @@
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   Fragment,
   useEffect,
@@ -56,7 +61,7 @@ function Request({
     if (focusTitle) title.current?.focus();
   }, [focusTitle]);
   const [sending, setSending] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [showCommand, setShowCommand] = useState(false);
   const commandId = useId();
   const question = request.request === "question";
@@ -66,7 +71,7 @@ function Request({
   const pick = (optionId: string) => {
     if (sending) return;
     setSending(optionId);
-    setError("");
+    setError(null);
     onAnswer(optionId).then(
       () => {
         setSending(null);
@@ -74,7 +79,12 @@ function Request({
       },
       (reason: unknown) => {
         setSending(null);
-        setError(reason instanceof Error ? reason.message : String(reason));
+        const failure = describeFailure(reason, "send your answer");
+        // Picking again is the retry.
+        setError({
+          ...failure,
+          sentence: `${failure.sentence} Pick again to retry.`,
+        });
       },
     );
   };
@@ -220,11 +230,7 @@ function Request({
             ))}
           </div>
         )}
-        {error && (
-          <p className="chat-request-error" role="alert">
-            Not sent: {error.replace(/\.$/, "")}. Pick again to retry.
-          </p>
-        )}
+        {error && <FailureAlert size="compact" failure={error} />}
       </div>
     </section>
   );

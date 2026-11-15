@@ -1,5 +1,6 @@
 import { ChevronRight, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureState } from "@/components/ui/failure-alert";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -128,12 +129,7 @@ export function LinkedChats({
       Loading Chats…
     </span>
   ) : list.error ? (
-    <span className="linked-chats-note" role="alert">
-      Couldn’t load Chats{" "}
-      <Button variant="ghost" size="xs" onClick={retry}>
-        Retry
-      </Button>
-    </span>
+    <FailureState size="inline" failure={list.error} onRetry={retry} />
   ) : null;
   if (chip)
     return (

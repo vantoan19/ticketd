@@ -22,6 +22,7 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import {
   Popover,
@@ -68,6 +69,7 @@ import {
   useQuotes,
 } from "@/features/chats/quotes";
 import { ResumeDialog, SaveDocumentDialog } from "@/features/chats/dialogs";
+import { chatFailure, type ChatFailureNotice } from "@/features/chats/failure";
 import { lastAsk, runningPlan } from "@/features/chats/reports";
 import { PlanPill } from "@/features/chats/TurnReports";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
@@ -217,7 +219,7 @@ function LinkedRecords({
   onFailure,
 }: {
   chat: ChatState;
-  onFailure: (failure: string) => void;
+  onFailure: (failure: ChatFailureNotice | null) => void;
 }) {
   const client = useChatClient();
   const line = useRef<HTMLDivElement>(null);
@@ -238,16 +240,20 @@ function LinkedRecords({
     observer.observe(element);
     return () => observer.disconnect();
   }, [links]);
-  const settle = (action: Promise<void>) =>
-    void action.then(
-      () => onFailure(""),
+  const settle = (name: string, action: () => Promise<void>): void =>
+    void action().then(
+      () => onFailure(null),
       (reason: unknown) =>
-        onFailure(reason instanceof Error ? reason.message : String(reason)),
+        onFailure(chatFailure(reason, name, () => settle(name, action))),
     );
   const remove = (record: LinkedRecord) =>
-    settle(client.removeLink(chat.id, { kind: record.kind, id: record.id }));
+    settle(`remove the link to ${record.title}`, () =>
+      client.removeLink(chat.id, { kind: record.kind, id: record.id }),
+    );
   const add = (record: LinkedRecord) =>
-    settle(client.addLink(chat.id, { kind: record.kind, id: record.id }));
+    settle(`link ${record.title}`, () =>
+      client.addLink(chat.id, { kind: record.kind, id: record.id }),
+    );
   if (links.length === 0) return null;
   return (
     <div className="chat-linked">
@@ -313,7 +319,9 @@ function Conversation({
   const { chat: reported, items } = snapshot;
   const id = reported.id;
   const harness = reported.harness.name;
-  const [failure, setFailure] = useState(() => arrivals.get(id) ?? "");
+  // Why text was carried into this Chat: a written sentence, said once.
+  const [arrival, setArrival] = useState(() => arrivals.get(id) ?? "");
+  const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   // Said once: the next time this Chat opens it starts without the reason.
   useEffect(() => void arrivals.delete(id), [id]);
   const [resuming, setResuming] = useState(false);
@@ -327,17 +335,23 @@ function Conversation({
   /** A model, effort or permission change asked for here, until the next send. */
   const [asked, setAsked] = useState<AskedChange | null>(null);
   const changeLine = settingLine(reported, asked);
-  /** Runs a command; a refusal is said once, and the view keeps the host's state. */
-  const run = (action: Promise<unknown>) =>
+  /**
+   * Runs a command; a refusal is said once, and the view keeps the host's
+   * state. `name` says what did not happen: "send the message".
+   */
+  const run = (action: Promise<unknown>, name: string) =>
     action.then(
-      () => setFailure(""),
+      () => {
+        setFailure(null);
+        setArrival("");
+      },
       (reason: unknown) => {
-        setFailure(reason instanceof Error ? reason.message : String(reason));
+        setFailure(chatFailure(reason, name));
         throw reason;
       },
     );
-  const quietly = (action: Promise<unknown>) =>
-    void run(action).catch(() => {});
+  const quietly = (action: Promise<unknown>, name: string) =>
+    void run(action, name).catch(() => {});
   const actions = useMemo<TranscriptActions>(
     () => ({
       saveAsDocument: (response) =>
@@ -426,7 +440,7 @@ function Conversation({
   /** Stops the turn; the Stop button leaves, so the message box takes focus. */
   const stop = () => {
     messageBox.current?.focus();
-    quietly(client.stop(id));
+    quietly(client.stop(id), "stop the turn");
   };
   // When a menu, popover or picker last took an Esc: the next Esc a moment
   // later is the same habit (closing things), not a request to stop.
@@ -456,11 +470,19 @@ function Conversation({
   };
   const answer = (requestId: string, optionId: string) =>
     client.answer(id, requestId, { option_id: optionId }).then(
-      () => setFailure(""),
+      () => setFailure(null),
       (reason: unknown) => {
         // The request left the dock; say why the pick did nothing.
         if (reason instanceof ChatError && reason.code === "stale")
-          setFailure("The request had closed; your answer wasn't applied.");
+          setFailure({
+            failure: {
+              code: "failed",
+              title: "Couldn't apply your answer",
+              sentence: "The request had already closed.",
+              action: null,
+              details: "",
+            },
+          });
         else throw reason;
       },
     );
@@ -474,6 +496,7 @@ function Conversation({
         );
         setEdits((count) => count + 1);
       }),
+      "edit the queued message",
     );
   // Placed once when the Chat opens; it stays until the person sends or leaves.
   // After what the person read through, which the host keeps (#365); a Chat
@@ -499,13 +522,14 @@ function Conversation({
   const messageCount = items.filter(isMessage).length;
   const trashed = chat.retention === "trashed";
   const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
-    if (action === "check") quietly(client.checkAgain(id));
+    if (action === "check") quietly(client.checkAgain(id), "check again");
     else if (action === "resume") setResuming(true);
     else if (action === "pick-folder")
       quietly(
         client
           .pickFolder()
           .then((path) => (path ? client.setFolder(id, path) : undefined)),
+        "change the folder",
       );
     else if (chat.problem?.message_id)
       quietly(
@@ -514,6 +538,7 @@ function Conversation({
           chat.problem.message_id,
           action === "resend" ? "resend" : "discard",
         ),
+        action === "resend" ? "send it again" : "discard it",
       );
   };
   return (
@@ -570,10 +595,17 @@ function Conversation({
             {changeLine}
           </p>
         )}
-        {failure && (
+        {arrival && (
           <p className="chat-fine" role="alert">
-            {failure}
+            {arrival}
           </p>
+        )}
+        {failure && (
+          <FailureAlert
+            size="compact"
+            failure={failure.failure}
+            {...(failure.retry && { onRetry: failure.retry })}
+          />
         )}
         {saved && (
           <p className="chat-fine" role="status">
@@ -597,6 +629,7 @@ function Conversation({
                   client
                     .resume(id, { kind: "picked", ids: [...picked] })
                     .then(() => setPicked(null)),
+                  "resume the Chat",
                 )
               }
             >
@@ -637,13 +670,21 @@ function Conversation({
                     onAnswer={answer}
                     onLeave={() => messageBox.current?.focus()}
                     onSendNow={(queuedId) =>
-                      run(client.sendQueuedNow(id, queuedId)).then(() => {})
+                      run(
+                        client.sendQueuedNow(id, queuedId),
+                        "send the queued message",
+                      ).then(() => {})
                     }
                     onEdit={edit}
                     onRemove={(queuedId) =>
-                      quietly(client.removeQueued(id, queuedId))
+                      quietly(
+                        client.removeQueued(id, queuedId),
+                        "remove the queued message",
+                      )
                     }
-                    onResume={() => quietly(client.resumeQueue(id))}
+                    onResume={() =>
+                      quietly(client.resumeQueue(id), "resume the queue")
+                    }
                   />
                 </DockSlot>
                 <Composer
@@ -675,6 +716,9 @@ function Conversation({
                               ])
                               .then(() => clearQuotes(id)),
                       ),
+                      answering && question
+                        ? "send your answer"
+                        : "send the message",
                     )
                   }
                   onQueue={(text, links) =>
@@ -687,6 +731,7 @@ function Conversation({
                           ])
                           .then(() => clearQuotes(id)),
                       ),
+                      "queue the message",
                     )
                   }
                   {...(pending.length > 0 && {
@@ -701,14 +746,12 @@ function Conversation({
                       onChange={(setting, value) =>
                         void client.changeSetting(id, setting, value).then(
                           (outcome) => {
-                            setFailure("");
+                            setFailure(null);
                             setAsked({ setting, outcome });
                           },
                           (reason: unknown) =>
                             setFailure(
-                              reason instanceof Error
-                                ? reason.message
-                                : String(reason),
+                              chatFailure(reason, "change the setting"),
                             ),
                         )
                       }
@@ -778,14 +821,15 @@ export function ChatDetail({
   focusRequest?: boolean;
 }) {
   const client = useChatClient();
-  const { snapshot, error } = useChat(id);
-  const [failure, setFailure] = useState("");
+  const { snapshot, error, retry } = useChat(id);
+  const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   const [linking, setLinking] = useState(false);
   const chat = snapshot?.chat;
-  const retain = (action: Promise<void>) =>
-    void action.then(
-      () => setFailure(""),
-      (reason: unknown) => setFailure(String(reason)),
+  const retain = (name: string, action: () => Promise<void>): void =>
+    void action().then(
+      () => setFailure(null),
+      (reason: unknown) =>
+        setFailure(chatFailure(reason, name, () => retain(name, action))),
     );
   return (
     <section
@@ -820,13 +864,20 @@ export function ChatDetail({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => retain(client.unarchive(id))}
+              onClick={() =>
+                retain("unarchive the Chat", () => client.unarchive(id))
+              }
             >
               Unarchive
             </Button>
           )}
           {chat?.retention === "trashed" && (
-            <Button size="sm" onClick={() => retain(client.restore(id))}>
+            <Button
+              size="sm"
+              onClick={() =>
+                retain("restore the Chat", () => client.restore(id))
+              }
+            >
               Restore
             </Button>
           )}
@@ -843,7 +894,7 @@ export function ChatDetail({
                 open={linking}
                 onOpenChange={setLinking}
                 onPick={(record) =>
-                  retain(
+                  retain(`link ${record.title}`, () =>
                     client.addLink(id, { kind: record.kind, id: record.id }),
                   )
                 }
@@ -865,12 +916,15 @@ export function ChatDetail({
             <X aria-hidden />
           </IconButton>
         </div>
-        {(failure || error) && (
-          <p className="detail-header-message" role="alert">
-            {failure || `Could not open this Chat: ${error}`}
-          </p>
+        {failure && (
+          <FailureAlert
+            size="compact"
+            failure={failure.failure}
+            {...(failure.retry && { onRetry: failure.retry })}
+          />
         )}
       </div>
+      {error && !snapshot && <FailureState failure={error} onRetry={retry} />}
       {snapshot && (
         <Conversation
           key={id}

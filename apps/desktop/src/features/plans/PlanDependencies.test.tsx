@@ -96,7 +96,7 @@ test("shows outside blockers and edits dependencies through the shared workflow"
   );
 });
 
-test("a rejected blocker is explained next to the form", async () => {
+test("a blocker that would loop is explained by its failure kind, not its wording", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "plan_dependency_graph")
       return {
@@ -139,7 +139,11 @@ test("a rejected blocker is explained next to the form", async () => {
         },
       ];
     if (command === "add_dependency")
-      throw "dependency would create a cycle or self-link";
+      // The core's message lacks the word "cycle"; the kind decides (DP-05).
+      throw {
+        code: "cycle",
+        message: "T-KQ3 can't block T-KQ1: T-KQ1 already blocks T-KQ3.",
+      };
     return undefined;
   });
   render(
@@ -163,8 +167,15 @@ test("a rejected blocker is explained next to the form", async () => {
   fireEvent.click(await screen.findByRole("button", { name: /T-KQ3/ }));
   fireEvent.click(screen.getByRole("button", { name: "Add blocker" }));
   expect(
-    (await screen.findByText(/already blocks T-KQ3/)).textContent,
-  ).toContain("T-KQ1");
+    await screen.findByText(
+      "T-KQ3 already waits on T-KQ1, so it can’t block it. Choose another ticket.",
+    ),
+  ).toBeTruthy();
+  // Submit stays off until the choice changes.
+  expect(
+    (screen.getByRole("button", { name: "Add blocker" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
 });
 
 test("an archived Plan shows its blockers without add or remove controls", async () => {

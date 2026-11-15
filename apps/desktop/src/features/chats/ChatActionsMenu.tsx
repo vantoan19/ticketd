@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { useChatClient, type Retention } from "@/features/chats/client";
+import { chatFailure, type ChatFailureNotice } from "./failure";
 
 /** What the menu needs to know about the Chat it acts on. */
 export type ActionTarget = {
@@ -22,7 +23,7 @@ export type ActionTarget = {
 /**
  * The one Chat actions menu, for a list row's ⋯ and the Chat header: Mark as
  * unread or read, Mute or Unmute, then Archive and Move to Trash. A refused
- * action keeps the old state; `onResult` hears why, or "" once one succeeds.
+ * action keeps the old state; `onResult` hears why, or null once one succeeds.
  */
 export function ChatActionsMenu({
   chat,
@@ -41,14 +42,14 @@ export function ChatActionsMenu({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
-  onResult: (failure: string) => void;
+  onResult: (failure: ChatFailureNotice | null) => void;
 }) {
   const client = useChatClient();
-  const act = (action: Promise<void>) =>
-    void action.then(
-      () => onResult(""),
+  const act = (name: string, action: () => Promise<void>): void =>
+    void action().then(
+      () => onResult(null),
       (reason: unknown) =>
-        onResult(reason instanceof Error ? reason.message : String(reason)),
+        onResult(chatFailure(reason, name, () => act(name, action))),
     );
   const trashed = chat.retention === "trashed";
   // The link picker opens as the menu closes; focus stays with the picker.
@@ -74,16 +75,22 @@ export function ChatActionsMenu({
         <DropdownMenuItem
           onSelect={() =>
             act(
-              chat.unseen
-                ? client.markRead(chat.id)
-                : client.markUnread(chat.id),
+              chat.unseen ? "mark the Chat as read" : "mark the Chat as unread",
+              () =>
+                chat.unseen
+                  ? client.markRead(chat.id)
+                  : client.markUnread(chat.id),
             )
           }
         >
           {chat.unseen ? "Mark as read" : "Mark as unread"}
         </DropdownMenuItem>
         <DropdownMenuItem
-          onSelect={() => act(client.setMuted(chat.id, !chat.muted))}
+          onSelect={() =>
+            act(chat.muted ? "unmute the Chat" : "mute the Chat", () =>
+              client.setMuted(chat.id, !chat.muted),
+            )
+          }
         >
           {chat.muted ? "Unmute notifications" : "Mute notifications"}
         </DropdownMenuItem>
@@ -99,12 +106,20 @@ export function ChatActionsMenu({
         )}
         {!trashed && <DropdownMenuSeparator />}
         {chat.retention === "active" && (
-          <DropdownMenuItem onSelect={() => act(client.archive(chat.id))}>
+          <DropdownMenuItem
+            onSelect={() =>
+              act("archive the Chat", () => client.archive(chat.id))
+            }
+          >
             Archive
           </DropdownMenuItem>
         )}
         {!trashed && (
-          <DropdownMenuItem onSelect={() => act(client.trash(chat.id))}>
+          <DropdownMenuItem
+            onSelect={() =>
+              act("move the Chat to Trash", () => client.trash(chat.id))
+            }
+          >
             Move to Trash
           </DropdownMenuItem>
         )}

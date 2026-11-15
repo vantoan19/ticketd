@@ -150,24 +150,6 @@
   margin-right: auto;
   margin-left: 0;
 }
-.document-save-error {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-.document-save-error p {
-  margin: 0;
-}
-.document-save-error details {
-  flex-basis: 100%;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
-.document-save-error pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .document-dialog #document-title {
   font-size: var(--text-ui);
 }

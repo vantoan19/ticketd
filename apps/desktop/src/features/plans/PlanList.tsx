@@ -1,10 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ArchiveRestore, Layers } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import "./plan.css";
 
@@ -27,19 +31,28 @@ export function PlanList({
 }) {
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{
+    failure: FailureDescription;
+    retry: () => void;
+  } | null>(null);
   const [pending, setPending] = useState(false);
   const shown = plans.filter((item) => item.archived === archived);
 
-  async function act(change: () => Promise<unknown>) {
+  async function act(
+    change: () => Promise<unknown>,
+    action: string,
+  ): Promise<boolean> {
     setPending(true);
-    setError("");
+    setError(null);
     try {
       await change();
       await refresh();
       return true;
     } catch (reason) {
-      setError(String(reason));
+      setError({
+        failure: describeFailure(reason, action),
+        retry: () => void act(change, action),
+      });
       return false;
     } finally {
       setPending(false);
@@ -55,7 +68,7 @@ export function PlanList({
     let id = "";
     const created = await act(async () => {
       id = (await plansClient.create(name)).id;
-    });
+    }, `create ${name.trim()}`);
     if (created) {
       setName("");
       onOpen(id);
@@ -91,9 +104,11 @@ export function PlanList({
         </form>
       )}
       {error && (
-        <Alert tone="error" role="alert">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+        <FailureAlert
+          size="compact"
+          failure={error.failure}
+          onRetry={error.retry}
+        />
       )}
       {shown.length === 0 ? (
         <EmptyState
@@ -141,7 +156,10 @@ export function PlanList({
                   disabled={pending}
                   aria-label={`Reactivate ${item.name}`}
                   onClick={() =>
-                    void act(() => plansClient.change(item.id, null, false))
+                    void act(
+                      () => plansClient.change(item.id, null, false),
+                      `reactivate ${item.name}`,
+                    )
                   }
                 >
                   <ArchiveRestore data-icon="inline-start" /> Reactivate

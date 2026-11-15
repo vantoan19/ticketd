@@ -97,7 +97,8 @@ export function createHostChatClient(
         ? new ChatError(failure.data.code, failure.data.message)
         : new ChatError(
             "failed",
-            reason instanceof Error ? reason.message : String(reason),
+            // Internal: the page describes it; the text is for Details.
+            reason instanceof Error ? reason.message : "The Chat host failed.",
           );
     }
   }
