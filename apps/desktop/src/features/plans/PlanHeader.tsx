@@ -212,10 +212,7 @@ export function PlanHeader({
           {/* An archived Plan has one action left: a direct button, not a
               one-item menu (plans PL-11). */}
           {!canArchive && openGraph && (
-            <IconButton
-              label="Open context graph"
-              onClick={() => openGraph(plan.id)}
-            >
+            <IconButton label="Open graph" onClick={() => openGraph(plan.id)}>
               <Network />
             </IconButton>
           )}
@@ -245,7 +242,7 @@ export function PlanHeader({
                 </DropdownMenuItem>
                 {openGraph && (
                   <DropdownMenuItem onSelect={() => openGraph(plan.id)}>
-                    <Network /> Open context graph
+                    <Network /> Open graph
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />

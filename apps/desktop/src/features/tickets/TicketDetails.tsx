@@ -3,7 +3,8 @@ import { FailureState } from "@/components/ui/failure-alert";
 import type { FailureDescription } from "@/lib/api/describe-failure";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef } from "react";
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { type Project, type Ticket } from "@/lib/api/client";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
@@ -21,9 +22,6 @@ function newest(
   return first ?? second;
 }
 
-const DependencyGraph = lazy(
-  () => import("@/features/tickets/DependencyGraph"),
-);
 export function TicketDetails({
   selected,
   mention,
@@ -83,20 +81,10 @@ export function TicketDetails({
   }, [selected]);
   const pane = useRef<HTMLElement>(null);
   const narrow = useNarrowPane(pane);
-  const [graphReference, setGraphReference] = useState<string | null>(null);
-  // The graph belongs to the ticket it opened from; selecting another closes it.
-  const graphOpen = graphReference !== null && graphReference === selected;
-  // Closing the graph unmounts the control that had focus; land on the ticket heading.
-  const returnFromGraph = useRef(false);
-  useEffect(() => {
-    if (!graphOpen && returnFromGraph.current) {
-      returnFromGraph.current = false;
-      document.getElementById("detail-heading")?.focus();
-    }
-  }, [graphOpen]);
-  const closeGraph = () => {
-    returnFromGraph.current = true;
-    setGraphReference(null);
+  // A ticket's graph is the one graph view, opened on its dependencies.
+  const openGraph = useContext(ContextGraphNavigation);
+  const showGraph = (reference: string | null) => {
+    if (reference) openGraph?.(reference, { dependencies: true });
   };
   // Plain selection: it ends any mention being followed.
   const open = (reference: string | null) => setSelected(reference);
@@ -108,32 +96,9 @@ export function TicketDetails({
       ref={pane}
       className="ticket-detail"
       data-expanded={expanded || undefined}
-      data-graph={graphOpen || undefined}
       data-empty={selected === null || undefined}
       aria-labelledby="detail-heading"
     >
-      {graphOpen && selected && (
-        <Suspense
-          fallback={
-            <p role="status" className="graph-loading">
-              Loading graph…
-            </p>
-          }
-        >
-          <DependencyGraph
-            key={selected}
-            reference={selected}
-            revision={revision}
-            projects={projects}
-            plans={plans}
-            onBack={closeGraph}
-            onOpen={(reference) => {
-              closeGraph();
-              open(reference);
-            }}
-          />
-        </Suspense>
-      )}
       <TicketHeader
         selected={selected}
         ticket={ticket}
@@ -141,7 +106,7 @@ export function TicketDetails({
         onExpand={onExpand}
         onReturn={onReturn}
         onClose={() => open(null)}
-        onOpenGraph={() => setGraphReference(selected)}
+        {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
         refresh={refresh}
         updateTicket={updateTicket}
         position={position}
@@ -182,7 +147,7 @@ export function TicketDetails({
             refresh={refresh}
             updateTicket={updateTicket}
             select={open}
-            onOpenGraph={() => setGraphReference(item.reference)}
+            onOpenGraph={() => showGraph(item.reference)}
             noteTarget={newest(
               inboxTarget?.reference === item.reference ? inboxTarget : null,
               mention?.reference === item.reference && mention.noteId

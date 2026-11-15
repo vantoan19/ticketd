@@ -2163,7 +2163,7 @@ test.each(["ticket", "document", "plan"] as const)(
       screen.getAllByRole("button", { name: "T-KQ1 · First" }).at(-1)!,
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /^Open (ticket|item)$/ }),
+      screen.getByRole("button", { name: /^Open (T-KQ1|Document|Plan)$/ }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Back to workspace graph" }),
@@ -2291,6 +2291,7 @@ test("returns to local graph state after opening an item", async () => {
       total: 1,
       nodes: [node],
       edges: [],
+      connection_counts: { "1": 1 },
       next_cursor: null,
       omitted: false,
       omitted_groups: [],
@@ -2315,9 +2316,7 @@ test("returns to local graph state after opening an item", async () => {
   fireEvent.click(
     screen.getAllByRole("button", { name: "T-KQ1 · First" }).at(-1)!,
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Show only its neighbors" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -2327,10 +2326,8 @@ test("returns to local graph state after opening an item", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open item" }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Back to context graph" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Open T-KQ1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to graph" }));
   expect(
     screen
       .getByRole("switch", { name: "Include update details" })

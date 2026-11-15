@@ -31,10 +31,6 @@
     display: none;
   }
 }
-/* The dependency graph replaces the ticket; its drafts stay mounted. */
-.ticket-detail[data-graph] > :not(.dependency-graph-view, .graph-loading) {
-  display: none;
-}
 /* Expanded: the document column is 800px (32px inset) and the rail takes the
    rest, at least 232px. Beside the list the rail is a flat 232px. */
 @container ticket-detail (min-width: 652px) {

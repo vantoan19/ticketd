@@ -1321,7 +1321,7 @@ export function DocumentEditor({
                 onClick={() => navigate(() => onOpenGraph(initial.id))}
               >
                 <Network aria-hidden="true" />
-                Open context graph
+                Open graph
               </Button>
             )}
           </div>

@@ -159,7 +159,7 @@ test("a ticket with no links shows only Add relationship once the read succeeds"
   expect(screen.queryByRole("button", { name: "Dependencies" })).toBeNull();
 });
 
-test("a ticket with no links still offers its Context graph", async () => {
+test("a ticket with no links still offers its graph", async () => {
   bridge();
   const open = vi.fn();
   render(
@@ -167,10 +167,8 @@ test("a ticket with no links still offers its Context graph", async () => {
       <Section ticket={base} refresh={vi.fn()} onOpenGraph={vi.fn()} />
     </ContextGraphNavigation.Provider>,
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Open context graph" }),
-  );
-  expect(open).toHaveBeenCalledWith("T-KQ1");
+  fireEvent.click(await screen.findByRole("button", { name: "Open graph" }));
+  expect(open).toHaveBeenCalledWith("T-KQ1", { dependencies: true });
 });
 
 test("a trashed ticket still shows its relationships, without actions to change them", async () => {
@@ -263,11 +261,11 @@ test("shows n+ and loads the next page when more links exist", async () => {
   expect(screen.getByRole("button", { name: "Show more links" })).toBeTruthy();
 });
 
-test("the Dependencies action opens the dependency graph", async () => {
+test("Open graph opens the ticket graph without a navigation provider", async () => {
   bridge({ prerequisites: [{ reference: "T-KQ2", title: "Blocker" }] });
   const onOpenGraph = vi.fn();
   renderSection(base, undefined, onOpenGraph);
-  fireEvent.click(await screen.findByRole("button", { name: "Dependencies" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open graph" }));
   expect(onOpenGraph).toHaveBeenCalled();
 });
 

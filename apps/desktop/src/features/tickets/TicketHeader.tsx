@@ -73,7 +73,8 @@ export function TicketHeader({
   onExpand: () => void;
   onReturn: () => void;
   onClose: () => void;
-  onOpenGraph: () => void;
+  /** Opens the ticket's graph; without it the menu leaves the entry out. */
+  onOpenGraph?: () => void;
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
@@ -300,9 +301,11 @@ export function TicketHeader({
                     <DropdownMenuItem onSelect={() => setDuplicateOpen(true)}>
                       Mark as duplicate…
                     </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={onOpenGraph}>
-                      Show in dependency graph
-                    </DropdownMenuItem>
+                    {onOpenGraph && (
+                      <DropdownMenuItem onSelect={onOpenGraph}>
+                        Open graph
+                      </DropdownMenuItem>
+                    )}
                   </>
                 )}
                 <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>

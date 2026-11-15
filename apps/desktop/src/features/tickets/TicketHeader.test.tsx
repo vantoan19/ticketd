@@ -142,7 +142,7 @@ test("a reminder whose time has passed says it is due, not scheduled", () => {
 
 test("the actions menu opens the graph, the duplicate dialog, and trash", async () => {
   const props = header();
-  await chooseAction("Show in dependency graph");
+  await chooseAction("Open graph");
   expect(props.onOpenGraph).toHaveBeenCalled();
   await chooseAction("Mark as duplicate…");
   expect(
@@ -199,9 +199,7 @@ test("a trashed ticket offers Restore without graph or duplicate actions", async
   );
   expect(await screen.findByRole("menuitem", { name: "Restore" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: "Move to Trash" })).toBeNull();
-  expect(
-    screen.queryByRole("menuitem", { name: "Show in dependency graph" }),
-  ).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Open graph" })).toBeNull();
 });
 
 test("shows the position in the list and moves to the neighboring ticket", () => {

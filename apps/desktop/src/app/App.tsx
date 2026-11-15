@@ -183,13 +183,15 @@ function AppContent() {
   }, []);
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
+  // A ticket's graph opened from its header or rail starts on its dependencies.
+  const [graphDependencies, setGraphDependencies] = useState(false);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
   // Once opened it stays mounted (hidden), so coming back restores its filters,
   // selection and viewport exactly as Back does.
   const [workspaceGraphMounted, setWorkspaceGraphMounted] = useState(false);
   // The only way to change the top-level view or the open graph: switching view
   // closes any graph, and opening a graph leaves the view as it was.
-  // `keepGraph` only hides the graph so Back to context graph can return to it.
+  // `keepGraph` only hides the graph so Back to graph can return to it.
   const navigate = (next: {
     view?: typeof view;
     graph?: string | null;
@@ -310,7 +312,12 @@ function AppContent() {
   });
   const isMobile = useIsMobile();
   return (
-    <ContextGraphNavigation.Provider value={(id) => navigate({ graph: id })}>
+    <ContextGraphNavigation.Provider
+      value={(id, options) => {
+        setGraphDependencies(options?.dependencies ?? false);
+        navigate({ graph: id });
+      }}
+    >
       <TicketNavigation.Provider
         value={(reference) => {
           setSelected(reference);
@@ -468,7 +475,7 @@ function AppContent() {
                                   }
                                 >
                                   {localGraphOrigin
-                                    ? "Back to context graph"
+                                    ? "Back to graph"
                                     : "Back to workspace graph"}
                                 </Button>
                               )}
@@ -648,8 +655,12 @@ function AppContent() {
                                   key={localGraphOrigin}
                                   active={graphOrigin === localGraphOrigin}
                                   origin={localGraphOrigin}
+                                  dependencies={graphDependencies}
+                                  revision={revision}
+                                  projects={projects}
+                                  plans={plans}
                                   {...(workspaceGraphOpen && {
-                                    originLabel: "workspace graph",
+                                    originLabel: "Workspace graph",
                                   })}
                                   onBack={(origin) => {
                                     setLocalGraphOrigin(null);
@@ -659,6 +670,16 @@ function AppContent() {
                                     else setGraphOrigin(null);
                                   }}
                                   onOpen={openGraphItem}
+                                  onOpenTicket={(reference) => {
+                                    keepGraph.current = true;
+                                    try {
+                                      setGraphOrigin(null);
+                                      setSelected(reference);
+                                      setView("tickets");
+                                    } finally {
+                                      keepGraph.current = false;
+                                    }
+                                  }}
                                 />
                               </div>
                             )}
