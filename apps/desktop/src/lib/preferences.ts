@@ -193,7 +193,17 @@ export function useThemeSync() {
   }, [dark]);
 }
 
-/** Applies the stored theme before the first render. */
+/**
+ * Applies the stored theme before the first render, to the page and to the
+ * native window, so a screen shown before the app mounts (opening, or the
+ * startup recovery screen) never sits under a light title bar in dark.
+ */
 export function applyStoredTheme() {
-  applyTheme(resolveTheme(loadPreferences().theme, systemPrefersDark()));
+  const { theme } = loadPreferences();
+  const resolved = resolveTheme(theme, systemPrefersDark());
+  applyTheme(resolved);
+  void windowClient.setTheme(theme === "system" ? null : theme);
+  void windowClient.setBackgroundColor(
+    resolved === "dark" ? "#0A0A0A" : "#FAFAFA",
+  );
 }

@@ -10,6 +10,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { DraftRecoveryProvider } from "./draft-recovery";
+import { WorkspaceBand } from "@/app/WorkspaceBand";
 import {
   useDraftRecovery,
   useDraftRecoveryNotices,
@@ -24,9 +25,11 @@ afterEach(() => {
 });
 
 function Probe({ expose }: { expose: (recovery: DraftRecovery) => void }) {
-  expose(useDraftRecovery());
+  const recovery = useDraftRecovery();
+  expose(recovery);
   return (
     <>
+      <WorkspaceBand onRetry={() => recovery.retry()} />
       <main>{useDraftRecoveryNotices()}</main>
       <p>App content</p>
     </>
@@ -55,16 +58,22 @@ test("an explicit flush retries a latched write once access returns, without a s
   await act(async () => {
     await recovery?.put("document:1", { body: "x" }, ["x"]).catch(() => {});
   });
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "readonly database",
+  // The workspace band says it once, in plain words; the raw text is in Details.
+  const band = await screen.findByText(
+    /Unsaved drafts aren't protected right now/,
   );
+  expect(band.textContent).not.toContain("readonly database");
   // The failure stays latched for background writes.
   await expect(recovery?.flush()).rejects.toThrow("readonly database");
   writable = true;
   await act(async () => {
     await recovery?.flush();
   });
-  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  await waitFor(() =>
+    expect(
+      screen.queryByText(/Unsaved drafts aren't protected right now/),
+    ).toBeNull(),
+  );
 });
 
 test("an unwritable workspace at startup shows a styled error state with Retry", async () => {
@@ -83,7 +92,10 @@ test("an unwritable workspace at startup shows a styled error state with Retry",
     </DraftRecoveryProvider>,
   );
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("Could not open the workspace");
+  expect(alert.textContent).toContain("ticketd can't open this workspace");
+  // The raw cause waits under Details.
+  expect(alert.textContent).not.toContain("Permission denied");
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(alert.textContent).toContain("Permission denied");
   expect(screen.queryByText("Loading recoverable drafts…")).toBeNull();
   readable = true;

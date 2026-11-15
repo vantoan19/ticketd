@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { draftRetention, type DraftRetention } from "./api/attachments";
+import { isWorkspaceCode, toFailure } from "./api/bridge-failure";
+import { RecoveryScreen } from "./recovery-screen";
 import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+  clearWorkspaceFailure,
+  reportWorkspaceFailure,
+} from "./workspace-state";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { describeFailure } from "@/lib/api/describe-failure";
 import {
   DraftRecoveryContext as Context,
-  DraftRecoveryNoticeContext as NoticeContext,
   DraftRecoveryErrorContext as ErrorContext,
   DraftRecoveryGenerationContext as GenerationContext,
   DraftRecoveryNoticesContext as NoticesContext,
@@ -25,7 +27,8 @@ type RecoveryStore = DraftRecovery & {
 
 function recoveryStore(
   initial: DraftRetention[],
-  onError: (error: string) => void,
+  /** A failure to protect drafts, or null once writes succeed again. */
+  onError: (reason: unknown) => void,
   onReload: (
     restored: DraftRetention[],
     cutover: boolean,
@@ -53,7 +56,7 @@ function recoveryStore(
     })()
       .catch((reason) => {
         error = reason;
-        if (!transitioning && !retired) onError(String(reason));
+        if (!transitioning && !retired) onError(reason);
         throw reason;
       })
       .finally(() => {
@@ -67,12 +70,12 @@ function recoveryStore(
     // Background writes stay latched after a failure so a failing disk is not
     // hammered on every keystroke. An explicit flush is a person's save or
     // retry: it clears the latch and tries the queued writes again, so a save
-    // can succeed as soon as access returns.
-    if (error && !running) {
-      error = null;
-      onError("");
-    }
-    return settle();
+    // can succeed as soon as access returns. The failure is cleared only once
+    // the writes succeed, so the workspace band never flickers off and on.
+    const failed = error !== null;
+    if (error && !running) error = null;
+    await settle();
+    if (failed) onError(null);
   };
   const settle = async () => {
     while (queue.length || running) {
@@ -152,9 +155,14 @@ function recoveryStore(
     },
     retry() {
       if (transitioning || retired) return;
+      const failed = error !== null;
       error = null;
-      onError("");
-      void flush().catch(() => {});
+      void settle().then(
+        () => {
+          if (failed) onError(null);
+        },
+        () => {},
+      );
     },
   };
   return store;
@@ -166,29 +174,37 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
     store: RecoveryStore | null;
     generation: number;
   }>({ store: null, generation: 0 });
-  const [error, setError] = useState("");
+  // Why drafts are not protected, or null. The workspace band says so; editors
+  // read it only to stop claiming their content is protected.
+  const [failure, setFailureState] = useState<unknown>(null);
+  const setFailure = useCallback((reason: unknown) => {
+    setFailureState(reason);
+    if (reason === null) {
+      clearWorkspaceFailure();
+      return;
+    }
+    // A workspace-level kind already raised the band through the bridge.
+    const kind = toFailure(reason).kind;
+    if (!isWorkspaceCode(kind))
+      reportWorkspaceFailure("drafts_unprotected", toFailure(reason).message);
+  }, []);
+  // A cutover action failed; shown beside its button.
+  const [cutoverFailure, setCutoverFailure] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
   const [cutoverPending, setCutoverPending] = useState(false);
-  // Editors that show the recovery failure beside their own content claim it,
-  // so the window-level notice does not repeat it over the page.
-  const [inlineNotices, setInlineNotices] = useState(0);
-  const claimNotice = useCallback(() => {
-    setInlineNotices((count) => count + 1);
-    return () => setInlineNotices((count) => count - 1);
-  }, []);
   useEffect(() => {
     let active = true;
     void (async () => {
       const makeStore = (initial: DraftRetention[]): RecoveryStore =>
         recoveryStore(
           initial,
-          (message) => {
-            if (active) setError(message);
+          (reason) => {
+            if (active) setFailure(reason);
           },
           (restored, pending, previous) => {
             previous.retire();
             if (!active) return;
-            setError("");
+            setFailure(null);
             setCutoverPending(pending);
             setRecovery((current) => ({
               store: makeStore(restored),
@@ -312,88 +328,76 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
       if (active) {
         setCutoverPending(pending);
         setRecovery((current) => ({ ...current, store: next }));
-        setError("");
+        setFailureState(null);
       }
-    })().catch((reason) => {
-      if (active) setError(String(reason));
+    })().catch((reason: unknown) => {
+      // Before the store exists the recovery screen says it; there is no band yet.
+      if (active) setFailureState(reason ?? new Error("Unknown failure"));
     });
     return () => {
       active = false;
     };
-  }, [attempt]);
-  const retryRecovery = () =>
-    recovery.store ? recovery.store.retry() : setAttempt((value) => value + 1);
+  }, [attempt, setFailure]);
   if (!recovery.store)
-    return (
+    return failure !== null ? (
+      <RecoveryScreen
+        reason={failure}
+        onRetry={() => {
+          setFailureState(null);
+          setAttempt((value) => value + 1);
+        }}
+      />
+    ) : (
       <div className="grid min-h-screen place-items-center p-6">
-        {error ? (
-          <Alert tone="error" className="w-full max-w-xl">
-            <AlertTitle>Could not open the workspace</AlertTitle>
-            <AlertDescription>
-              ticketd could not read or write its workspace, so nothing can be
-              shown yet. Check that the workspace folder and its files are
-              writable, then retry. {error}
-            </AlertDescription>
-            <AlertActions>
-              <Button type="button" onClick={retryRecovery}>
-                Retry
-              </Button>
-            </AlertActions>
-          </Alert>
-        ) : (
-          <EmptyState size="hint" role="status" title="Opening workspace…" />
-        )}
+        <EmptyState size="hint" role="status" title="Opening workspace…" />
       </div>
     );
-  // The notices sit in the flow at the top of the main content (see
-  // useDraftRecoveryNotices) so they push the page down instead of covering it.
-  const notices = (cutoverPending || (error && inlineNotices === 0)) && (
+  // The legacy-draft cutover notice sits in the flow at the top of the main
+  // content (see useDraftRecoveryNotices). A failure to protect drafts is not
+  // shown here: the workspace band reports it once for the whole window.
+  const notices = cutoverPending && (
     <div className="mx-auto flex max-h-1/2 w-full max-w-xl flex-none flex-col gap-2 overflow-y-auto p-2">
-      {error && inlineNotices === 0 && (
-        <Alert tone="error">
-          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
-          <AlertDescription>Keep this window open. {error}</AlertDescription>
-          <AlertActions>
-            <Button type="button" onClick={retryRecovery}>
-              Retry draft recovery
-            </Button>
-          </AlertActions>
-        </Alert>
-      )}
-      {cutoverPending && (
-        <Alert role="status">
-          <AlertDescription>
-            Files are protected while legacy drafts are reviewed. Open each
-            desktop profile to import its drafts before allowing cleanup.
-          </AlertDescription>
-          <AlertActions>
-            <Button
-              type="button"
-              onClick={() =>
-                void draftRetention
-                  .completeCutover()
-                  .then(() => setCutoverPending(false))
-                  .catch((reason) => setError(String(reason)))
-              }
-            >
-              All desktop profiles reviewed
-            </Button>
-          </AlertActions>
-        </Alert>
+      <Alert role="status">
+        <AlertDescription>
+          Files are protected while legacy drafts are reviewed. Open each
+          desktop profile to import its drafts before allowing cleanup.
+        </AlertDescription>
+        <AlertActions>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setCutoverFailure(null);
+              void draftRetention
+                .completeCutover()
+                .then(() => setCutoverPending(false))
+                .catch((reason: unknown) => setCutoverFailure(reason));
+            }}
+          >
+            All desktop profiles reviewed
+          </Button>
+        </AlertActions>
+      </Alert>
+      {cutoverFailure !== null && (
+        <FailureAlert
+          size="compact"
+          failure={describeFailure(cutoverFailure, "finish the draft review")}
+        />
       )}
     </div>
   );
   return (
     <>
       <GenerationContext.Provider value={recovery.generation}>
-        <ErrorContext.Provider value={error}>
-          <NoticeContext.Provider value={claimNotice}>
-            <Context.Provider value={recovery.store}>
-              <NoticesContext.Provider value={notices}>
-                {children}
-              </NoticesContext.Provider>
-            </Context.Provider>
-          </NoticeContext.Provider>
+        <ErrorContext.Provider
+          value={failure === null ? "" : toFailure(failure).message}
+        >
+          <Context.Provider value={recovery.store}>
+            <NoticesContext.Provider value={notices}>
+              {children}
+            </NoticesContext.Provider>
+          </Context.Provider>
         </ErrorContext.Provider>
       </GenerationContext.Provider>
     </>

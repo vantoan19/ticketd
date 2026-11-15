@@ -78,7 +78,6 @@ import {
 } from "@/features/attachments/AttachmentPreview";
 import {
   useDraftRecovery,
-  useClaimRecoveryNotice,
   useDraftRecoveryError,
 } from "@/lib/draft-recovery-context";
 import {
@@ -94,12 +93,7 @@ import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Popover,
   PopoverContent,
@@ -817,12 +811,9 @@ export function MarkdownEditor({
   attachmentTicketReference = null,
 }: MarkdownEditorProps) {
   const recovery = useDraftRecovery();
+  // The workspace band reports a failure to protect drafts once for the whole
+  // window; the editor only stops saying its content is protected.
   const recoveryError = useDraftRecoveryError();
-  const claimRecoveryNotice = useClaimRecoveryNotice();
-  useEffect(
-    () => (recoveryError ? claimRecoveryNotice() : undefined),
-    [recoveryError, claimRecoveryNotice],
-  );
   const [historyOwner] = useState(
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
@@ -1379,19 +1370,6 @@ export function MarkdownEditor({
         setActive(false);
       }}
     >
-      {recoveryError && (
-        <Alert tone="error">
-          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
-          <AlertDescription>
-            Keep this window open. {recoveryError}
-          </AlertDescription>
-          <AlertActions>
-            <Button type="button" onClick={recovery.retry}>
-              Retry draft recovery
-            </Button>
-          </AlertActions>
-        </Alert>
-      )}
       {recovery.active &&
         protectedValue === value &&
         !recoveryError &&

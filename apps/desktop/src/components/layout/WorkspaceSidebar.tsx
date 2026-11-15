@@ -235,7 +235,7 @@ export function WorkspaceSidebar({
               onClick={() => {
                 if (!setPreference("sidebarCollapsed", !collapsed))
                   onError(
-                    "Could not save the sidebar state. Check local storage and try again.",
+                    "Couldn't save the sidebar state. This window can't store preferences right now.",
                   );
               }}
             >

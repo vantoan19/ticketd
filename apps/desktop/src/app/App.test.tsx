@@ -1184,7 +1184,7 @@ test("keeps the selection and retries a failed bulk change with the same request
     screen.getByRole("button", { name: "Retry" }),
   );
   expect(alert).toContain("Nothing changed");
-  expect(alert).toContain("storage is busy");
+  expect(alert).toContain("Storage is busy");
   expect(screen.getByText("2 selected")).toBeTruthy();
   fail = false;
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -2153,7 +2153,7 @@ test("a failed save of the sidebar state says so and leaves the sidebar as it wa
   fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   setItem.mockRestore();
   expect(screen.getByRole("alert").textContent).toContain(
-    "Could not save the sidebar state",
+    "Couldn't save the sidebar state",
   );
   expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
 });
