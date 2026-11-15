@@ -4,16 +4,13 @@ import {
   CornerDownRight,
   Layers,
   ListFilter,
-  Search,
   Tag,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { FilterChip } from "@/components/ui/badge";
-import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeaderButton } from "@/components/ui/list-header";
-import { SearchInput } from "@/components/ui/search-input";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   DropdownMenu,
@@ -29,7 +26,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { plural } from "@/lib/format";
 import { client, type StatusCounts } from "@/lib/api/client";
 import { ticketStatuses } from "@/lib/statuses";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -140,10 +136,9 @@ function dimensions(p: Props) {
 }
 
 /**
- * Search and Filters for a ticket list (DESIGN.md section 6, S3).
+ * Filter controls for a ticket list (DESIGN.md section 6, S3).
  *
- * - `controls`: the header's Search button (it expands in place) and the
- *   Filters menu: one submenu per dimension built from menu rows with icons,
+ * - `controls`: the header's Filters menu: one submenu per dimension built from menu rows with icons,
  *   a trailing check on the current value and counts where they are cheap.
  *   It opens below its trigger inside the list pane, never over the open
  *   ticket, and with focus on its first row.
@@ -159,55 +154,8 @@ export function TicketFilters(p: Props) {
   if (p.part === "chips") return <FilterChips {...p} menu={menu} />;
   return (
     <span className="list-controls">
-      <HeaderSearch {...p} />
       <FiltersMenu {...p} menu={menu} filterCount={chips.length} />
       {p.part !== "controls" && <FilterChips {...p} menu={menu} />}
-    </span>
-  );
-}
-
-/** The header's search: an icon button that expands into the field in place. */
-function HeaderSearch(p: Props) {
-  const [searching, setSearching] = useState(false);
-  const update = (value: string) => {
-    p.setQuery(value);
-    p.resetPaging();
-  };
-  if (!searching)
-    return (
-      <IconButton
-        label={p.query ? `Search tickets: ${p.query}` : "Search tickets"}
-        onClick={() => setSearching(true)}
-      >
-        <Search />
-      </IconButton>
-    );
-  return (
-    <span className="header-search" role="search" data-slot="pane-search">
-      <SearchInput
-        fill
-        aria-label="Search tickets"
-        placeholder={`Search ${p.scopeName}…`}
-        autoFocus
-        value={p.query}
-        onValueChange={update}
-        onKeyDown={(event) => {
-          // A first Escape clears the words (SearchInput); the next closes.
-          if (event.key === "Escape") {
-            event.stopPropagation();
-            setSearching(false);
-          }
-        }}
-      />
-      {p.query.trim() && (
-        <span role="status" className="header-search-count">
-          {plural(p.total, "result")}
-          <span className="sr-only"> in {p.scopeName}</span>
-        </span>
-      )}
-      <IconButton label="Close search" onClick={() => setSearching(false)}>
-        <X />
-      </IconButton>
     </span>
   );
 }
@@ -231,7 +179,9 @@ function FiltersMenu(
       active = false;
     };
   }, [menu.open]);
-  const allTags = [...new Set([...tagList, ...vocabulary])];
+  const allTags = [...new Set([...vocabulary, ...tagList])].sort((a, b) =>
+    a.localeCompare(b),
+  );
   const activePlans = p.plans.filter((item) => !item.archived);
   const archivedPlans = p.plans.filter((item) => item.archived);
   // Per-status totals mean something only while no status narrows them.
@@ -253,7 +203,7 @@ function FiltersMenu(
       <DropdownMenuTrigger asChild>
         <PaneHeaderButton
           icon={<ListFilter />}
-          label="Filters"
+          label="Filter"
           aria-label={
             filterCount ? `Filters, ${filterCount} active` : "Filters"
           }

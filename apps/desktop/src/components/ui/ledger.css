@@ -1,0 +1,157 @@
+/* Ledger variants of Item own row typography, surfaces and interaction treatment.
+   Ticket features supply lane geometry and responsive collapse. */
+[data-slot="item"][data-variant="ledger"],
+[data-slot="item"][data-variant="ledger-group"] {
+  border-radius: var(--radius-card);
+}
+.ui-item-ledger:hover,
+.ui-item-ledger:focus-within {
+  background: var(--hover);
+}
+.ui-item-ledger:has(.ticket-row[aria-pressed="true"]) {
+  background: var(--accent);
+}
+.ticket-list .ticket-row {
+  background: transparent;
+  border-radius: var(--radius-card);
+}
+.ticket-title {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ticket-row[data-status="Done"] .ticket-title,
+.ticket-row[data-status="Canceled"] .ticket-title,
+.ticket-row[data-status="Duplicate"] .ticket-title {
+  color: var(--muted-foreground);
+}
+.ticket-row-state,
+.ticket-row-context,
+.ticket-row-time,
+.ticket-row-update {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ticket-row-time {
+  font-variant-numeric: tabular-nums;
+}
+.ticket-rows input[type="checkbox"] {
+  accent-color: var(--foreground);
+}
+.ticket-rows input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ticket-list .ticket-row:focus-visible {
+  outline: none;
+}
+.ui-item-ledger:has(.ticket-row:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.ui-item-ledger-group,
+.ui-item-ledger-group:hover {
+  background: var(--surface);
+}
+.ticket-group-header h2 {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.ticket-group-header svg {
+  color: var(--muted-foreground);
+}
+.ticket-group-meta {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ticket-skeleton-icon {
+  border-radius: var(--radius-pill);
+}
+
+.ui-item-ledger .ui-reference {
+  font-weight: 400;
+  line-height: var(--text-ui-line);
+}
+
+/* Companion ledger controls share the same surface and type roles. */
+.bulk-controls {
+  color: var(--foreground);
+}
+.bulk-bar {
+  border-radius: var(--radius-panel);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+}
+.bulk-menu-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.bulk-count {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+}
+.bulk-menu-count {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+/* The tag choice list sits in the dialog body inside a control outline. */
+.bulk-tag-choices {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-border-base);
+}
+.source-filter [data-slot="segmented-control"] {
+  background: transparent;
+  box-shadow: none;
+}
+.source-filter [role="radio"] {
+  border-radius: var(--radius);
+}
+.source-filter [role="radio"][data-state="checked"] {
+  background: var(--accent);
+  box-shadow: none;
+}
+.source-filter [role="radio"]:hover {
+  background: var(--recessed);
+}
+.source-refresh {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.refresh-failed {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+/* The note starts at the header title's x. */
+.ticket-list > .list-description {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+/* One line of chips under the header: they never wrap; what does not fit
+   becomes "+N more". Clear filters ends the line. */
+.filter-chips {
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+/* Menu rows: the current value after the dimension, a count, a dot slot. */
+.filters-menu-value,
+.filters-menu-count {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.filters-menu-count {
+  font-variant-numeric: tabular-nums;
+}
+.filters-menu-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}

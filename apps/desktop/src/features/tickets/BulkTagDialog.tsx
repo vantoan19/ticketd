@@ -27,6 +27,7 @@ export function BulkTagDialog({
   const [chosen, setChosen] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [unavailable, setUnavailable] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   // A closed dialog keeps no query, choice or stale suggestions for the next
   // time it opens.
@@ -37,31 +38,31 @@ export function BulkTagDialog({
     setChosen("");
     setSuggestions([]);
     setUnavailable(false);
+    setLoaded(false);
   }
 
   const name = query.trim();
   useEffect(() => {
     if (!open) return;
     let current = true;
-    const timer = window.setTimeout(() => {
-      void client
-        .searchTags(name)
-        .then((tags) => {
-          if (!current) return;
-          setSuggestions(tags);
-          setUnavailable(false);
-        })
-        .catch(() => {
-          if (!current) return;
-          setSuggestions([]);
-          setUnavailable(true);
-        });
-    }, 150);
+    void client
+      .searchTags("")
+      .then((tags) => {
+        if (!current) return;
+        setSuggestions(tags);
+        setLoaded(true);
+        setUnavailable(false);
+      })
+      .catch(() => {
+        if (!current) return;
+        setSuggestions([]);
+        setUnavailable(true);
+        setLoaded(true);
+      });
     return () => {
       current = false;
-      window.clearTimeout(timer);
     };
-  }, [open, name]);
+  }, [open]);
 
   const verb = mode === "add" ? "Add tag" : "Remove tag";
   const tickets = `${count} selected ${count === 1 ? "ticket" : "tickets"}`;
@@ -70,6 +71,7 @@ export function BulkTagDialog({
     <DialogShell
       open={open}
       onOpenChange={onOpenChange}
+      size="sm"
       title={verb}
       description={`Applies to ${tickets}.`}
       primaryLabel={verb}
@@ -99,7 +101,9 @@ export function BulkTagDialog({
           query={query}
           onQueryChange={setQuery}
           groups={[
-            ...suggestions,
+            ...suggestions.filter((tag) =>
+              tag.toLowerCase().includes(name.toLowerCase()),
+            ),
             // A tag may be removed by name even when suggestions miss it.
             ...(mode === "remove" && name && !suggestions.includes(name)
               ? [name]
@@ -114,7 +118,13 @@ export function BulkTagDialog({
                 ? "Tag suggestions unavailable. You can still create a tag."
                 : "Tag suggestions unavailable.",
           })}
-          empty={(text) => (text ? `No tags match “${text}”` : "No tags yet")}
+          empty={(text) =>
+            !loaded
+              ? "Loading tags…"
+              : text
+                ? `No tags match “${text}”`
+                : "No tags yet"
+          }
         />
       </div>
     </DialogShell>

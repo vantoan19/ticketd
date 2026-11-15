@@ -7,7 +7,13 @@ import { Badge } from "@/components/ui/badge";
  * it), the others as one "+N" pill. Layout is measured, so a wide pane shows
  * `backend` `payments` and a narrow one `backend` `+1`.
  */
-export function RowTags({ tags }: { tags: readonly string[] }) {
+export function RowTags({
+  tags,
+  ledger = false,
+}: {
+  tags: readonly string[];
+  ledger?: boolean;
+}) {
   const box = useRef<HTMLSpanElement>(null);
   const widths = useRef<number[] | null>(null);
   const [shown, setShown] = useState(tags.length);
@@ -35,14 +41,19 @@ export function RowTags({ tags }: { tags: readonly string[] }) {
         if (measured.some((width) => width === 0)) return setShown(1);
         widths.current = measured;
       }
-      setShown(fittingTags(widths.current, line.clientWidth / 2));
+      setShown(
+        Math.min(
+          ledger ? 3 : tags.length,
+          fittingTags(widths.current, line.clientWidth / (ledger ? 1 : 2)),
+        ),
+      );
     };
     fit();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(fit);
     observer.observe(line);
     return () => observer.disconnect();
-  }, [key, tags.length, shown]);
+  }, [key, tags.length, shown, ledger]);
   if (tags.length === 0) return null;
   const visible = Math.min(shown, tags.length);
   const more = tags.length - visible;

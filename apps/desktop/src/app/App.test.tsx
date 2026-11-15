@@ -53,7 +53,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: unknown) => {
     if (command === "find_tickets_with_updates") {
       const tickets: unknown[] = await bridge.invoke("find_tickets", args);
-      return tickets.map((ticket) => ({ ticket, latest_update: null }));
+      return tickets.map((ticket) => ({
+        ticket,
+        latest_update:
+          (ticket as { progress_summary?: unknown }).progress_summary ?? null,
+      }));
     }
     if (command === "workspace_change_token") return bridge.token.next();
     return bridge.invoke(command, args);
@@ -293,6 +297,8 @@ test("opens a related ticket outside the filtered list and preserves drafts when
         command === "ticket_history"
       )
         return [];
+      if (command === "change_ticket")
+        throw { code: "failed", message: "Keep draft for this test" };
       if (command === "find_tickets") return listVisible ? [first] : [];
       if (command === "show_ticket")
         return args?.reference === first.reference ? first : second;
@@ -345,7 +351,9 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     target: { value: "Unfinished title" },
   });
   listVisible = false;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -355,7 +363,9 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   );
   expect(screen.getByText("Not in the current results")).toBeTruthy();
   listVisible = true;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -707,7 +717,9 @@ test("a sidebar choice that could not be saved stays reported after the list loa
   setItem.mockRestore();
   const notice = /Couldn't save the sidebar state/;
   expect(screen.getByRole("alert").textContent).toMatch(notice);
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -833,49 +845,29 @@ test("clears additional filters while preserving the selected Plan", async () =>
   ).toBeNull();
 });
 
-test("removes one filter chip and shows the query when nothing matches", async () => {
+test("multiple tag filters count as one active dimension and clear together", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(
-    async (command: string, args?: { id?: string }) => {
-      if (command === "list_plans" || command === "list_projects") return [];
-      // One unfiltered ticket: an empty workspace offers no Search (P9).
-      if (command === "find_tickets") return unfilteredOnly(args);
-      if (command === "search_tags") return ["bug", "ui"];
-      return bridgeDefault(command, args);
-    },
-  );
+  bridge.invoke.mockImplementation((command: string, args?: unknown) => {
+    if (command === "find_tickets") return unfilteredOnly(args);
+    if (command === "search_tags") return ["bug", "ui"];
+    return bridgeDefault(command);
+  });
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
-    target: { value: "zebra" },
-  });
   await chooseFilter("Tags", "bug");
   await chooseFilter("Tags", "ui");
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
-  });
-  expect(screen.getByText("No tickets match “zebra”")).toBeTruthy();
   expect(
-    screen.getByText(
-      /Searched titles, descriptions and updates in All tickets, with 2 filters on/,
-    ),
+    screen.getByRole("button", { name: "Filters, 1 active" }),
   ).toBeTruthy();
-  expect(screen.getAllByRole("button", { name: "Clear search" })).toBeTruthy();
-  // Every tag is one chip for the dimension (list F-08).
   expect(screen.getByLabelText("Active filters").textContent).toContain(
     "Tagsbug, ui",
   );
   fireEvent.click(
     screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!,
   );
-  // Clear filters clears filters only; the search stays (list F-09).
-  expect(screen.queryByText(/with 2 filters on/)).toBeNull();
-  expect(
-    screen.getByRole("button", { name: "Remove Search: zebra" }),
-  ).toBeTruthy();
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
 });
 
 test("a filter applies live and counts N of M beside the title", async () => {
@@ -1229,7 +1221,7 @@ test("a failed refresh keeps saved tickets and shows its actionable cause until 
   expect(screen.getByText(/Can’t refresh/)).toBeTruthy();
   expect(screen.getByRole("button", { name: /First/ })).toBe(row);
 
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -1240,7 +1232,9 @@ test("a failed refresh keeps saved tickets and shows its actionable cause until 
   expect(screen.getByRole("button", { name: /First/ })).toBe(row);
 
   missing = false;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -1340,7 +1334,11 @@ test("names the ticket the core rejected and offers no Retry that cannot succeed
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert");
-  expect(alert.getAttribute("data-slot")).toBe("status-line");
+  expect(
+    within(screen.getByRole("region", { name: "Bulk edit" })).getByRole(
+      "alert",
+    ),
+  ).toBe(alert);
   expect(alert.textContent).toContain("T-KQ2 is trashed");
   expect(alert.textContent).toContain("Nothing changed.");
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
@@ -1433,6 +1431,7 @@ test("Organize has a separate Add tag action", async () => {
   const changes: unknown[] = [];
   await renderBulk({
     find_tickets: () => [bulkTicket(1)],
+    search_tags: ["needs-review", "ui"],
     bulk_change: (args: { change: unknown }) => {
       changes.push(args.change);
       return [];
@@ -1443,6 +1442,10 @@ test("Organize has a separate Add tag action", async () => {
   fireEvent.click(screen.getByRole("menuitem", { name: "Add tag…" }));
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "Add tag" });
+  expect(
+    within(dialog).getByRole("option", { name: "needs-review" }),
+  ).toBeTruthy();
+  expect(within(dialog).queryByText("No tags yet")).toBeNull();
   expect(
     within(dialog).queryByRole("button", { name: "Remove tag" }),
   ).toBeNull();
@@ -1663,7 +1666,7 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
   ).toContain("Tickets7");
 });
 
-test("a selection ends when the search or filters change, and the bar can be skipped to", async () => {
+test("a selection ends when the filters change, and the bar can be skipped to", async () => {
   await renderBulk({ find_tickets: () => [bulkTicket(1), bulkTicket(2)] });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(screen.getByText("1 selected")).toBeTruthy();
@@ -1672,10 +1675,7 @@ test("a selection ends when the search or filters change, and the bar can be ski
   expect(document.activeElement).toBe(
     screen.getByRole("region", { name: "Bulk edit" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
-    target: { value: "second" },
-  });
+  await chooseFilter("Status", "Todo");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(400);
   });
@@ -1760,23 +1760,26 @@ test("totals and group counts describe the whole result, not the loaded page", a
   expect(countCall?.[1].filter.order).toBe("Workflow");
 });
 
-test("single-status views say in one line what they list", async () => {
+test("empty ticket scopes follow one header rule without redundant captions", async () => {
   await renderBulk({});
-  const settle = () =>
-    act(async () => {
+  for (const label of [/^All tickets/, /^Ready/, /^In progress/]) {
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-  expect(screen.queryByText(/nothing left to wait on/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
-  await settle();
-  expect(screen.getByText(/nothing left to wait on/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /^In progress/ }));
-  await settle();
-  expect(screen.getByText(/working on right now/)).toBeTruthy();
-  expect(screen.queryByText(/nothing left to wait on/)).toBeNull();
+    const header = document
+      .getElementById("tickets-heading")!
+      .closest<HTMLElement>('[data-slot="pane-header"]')!;
+    expect(
+      within(header).queryByRole("button", { name: "Filters" }),
+    ).toBeNull();
+    expect(
+      within(header).queryByRole("button", { name: "Display" }),
+    ).toBeNull();
+  }
 });
 
-test("the source filter narrows list and counts together and Refresh imports on demand", async () => {
+test("the source filter narrows list and counts together without a header Refresh", async () => {
   const github = bulkTicket(1, {
     source: {
       provider: "github",
@@ -1847,17 +1850,7 @@ test("the source filter narrows list and counts together and Refresh imports on 
       .at(-1);
   expect(sourceOf("find_tickets")).toEqual({ Provider: "github" });
   expect(sourceOf("count_tickets")).toEqual({ Provider: "github" });
-  // The list's one Refresh also imports from the configured sources.
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-  await act(async () => {});
-  expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
-    ticket: null,
-  });
-  expect(screen.queryByText("1 new, 0 updated")).toBeNull();
-  expect(screen.getByRole("button", { name: "Refresh" })).toHaveProperty(
-    "disabled",
-    false,
-  );
+  expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 });
 
 test("the sidebar footer follows persisted source health and keeps the list", async () => {
@@ -3244,6 +3237,54 @@ test("palette keeps New ticket and Capture reachable after removing the create m
       within(dialog).getByRole("textbox", { name: "Title" }),
     ),
   );
+});
+
+test("ledger uses the existing page update in Detailed and clears checkbox selection with Escape", async () => {
+  const summary = {
+    activity_id: "update-1",
+    brief: { text: "Kept the drop slot until save", truncated: false },
+    editing_agent: "codex",
+    reported_at: "2026-11-15T00:00:00Z",
+    updated_at: "2026-11-15T00:00:00Z",
+    supporting_document_id: null,
+  };
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "find_tickets")
+      return [bulkTicket(1, { progress_summary: summary })];
+    if (command === "count_tickets")
+      return {
+        total: 1,
+        todo: 1,
+        in_progress: 0,
+        in_review: 0,
+        done: 0,
+        canceled: 0,
+        duplicate: 0,
+      };
+    return bridgeDefault(command, args as undefined);
+  });
+  render(<App />);
+  const row = await screen.findByRole("button", { name: /First/ });
+  const pane = row.closest("section")!;
+  expect(within(pane).queryByRole("button", { name: "Refresh" })).toBeNull();
+  expect(
+    within(pane).queryByRole("button", { name: "Search tickets" }),
+  ).toBeNull();
+  expect(within(row).queryByText("Ready")).toBeNull();
+  fireEvent.click(within(pane).getByRole("button", { name: "Display" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Detailed" }));
+  expect(await screen.findByText("Kept the drop slot until save")).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "latest_update"),
+  ).toHaveLength(0);
+  fireEvent.keyDown(screen.getByRole("radio", { name: "Detailed" }), {
+    key: "Escape",
+  });
+  const checkbox = screen.getByRole("checkbox", { name: "Select T-KQ1" });
+  fireEvent.click(checkbox);
+  checkbox.focus();
+  fireEvent.keyDown(checkbox, { key: "Escape" });
+  expect((checkbox as HTMLInputElement).checked).toBe(false);
 });
 
 test("Inbox shares Needs you counts with the sidebar and keeps E/H on the opened entry", async () => {

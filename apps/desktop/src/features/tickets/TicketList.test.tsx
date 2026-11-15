@@ -68,13 +68,13 @@ test("names an unfinished prerequisite on a blocked Todo ticket", () => {
   expect(screen.getByText("Blocked by T-KQ2 and 1 more")).toBeTruthy();
 });
 
-test("shows Ready once prerequisites are done", () => {
+test("a ready ticket has no redundant state word", () => {
   renderList([ticket({ prerequisites: [prerequisite("T-KQ2", "Done")] })]);
-  expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.queryByText("Ready")).toBeNull();
   expect(screen.queryByText(/Blocked/)).toBeNull();
 });
 
-test("shows only the status word outside Todo", () => {
+test("names each non-Todo status through its glyph", () => {
   renderList(
     ["In progress", "In review", "Done", "Canceled", "Duplicate"].map(
       (status, index) => ({
@@ -86,7 +86,7 @@ test("shows only the status word outside Todo", () => {
   );
   expect(screen.queryByText("Ready")).toBeNull();
   expect(screen.queryByText(/Blocked/)).toBeNull();
-  expect(screen.getByText("In review", { selector: "span" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "In review" })).toBeTruthy();
 });
 
 test("names the canonical ticket of a duplicate", () => {
@@ -208,7 +208,7 @@ test("moves keyboard focus across group boundaries and omits empty groups", () =
 test("a flat list has no group headers and names each status", () => {
   renderList([inStatus(4, "In progress")]);
   expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
-  expect(screen.getByText("In progress", { selector: "span" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "In progress" })).toBeTruthy();
 });
 
 test("rows end with the core update time, never a progress excerpt or a lone no-update note", () => {
@@ -259,9 +259,9 @@ test("a Plan and a project carry different icons", () => {
   expect(container.querySelectorAll(".ticket-row-context svg")).toHaveLength(2);
 });
 
-test("a filtered Todo list keeps each row's Ready word", () => {
+test("a filtered Todo list omits redundant Ready words", () => {
   renderList([ticket({ availability: "Ready" })], { singleStatus: true });
-  expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.queryByText("Ready")).toBeNull();
 });
 
 test("the Ready view drops the group header and the Ready dot", () => {
@@ -288,7 +288,7 @@ test("a single-status view still shows that a ticket is blocked", () => {
   expect(screen.getByText("Blocked by T-KQ9")).toBeTruthy();
 });
 
-test("simple rows keep the reference, title, readiness and time, and hide tags and context", () => {
+test("one line rows retain context and tags for container collapse", () => {
   renderList(
     [
       ticket({
@@ -301,25 +301,28 @@ test("simple rows keep the reference, title, readiness and time, and hide tags a
   );
   expect(screen.getByText("T-KQ1")).toBeTruthy();
   expect(screen.getByText("First ticket")).toBeTruthy();
-  expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.queryByText("Ready")).toBeNull();
   expect(screen.getByText(/Updated/)).toBeTruthy();
-  expect(screen.queryByText("checkout")).toBeNull();
-  expect(screen.queryByText("Launch")).toBeNull();
-});
-
-test("detailed rows show tags and context", () => {
-  renderList([ticket({ tags: ["checkout"], plan_id: "e1" })]);
   expect(screen.getByText("checkout")).toBeTruthy();
   expect(screen.getByText("Launch")).toBeTruthy();
 });
 
-test("a simple row's readiness dot is never alone: it has a tooltip and a name", () => {
-  renderList([ticket({})], { simple: true });
-  const dot = screen.getByText("Ready").closest(".ticket-row-state")!;
-  expect(dot.textContent).toBe("Ready");
-  // A Tooltip trigger, not a native title the keyboard never reaches.
-  expect(dot.getAttribute("data-state")).toBe("closed");
-  expect(dot.hasAttribute("title")).toBe(false);
+test("detailed rows show tags and context", () => {
+  renderList([ticket({ tags: ["checkout"], plan_id: "e1" })], {
+    simple: false,
+  });
+  expect(screen.getByText("checkout")).toBeTruthy();
+  expect(screen.getAllByText("Launch")).toHaveLength(2);
+});
+
+test("a blocked row's state carries its full name even when the lane collapses", () => {
+  renderList([
+    ticket({
+      availability: "Blocked",
+      prerequisites: [prerequisite("T-KQ9", "Todo")],
+    }),
+  ]);
+  expect(screen.getByLabelText("Blocked by T-KQ9")).toBeTruthy();
 });
 
 test("the Ready view leaves out the per-row Ready dot, simple rows too", () => {
@@ -327,7 +330,7 @@ test("the Ready view leaves out the per-row Ready dot, simple rows too", () => {
   expect(screen.queryByText("Ready")).toBeNull();
 });
 
-test("a simple row's name carries its Ready and Blocked words", () => {
+test("a one line row names blockers without repeating Ready", () => {
   renderList(
     [
       ticket({}),
@@ -341,9 +344,7 @@ test("a simple row's name carries its Ready and Blocked words", () => {
     ],
     { simple: true },
   );
-  expect(
-    screen.getByRole("button", { name: /First ticket.*Ready/ }),
-  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: /First ticket/ })).toBeTruthy();
   expect(
     screen.getByRole("button", { name: /Second ticket.*Blocked/ }),
   ).toBeTruthy();

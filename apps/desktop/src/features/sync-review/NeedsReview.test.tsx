@@ -95,7 +95,7 @@ test("a ticket row says Needs review in place of its readiness", async () => {
   expect(row?.textContent).toContain("T-KQ12");
   expect(row?.textContent).not.toContain("Ready");
   expect(screen.getAllByText("Needs review")).toHaveLength(1);
-  expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.queryByText("Ready")).toBeNull();
 });
 
 test("conflicts that cannot be read again keep the notice that was showing", async () => {
