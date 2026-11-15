@@ -166,20 +166,23 @@ test("groups rows in workflow order with whole-result counts and an Add action e
     "Todo",
     "Done",
   ]);
-  // The page holds one of nine Todo tickets; the header says so.
-  expect(screen.getByText("1 of 9")).toBeTruthy();
+  // The header counts the whole group, never the part shown (list R-09).
+  expect(screen.getByText("9")).toBeTruthy();
+  expect(screen.queryByText("1 of 9")).toBeNull();
   // A group header already names the status, so its rows do not repeat it.
   expect(screen.queryByText("In progress", { selector: "span" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add Todo ticket" }));
   expect(onAdd).toHaveBeenCalledWith("Todo", expect.any(HTMLButtonElement));
 });
 
-test("a Duplicate group's Add action is worded like every group's and hands over its status", () => {
+test("a Duplicate group's Add action names the review it opens and hands over its status", () => {
   const onAdd = vi.fn();
   renderList([inStatus(5, "Duplicate")], {
     grouping: { counts: { ...counts, duplicate: 1 }, onAdd },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate…" }),
+  );
   expect(onAdd).toHaveBeenCalledWith(
     "Duplicate",
     expect.any(HTMLButtonElement),
@@ -370,4 +373,22 @@ test("the list is one Tab stop and arrows, J/K, Home and End move within it", ()
   fireEvent.keyDown(rows()[0]!, { key: "End" });
   expect(document.activeElement).toBe(rows()[2]);
   expect(stops()).toHaveLength(1);
+});
+
+test("a grouped Todo list says Ready once in its header and flags only Blocked rows", () => {
+  renderList(
+    [
+      ticket(),
+      ticket({
+        id: "2",
+        reference: "T-KQ2",
+        availability: "Blocked",
+        prerequisites: [prerequisite("T-KQ9", "Todo")],
+      }),
+    ],
+    { grouping: { counts: { ...counts, todo: 2 } } },
+  );
+  expect(screen.getByText("· 1 ready")).toBeTruthy();
+  expect(screen.queryByText("Ready")).toBeNull();
+  expect(screen.getByText("Blocked by T-KQ9")).toBeTruthy();
 });

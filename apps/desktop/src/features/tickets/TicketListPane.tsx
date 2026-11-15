@@ -12,6 +12,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { FailureDetails, FailureState } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
 import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
@@ -27,6 +28,10 @@ import { allowRemoval } from "@/lib/removal-guard";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
+import {
+  useFiltersMenu,
+  type FiltersMenuState,
+} from "@/features/tickets/filters-menu";
 import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketBoard } from "./TicketBoard";
@@ -62,6 +67,7 @@ function TicketListBody({
   planState,
   onOpen,
   onCreate,
+  filtersMenu: sharedFiltersMenu,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
@@ -69,6 +75,8 @@ function TicketListBody({
   planState: PlanViewState;
   onOpen: (reference: string) => void;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
+  /** The Plan header's Filters menu, which the chip row shares. */
+  filtersMenu?: FiltersMenuState;
 }) {
   const { ticketRows } = usePreferences();
   const {
@@ -77,8 +85,10 @@ function TicketListBody({
     filter,
     query,
     setQuery,
-    offset,
-    setOffset,
+    pages,
+    resetPaging,
+    showMore,
+    matchingReferences,
     plan,
     status,
     tags,
@@ -110,6 +120,10 @@ function TicketListBody({
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const planAction = usePlanAction(planState);
   const lastRemoval = useRef(0);
+  // The header's Filters menu and the chip row under it share one menu; in a
+  // Plan scope the menu sits in the Plan header, which passes its state in.
+  const ownFiltersMenu = useFiltersMenu();
+  const filtersMenu = sharedFiltersMenu ?? ownFiltersMenu;
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
   // An archived Plan is read-only: no new tickets into it, no removing from it.
@@ -145,11 +159,16 @@ function TicketListBody({
         ? item.project_id === null
         : item.project_id === filter),
   );
-  // A selection belongs to the page it was made on. Moving to another page,
-  // scope, search or filter drops it, so the bar never acts on tickets that are
-  // no longer listed.
+  const visibleTicketsRef = useRef(visibleTickets);
+  useEffect(() => {
+    visibleTicketsRef.current = visibleTickets;
+  });
+  // A selection belongs to the view it was made in. Another scope, search,
+  // filter or layout drops it, so the bar never acts on tickets that are no
+  // longer listed; the board has no bar, so a selection never waits hidden
+  // there (list B-08). Showing more keeps it.
   const viewKey = JSON.stringify([
-    offset,
+    workspace.layout,
     filter,
     query,
     plan,
@@ -162,24 +181,26 @@ function TicketListBody({
     navigation,
   ]);
   const previousView = useRef(viewKey);
-  // Pressing Previous or Next can disable that very button (the first or last
-  // page). Focus then moves to the other button, or to the list, never to the
-  // document root.
-  const previousButton = useRef<HTMLButtonElement>(null);
-  const nextButton = useRef<HTMLButtonElement>(null);
-  const paged = useRef<"previous" | "next" | null>(null);
+  // "Show 50 more" (P17): the next rows arrive where the button was. For a
+  // moment a click there is ignored, so a double click never opens a ticket
+  // that slid under the pointer, and keyboard focus moves to the first new
+  // row (list BD-09).
+  const arriving = useRef<{ from: number; focused: boolean } | null>(null);
+  const guardUntil = useRef(0);
+  const shownCount = visibleTickets.length;
   useEffect(() => {
-    const which = paged.current;
-    if (!which || loading) return;
-    const own = which === "previous" ? previousButton : nextButton;
-    const other = which === "previous" ? nextButton : previousButton;
-    if (!own.current?.disabled) return;
-    paged.current = null;
-    (other.current && !other.current.disabled
-      ? other.current
-      : listRef.current
-    )?.focus();
-  });
+    const pending = arriving.current;
+    if (!pending || shownCount <= pending.from) return;
+    arriving.current = null;
+    guardUntil.current = Date.now() + 400;
+    const first = visibleTicketsRef.current[pending.from];
+    if (pending.focused && first)
+      listRef.current
+        ?.querySelector<HTMLElement>(
+          `[data-ticket-reference="${first.reference}"]`,
+        )
+        ?.focus();
+  }, [shownCount, listRef]);
   const { clearSelection } = bulk;
   useEffect(() => {
     if (previousView.current === viewKey) return;
@@ -197,7 +218,123 @@ function TicketListBody({
       : navigation.kind === "progress"
         ? "Tickets someone is working on right now."
         : null;
-  const filterProps = filterPropsOf(workspace);
+  const filterProps = { ...filterPropsOf(workspace), menu: filtersMenu };
+  // What an empty list or board says (P9): one state for the whole view.
+  const emptyView = trash ? (
+    <EmptyState icon={<Trash2 />} {...copyProps(emptyCopy("tickets-trash"))} />
+  ) : filtered ? (
+    <EmptyState
+      icon={<SearchX />}
+      {...copyProps(
+        emptyCopy(
+          query
+            ? filterCount
+              ? "tickets-search-filtered"
+              : "tickets-search"
+            : "tickets-filters",
+          { query, name: scopeName, filters: filterCount },
+        ),
+      )}
+      action={
+        query || filterCount > 0 ? (
+          <>
+            {query && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setQuery("");
+                  resetPaging();
+                }}
+              >
+                Clear search
+              </Button>
+            )}
+            {filterCount > 0 && (
+              <Button variant="outline" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </>
+        ) : undefined
+      }
+    />
+  ) : planScope ? (
+    <EmptyState
+      icon={<Layers />}
+      {...copyProps(
+        emptyCopy(addDisabled ? "plan-archived" : "plan-empty", {
+          name: scopedPlan?.name ?? scopeName,
+        }),
+      )}
+      action={
+        addDisabled ? undefined : (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => planState.setAdding(true)}
+            >
+              Add to Plan…
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(event) => onCreate(event.currentTarget)}
+            >
+              New ticket
+            </Button>
+          </>
+        )
+      }
+    />
+  ) : navigation.kind === "ready" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-ready"))}
+    />
+  ) : navigation.kind === "progress" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-progress"))}
+    />
+  ) : navigation.project === "unlinked" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-no-project"))}
+    />
+  ) : navigation.project !== "all" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-project", { name: scopeName }))}
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={(event) => onCreate(event.currentTarget)}
+        >
+          New ticket
+        </Button>
+      }
+    />
+  ) : (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-first-run"))}
+      action={
+        <Button
+          size="sm"
+          aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
+          onClick={(event) => onCreate(event.currentTarget)}
+        >
+          New ticket
+          <Kbd tone="inverted" aria-hidden="true">
+            {shortcutLabel("new-ticket")}
+          </Kbd>
+        </Button>
+      }
+    />
+  );
   return (
     <section
       className="ticket-list"
@@ -295,6 +432,11 @@ function TicketListBody({
           {workspace.layout === "board" ? (
             <TicketBoard
               workspace={workspace}
+              empty={
+                !loading && !queryError && tickets.length === 0
+                  ? emptyView
+                  : null
+              }
               onOpen={onOpen}
               {...(!addDisabled &&
                 !trash && {
@@ -321,130 +463,7 @@ function TicketListBody({
               ) : loading && tickets.length === 0 ? (
                 <TicketRowsSkeleton />
               ) : tickets.length === 0 ? (
-                trash ? (
-                  <EmptyState
-                    icon={<Trash2 />}
-                    {...copyProps(emptyCopy("tickets-trash"))}
-                  />
-                ) : filtered ? (
-                  <EmptyState
-                    icon={<SearchX />}
-                    {...copyProps(
-                      emptyCopy(
-                        query
-                          ? filterCount
-                            ? "tickets-search-filtered"
-                            : "tickets-search"
-                          : "tickets-filters",
-                        { query, name: scopeName, filters: filterCount },
-                      ),
-                    )}
-                    action={
-                      query || filterCount > 0 ? (
-                        <>
-                          {query && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setQuery("");
-                                setOffset(0);
-                              }}
-                            >
-                              Clear search
-                            </Button>
-                          )}
-                          {filterCount > 0 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={clearFilters}
-                            >
-                              Clear filters
-                            </Button>
-                          )}
-                        </>
-                      ) : undefined
-                    }
-                  />
-                ) : planScope ? (
-                  <EmptyState
-                    icon={<Layers />}
-                    {...copyProps(
-                      emptyCopy(addDisabled ? "plan-archived" : "plan-empty", {
-                        name: scopedPlan?.name ?? scopeName,
-                      }),
-                    )}
-                    action={
-                      addDisabled ? undefined : (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => planState.setAdding(true)}
-                          >
-                            Add to Plan…
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(event) => onCreate(event.currentTarget)}
-                          >
-                            New ticket
-                          </Button>
-                        </>
-                      )
-                    }
-                  />
-                ) : navigation.kind === "ready" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-ready"))}
-                  />
-                ) : navigation.kind === "progress" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-progress"))}
-                  />
-                ) : navigation.project === "unlinked" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-no-project"))}
-                  />
-                ) : navigation.project !== "all" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(
-                      emptyCopy("tickets-project", { name: scopeName }),
-                    )}
-                    action={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(event) => onCreate(event.currentTarget)}
-                      >
-                        New ticket
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-first-run"))}
-                    action={
-                      <Button
-                        size="sm"
-                        aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
-                        onClick={(event) => onCreate(event.currentTarget)}
-                      >
-                        New ticket
-                        <Kbd tone="inverted" aria-hidden="true">
-                          {shortcutLabel("new-ticket")}
-                        </Kbd>
-                      </Button>
-                    }
-                  />
-                )
+                emptyView
               ) : (
                 <>
                   {showBulk && bulk.selection.length > 0 && (
@@ -497,7 +516,11 @@ function TicketListBody({
                     selectionDisabled={bulk.pending}
                     bulkSelection={bulk.selection}
                     onToggle={bulk.toggle}
-                    onOpen={onOpen}
+                    onSelectMany={bulk.selectAll}
+                    onOpen={(reference) => {
+                      if (Date.now() < guardUntil.current) return;
+                      onOpen(reference);
+                    }}
                     {...(scopedPlan &&
                       planWritable && {
                         rowAction: (ticket: Ticket) => (
@@ -531,39 +554,24 @@ function TicketListBody({
                 </>
               )}
               {!trash &&
-                workspace.layout === "list" &&
-                (offset > 0 || total > PAGE_SIZE) && (
-                  <div className="pagination">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      ref={previousButton}
-                      disabled={offset === 0}
-                      onClick={() => {
-                        paged.current = "previous";
-                        setOffset(Math.max(0, offset - PAGE_SIZE));
-                      }}
-                    >
-                      Previous
-                    </Button>
-                    <span>
-                      {" "}
-                      Showing {offset + 1}–{offset + tickets.length} of{" "}
-                      {total}{" "}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      ref={nextButton}
-                      disabled={offset + tickets.length >= total}
-                      onClick={() => {
-                        paged.current = "next";
-                        setOffset(offset + PAGE_SIZE);
-                      }}
-                    >
-                      Next
-                    </Button>
-                  </div>
+                !queryError &&
+                tickets.length > 0 &&
+                tickets.length < total && (
+                  <Pager
+                    more={Math.min(PAGE_SIZE, total - tickets.length)}
+                    noun="tickets"
+                    loading={loading && pages * PAGE_SIZE > tickets.length}
+                    onMore={() => {
+                      arriving.current = {
+                        from: visibleTickets.length,
+                        focused:
+                          document.activeElement?.closest(
+                            '[data-slot="pager"]',
+                          ) != null,
+                      };
+                      showMore();
+                    }}
+                  />
                 )}
             </div>
           )}
@@ -578,6 +586,8 @@ function TicketListBody({
         <BulkControls
           bulk={bulk}
           visible={visibleTickets}
+          total={total}
+          matchingReferences={matchingReferences}
           projects={projects}
           plans={plans}
         />
@@ -607,12 +617,13 @@ function filterPropsOf(w: TicketWorkspace) {
     family: w.family,
     setFamily: w.setFamily,
     plans: w.plans,
-    setOffset: w.setOffset,
+    resetPaging: w.resetPaging,
     navigation: w.navigation,
     clearFilters: w.clearFilters,
     scopeName: w.scopeName,
     total: w.total,
     scopeTotal: w.scopeTotal,
+    counts: w.counts,
   };
 }
 
@@ -622,12 +633,19 @@ function filterPropsOf(w: TicketWorkspace) {
  */
 export function PlanListControls({
   workspace,
+  filtersMenu,
 }: {
   workspace: TicketWorkspace;
+  /** Shared with the list's chip row, so a chip reopens this menu. */
+  filtersMenu: FiltersMenuState;
 }) {
   return (
     <>
-      <TicketFilters part="controls" {...filterPropsOf(workspace)} />
+      <TicketFilters
+        part="controls"
+        {...filterPropsOf(workspace)}
+        menu={filtersMenu}
+      />
       <DisplayMenu onError={workspace.setError} rowsOnly />
     </>
   );

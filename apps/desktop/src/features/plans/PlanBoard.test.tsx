@@ -12,6 +12,7 @@ import { App } from "@/app/App";
 import type { FindFilter, Ticket } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { chooseFilter } from "@/test/filters";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -463,20 +464,16 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
     within(board)
       .getAllByRole("heading")
       .map((item) => item.textContent),
-  ).toEqual([
-    "Todo",
-    "In progress",
-    "In review",
-    "Done",
-    "Canceled",
-    "Duplicate",
-  ]);
+  ).toEqual(["Todo", "In progress", "In review", "Done"]);
+  // Canceled and Duplicate fold to headers that open them.
+  expect(screen.getByRole("button", { name: /^Show Canceled/ })).toBeTruthy();
   expect(todo.getByRole("button", { name: "Show 5 more Todo" })).toBeTruthy();
   const parent = todo.getByRole("button", { name: /^T-KQ1\D/ });
   const child = todo.getByRole("button", { name: /^T-KQ2\D/ });
   expect(within(parent).getByText("Alpha")).toBeTruthy();
-  expect(within(child).getByText("Beta")).toBeTruthy();
+  // One context item per card, as on a row (BD-07): the parent first.
   expect(within(child).getByText("Subticket of T-KQ1")).toBeTruthy();
+  expect(within(child).queryByText("Beta")).toBeNull();
   expect(within(parent).queryByText("Launch")).toBeNull();
   expect(
     within(board).queryByRole("button", { name: /^T-KQ201\D/ }),
@@ -497,15 +494,11 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
     todo.queryByRole("button", { name: /^Show \d+ more Todo$/ }),
   ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "Ticket 2" },
   });
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  await settle();
-  const panel = within(screen.getByRole("dialog", { name: "Ticket filters" }));
-  fireEvent.click(panel.getByRole("button", { name: "Todo" }));
-  fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
+  await chooseFilter("Status", "Todo");
   await settle();
   expect(todo.getByLabelText("11 matching tickets")).toBeTruthy();
   expect(
@@ -519,7 +512,7 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   chooseView("Board");
   await settle();
   expect(
-    screen.getByRole("button", { name: "Remove Status is Todo" }),
+    screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Remove Search: Ticket 2" }),

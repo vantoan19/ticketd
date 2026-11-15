@@ -480,7 +480,9 @@ test("a row shows the owner's pill and a local row shows none", () => {
       }}
     />,
   );
-  const pills = screen.getAllByTitle(/Owned by GitHub/);
+  const pills = [
+    ...document.querySelectorAll('[data-slot="badge"][data-variant="source"]'),
+  ] as HTMLElement[];
   expect(pills).toHaveLength(1);
   // Read once: the visible words are hidden from assistive technology and the
   // screen-reader text says the same thing in one sentence.

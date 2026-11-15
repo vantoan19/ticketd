@@ -1,13 +1,6 @@
 import { useNow } from "@/lib/use-now";
 import { useRef, useState, type ReactNode } from "react";
-import {
-  Cloud,
-  Copy,
-  CornerDownRight,
-  Folder,
-  Layers,
-  Plus,
-} from "lucide-react";
+import { Cloud, CornerDownRight, Folder, Layers, Plus } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -37,6 +30,7 @@ export function TicketList({
   onOpen,
   bulkSelection,
   onToggle,
+  onSelectMany,
   selectable,
   selectionDisabled = false,
   scope,
@@ -51,6 +45,11 @@ export function TicketList({
   onOpen: (reference: string) => void;
   bulkSelection: string[];
   onToggle: (reference: string) => void;
+  /**
+   * Adds several tickets to the selection: a Shift-click or Shift+↑/↓ range
+   * from the last one toggled, or Mod+A for every listed ticket.
+   */
+  onSelectMany?: (references: string[]) => void;
   selectable: boolean;
   selectionDisabled?: boolean;
   scope: RowScope;
@@ -105,11 +104,30 @@ export function TicketList({
   const focusRow = (ticket: Ticket | undefined) => {
     if (ticket) rows.current.get(ticket.id)?.focus();
   };
+  // Where a Shift range starts: the ticket last toggled by itself.
+  const anchor = useRef<string | null>(null);
+  // A Shift-click already applied its range; its change event must not toggle.
+  const ranged = useRef(false);
+  const range = (to: Ticket) => {
+    const from = ordered.findIndex((item) => item.reference === anchor.current);
+    const end = ordered.indexOf(to);
+    if (from < 0 || end < 0) return [to.reference];
+    const [low, high] = from < end ? [from, end] : [end, from];
+    return ordered.slice(low, high + 1).map((item) => item.reference);
+  };
+  const canSelect = selectable && !selectionDisabled;
   return (
     <ul className="ticket-rows">
       {entries.map((entry) => {
         if ("header" in entry) {
           const { status, count, tickets: shown } = entry.header;
+          // Ready is summarised here, not repeated on every row (list R-10);
+          // only a whole group can say how many are ready.
+          const ready =
+            status === "Todo" && shown.length === count
+              ? shown.filter((ticket) => readiness(ticket).kind === "ready")
+                  .length
+              : 0;
           return (
             <li
               key={`group-${status}`}
@@ -118,25 +136,34 @@ export function TicketList({
             >
               <StatusIcon status={status} decorative />
               <h2>{status}</h2>
+              {/* Always the group's total, never the part shown (list R-09). */}
               <Count>
-                {shown.length < count ? `${shown.length} of ${count}` : count}
+                {count}
                 <span className="sr-only">
                   {" "}
                   {count === 1 ? "ticket" : "tickets"}
                 </span>
               </Count>
+              {ready > 0 && (
+                <span className="ticket-group-meta">· {ready} ready</span>
+              )}
               {grouping?.onAdd && (
-                <IconButton
-                  className="ticket-group-add"
-                  // Every group offers the same action; the Duplicate group's
-                  // opens the review that names the canonical ticket.
-                  label={`Add ${status} ticket`}
-                  onClick={(event) =>
-                    grouping.onAdd?.(status, event.currentTarget)
-                  }
-                >
-                  <Plus aria-hidden="true" />
-                </IconButton>
+                // Revealed on header hover or focus; it stays in the tab order.
+                <span className="ticket-group-add">
+                  <IconButton
+                    // The Duplicate group's action names what it opens (R-03).
+                    label={
+                      status === "Duplicate"
+                        ? "Mark a ticket as duplicate…"
+                        : `Add ${status} ticket`
+                    }
+                    onClick={(event) =>
+                      grouping.onAdd?.(status, event.currentTarget)
+                    }
+                  >
+                    <Plus aria-hidden="true" />
+                  </IconButton>
+                </span>
               )}
             </li>
           );
@@ -157,7 +184,23 @@ export function TicketList({
                   aria-label={`Select ${ticket.reference}`}
                   checked={bulkSelection.includes(ticket.reference)}
                   disabled={selectionDisabled}
-                  onChange={() => onToggle(ticket.reference)}
+                  onClick={(event) => {
+                    // Shift-click selects the range from the last ticket toggled.
+                    if (event.shiftKey && anchor.current && onSelectMany) {
+                      event.preventDefault();
+                      ranged.current = true;
+                      window.setTimeout(() => (ranged.current = false), 0);
+                      onSelectMany(range(ticket));
+                    }
+                  }}
+                  onChange={() => {
+                    if (ranged.current) {
+                      ranged.current = false;
+                      return;
+                    }
+                    anchor.current = ticket.reference;
+                    onToggle(ticket.reference);
+                  }}
                 />
               </label>
             )}
@@ -180,6 +223,30 @@ export function TicketList({
               onKeyDown={(event) => {
                 const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
                 if (
+                  canSelect &&
+                  onSelectMany &&
+                  event.shiftKey &&
+                  (event.key === "ArrowDown" || event.key === "ArrowUp")
+                ) {
+                  // Shift+↑/↓ extends the selection as focus moves.
+                  event.preventDefault();
+                  const next =
+                    ordered[index + (event.key === "ArrowDown" ? 1 : -1)];
+                  if (!next) return;
+                  anchor.current ??= ticket.reference;
+                  onSelectMany(range(next));
+                  focusRow(next);
+                } else if (
+                  canSelect &&
+                  onSelectMany &&
+                  (event.metaKey || event.ctrlKey) &&
+                  !event.altKey &&
+                  event.key.toLowerCase() === "a"
+                ) {
+                  // Mod+A selects every listed ticket.
+                  event.preventDefault();
+                  onSelectMany(ordered.map((item) => item.reference));
+                } else if (
                   event.key === "ArrowDown" ||
                   event.key === "ArrowUp" ||
                   (plain && (event.key === "j" || event.key === "k"))
@@ -200,6 +267,7 @@ export function TicketList({
                 ) {
                   // Space selects for bulk actions; Enter opens.
                   event.preventDefault();
+                  anchor.current = ticket.reference;
                   onToggle(ticket.reference);
                 }
               }}
@@ -208,13 +276,24 @@ export function TicketList({
                 if (event.key === " " && selectable && !selectionDisabled)
                   event.preventDefault();
               }}
-              aria-keyshortcuts={selectable ? "Space Enter" : undefined}
+              aria-keyshortcuts={
+                selectable
+                  ? "Space Enter Shift+ArrowDown Shift+ArrowUp Meta+A Control+A"
+                  : undefined
+              }
             >
-              <Tooltip content={ticket.status}>
+              {grouping && !singleStatus ? (
+                // The group header already names the status (list R-02).
                 <span className="ticket-row-status">
                   <StatusIcon status={ticket.status} />
                 </span>
-              </Tooltip>
+              ) : (
+                <Tooltip content={ticket.status}>
+                  <span className="ticket-row-status">
+                    <StatusIcon status={ticket.status} />
+                  </span>
+                </Tooltip>
+              )}
               <Reference>{ticket.reference}</Reference>
               <Tooltip content={ticket.title} overflowOnly>
                 <span className="ticket-title">{ticket.title}</span>
@@ -245,24 +324,27 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
   const source = externalSource(ticket);
   if (!source) return null;
   return (
-    <Badge
-      variant="source"
-      // Raised: the pill keeps its fill when the row is hovered or selected.
-      tone="raised"
-      title={`Owned by ${source.provider_name}: ${source.display}`}
-    >
-      <span className="sr-only">
-        Owned by {source.provider_name}, {source.number}
-      </span>
-      <Cloud aria-hidden="true" />
-      <span aria-hidden="true">{source.number}</span>
-    </Badge>
+    <Tooltip content={`Owned by ${source.provider_name}: ${source.display}`}>
+      <Badge
+        variant="source"
+        // Raised: the pill keeps its fill when the row is hovered or selected.
+        tone="raised"
+      >
+        <span className="sr-only">
+          Owned by {source.provider_name}, {source.number}
+        </span>
+        <Cloud aria-hidden="true" />
+        <span aria-hidden="true">{source.number}</span>
+      </Badge>
+    </Tooltip>
   );
 }
 
 function ContextIcon({ kind }: { kind: RowContextKind }) {
   const props = { "aria-hidden": true } as const;
-  if (kind === "duplicate") return <Copy {...props} />;
+  // The Duplicate status glyph, never a copy icon (list R-06).
+  if (kind === "duplicate")
+    return <StatusIcon status="Duplicate" size={12} decorative />;
   if (kind === "subticket") return <CornerDownRight {...props} />;
   return kind === "plan" ? <Layers {...props} /> : <Folder {...props} />;
 }
@@ -292,9 +374,10 @@ function RowDetails({
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   const showState =
     // The Ready view already says Ready, and a status view says its status;
-    // Blocked is still news, and so is Ready inside a filtered Todo list.
+    // Blocked is still news. In a grouped list the Todo header summarises
+    // Ready ("Todo 51 · 50 ready"), so only Blocked is flagged (list R-10).
     state.kind === "blocked" ||
-    (state.kind === "ready" && !readyView) ||
+    (state.kind === "ready" && !readyView && !grouped) ||
     (state.kind === "status" &&
       !singleStatus &&
       !grouped &&
@@ -303,7 +386,7 @@ function RowDetails({
     ? "attention"
     : state.kind === "blocked"
       ? "blocked"
-      : state.kind === "ready" && !readyView
+      : state.kind === "ready" && !readyView && !grouped
         ? "ready"
         : null;
   return (
@@ -383,6 +466,8 @@ function RowDetails({
                 {ago(ticket.updated_at, now)}
               </span>
               <span aria-hidden="true">
+                {/* A trashed row says so (list R-07). */}
+                {ticket.trashed ? "Trashed " : ""}
                 {compactAgo(ticket.updated_at, now)}
               </span>
             </time>

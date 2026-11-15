@@ -87,6 +87,34 @@ export const SHORTCUTS = [
     label: "Select the focused ticket for bulk changes",
   },
   {
+    id: "list-select-range",
+    keys: [
+      ["Shift", "↑"],
+      ["Shift", "↓"],
+    ],
+    scope: "Lists",
+    label: "Extend the selection",
+    note: "Shift-click a checkbox to select the range from the last one.",
+  },
+  {
+    id: "list-select-all",
+    keys: [["Mod", "A"]],
+    scope: "Lists",
+    label: "Select every listed ticket",
+  },
+  {
+    id: "inbox-mark",
+    keys: [["E"]],
+    scope: "Lists",
+    label: "Mark the focused Inbox entry read or unread",
+  },
+  {
+    id: "inbox-snooze",
+    keys: [["H"]],
+    scope: "Lists",
+    label: "Snooze the focused Inbox reminder",
+  },
+  {
     id: "list-clear-selection",
     keys: [["Esc"]],
     scope: "Lists",

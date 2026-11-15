@@ -611,25 +611,6 @@ function AppContent() {
                                     refresh={refresh}
                                   />
                                 )}
-                              {view === "inbox" && graphOrigin === null && (
-                                <Inbox
-                                  revision={revision}
-                                  onBrowse={() => setView("tickets")}
-                                  select={(reference, noteId) => {
-                                    setInboxTarget(
-                                      noteId
-                                        ? {
-                                            reference,
-                                            id: noteId,
-                                            key: Date.now(),
-                                          }
-                                        : null,
-                                    );
-                                    setSelected(reference);
-                                    setView("tickets");
-                                  }}
-                                />
-                              )}
                               <div
                                 className="context-view-wrapper"
                                 hidden={
@@ -746,9 +727,33 @@ function AppContent() {
                                 workspace={workspace}
                                 bulk={bulk}
                                 hidden={
-                                  view !== "tickets" || graphOrigin !== null
+                                  (view !== "tickets" && view !== "inbox") ||
+                                  graphOrigin !== null
                                 }
                                 inboxTarget={inboxTarget}
+                                // The Inbox is a triage split: entries open
+                                // beside it, without leaving the view (S6).
+                                {...(view === "inbox" && {
+                                  inbox: (
+                                    <Inbox
+                                      revision={revision}
+                                      selected={workspace.selected}
+                                      onBrowse={() => setView("tickets")}
+                                      select={(reference, noteId) => {
+                                        setInboxTarget(
+                                          noteId
+                                            ? {
+                                                reference,
+                                                id: noteId,
+                                                key: Date.now(),
+                                              }
+                                            : null,
+                                        );
+                                        setSelected(reference);
+                                      }}
+                                    />
+                                  ),
+                                })}
                                 onCreate={(trigger, status) => {
                                   createTriggerRef.current = trigger;
                                   setCreateStatus(status);

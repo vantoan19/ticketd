@@ -37,8 +37,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -203,51 +203,63 @@ function CreateButtons({
       >
         <SquarePen aria-hidden="true" />
       </IconButton>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <IconButton
-            ref={moreTrigger}
-
-            label="More ways to create"
-          >
-            <ChevronDown aria-hidden="true" />
-          </IconButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          onCloseAutoFocus={(event) => {
-            if (chose.current) event.preventDefault();
-            chose.current = false;
-          }}
+      {/* With Chat off the menu would hold only Capture and a repeat of New
+          ticket, so the chevron's place is a direct Capture button (P3). */}
+      {!onNewChat ? (
+        <IconButton
+          ref={moreTrigger}
+          label="Capture a thought"
+          shortcut={shortcutLabel("capture")}
+          aria-keyshortcuts={ariaKeyShortcuts("capture")}
+          onClick={() => onCapture(moreTrigger.current)}
         >
-          <DropdownMenuItem
-            aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
-            onSelect={() => {
-              chose.current = true;
-              // After the menu has closed, so it cannot take focus back.
-              window.setTimeout(() => onNewTicket(moreTrigger.current), 0);
+          <NotebookPen aria-hidden="true" />
+        </IconButton>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              ref={moreTrigger}
+
+              label="More ways to create"
+            >
+              <ChevronDown aria-hidden="true" />
+            </IconButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              if (chose.current) event.preventDefault();
+              chose.current = false;
             }}
           >
-            <SquarePen aria-hidden />
-            New ticket
-            <DropdownMenuShortcut aria-hidden="true">
-              {shortcutLabel("new-ticket")}
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            aria-keyshortcuts={ariaKeyShortcuts("capture")}
-            onSelect={() => {
-              chose.current = true;
-              onCapture(moreTrigger.current);
-            }}
-          >
-            <NotebookPen aria-hidden />
-            Capture a thought
-            <DropdownMenuShortcut aria-hidden="true">
-              {shortcutLabel("capture")}
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-          {onNewChat && (
+            <DropdownMenuItem
+              aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
+              onSelect={() => {
+                chose.current = true;
+                // After the menu has closed, so it cannot take focus back.
+                window.setTimeout(() => onNewTicket(moreTrigger.current), 0);
+              }}
+            >
+              <SquarePen aria-hidden />
+              New ticket
+              <DropdownMenuShortcut aria-hidden="true">
+                {shortcutLabel("new-ticket")}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              aria-keyshortcuts={ariaKeyShortcuts("capture")}
+              onSelect={() => {
+                chose.current = true;
+                onCapture(moreTrigger.current);
+              }}
+            >
+              <NotebookPen aria-hidden />
+              Capture a thought
+              <DropdownMenuShortcut aria-hidden="true">
+                {shortcutLabel("capture")}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => {
                 chose.current = true;
@@ -257,9 +269,9 @@ function CreateButtons({
               <MessageSquarePlus aria-hidden />
               New Chat
             </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </span>
   );
 }

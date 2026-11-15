@@ -117,6 +117,12 @@ export function CreateTicketDialog({
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [createMore, setCreateMore] = useState(draft?.createMore ?? false);
   const [announcement, setAnnouncement] = useState("");
+  // "Created T-FV16." stays readable in the footer for a while (list C-06).
+  useEffect(() => {
+    if (!announcement) return;
+    const timer = window.setTimeout(() => setAnnouncement(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [announcement]);
   const titleRef = useRef<HTMLInputElement>(null);
   // The body scrolls inside a viewport-bound dialog, so a failure below the
   // fold would leave "Retry safely" unexplained: bring the notice into view.
@@ -307,7 +313,10 @@ export function CreateTicketDialog({
       : "Create ticket";
   const blockedReason =
     !hasSubmission && !draft.title.trim()
-      ? "Add a title to create"
+      ? // Right after Create more, the result keeps the slot (list C-06).
+        announcement
+        ? `${announcement}.`
+        : "Add a title to create"
       : pending
         ? "Creating…"
         : workspaceBlocked && !error
@@ -332,6 +341,31 @@ export function CreateTicketDialog({
         </label>
       }
       blockedReason={blockedReason}
+      // Results and restored drafts live in the note slot, so nothing is
+      // inserted into the form (list C-05, C-06).
+      footerNote={
+        announcement ? (
+          `${announcement}.`
+        ) : draft.restored ? (
+          <>
+            Draft restored ·{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="inline"
+              aria-label="Discard draft"
+              disabled={fieldsLocked || hasSubmission}
+              onClick={() => {
+                update({ title: "", body: "", restored: false });
+                setEditorGeneration((value) => value + 1);
+                titleRef.current?.focus();
+              }}
+            >
+              Discard
+            </Button>
+          </>
+        ) : undefined
+      }
       onSubmit={() => void submit()}
       returnFocus={triggerRef}
       busy={pending || !!completedCreation}
@@ -397,6 +431,9 @@ export function CreateTicketDialog({
                 label="Description"
                 placeholder="Steps, acceptance criteria, or a checklist"
                 readOnly={fieldsLocked}
+                // Shown from the start, so focusing the field never inserts
+                // a toolbar and moves the form (list C-04).
+                persistentToolbar
                 value={draft.body}
                 onChange={(body) => update({ body })}
               />
@@ -405,24 +442,6 @@ export function CreateTicketDialog({
               </small>
             </div>
           </Field>
-          {draft.restored && (
-            <p className="create-restored" role="status">
-              Draft restored.{" "}
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                disabled={fieldsLocked || hasSubmission}
-                onClick={() => {
-                  update({ title: "", body: "", restored: false });
-                  setEditorGeneration((value) => value + 1);
-                  titleRef.current?.focus();
-                }}
-              >
-                Discard draft
-              </Button>
-            </p>
-          )}
           <div
             className="create-properties"
             role="group"

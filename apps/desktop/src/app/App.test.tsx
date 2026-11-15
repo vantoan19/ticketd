@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { chooseFilter } from "@/test/filters";
+import { setPreference } from "@/lib/preferences";
 import {
   act,
   cleanup,
@@ -420,14 +422,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
       screen.getByRole("navigation", { name: "Workspace views" }),
     ).getByRole("button", { name: "All tickets" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  expect(screen.getByRole("dialog", { name: "Ticket filters" })).toBeTruthy();
-  fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
-      "button",
-      { name: "Todo" },
-    ),
-  );
+  await chooseFilter("Status", "Todo");
   expect(
     screen.getByRole("button", { name: "Filters, 1 active" }),
   ).toBeTruthy();
@@ -802,6 +797,10 @@ test("clears additional filters while preserving the selected Plan", async () =>
       if (command === "list_plans")
         return [{ id: "e1", name: "Launch", archived: false }];
       if (command === "list_projects" || command === "find_tickets") return [];
+      if (command === "show_plan") {
+        const view = bridgeDefault(command, args) as { plan: object };
+        return { ...view, plan: { ...view.plan, name: "Launch" } };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -810,15 +809,9 @@ test("clears additional filters while preserving the selected Plan", async () =>
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Launch" }));
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
-      "button",
-      { name: "Todo" },
-    ),
-  );
+  await chooseFilter("Status", "Todo");
   expect(
-    screen.getByRole("button", { name: "Remove Status is Todo" }),
+    screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
   fireEvent.click(
     within(screen.getByLabelText("Active filters")).getByRole("button", {
@@ -827,7 +820,7 @@ test("clears additional filters while preserving the selected Plan", async () =>
   );
   expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
   expect(
-    screen.queryByRole("button", { name: "Remove Status is Todo" }),
+    screen.queryByRole("button", { name: "Remove Status filter" }),
   ).toBeNull();
 });
 
@@ -847,18 +840,11 @@ test("removes one filter chip and shows the query when nothing matches", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "zebra" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  const filters = within(
-    screen.getByRole("dialog", { name: "Ticket filters" }),
-  );
-  fireEvent.click(filters.getByRole("button", { name: "bug" }));
-  fireEvent.click(filters.getByRole("button", { name: "ui" }));
+  await chooseFilter("Tags", "bug");
+  await chooseFilter("Tags", "ui");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
@@ -868,20 +854,22 @@ test("removes one filter chip and shows the query when nothing matches", async (
       /Searched titles, descriptions and updates in All tickets, with 2 filters on/,
     ),
   ).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove Tag is bug" }));
-  expect(
-    screen.queryByRole("button", { name: "Remove Tag is bug" }),
-  ).toBeNull();
-  expect(screen.getByRole("button", { name: "Remove Tag is ui" })).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: "Clear search" })).toBeTruthy();
+  // Every tag is one chip for the dimension (list F-08).
+  expect(screen.getByLabelText("Active filters").textContent).toContain(
+    "Tagsbug, ui",
+  );
   fireEvent.click(
     screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!,
   );
-  expect(screen.queryByText(/Searched titles/)).toBeNull();
-  expect(screen.queryByLabelText("Active filters")).toBeNull();
+  // Clear filters clears filters only; the search stays (list F-09).
+  expect(screen.queryByText(/with 2 filters on/)).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Remove Search: zebra" }),
+  ).toBeTruthy();
 });
 
-test("a filter applies live, counts N of M, and Done closes the panel", async () => {
+test("a filter applies live and counts N of M beside the title", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { filter?: { status: string | null } }) => {
@@ -897,9 +885,7 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  const panel = within(screen.getByRole("dialog", { name: "Ticket filters" }));
-  fireEvent.click(panel.getByRole("button", { name: "Todo" }));
+  await chooseFilter("Status", "Todo");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
@@ -911,16 +897,8 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
     screen.getByRole("heading", { name: "All tickets" }).parentElement!
       .textContent,
   ).toContain("3 of 7");
-  expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
-  // Clear all sits in the header (board C); the footer has the count and Done.
-  expect(
-    within(
-      panel.getByRole("heading", { name: "Filters" }).parentElement!,
-    ).getByRole("button", { name: "Clear all" }),
-  ).toBeTruthy();
-  // The Done status chip shares the name; the footer button comes last.
-  fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
-  expect(screen.queryByRole("dialog", { name: "Ticket filters" })).toBeNull();
+  // Choosing a value closes the menu; nothing docks over the detail pane.
+  expect(screen.queryByRole("menu")).toBeNull();
 });
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
@@ -1016,13 +994,7 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
   });
   const row = screen.getByRole("button", { name: /First/ });
   fireEvent.click(row);
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
-      "button",
-      { name: "Todo" },
-    ),
-  );
+  await chooseFilter("Status", "Todo");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -1338,10 +1310,8 @@ test("keeps the selection and retries a failed bulk change with the same request
   expect(requests[1]).toBe(requests[0]);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByText("2 selected")).toBeNull();
-  // The menu that started the change is gone; focus lands on the list heading.
-  expect(document.activeElement).toBe(
-    document.getElementById("tickets-heading"),
-  );
+  // The menu that started the change is gone; focus goes back to the list.
+  expect(document.activeElement?.classList.contains("ticket-row")).toBe(true);
 });
 
 test("names the ticket the core rejected and offers no Retry that cannot succeed", async () => {
@@ -1489,7 +1459,8 @@ test("the status menu counts tickets per status and checks the one all share", a
   openMenu("Status of selected tickets");
   expect(screen.getByText("Set status for 2 tickets")).toBeTruthy();
   const todo = screen.getByRole("menuitem", { name: /^Todo/ });
-  expect(todo.textContent).toContain("both");
+  // Every selected ticket is Todo: a check, and no "both" or "all" word.
+  expect(todo.textContent).toBe("Todo");
   expect(todo.querySelector("svg.bulk-status-check")).not.toBeNull();
   expect(screen.getByRole("menuitem", { name: "Done" })).toBeTruthy();
   fireEvent.keyDown(document.activeElement ?? document.body, {
@@ -1506,8 +1477,10 @@ test("Escape clears the selection and the bar shows the shortcut", async () => {
   await renderBulk({ find_tickets: () => [bulkTicket(1)] });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(
-    screen.getByRole("button", { name: "Clear selection" }).textContent,
-  ).toContain("Esc");
+    screen
+      .getByRole("button", { name: "Clear selection" })
+      .getAttribute("aria-keyshortcuts"),
+  ).toBe("Escape");
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(screen.queryByText("1 selected")).toBeNull();
 });
@@ -1692,7 +1665,7 @@ test("a selection ends when the search or filters change, and the bar can be ski
     screen.getByRole("region", { name: "Bulk edit" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "second" },
   });
   await act(async () => {
@@ -1738,9 +1711,11 @@ test("the list header stays outside the scroller that holds the rows", async () 
     scroller?.contains(screen.getByRole("heading", { name: "All tickets" })),
   ).toBe(false);
   expect(scroller?.contains(document.querySelector(".ticket-rows"))).toBe(true);
-  expect(scroller?.contains(screen.getByRole("button", { name: "Next" }))).toBe(
-    true,
-  );
+  expect(
+    scroller?.contains(
+      screen.getByRole("button", { name: "Show 50 more tickets" }),
+    ),
+  ).toBe(true);
 });
 
 test("totals and group counts describe the whole result, not the loaded page", async () => {
@@ -1757,11 +1732,13 @@ test("totals and group counts describe the whole result, not the loaded page", a
       selector: '.ui-pane-header [data-slot="count"]',
     }),
   ).toBeTruthy();
-  // One Todo ticket is on this page of the 119 in the result.
-  expect(screen.getByText("1 of 119")).toBeTruthy();
-  expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
-  const next = screen.getByRole("button", { name: "Next" });
-  expect((next as HTMLButtonElement).disabled).toBe(false);
+  // The Todo header counts all 119 in the result, not the one shown.
+  expect(screen.getByText("119")).toBeTruthy();
+  // One paging pattern: "Show 50 more" under the rows (P17).
+  expect(
+    screen.getByRole("button", { name: "Show 50 more tickets" }),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Showing 1–2/)).toBeNull();
   // The list is requested in workflow order and counted with the same filter.
   const asked = bridge.invoke.mock.calls
     .filter(([command]) => command === "find_tickets")
@@ -2017,7 +1994,9 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     count_tickets: counted({ duplicate: 1 }),
     search_tickets: () => [bulkTicket(2)],
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate…" }),
+  );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
@@ -2067,7 +2046,9 @@ test("an exact reference leads the matches in the mark-duplicate search", async 
     search_tickets: () => [bulkTicket(2)],
     show_ticket: () => bulkTicket(3),
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate…" }),
+  );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
@@ -2131,71 +2112,84 @@ test("Next at the end of a page opens the first ticket of the next page", async 
   ).toBe("true");
 });
 
-test("pressing Next on the last page keeps focus in the pagination, on Previous", async () => {
-  const all = Array.from({ length: 50 }, (_, index) => ({
+test("Show more adds the next page under the rows and keeps the selection", async () => {
+  const all = Array.from({ length: 51 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-KQ${index + 1}`,
+    title: `Ticket ${index + 1}`,
+  }));
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) =>
+      all.slice(args.filter.offset, args.filter.offset + 50),
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: 51 }),
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  const more = screen.getByRole("button", { name: "Show 1 more tickets" });
+  more.focus();
+  fireEvent.click(more);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.getByRole("button", { name: /Ticket 51/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Show \d+ more/ })).toBeNull();
+  // Focus moves to the first new row, never to the document root (BD-09).
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /Ticket 51/ }),
+  );
+  // Showing more is not a new view: the selection stays.
+  expect(screen.getByText("1 selected")).toBeTruthy();
+});
+
+test("Select all reaches every matching ticket, beyond the listed page (list B-02)", async () => {
+  const all = Array.from({ length: 51 }, (_, index) => ({
     ...bulkTicket(1),
     id: String(index + 1),
     reference: `T-KQ${index + 1}`,
   }));
   await renderBulk({
     find_tickets: (args: { filter: { offset: number } }) =>
-      args.filter.offset === 0
-        ? all
-        : [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }],
-    show_ticket: () => all[0],
+      all.slice(args.filter.offset, args.filter.offset + 50),
     count_tickets: () => counted({ todo: 51 }),
   });
-  const next = screen.getByRole("button", { name: "Next" });
-  next.focus();
-  fireEvent.click(next);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
-  });
-  expect((next as HTMLButtonElement).disabled).toBe(true);
-  // Never the document root: the person can keep paging with the keyboard.
-  expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Previous" }),
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select all 50" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Select all 51 matching" }),
   );
+  await act(async () => {});
+  expect(screen.getByText("51 selected")).toBeTruthy();
 });
 
-test("a later page that empties moves back to the last page that exists", async () => {
-  const all = Array.from({ length: 50 }, (_, index) => ({
-    ...bulkTicket(1),
-    id: String(index + 1),
-    reference: `T-KQ${index + 1}`,
-    title: `Ticket ${index + 1}`,
-  }));
-  let total = 51;
-  const offsets: number[] = [];
+test("Shift-click selects the range from the last ticket toggled", async () => {
   await renderBulk({
-    find_tickets: (args: { filter: { offset: number } }) => {
-      offsets.push(args.filter.offset);
-      if (args.filter.offset === 0) return all;
-      return total > 50
-        ? [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }]
-        : [];
-    },
-    show_ticket: () => all[0],
-    count_tickets: () => counted({ todo: total }),
+    find_tickets: () => [bulkTicket(1), bulkTicket(2), bulkTicket(3)],
   });
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ3" }), {
+    shiftKey: true,
   });
-  expect(offsets.at(-1)).toBe(50);
-  // The only ticket on page 2 leaves the result (trashed, or closed by an agent).
-  total = 50;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2500);
+  expect(screen.getByText("3 selected")).toBeTruthy();
+});
+
+test("switching to the board drops a selection the board cannot act on (list B-08)", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  act(() => {
+    setPreference("ticketLayout", "board");
   });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
-  expect(offsets.at(-1)).toBe(0);
-  expect(
-    screen.getByText("50", { selector: '.ui-pane-header [data-slot="count"]' }),
-  ).toBeTruthy();
-  expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
+  act(() => {
+    setPreference("ticketLayout", "list");
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.queryByText("1 selected")).toBeNull();
 });
 
 test.each(["ticket", "document", "plan"] as const)(

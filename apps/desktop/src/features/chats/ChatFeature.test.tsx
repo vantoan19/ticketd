@@ -196,14 +196,13 @@ test("with Chat off, nothing about Chat is in the workspace", async () => {
   app(createMockChatClient({ chats: [waitingChat()] }));
   await screen.findByRole("button", { name: /All tickets/ });
   expect(screen.queryByRole("button", { name: /^Chats/ })).toBeNull();
-  fireEvent.keyDown(
-    screen.getByRole("button", { name: "More ways to create" }),
-    {
-      key: "Enter",
-    },
-  );
-  await screen.findByRole("menuitem", { name: "Capture a thought" });
-  expect(screen.queryByRole("menuitem", { name: "New Chat" })).toBeNull();
+  // With Chat off, Capture is a direct action beside New ticket.
+  expect(
+    screen.getByRole("button", { name: "Capture a thought" }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "More ways to create" }),
+  ).toBeNull();
 });
 
 test("with Chat on, the sidebar entry says how many Chats wait and opens them", async () => {
@@ -229,9 +228,7 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
 
   fireEvent.keyDown(
     screen.getByRole("button", { name: "More ways to create" }),
-    {
-      key: "Enter",
-    },
+    { key: "Enter" },
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "New Chat" }));
   expect(

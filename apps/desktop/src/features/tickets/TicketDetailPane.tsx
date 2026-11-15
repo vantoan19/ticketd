@@ -14,8 +14,11 @@ export function TicketDetailPane({
   onExpand,
   onReturn,
   onSelect,
+  context = "list",
 }: {
   workspace: TicketWorkspace;
+  /** Opened from the Inbox: no list position, no "outside the results". */
+  context?: "list" | "inbox";
   expanded: boolean;
   inboxTarget: { reference: string; id: string; key: number } | null;
   onExpand: () => void;
@@ -49,6 +52,7 @@ export function TicketDetailPane({
     <StatusLineRegion>
       <TicketDetails
         outsideResults={Boolean(
+          context === "list" &&
           selected &&
           !resultLoading &&
           !queryError &&
@@ -67,11 +71,13 @@ export function TicketDetailPane({
         revision={revision}
         refresh={refresh}
         updateTicket={updateTicket}
-        position={workspace.layout === "board" ? null : position}
+        position={
+          workspace.layout === "board" || context === "inbox" ? null : position
+        }
         onAdjacent={openAdjacent}
         failure={workspace.detailFailure}
         onRetry={workspace.retryDetail}
-        returnLabel={workspace.scopeName}
+        returnLabel={context === "inbox" ? "Inbox" : workspace.scopeName}
       />
     </StatusLineRegion>
   );

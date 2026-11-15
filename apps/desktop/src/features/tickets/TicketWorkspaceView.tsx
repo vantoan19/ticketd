@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   useDefaultLayout,
   useGroupRef,
@@ -17,7 +23,7 @@ import { PlanHeader } from "@/features/plans/PlanHeader";
 import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
-import { FilterDockContext } from "@/features/tickets/filter-dock";
+import { useFiltersMenu } from "@/features/tickets/filters-menu";
 import {
   PlanListControls,
   TicketListPane,
@@ -44,14 +50,29 @@ export function TicketWorkspaceView({
   hidden,
   inboxTarget,
   onCreate,
+  inbox,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
   hidden: boolean;
   inboxTarget: { reference: string; id: string; key: number } | null;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
+  /**
+   * The Inbox, when it is the view: it takes the list pane's place and opens
+   * entries in the detail pane beside it, a triage split (S6).
+   */
+  inbox?: ReactNode;
 }) {
   const { selected, setSelected, clearMention } = workspace;
+  const inboxMode = Boolean(inbox);
+  // Entering or leaving the Inbox starts without an open ticket: the detail
+  // beside it belongs to the list it was opened from.
+  const [wasInbox, setWasInbox] = useState(inboxMode);
+  if (wasInbox !== inboxMode) {
+    setWasInbox(inboxMode);
+    if (selected) setSelected(null);
+  }
+  const board = workspace.layout === "board" && !inboxMode;
   // This view is hidden, not unmounted, when another view opens. Leaving counts as
   // navigating, so a followed mention is not still highlighted on return.
   useEffect(() => {
@@ -64,29 +85,6 @@ export function TicketWorkspaceView({
   const workspaceRef = useRef<HTMLDivElement>(null);
   // The content panel’s width, not the window’s: collapsing the sidebar gives it back.
   const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
-  // The Filters panel docks beside the list, so the detail pane makes room.
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const filterDock = useMemo(
-    () => ({
-      open: filtersOpen,
-      setOpen: setFiltersOpen,
-      anchor:
-        // Stacked, the list fills the window: no room beside it, so use collision handling.
-        workspace.layout === "board" || narrow
-          ? null
-          : {
-              // Always a measurable: the panel measures the list pane when it opens.
-              current: {
-                getBoundingClientRect: () =>
-                  (
-                    listRef.current?.closest<HTMLElement>("#list") ??
-                    document.getElementById("list")
-                  )?.getBoundingClientRect() ?? new DOMRect(),
-              } as HTMLElement,
-            },
-    }),
-    [filtersOpen, workspace.layout, narrow],
-  );
   // Dependencies are temporary; ticket layouts share the remembered preference.
   const [showDependencies, setShowDependencies] = useState(false);
   const planScope = workspace.trash ? "" : workspace.navigation.plan;
@@ -113,6 +111,8 @@ export function TicketWorkspaceView({
     workspace.refresh,
   );
   const scopedPlan = workspace.plans.find((item) => item.id === planScope);
+  // The Plan header's Filters menu and the list's chip row share one state.
+  const filtersMenu = useFiltersMenu();
   const dependenciesOpen = showDependencies && scopedPlan;
   const showTickets = () => {
     setShowDependencies(false);
@@ -177,6 +177,36 @@ export function TicketWorkspaceView({
     }
     focusPane.current = null;
   });
+  // On the board an open card is a peek over its right side; the columns keep
+  // their width (S5). Narrow windows stack as before; Expand takes the page.
+  const peek = board && selected !== null && !narrow && !expanded;
+  // Escape closes the peek, unless a field, menu or dialog inside it has it.
+  const peekState = useRef({ peek, selected });
+  useEffect(() => {
+    peekState.current = { peek, selected };
+  });
+  useEffect(() => {
+    if (!peek) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        !(target instanceof HTMLElement) ||
+        !target.closest("#detail") ||
+        target.isContentEditable ||
+        target.closest(
+          "input, textarea, select, [role=combobox], [role=menu], [role=dialog]",
+        )
+      )
+        return;
+      event.preventDefault();
+      focusPane.current = { reference: peekState.current.selected };
+      setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [peek, setSelected]);
   const [previousNarrow, setPreviousNarrow] = useState(narrow);
   if (previousNarrow !== narrow) {
     setPreviousNarrow(narrow);
@@ -198,14 +228,14 @@ export function TicketWorkspaceView({
     setNarrowDetail(false);
   }
   return (
-    <FilterDockContext.Provider value={filterDock}>
+    <>
       <div
         ref={workspaceRef}
         className="plan-workspace"
         hidden={hidden}
         data-plan={scopedPlan ? "" : undefined}
       >
-        {scopedPlan && (
+        {scopedPlan && !inboxMode && (
           <PlanHeader
             key={scopedPlan.id}
             plan={scopedPlan}
@@ -213,10 +243,15 @@ export function TicketWorkspaceView({
             state={planState}
             mode={dependenciesOpen ? "dependencies" : workspace.layout}
             onModeChange={setPlanMode}
-            controls={<PlanListControls workspace={workspace} />}
+            controls={
+              <PlanListControls
+                workspace={workspace}
+                filtersMenu={filtersMenu}
+              />
+            }
           />
         )}
-        {dependenciesOpen && (
+        {dependenciesOpen && !inboxMode && (
           <PlanDependencies
             id={scopedPlan.id}
             revision={workspace.revision}
@@ -235,17 +270,15 @@ export function TicketWorkspaceView({
           orientation="horizontal"
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
-          disabled={
-            narrow || expanded || (workspace.layout === "board" && !selected)
-          }
+          disabled={narrow || expanded || !selected || peek}
           className={cn(
             "ticket-workspace",
             expanded && "expanded",
             narrowDetail && "narrow-detail",
-            workspace.layout === "board" && "board-layout",
-            !selected && "board-unselected",
+            board && "board-layout",
+            !selected && "unselected",
           )}
-          data-filters-open={filtersOpen ? "" : undefined}
+          data-peek={peek || undefined}
           groupRef={groupRef}
           defaultLayout={
             workspace.layout === "board"
@@ -263,7 +296,7 @@ export function TicketWorkspaceView({
                 meta,
               );
           }}
-          hidden={hidden || Boolean(dependenciesOpen)}
+          hidden={hidden || Boolean(dependenciesOpen && !inboxMode)}
         >
           <ResizablePanel
             id="list"
@@ -271,29 +304,32 @@ export function TicketWorkspaceView({
             minSize={360}
             defaultSize={384}
           >
-            <TicketListPane
-              workspace={workspace}
-              bulk={bulk}
-              listRef={listRef}
-              planState={planState}
-              onCreate={onCreate}
-              onOpen={(reference) => {
-                if (workspace.layout === "board")
-                  boardScrollLeft.current =
-                    listRef.current?.querySelector(".ticket-board")
-                      ?.scrollLeft ?? 0;
-                setShowDependencies(false);
-                setSelected(reference);
-                setNarrowDetail(true);
-                if (narrow) focusPane.current = "detail";
-                // The Open tickets preference: a ticket opened from the list may
-                // take the full width. Narrow windows already show it that way.
-                else if (openTickets === "expanded") {
-                  setExpanded(true);
-                  focusPane.current = "detail";
-                }
-              }}
-            />
+            {inbox ?? (
+              <TicketListPane
+                workspace={workspace}
+                bulk={bulk}
+                listRef={listRef}
+                planState={planState}
+                {...(scopedPlan && { filtersMenu })}
+                onCreate={onCreate}
+                onOpen={(reference) => {
+                  if (workspace.layout === "board")
+                    boardScrollLeft.current =
+                      listRef.current?.querySelector(".ticket-board")
+                        ?.scrollLeft ?? 0;
+                  setShowDependencies(false);
+                  setSelected(reference);
+                  setNarrowDetail(true);
+                  if (narrow) focusPane.current = "detail";
+                  // The Open tickets preference: a ticket opened from the list may
+                  // take the full width. Narrow windows already show it that way.
+                  else if (openTickets === "expanded") {
+                    setExpanded(true);
+                    focusPane.current = "detail";
+                  }
+                }}
+              />
+            )}
           </ResizablePanel>
           <ResizableHandle
             className="split-handle"
@@ -309,6 +345,7 @@ export function TicketWorkspaceView({
           >
             <TicketDetailPane
               workspace={workspace}
+              {...(inboxMode && { context: "inbox" as const })}
               expanded={expanded}
               inboxTarget={inboxTarget}
               onExpand={() => {
@@ -328,6 +365,6 @@ export function TicketWorkspaceView({
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-    </FilterDockContext.Provider>
+    </>
   );
 }

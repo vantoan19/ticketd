@@ -1480,6 +1480,15 @@ html[data-window-bar] {
   width: 14px;
   height: 14px;
 }
+/* New ticket in one click, the other ways to create behind a 20px chevron. */
+.new-ticket-split {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.new-ticket-split > [data-slot="button"]:last-child {
+  width: 20px;
+}
 .sidebar-nav {
   display: grid;
   gap: 0;
@@ -1766,12 +1775,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .management-host:not([hidden]) {
   display: contents;
 }
-.list-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: 0;
-}
 .search {
   display: flex;
   align-items: center;
@@ -1799,18 +1802,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .search input:focus-visible {
   outline: none;
-}
-.filters-content {
-  width: 320px;
-}
-.filters-content fieldset {
-  padding: 0;
-  border: 0;
-}
-.filters-content legend {
-  margin-bottom: 16px;
-  font-size: var(--text-ui);
-  font-weight: 500;
 }
 .pagination {
   display: flex;
@@ -2490,15 +2481,6 @@ html[data-input="pointer"] .sidebar-nav button:focus-visible {
   line-height: var(--text-caption-line);
   text-align: right;
   text-wrap: pretty;
-}
-/* Filters panel open (board C): the panel covers the left of the detail pane,
-   so the empty state centres in the space to its right (centre x 1120) and sits
-   23.5px higher, as the frame draws it. */
-.ticket-workspace[data-filters-open]
-  .ticket-detail[data-empty]
-  [data-slot="empty-state"][data-size="hint"] {
-  padding-left: calc(24px + 360px);
-  padding-bottom: calc(48px + 47px);
 }
 /* Export results share the existing dialog tokens in light and dark themes. */
 .portable-export-files {
