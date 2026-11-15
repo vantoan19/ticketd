@@ -72,11 +72,6 @@
   color: var(--error-foreground);
   max-width: 240px;
 }
-.property-popover {
-  width: 280px;
-  padding: 4px;
-}
-
 .rail-source {
   min-width: 0;
   width: 100%;
