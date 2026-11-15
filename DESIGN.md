@@ -553,7 +553,7 @@ Compose a control before inventing another. Inputs, buttons, menus, fields, noti
 | Failure        | Actionable local error with retry where possible; distinguish failed saves from saved content |
 | Success        | Updated value and concise confirmation; avoid repeated success toasts for autosave            |
 
-Primary buttons use the inverted neutral pair. Secondary actions use outline or quiet neutral fill. Tertiary actions use ghost styling with a visible focus state. Inline ticket references are links with consistent hover/focus behavior; they should not resemble a row of submit buttons embedded in prose.
+Primary buttons use the inverted neutral pair. Destructive buttons sit on `--error-surface` with the `--destructive` label, and hover adds a 1px `--destructive` ring; a destructive confirm places Cancel before it. Secondary actions use outline or quiet neutral fill. Tertiary actions use ghost styling with a visible focus state. Inline ticket references are links with consistent hover/focus behavior; they should not resemble a row of submit buttons embedded in prose.
 
 Fields have persistent labels; placeholders are examples, not labels. Forms use aligned full-width inputs, shared field spacing, and a trailing action row. Put the destructive action away from ordinary submit controls. Do not place an unstyled native select beside a themed button and consider the form finished.
 

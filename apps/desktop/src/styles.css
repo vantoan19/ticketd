@@ -446,13 +446,15 @@
   color: var(--foreground);
   background: var(--accent);
 }
+/* Destructive (DESIGN.md section 11): the error surface with the destructive
+   label at rest, and a 1px destructive ring on hover. Never the inverted
+   primary pair, so it cannot read as the ordinary submit. */
 .ui-button-destructive {
   color: var(--destructive);
-  background: var(--surface);
-  box-shadow: var(--shadow-border);
+  background: var(--error-surface);
 }
 .ui-button-destructive:hover {
-  background: var(--error-surface);
+  box-shadow: inset 0 0 0 1px var(--destructive);
 }
 .ui-button:disabled {
   color: var(--disabled-foreground);
