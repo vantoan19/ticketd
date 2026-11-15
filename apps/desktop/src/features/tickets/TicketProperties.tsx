@@ -1,3 +1,4 @@
+import { TicketAgentStrip } from "./TicketAgent";
 import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
 import {
   TicketCommandContext,
@@ -708,7 +709,10 @@ export function TicketProperties({
         {attention}
         {children}
         {dialogs}
-        <div className="ticket-agent-slot">{latestUpdate}</div>
+        <TicketAgentStrip
+          reference={ticket.reference}
+          onOpenUpdate={onOpenNote}
+        />
       </div>
     );
   return (
