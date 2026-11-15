@@ -5250,6 +5250,17 @@ test("Documents folds local search in its header and navigates one row stop with
   expect(
     screen.getByRole("status", { name: "Document sync status" }).parentElement,
   ).toBe(metadata);
+  fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
+  rows[1]!.focus();
+  fireEvent.keyDown(rows[1]!, { key: "Escape" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("heading", { name: "Reader spec" })).toBeNull(),
+  );
+  expect(
+    within(navigator as HTMLElement).getByRole("button", {
+      name: "Reader spec",
+    }),
+  ).toBe(rows[1]);
 });
 
 test("Documents keeps pin grouping under keyboard focus, exposes exact times and restores a linked Plan Document", async () => {

@@ -121,6 +121,8 @@ export function Documents({
   listRequest?: number;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
+  const [readerCloseRequest, setReaderCloseRequest] = useState(0);
+  const page = useRef<HTMLDivElement>(null);
   const navigator = useRef<HTMLDivElement>(null);
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -164,6 +166,28 @@ export function Documents({
   const [allOffset, setAllOffset] = useState(0);
   const [allLoaded, setAllLoaded] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
+  useEffect(() => {
+    if (!active || !selected) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !matchesShortcut(event, "close")) return;
+      if (
+        document.querySelector(
+          '[role="dialog"], [role="menu"], [role="listbox"]',
+        )
+      )
+        return;
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("input, textarea, [contenteditable]")
+      )
+        return;
+      if (page.current?.querySelector('[aria-label="Edit controls"]')) return;
+      event.preventDefault();
+      setReaderCloseRequest((value) => value + 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, selected]);
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
   const [addingTag, setAddingTag] = useState(false);
@@ -211,7 +235,7 @@ export function Documents({
   // Only mention hidden Activity details when including them would actually find something.
   const [hiddenProbe, setHiddenProbe] = useState({ key: "", found: false });
   const refresh = useCallback(() => {
-    void Promise.all([
+    return Promise.all([
       upTo(recentOffset, (at) => documents.recent(at, includeSupport)),
       upTo(pinOffset, (at) => documents.pins(at)),
     ])
@@ -677,6 +701,7 @@ export function Documents({
     <div
       className="documents-page"
       data-reading={selected !== null || undefined}
+      ref={page}
     >
       <div
         className="documents-list-view"
@@ -1005,7 +1030,7 @@ export function Documents({
             );
           }}
           onOpenDocument={open}
-          closeRequest={listRequest ?? 0}
+          closeRequest={(listRequest ?? 0) + readerCloseRequest}
           backLabel={backLabel}
           {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {
@@ -1017,8 +1042,17 @@ export function Documents({
             onOpenTicket(reference);
           }}
           onClose={() => {
+            const closedId = selected.id;
             setSelected(null);
-            refresh();
+            void refresh().then(() => {
+              if (navigator.current?.closest("[hidden]")) return;
+              const row = [
+                ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
+                  "[data-document-row]",
+                ) ?? []),
+              ].find((button) => button.dataset.documentRow === closedId);
+              (row ?? searchTrigger.current)?.focus();
+            });
             onDocumentClose?.();
           }}
         >
