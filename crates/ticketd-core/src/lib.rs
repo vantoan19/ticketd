@@ -88,6 +88,7 @@ mod upload_destination;
 mod versions;
 pub use attachment_previews::{
     AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
+    TEXT_EXCERPT_BYTES, TextExcerpt,
 };
 pub use upload_destination::AttachmentUploadDestination;
 pub use versions::{RecordKind, Version, VersionSummary};

@@ -43,6 +43,9 @@ pub struct AttachmentSearchResult {
     pub attachment: Attachment,
     pub usage: AttachmentUsage,
     pub related: bool,
+    /// A kept local file whose stored copy is gone or cut short on this computer.
+    #[serde(default)]
+    pub missing: bool,
 }
 
 impl Workspace {
@@ -125,9 +128,11 @@ impl Workspace {
         let results = ids
             .into_iter()
             .map(|(id, related)| {
+                let attachment = attachments::read_attachment(&tx, &id)?;
                 Ok(AttachmentSearchResult {
-                    attachment: attachments::read_attachment(&tx, &id)?,
+                    missing: self.snapshot_missing(&attachment),
                     usage: attachment_retention::read_usage(&tx, &id)?,
+                    attachment,
                     related,
                 })
             })
