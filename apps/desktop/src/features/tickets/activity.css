@@ -38,7 +38,7 @@
 }
 .activity-composer:focus-within,
 .activity-edit:focus-within {
-  outline: 1px solid var(--input-focus);
+  outline: 2px solid var(--input-focus);
   outline-offset: -1px;
 }
 .activity-composer .markdown-editor,
@@ -74,7 +74,7 @@
   outline: none;
 }
 .activity-composer:has(.activity-composer-idle:focus-visible) {
-  outline: 1px solid var(--input-focus);
+  outline: 2px solid var(--input-focus);
   outline-offset: -1px;
 }
 /* The bottom row: "Draft saved" · controls · + · Discard · Post ⌘↵. */
@@ -187,4 +187,9 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* Reserve the text and controls before opening, so the timeline stays put. */
+.activity-composer {
+  min-height: 80px;
 }

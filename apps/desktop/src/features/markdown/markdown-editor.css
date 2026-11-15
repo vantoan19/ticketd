@@ -27,9 +27,10 @@
 .markdown-editor[data-chrome="session"] {
   margin: 0 -12px;
 }
-.markdown-editor[data-chrome="session"] .rich-document {
+.markdown-editor:is([data-chrome="session"], [data-chrome="floating"])
+  .rich-document {
   padding: 12px;
-  min-height: 64px;
+  min-height: 48px;
 }
 /* The editor's own controls: in a host's reserved row, or as the frame's
    last row when nothing hosts them. Always present, never toggled by focus. */
@@ -114,7 +115,7 @@
   outline: none;
 }
 .markdown-editor:has(.rich-document:focus-visible) {
-  outline: 1px solid var(--input-focus);
+  outline: 2px solid var(--input-focus);
   outline-offset: 0;
 }
 .rich-document > * {
@@ -156,7 +157,7 @@
 }
 .rich-document li:has(> input[type="checkbox"]) {
   list-style: none;
-  margin-left: -20px;
+  margin-left: 0;
 }
 .rich-document[data-empty] > :first-child::before {
   content: var(--editor-placeholder);

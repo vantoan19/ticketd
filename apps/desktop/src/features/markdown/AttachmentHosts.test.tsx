@@ -101,10 +101,18 @@ async function insertInto(label: string) {
   await waitFor(() => expect(document.activeElement).toBe(editable));
   // A quick composer keeps the button in its frame; an editing session in
   // the row its page reserves.
-  fireEvent.click(
+  const attachment =
     within(editor).queryByRole("button", { name: "Insert attachment" }) ??
-      screen.getByRole("button", { name: "Insert attachment" }),
-  );
+    screen.queryByRole("button", { name: "Insert attachment" });
+  if (attachment) fireEvent.click(attachment);
+  else {
+    fireEvent.keyDown(screen.getByRole("button", { name: "More formatting" }), {
+      key: "Enter",
+    });
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Insert attachment" }),
+    );
+  }
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await waitFor(() =>
     expect(screen.queryByRole("dialog", { name: "Attach file" })).toBeNull(),
@@ -237,7 +245,7 @@ test.each(["reader", "rich"])(
     );
     if (mode === "rich") {
       fireEvent.click(
-        await screen.findByRole("button", { name: "Edit description" }),
+        await screen.findByRole("group", { name: "Read description" }),
       );
       fireEvent.click(
         await screen.findByRole("button", {

@@ -368,6 +368,9 @@ export function Activity({
     Record<string, { heading: string; trashed: boolean; attached: boolean }>
   >({});
   const [picking, setPicking] = useState(false);
+  const [controlsOwner, setControlsOwner] = useState<"brief" | "details">(
+    "brief",
+  );
   const composerRef = useRef<HTMLFormElement>(null);
   // Where the editors put their controls: the composer's and the edit's bottom row.
   const [controlsHost, setControlsHost] = useState<HTMLSpanElement | null>(
@@ -878,6 +881,13 @@ export function Activity({
           className="activity-composer"
           data-open={composing || undefined}
           aria-label="Write an update"
+          onFocusCapture={(event) => {
+            if (!(event.target instanceof HTMLElement)) return;
+            if (event.target.closest(".activity-details"))
+              setControlsOwner("details");
+            else if (event.target.closest(".markdown-editor"))
+              setControlsOwner("brief");
+          }}
           onSubmit={(event) => void post(event)}
           onKeyDown={submitKey}
         >
@@ -892,7 +902,8 @@ export function Activity({
                 onChange={setDraft}
                 readOnly={pending}
                 focusRequest={focusUpdate}
-                chromeHost={controlsHost}
+                chromeHost={controlsOwner === "brief" ? controlsHost : null}
+                controlsHidden={controlsOwner !== "brief"}
                 paragraphAfterQuote
               />
               {showDetails && (
@@ -906,6 +917,7 @@ export function Activity({
                       disabled={pending}
                       onClick={() => {
                         setFocusDetails(false);
+                        setControlsOwner("brief");
                         updateDraft({ details: null });
                         try {
                           localStorage.removeItem(requestKey);
@@ -919,6 +931,10 @@ export function Activity({
                   </span>
                   <LazyMarkdownEditor
                     attachmentTicketReference={reference}
+                    chromeHost={
+                      controlsOwner === "details" ? controlsHost : null
+                    }
+                    controlsHidden={controlsOwner !== "details"}
                     label="Details"
                     recoveryOwner={`${recoveryOwner}:details`}
                     placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."

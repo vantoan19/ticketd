@@ -242,10 +242,11 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
   expect(within(rail).getByText("urgent")).toBeTruthy();
 });
 
-test("Edit is a real button with its shortcut, and E starts editing", async () => {
+test("the description owns its shortcut, and E starts editing", async () => {
   renderDetails({ ...ticket, body: "Some text" });
-  const edit = await screen.findByRole("button", { name: "Edit description" });
-  expect(edit.textContent).toContain("E");
+  const edit = await screen.findByRole("group", { name: "Read description" });
+  expect(edit.getAttribute("aria-keyshortcuts")).toBe("E");
+  expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
   fireEvent.keyDown(document.body, { key: "e" });
   expect(
     await screen.findByRole("button", { name: "Done editing" }),

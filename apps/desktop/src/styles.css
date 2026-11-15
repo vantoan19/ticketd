@@ -2930,3 +2930,117 @@ kbd,
   line-height: var(--text-section-line);
   letter-spacing: var(--text-section-tracking);
 }
+
+/* Shared in-place editing chrome: outside the prose and anchored to its pane. */
+.ticket-detail,
+.context-view-wrapper {
+  position: relative;
+}
+.floating-edit-position {
+  position: absolute;
+  z-index: 10;
+  bottom: 16px;
+  inset-inline: 12px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.floating-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  max-width: 100%;
+  padding: 0 6px 0 12px;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-menu);
+  background: var(--popover);
+  color: var(--foreground);
+  pointer-events: auto;
+}
+.floating-edit-status {
+  flex: none;
+  width: 112px;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.floating-edit-status > [role="status"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.floating-edit-tools {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+  padding-inline: 4px;
+  border-inline: 1px solid var(--border);
+}
+.description-reading:focus-visible {
+  outline: 2px solid var(--input-focus);
+  outline-offset: 4px;
+  border-radius: var(--radius-card);
+}
+.markdown-editor[data-chrome="floating"] {
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--radius-card);
+}
+.markdown-editor[data-chrome="floating"]:focus-within {
+  outline: 1px solid var(--input-focus);
+  outline-offset: 0;
+}
+
+.ticket-detail
+  .description-document
+  .markdown-document
+  :is(h2, h3, h4, h5, h6) {
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+  font-weight: 600;
+}
+.ticket-detail[data-expanded]
+  .description-document
+  :is(.markdown-document, p, li, h2, h3, h4, h5, h6),
+.ticket-detail[data-expanded] .editor-body [role="textbox"] {
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
+}
+.description-add {
+  height: 48px;
+  padding: 12px;
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+}
+
+.ui-popover[data-variant="compact-list"] {
+  width: 260px;
+  padding: 4px;
+}
+/* Task text has the same inset in reading and rich editing. */
+.markdown-document li.task-list-item,
+.rich-document li:has(> input[type="checkbox"]) {
+  position: relative;
+  margin-left: -20px;
+  padding-left: 24px;
+}
+.markdown-document li.task-list-item > .markdown-check,
+.rich-document li > input[type="checkbox"] {
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.markdown-editor[data-chrome="floating"] .markdown-document,
+.markdown-editor[data-chrome="floating"]
+  .markdown-document
+  :is(h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  line-height: inherit;
+}
