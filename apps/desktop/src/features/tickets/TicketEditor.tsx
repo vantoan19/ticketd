@@ -1,3 +1,4 @@
+import { Disclosure } from "@/components/ui/disclosure";
 import { EmptyState } from "@/components/ui/empty-state";
 import "./description.css";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
@@ -677,10 +678,9 @@ export function TicketEditor({
             Retry
           </Button>
           {error && (
-            <details>
-              <summary>Details</summary>
+            <Disclosure label="Details">
               <pre>{error}</pre>
-            </details>
+            </Disclosure>
           )}
         </div>
       )}

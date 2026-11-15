@@ -1182,7 +1182,13 @@ test("each status loads a bounded page with accurate totals and its own Load mor
   const progress = within(
     screen.getByRole("region", { name: "In progress column" }),
   );
-  expect(progress.getByText("50 of 128 loaded")).toBeTruthy();
+  // The total is in the column header; the pager names the next page (P17).
+  expect(progress.getAllByRole("button", { name: /^T-KQ\d+/ })).toHaveLength(
+    50,
+  );
+  expect(
+    progress.getByRole("button", { name: "Show 50 more In progress" }),
+  ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).getByRole(
       "button",
@@ -1196,19 +1202,24 @@ test("each status loads a bounded page with accurate totals and its own Load mor
     ),
   ).toBeTruthy();
   fireEvent.click(
-    progress.getByRole("button", { name: "Load more In progress" }),
+    progress.getByRole("button", { name: /^Show \d+ more In progress$/ }),
   );
   await settle();
-  expect(progress.getByText("100 of 128 loaded")).toBeTruthy();
+  expect(progress.getAllByRole("button", { name: /^T-KQ\d+/ })).toHaveLength(
+    100,
+  );
+  expect(
+    progress.getByRole("button", { name: "Show 28 more In progress" }),
+  ).toBeTruthy();
   fireEvent.click(
-    progress.getByRole("button", { name: "Load more In progress" }),
+    progress.getByRole("button", { name: /^Show \d+ more In progress$/ }),
   );
   await settle();
   expect(progress.getAllByRole("button", { name: /^T-KQ\d+/ })).toHaveLength(
     128,
   );
   expect(
-    progress.queryByRole("button", { name: "Load more In progress" }),
+    progress.queryByRole("button", { name: /^Show \d+ more In progress$/ }),
   ).toBeNull();
 });
 
@@ -1227,7 +1238,7 @@ test("an obsolete Load more response cannot put tickets back into a different sc
           finish = resolve;
         })
       : null;
-  fireEvent.click(screen.getByRole("button", { name: "Load more Todo" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Show \d+ more Todo$/ }));
   await settle();
   expect(finish).toBeTypeOf("function");
   fireEvent.click(screen.getByRole("button", { name: /^In progress/ }));

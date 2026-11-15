@@ -1,3 +1,4 @@
+import { Disclosure } from "@/components/ui/disclosure";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CloudCheck,
@@ -723,10 +724,9 @@ export function DocumentEditor({
       </p>
       <Button onClick={retry}>Retry</Button>
       {failureDetail && (
-        <details>
-          <summary>Details</summary>
+        <Disclosure label="Details">
           <pre>{failureDetail}</pre>
-        </details>
+        </Disclosure>
       )}
     </div>
   );

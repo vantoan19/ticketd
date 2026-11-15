@@ -1,3 +1,4 @@
+import { Disclosure } from "@/components/ui/disclosure";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -134,10 +135,9 @@ export function RemoveRemoteAttachment({
                 ? "Could not open the Drive file. Its ticketd record was removed; use the retained link or find it in Drive."
                 : "Removal was not confirmed. Retry the same action or review usage again; the Drive file remains."}
             </p>
-            <details>
-              <summary>Details</summary>
+            <Disclosure label="Details">
               <p className="attachment-hint">{error}</p>
-            </details>
+            </Disclosure>
           </>
         )}
         <div className="attachment-actions attachment-cleanup-footer">

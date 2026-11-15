@@ -1,3 +1,4 @@
+import { Disclosure } from "@/components/ui/disclosure";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -110,10 +111,9 @@ export function PurgeAttachment({
                 Permanent purge is pending. Retry to finish or confirm
                 completion.
               </p>
-              <details>
-                <summary>Details</summary>
+              <Disclosure label="Details">
                 <p className="attachment-hint">{error}</p>
-              </details>
+              </Disclosure>
             </>
           ) : (
             <p role="alert">{error}</p>

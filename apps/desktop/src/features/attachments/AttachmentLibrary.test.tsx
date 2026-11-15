@@ -123,8 +123,10 @@ test("explicit local cleanup reviews protections and restores quarantine", async
   fireEvent.click(screen.getByRole("button", { name: "Clean up" }));
   await screen.findByRole("dialog", { name: "Review unused attachments" });
   await screen.findByRole("checkbox", { name: "Select Unused trace" });
-  const protections = screen.getByText("Protected or unavailable (1)");
-  expect(protections.closest("details")).toHaveProperty("open", false);
+  const protections = screen.getByRole("button", {
+    name: /^Protected or unavailable\s*1$/
+  });
+  expect(protections.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(protections);
   expect(screen.getByText("Protected · Recoverable draft")).toBeTruthy();
   expect(screen.queryByText("Protected by recoverable draft")).toBeNull();

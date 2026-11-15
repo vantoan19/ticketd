@@ -234,7 +234,7 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
   const note = await screen.findByLabelText("Selected update");
   expect(note.closest("ol")).not.toBeNull();
   fireEvent.click(
-    await screen.findByRole("button", { name: "Load more activity" }),
+    await screen.findByRole("button", { name: "Show more activity" }),
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("activity_feed", {

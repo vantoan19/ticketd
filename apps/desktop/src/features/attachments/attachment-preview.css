@@ -98,10 +98,6 @@
   line-height: var(--text-ui-line);
   font-weight: 500;
 }
-.attachment-preview-info summary {
-  cursor: pointer;
-  font-size: 12px;
-}
 .attachment-preview-usage {
   border-top: 1px solid var(--border);
   padding-top: 18px;

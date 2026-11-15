@@ -476,7 +476,7 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
     "Canceled",
     "Duplicate",
   ]);
-  expect(todo.getByText("50 of 55 loaded")).toBeTruthy();
+  expect(todo.getByRole("button", { name: "Show 5 more Todo" })).toBeTruthy();
   const parent = todo.getByRole("button", { name: /^T-KQ1\D/ });
   const child = todo.getByRole("button", { name: /^T-KQ2\D/ });
   expect(within(parent).getByText("Alpha")).toBeTruthy();
@@ -495,10 +495,12 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
       { name: /^T-KQ200\D/ },
     ),
   ).toBeTruthy();
-  fireEvent.click(todo.getByRole("button", { name: "Load more Todo" }));
+  fireEvent.click(todo.getByRole("button", { name: /^Show \d+ more Todo$/ }));
   await settle();
   expect(todo.getAllByRole("button", { name: /^T-/ })).toHaveLength(55);
-  expect(todo.queryByRole("button", { name: "Load more Todo" })).toBeNull();
+  expect(
+    todo.queryByRole("button", { name: /^Show \d+ more Todo$/ }),
+  ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
     target: { value: "Ticket 2" },

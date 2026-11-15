@@ -8,12 +8,13 @@ import {
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
+import { renderedLines } from "@/components/ui/rendered-lines";
 import "./patterns.css";
 
 /**
  * A labelled section that opens in place: a 16px chevron that turns down,
  * the label at 14/20 and an optional count. One level only; it replaces every
- * raw `<details>`. Closed content is not rendered. Controlled with `open` and
+ * raw `<details>`. Closed content stays mounted but hidden. Controlled with `open` and
  * `onOpenChange`, or left to itself with `defaultOpen`.
  */
 export function Disclosure({
@@ -52,11 +53,10 @@ export function Disclosure({
         <span>{label}</span>
         {count !== undefined && <Count>{count}</Count>}
       </button>
-      {open && (
-        <div id={body} className="ui-disclosure-body">
-          {children}
-        </div>
-      )}
+      {/* Kept mounted while closed, as <details> is, so state inside survives. */}
+      <div id={body} className="ui-disclosure-body" hidden={!open}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -81,14 +81,13 @@ export function Clamp({
   useLayoutEffect(() => {
     const element = box.current;
     if (!element || expanded) return;
-    const measure = () =>
-      setOverflows(element.scrollHeight > element.clientHeight + 1);
+    const measure = () => setOverflows(renderedLines(element) > lines);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [expanded, children]);
+  }, [expanded, children, lines]);
   const id = useId();
   return (
     <div data-slot="clamp" className={className}>

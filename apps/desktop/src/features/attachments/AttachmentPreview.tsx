@@ -1,3 +1,4 @@
+import { Disclosure } from "@/components/ui/disclosure";
 import { RecordLink } from "@/components/ui/record-link";
 import {
   useCallback,
@@ -506,8 +507,7 @@ export function AttachmentPreview({
                       original attachment.
                     </p>
                   )}
-                  <details>
-                    <summary>Original name &amp; identity</summary>
+                  <Disclosure label="Original name and identity">
                     <dl className="attachment-metadata">
                       <dt>Original filename</dt>
                       <dd>{file.original_filename}</dd>
@@ -516,7 +516,7 @@ export function AttachmentPreview({
                         <code>{file.id}</code>
                       </dd>
                     </dl>
-                  </details>
+                  </Disclosure>
                 </>
               )}
               {error && <p role="alert">{error}</p>}

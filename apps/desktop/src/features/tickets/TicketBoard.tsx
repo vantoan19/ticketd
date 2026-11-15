@@ -1,3 +1,4 @@
+import { Pager } from "@/components/ui/pager";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useEffect } from "react";
 import { useStatusLine } from "@/components/ui/use-status-line";
@@ -23,6 +24,9 @@ import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
 import { useBoardDrag } from "./useBoardDrag";
 import "./ticket-board.css";
+
+/** Cards the board reads per column at a time (useTicketBoard). */
+const BOARD_PAGE = 50;
 import { Reference } from "@/components/ui/reference";
 
 export function TicketBoard({
@@ -318,20 +322,14 @@ export function TicketBoard({
                   />
                 )}
                 {total !== null && items.length < total && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={loading}
-                      onClick={() => void workspace.board.loadMore(status)}
-                      aria-label={`Load more ${status}`}
-                    >
-                      Load more
-                    </Button>
-                    <p className="board-loaded">
-                      {items.length} of {total} loaded
-                    </p>
-                  </>
+                  // The pager keeps its place while the next cards load, so
+                  // a card never lands under the pointer (list BD-09).
+                  <Pager
+                    more={Math.min(BOARD_PAGE, total - items.length)}
+                    noun={status}
+                    loading={loading}
+                    onMore={() => void workspace.board.loadMore(status)}
+                  />
                 )}
               </div>
             </section>

@@ -159,10 +159,8 @@
 .document-save-error p {
   margin: 0;
 }
-.document-save-error details {
+.document-save-error [data-slot="disclosure"] {
   flex-basis: 100%;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 .document-save-error pre {
   white-space: pre-wrap;

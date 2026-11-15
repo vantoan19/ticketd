@@ -1,3 +1,4 @@
+import { Disclosure } from "@/components/ui/disclosure";
 import type { DriveConfiguration } from "@/lib/api/attachments";
 
 export function DriveSetupNotice({
@@ -9,10 +10,9 @@ export function DriveSetupNotice({
   return (
     <>
       <p role="status">Google Drive setup is required before connecting.</p>
-      <details className="attachment-hint">
-        <summary className="cursor-pointer">Setup instructions</summary>
-        <p className="mt-2 wrap-anywhere">{configuration.message}</p>
-      </details>
+      <Disclosure label="Setup instructions">
+        <p className="attachment-hint wrap-anywhere">{configuration.message}</p>
+      </Disclosure>
     </>
   );
 }

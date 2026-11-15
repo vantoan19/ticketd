@@ -1,3 +1,4 @@
+import { Disclosure } from "@/components/ui/disclosure";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -121,10 +122,10 @@ export function AttachmentCleanup({
               : row.reason}
         </p>
         {row.usage.protections.length > 0 && (
-          <details>
-            <summary>
-              Protected references ({row.usage.protections.length})
-            </summary>
+          <Disclosure
+            label="Protected references"
+            count={row.usage.protections.length}
+          >
             <ul>
               {row.usage.protections.map((use) => (
                 <li key={`${use.kind}:${use.owner}`}>
@@ -132,7 +133,7 @@ export function AttachmentCleanup({
                 </li>
               ))}
             </ul>
-          </details>
+          </Disclosure>
         )}
       </li>
     );
@@ -180,18 +181,18 @@ export function AttachmentCleanup({
               <p>No eligible files on this page.</p>
             )}
             {rows.some((row) => !row.eligible) && (
-              <details className="attachment-cleanup-protected">
-                <summary>
-                  Protected or unavailable (
-                  {rows.filter((row) => !row.eligible).length})
-                </summary>
+              <Disclosure
+                className="attachment-cleanup-protected"
+                label="Protected or unavailable"
+                count={rows.filter((row) => !row.eligible).length}
+              >
                 <ul
                   className="attachment-cleanup-files"
                   aria-label="Protected or unavailable files"
                 >
                   {rows.filter((row) => !row.eligible).map(fileRow)}
                 </ul>
-              </details>
+              </Disclosure>
             )}
             <div className="attachment-actions">
               <Button

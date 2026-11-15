@@ -1,3 +1,4 @@
+import { Pager } from "@/components/ui/pager";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
@@ -491,19 +492,16 @@ export function ContextGraph({
                 ))}
               </ul>
               {group.nodes.length > limit && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label={`Load more ${group.title}`}
-                  onClick={() =>
+                <Pager
+                  more={Math.min(GROUP_PAGE, group.nodes.length - limit)}
+                  noun={group.title}
+                  onMore={() =>
                     setShownPerKind((value) => ({
                       ...value,
                       [group.key]: limit + GROUP_PAGE,
                     }))
                   }
-                >
-                  Load more
-                </Button>
+                />
               )}
             </div>
           );

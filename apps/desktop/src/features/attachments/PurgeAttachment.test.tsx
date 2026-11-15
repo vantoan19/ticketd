@@ -74,11 +74,14 @@ test("pending purge keeps technical diagnostics collapsed and retries without cl
   expect(alert.textContent).not.toContain(id);
   expect(alert.textContent).not.toContain("attachment:");
   expect(alert.textContent).not.toContain("repairing managed storage");
-  const details = screen.getByText("Details").closest("details");
-  expect(details).toHaveProperty("open", false);
-  expect(details?.textContent).toContain(diagnostic);
-  fireEvent.click(screen.getByText("Details"));
-  expect(details).toHaveProperty("open", true);
+  const details = screen.getByRole("button", { name: "Details" });
+  expect(details.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(details);
+  expect(details.getAttribute("aria-expanded")).toBe("true");
+  expect(
+    document.getElementById(details.getAttribute("aria-controls") ?? "")
+      ?.textContent,
+  ).toContain(diagnostic);
   fireEvent.click(
     screen.getByRole("button", { name: "Retry permanent purge" }),
   );
