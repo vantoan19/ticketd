@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -122,6 +123,33 @@ test("a limit that is not positive is refused beside the field and nothing is sa
     expect.anything(),
   );
   expect(screen.queryByText("Saved")).toBeNull();
+});
+
+test("entering the saved value again clears the refusal, and Saved goes after a moment", async () => {
+  answer();
+  render(<AttachmentSettings />);
+  const input = await limit();
+  await waitFor(() => expect(input.value).toBe("100"));
+  typeLimit(input, "0");
+  await screen.findByRole("alert");
+  expect(input.getAttribute("aria-describedby")).toContain(
+    "attachment-upload-limit-error",
+  );
+  typeLimit(input, "100");
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(input.getAttribute("aria-invalid")).toBeNull();
+  vi.useFakeTimers();
+  try {
+    typeLimit(input, "25");
+    await act(async () => {});
+    expect(screen.getByText("Saved")).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.queryByText("Saved")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("a failed save keeps what was typed and shows the reason without Saved", async () => {

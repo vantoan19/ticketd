@@ -55,12 +55,14 @@
   gap: 6px;
 }
 
-/* The scroll container around the open page. */
+/* The scroll container around the open page. Focus-driven scrolls stop
+   below the 48px sticky panel bar instead of under it. */
 .settings-page {
   flex: 1;
   min-height: 0;
   width: 100%;
   overflow-y: auto;
+  scroll-padding-top: 48px;
 }
 
 /* Page column and header. */

@@ -18,6 +18,8 @@ import "./pages/attachments.css";
 
 const MIB = 1048576;
 const DEFAULT_LIMIT_BYTES = 100 * MIB;
+/** How long "Saved" stays beside the field after a save. */
+const SAVED_MS = 2000;
 
 /** The Attachments page's content: where new uploads go, and the largest file. */
 export function AttachmentSettings() {
@@ -53,6 +55,12 @@ function UploadLimitSettings() {
       current = false;
     };
   }, []);
+  // "Saved" confirms the change, then goes; it is not a lasting state.
+  useEffect(() => {
+    if (!confirmed) return;
+    const timer = window.setTimeout(() => setConfirmed(false), SAVED_MS);
+    return () => window.clearTimeout(timer);
+  }, [confirmed]);
   async function save(text: string) {
     const bytes = Number(text) * MIB;
     if (!Number.isSafeInteger(bytes) || bytes <= 0) {
@@ -60,10 +68,11 @@ function UploadLimitSettings() {
       setFailure("Enter a positive upload limit in MiB.");
       return;
     }
+    // A valid value answers an earlier refusal even when it is the saved one.
+    setFailure("");
     if (bytes === saved) return;
     setSaving(true);
     setConfirmed(false);
-    setFailure("");
     try {
       await attachments.setUploadLimit(bytes);
       setSaved(bytes);
@@ -100,7 +109,11 @@ function UploadLimitSettings() {
                   value={value}
                   disabled={saved === null || saving}
                   aria-invalid={invalid || undefined}
-                  aria-describedby="attachment-upload-limit-description"
+                  aria-describedby={
+                    failure
+                      ? "attachment-upload-limit-description attachment-upload-limit-error"
+                      : "attachment-upload-limit-description"
+                  }
                   onChange={(event) => {
                     setValue(event.target.value);
                     setConfirmed(false);
@@ -133,7 +146,11 @@ function UploadLimitSettings() {
           }
         >
           {failure && (
-            <span role="alert" className="settings-failure attachments-error">
+            <span
+              id="attachment-upload-limit-error"
+              role="alert"
+              className="settings-failure attachments-error"
+            >
               {failure}
             </span>
           )}

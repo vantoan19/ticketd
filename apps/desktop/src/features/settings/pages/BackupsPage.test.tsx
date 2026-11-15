@@ -79,7 +79,9 @@ test("the last backup shows its file, folder and Checked, and can be revealed", 
   const name = await screen.findByText("ticketd-backup-2026-11-01.sqlite3");
   const row = name.closest(".settings-list-row") as HTMLElement;
   expect(within(row).getByText("Checked")).toBeTruthy();
-  expect(row.textContent).toContain("/Users/me/Backups");
+  expect(within(row).getByTitle("/Users/me/Backups").textContent).toBe(
+    "~/Backups",
+  );
   fireEvent.click(within(row).getByRole("button", { name: /^Show in / }));
   await waitFor(() =>
     expect(workspaceClient.reveal).toHaveBeenCalledWith(last.path),
@@ -141,6 +143,33 @@ test("Back up now shows the backing-up row, then the new last backup and a saved
   ).toBeTruthy();
   expect(screen.getByText("Backup saved and checked.")).toBeTruthy();
   expect(client.backupWorkspace).toHaveBeenCalledWith(last.path);
+});
+
+test("the row says Backing up only once the save sheet returns a path", async () => {
+  let choose: (path: string | null) => void = () => {};
+  vi.mocked(workspaceClient.chooseSavePath).mockReturnValue(
+    new Promise((done) => {
+      choose = done;
+    }),
+  );
+  renderPage();
+  await screen.findByText("No backups yet");
+  fireEvent.click(backUpButton());
+  await waitFor(() =>
+    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
+  );
+  // The sheet is still asking where to save.
+  expect(screen.queryByText("Backing up…")).toBeNull();
+  expect(screen.getByText("No backups yet")).toBeTruthy();
+  fireEvent.click(backUpButton());
+  expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1);
+  vi.mocked(client.backupWorkspace).mockReturnValue(new Promise(() => {}));
+  choose(last.path);
+  expect(
+    await screen.findByText("Backing up…", {
+      selector: ".settings-list-row-title",
+    }),
+  ).toBeTruthy();
 });
 
 test("a refused backup is explained in the footer and keeps the previous status", async () => {

@@ -174,6 +174,26 @@ test("choosing a section opens only its page and moves focus to its title", asyn
   ).toBe("WorkspaceBackups");
 });
 
+test("the Needs setup dot is read at startup, so Settings opens with it already shown", async () => {
+  vi.mocked(cliClient.check).mockResolvedValue({ ...installed, found: false });
+  const view = render(
+    <SettingsStateProvider active={false}>{null}</SettingsStateProvider>,
+  );
+  await act(async () => {});
+  expect(cliClient.check).toHaveBeenCalledTimes(1);
+  // Opening reads again; the dot stays while that reading is still out.
+  vi.mocked(cliClient.check).mockReturnValue(new Promise(() => {}));
+  view.rerender(
+    <SettingsStateProvider active>
+      <SettingsNav onBack={() => {}} />
+    </SettingsStateProvider>,
+  );
+  expect(cliClient.check).toHaveBeenCalledTimes(2);
+  expect(
+    within(navItem("Command line")).getByRole("img", { name: "Needs setup" }),
+  ).toBeTruthy();
+});
+
 test("Command line and Agent skills carry a Needs setup dot until they are set up", async () => {
   vi.mocked(cliClient.check).mockResolvedValue({ ...installed, found: false });
   vi.mocked(agentSkillsClient.list).mockResolvedValue([

@@ -11,6 +11,16 @@ const OPENED = "ticketd:suggestions-opened";
 
 type MultiSelect = Extract<SchemaField, { type: "multi_select" }>;
 
+/** The core's `owner_name` rule: two parts of letters, digits, ".", "_" or "-". */
+const OWNER_NAME = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
+
+/** Why typed text cannot be added to the field, or "" when it can. */
+function formatProblem(field: MultiSelect, text: string) {
+  if (field.format === "owner_name" && !OWNER_NAME.test(text))
+    return "Use owner/name, for example acme/billing-api.";
+  return "";
+}
+
 /** Loads dynamic options for a field from the connector, given what was typed. */
 export type LoadOptions = (
   field: string,
@@ -22,14 +32,30 @@ function FieldNote({
   field,
   errors,
   pending = "",
+  refused = "",
 }: {
   id: string;
   field: SchemaField;
   errors: string[];
   /** Text typed into a selector but not yet added to it. */
   pending?: string;
+  /** Why Enter did not add the typed text; it replaces the other messages. */
+  refused?: string;
 }) {
   const text = pending.trim();
+  if (refused)
+    return (
+      <>
+        {field.help && (
+          <p className="settings-hint" id={`${id}-help`}>
+            {field.help}
+          </p>
+        )}
+        <p id={`${id}-error`} role="alert" className="settings-failure">
+          {refused}
+        </p>
+      </>
+    );
   const explained = text !== "" && errors.length > 0;
   if (explained) {
     const shape =
@@ -75,6 +101,7 @@ function MultiSelectField({
   const [suggestions, setSuggestions] = useState<ChoiceOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState("");
+  const [refused, setRefused] = useState("");
   const requests = useRef(0);
   const container = useRef<HTMLDivElement>(null);
   const full = value.length >= field.max_items;
@@ -141,6 +168,14 @@ function MultiSelectField({
   function add(item: string) {
     const text = item.trim();
     if (!text || full || value.includes(text)) return;
+    // Refused here, keeping the text to correct, rather than sent and turned
+    // into a chip that the save would then reject.
+    const problem = formatProblem(field, text);
+    if (problem) {
+      setRefused(problem);
+      return;
+    }
+    setRefused("");
     onChange([...value, text]);
     setQuery("");
     setOpen(false);
@@ -209,13 +244,18 @@ function MultiSelectField({
                 ? "e.g. bug, payments"
                 : "Search or type, then press Enter"
           }
-          aria-describedby={field.help ? `${id}-help` : undefined}
-          aria-invalid={errors.length > 0 || undefined}
+          aria-describedby={
+            [field.help && `${id}-help`, refused && `${id}-error`]
+              .filter(Boolean)
+              .join(" ") || undefined
+          }
+          aria-invalid={errors.length > 0 || refused !== "" || undefined}
           onFocus={() => {
             if (!open) show();
           }}
           onChange={(event) => {
             setQuery(event.target.value);
+            setRefused("");
             show();
           }}
           onKeyDown={(event) => {
@@ -271,7 +311,13 @@ function MultiSelectField({
           )}
         </div>
       )}
-      <FieldNote id={id} field={field} errors={errors} pending={query} />
+      <FieldNote
+        id={id}
+        field={field}
+        errors={errors}
+        pending={query}
+        refused={refused}
+      />
     </div>
   );
 }

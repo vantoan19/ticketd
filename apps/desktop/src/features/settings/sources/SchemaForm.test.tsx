@@ -101,3 +101,35 @@ test("text typed but not added says what is wrong instead of 'are required'", ()
   expect(alert.textContent).toContain("owner/name");
   expect(screen.queryByText(/are required/)).toBeNull();
 });
+
+test("Enter refuses a repository that is not owner/name, keeps the text and sends nothing", () => {
+  const repositories: SchemaField = {
+    ...multi("repositories", "Repositories"),
+    allow_custom: true,
+    format: "owner_name",
+  };
+  const onChange = vi.fn();
+  render(
+    <SchemaForm
+      fields={[repositories]}
+      draft={{ repositories: [] }}
+      errors={{}}
+      disabled={false}
+      loadOptions={async () => []}
+      onChange={onChange}
+    />,
+  );
+  const field = input("Repositories") as HTMLInputElement;
+  fireEvent.change(field, { target: { value: "acme billing" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(onChange).not.toHaveBeenCalled();
+  expect(field.value).toBe("acme billing");
+  expect(screen.getByRole("alert").textContent).toBe(
+    "Use owner/name, for example acme/billing-api.",
+  );
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  fireEvent.change(field, { target: { value: "acme/billing" } });
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(onChange).toHaveBeenCalledWith("repositories", ["acme/billing"]);
+});

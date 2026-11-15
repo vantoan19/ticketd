@@ -1,6 +1,7 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Terminal } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,15 +45,27 @@ type Check =
 
 const mono = "font-mono";
 
-function InstallGuideLink() {
+/** `onFailure` says why the guide did not open; "" clears it. */
+function InstallGuideLink({
+  onFailure,
+}: {
+  onFailure: (message: string) => void;
+}) {
   return (
     <Button
       type="button"
       variant="secondary"
       size="sm"
-      onClick={() =>
-        void workspaceClient.openLink(INSTALL_GUIDE_URL).catch(() => {})
-      }
+      onClick={() => {
+        onFailure("");
+        workspaceClient
+          .openLink(INSTALL_GUIDE_URL)
+          .catch((reason: unknown) =>
+            onFailure(
+              `Could not open the installation guide: ${String(reason)}`,
+            ),
+          );
+      }}
     >
       Installation guide
       <ExternalLink aria-hidden="true" />
@@ -105,7 +118,13 @@ function StatusTile({ tone }: { tone: StatusDotTone }) {
   );
 }
 
-function StatusRows({ check }: { check: Check }) {
+function StatusRows({
+  check,
+  onGuideFailure,
+}: {
+  check: Check;
+  onGuideFailure: (message: string) => void;
+}) {
   if (check.phase === "checking")
     return (
       <div
@@ -142,7 +161,7 @@ function StatusRows({ check }: { check: Check }) {
             <Step
               title="Get the ticketd executable"
               description="It comes with this app's download."
-              action={<InstallGuideLink />}
+              action={<InstallGuideLink onFailure={onGuideFailure} />}
             />
             <Step
               title="Copy it into a folder on your PATH"
@@ -193,7 +212,9 @@ function StatusRows({ check }: { check: Check }) {
           )
         }
         trailing={
-          versionTrouble || !status.on_path ? <InstallGuideLink /> : null
+          versionTrouble || !status.on_path ? (
+            <InstallGuideLink onFailure={onGuideFailure} />
+          ) : null
         }
       />
       <dl className="cli-details">
@@ -242,6 +263,7 @@ export function CommandLineCard({
 }) {
   const { openPage } = useSettingsState();
   const [check, setCheck] = useState<Check>({ phase: "checking" });
+  const [guideFailure, setGuideFailure] = useState("");
   const load = useCallback(() => {
     void cliClient.check().then(
       (status) => {
@@ -275,8 +297,13 @@ export function CommandLineCard({
         }
       >
         <SettingsList aria-live="polite">
-          <StatusRows check={check} />
+          <StatusRows check={check} onGuideFailure={setGuideFailure} />
         </SettingsList>
+        {guideFailure && (
+          <Alert tone="error" size="compact" className="mt-3">
+            <AlertDescription>{guideFailure}</AlertDescription>
+          </Alert>
+        )}
       </SettingsSection>
       <SettingsSection
         title="Quick reference for agents"
