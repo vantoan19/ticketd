@@ -1,3 +1,4 @@
+import { TicketAgentSession } from "./TicketAgent";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -101,79 +102,109 @@ export function TicketDetails({
       aria-labelledby="detail-heading"
     >
       <OverlayBoundary element={boundary}>
-        <TicketHeader
-          selected={selected}
-          ticket={ticket}
-          expanded={expanded}
-          onExpand={onExpand}
-          onReturn={onReturn}
-          onClose={() => open(null)}
-          {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
-          refresh={refresh}
-          updateTicket={updateTicket}
-          position={position}
-          projects={projects}
-          {...(returnLabel && { returnLabel })}
-          {...(onAdjacent && { onAdjacent })}
-        />
-        <div className="detail-scroll">
-          {selected === null && (
-            <EmptyState
-              size="hint"
-              title="Select a ticket to read it here"
-              footnote={
-                <>
-                  <Kbd>↑</Kbd>
-                  <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
-                </>
-              }
-            />
+        <TicketAgentSession ticket={ticket} revision={revision}>
+          {(agentLoading) => (
+            <>
+              <TicketHeader
+                selected={selected}
+                ticket={ticket}
+                expanded={expanded}
+                onExpand={onExpand}
+                onReturn={onReturn}
+                onClose={() => open(null)}
+                {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
+                refresh={refresh}
+                updateTicket={updateTicket}
+                position={position}
+                projects={projects}
+                {...(returnLabel && { returnLabel })}
+                {...(onAdjacent && { onAdjacent })}
+              />
+              <div
+                className="detail-scroll"
+                data-agent-loading={agentLoading || undefined}
+              >
+                {agentLoading && (
+                  <div
+                    className="detail-document"
+                    role="status"
+                    aria-label="Loading ticket agent context"
+                  >
+                    <Skeleton className="h-9 w-3/4" />
+                    <Skeleton className="mt-3 h-7 w-full" />
+                    <Skeleton className="mt-8 h-11 w-full" />
+                    <Skeleton className="mt-6 h-24 w-full" />
+                  </div>
+                )}
+                {selected === null && (
+                  <EmptyState
+                    size="hint"
+                    title="Select a ticket to read it here"
+                    footnote={
+                      <>
+                        <Kbd>↑</Kbd>
+                        <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
+                      </>
+                    }
+                  />
+                )}
+                {selected !== null && !ticket && failure && (
+                  <FailureState
+                    failure={failure}
+                    {...(onRetry && { onRetry })}
+                  />
+                )}
+                {selected !== null && !ticket && !failure && (
+                  <div
+                    className="detail-document"
+                    role="status"
+                    aria-label="Loading ticket"
+                  >
+                    <Skeleton className="h-9 w-3/4" />
+                    <Skeleton className="mt-3 h-7 w-full" />
+                    <Skeleton className="mt-8 h-11 w-full" />
+                    <Skeleton className="mt-6 h-24 w-full" />
+                  </div>
+                )}
+                {Object.values(details).map((item) => (
+                  <TicketPage
+                    key={item.id}
+                    ticket={item}
+                    active={item.reference === selected}
+                    outsideResults={
+                      outsideResults && item.reference === selected
+                    }
+                    projects={projects}
+                    plans={plans}
+                    revision={revision}
+                    refresh={refresh}
+                    updateTicket={updateTicket}
+                    select={open}
+                    onOpenGraph={() => showGraph(item.reference)}
+                    noteTarget={newest(
+                      inboxTarget?.reference === item.reference
+                        ? inboxTarget
+                        : null,
+                      mention?.reference === item.reference && mention.noteId
+                        ? { id: mention.noteId, key: mention.key }
+                        : null,
+                    )}
+                    mention={
+                      mention?.reference === item.reference &&
+                      !mention.noteId &&
+                      mention.ready
+                        ? mention
+                        : null
+                    }
+                    onMention={(target) =>
+                      setSelected(target.reference, target)
+                    }
+                  />
+                ))}
+              </div>
+            </>
           )}
-          {selected !== null && !ticket && failure && (
-            <FailureState failure={failure} {...(onRetry && { onRetry })} />
-          )}
-          {selected !== null && !ticket && !failure && (
-            <div
-              className="detail-document"
-              role="status"
-              aria-label="Loading ticket"
-            >
-              <Skeleton className="h-9 w-3/4" />
-              <Skeleton className="mt-3 h-7 w-full" />
-              <Skeleton className="mt-8 h-11 w-full" />
-              <Skeleton className="mt-6 h-24 w-full" />
-            </div>
-          )}
-          {Object.values(details).map((item) => (
-            <TicketPage
-              key={item.id}
-              ticket={item}
-              active={item.reference === selected}
-              outsideResults={outsideResults && item.reference === selected}
-              projects={projects}
-              plans={plans}
-              revision={revision}
-              refresh={refresh}
-              updateTicket={updateTicket}
-              select={open}
-              onOpenGraph={() => showGraph(item.reference)}
-              noteTarget={newest(
-                inboxTarget?.reference === item.reference ? inboxTarget : null,
-                mention?.reference === item.reference && mention.noteId
-                  ? { id: mention.noteId, key: mention.key }
-                  : null,
-              )}
-              mention={
-                mention?.reference === item.reference &&
-                !mention.noteId &&
-                mention.ready
-                  ? mention
-                  : null
-              }
-              onMention={(target) => setSelected(target.reference, target)}
-            />
-          ))}
-        </div>
+        </TicketAgentSession>
       </OverlayBoundary>
     </section>
   );
