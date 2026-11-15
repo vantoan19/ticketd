@@ -163,6 +163,8 @@ export function TicketEditor({
   }, [draft.title]);
   const [saved, setSaved] = useState<Content>(restored.saved);
   const [confirmSaved, setConfirmSaved] = useState(false);
+  // After "Use saved text", what the save state says instead of "saved".
+  const [adopted, setAdopted] = useState<string | null>(null);
   // Keep the unsaved text on this device, and write it once more as the page goes away.
   const ticketId = ticket.id;
   const latest = useRef({ draft, saved });
@@ -230,7 +232,8 @@ export function TicketEditor({
       if (event.key !== "e" || event.metaKey || event.ctrlKey || event.altKey)
         return;
       const button = editButton.current;
-      if (!button || button.closest("[hidden]")) return;
+      // A hidden page, or one the dependency graph covers, is not in view.
+      if (!button || button.closest("[hidden], [data-graph]")) return;
       const target = event.target;
       if (
         target instanceof Element &&
@@ -434,11 +437,32 @@ export function TicketEditor({
     recovery,
   ]);
 
+  /**
+   * "Use saved text": only the field in conflict takes the saved text; a
+   * draft in the other field stays and keeps saving. Nothing was saved, so
+   * the save state says which saved text is now in use.
+   */
   function adoptSaved() {
-    setDraft({ title: ticket.title, body: ticket.body });
-    setSaved({ title: ticket.title, body: ticket.body });
+    const next = {
+      title: titleConflict ? ticket.title : draft.title,
+      body: bodyConflict ? ticket.body : draft.body,
+    };
+    const base = {
+      title: titleConflict ? ticket.title : saved.title,
+      body: bodyConflict ? ticket.body : saved.body,
+    };
+    setDraft(next);
+    setSaved(base);
     setConfirmSaved(false);
-    setState("saved");
+    const stillDirty = next.title !== base.title || next.body !== base.body;
+    setAdopted(
+      titleConflict && bodyConflict
+        ? "Using the saved title and description"
+        : titleConflict
+          ? "Using the saved title"
+          : "Using the saved description",
+    );
+    setState(stillDirty ? "pending" : "idle");
     focusEditor();
   }
   /** After a conflict choice the notice goes away; the caret returns to the text in conflict. */
@@ -533,6 +557,7 @@ export function TicketEditor({
   );
   function edit(next: Content) {
     setDraft(next);
+    setAdopted(null);
     setState("pending");
   }
   return (
@@ -698,7 +723,7 @@ export function TicketEditor({
                 ? `${savedField} not saved`
                 : state === "saved"
                   ? `${savedField} saved`
-                  : ""}
+                  : (adopted ?? "")}
       </p>
       {state === "failed" && error && (
         <div className="ticket-save-error">
