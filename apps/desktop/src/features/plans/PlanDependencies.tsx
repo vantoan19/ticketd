@@ -30,20 +30,30 @@ function reasonFor(status: string) {
   return `${status}, so it blocks until it is Done.`;
 }
 
-/** Says what went wrong in terms of the two tickets, not the core's one-liner. */
+/**
+ * Says what went wrong in terms of the two tickets, not the core's one-liner.
+ * `refused` marks a choice that can never be added, so Add waits for another.
+ */
 function dependencyError(
   reason: unknown,
   blocker: string,
   dependent: string,
-): string {
-  const text = String(reason);
-  if (blocker === dependent) return `${dependent} cannot block itself.`;
-  // The core names the loop once; keep it when it is there.
-  if (/can.t block\b/i.test(text)) return text.replace(/^Error:\s*/, "");
-  if (/cycle/i.test(text))
-    return `${dependent} already blocks ${blocker}, directly or through other tickets, so ${blocker} cannot also block it.`;
-  if (/not found/i.test(text)) return `No ticket ${blocker} exists.`;
-  return text;
+): { message: string; refused: boolean } {
+  const text = String(reason).replace(/^Error:\s*/, "");
+  if (blocker === dependent)
+    return { message: `${dependent} can’t block itself.`, refused: true };
+  // The core says "B can't block D: D already blocks B." or "D already reaches
+  // B through X → Y."; older cores only said "cycle".
+  if (/can.t block\b|cycle/i.test(text)) {
+    const through = /\bthrough (.+?)\.?$/.exec(text)?.[1];
+    return {
+      message: `${dependent} already blocks ${blocker}${through ? ` through ${through}` : ""}, so ${blocker} can’t also block it. Choose another ticket.`,
+      refused: true,
+    };
+  }
+  if (/not found/i.test(text))
+    return { message: `No ticket ${blocker} exists.`, refused: true };
+  return { message: text, refused: false };
 }
 
 function Blockers({
@@ -64,6 +74,7 @@ function Blockers({
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<Ticket | null>(null);
   const [error, setError] = useState("");
+  const [refused, setRefused] = useState(false);
   const [pending, setPending] = useState(false);
   const blockers = graph.edges
     .filter((edge) => edge.dependent === member.reference)
@@ -92,7 +103,9 @@ function Blockers({
       await refresh();
       return true;
     } catch (reason) {
-      setError(dependencyError(reason, ref, member.reference));
+      const failure = dependencyError(reason, ref, member.reference);
+      setError(failure.message);
+      setRefused(kind === "add_dependency" && failure.refused);
       return false;
     } finally {
       setPending(false);
@@ -254,7 +267,11 @@ function Blockers({
               <p className="plan-note">A ticket can’t block itself.</p>
             )}
           </Field>
-          <Button type="submit" size="sm" disabled={pending || !chosen}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={pending || !chosen || (refused && Boolean(error))}
+          >
             Add blocker
           </Button>
         </form>
