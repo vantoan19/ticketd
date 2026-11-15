@@ -1,3 +1,4 @@
+import { useReminderTime } from "@/features/tickets/use-reminder-time";
 import { SettingsNavigation } from "@/lib/settings-navigation";
 import { searchMatch } from "@/lib/search-match";
 import { documents, type DocumentSummary } from "@/features/documents/api";
@@ -14,7 +15,7 @@ import {
 import { useLinkedChats, useChatFeature } from "@/features/chats/use-chats";
 import { statusLabel } from "@/features/chats/model";
 import { ReminderDateTime } from "@/features/tickets/ReminderDateTime";
-import { localInstants, localValue } from "@/features/tickets/reminder-time";
+import { localValue } from "@/features/tickets/reminder-time";
 import { reminderPresets } from "@/features/tickets/reminder-presets";
 import { Button } from "@/components/ui/button";
 import {
@@ -170,7 +171,8 @@ export function CommandPalette({
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState("");
   const [occurrence, setOccurrence] = useState("");
-  const instants = localInstants(draft);
+  const time = useReminderTime(draft, occurrence);
+  const instants = time.instants;
   const input = useRef<HTMLInputElement>(null);
   const [scope, setScope] = useState<TicketCommandScope | null>(null);
   const commandsOnly = query.trimStart().startsWith(">");
@@ -453,6 +455,7 @@ export function CommandPalette({
                   draft={draft}
                   occurrence={occurrence}
                   pending={actions.pending || actions.blocked}
+                  past={time.past}
                   onDraft={(value) => {
                     setDraft(value);
                     setOccurrence("");
@@ -464,16 +467,14 @@ export function CommandPalette({
                   disabled={
                     actions.pending ||
                     actions.blocked ||
+                    time.past ||
                     instants.length === 0 ||
                     (instants.length > 1 && !occurrence)
                   }
-                  onClick={() =>
-                    void actions.apply(
-                      "custom",
-                      false,
-                      occurrence || instants[0]!.toISOString(),
-                    )
-                  }
+                  onClick={() => {
+                    const selected = time.selectForSubmit();
+                    if (selected) void actions.apply("custom", false, selected);
+                  }}
                 >
                   Set reminder
                 </Button>

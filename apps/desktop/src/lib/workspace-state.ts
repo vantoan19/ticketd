@@ -19,26 +19,32 @@ let state: WorkspaceState = null;
 const listeners = new Set<() => void>();
 
 function publish(next: WorkspaceState) {
-  if (state?.problem === next?.problem && state?.details === next?.details)
-    return;
+  if (state === next) return;
   state = next;
   for (const listener of listeners) listener();
 }
 
 /**
  * Records a workspace-level failure from any command. The band shows the
- * latest one until Retry clears it; a write that fails again brings it back.
+ * latest one until recovery proves writes work again.
  */
 export function reportWorkspaceFailure(
   problem: WorkspaceProblem,
   details: string,
 ) {
-  publish({ problem, details });
+  const failure = { problem, details };
+  publish(failure);
+  return failure;
 }
 
-/** Clears the band, before the retry that may raise it again. */
-export function clearWorkspaceFailure() {
-  publish(null);
+/** Capture the failure an async recovery attempt is allowed to clear. */
+export function getWorkspaceFailure(): WorkspaceState {
+  return state;
+}
+
+/** A completed recovery must not clear a failure reported since it began. */
+export function clearWorkspaceFailure(expected: WorkspaceState = state) {
+  if (state === expected) publish(null);
 }
 
 /**

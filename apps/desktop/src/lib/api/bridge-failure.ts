@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   noteWorkspaceSuccess,
   reportWorkspaceFailure,
+  type WorkspaceState,
 } from "@/lib/workspace-state";
 
 /** Every kind of failure the core reports across the bridge. */
@@ -69,6 +70,9 @@ export function isWorkspaceCode(code: string): code is WorkspaceFailureCode {
  * message is the raw cause: show it only under "Details" (see describeFailure).
  */
 export class BridgeFailure extends Error {
+  /** The exact band raised by this rejection; a later failure must survive recovery. */
+  workspaceFailure: WorkspaceState = null;
+
   constructor(
     readonly code: FailureCode,
     message: string,
@@ -134,7 +138,10 @@ export async function structured<T>(call: Promise<T>): Promise<T> {
   } catch (reason) {
     const failure = toFailure(reason);
     if (isWorkspaceCode(failure.kind))
-      reportWorkspaceFailure(failure.kind, failure.message);
+      failure.workspaceFailure = reportWorkspaceFailure(
+        failure.kind,
+        failure.message,
+      );
     throw failure;
   }
   noteWorkspaceSuccess();
