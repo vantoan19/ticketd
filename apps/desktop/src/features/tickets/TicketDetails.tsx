@@ -38,11 +38,14 @@ export function TicketDetails({
   updateTicket,
   position = null,
   onAdjacent,
+  returnLabel,
   outsideResults = false,
 }: {
   outsideResults?: boolean;
   /** The selected ticket's place in the visible list, across pages. */
   position?: { index: number; total: number } | null;
+  /** The list's name, for the expanded view's return crumb. */
+  returnLabel?: string;
   /** Open the ticket before (-1) or after (1) the selected one in the list. */
   onAdjacent?: (direction: 1 | -1) => void;
   selected: string | null;
@@ -136,6 +139,7 @@ export function TicketDetails({
         updateTicket={updateTicket}
         position={position}
         projects={projects}
+        {...(returnLabel && { returnLabel })}
         {...(onAdjacent && { onAdjacent })}
       />
       <div className="detail-scroll">

@@ -69,6 +69,7 @@ export function TicketDetailPane({
         updateTicket={updateTicket}
         position={workspace.layout === "board" ? null : position}
         onAdjacent={openAdjacent}
+        returnLabel={workspace.scopeName}
       />
     </StatusLineRegion>
   );

@@ -57,15 +57,6 @@
   font-size: var(--text-reading);
   line-height: 24px;
 }
-.breadcrumb-back {
-  /* Board B: the back arrow sits 12px left of the button's own inset. */
-  margin-left: -12px;
-  gap: 6px;
-  color: var(--secondary-foreground);
-}
-.breadcrumb-separator {
-  color: var(--disabled-foreground);
-}
 .ticket-detail[data-expanded] .description-document,
 .ticket-detail[data-expanded] .description-document :is(p, li),
 .ticket-detail[data-expanded] .editor-body [role="textbox"] {

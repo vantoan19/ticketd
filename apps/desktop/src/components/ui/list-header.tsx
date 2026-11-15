@@ -128,18 +128,16 @@ export function PaneHeaderButton({
 export function ReturnCrumb({
   origin,
   onReturn,
+  label = `Back to ${origin}`,
 }: {
   origin: string;
   onReturn: () => void;
+  /** The accessible name, when "Back to {origin}" is not the clearest. */
+  label?: string;
 }) {
   return (
     <span data-slot="return-crumb" className="ui-return-crumb">
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label={`Back to ${origin}`}
-        onClick={onReturn}
-      >
+      <Button variant="ghost" size="sm" aria-label={label} onClick={onReturn}>
         <ArrowLeft aria-hidden="true" />
         <span className="ui-return-crumb-origin">{origin}</span>
       </Button>

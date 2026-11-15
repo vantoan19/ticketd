@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { ReturnCrumb } from "@/components/ui/list-header";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useCopy } from "@/components/ui/use-copy";
@@ -55,7 +56,10 @@ export function TicketHeader({
   position = null,
   onAdjacent,
   projects = [],
+  returnLabel = "All tickets",
 }: {
+  /** The name of the list the ticket was opened from, for the return crumb. */
+  returnLabel?: string;
   /** For the Project folder a Chat about the ticket is offered. */
   projects?: Project[];
   /** The selected ticket's place in the visible list, across pages. */
@@ -147,21 +151,12 @@ export function TicketHeader({
     <div className="detail-header">
       <div className="detail-title-group">
         {selected && expanded && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="breadcrumb-back"
-              aria-label="Return to ticket list"
-              onClick={onReturn}
-            >
-              <ArrowLeft size={16} aria-hidden="true" />
-              All tickets
-            </Button>
-            <span className="breadcrumb-separator" aria-hidden="true">
-              /
-            </span>
-          </>
+          // The list it came from, by name (P14), not a hard-coded "All tickets".
+          <ReturnCrumb
+            origin={returnLabel}
+            label="Return to ticket list"
+            onReturn={onReturn}
+          />
         )}
         {selected && !expanded && (
           <span className="return-to-list">

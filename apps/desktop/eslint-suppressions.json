@@ -188,7 +188,7 @@
   },
   "src/features/tickets/TicketHeader.tsx": {
     "shadcn/no-restyle": {
-      "count": 3
+      "count": 2
     }
   },
   "src/features/tickets/TicketList.tsx": {
