@@ -5955,3 +5955,46 @@ test("an empty Ticket folds Activity and R opens its existing composer without l
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "A retained update draft");
 });
+
+test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
+  const current = bulkTicket(1, { title: "Follow outcome" });
+  let following = false;
+  let failed = true;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { following?: boolean }) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "is_following") return following;
+      if (command === "set_following") {
+        if (failed) throw new Error("Storage is busy");
+        following = args?.following ?? false;
+        return null;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Follow outcome/ }),
+  );
+  const follow = await screen.findByRole("button", { name: "Follow" });
+  const header = follow.closest("header");
+  expect(header).toBeTruthy();
+  expect(
+    within(
+      screen.getByRole("group", { name: "Ticket properties" }),
+    ).queryByRole("button", { name: "Follow" }),
+  ).toBeNull();
+  fireEvent.click(follow);
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(follow.closest("header")).toBe(header);
+  expect(header?.querySelector('[role="alert"]')).toBeNull();
+  expect(follow.getAttribute("aria-pressed")).toBe("false");
+  failed = false;
+  fireEvent.click(retry);
+  await vi.waitFor(() =>
+    expect(follow.getAttribute("aria-pressed")).toBe("true"),
+  );
+  act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
+  expect(follow.hasAttribute("disabled")).toBe(true);
+});
