@@ -1,3 +1,7 @@
+import {
+  reportWorkspaceFailure,
+  clearWorkspaceFailure,
+} from "@/lib/workspace-state";
 // @vitest-environment jsdom
 import { chooseFilter } from "@/test/filters";
 import { setPreference } from "@/lib/preferences";
@@ -84,6 +88,7 @@ afterEach(() => {
   bridge.invoke.mockReset();
   localStorage.clear();
   narrowViewport = false;
+  clearWorkspaceFailure();
   // A command no fake answers means the bridge contract moved under the test.
   const unknown = unknownCommands.splice(0);
   expect(unknown).toEqual([]);
@@ -2740,4 +2745,357 @@ test("a G sequence expires after one second", async () => {
       .getByRole("button", { name: /^All tickets/ })
       .getAttribute("aria-current"),
   ).toBe("page");
+});
+
+test("focused Ticket status key opens a scoped palette and Undo restores the status", async () => {
+  let current = bulkTicket(1, { reference: "T-FV1", title: "Palette target" });
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { patch?: { status?: string } }) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "change_ticket") {
+        current = { ...current, status: args?.patch?.status ?? current.status };
+        return current;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  const row = await screen.findByRole("button", { name: /Palette target/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "s" });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  expect(await screen.findByText("Status of T-FV1")).toBeTruthy();
+  fireEvent.keyDown(input, { key: "4" });
+  expect(await screen.findByText("Moved T-FV1 to Done")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "change_ticket",
+    expect.objectContaining({ reference: "T-FV1", patch: { status: "Done" } }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await vi.waitFor(() => expect(current.status).toBe("Todo"));
+});
+
+test.each([
+  [
+    "p",
+    "Project",
+    "Next project",
+    "change_ticket",
+    { patch: { project_id: "project-next" } },
+  ],
+  ["l", "Plan", "Next Plan", "set_plan", { plan: "plan-next" }],
+  ["t", "Tags", "polish", "add_tag", { tag: "polish" }],
+  ["h", "Reminder", "Tomorrow", "set_reminder", {}],
+])(
+  "focused Ticket %s key uses the existing %s mutation and Undo",
+  async (key, scope, label, command, expected) => {
+    const current = bulkTicket(1, {
+      reference: "T-FV1",
+      title: "Palette target",
+    });
+    bridge.invoke.mockImplementation(
+      (name: string, args?: { reference?: string; id?: string }) => {
+        if (name === "find_tickets") return [current];
+        if (
+          name === "show_ticket" ||
+          name === "change_ticket" ||
+          name === "set_plan" ||
+          name === "add_tag" ||
+          name === "remove_tag"
+        )
+          return current;
+        if (name === "set_reminder") return null;
+        if (name === "list_projects")
+          return [
+            {
+              id: "project-next",
+              name: "Next project",
+              path: "/next",
+              paths: ["/next"],
+            },
+          ];
+        if (name === "list_plans")
+          return [
+            {
+              id: "plan-next",
+              name: "Next Plan",
+              archived: false,
+              purpose: "",
+            },
+          ];
+        if (name === "search_tags") return ["polish"];
+        return bridgeDefault(name, args);
+      },
+    );
+    render(<App />);
+    const row = await screen.findByRole("button", { name: /Palette target/ });
+    row.focus();
+    fireEvent.keyDown(row, { key });
+    expect(await screen.findByText(`${scope} of T-FV1`)).toBeTruthy();
+    fireEvent.click(
+      await screen.findByRole("option", { name: new RegExp(`^${label}`) }),
+    );
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      command,
+      expect.objectContaining({ reference: "T-FV1", ...expected }),
+    );
+    bridge.invoke.mockClear();
+    fireEvent.click(undo);
+    const undoCommand = command === "add_tag" ? "remove_tag" : command;
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        undoCommand,
+        expect.objectContaining({ reference: "T-FV1" }),
+      ),
+    );
+  },
+);
+
+function paletteTickets() {
+  const tickets = [
+    bulkTicket(1, { title: "Open Ticket" }),
+    bulkTicket(2, { title: "Focused Ticket" }),
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { reference?: string; id?: string }) => {
+      if (command === "find_tickets") return tickets;
+      if (command === "show_ticket")
+        return tickets.find((ticket) => ticket.reference === args?.reference);
+      return bridgeDefault(command, args);
+    },
+  );
+  return tickets;
+}
+
+test("palette actions come first, > excludes ticket search, and Tab and Backspace stay in the palette", async () => {
+  paletteTickets();
+  render(<App />);
+  const row = await screen.findByRole("button", { name: /Focused Ticket/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  const status = await screen.findByRole("option", { name: /Change status/ });
+  expect(screen.getAllByRole("option")[0]).toBe(status);
+  fireEvent.keyDown(input, { key: "Tab" });
+  expect(await screen.findByText("Status of T-KQ2")).toBeTruthy();
+  fireEvent.keyDown(input, { key: "Backspace" });
+  expect(
+    await screen.findByRole("option", { name: /Change status/ }),
+  ).toBeTruthy();
+  bridge.invoke.mockClear();
+  fireEvent.change(input, { target: { value: "> status" } });
+  expect(screen.getByRole("option", { name: /Change status/ })).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "Tickets" })).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "search_tickets"),
+  ).toBe(false);
+});
+
+test("Duplicate chooses the existing canonical-ticket review without a direct status write", async () => {
+  paletteTickets();
+  render(<App />);
+  const row = await screen.findByRole("button", { name: /Focused Ticket/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "s" });
+  fireEvent.click(
+    await screen.findByRole("option", { name: /^Mark as duplicate/ }),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "Mark T-KQ2 as a duplicate" }),
+  ).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
+  ).toBe(false);
+});
+
+test("copy reference prefers the focused row over the open Ticket", async () => {
+  paletteTickets();
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  await screen.findByRole("textbox", { name: "Title" });
+  const focused = screen.getByRole("button", { name: /Focused Ticket/ });
+  focused.focus();
+  fireEvent.keyDown(focused, { key: "C", ctrlKey: true, shiftKey: true });
+  expect(writeText).toHaveBeenCalledWith("T-KQ2");
+  fireEvent.keyDown(focused, { key: "p" });
+  expect(await screen.findByText("Project of T-KQ2")).toBeTruthy();
+});
+
+test("property keys leave typing and existing dialogs alone", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  const title = await screen.findByRole("textbox", { name: "Title" });
+  fireEvent.keyDown(title, { key: "s" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  title.blur();
+  fireEvent.keyDown(document.body, { key: "c" });
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.keyDown(dialog, { key: "h" });
+  expect(
+    screen.queryByRole("combobox", { name: "Search tickets and destinations" }),
+  ).toBeNull();
+});
+
+test("reminder drill-in shares custom local-time scheduling with the existing reminder picker", async () => {
+  paletteTickets();
+  const original = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { reference?: string }) =>
+      command === "set_reminder" ? null : original(command, args),
+  );
+  render(<App />);
+  const row = await screen.findByRole("button", { name: /Focused Ticket/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "h" });
+  fireEvent.click(await screen.findByRole("option", { name: "Custom…" }));
+  const field = await screen.findByLabelText("Date and time");
+  fireEvent.change(field, { target: { value: "2030-01-01T12:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Set reminder" }));
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "set_reminder",
+      expect.objectContaining({
+        reference: "T-KQ2",
+        dueAt: new Date(2030, 0, 1, 12).toISOString(),
+      }),
+    ),
+  );
+});
+
+test.each([
+  ["s", "Status"],
+  ["p", "Project"],
+  ["l", "Plan"],
+  ["t", "Tags"],
+  ["h", "Reminder"],
+])(
+  "board property key %s targets the focused card and returns focus after Escape",
+  async (key, scope) => {
+    paletteTickets();
+    act(() => setPreference("ticketLayout", "board"));
+    render(<App />);
+    const card = (
+      await screen.findAllByRole("button", { name: /Focused Ticket/ })
+    ).find((button) => button.hasAttribute("data-board-reference"))!;
+    card.focus();
+    fireEvent.keyDown(card, { key });
+    expect(await screen.findByText(`${scope} of T-KQ2`)).toBeTruthy();
+    const input = screen.getByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.keyDown(input, { key: "Escape" });
+    await vi.waitFor(() => expect(document.activeElement).toBe(card));
+  },
+);
+
+test("R opens the update composer on the open Ticket", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  await screen.findByRole("textbox", { name: "Title" });
+  fireEvent.keyDown(document.body, { key: "r" });
+  expect(
+    await screen.findByRole("textbox", { name: /New update/ }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+});
+
+test.each([
+  ["s", "Status"],
+  ["p", "Project"],
+  ["l", "Plan"],
+  ["t", "Tags"],
+  ["h", "Reminder"],
+])(
+  "open Ticket property key %s is scoped to the Ticket",
+  async (key, scope) => {
+    paletteTickets();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+    await screen.findByRole("textbox", { name: "Title" });
+    fireEvent.keyDown(document.body, { key });
+    expect(await screen.findByText(`${scope} of T-KQ1`)).toBeTruthy();
+  },
+);
+
+test("a read-only workspace disables palette mutations and R keeps the composer closed", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  await screen.findByRole("textbox", { name: "Title" });
+  act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
+  fireEvent.keyDown(document.body, { key: "r" });
+  expect(screen.queryByRole("textbox", { name: /New update/ })).toBeNull();
+  fireEvent.keyDown(document.body, { key: "s" });
+  const done = await screen.findByRole("option", { name: "Done" });
+  expect(done.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.keyDown(
+    screen.getByRole("combobox", { name: "Search tickets and destinations" }),
+    { key: "4" },
+  );
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
+  ).toBe(false);
+});
+
+test("palette offers the focused Ticket's linked Chat and opens that Chat", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient, chatState } =
+    await import("@/features/chats/mock-client");
+  const tickets = paletteTickets();
+  const client = createMockChatClient({
+    enabled: true,
+    records: tickets.map((ticket) => ({
+      kind: "ticket",
+      id: ticket.id,
+      reference: ticket.reference,
+      title: ticket.title!,
+      status: ticket.status,
+    })),
+    chats: [
+      {
+        chat: chatState({
+          id: "linked-chat",
+          title: "Polish focused Ticket",
+          links: [
+            {
+              kind: "ticket",
+              id: "2",
+              reference: "T-KQ2",
+              title: "Focused Ticket",
+              status: "Todo",
+            },
+          ],
+        }),
+      },
+    ],
+  });
+  const open = vi.spyOn(client, "openChat");
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  const row = await screen.findByRole("button", { name: /Focused Ticket/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "k", ctrlKey: true });
+  fireEvent.click(
+    await screen.findByRole("option", {
+      name: /Open its Chat, “Polish focused Ticket”/,
+    }),
+  );
+  await vi.waitFor(() => expect(open).toHaveBeenCalledWith("linked-chat"));
 });

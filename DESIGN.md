@@ -765,8 +765,17 @@ keep Mod+K for links. G then I/A/R/C/D navigates outside typing and overlays,
 with a one-second sequence timeout. Chat destinations are unavailable while
 Chat is off. The single shortcut registry represents sequences separately from
 simultaneous chords; Settings and palette hints render that registry. The
-palette currently offers Ticket search and navigation; action drill-ins build
-on this shared surface.
+palette starts with the open or focused Ticket's actions. S/P/L/T/H drill into
+Status, Project, Plan, tags and reminder on this same surface. The input's
+recessed scope chip names the Ticket and property and announces “Status of
+T-…”; 1–9 choose the visible options, Backspace on an empty input returns to
+actions, and Tab or Right opens the selected action. Prefix > searches commands
+only. Property changes use the same bridge operations as the property pickers
+and post a status line with Undo; Duplicate opens the existing dependency review.
+The same keys act on a focused list row or board card before the open Ticket;
+Mod+Shift+C copies that reference, H means Remind me and R writes an update.
+Typing and overlays keep their own keys; completing an action returns focus
+to its opener.
 
 Keyboard access must cover navigation, row selection/opening, resizing, property changes, editing, overlay dismissal, and return to the list. Preserve distinct focus and selection. Announce save errors and meaningful async results without repeatedly announcing background polling. Use landmark regions and a logical heading sequence. Do not assign a visual heading level solely to obtain a font size.
 

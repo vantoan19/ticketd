@@ -1,3 +1,6 @@
+import { localInstants, localValue } from "./reminder-time";
+import { ReminderDateTime } from "./ReminderDateTime";
+import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
 import { Bell, CalendarClock } from "lucide-react";
 import {
   Popover,
@@ -11,80 +14,15 @@ import { invoke } from "@/lib/api/bridge-failure";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Input } from "@/components/ui/input";
 import { ChoiceList } from "@/components/ui/choice-list";
-import { Picker } from "@/components/ui/picker";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { formatDateTime, formatTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { reminderSummary } from "@/features/tickets/reminder-summary";
 import { reminderPresets } from "./reminder-presets";
-
-/**
- * Whether the field holds a whole date and time yet. While a year is still being
- * typed the field reports years such as 0006; that is unfinished, not invalid.
- */
-function complete(value: string): boolean {
-  const match = /^(\d{4})-\d{2}-\d{2}T\d{2}:\d{2}$/.exec(value);
-  return match !== null && Number(match[1]) >= 1000;
-}
-
-// A local clock time may be skipped or occur twice during a time-zone transition.
-function localInstants(value: string): Date[] {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
-  if (!match) return [];
-  const [, y, m, d, h, min] = match;
-  const utc = Date.UTC(
-    Number(y),
-    Number(m) - 1,
-    Number(d),
-    Number(h),
-    Number(min),
-  );
-  const offsets = new Set<number>();
-  for (let delta = -48; delta <= 48; delta++)
-    offsets.add(new Date(utc + delta * 3600000).getTimezoneOffset());
-  return [...offsets]
-    .map((offset) => new Date(utc + offset * 60000))
-    .filter(
-      (date) =>
-        date.getFullYear() === Number(y) &&
-        date.getMonth() === Number(m) - 1 &&
-        date.getDate() === Number(d) &&
-        date.getHours() === Number(h) &&
-        date.getMinutes() === Number(min),
-    )
-    .sort((a, b) => a.getTime() - b.getTime());
-}
-function offsetLabel(date: Date): string {
-  const minutes = -date.getTimezoneOffset();
-  const sign = minutes >= 0 ? "+" : "−";
-  return `UTC${sign}${String(Math.floor(Math.abs(minutes) / 60)).padStart(2, "0")}:${String(Math.abs(minutes) % 60).padStart(2, "0")}`;
-}
-
-/** "Bangkok (UTC+07:00)": the zone the reminder's time is read in. */
-function zoneLabel(now: Date): string {
-  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const place = zone?.split("/").pop()?.replaceAll("_", " ");
-  return place
-    ? `${place} (${offsetLabel(now)})`
-    : `Your local time (${offsetLabel(now)})`;
-}
-
-/** The value a datetime-local field shows for an instant, in local time. */
-function localValue(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 /**
  * The ticket's reminder: a trigger in the rail's Attention row ("Remind me"
@@ -107,8 +45,6 @@ export function Reminder({
   const [draft, setDraft] = useState("");
   const [occurrence, setOccurrence] = useState("");
   const options = localInstants(draft);
-  // A whole date and time that does not exist here: the clock skips it.
-  const skipped = complete(draft) && options.length === 0;
   // Reading and changing the reminder fail separately: a failed read names
   // the trigger, a failed change shows under the actions until the next try.
   const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
@@ -230,6 +166,8 @@ export function Reminder({
         {variant === "strip" ? (
           <IconButton
             label={summary ?? label}
+            shortcut={shortcutLabel("ticket-reminder")}
+            aria-keyshortcuts={ariaKeyShortcuts("ticket-reminder")}
             aria-label={name}
             aria-pressed={due !== null}
           >
@@ -240,6 +178,8 @@ export function Reminder({
             variant="ghost"
             size="sm"
             aria-label={name}
+            title={`Remind me (${shortcutLabel("ticket-reminder")})`}
+            aria-keyshortcuts={ariaKeyShortcuts("ticket-reminder")}
             data-set={due ? "" : undefined}
           >
             <Bell aria-hidden="true" />
@@ -286,56 +226,17 @@ export function Reminder({
           }}
         />
         {custom && (
-          <Field>
-            <FieldLabel htmlFor={`reminder-time-${reference}`}>
-              Date and time
-            </FieldLabel>
-            <Input
-              id={`reminder-time-${reference}`}
-              type="datetime-local"
-              disabled={pending}
-              value={draft}
-              aria-invalid={skipped || undefined}
-              aria-describedby={
-                skipped
-                  ? `reminder-time-error-${reference}`
-                  : `reminder-zone-${reference}`
-              }
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setOccurrence("");
-              }}
-            />
-            {skipped ? (
-              <FieldError id={`reminder-time-error-${reference}`}>
-                The clock skips this time here. Choose another time.
-              </FieldError>
-            ) : (
-              <FieldDescription id={`reminder-zone-${reference}`}>
-                {zoneLabel(now)}
-              </FieldDescription>
-            )}
-            {options.length > 1 && (
-              <Picker
-                stacked
-                label="Clock change"
-                value={occurrence || "none"}
-                disabled={pending}
-                onValueChange={(value) =>
-                  setOccurrence(value === "none" ? "" : value)
-                }
-                options={[
-                  ...(occurrence
-                    ? []
-                    : [{ value: "none", label: "Choose which one" }]),
-                  ...options.map((date) => ({
-                    value: date.toISOString(),
-                    label: `${formatTime(date)} (${offsetLabel(date)})`,
-                  })),
-                ]}
-              />
-            )}
-          </Field>
+          <ReminderDateTime
+            reference={reference}
+            draft={draft}
+            occurrence={occurrence}
+            pending={pending}
+            onDraft={(value) => {
+              setDraft(value);
+              setOccurrence("");
+            }}
+            onOccurrence={setOccurrence}
+          />
         )}
         {(custom || due) && (
           <div className="reminder-actions">

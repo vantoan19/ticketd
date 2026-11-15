@@ -2790,3 +2790,39 @@ kbd,
 [data-variant="palette"] [data-slot="command-shortcut"] {
   letter-spacing: normal;
 }
+
+.ui-palette-scope {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  color: var(--foreground);
+  font-size: var(--text-code);
+  line-height: var(--text-ui-line);
+  white-space: nowrap;
+  gap: 6px;
+}
+.ui-palette-scope [data-slot="reference"] {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+@media (max-width: 600px) {
+  .ui-palette-footer {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding-block: 8px;
+  }
+  .ui-palette-scope {
+    max-width: 48%;
+    overflow: hidden;
+  }
+}
+
+.ui-palette-custom {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}

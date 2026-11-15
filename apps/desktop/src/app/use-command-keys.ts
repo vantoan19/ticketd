@@ -16,9 +16,14 @@ const overlays =
   "[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-slot=popover-content]";
 
 /** The shell owns navigation; sequences never escape typing or overlay contexts. */
-export function useCommandKeys(open: () => void, go: (target: GoTo) => void) {
+export function useCommandKeys(
+  open: () => void,
+  go: (target: GoTo) => void,
+  ticketAction: (event: KeyboardEvent) => boolean,
+) {
   const openPalette = useEffectEvent(open);
   const navigate = useEffectEvent(go);
+  const actOnTicket = useEffectEvent(ticketAction);
   useEffect(() => {
     let pending = false;
     let timer: number | undefined;
@@ -45,6 +50,16 @@ export function useCommandKeys(open: () => void, go: (target: GoTo) => void) {
         if (document.querySelector(overlays)) return;
         event.preventDefault();
         openPalette();
+        return;
+      }
+      if (
+        !pending &&
+        !target?.closest(typing) &&
+        !document.querySelector(overlays) &&
+        actOnTicket(event)
+      ) {
+        reset();
+        event.preventDefault();
         return;
       }
       if (

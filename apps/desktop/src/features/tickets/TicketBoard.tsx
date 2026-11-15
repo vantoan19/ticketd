@@ -432,6 +432,7 @@ function BoardCard({
   return (
     <div
       className="board-card-container"
+      data-ticket-reference={ticket.reference}
       data-dragging={dragging || undefined}
       aria-busy={pending}
     >

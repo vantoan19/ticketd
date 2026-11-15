@@ -1,3 +1,5 @@
+import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
+import { ticketCommandActions } from "@/lib/ticket-command-actions";
 import { LatestUpdate } from "./LatestUpdate";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChoiceList, type Choice } from "@/components/ui/choice-list";
@@ -115,6 +117,11 @@ export function PropertyPicker({
           readOnly={readOnly}
           disabled={disabled}
           aria-label={`${label}: ${value}`}
+          title={`${label} (${shortcutLabel(ticketCommandActions.find((action) => action.scope === label)?.shortcut ?? "ticket-tags")})`}
+          aria-keyshortcuts={ariaKeyShortcuts(
+            ticketCommandActions.find((action) => action.scope === label)
+              ?.shortcut ?? "ticket-tags",
+          )}
           trailing={trailing}
         >
           {display ?? value}
@@ -429,6 +436,8 @@ export function TicketProperties({
             variant="ghost"
             readOnly={readOnly}
             aria-label={`Status: ${ticket.status}`}
+            title={`Change status (${shortcutLabel("ticket-status")})`}
+            aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
           >
             <StatusIcon status={ticket.status} decorative />
             <SelectValue>{ticket.status}</SelectValue>
