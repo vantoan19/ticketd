@@ -992,3 +992,24 @@ test("canceling one file suppresses late insertion, preserves its completed snap
       .mock.calls.filter(([command]) => command === "import_attachment"),
   ).toHaveLength(2);
 });
+
+test("Existing files says the workspace has none, then names an unmatched search, with no paging", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "search_attachments") return [];
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={vi.fn()} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  expect(
+    await screen.findByText("No files in this workspace yet"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Previous files" })).toBeNull();
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search existing files" }),
+    { target: { value: "notes" } },
+  );
+  expect(await screen.findByText("No files match “notes”")).toBeTruthy();
+});

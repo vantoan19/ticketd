@@ -35,7 +35,7 @@ export function ExistingAttachments({
       current.current = false;
     };
   }, []);
-  const { files, loading, error } = useAttachmentSearch(
+  const { files, loading, error, answered } = useAttachmentSearch(
     search,
     "all",
     ticketReference,
@@ -149,25 +149,35 @@ export function ExistingAttachments({
           );
         })}
       </div>
-      {!loading && !error && !files.length && <p>No matching files</p>}
+      {!loading && !error && !files.length && (
+        <p className="attachment-hint">
+          {answered.search.trim()
+            ? `No files match “${answered.search.trim()}”`
+            : answered.offset > 0
+              ? "No more files"
+              : "No files in this workspace yet"}
+        </p>
+      )}
       {(error || failure) && <p role="alert">{error || failure}</p>}
-      <div className="attachment-actions">
-        <Button
-          variant="ghost"
-          disabled={busy || offset === 0}
-          onClick={() => setOffset(Math.max(0, offset - 50))}
-        >
-          Previous files
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={busy || files.length < 50}
-          onClick={() => setOffset(offset + 50)}
-        >
-          Next files
-        </Button>
-      </div>
-      <div className="attachment-actions">
+      {(answered.offset > 0 || files.length >= 50) && (
+        <div className="attachment-actions">
+          <Button
+            variant="ghost"
+            disabled={busy || offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - 50))}
+          >
+            Previous files
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy || files.length < 50}
+            onClick={() => setOffset(offset + 50)}
+          >
+            Next files
+          </Button>
+        </div>
+      )}
+      <div className="attachment-actions attachment-existing-footer">
         <span className="attachment-hint">
           {selected.length} selected · No extra copy is created
         </span>

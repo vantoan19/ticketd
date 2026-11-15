@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
-import { ChevronRight, Plus, Settings } from "lucide-react";
+import { ChevronRight, Paperclip, Plus, SearchX, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
@@ -40,19 +41,50 @@ export function AttachmentLibrary({
   const cleanupTrigger = useRef<HTMLButtonElement>(null);
   const [restoreError, setRestoreError] = useState("");
   const [restoring, setRestoring] = useState<string | null>(null);
-  const { files, loading, error } = useAttachmentSearch(
+  const { files, loading, pending, error, answered } = useAttachmentSearch(
     search,
     state,
     null,
     offset,
     refresh,
   );
+  // Nothing at all in the workspace: no table, paging or Clean up over it.
+  const libraryEmpty =
+    !loading &&
+    !error &&
+    files.length === 0 &&
+    answered.search.trim() === "" &&
+    answered.state === "all" &&
+    answered.offset === 0;
+  const onePage = answered.offset === 0 && files.length < 50;
+  const addTrigger = useRef<HTMLButtonElement>(null);
   const availability = useAvailability(
     files
       .filter(({ attachment }) => attachment.kind === "local_snapshot")
       .map(({ attachment }) => attachment.id),
   );
   const [downloadError, setDownloadError] = useState("");
+  // Only when there is another page to move to.
+  const pagination = (
+    <footer>
+      <div className="attachment-actions">
+        <Button
+          variant="ghost"
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - 50))}
+        >
+          Previous files
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={files.length < 50}
+          onClick={() => setOffset(offset + 50)}
+        >
+          Next files
+        </Button>
+      </div>
+    </footer>
+  );
   return (
     <div className="attachment-workspace">
       <div className="attachment-library-bar">
@@ -75,14 +107,16 @@ export function AttachmentLibrary({
             <p>Files used across your tickets and Documents.</p>
           </div>
           <div className="attachment-actions">
-            <Button
-              ref={cleanupTrigger}
-              variant="outline"
-              onClick={() => setCleanup(true)}
-            >
-              Clean up
-            </Button>
-            <Button onClick={() => setPicker(true)}>
+            {!libraryEmpty && (
+              <Button
+                ref={cleanupTrigger}
+                variant="outline"
+                onClick={() => setCleanup(true)}
+              >
+                Clean up
+              </Button>
+            )}
+            <Button ref={addTrigger} onClick={() => setPicker(true)}>
               <Plus aria-hidden="true" />
               Add files
             </Button>
@@ -92,7 +126,7 @@ export function AttachmentLibrary({
           <Input
             type="search"
             aria-label="Search files"
-            placeholder="Search files…"
+            placeholder="Search names and metadata…"
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
@@ -118,9 +152,32 @@ export function AttachmentLibrary({
         {restoreError && <p role="alert">{restoreError}</p>}
         {loading ? (
           <p role="status">Loading files…</p>
+        ) : libraryEmpty ? (
+          <EmptyState
+            icon={<Paperclip />}
+            title="No attachments yet"
+            description="Files you attach to tickets and Documents appear here."
+          />
+        ) : files.length === 0 && error ? null : files.length === 0 ? (
+          <>
+            <NoFiles
+              search={answered.search.trim()}
+              state={answered.state}
+              later={answered.offset > 0}
+              onClearSearch={() => {
+                setSearch("");
+                setOffset(0);
+              }}
+              onShowAll={() => {
+                setState("all");
+                setOffset(0);
+              }}
+            />
+            {!onePage && pagination}
+          </>
         ) : (
           <>
-            <div className="attachment-table-scroll">
+            <div className="attachment-table-scroll" aria-busy={pending}>
               <table>
                 <thead>
                   <tr>
@@ -280,26 +337,7 @@ export function AttachmentLibrary({
               </table>
             </div>
             {downloadError && <p role="alert">{downloadError}</p>}
-            {!files.length && <p>No matching files</p>}
-            <footer>
-              <span>Search covers filenames and available metadata</span>
-              <div className="attachment-actions">
-                <Button
-                  variant="ghost"
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - 50))}
-                >
-                  Previous files
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={files.length < 50}
-                  onClick={() => setOffset(offset + 50)}
-                >
-                  Next files
-                </Button>
-              </div>
-            </footer>
+            {!onePage && pagination}
           </>
         )}
         <AttachmentPicker
@@ -338,10 +376,78 @@ export function AttachmentLibrary({
             file={removing}
             onClose={() => setRemoving(null)}
             onChanged={() => setRefresh((value) => value + 1)}
-            onRemovedFocus={() => cleanupTrigger.current?.focus()}
+            onRemovedFocus={() =>
+              // Clean up is gone once the last file is.
+              (cleanupTrigger.current ?? addTrigger.current)?.focus()
+            }
           />
         )}
       </section>
     </div>
+  );
+}
+
+const STATE_NAMES: Record<AttachmentState, string> = {
+  all: "All files",
+  in_use: "In use",
+  unused: "Unused",
+  quarantined: "Quarantine",
+};
+
+/** The library has files, but none answer this search, filter or page. */
+function NoFiles({
+  search,
+  state,
+  later,
+  onClearSearch,
+  onShowAll,
+}: {
+  search: string;
+  state: AttachmentState;
+  /** A page past the first came back empty. */
+  later: boolean;
+  onClearSearch: () => void;
+  onShowAll: () => void;
+}) {
+  if (search)
+    return (
+      <EmptyState
+        icon={<SearchX />}
+        title={`No files match “${search}”`}
+        description={`Searched names and metadata in ${STATE_NAMES[state]}.`}
+        action={
+          <Button variant="outline" size="sm" onClick={onClearSearch}>
+            Clear search
+          </Button>
+        }
+      />
+    );
+  if (later || state === "all") return <EmptyState title="No more files" />;
+  const copy = {
+    in_use: {
+      title: "No files in use",
+      description: "Files a ticket or Document links to appear here.",
+    },
+    unused: {
+      title: "No unused files",
+      description: "Files no ticket or Document links to appear here.",
+    },
+    quarantined: {
+      title: "Quarantine is empty",
+      description:
+        "Files you clean up wait here until you restore or purge them.",
+    },
+  }[state];
+  return (
+    <EmptyState
+      icon={<SearchX />}
+      title={copy.title}
+      description={copy.description}
+      action={
+        <Button variant="outline" size="sm" onClick={onShowAll}>
+          Show all files
+        </Button>
+      }
+    />
   );
 }
