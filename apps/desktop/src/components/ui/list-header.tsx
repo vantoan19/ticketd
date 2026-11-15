@@ -51,7 +51,9 @@ export function ShellLeading({ navOnly = false }: { navOnly?: boolean }) {
 
 /**
  * The 48px header of every pane: lists, detail, graph, Chats, Inbox. It never
- * wraps. Its leading slot starts with the shell's controls (ShellSlotProvider:
+ * wraps by default. The responsive variant reserves two rows below a 640px
+ * pane, keeping the name above a dense action cluster. Its leading slot starts
+ * with the shell's controls (ShellSlotProvider:
  * the narrow-nav button, the way back to the graph), then `leading`, such as
  * the pane's own `ReturnCrumb`; the title
  * (14/20/500) truncates, with `count` 8px after it (a `Count`, or a summary in
@@ -85,7 +87,7 @@ export function PaneHeader({
 }: {
   title: string;
   /** Ticket headers supply their reference heading and shell controls in leading. */
-  variant?: "default" | "ticket";
+  variant?: "default" | "ticket" | "responsive";
   /** Renders the title as a control inside the heading (a menu trigger). */
   titleControl?: (title: string) => ReactNode;
   /** The heading's id, for `aria-labelledby` and focus after a change. */
@@ -127,6 +129,7 @@ export function PaneHeader({
         className={cn(
           "ui-pane-header",
           variant === "ticket" && "detail-header",
+          variant === "responsive" && "ui-pane-header-responsive",
           className,
         )}
       >
