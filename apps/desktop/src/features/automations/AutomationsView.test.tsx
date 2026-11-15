@@ -450,7 +450,7 @@ test("cancelling or dismissing the agent delete dialog returns focus to Agent ac
   expect(stored).toHaveLength(1);
 });
 
-test("with Codex chosen, the switches it cannot enforce are fixed on and the turn limit is not applied; Claude Code brings the agent's own choices back", async () => {
+test("with Codex chosen, the switches are live, say what Codex does with them, and the turn limit is not applied; Claude Code brings the command list back", async () => {
   await open(undefined, [
     {
       id: "a1",
@@ -465,28 +465,42 @@ test("with Codex chosen, the switches it cannot enforce are fixed on and the tur
   const control = (role: "switch" | "spinbutton", name: string) =>
     within(form).getByRole(role, { name }) as HTMLButtonElement;
 
-  for (const name of ["Read files", "Edit files", "Run commands"]) {
-    expect(control("switch", name).getAttribute("aria-checked")).toBe("true");
-    expect(control("switch", name).disabled).toBe(true);
+  // Every switch is the agent's own, and none is locked.
+  for (const [name, on] of [
+    ["Read files", "false"],
+    ["Edit files", "false"],
+    ["Run commands", "false"],
+    ["Use the web", "false"],
+  ] as const) {
+    expect(control("switch", name).getAttribute("aria-checked")).toBe(on);
+    expect(control("switch", name).disabled).toBe(false);
   }
-  // Codex has no list of commands to allow.
+  expect(within(form).queryByText("Always on with Codex")).toBeNull();
+  expect(
+    within(form).getByText(
+      "Codex reads by running commands: needs Run commands",
+    ),
+  ).toBeTruthy();
+  // Turning Run commands on offers no list: Codex has none.
+  fireEvent.click(control("switch", "Run commands"));
+  await waitFor(() => expect(stored[0]?.tools.run_commands).toBe(true));
   expect(
     within(form).queryByRole("textbox", { name: "Allowed commands" }),
   ).toBeNull();
-  // The web is the one switch Codex's sandbox follows.
-  expect(control("switch", "Use the web").disabled).toBe(false);
-  expect(control("switch", "Use the web").getAttribute("aria-checked")).toBe(
-    "false",
-  );
-  // #387 3B1: Codex's sandbox limits writes, not reads, and the note says so.
+  // The note says what Codex does with the switches and what stays the person's.
   expect(
     within(form).getByText(
-      /Codex applies its own sandbox: it can read any file you can read on this computer/,
+      /Codex reads files by running commands. With Run commands off it cannot read files, even with Read files on/,
     ),
   ).toBeTruthy();
   expect(
     within(form).getByText(
-      /It cannot switch off your Codex rules, your global AGENTS.md/,
+      /With Run commands on it runs any command, because Codex has no list of allowed commands, and it can read any file you can read on this computer/,
+    ),
+  ).toBeTruthy();
+  expect(
+    within(form).getByText(
+      /Your own Codex setup still applies: your global AGENTS.md, the skills in ~\/\.agents\/skills and, with Run commands on, your “always allow” rules/,
     ),
   ).toBeTruthy();
   expect(control("spinbutton", "Turns").disabled).toBe(true);
@@ -495,15 +509,15 @@ test("with Codex chosen, the switches it cannot enforce are fixed on and the tur
 
   fireEvent.click(within(form).getByRole("radio", { name: /Claude Code/ }));
 
-  for (const name of ["Read files", "Edit files", "Run commands"]) {
-    expect(control("switch", name).getAttribute("aria-checked")).toBe("false");
-    expect(control("switch", name).disabled).toBe(false);
-  }
-  expect(within(form).queryByText(/Codex applies its own sandbox/)).toBeNull();
+  expect(control("switch", "Run commands").getAttribute("aria-checked")).toBe(
+    "true",
+  );
+  expect(
+    within(form).getByRole("textbox", { name: "Allowed commands" }),
+  ).toBeTruthy();
+  expect(within(form).queryByText(/Codex reads files by running/)).toBeNull();
   expect(control("spinbutton", "Turns").disabled).toBe(false);
-  // What Codex showed as fixed was never saved over the agent's own choices.
   await waitFor(() => expect(stored[0]?.harness).toBe("claude-code"));
-  expect(stored[0]?.tools).toEqual({ ...DEFAULTS.tools, read_files: false });
 });
 
 test("the Runs view lists every run under Now, Needs you and Earlier, naming its Automation, and opens the one chosen", async () => {
