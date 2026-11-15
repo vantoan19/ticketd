@@ -206,7 +206,7 @@ test("description autosave releases the current draft while source Undo retains 
   }
   render(<Host />);
   fireEvent.click(
-    await screen.findByRole("button", { name: "Edit description" }),
+    await screen.findByRole("group", { name: "Read description" }),
   );
   await typeSource("Description", "");
   await waitFor(() => expect(canonical.body).toBe(""));

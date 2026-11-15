@@ -2674,14 +2674,25 @@ test("typing and overlays keep G keys; Mod K leaves a rich editor's link shortcu
       .getAttribute("aria-current"),
   ).toBe("page");
   fireEvent.click(
-    await screen.findByRole("button", { name: "Edit description" }),
+    await screen.findByRole("group", { name: "Read description" }),
   );
   const editor = await screen.findByRole("textbox", {
     name: "Description rich text",
   });
-  editor.focus();
-  expect(fireEvent.keyDown(editor, { key: "k", ctrlKey: true })).toBe(true);
+  await screen.findByRole("button", { name: "Link" });
+  await act(async () => {
+    editor.focus();
+  });
+  fireEvent.keyDown(editor, { key: "k", metaKey: true });
+  expect(await screen.findByLabelText("Or link an address")).toBeTruthy();
   expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+  fireEvent.keyDown(screen.getByLabelText("Or link an address"), {
+    key: "Escape",
+  });
+  fireEvent.keyDown(editor, { key: "Escape" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull(),
+  );
   fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
   const input = await screen.findByRole(
     "combobox",
@@ -4156,3 +4167,90 @@ test.each([
     expect(publisherMark(entry)).toBe(viewBox);
   },
 );
+
+test("description editing keeps its state row and floats controls outside the prose", async () => {
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets")
+      return [bulkTicket(1, { body: "A description" })];
+    if (command === "show_ticket")
+      return bulkTicket(1, { body: "A description" });
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+  const prose = await screen.findByText("A description");
+  const stateRow = document.querySelector(".ticket-state-row");
+  const stateText = stateRow?.textContent;
+  fireEvent.click(prose);
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  expect(document.querySelector(".ticket-state-row")).toBe(stateRow);
+  expect(stateRow?.textContent).toBe(stateText);
+  expect(screen.queryByText(/^Edit$/)).toBeNull();
+  const bar = screen.getByRole("group", { name: "Edit controls" });
+  expect(
+    bar.contains(screen.getByRole("button", { name: "Done editing" })),
+  ).toBe(true);
+  expect(bar.closest(".editor-body")).toBeNull();
+  fireEvent.keyDown(editor, { key: "Escape" });
+  expect(screen.queryByRole("group", { name: "Edit controls" })).toBeNull();
+  expect(
+    within(screen.getByRole("group", { name: "Read description" })).getByText(
+      "A description",
+    ),
+  ).toBeTruthy();
+  expect(document.querySelector(".ticket-state-row")).toBe(stateRow);
+  const reading = screen.getByRole("group", { name: "Read description" });
+  await vi.waitFor(() => expect(document.activeElement).toBe(reading));
+  fireEvent.keyDown(reading, { key: "k", ctrlKey: true });
+  expect(
+    await screen.findByRole("dialog", { name: "Go anywhere" }),
+  ).toBeTruthy();
+});
+
+test("floating save feedback retains a failed description draft and retries it", async () => {
+  let stored = bulkTicket(1, { body: "- [ ] Keep this draft" });
+  let failSave: (reason: Error) => void = () => {};
+  let attempts = 0;
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "find_tickets") return [stored];
+    if (command === "show_ticket") return stored;
+    if (command === "change_ticket") {
+      attempts += 1;
+      if (attempts === 1)
+        return new Promise((_resolve, reject) => {
+          failSave = reject;
+        });
+      stored = { ...stored, ...(args as { patch: { body: string } }).patch };
+      return stored;
+    }
+    return bridgeDefault(command, args as { id?: string; reference?: string });
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+  await screen.findByText("Keep this draft");
+  fireEvent.keyDown(document.body, { key: "e" });
+  const checkbox = await screen.findByRole("checkbox", {
+    name: "Checklist item",
+  });
+  fireEvent.click(checkbox);
+  const bar = screen.getByRole("group", { name: "Edit controls" });
+  expect(await within(bar).findByText("Saving…")).toBeTruthy();
+  await vi.waitFor(() => expect(attempts).toBe(1));
+  await act(async () => failSave(new Error("Disk full")));
+  expect(await within(bar).findByText("Not saved")).toBeTruthy();
+  expect(
+    screen.getByRole("checkbox", { name: "Checklist item" }),
+  ).toHaveProperty("checked", true);
+  expect(screen.getByText(/Disk full/)).toBeTruthy();
+  fireEvent.click(within(bar).getByRole("button", { name: "Retry" }));
+  expect(await within(bar).findByText("Saved")).toBeTruthy();
+  expect(stored.body).toBe("- [x] Keep this draft");
+  await vi.waitFor(() => expect(within(bar).queryByText("Saved")).toBeNull(), {
+    timeout: 4000,
+  });
+  expect(
+    within(bar).getByRole("button", { name: "Done editing" }),
+  ).toBeTruthy();
+});

@@ -39,6 +39,7 @@ import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
 import { Kbd } from "@/components/ui/kbd";
+import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
 import { Time } from "@/components/ui/time";
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import {
@@ -810,6 +811,17 @@ export function DocumentEditor({
       </Field>
     </FieldGroup>
   );
+  const [fadedStatus, setFadedStatus] = useState<string | null>(null);
+  const [previousStatus, setPreviousStatus] = useState(status);
+  if (previousStatus !== status) {
+    setPreviousStatus(status);
+    setFadedStatus(null);
+  }
+  useEffect(() => {
+    if (status !== "Saved on this computer") return;
+    const timer = window.setTimeout(() => setFadedStatus(status), 3000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
   const isSaved = status === "Saved on this computer";
   const sync = useRecordSyncState(savedDocument?.id ?? null, isSaved);
   const statusLine = (
@@ -846,7 +858,7 @@ export function DocumentEditor({
     <FailureAlert
       {...(capture && { size: "compact" as const })}
       failure={{ ...failure, sentence: `${failure.sentence}${draftNote}` }}
-      onRetry={retry}
+      {...((capture || !writing) && { onRetry: retry })}
       actions={
         draftAtRisk ? (
           <Button
@@ -1071,43 +1083,48 @@ export function DocumentEditor({
             <h1 className="document-title">{heading}</h1>
           ))}
         {initial && (
-          // One 32px row: "Updated 2 h ago" while reading; the session row
-          // (save state, formatting, Done) while editing. Nothing moves.
-          <div
-            className="document-state-row"
-            data-session={writing || undefined}
-          >
-            {writing ? (
-              <>
-                {statusLine}
-                <span ref={setSessionHost} className="document-session-tools" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Done editing"
-                  onClick={() => setEditing(false)}
-                >
-                  Done
-                  <Kbd aria-hidden="true">Esc</Kbd>
-                </Button>
-              </>
-            ) : (
-              <>
-                <p className="document-subtitle">
-                  Updated{" "}
-                  {Number.isNaN(Date.parse(updatedAt)) ? (
-                    updatedAt
-                  ) : (
-                    <Time value={updatedAt} />
-                  )}
-                  {planSpec && ` · spec of the Plan ${planSpec.label}`}
-                  {planSupport &&
-                    ` · supporting Document of the Plan ${planSupport.label}`}
-                </p>
-                {(needsReview || sync === "needs_review") && statusLine}
-              </>
-            )}
+          // Reading metadata stays in place; editing tools float outside the body.
+          <div className="document-state-row">
+            <p className="document-subtitle">
+              Updated{" "}
+              {Number.isNaN(Date.parse(updatedAt)) ? (
+                updatedAt
+              ) : (
+                <Time value={updatedAt} />
+              )}
+              {planSpec && ` · spec of the Plan ${planSpec.label}`}
+              {planSupport &&
+                ` · supporting Document of the Plan ${planSupport.label}`}
+            </p>
+            {(needsReview || sync === "needs_review") && statusLine}
           </div>
+        )}
+        {initial && writing && (
+          <FloatingEditBar
+            status={
+              failed && !external ? (
+                <span role="status">
+                  Not saved{" "}
+                  <Button variant="link" size="inline" onClick={retry}>
+                    Retry
+                  </Button>
+                </span>
+              ) : isSaved && (needsReview || sync === "needs_review") ? (
+                statusLine
+              ) : isSaved ? (
+                fadedStatus === status ? null : (
+                  <span role="status">
+                    <Check className="size-3" aria-hidden="true" />
+                    Saved
+                  </span>
+                )
+              ) : (
+                statusLine
+              )
+            }
+            controlsRef={setSessionHost}
+            onDone={() => setEditing(false)}
+          />
         )}
         {suggestion && (
           <p>
@@ -1214,7 +1231,7 @@ export function DocumentEditor({
               readOnly={locked}
               autoFocus={capture}
               {...(!capture && {
-                chrome: "session" as const,
+                chrome: "floating" as const,
                 chromeHost: sessionHost,
                 onEscape: () => setEditing(false),
               })}

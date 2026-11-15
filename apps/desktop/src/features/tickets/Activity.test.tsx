@@ -639,24 +639,30 @@ test("restores unpublished details after remount", async () => {
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "Add details" }));
   expect(await screen.findByText("Details")).toBeTruthy();
-  fireEvent.click(
-    within(screen.getByRole("region", { name: "Details" })).getByRole(
-      "button",
-      { name: "Edit Markdown source" },
+  fireEvent.focus(
+    within(await screen.findByRole("region", { name: "Details" })).getByRole(
+      "textbox",
     ),
   );
+  expect(
+    screen.getAllByRole("button", { name: "Edit Markdown source" }),
+  ).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Details source" }), {
     target: { value: "Evidence **draft**" },
   });
   view.unmount();
   render(<Activity {...props} />);
   expect(await screen.findByText("Details")).toBeTruthy();
-  fireEvent.click(
+  fireEvent.focus(
     within(await screen.findByRole("region", { name: "Details" })).getByRole(
-      "button",
-      { name: "Edit Markdown source" },
+      "textbox",
     ),
   );
+  expect(
+    screen.getAllByRole("button", { name: "Edit Markdown source" }),
+  ).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
     screen.getByRole("textbox", { name: "Details source" }),
   ).toHaveProperty("value", "Evidence **draft**");

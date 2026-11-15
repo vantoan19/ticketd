@@ -470,7 +470,7 @@ it("reads an untitled Document with its core heading and current save details", 
   // The save state shows only while editing, in the session row (DR-09).
   expect(screen.queryAllByText("Saved on this computer")).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  expect(screen.getAllByText("Saved on this computer")).toHaveLength(1);
+  expect(screen.getAllByText("Saved")).toHaveLength(1);
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Changed" },
   });

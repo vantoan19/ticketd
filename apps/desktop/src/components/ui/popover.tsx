@@ -22,7 +22,7 @@ function PopoverTrigger({
  * `variant="list"` holds a ChoiceList or picker: 4px padding, at least as
  * wide as the trigger and 280px. `variant="bar"` holds a row of icon buttons
  * floating over content (the editor's selection bubble): 4px padding, as wide
- * as its buttons.
+ * as its buttons. `compact-list` uses 260px for caret block choices.
  */
 function PopoverContent({
   className,
@@ -33,7 +33,7 @@ function PopoverContent({
   variant = "form",
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
-  variant?: "form" | "list" | "bar";
+  variant?: "form" | "list" | "compact-list" | "bar";
 }) {
   const boundary = useOverlayBoundary();
   return (

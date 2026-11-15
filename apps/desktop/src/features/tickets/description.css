@@ -1,7 +1,4 @@
-/* The state row: one 32px line under the title. Reading, it holds the state
-   line, the save state and Edit · E; editing the description, it is the
-   session row (save state, formatting, Done). Its height never changes, so
-   nothing below it moves when editing starts or ends (P16). */
+/* The state line keeps its place while controls float outside the prose. */
 .ticket-state-row {
   display: flex;
   align-items: center;
@@ -23,13 +20,6 @@
   overflow: hidden;
   white-space: nowrap;
 }
-.ticket-session-tools {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  min-width: 0;
-  margin-left: -8px;
-}
 .editor-save-state {
   flex: none;
   color: var(--muted-foreground);
@@ -39,14 +29,6 @@
 }
 .editor-save-state:empty {
   display: none;
-}
-/* Editing: the save state leads the row, Done ends it. */
-.ticket-state-row[data-session] .editor-save-state {
-  order: -1;
-}
-.ticket-state-row > .ui-button:last-child {
-  flex: none;
-  margin-right: -8px;
 }
 .description-document {
   display: block;
@@ -58,6 +40,8 @@
   overflow-wrap: anywhere;
 }
 .editor-body {
+  --text-editor: var(--text-doc);
+  --text-editor-line: var(--text-doc-line);
   margin-top: 16px;
 }
 .editor-body:focus {
@@ -68,17 +52,16 @@
 }
 /* Editing in place: the frame sits where the reading card sits, 12px
    outside the text, and reads at the same size, so no line moves (DS-01). */
-.editor-body .markdown-editor[data-chrome="session"] {
+.editor-body .markdown-editor[data-chrome="floating"] {
   margin: -4px -12px -12px;
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 .ticket-detail[data-expanded] .editor-body {
   --text-editor: var(--text-reading);
-  --text-editor-line: 24px;
+  --text-editor-line: var(--text-reading-line);
 }
 .ticket-detail[data-expanded]
   .editor-body
-  .markdown-editor[data-chrome="session"] {
+  .markdown-editor[data-chrome="floating"] {
   margin-top: 8px;
   margin-bottom: 0;
 }
