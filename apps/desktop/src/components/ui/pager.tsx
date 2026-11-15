@@ -26,6 +26,7 @@ export function Pager({
   return (
     <div data-slot="pager" className="ui-pager">
       <Button
+        type="button"
         variant="outline"
         size="sm"
         disabled={loading}

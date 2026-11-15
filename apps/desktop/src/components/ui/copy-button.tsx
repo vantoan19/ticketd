@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { useCopy } from "@/components/ui/use-copy";
@@ -5,13 +6,15 @@ import { useCopy } from "@/components/ui/use-copy";
 /**
  * Copies `text`. The icon turns into a check for 2s and the tooltip reads
  * "Copied"; a failure shows in the tooltip. `label` names what is copied
- * ("Copy path", never the path itself). Menu items that copy post to the
- * status line instead.
+ * ("Copy path", never the path itself). `icon` replaces the copy glyph where
+ * another names the thing better (a link for "Copy link"). Menu items that
+ * copy post to the status line instead.
  */
 export function CopyButton({
   text,
   label,
   subject,
+  icon,
   className,
 }: {
   text: string;
@@ -21,6 +24,7 @@ export function CopyButton({
    * /work/app"), so several buttons in a list stay distinct.
    */
   subject?: string;
+  icon?: ReactNode;
   className?: string;
 }) {
   const { copied, error, copy } = useCopy();
@@ -36,7 +40,7 @@ export function CopyButton({
         {...(className && { className })}
         onClick={() => void copy(label, text)}
       >
-        {copied ? <Check /> : <Copy />}
+        {copied ? <Check /> : (icon ?? <Copy />)}
       </IconButton>
       <span className="sr-only" role="status">
         {copied ? "Copied" : error}

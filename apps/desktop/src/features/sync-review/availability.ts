@@ -8,7 +8,7 @@ const POLL_MS = 2000;
 export function storageWord(availability: Availability | undefined): string {
   if (availability?.state === "downloading") return "Downloading…";
   if (availability?.state === "not_downloaded") return "Not downloaded";
-  return "Local snapshot";
+  return "On this computer";
 }
 
 /**
@@ -19,9 +19,12 @@ export function storageWord(availability: Availability | undefined): string {
 export function useAvailability(ids: string[]): {
   of: (id: string) => Availability | undefined;
   download: (id: string) => Promise<void>;
+  /** The first read for these files has answered (or failed), so `of` can be trusted. */
+  known: boolean;
 } {
   const key = ids.join("\n");
   const [found, setFound] = useState<Availability[]>([]);
+  const [answered, setAnswered] = useState<string | null>(null);
   // Downloads this view asked for that have not answered yet.
   const [requested, setRequested] = useState<string[]>([]);
   const [tick, setTick] = useState(0);
@@ -38,13 +41,16 @@ export function useAvailability(ids: string[]): {
       (next) => {
         if (!active) return;
         setFound(next);
+        setAnswered(key);
         if (waiting || next.some((item) => item.state === "downloading"))
           again();
       },
       // A failed read says nothing about the files: what was last known stays.
       // (A Workspace without sync answers with no entries, not a failure.)
       () => {
-        if (active && waiting) again();
+        if (!active) return;
+        setAnswered(key);
+        if (waiting) again();
       },
     );
     return () => {
@@ -71,5 +77,6 @@ export function useAvailability(ids: string[]): {
         : item;
     },
     download,
+    known: !key || answered === key,
   };
 }
