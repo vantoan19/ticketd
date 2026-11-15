@@ -23,6 +23,33 @@ export default tseslint.config(
     },
   },
   {
+    // Error language (DESIGN.md section 12): raw failure text never reaches
+    // people. Describe it with describeFailure(reason, action) and keep the
+    // raw text under Details (FailureAlert, FailureDetails).
+    files: ["apps/desktop/src/**/*.{ts,tsx}"],
+    ignores: [
+      "**/*.test.{ts,tsx}",
+      "apps/desktop/src/lib/api/bridge-failure.ts",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.name='String'][arguments.0.type='Identifier'][arguments.0.name=/^(reason|error|err|e|cause|failure|caught)$/]",
+          message:
+            "Raw failure text reaches people. Use describeFailure(reason, action) or failureText(reason, action) from lib/api/describe-failure.ts; the raw text belongs under Details.",
+        },
+        {
+          selector:
+            "TemplateLiteral > MemberExpression[property.name='message'][object.type='CallExpression'][object.callee.name='toFailure']",
+          message:
+            "Raw failure text reaches people. Use describeFailure(reason, action) or failureText(reason, action) from lib/api/describe-failure.ts; the raw text belongs under Details.",
+        },
+      ],
+    },
+  },
+  {
     files: ["apps/chat-bridge-claude/**/*.{ts,mjs}"],
     languageOptions: { globals: globals.node },
     rules: { "@typescript-eslint/no-explicit-any": "error" },
