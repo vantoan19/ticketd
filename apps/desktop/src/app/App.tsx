@@ -1,3 +1,7 @@
+import { requestInboxAction } from "@/features/tickets/inbox-commands";
+import type { TriageSelection } from "@/features/tickets/inbox-triage-context";
+import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
+import { requestTicketUpdate } from "@/features/tickets/activity-composer-request";
 import { FirstRunGuide } from "@/features/tickets/FirstRunGuide";
 import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
 import {
@@ -202,6 +206,9 @@ function AppContent() {
     // A record that needs review has an Inbox entry that opens its comparison.
     openReview: () => openView("inbox"),
   });
+  const [inboxSelection, setInboxSelection] = useState<TriageSelection | null>(
+    null,
+  );
   const [inboxTarget, setInboxTarget] = useState<{
     reference: string;
     id: string;
@@ -435,17 +442,7 @@ function AppContent() {
     setPaletteOpen(true);
   }
   function openTicketUpdate() {
-    const composer = document.querySelector<HTMLElement>(
-      '.detail-content:not([hidden]) [aria-label="Write an update"]',
-    );
-    const idle = composer?.querySelector<HTMLButtonElement>(
-      ".activity-composer-idle",
-    );
-    if (idle) idle.click();
-    else
-      composer
-        ?.querySelector<HTMLElement>('[role="textbox"], textarea')
-        ?.focus();
+    if (workspace.selected) requestTicketUpdate(workspace.selected);
   }
   useCommandKeys(
     () => openPalette(),
@@ -612,6 +609,111 @@ function AppContent() {
                           onCreated={(id) => scope("all", "all", id)}
                         />
                         <CommandPalette
+                          inboxCommands={
+                            view === "inbox" && inboxSelection
+                              ? (() => {
+                                  const entry =
+                                    inboxSelection.kind === "entry"
+                                      ? inboxSelection.entry
+                                      : null;
+                                  const chat =
+                                    inboxSelection.kind === "approval"
+                                      ? inboxSelection.chat
+                                      : null;
+                                  const reference =
+                                    entry?.reference ??
+                                    chat?.tickets[0]?.reference ??
+                                    chat?.first_ticket;
+                                  const ticketReason =
+                                    editingBlockedReason(workspaceProblem) ??
+                                    (!reference
+                                      ? "This Chat has no linked Ticket."
+                                      : null);
+                                  const blocked =
+                                    editingBlockedReason(workspaceProblem);
+                                  const activeTicket = reference
+                                    ? workspace.details[reference]
+                                    : undefined;
+                                  const ticketActionReason =
+                                    ticketReason ??
+                                    (!activeTicket
+                                      ? "The Ticket is still loading."
+                                      : activeTicket.trashed
+                                        ? "Restore the Ticket before changing it."
+                                        : null);
+                                  const isReview =
+                                    entry?.kind === "status" &&
+                                    entry.to_value === "In review";
+                                  const primaryReason = isReview
+                                    ? (ticketActionReason ??
+                                      (activeTicket?.status !== "In review"
+                                        ? "This review is already resolved."
+                                        : activeTicket.source?.ownership ===
+                                              "external" &&
+                                            (activeTicket.source
+                                              .status_locked ||
+                                              !activeTicket.source.status_choices.includes(
+                                                "Done",
+                                              ))
+                                          ? "The source does not allow moving this Ticket to Done."
+                                          : null))
+                                    : entry?.kind === "reminder"
+                                      ? ticketActionReason
+                                      : blocked;
+                                  const primaryLabel = chat
+                                    ? "Review in Chat"
+                                    : entry?.kind === "reminder"
+                                      ? "Clear reminder"
+                                      : entry?.kind === "status" &&
+                                          entry.to_value === "In review"
+                                        ? "Move to Done"
+                                        : "Mark read";
+                                  return [
+                                    {
+                                      id: "inbox-primary" as const,
+                                      label: primaryLabel,
+                                      disabledReason: chat
+                                        ? null
+                                        : primaryReason,
+                                      run: () => requestInboxAction("primary"),
+                                    },
+                                    {
+                                      id: "inbox-reply" as const,
+                                      label: "Reply on this Ticket",
+                                      disabledReason: ticketActionReason,
+                                      run: () => requestInboxAction("reply"),
+                                    },
+                                    {
+                                      id: "inbox-remind" as const,
+                                      label:
+                                        entry?.kind === "reminder"
+                                          ? "Snooze reminder"
+                                          : "Remind me on this Ticket",
+                                      disabledReason: ticketActionReason,
+                                      run: () => requestInboxAction("remind"),
+                                    },
+                                    {
+                                      id: "inbox-read" as const,
+                                      label: "Toggle Inbox read state",
+                                      disabledReason: blocked,
+                                      run: () => requestInboxAction("read"),
+                                    },
+                                    {
+                                      id: "inbox-next" as const,
+                                      label: "Next Inbox entry",
+                                      disabledReason: null,
+                                      run: () => requestInboxAction("next"),
+                                    },
+                                    {
+                                      id: "inbox-previous" as const,
+                                      label: "Previous Inbox entry",
+                                      disabledReason: null,
+                                      run: () => requestInboxAction("previous"),
+                                    },
+                                  ];
+                                })()
+                              : null
+                          }
                           writeUpdate={
                             view === "tickets" &&
                             workspace.selected === paletteReference &&
@@ -1016,46 +1118,51 @@ function AppContent() {
                                         }}
                                       />
                                     )}
-                                  <TicketWorkspaceView
-                                    key={`tickets:${recoveryGeneration}`}
-                                    workspace={workspace}
-                                    bulk={bulk}
-                                    hidden={
-                                      (firstRun && view === "tickets") ||
-                                      (view !== "tickets" &&
-                                        view !== "inbox") ||
-                                      graphOrigin !== null
-                                    }
-                                    inboxTarget={inboxTarget}
-                                    // The Inbox is a triage split: entries open
-                                    // beside it, without leaving the view (S6).
-                                    {...(view === "inbox" && {
-                                      inbox: (
-                                        <Inbox
-                                          revision={revision}
-                                          selected={workspace.selected}
-                                          onBrowse={() => setView("tickets")}
-                                          select={(reference, noteId) => {
-                                            setInboxTarget(
-                                              noteId
-                                                ? {
-                                                    reference,
-                                                    id: noteId,
-                                                    key: Date.now(),
-                                                  }
-                                                : null,
-                                            );
-                                            setSelected(reference);
-                                          }}
-                                        />
-                                      ),
-                                    })}
-                                    onCreate={(trigger, status) => {
-                                      createTriggerRef.current = trigger;
-                                      setCreateStatus(status);
-                                      setCreating(true);
-                                    }}
-                                  />
+                                  <InboxTriageProvider
+                                    active={view === "inbox"}
+                                    onSelectionChange={setInboxSelection}
+                                  >
+                                    <TicketWorkspaceView
+                                      key={`tickets:${recoveryGeneration}`}
+                                      workspace={workspace}
+                                      bulk={bulk}
+                                      hidden={
+                                        (firstRun && view === "tickets") ||
+                                        (view !== "tickets" &&
+                                          view !== "inbox") ||
+                                        graphOrigin !== null
+                                      }
+                                      inboxTarget={inboxTarget}
+                                      // The Inbox is a triage split: entries open
+                                      // beside it, without leaving the view (S6).
+                                      {...(view === "inbox" && {
+                                        inbox: (
+                                          <Inbox
+                                            revision={revision}
+                                            selected={workspace.selected}
+                                            onBrowse={() => setView("tickets")}
+                                            select={(reference, noteId) => {
+                                              setInboxTarget(
+                                                noteId && reference
+                                                  ? {
+                                                      reference,
+                                                      id: noteId,
+                                                      key: Date.now(),
+                                                    }
+                                                  : null,
+                                              );
+                                              setSelected(reference);
+                                            }}
+                                          />
+                                        ),
+                                      })}
+                                      onCreate={(trigger, status) => {
+                                        createTriggerRef.current = trigger;
+                                        setCreateStatus(status);
+                                        setCreating(true);
+                                      }}
+                                    />
+                                  </InboxTriageProvider>
                                 </TicketCommandContext.Provider>
                               </ShellSlotProvider>
                             </StatusLineRegion>

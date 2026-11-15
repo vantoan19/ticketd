@@ -1,3 +1,4 @@
+import { useInboxTriage } from "./inbox-triage-context";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
@@ -9,6 +10,7 @@ import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
  */
 export function TicketDetailPane({
   workspace,
+  hidden = false,
   expanded,
   inboxTarget,
   onExpand,
@@ -17,6 +19,7 @@ export function TicketDetailPane({
   context = "list",
 }: {
   workspace: TicketWorkspace;
+  hidden?: boolean;
   /** Opened from the Inbox: no list position, no "outside the results". */
   context?: "list" | "inbox";
   expanded: boolean;
@@ -25,6 +28,7 @@ export function TicketDetailPane({
   onReturn: () => void;
   onSelect: (reference: string | null, mention?: MentionTarget) => void;
 }) {
+  const triage = useInboxTriage();
   const {
     selected,
     mention,
@@ -51,6 +55,7 @@ export function TicketDetailPane({
   return (
     <StatusLineRegion>
       <TicketDetails
+        hidden={hidden}
         outsideResults={Boolean(
           context === "list" &&
           selected &&
@@ -72,9 +77,17 @@ export function TicketDetailPane({
         refresh={refresh}
         updateTicket={updateTicket}
         position={
-          workspace.layout === "board" || context === "inbox" ? null : position
+          context === "inbox"
+            ? (triage?.position ?? null)
+            : workspace.layout === "board"
+              ? null
+              : position
         }
-        onAdjacent={openAdjacent}
+        onAdjacent={
+          context === "inbox"
+            ? (triage?.adjacent ?? openAdjacent)
+            : openAdjacent
+        }
         failure={workspace.detailFailure}
         onRetry={workspace.retryDetail}
         returnLabel={context === "inbox" ? "Inbox" : workspace.scopeName}

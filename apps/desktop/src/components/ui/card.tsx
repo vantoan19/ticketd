@@ -16,7 +16,8 @@ function Card({
   asChild = false,
   ...props
 }: Props & {
-  variant?: "default" | "well" | "slot" | "lift" | "board" | "summary";
+  variant?:
+    "default" | "well" | "slot" | "lift" | "board" | "triage" | "summary";
 }) {
   const Comp = asChild ? Slot.Root : "div";
   return (

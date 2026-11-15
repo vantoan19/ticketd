@@ -1,5 +1,5 @@
+import { AgentContext } from "./ticket-agent-context";
 import {
-  createContext,
   useContext,
   useEffect,
   useEffectEvent,
@@ -29,12 +29,6 @@ import { relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { useInboxAttention } from "./use-inbox-attention";
 import { progressBrief } from "./progress-brief";
-
-const AgentContext = createContext<{
-  reserved: boolean;
-  chat: ChatSummary | undefined;
-  update: LatestUpdate | null;
-} | null>(null);
 
 /** Decide the slot once per opening, before displaying the document. */
 export function TicketAgentSession({
@@ -117,6 +111,7 @@ export function TicketAgentSession({
   return (
     <AgentContext
       value={{
+        ready,
         reserved:
           opening.reference === ticket?.reference && Boolean(opening.reserved),
         chat,

@@ -1,5 +1,29 @@
+import { StatusLineRegion } from "@/components/ui/status-line";
+import { StatusLineContext } from "@/components/ui/use-status-line";
+import { Skeleton } from "@/components/ui/skeleton";
+import { onInboxAction } from "./inbox-commands";
+import { useInboxAction } from "./use-inbox-action";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
+import {
+  useInboxTriage,
+  triageId,
+  type TriageSelection,
+} from "./inbox-triage-context";
+import type { Attention } from "./use-inbox-attention";
+import {
+  matchesShortcut,
+  shortcutLabel,
+  ariaKeyShortcuts,
+} from "@/lib/shortcuts";
+import { Kbd } from "@/components/ui/kbd";
 import { emptyCopy } from "@/lib/empty-copy";
-import { useContext, useEffect, useRef, useState } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   AlarmClock,
   Check,
@@ -94,13 +118,41 @@ function EntryIcon({ entry }: { entry: Entry }) {
   );
 }
 
+function SnoozeButton({
+  label,
+  ...props
+}: React.ComponentProps<typeof Button> & { label: string }) {
+  return (
+    <Tooltip
+      content={
+        label === "Snooze" ? "Snooze this reminder" : "Remind me on this Ticket"
+      }
+      shortcut={shortcutLabel("inbox-remind")}
+    >
+      <Button
+        variant="ghost"
+        size="compact"
+        aria-keyshortcuts={ariaKeyShortcuts("inbox-remind")}
+        {...props}
+      >
+        {label}
+        <Kbd>{shortcutLabel("inbox-remind")}</Kbd>
+      </Button>
+    </Tooltip>
+  );
+}
+
 /** Snooze is a menu whose rows say when the reminder comes back (list I-03). */
-function Snooze({
+export function Snooze({
   entry,
   snooze,
   openRequest,
+  label,
+  disabled = false,
 }: {
-  entry: Entry;
+  entry: Pick<Entry, "reference">;
+  label?: string;
+  disabled?: boolean;
   snooze: (choice: SnoozeChoice) => Promise<void>;
   /** Bumped by H on the row, to open the menu from the keyboard. */
   openRequest: number;
@@ -115,13 +167,18 @@ function Snooze({
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <IconButton
-          label={`Snooze reminder for ${entry.reference}`}
-          tooltipSide="top"
-          aria-keyshortcuts="H"
-        >
-          <Clock />
-        </IconButton>
+        {label ? (
+          <SnoozeButton label={label} disabled={disabled} />
+        ) : (
+          <IconButton
+            disabled={disabled}
+            label={`Snooze reminder for ${entry.reference}`}
+            tooltipSide="top"
+            aria-keyshortcuts="H"
+          >
+            <Clock />
+          </IconButton>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" aria-label="Snooze until">
         <DropdownMenuLabel>Snooze until</DropdownMenuLabel>
@@ -129,6 +186,7 @@ function Snooze({
         {snoozeChoices.map((choice) => (
           <DropdownMenuItem
             key={choice.value}
+            disabled={disabled}
             onSelect={() => void snooze(choice.value)}
           >
             <Clock aria-hidden="true" />
@@ -161,6 +219,7 @@ function InboxRow({
   onOpen,
   onMark,
   snooze,
+  disabledReason,
 }: {
   reference: string | null;
   title: string;
@@ -172,6 +231,7 @@ function InboxRow({
   markLabel: string;
   onOpen: () => void;
   onMark: () => void;
+  disabledReason?: string | null;
   snooze?: (openRequest: number) => React.ReactNode;
 }) {
   const now = useNow();
@@ -195,7 +255,18 @@ function InboxRow({
           event.currentTarget.focus();
         }}
         onKeyDown={(event) => {
-          if (event.metaKey || event.ctrlKey || event.altKey) return;
+          if (
+            event.defaultPrevented ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.altKey
+          )
+            return;
+          if (disabledReason && ["e", "h"].includes(event.key.toLowerCase())) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (event.key === "e" || event.key === "E") {
             event.preventDefault();
             event.stopPropagation();
@@ -234,7 +305,10 @@ function InboxRow({
         <span className="inbox-actions">
           {snooze?.(snoozeRequest)}
           <IconButton
-            label={markLabel}
+            disabled={!!disabledReason}
+            label={
+              disabledReason ? `${markLabel} · ${disabledReason}` : markLabel
+            }
             tooltipSide="top"
             aria-keyshortcuts="E"
             onClick={onMark}
@@ -252,8 +326,10 @@ function SyncRow({
   entry,
   mark,
   open,
+  disabledReason,
 }: {
   entry: SyncEntry;
+  disabledReason?: string | null;
   mark: (read: boolean) => void;
   open: () => void;
 }) {
@@ -272,6 +348,7 @@ function SyncRow({
       read={entry.read}
       timestamp={entry.timestamp}
       current={false}
+      disabledReason={disabledReason ?? null}
       markLabel={`Mark ${entry.reference ?? "Drive file"} ${entry.conflict ? "review" : "notice"} ${entry.read ? "unread" : "read"}`}
       onOpen={() => {
         if (!entry.read) mark(true);
@@ -289,18 +366,20 @@ function SyncRow({
  */
 export function Inbox(props: {
   revision: number;
-  select: (reference: string, noteId?: string) => void;
+  select: (reference: string | null, noteId?: string) => void;
   onBrowse: () => void;
   selected?: string | null;
 }) {
   const attention = useInboxAttention();
-  return attention ? (
+  const line = useContext(StatusLineContext);
+  const content = attention ? (
     <InboxContent {...props} />
   ) : (
     <InboxAttentionProvider revision={props.revision}>
       <InboxContent {...props} />
     </InboxAttentionProvider>
   );
+  return line ? content : <StatusLineRegion>{content}</StatusLineRegion>;
 }
 
 function InboxContent({
@@ -309,70 +388,135 @@ function InboxContent({
   selected = null,
 }: {
   revision: number;
-  select: (reference: string, noteId?: string) => void;
+  select: (reference: string | null, noteId?: string) => void;
   /** Opens the ticket list, where tickets can be followed. */
   onBrowse: () => void;
   /** The ticket open beside the Inbox. */
   selected?: string | null;
 }) {
   const attention = useInboxAttention()!;
+  const triage = useInboxTriage();
+  const [held, setHeld] = useState<Attention | null>(null);
+  const [heldSync, setHeldSync] = useState<SyncEntry[] | null>(null);
+  const [heldTime, setHeldTime] = useState<number | null>(null);
+  const [readingSelection, setReadingSelection] = useState(
+    triage?.selection ?? null,
+  );
+  if (readingSelection !== (triage?.selection ?? null)) {
+    setReadingSelection(triage?.selection ?? null);
+    if (!triage?.selection) {
+      setHeld(null);
+      setHeldSync(null);
+      setHeldTime(null);
+    }
+  }
+  const projection = held ?? attention;
   const chats = useChatClient();
   const chatFeature = useChatFeature();
-  const now = useNow();
+  const liveNow = useNow();
+  const now = heldTime ?? liveNow;
   const [pages, setPages] = useState(1);
   // Attention never disappears behind update paging, even when its event is old.
-  const urgent = attention.entries.filter((entry) =>
-    needsYou(entry, attention, new Date(now)),
+  const urgent = projection.entries.filter((entry) =>
+    needsYou(entry, projection, new Date(now)),
   );
-  const updates = attention.entries.filter(
-    (entry) => !needsYou(entry, attention, new Date(now)),
+  const updates = projection.entries.filter(
+    (entry) => !needsYou(entry, projection, new Date(now)),
   );
   const entries = [...urgent, ...updates.slice(0, pages * PAGE_SIZE)];
   const more = pages * PAGE_SIZE < updates.length;
-  const [actionError, setError] = useState<FailureDescription | null>(null);
-  const error = actionError ?? attention.error;
+  const [navigationError, setNavigationError] =
+    useState<FailureDescription | null>(null);
+  const error = navigationError ?? attention.error;
   const loading = attention.loading;
   const openRun = useContext(RunNavigation);
   const sync = useSyncEntries(revision);
   const [reviewing, setReviewing] = useState<ConflictSummary | null>(null);
   const reload = attention.reload;
-  async function mark(ids: number[], read: boolean) {
-    try {
-      for (let start = 0; start < ids.length; start += MARK_BATCH)
-        await inboxClient.setRead(ids.slice(start, start + MARK_BATCH), read);
+  const blocked = editingBlockedReason(useWorkspaceState());
+  const { pending, perform } = useInboxAction(
+    () => {
       reload();
-    } catch (e) {
-      setError(
-        describeFailure(e, read ? "mark updates as read" : "mark as unread"),
-      );
-    }
+      sync.reload();
+    },
+    undefined,
+    true,
+  );
+  async function mark(ids: number[], read: boolean, notify = true) {
+    if (blocked || !ids.length) return;
+    const before = attention.entries.filter((entry) => ids.includes(entry.id));
+    const batches: { ids: number[]; requestId: string; undoId?: string }[] = [];
+    for (let start = 0; start < ids.length; start += MARK_BATCH)
+      batches.push({
+        ids: ids.slice(start, start + MARK_BATCH),
+        requestId: crypto.randomUUID(),
+      });
+    const undo = before.map((entry) => ({
+      ...entry,
+      requestId: crypto.randomUUID(),
+    }));
+    await perform(
+      `Marked updates ${read ? "read" : "unread"}`,
+      async () => {
+        for (const batch of batches)
+          await inboxClient.setRead(batch.ids, read, batch.requestId);
+      },
+      notify
+        ? async () => {
+            for (const entry of undo)
+              await inboxClient.setRead(
+                [entry.id],
+                entry.read,
+                entry.requestId,
+              );
+          }
+        : undefined,
+    );
   }
   async function snooze(entry: Entry, choice: SnoozeChoice) {
-    try {
-      await inboxClient.snooze(
-        entry.reference,
-        snoozeInstant(choice, new Date()),
-      );
-      reload();
-    } catch (e) {
-      setError(describeFailure(e, `snooze ${entry.reference}`));
-    }
+    if (blocked) return;
+    const due = snoozeInstant(choice, new Date());
+    const requestId = crypto.randomUUID();
+    const undoId = crypto.randomUUID();
+    let before: string | null | undefined;
+    await perform(
+      `Reminder set for ${entry.reference}`,
+      async () => {
+        if (before === undefined)
+          before = await inboxClient.reminder(entry.reference);
+        await inboxClient.snooze(entry.reference, due, requestId);
+      },
+      () => inboxClient.snooze(entry.reference, before ?? null, undoId),
+    );
   }
   async function markSync(ids: string[], read: boolean) {
-    try {
-      if (ids.length) await syncReview.setRead(ids, read);
-      sync.reload();
-    } catch (e) {
-      setError(
-        describeFailure(e, read ? "mark updates as read" : "mark as unread"),
-      );
-    }
+    if (blocked || !ids.length) return;
+    const before = sync.entries.filter((entry) => ids.includes(entry.id));
+    await perform(
+      `Marked updates ${read ? "read" : "unread"}`,
+      () => syncReview.setRead(ids, read),
+      async () => {
+        for (const entry of before)
+          await syncReview.setRead([entry.id], entry.read);
+      },
+      read ? "mark updates as read" : "mark as unread",
+    );
   }
-  const syncShown = sync.entries;
-  const unreadShown = entries.filter((e) => !e.read);
-  const unreadSync = syncShown.filter((e) => !e.read).map((e) => e.id);
-  const unreadApprovals = attention.approvals.filter(
-    (chat) => chat.status.unseen,
+  const syncShown = heldSync ?? sync.entries;
+  const unreadShown = entries.filter(
+    (e) =>
+      !(attention.entries.find((entry) => entry.id === e.id)?.read ?? e.read),
+  );
+  const unreadSync = syncShown
+    .filter(
+      (e) =>
+        !(sync.entries.find((current) => current.id === e.id)?.read ?? e.read),
+    )
+    .map((e) => e.id);
+  const unreadApprovals = projection.approvals.filter(
+    (chat) =>
+      attention.chats.find((current) => current.id === chat.id)?.status
+        .unseen ?? chat.status.unseen,
   );
   const unreadCount =
     unreadShown.length + unreadSync.length + unreadApprovals.length;
@@ -387,7 +531,7 @@ function InboxContent({
     const group =
       "summary" in entry
         ? attentionGroup(entry, new Date(now))
-        : needsYou(entry, attention, new Date(now))
+        : needsYou(entry, projection, new Date(now))
           ? "Needs you"
           : attentionGroup(entry, new Date(now));
     grouped.get(group)?.push(entry);
@@ -399,17 +543,165 @@ function InboxContent({
   });
   const groups = [...grouped].filter(
     ([group, items]) =>
-      items.length || (group === "Needs you" && attention.approvals.length),
+      items.length || (group === "Needs you" && projection.approvals.length),
   );
   async function markChat(id: string, read: boolean) {
-    try {
-      if (read) await chats.markRead(id);
+    if (blocked) return;
+    const before = !(
+      attention.chats.find((chat) => chat.id === id)?.status.unseen ?? !read
+    );
+    const set = async (value: boolean) => {
+      if (value) await chats.markRead(id);
       else await chats.markUnread(id);
-      reload();
-    } catch (reason) {
-      setError(describeFailure(reason, "mark the Chat as read"));
+    };
+    await perform(
+      `Marked Chat ${read ? "read" : "unread"}`,
+      () => set(read),
+      () => set(before),
+    );
+  }
+  function markAll() {
+    if (blocked) return;
+    const numeric = unreadShown.map((entry) => entry.id);
+    const batches: { ids: number[]; requestId: string; undoId?: string }[] = [];
+    for (let start = 0; start < numeric.length; start += MARK_BATCH)
+      batches.push({
+        ids: numeric.slice(start, start + MARK_BATCH),
+        requestId: crypto.randomUUID(),
+        undoId: crypto.randomUUID(),
+      });
+    void perform(
+      "Marked shown entries read",
+      async () => {
+        for (const batch of batches)
+          await inboxClient.setRead(batch.ids, true, batch.requestId);
+        if (unreadSync.length) await syncReview.setRead(unreadSync, true);
+        for (const chat of unreadApprovals) await chats.markRead(chat.id);
+      },
+      async () => {
+        for (const batch of batches)
+          await inboxClient.setRead(batch.ids, false, batch.undoId);
+        if (unreadSync.length) await syncReview.setRead(unreadSync, false);
+        for (const chat of unreadApprovals) await chats.markUnread(chat.id);
+      },
+    );
+  }
+  const queue: TriageSelection[] = [
+    ...projection.approvals.map((chat) => ({
+      kind: "approval" as const,
+      chat,
+    })),
+    ...groups.flatMap(([, items]) =>
+      items.flatMap((entry) =>
+        "summary" in entry ? [] : [{ kind: "entry" as const, entry }],
+      ),
+    ),
+  ];
+  function openSelection(selection: TriageSelection, fresh = attention) {
+    if (triage) {
+      setHeld(fresh);
+      setHeldSync(sync.entries);
+      setHeldTime(liveNow);
+    }
+    triage?.choose(selection);
+    setNavigationError(null);
+    triage?.openChat(null);
+    if (selection.kind === "approval") {
+      const reference =
+        selection.chat.tickets[0]?.reference ?? selection.chat.first_ticket;
+      select(reference ?? null);
+    } else {
+      const entry = selection.entry;
+      if (!entry.read) void mark([entry.id], true, false);
+      if (entry.kind === "activity") select(entry.reference, entry.from_value);
+      else if (entry.kind === "automation_run" && openRun)
+        openRun(entry.from_value);
+      else select(entry.reference);
     }
   }
+  async function walk(direction: 1 | -1) {
+    const selected = triage?.selection;
+    const index = selected
+      ? queue.findIndex((entry) => triageId(entry) === triageId(selected))
+      : -1;
+    const next = queue[index < 0 ? 0 : index + direction];
+    {
+      try {
+        const fresh = (await attention.readLatest?.()) ?? attention;
+        if (next) openSelection(next, fresh);
+        else {
+          setHeld(fresh);
+          setHeldSync(sync.entries);
+          setHeldTime(liveNow);
+        }
+      } catch (reason) {
+        setNavigationError(
+          describeFailure(reason, "load the next Inbox entry"),
+        );
+      }
+    }
+  }
+  useEffect(() => {
+    if (!triage) return;
+    return onInboxAction((action) => {
+      if (action === "next") void walk(1);
+      else if (action === "previous") void walk(-1);
+    });
+  });
+  useLayoutEffect(() => {
+    triage?.registerWalk(walk);
+    const selected = triage?.selection;
+    const index = selected
+      ? queue.findIndex((entry) => triageId(entry) === triageId(selected))
+      : -1;
+    triage?.setPosition(
+      index < 0 ? null : { index: index + 1, total: queue.length },
+    );
+  });
+  useEffect(() => {
+    if (!triage) return;
+    const key = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        !(target instanceof HTMLElement) ||
+        target.closest(
+          'input,textarea,select,[contenteditable="true"],[role="textbox"],[role="dialog"],[role="menu"],[role="listbox"]',
+        )
+      )
+        return;
+      if (
+        !matchesShortcut(event, "inbox-next") &&
+        !matchesShortcut(event, "inbox-previous")
+      )
+        return;
+      if (!target.closest(".ticket-workspace,.inbox")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      walk(matchesShortcut(event, "inbox-next") ? 1 : -1);
+    };
+    const focus = (event: FocusEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        !target.closest(
+          '.ticket-workspace,.inbox,[role="menu"],[role="dialog"],[data-slot="status-line"]',
+        )
+      ) {
+        setHeld(null);
+        setHeldSync(null);
+        setHeldTime(null);
+      }
+    };
+    window.addEventListener("keydown", key, true);
+    document.addEventListener("focusin", focus);
+    return () => {
+      window.removeEventListener("keydown", key, true);
+      document.removeEventListener("focusin", focus);
+    };
+  });
   // "Show 50 more": the first new row takes focus when the button had it.
   const arriving = useRef<number | null>(null);
   const revealingRead = useRef(false);
@@ -433,34 +725,53 @@ function InboxContent({
         actions={
           // Only while something shown is unread (list I-07).
           unreadCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                void mark(
-                  unreadShown.map((e) => e.id),
-                  true,
-                );
-                void markSync(unreadSync, true);
-                for (const chat of unreadApprovals)
-                  void markChat(chat.id, true);
-              }}
-            >
-              <CheckCheck />
-              Mark all read
-            </Button>
+            <Tooltip content={blocked ?? "Mark all shown unread entries read"}>
+              <span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!!blocked || pending}
+                  onClick={markAll}
+                >
+                  <CheckCheck />
+                  Mark all read
+                </Button>
+              </span>
+            </Tooltip>
           )
         }
       />
-      <div className="inbox-body" ref={body}>
-        {error && (
-          <FailureAlert
-            size="compact"
-            failure={error}
-            {...(!actionError && { onRetry: reload })}
-          />
+      <div
+        className="inbox-body"
+        ref={body}
+        onFocusCapture={(event) => {
+          if (
+            triage &&
+            !held &&
+            event.target instanceof HTMLElement &&
+            event.target.closest(".inbox-entry")
+          ) {
+            setHeld(attention);
+            setHeldSync(sync.entries);
+            setHeldTime(liveNow);
+          }
+        }}
+      >
+        {loading && !entries.length && !error && (
+          <div
+            role="status"
+            aria-label="Loading Inbox"
+            className="inbox-loading"
+          >
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
         )}
-        {!loading && !error && attention.needsCount === 0 && (
+        {error && (
+          <FailureAlert size="compact" failure={error} onRetry={reload} />
+        )}
+        {!loading && !error && projection.needsCount === 0 && (
           <EmptyState
             icon={<CheckCheck />}
             title={emptyCopy("inbox-caught-up").title}
@@ -498,12 +809,12 @@ function InboxContent({
               {group}
               <Count>
                 {items.length +
-                  (group === "Needs you" ? attention.approvals.length : 0)}
+                  (group === "Needs you" ? projection.approvals.length : 0)}
               </Count>
             </h2>
             <ul className="inbox-entries">
               {group === "Needs you" &&
-                attention.approvals.map((chat) => (
+                projection.approvals.map((chat) => (
                   <InboxRow
                     key={`chat:${chat.id}`}
                     reference={
@@ -535,17 +846,29 @@ function InboxContent({
                         decorative
                       />
                     }
-                    read={!chat.status.unseen}
+                    read={
+                      !(
+                        attention.chats.find(
+                          (current) => current.id === chat.id,
+                        )?.status.unseen ?? chat.status.unseen
+                      )
+                    }
                     timestamp={chat.updated_at}
-                    current={false}
+                    current={
+                      triage?.selection?.kind === "approval" &&
+                      triage.selection.chat.id === chat.id
+                    }
                     markLabel={`Mark ${chat.title} ${chat.status.unseen ? "read" : "unread"}`}
+                    disabledReason={blocked}
                     onMark={() => void markChat(chat.id, !chat.status.unseen)}
                     onOpen={() =>
-                      chatFeature.requestChat({
-                        kind: "open",
-                        chatId: chat.id,
-                        retention: chat.retention,
-                      })
+                      triage
+                        ? openSelection({ kind: "approval", chat })
+                        : chatFeature.requestChat({
+                            kind: "open",
+                            chatId: chat.id,
+                            retention: chat.retention,
+                          })
                     }
                   />
                 ))}
@@ -554,7 +877,13 @@ function InboxContent({
                   return (
                     <SyncRow
                       key={e.id}
-                      entry={e}
+                      entry={{
+                        ...e,
+                        read:
+                          sync.entries.find((entry) => entry.id === e.id)
+                            ?.read ?? e.read,
+                      }}
+                      disabledReason={blocked}
                       mark={(read) => void markSync([e.id], read)}
                       open={() => {
                         if (e.conflict) setReviewing(e.conflict);
@@ -563,13 +892,16 @@ function InboxContent({
                     />
                   );
                 const noun = entryNoun(e);
+                const currentRead =
+                  attention.entries.find((entry) => entry.id === e.id)?.read ??
+                  e.read;
                 return (
                   <InboxRow
                     key={e.id}
                     reference={e.reference}
                     title={e.title}
                     summary={
-                      needsYou(e, attention, new Date(now)) &&
+                      needsYou(e, projection, new Date(now)) &&
                       e.kind === "status" ? (
                         <>
                           <span className="inbox-agent-name">
@@ -590,27 +922,33 @@ function InboxContent({
                         summarize(e)
                       )
                     }
-                    icon={<EntryIcon entry={e} />}
-                    read={e.read}
+                    icon={
+                      <EntryIcon
+                        entry={
+                          e.kind === "status" && e.to_value === "In review"
+                            ? {
+                                ...e,
+                                to_value:
+                                  attention.statuses.get(e.reference) ??
+                                  e.to_value,
+                              }
+                            : e
+                        }
+                      />
+                    }
+                    read={currentRead}
                     timestamp={e.timestamp}
                     current={selected === e.reference}
-                    markLabel={`Mark ${e.reference} ${noun} ${e.read ? "unread" : "read"}`}
-                    onOpen={() => {
-                      if (!e.read) void mark([e.id], true);
-                      // A deleted update still opens with its id, so the ticket says it is gone.
-                      if (e.kind === "activity")
-                        select(e.reference, e.from_value);
-                      // Reading the entry is not acting on the run: it opens.
-                      else if (e.kind === "automation_run" && openRun)
-                        openRun(e.from_value);
-                      else select(e.reference);
-                    }}
-                    onMark={() => void mark([e.id], !e.read)}
+                    markLabel={`Mark ${e.reference} ${noun} ${currentRead ? "unread" : "read"}`}
+                    onOpen={() => openSelection({ kind: "entry", entry: e })}
+                    disabledReason={blocked}
+                    onMark={() => void mark([e.id], !currentRead)}
                     {...(e.kind === "reminder" && {
                       snooze: (request: number) => (
                         <Snooze
                           entry={e}
                           openRequest={request}
+                          disabled={!!blocked || pending}
                           snooze={(choice) => snooze(e, choice)}
                         />
                       ),

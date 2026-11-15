@@ -6176,6 +6176,551 @@ test("an empty Ticket folds Activity and R opens its existing composer without l
   ).toHaveProperty("value", "A retained update draft");
 });
 
+test("Inbox triage accepts review with Undo, keeps the reading queue still, and uses the folded Activity composer", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  let first = bulkTicket(1, { status: "In review" });
+  const second = bulkTicket(2);
+  let due: string | null = "2020-01-01T00:00:00Z";
+  const timestamp = "2026-11-15T00:00:00Z";
+  let entries = [
+    {
+      id: 201,
+      reference: "T-KQ1",
+      title: "First",
+      kind: "status",
+      from_value: "In progress",
+      to_value: "In review",
+      timestamp,
+      editing_agent: "codex",
+      read: false,
+    },
+    {
+      id: 202,
+      reference: "T-KQ2",
+      title: "Second",
+      kind: "reminder",
+      from_value: "",
+      to_value: due,
+      timestamp,
+      editing_agent: null,
+      read: false,
+    },
+  ];
+  await renderBulk({
+    attachment_workspace_id: () => "triage-test",
+    latest_update: () => null,
+    is_following: () => false,
+    find_tickets: () => [first, second],
+    show_ticket: ({ reference }: { reference: string }) =>
+      reference === "T-KQ1" ? first : second,
+    ticket_history: ({ reference }: { reference: string }) =>
+      reference === "T-KQ1"
+        ? [
+            {
+              kind: "status",
+              from_value: "In progress",
+              to_value: first.status,
+              timestamp,
+              editing_agent: "codex",
+            },
+          ]
+        : [],
+    reminder: ({ reference }: { reference: string }) =>
+      reference === "T-KQ2" ? due : null,
+    inbox: () => entries,
+    set_inbox_read: ({ ids, read }: { ids: number[]; read: boolean }) => {
+      entries = entries.map((entry) =>
+        ids.includes(entry.id) ? { ...entry, read } : entry,
+      );
+    },
+    change_ticket: ({ patch }: { patch: { status: string } }) => {
+      first = { ...first, status: patch.status };
+      return first;
+    },
+    set_reminder: ({ dueAt }: { dueAt: string | null }) => {
+      due = dueAt;
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  await flush();
+  const review = screen.getByRole("button", {
+    name: /T-KQ1.*First.*waiting for you/,
+  });
+  review.focus();
+  fireEvent.keyDown(review, { key: "j" });
+  await flush();
+  const card = screen.getByRole("region", { name: "Inbox triage" });
+  expect(
+    within(card).getByRole("button", { name: /Move to Done/ }),
+  ).toBeTruthy();
+  expect(screen.getByText("1 of 2")).toBeTruthy();
+  const order = () =>
+    [...document.querySelectorAll(".inbox-ticket")].map(
+      (row) => row.textContent,
+    );
+  const before = order();
+  fireEvent.keyDown(review, { key: "Enter", ctrlKey: true });
+  await flush();
+  expect(first.status).toBe("Done");
+  expect(order()).toEqual(before);
+  expect(review.closest("section")?.querySelector("h2")?.textContent).toContain(
+    "Needs you",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(first.status).toBe("In review");
+  fireEvent.click(review);
+  await flush();
+  fireEvent.keyDown(review, { key: "e" });
+  await flush();
+  expect(entries[0]?.read).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(entries[0]?.read).toBe(true);
+  fireEvent.keyDown(review, { key: "r" });
+  await flush();
+  const update = screen.getByRole("textbox", { name: "New update rich text" });
+  expect(update.textContent || (update as HTMLTextAreaElement).value).toContain(
+    "Re:",
+  );
+  expect(update.textContent || (update as HTMLTextAreaElement).value).toContain(
+    "codex",
+  );
+  fireEvent.keyDown(update, { key: "h" });
+  expect(screen.queryByRole("menu")).toBeNull();
+  review.focus();
+  fireEvent.keyDown(review, { key: "j" });
+  await flush();
+  expect(screen.getByText("2 of 2")).toBeTruthy();
+  fireEvent.keyDown(review, { key: "h" });
+  await flush();
+  fireEvent.click(screen.getByRole("menuitem", { name: /In 1 hour/ }));
+  await flush();
+  expect(due).not.toBe("2020-01-01T00:00:00Z");
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(due).toBe("2020-01-01T00:00:00Z");
+});
+
+test.each(["1", "2", "3"])(
+  "Inbox approval %s stays beside the queue and J returns to its next Ticket",
+  async (choice) => {
+    const { ChatClientContext } = await import("@/features/chats/client");
+    const { createMockChatClient, chatState } =
+      await import("@/features/chats/mock-client");
+    const ticket = bulkTicket(1);
+    const chats = createMockChatClient({
+      enabled: true,
+      chats: [
+        {
+          chat: chatState({
+            id: "triage-chat",
+            title: "Triage Chat",
+            activity: "idle",
+            links: [
+              {
+                kind: "ticket",
+                id: "1",
+                reference: "T-KQ1",
+                title: "First",
+                status: "Todo",
+              },
+            ],
+          }),
+        },
+      ],
+    });
+    const due = "2020-01-01T00:00:00Z";
+    let releaseContext = () => {};
+    const loadingContext = new Promise<null>((resolve) => {
+      releaseContext = () => resolve(null);
+    });
+    bridge.invoke.mockImplementation(
+      (command: string, args?: { reference?: string }) => {
+        if (command === "find_tickets") return [ticket];
+        if (command === "show_ticket") return ticket;
+        if (command === "latest_update") return loadingContext;
+        if (command === "reminder") return due;
+        if (command === "inbox")
+          return [
+            {
+              id: 301,
+              reference: "T-KQ1",
+              title: "First",
+              kind: "reminder",
+              from_value: "",
+              to_value: due,
+              timestamp: "2026-11-16T00:00:00Z",
+              editing_agent: null,
+              read: true,
+            },
+          ];
+        return bridgeDefault(command, args);
+      },
+    );
+    render(
+      <ChatClientContext value={chats}>
+        <App />
+      </ChatClientContext>,
+    );
+    act(() =>
+      chats.push("triage-chat", {
+        kind: "request",
+        id: "triage-request",
+        at: "2026-11-16T00:00:00Z",
+        request: "approval",
+        title: "wants to run",
+        command: "npm test -- board",
+        options: [
+          { id: "allow", label: "Allow once" },
+          { id: "session", label: "Allow for this session" },
+          { id: "deny", label: "Decline" },
+        ],
+        state: "pending",
+        free_text: false,
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /^Inbox/ }));
+    const approval = await screen.findByRole("button", {
+      name: /Approval needed in.*Triage Chat/,
+    });
+    fireEvent.click(approval);
+    expect(
+      await screen.findByRole("region", { name: "Inbox triage" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Triage Chat" })).toBeNull();
+    // The approval stays actionable while the linked Ticket waits for its agent context.
+    expect(
+      await screen.findByRole("status", {
+        name: "Loading ticket agent context",
+      }),
+    ).toBeTruthy();
+    const queue = document.querySelector(".inbox");
+    fireEvent.keyDown(approval, { key: "Enter" });
+    const heading = await screen.findByRole("heading", { name: "Triage Chat" });
+    expect(heading.closest("#detail")).toBeTruthy();
+    act(() => releaseContext());
+    expect(document.querySelector(".inbox")).toBe(queue);
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
+    const answer = vi.spyOn(chats, "answer");
+    const allow = await screen.findByRole("button", { name: "Allow once" });
+    fireEvent.keyDown(allow, { key: choice });
+    await vi.waitFor(() =>
+      expect(answer).toHaveBeenCalledWith("triage-chat", "triage-request", {
+        option_id:
+          choice === "1" ? "allow" : choice === "2" ? "session" : "deny",
+      }),
+    );
+    expect(
+      screen.getByRole("button", { name: /Approval needed in.*Triage Chat/ }),
+    ).toBe(approval);
+    act(() =>
+      chats.push("triage-chat", {
+        kind: "response",
+        id: "triage-response",
+        at: "2026-11-16T00:01:00Z",
+        text: "The board checks passed.",
+        state: "complete",
+      }),
+    );
+    expect(await screen.findByText("The board checks passed.")).toBeTruthy();
+    fireEvent.keyDown(heading, { key: "j" });
+    const next = await screen.findByRole("region", { name: "Inbox triage" });
+    expect(
+      within(next).getByRole("button", { name: /Clear reminder/ }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Triage Chat" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Approval needed in.*Triage Chat/ }),
+    ).toBeNull();
+    expect(document.querySelector(".inbox")).toBe(queue);
+  },
+);
+
+test("Inbox Retry preserves its operation identity and Undo restores Needs you after reload until a genuine later review", async () => {
+  vi.useFakeTimers();
+  let first = bulkTicket(1, { status: "In review" });
+  const second = bulkTicket(2);
+  const original = {
+    kind: "status",
+    from_value: "In progress",
+    to_value: "In review",
+    timestamp: "2020-01-01T00:00:00Z",
+    editing_agent: "codex",
+  };
+  let transition = original;
+  let entries = [
+    { ...original, id: 401, reference: "T-KQ1", title: "First", read: false },
+    {
+      id: 402,
+      reference: "T-KQ2",
+      title: "Second",
+      read: true,
+      kind: "status",
+      from_value: "update-second",
+      to_value: "Done",
+      timestamp: "2020-01-01T00:00:00Z",
+      editing_agent: "codex",
+    },
+  ];
+  const accepted = new Set<string>();
+  let lostReply = true;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: Record<string, unknown>) => {
+      if (command === "find_tickets") return [first, second];
+      if (command === "show_ticket")
+        return args?.reference === "T-KQ1" ? first : second;
+      if (command === "ticket_history")
+        return args?.reference === "T-KQ1" ? [transition] : [];
+      if (command === "inbox") return entries;
+      if (command === "set_inbox_read") {
+        const ids = args?.ids as number[];
+        entries = entries.map((entry) =>
+          ids.includes(entry.id)
+            ? { ...entry, read: args?.read as boolean }
+            : entry,
+        );
+        return;
+      }
+      if (command === "change_ticket") {
+        const id = args?.requestId as string;
+        if (!accepted.has(id)) {
+          accepted.add(id);
+          const status = (args?.patch as { status: string }).status;
+          transition = {
+            kind: "status",
+            from_value: first.status,
+            to_value: status,
+            timestamp: `2026-11-16T00:0${accepted.size}:00Z`,
+            editing_agent: "local-person",
+          };
+          first = { ...first, status };
+        }
+        if (lostReply) {
+          lostReply = false;
+          throw new Error("The connection closed before its reply arrived.");
+        }
+        return first;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  render(<App />);
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  await flush();
+  const row = screen.getByRole("button", { name: /T-KQ1.*waiting for you/ });
+  fireEvent.click(row);
+  await flush();
+  fireEvent.keyDown(row, { key: "Enter", ctrlKey: true });
+  await flush();
+  expect(first.status).toBe("Done");
+  const failure = screen.getByRole("button", { name: "Retry" });
+  entries = [
+    {
+      ...entries[1]!,
+      id: 403,
+      reference: "T-KQ3",
+      title: "Live Ticket",
+      kind: "status",
+      to_value: "In progress",
+      timestamp: "2026-11-16T00:00:00Z",
+      read: false,
+    },
+    ...entries,
+  ];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15000);
+  });
+  expect(
+    screen.queryByRole("button", { name: /T-KQ3.*Live Ticket/ }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Retry" })).toBe(failure);
+  expect(row.closest("section")?.textContent).toContain("Needs you");
+  fireEvent.click(failure);
+  await flush();
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "change_ticket",
+  );
+  expect((writes[0]?.[1] as { requestId: string }).requestId).toBe(
+    (writes[1]?.[1] as { requestId: string }).requestId,
+  );
+  expect(accepted.size).toBe(1);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(first.status).toBe("In review");
+  expect(transition.editing_agent).toBe("local-person");
+  expect(
+    screen.getByRole("button", { name: "Inbox, 1 entry needs you" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(row, { key: "j" });
+  await flush();
+  expect(
+    screen
+      .getByRole("button", { name: /T-KQ1.*waiting for you/ })
+      .closest("section")?.textContent,
+  ).toContain("Needs you");
+  expect(
+    screen.getByRole("button", { name: /T-KQ3.*Live Ticket/ }),
+  ).toBeTruthy();
+  cleanup();
+  render(<App />);
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  await flush();
+  expect(
+    screen
+      .getByRole("button", { name: /T-KQ1.*waiting for you/ })
+      .closest("section")?.textContent,
+  ).toContain("Needs you");
+  transition = {
+    ...transition,
+    from_value: "Done",
+    timestamp: "2026-11-16T01:00:00Z",
+  };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByText("You're all caught up")).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Inbox, 1 entry needs you" }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: /T-KQ2.*Second/ })).toBeTruthy();
+});
+
+test("Inbox unlinked approvals keep Chat review available and mark all read sends only real Inbox IDs", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient, chatState } =
+    await import("@/features/chats/mock-client");
+  const chats = createMockChatClient({
+    enabled: true,
+    chats: [
+      {
+        chat: chatState({
+          id: "unlinked-approval",
+          title: "Unlinked approval",
+          activity: "idle",
+          links: [],
+        }),
+      },
+    ],
+  });
+  let read = false;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: Record<string, unknown>) => {
+      if (command === "inbox")
+        return [
+          {
+            id: 501,
+            reference: "T-KQ1",
+            title: "First",
+            kind: "activity",
+            from_value: "activity",
+            to_value: "A new update",
+            timestamp: "2026-11-16T00:00:00Z",
+            editing_agent: "codex",
+            read,
+          },
+        ];
+      if (command === "set_inbox_read") {
+        read = args?.read as boolean;
+        return;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(
+    <ChatClientContext value={chats}>
+      <App />
+    </ChatClientContext>,
+  );
+  act(() =>
+    chats.push("unlinked-approval", {
+      kind: "request",
+      id: "request",
+      at: "2026-11-16T00:00:00Z",
+      request: "approval",
+      title: "wants to run",
+      command: "npm test",
+      options: [{ id: "allow", label: "Allow once" }],
+      state: "pending",
+      free_text: false,
+    }),
+  );
+  await chats.markUnread("unlinked-approval");
+  fireEvent.click(await screen.findByRole("button", { name: /^Inbox/ }));
+  const approval = await screen.findByRole("button", {
+    name: /Approval needed in.*Unlinked approval/,
+  });
+  fireEvent.click(approval);
+  const card = await screen.findByRole("region", { name: "Inbox triage" });
+  expect(
+    within(card).getByText("This Chat has no linked Ticket."),
+  ).toBeTruthy();
+  expect(
+    (within(card).getByRole("button", { name: /Reply/ }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (
+      within(card).getByRole("button", {
+        name: /Remind me/,
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  act(() =>
+    reportWorkspaceFailure(
+      "workspace_read_only",
+      "The workspace is read-only.",
+    ),
+  );
+  expect(
+    (
+      within(card).getByRole("button", {
+        name: /Mark read/,
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  expect(
+    (screen.getByRole("button", { name: "Mark all read" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (
+      within(card).getByRole("button", {
+        name: /Review in Chat/,
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+  act(() => clearWorkspaceFailure());
+  const chatRead = vi.spyOn(chats, "markRead");
+  fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+  await vi.waitFor(() => expect(read).toBe(true));
+  await vi.waitFor(() =>
+    expect(chatRead).toHaveBeenCalledWith("unlinked-approval"),
+  );
+  const calls = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "set_inbox_read",
+  );
+  expect(calls.map(([, args]) => (args as { ids: number[] }).ids)).toEqual([
+    [501],
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await vi.waitFor(() => expect(read).toBe(false));
+  fireEvent.keyDown(approval, { key: "Enter" });
+  expect(
+    await screen.findByRole("heading", { name: "Unlinked approval" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
+});
 test("first run creates through the shared dialog and gives way to the ticket list", async () => {
   let created = false;
   bridge.invoke.mockImplementation(
@@ -6939,3 +7484,73 @@ test.each([
     ).toBeTruthy();
   },
 );
+
+test("Inbox palette actions share selected-entry read, reminder and Activity handlers", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  const ticket = bulkTicket(1);
+  const due = "2020-01-01T00:00:00Z";
+  let read = false;
+  await renderBulk({
+    latest_update: () => null,
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    reminder: () => due,
+    inbox: () => [
+      {
+        id: 601,
+        reference: "T-KQ1",
+        title: "First",
+        kind: "reminder",
+        from_value: "",
+        to_value: due,
+        timestamp: "2026-11-16T00:00:00Z",
+        editing_agent: null,
+        read,
+      },
+    ],
+    set_inbox_read: ({ read: value }: { read: boolean }) => {
+      read = value;
+    },
+  });
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  fireEvent.keyDown(document.body, { key: "g" });
+  fireEvent.keyDown(document.body, { key: "i" });
+  await flush();
+  const row = screen.getByRole("button", {
+    name: /T-KQ1.*First.*Your reminder/,
+  });
+  fireEvent.click(row);
+  await flush();
+  expect(read).toBe(true);
+  async function command(name: string) {
+    fireEvent.keyDown(row, { key: "k", ctrlKey: true });
+    await flush();
+    const palette = screen.getByRole("dialog", { name: "Go anywhere" });
+    fireEvent.click(
+      within(palette).getByRole("option", { name: new RegExp(name) }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+  }
+  await command("Toggle Inbox read state");
+  expect(read).toBe(false);
+  expect(screen.getAllByRole("button", { name: "Undo" })).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(read).toBe(true);
+  await command("Snooze reminder");
+  expect(screen.getByRole("menu")).toBeTruthy();
+  expect(screen.getByText("Snooze until")).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  await command("Reply on this Ticket");
+  expect(
+    screen.getByRole("textbox", { name: "New update rich text" }).textContent,
+  ).toContain("Your reminder is due");
+});

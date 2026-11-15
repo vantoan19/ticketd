@@ -1,6 +1,13 @@
+import { attachments } from "@/lib/api/attachments";
+import {
+  readReviewRestorations,
+  hasReviewRestorations,
+  writeReviewRestorations,
+  restorationFor,
+} from "./inbox-review-restoration";
 import { historyClient } from "@/lib/api/history";
 import { InboxAttentionContext, type Attention } from "./use-inbox-attention";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { inboxClient, type Entry } from "@/lib/api/inbox";
 import { client } from "@/lib/api/client";
 import { useChatClient } from "@/features/chats/client";
@@ -8,7 +15,7 @@ import { useChatFeature } from "@/features/chats/use-chats";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import { useNow } from "@/lib/use-now";
 import { describeFailure } from "@/lib/api/describe-failure";
-import { approvalChats, needsYou } from "./inboxModel";
+import { approvalChats, needsYou, sameTransition } from "./inboxModel";
 
 /** One shared projection for the list and sidebar; all inputs remain host-owned. */
 export function InboxAttentionProvider({
@@ -33,6 +40,9 @@ export function InboxAttentionProvider({
     loading: true,
     error: null,
   });
+  const loadLatest = useRef<
+    (() => Promise<Omit<Attention, "needsCount" | "reload">>) | null
+  >(null);
   useEffect(() => {
     let active = true;
     async function load() {
@@ -90,22 +100,54 @@ export function InboxAttentionProvider({
           ),
         ),
       ]);
-      if (active)
-        setState({
-          entries,
-          statuses: new Map(statuses),
-          latestStatusChanges: new Map(
-            histories.flatMap(([reference, entry]) =>
-              entry ? [[reference, entry] as const] : [],
-            ),
+      const workspaceId = hasReviewRestorations()
+        ? await attachments.workspaceId()
+        : null;
+      const saved = workspaceId ? readReviewRestorations(workspaceId) : [];
+      const current = saved.filter((restored) => {
+        const entry = entries.find(
+          (entry) =>
+            entry.id === restored.id &&
+            entry.reference === restored.reference &&
+            entry.timestamp === restored.originalTimestamp &&
+            entry.editing_agent === restored.originalAgent,
+        );
+        const latest = histories.find(
+          ([reference]) => reference === restored.reference,
+        )?.[1];
+        return (
+          !!entry &&
+          !!latest &&
+          sameTransition(latest, restored.transition) &&
+          statuses.some(
+            ([reference, status]) =>
+              reference === restored.reference && status === "In review",
+          )
+        );
+      });
+      if (workspaceId && current.length !== saved.length)
+        writeReviewRestorations(workspaceId, current);
+      const next = {
+        entries,
+        restoredReviews: new Map(
+          current.map((restored) => [restored.id, restored.transition]),
+        ),
+        statuses: new Map(statuses),
+        latestStatusChanges: new Map(
+          histories.flatMap(([reference, entry]) =>
+            entry ? [[reference, entry] as const] : [],
           ),
-          reminders: new Map(reminders),
-          approvals: approvalChats(summaries),
-          chats: summaries,
-          loading: false,
-          error: null,
-        });
+        ),
+        reminders: new Map(reminders),
+        approvals: approvalChats(summaries),
+        chats: summaries,
+        loading: false,
+        error: null,
+      };
+      if (active) setState(next);
+      return next;
     }
+    loadLatest.current = load;
     void load().catch((reason: unknown) => {
       if (active)
         setState((previous) => ({
@@ -128,6 +170,37 @@ export function InboxAttentionProvider({
         ...state,
         needsCount,
         reload: () => setAttempt((value) => value + 1),
+        readLatest: async () => {
+          const latest = await loadLatest.current?.();
+          const fresh = latest ?? state;
+          return {
+            ...fresh,
+            needsCount:
+              fresh.approvals.length +
+              fresh.entries.filter((entry) =>
+                needsYou(entry, fresh, new Date()),
+              ).length,
+            reload: () => setAttempt((value) => value + 1),
+          };
+        },
+        restoreReview: async (entry) => {
+          const latest = (await historyClient.list(entry.reference))
+            .filter((item) => item.kind === "status")
+            .at(-1);
+          if (!latest || latest.to_value !== "In review")
+            throw new Error(
+              "The Ticket changed again. Reload the Inbox before retrying Undo.",
+            );
+          const workspaceId = await attachments.workspaceId();
+          const saved = readReviewRestorations(workspaceId).filter(
+            (item) => item.id !== entry.id,
+          );
+          writeReviewRestorations(workspaceId, [
+            ...saved,
+            restorationFor(entry, latest),
+          ]);
+          setAttempt((value) => value + 1);
+        },
       }}
     >
       {children}

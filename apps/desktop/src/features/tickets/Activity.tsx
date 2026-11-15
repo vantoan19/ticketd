@@ -1,3 +1,4 @@
+import { onTicketUpdate } from "./activity-composer-request";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
 import { Pager } from "@/components/ui/pager";
@@ -465,6 +466,14 @@ export function Activity({
       if (composerRef.current) revealInDetail(composerRef.current);
     });
   }
+  useEffect(() => {
+    if (!active || trashed) return;
+    return onTicketUpdate(reference, (quote) => {
+      if (quote) reply(quote);
+      else setComposing(true);
+      setFocusUpdate((count) => count + 1);
+    });
+  });
   const post = (event: FormEvent<HTMLFormElement>) => save(event, null);
   const saveEdit = (event: FormEvent<HTMLFormElement>) => save(event, edit);
   async function save(
