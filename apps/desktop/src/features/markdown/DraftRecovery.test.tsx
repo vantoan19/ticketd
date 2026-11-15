@@ -490,7 +490,7 @@ test("source Undo and rich/source transitions keep independent history protectio
   function Editor() {
     const [value, setValue] = useState(body);
     return (
-      <MarkdownEditor persistentToolbar value={value} onChange={setValue} />
+      <MarkdownEditor chrome="session" value={value} onChange={setValue} />
     );
   }
   const host = render(

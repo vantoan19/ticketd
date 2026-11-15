@@ -99,8 +99,11 @@ async function insertInto(label: string) {
   editable.focus();
   fireEvent.focus(editable);
   await waitFor(() => expect(document.activeElement).toBe(editable));
+  // A quick composer keeps the button in its frame; an editing session in
+  // the row its page reserves.
   fireEvent.click(
-    within(editor).getByRole("button", { name: "Insert attachment" }),
+    within(editor).queryByRole("button", { name: "Insert attachment" }) ??
+      screen.getByRole("button", { name: "Insert attachment" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await waitFor(() =>

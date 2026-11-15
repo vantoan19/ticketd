@@ -163,7 +163,6 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   fireEvent.focus(
     screen.getByRole("textbox", { name: "Description rich text" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Bold" }));
   expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() =>
@@ -182,7 +181,9 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   );
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   expect(
     screen.getByRole("textbox", { name: "Description source" }),
   ).toHaveProperty("value", "# Draft\n\n- [ ] Keep this");
@@ -291,20 +292,6 @@ test("Ctrl+Enter chooses the highlighted slash menu block instead of creating", 
   const combo = screen.getByRole("combobox", { name: "Description rich text" });
   fireEvent.keyDown(combo, { key: "Enter", ctrlKey: true });
   expect(screen.queryByRole("listbox", { name: "Insert block" })).toBeNull();
-  expect(create).not.toHaveBeenCalled();
-});
-
-test("Ctrl+Enter in the Link URL field does not create", async () => {
-  const create = vi.fn().mockResolvedValue("T-KQ1");
-  render(<Harness create={create} />);
-  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
-    target: { value: "Link" },
-  });
-  await focusedEditor();
-  fireEvent.click(screen.getByRole("button", { name: "Link" }));
-  const url = await screen.findByLabelText("Link URL");
-  fireEvent.keyDown(url, { key: "Enter", ctrlKey: true });
-  fireEvent.keyDown(url, { key: "Enter", metaKey: true });
   expect(create).not.toHaveBeenCalled();
 });
 

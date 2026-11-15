@@ -76,6 +76,7 @@ const supported = new Set([
   "delete",
   "inlineCode",
   "link",
+  "image",
   "list",
   "listItem",
   "blockquote",
@@ -104,24 +105,29 @@ function meaning(node: unknown): unknown {
   return node;
 }
 
+/** What a construct the rich editor cannot keep is called, in plain words. */
+const unsupportedNames: Record<string, string> = {
+  html: "raw HTML",
+  definition: "link definitions",
+  linkReference: "reference-style links",
+  imageReference: "reference-style images",
+  footnoteDefinition: "footnotes",
+  footnoteReference: "footnotes",
+  yaml: "front matter",
+};
+
+/**
+ * Why the rich editor would change this text, as short phrases ("raw HTML",
+ * "a code fence with metadata"). The editor says them in one caption.
+ */
 function scan(
   node: Root | RootContent | PhrasingContent,
   reasons: Set<string>,
 ) {
   if (!supported.has(node.type))
-    reasons.add(
-      `This document contains ${node.type}; edit its Markdown source to preserve it.`,
-    );
-  if (
-    node.type === "list" &&
-    node.children.some((child) => typeof child.checked === "boolean") &&
-    !node.children.every((child) => typeof child.checked === "boolean")
-  )
-    reasons.add(
-      "Mixed checklists and bullet items require Markdown source editing.",
-    );
+    reasons.add(unsupportedNames[node.type] ?? "Markdown it cannot show");
   if (node.type === "code" && node.meta)
-    reasons.add("Code fence metadata requires Markdown source editing.");
+    reasons.add("a code fence with metadata");
   if ("children" in node)
     node.children.forEach((child) => scan(child, reasons));
 }
@@ -161,6 +167,15 @@ function convert(
       };
     case "break":
       return { type: "br", children: [{ text: "" }] };
+    case "image":
+      // An inline void: the editor shows the picture (or its label) as one unit.
+      return {
+        type: "img",
+        url: node.url,
+        alt: node.alt ?? "",
+        title: node.title ?? "",
+        children: [{ text: "" }],
+      };
     case "code": {
       if (node.lang === "mermaid") {
         const raw = source.slice(
@@ -262,6 +277,15 @@ function phrasing(nodes: Descendant[]): PhrasingContent[] {
       return [result];
     }
     if (node.type === "br") return [{ type: "break" }];
+    if (node.type === "img")
+      return [
+        {
+          type: "image",
+          url: String(node.url ?? ""),
+          alt: String(node.alt ?? ""),
+          title: String(node.title ?? "") || null,
+        },
+      ];
     if (node.type === "a")
       return [
         {
@@ -431,9 +455,7 @@ export function readMarkdown(source: string) {
     JSON.stringify(meaning(processor.parse(writeMarkdown(value)))) !==
       JSON.stringify(originalMeaning)
   ) {
-    reasons.add(
-      "This Markdown cannot be converted faithfully yet. Edit its source to preserve all content.",
-    );
+    reasons.add("Markdown it would rewrite");
   }
   return { value, reasons: [...reasons], meaning: originalMeaning };
 }

@@ -20,7 +20,9 @@ function PopoverTrigger({
  * buttons; when its trigger is icon-only it carries a title. It opens below
  * the trigger inside the nearest OverlayBoundary with 16px clearance.
  * `variant="list"` holds a ChoiceList or picker: 4px padding, at least as
- * wide as the trigger and 280px.
+ * wide as the trigger and 280px. `variant="bar"` holds a row of icon buttons
+ * floating over content (the editor's selection bubble): 4px padding, as wide
+ * as its buttons.
  */
 function PopoverContent({
   className,
@@ -31,7 +33,7 @@ function PopoverContent({
   variant = "form",
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
-  variant?: "form" | "list";
+  variant?: "form" | "list" | "bar";
 }) {
   const boundary = useOverlayBoundary();
   return (

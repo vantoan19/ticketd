@@ -1,3 +1,9 @@
+/* The editor's reading size. Its page sets these on an ancestor where text
+   reads at 16/24 (the expanded ticket, a Document); 14/20 everywhere else. */
+:root {
+  --text-editor: var(--text-ui);
+  --text-editor-line: 20px;
+}
 .markdown-editor {
   position: relative;
   min-width: 0;
@@ -6,85 +12,102 @@
   background: var(--surface);
   color: var(--foreground);
 }
-.editor-mode {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px;
-}
-.rich-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
+/* The editor reads at its context's reading size (P16): 14/20 by default,
+   16/24 where the page sets --text-editor (the expanded ticket, a Document). */
+.rich-document {
+  padding: 10px 12px;
   min-height: 40px;
-  padding: 4px;
-  background: var(--recessed);
+  font-size: var(--text-editor);
+  line-height: var(--text-editor-line);
+  overflow-wrap: anywhere;
+  outline: none;
 }
-/* The formatting tools wrap among themselves only when alone on a row; the copy/export/source
-   actions are the row's last item, so when both cannot fit it is the actions that drop to a second
-   row, never a single formatting button. */
-.rich-toolbar-tools {
-  display: flex;
-  flex-wrap: wrap;
+/* Editing in place uses the reading hover card's frame: 12px outside the
+   text on every side, so no line moves when Edit starts (detA DS-01). */
+.markdown-editor[data-chrome="session"] {
+  margin: 0 -12px;
+}
+.markdown-editor[data-chrome="session"] .rich-document {
+  padding: 12px;
+  min-height: 64px;
+}
+/* The editor's own controls: in a host's reserved row, or as the frame's
+   last row when nothing hosts them. Always present, never toggled by focus. */
+.editor-controls {
+  display: inline-flex;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
   min-width: 0;
 }
-/* A toolbar that appears on focus is docked inside the frame's top edge and grows the frame, so it
-   can never cover a neighbour. While idle it takes no space: the frame stays tight. */
-.rich-toolbar[data-floating] {
-  border-radius: var(--radius) var(--radius) 0 0;
-  box-shadow: 0 1px 0 var(--border);
+.editor-controls:not([data-hosted]) {
+  display: flex;
+  padding: 0 4px 4px;
 }
-/* Idle: only the hover-revealed actions remain, out of flow at the row's own position (no top
-   offset), so they sit below any notice above the editor and never cover it. */
-.rich-toolbar[data-floating][data-visible="false"] {
-  position: absolute;
-  right: 4px;
-  z-index: 1;
-  min-height: 0;
-  padding: 0;
-  background: none;
-  box-shadow: none;
+.editor-controls[data-chrome="session"] {
+  justify-content: flex-start;
 }
-.rich-toolbar[data-visible="false"] .rich-toolbar-tools {
-  display: none;
-}
-.editor-mode--inline {
-  margin-inline-start: auto;
+.editor-formatting {
+  display: inline-flex;
   align-items: center;
-  padding: 0;
+  gap: 2px;
 }
-/* Copy/source controls appear with the toolbar, not as a stray pair of icons on an idle editor. */
-/* visibility, not just opacity: hidden controls must not be clickable or focusable. */
-.editor-mode--inline {
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 120ms,
-    visibility 0s 120ms;
+.editor-caption {
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.markdown-editor:hover .editor-mode--inline,
-.markdown-editor:focus-within .editor-mode--inline {
-  opacity: 1;
-  visibility: visible;
-  transition-delay: 0s;
+.editor-bubble {
+  display: inline-flex;
+  gap: 2px;
 }
-/* A persistent toolbar (the capture dialog) keeps its copy/source pair too. */
-.editor-mode--inline[data-persistent] {
-  opacity: 1;
-  visibility: visible;
+.editor-link-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.rich-document .code-language[data-editing="false"]:not(:focus-within) {
-  display: none;
+/* Slash menu rows: ChoiceList anatomy (P3), the active row on --accent. */
+.slash-option,
+.slash-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  cursor: default;
 }
-.rich-document {
-  padding: 16px;
-  min-height: 160px;
-  font-size: var(--text-reading);
-  line-height: normal;
-  overflow-wrap: anywhere;
-  outline: none;
+.slash-option svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.slash-option[aria-selected="true"] {
+  background: var(--accent);
+}
+.slash-option[aria-selected="true"] svg {
+  color: var(--foreground);
+}
+.slash-empty {
+  color: var(--muted-foreground);
+}
+.editor-image-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+}
+.editor-image-label svg {
+  width: 14px;
+  height: 14px;
 }
 /* The ring sits on the rounded frame, not the square text area inside it. */
 .rich-document:focus-visible {
@@ -110,10 +133,11 @@
   line-height: 40px;
   letter-spacing: -1.28px;
 }
+/* Headings are never smaller than the text around them (plans DR-14). */
 .rich-document :is(h2, h3, h4, h5, h6) {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
+  font-size: var(--text-editor);
+  font-weight: 600;
+  line-height: var(--text-editor-line);
   letter-spacing: -0.28px;
 }
 .rich-document strong {
@@ -164,6 +188,31 @@
   box-shadow: -2px 0 var(--border);
   color: var(--muted-foreground);
 }
+/* A code block reads as it does in the document: header band, then code. */
+.rich-document .markdown-code-block pre {
+  margin: 0;
+  padding: 0 12px 12px;
+  background: transparent;
+}
+.rich-document .code-language {
+  width: 140px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-segment);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.rich-document .code-language:hover,
+.rich-document .code-language:focus-visible {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+  outline: none;
+}
 .rich-document pre {
   background: var(--recessed);
   padding: 12px;
@@ -208,48 +257,24 @@
 .diagram-editor {
   padding: 0;
 }
-/* Stays a list item so the disclosure marker shows; the reset makes svg a block, which would
-   stack the icon on its own line, so the icon is inline again. */
-.diagram-editor summary {
-  padding-top: 8px;
-  cursor: pointer;
-  color: var(--muted-foreground);
-}
-.diagram-editor summary > svg {
-  display: inline-block;
-  vertical-align: middle;
-  margin-right: 8px;
-}
-.diagram-editor .diagram-summary-action {
-  margin-left: 12px;
-}
-.slash-menu {
-  position: sticky;
-  bottom: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: min(280px, 100%);
-  padding: 8px;
-  margin-left: 16px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-menu);
-}
-.slash-menu button {
-  justify-content: flex-start;
+.diagram-editor [data-slot="disclosure"] {
+  margin-top: 8px;
 }
 .markdown-editor .cm-editor {
   background: var(--surface);
   color: var(--foreground);
   border-radius: var(--radius);
 }
+/* Source mode is a lighter view: regular weight, no ligatures (plans DR-02). */
 .markdown-editor .cm-scroller {
   font-family: var(--font-mono);
   font-size: var(--text-code);
-  font-weight: 500;
+  font-weight: 400;
+  font-variant-ligatures: none;
   line-height: 20px;
+}
+.markdown-editor .cm-content {
+  padding: 10px 0;
 }
 .markdown-editor .cm-gutters {
   background: var(--recessed);
@@ -275,8 +300,4 @@
 .mermaid-pending {
   height: 160px;
   padding: 12px;
-}
-.diagram-summary-action,
-.diagram-summary-label {
-  font-size: var(--text-caption);
 }
