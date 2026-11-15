@@ -2,7 +2,8 @@ import { useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { FieldError } from "@/components/ui/field";
+import { Reference } from "@/components/ui/reference";
 import { Picker } from "@/components/ui/picker";
 import type { Ticket } from "@/lib/api/client";
 import {
@@ -88,15 +89,12 @@ export function LinkTicketDialog({
       setPending(false);
     }
   }
-  // The title names the button that opened the dialog.
-  const title =
-    initialKind === "subticket" ? "Add subticket" : "Add relationship";
   return (
     <DialogShell
       open={open}
       onOpenChange={change}
-      title={title}
-      description={`Choose how ${ticket.reference} relates to another ticket.`}
+      // Neutral: the sentence below says which relationship, and it can change.
+      title="Link a ticket"
       primaryLabel={pending ? "Linking…" : "Link ticket"}
       blockedReason={
         pending ? "Linking…" : chosen ? null : "Choose a ticket to link"
@@ -114,36 +112,31 @@ export function LinkTicketDialog({
       onCancel={discard}
     >
       <div className="link-ticket-dialog flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor={`link-kind-${ticket.id}`}>
-            Relationship
-          </FieldLabel>
-          <div className="link-ticket-sentence">
-            <span>{ticket.reference}</span>
-            <Picker
-              label="Relationship"
-              value={kind}
-              onValueChange={(value) => {
-                setKind(
-                  addableKinds.find((item) => item.kind === value)?.kind ??
-                    kind,
-                );
-                setError(null);
-              }}
-              options={addableKinds.map((item) => ({
-                value: item.kind,
-                label: item.phrase,
-              }))}
-            />
-          </div>
-        </Field>
+        {/* One sentence: "T-FV1 [is related to ▾]", then the ticket. */}
+        <div className="link-ticket-sentence">
+          <Reference>{ticket.reference}</Reference>
+          <Picker
+            inSentence
+            label="Relationship"
+            value={kind}
+            onValueChange={(value) => {
+              setKind(
+                addableKinds.find((item) => item.kind === value)?.kind ?? kind,
+              );
+              setError(null);
+            }}
+            options={addableKinds.map((item) => ({
+              value: item.kind,
+              label: item.phrase,
+            }))}
+          />
+        </div>
         <div className="flex flex-col gap-2">
-          <span aria-hidden="true">Ticket</span>
           <TicketPicker
             label="Ticket"
             query={query}
             onQueryChange={setQuery}
-            autoFocus={false}
+            autoFocus
             accept={(item) => item.reference !== ticket.reference}
             selected={chosen ? [chosen.reference] : []}
             onPick={(item) => {

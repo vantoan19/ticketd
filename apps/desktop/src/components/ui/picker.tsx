@@ -38,6 +38,7 @@ export function Picker<T extends string>({
   disabled,
   icon,
   stacked = false,
+  inSentence = false,
 }: {
   label: string;
   value: T;
@@ -48,6 +49,11 @@ export function Picker<T extends string>({
   icon?: ReactNode;
   /** A form field: the label sits above a 40px control that shows the icon and the value. */
   stacked?: boolean;
+  /**
+   * A choice inside a sentence ("T-FV1 [is related to ▾]"): a 40px control
+   * showing only the value; the label stays its accessible name.
+   */
+  inSentence?: boolean;
 }) {
   const option = options.find((o) => o.value === value);
   const current = option?.label ?? value;
@@ -70,11 +76,14 @@ export function Picker<T extends string>({
       {...(disabled !== undefined && { disabled })}
     >
       <SelectTrigger
-        size={stacked ? "default" : "sm"}
+        size={stacked || inSentence ? "default" : "sm"}
         className={stacked ? "ui-picker ui-picker-field" : "ui-picker"}
         aria-label={`${label}: ${current}`}
       >
-        {leading ?? <span className="text-muted-foreground">{label}</span>}
+        {leading ??
+          (!inSentence && (
+            <span className="text-muted-foreground">{label}</span>
+          ))}
         <SelectValue>
           {/* The value is a flex container; ellipsis belongs on its text child. */}
           <span className="min-w-0 truncate">{current}</span>
