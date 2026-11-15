@@ -264,6 +264,21 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
   );
 });
 
+test("a failed archive keeps its dialog open with the error", async () => {
+  await openLaunch();
+  const respond = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command: string, args: never) => {
+    if (command === "change_plan") throw "workspace is read-only";
+    return respond(command, args);
+  });
+  await chooseAction("Archive Plan…");
+  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  const dialog = await screen.findByRole("dialog");
+  await within(dialog).findByText("workspace is read-only");
+  expect(within(dialog).getByRole("button", { name: "Archive" })).toBeTruthy();
+  expect(screen.getByText("Active Plan")).toBeTruthy();
+});
+
 test("adds an existing ticket from search", async () => {
   await openLaunch();
   fireEvent.click(screen.getByRole("button", { name: "Add tickets" }));
@@ -345,6 +360,10 @@ test("renaming focuses the title, shows its hint, and F2 starts it", async () =>
   expect(row.contains(screen.getByText("saves", { exact: false }))).toBe(true);
   expect(within(row).getByText("Active Plan")).toBeTruthy();
   fireEvent.keyDown(field, { key: "Escape" });
+  expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
+  // F2 in the ticket list is about the ticket, not the Plan.
+  const list = screen.getByRole("region", { name: "Launch" });
+  fireEvent.keyDown(within(list).getByText("Title of T-KQ1"), { key: "F2" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
   fireEvent.keyDown(document.body, { key: "F2" });
   expect(

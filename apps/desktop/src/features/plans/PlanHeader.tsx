@@ -16,14 +16,7 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,10 +65,13 @@ export function PlanHeader({
   const [editingPurpose, setEditingPurpose] = useState(false);
   const [purpose, setPurpose] = useState("");
   const [archiving, setArchiving] = useState(false);
+  // The archive failed while its dialog was open: the error stays in the dialog.
+  const [archiveFailed, setArchiveFailed] = useState(false);
   const { adding, setAdding } = state;
   // The list's own copy is current after a change; the loaded view adds counts.
   const current = view?.plan.id === plan.id ? view.plan : plan;
 
+  const header = useRef<HTMLElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const focusRename = useRef(false);
   function startRename() {
@@ -85,12 +81,15 @@ export function PlanHeader({
     focusRename.current = true;
   }
   const renameAvailable = !current.archived && !pending && !renaming;
-  // F2 renames from anywhere except while typing in a field.
+  // F2 renames the Plan from its header, or when nothing has focus. In the list
+  // or detail panes focus is on a ticket, so F2 there is not about the Plan.
   useEffect(() => {
     if (!renameAvailable) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "F2") return;
       const target = event.target as HTMLElement | null;
+      const inHeader = Boolean(target && header.current?.contains(target));
+      if (!inHeader && target !== document.body) return;
       if (target?.closest("input, textarea, [contenteditable='true']")) return;
       event.preventDefault();
       setName(current.name);
@@ -132,7 +131,7 @@ export function PlanHeader({
     : 0;
   const canArchive = !current.archived;
   return (
-    <header className="plan-header">
+    <header className="plan-header" ref={header}>
       <div className="plan-title-row" data-renaming={renaming || undefined}>
         {renaming ? (
           <>
@@ -239,7 +238,10 @@ export function PlanHeader({
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       disabled={pending}
-                      onSelect={() => setArchiving(true)}
+                      onSelect={() => {
+                        setArchiveFailed(false);
+                        setArchiving(true);
+                      }}
                     >
                       <Archive /> Archive Plan…
                     </DropdownMenuItem>
@@ -303,9 +305,11 @@ export function PlanHeader({
           )}
         </div>
       )}
-      {(actionError || loadError) && (
+      {((actionError && !archiving) || loadError) && (
         <Alert tone="error" role="alert">
-          <AlertDescription>{actionError || loadError}</AlertDescription>
+          <AlertDescription>
+            {(!archiving && actionError) || loadError}
+          </AlertDescription>
         </Alert>
       )}
       {view && (
@@ -341,32 +345,32 @@ export function PlanHeader({
           <PlanDocuments view={view} state={state} />
         </div>
       )}
-      <Dialog open={archiving} onOpenChange={setArchiving}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Archive {current.name}?</DialogTitle>
-            <DialogDescription>
-              Archiving hides this Plan from the sidebar. Its tickets stay
-              searchable and unchanged, and you can reactivate it later.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setArchiving(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={pending}
-              onClick={() =>
-                void run(() => plansClient.change(plan.id, null, true)).then(
-                  () => setArchiving(false),
-                )
-              }
-            >
-              Archive
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DialogShell
+        open={archiving}
+        onOpenChange={setArchiving}
+        width={480}
+        title={`Archive ${current.name}?`}
+        description="Archiving hides this Plan from the sidebar. Its tickets stay searchable and unchanged, and you can reactivate it later."
+        primaryLabel={pending ? "Archiving…" : "Archive"}
+        // While the archive runs, the primary stays disabled with nothing to explain.
+        blockedReason={pending ? "" : null}
+        busy={pending}
+        onSubmit={() => {
+          setArchiveFailed(false);
+          void run(() => plansClient.change(plan.id, null, true)).then(
+            (archived) => {
+              if (archived) setArchiving(false);
+              else setArchiveFailed(true);
+            },
+          );
+        }}
+      >
+        {archiveFailed && actionError && (
+          <Alert tone="error" size="compact">
+            <AlertDescription>{actionError}</AlertDescription>
+          </Alert>
+        )}
+      </DialogShell>
       <AddTicketsDialog
         plan={current}
         plans={plans}
