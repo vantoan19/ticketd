@@ -202,9 +202,10 @@ function syncWindowColor(resolved: "light" | "dark") {
 }
 
 /**
- * Applies the stored theme before the first render, to the document and the
- * native window both. A startup failure renders without the app, so its
- * `useThemeSync` would never theme the title bar.
+ * Applies the stored theme before the first render, to the page and to the
+ * native window, so a screen shown before the app mounts (opening, or the
+ * startup recovery screen, which renders without the app and its
+ * `useThemeSync`) never sits under a light title bar in dark.
  */
 export function applyStoredTheme() {
   const { theme } = loadPreferences();

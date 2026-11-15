@@ -2,6 +2,11 @@ import { useState, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { cn } from "cn";
 import { workspaceClient } from "@/lib/api/workspace";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 
 /**
  * A link to the issue at its source, opened in the default browser. A webview
@@ -20,7 +25,7 @@ export function SourceLink({
   title?: string;
   icon?: boolean;
 }) {
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   if (!url.startsWith("https://")) return <span>{children}</span>;
   return (
     <>
@@ -33,9 +38,9 @@ export function SourceLink({
         onClick={(event) => {
           event.preventDefault();
           void workspaceClient.openLink(url).then(
-            () => setError(""),
+            () => setError(null),
             (reason: unknown) =>
-              setError(`Could not open the link: ${String(reason)}`),
+              setError(describeFailure(reason, "open the link")),
           );
         }}
       >
@@ -44,7 +49,7 @@ export function SourceLink({
           <ExternalLink className="source-link-icon" aria-hidden="true" />
         )}
       </a>
-      {error && <small role="alert">{error}</small>}
+      {error && <FailureAlert size="compact" failure={error} />}
     </>
   );
 }

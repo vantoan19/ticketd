@@ -1,8 +1,7 @@
 import { latestUpdateSchema } from "./progress";
-import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { plainLabel } from "@/lib/plain-text";
-import { structured } from "@/lib/api/bridge-failure";
+import { invoke, structured } from "@/lib/api/bridge-failure";
 import { publicationAttemptSchema } from "@/lib/api/publication";
 import { ticketStatuses } from "@/lib/statuses";
 

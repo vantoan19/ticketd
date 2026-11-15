@@ -1,3 +1,8 @@
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useId, useState } from "react";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
@@ -30,7 +35,7 @@ export function ResumeDialog({
 }) {
   const [choice, setChoice] = useState<Choice>("last_response");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const recent = Math.min(RECENT, messageCount);
   const choices: { id: Choice; label: string; hint?: string }[] = [
     {
@@ -72,7 +77,7 @@ export function ResumeDialog({
           },
           (reason: unknown) => {
             setBusy(false);
-            setError(String(reason));
+            setError(describeFailure(reason, "resume the Chat"));
           },
         );
       }}
@@ -105,11 +110,7 @@ export function ResumeDialog({
         Linked tickets and Documents are read fresh. Nothing you sent before is
         sent again.
       </p>
-      {error && (
-        <p className="chat-fine" role="alert">
-          Could not resume: {error}
-        </p>
-      )}
+      {error && <FailureAlert size="compact" failure={error} />}
     </DialogShell>
   );
 }
@@ -136,7 +137,7 @@ export function SaveDocumentDialog({
   const id = useId();
   const [title, setTitle] = useState(() => suggestedTitle(response.text));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   return (
     <DialogShell
       open
@@ -151,7 +152,7 @@ export function SaveDocumentDialog({
         setBusy(true);
         onSave(response.id, title.trim()).then(onClose, (reason: unknown) => {
           setBusy(false);
-          setError(String(reason));
+          setError(describeFailure(reason, "save the Document"));
         });
       }}
     >
@@ -169,11 +170,7 @@ export function SaveDocumentDialog({
           ? "Saves this plan as a checklist; only finished steps are checked. The rest of the Chat isn’t copied."
           : "Saves this one response. The rest of the Chat isn’t copied."}
       </p>
-      {error && (
-        <p className="chat-fine" role="alert">
-          Could not save: {error}
-        </p>
-      )}
+      {error && <FailureAlert size="compact" failure={error} />}
     </DialogShell>
   );
 }

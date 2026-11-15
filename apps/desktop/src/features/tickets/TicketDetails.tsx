@@ -1,4 +1,6 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { FailureState } from "@/components/ui/failure-alert";
+import type { FailureDescription } from "@/lib/api/describe-failure";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -39,8 +41,13 @@ export function TicketDetails({
   position = null,
   onAdjacent,
   outsideResults = false,
+  failure = null,
+  onRetry,
 }: {
   outsideResults?: boolean;
+  /** Why the selected ticket could not be fetched; shown in place of it. */
+  failure?: FailureDescription | null;
+  onRetry?: () => void;
   /** The selected ticket's place in the visible list, across pages. */
   position?: { index: number; total: number } | null;
   /** Open the ticket before (-1) or after (1) the selected one in the list. */
@@ -155,6 +162,9 @@ export function TicketDetails({
               </>
             }
           />
+        )}
+        {selected !== null && !ticket && failure && (
+          <FailureState failure={failure} {...(onRetry && { onRetry })} />
         )}
         {Object.values(details).map((item) => (
           <TicketPage

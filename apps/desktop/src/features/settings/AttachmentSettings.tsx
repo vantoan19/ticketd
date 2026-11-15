@@ -1,9 +1,10 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useEffect, useRef, useState } from "react";
 import { Check, Cloud, HardDrive } from "lucide-react";
-import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusLabel } from "@/components/ui/status-label";
@@ -11,6 +12,10 @@ import {
   attachments,
   type AttachmentUploadDestination,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { SettingsSection } from "./layout/SettingsSection";
 import { SettingsList, SettingsRow } from "./layout/SettingsList";
 import { useSettingsState } from "./use-settings-state";
@@ -35,8 +40,11 @@ function UploadLimitSettings() {
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState<number | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
+  // A value that cannot be a limit: said under the field, nothing is sent.
+  const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let current = true;
     void attachments
@@ -49,12 +57,12 @@ function UploadLimitSettings() {
       })
       .catch((reason: unknown) => {
         if (current)
-          setFailure(`Could not read the upload limit: ${String(reason)}`);
+          setFailure(describeFailure(reason, "read the upload limit"));
       });
     return () => {
       current = false;
     };
-  }, []);
+  }, [reload]);
   // "Saved" confirms the change, then goes; it is not a lasting state.
   useEffect(() => {
     if (!confirmed) return;
@@ -65,26 +73,30 @@ function UploadLimitSettings() {
     const bytes = Number(text) * MIB;
     if (!Number.isSafeInteger(bytes) || bytes <= 0) {
       setConfirmed(false);
-      setFailure("Enter a positive upload limit in MiB.");
+      setFailure(null);
+      setInvalid(true);
       return;
     }
-    // A valid value answers an earlier refusal even when it is the saved one.
-    setFailure("");
-    if (bytes === saved) return;
+    setInvalid(false);
+    // Back to the saved value: nothing to send, and an earlier failure is moot.
+    if (bytes === saved) {
+      setFailure(null);
+      return;
+    }
     setSaving(true);
     setConfirmed(false);
+    setFailure(null);
     try {
       await attachments.setUploadLimit(bytes);
       setSaved(bytes);
       setConfirmed(true);
     } catch (reason) {
-      setFailure(`Could not save the upload limit: ${String(reason)}`);
+      setFailure(describeFailure(reason, "save the upload limit"));
     } finally {
       setSaving(false);
     }
   }
   const isDefault = Number(value) * MIB === DEFAULT_LIMIT_BYTES;
-  const invalid = failure === "Enter a positive upload limit in MiB.";
   return (
     <SettingsSection title="Upload limit">
       <SettingsList>
@@ -110,7 +122,7 @@ function UploadLimitSettings() {
                   disabled={saved === null || saving}
                   aria-invalid={invalid || undefined}
                   aria-describedby={
-                    failure
+                    invalid
                       ? "attachment-upload-limit-description attachment-upload-limit-error"
                       : "attachment-upload-limit-description"
                   }
@@ -145,14 +157,21 @@ function UploadLimitSettings() {
             </div>
           }
         >
+          {invalid && (
+            <FieldError id="attachment-upload-limit-error">
+              Enter a size above 0 MiB.
+            </FieldError>
+          )}
           {failure && (
-            <span
-              id="attachment-upload-limit-error"
-              role="alert"
-              className="settings-failure attachments-error"
-            >
-              {failure}
-            </span>
+            <FailureAlert
+              size="compact"
+              failure={failure}
+              onRetry={() => {
+                setFailure(null);
+                if (saved === null) setReload((count) => count + 1);
+                else void save(value);
+              }}
+            />
           )}
         </SettingsRow>
       </SettingsList>
@@ -164,7 +183,7 @@ function UploadDestinationSettings() {
   const { openPage } = useSettingsState();
   const [destination, setDestination] =
     useState<AttachmentUploadDestination | null>(null);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [busy, setBusy] = useState(false);
   // Unknown (null) until Drive's configuration is read; only a definite "no"
   // disables the Drive tile.
@@ -180,14 +199,12 @@ function UploadDestinationSettings() {
       .then((saved) => {
         if (current) {
           setDestination(saved);
-          setFailure("");
+          setFailure(null);
         }
       })
       .catch((reason: unknown) => {
         if (current)
-          setFailure(
-            `Could not read the upload destination: ${String(reason)}`,
-          );
+          setFailure(describeFailure(reason, "read the upload destination"));
       });
     return () => {
       current = false;
@@ -211,7 +228,7 @@ function UploadDestinationSettings() {
     };
   }, []);
   async function choose(kind: string) {
-    setFailure("");
+    setFailure(null);
     setBusy(true);
     try {
       let selected = null;
@@ -229,7 +246,7 @@ function UploadDestinationSettings() {
       if (active.current) setDestination(saved);
     } catch (reason) {
       if (active.current)
-        setFailure(`Upload destination unchanged: ${String(reason)}`);
+        setFailure(describeFailure(reason, "change the upload destination"));
     } finally {
       selection.current = null;
       if (active.current) setBusy(false);
@@ -322,21 +339,13 @@ function UploadDestinationSettings() {
       )}
       {failure && (
         <div className="attachments-folder">
-          <Alert tone="error" size="compact">
-            <AlertDescription>{failure}</AlertDescription>
-            {!destination && (
-              <AlertActions>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setReload((value) => value + 1)}
-                >
-                  Retry destination
-                </Button>
-              </AlertActions>
-            )}
-          </Alert>
+          <FailureAlert
+            size="compact"
+            failure={failure}
+            {...(!destination && {
+              onRetry: () => setReload((value) => value + 1),
+            })}
+          />
         </div>
       )}
       <p className="attachments-note">

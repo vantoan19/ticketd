@@ -14,6 +14,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { workspaceClient } from "@/lib/api/workspace";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  sentence,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { formatDateTime } from "@/lib/format";
 import { useCopy } from "@/components/ui/use-copy";
 import "./evidence.css";
@@ -45,6 +52,27 @@ const typeNames = {
   verification: "Verification",
 } as const;
 
+/** A failure the page knows the words for, with nothing to put under Details. */
+function plainFailure(title: string, text: string): FailureDescription {
+  return { code: "failed", title, sentence: text, action: null, details: "" };
+}
+
+/** A rejected save: the core's validation sentence without its prefix. */
+function saveFailure(reason: unknown, editing: boolean): FailureDescription {
+  const failure = describeFailure(
+    reason,
+    editing ? "save the evidence" : "add the evidence",
+  );
+  const { message } = toFailure(reason);
+  return message.startsWith("invalid evidence: ")
+    ? {
+        ...failure,
+        sentence: sentence(message.slice("invalid evidence: ".length)),
+        action: null,
+      }
+    : failure;
+}
+
 /** A commit is read by its first characters; the full value stays in the tooltip and in Copy. */
 function shortCommit(value: string): string {
   return /^[0-9a-f]{12,}$/i.test(value) ? value.slice(0, 10) : value;
@@ -65,7 +93,12 @@ export function Evidence({
   const [items, setItems] = useState<EvidenceRecord[]>([]);
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
-  const [error, setError] = useState("");
+  // The section's failures (load, delete, copy, open) and the dialog's own
+  // save failure are kept apart, so neither shows up in the other's place.
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [dialogError, setDialogError] = useState<FailureDescription | null>(
+    null,
+  );
   const [confirmDelete, setConfirmDelete] = useState<EvidenceRecord | null>(
     null,
   );
@@ -96,7 +129,9 @@ export function Evidence({
   useEffect(() => {
     void Promise.resolve()
       .then(load)
-      .catch((reason: unknown) => setError(String(reason)));
+      .catch((reason: unknown) =>
+        setError(describeFailure(reason, "load evidence")),
+      );
   }, [load, revision]);
   async function save() {
     if (pendingRef.current) return;
@@ -112,11 +147,11 @@ export function Evidence({
       setDraft(blank);
       setEditing(null);
       setComposing(false);
-      setError("");
+      setDialogError(null);
       await load();
       await refresh();
     } catch (reason) {
-      setError(String(reason).replace(/^invalid evidence: /, ""));
+      setDialogError(saveFailure(reason, Boolean(editing)));
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -131,11 +166,11 @@ export function Evidence({
       await client.deleteEvidence(reference, id, writeId);
       request.current = null;
       setConfirmDelete(null);
-      setError("");
+      setError(null);
       await load();
       await refresh();
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "delete the evidence"));
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -152,12 +187,16 @@ export function Evidence({
   async function copy(item: EvidenceRecord) {
     setError(
       (await copyText(item.id, item.value))
-        ? ""
-        : "Could not copy the value. Select it above to copy it.",
+        ? null
+        : plainFailure(
+            "Couldn't copy the value",
+            "Select it above to copy it.",
+          ),
     );
   }
   function startAdding() {
     returnFocus.current = null;
+    setDialogError(null);
     if (editing) {
       setEditing(null);
       setDraft(blank);
@@ -185,7 +224,18 @@ export function Evidence({
           description="Link a pull request, commit, or verification result."
         />
       )}
-      {error && !composing && <p role="alert">{error}</p>}
+      {error && !composing && (
+        <FailureAlert
+          size="compact"
+          failure={error}
+          onRetry={() => {
+            setError(null);
+            void load().catch((reason: unknown) =>
+              setError(describeFailure(reason, "load evidence")),
+            );
+          }}
+        />
+      )}
       {confirmDelete && (
         <p role="alertdialog" className="evidence-confirm">
           Delete evidence “{confirmDelete.name}”?
@@ -230,7 +280,12 @@ export function Evidence({
                       void workspaceClient
                         .openLink(item.value)
                         .catch(() =>
-                          setError("Could not open the link. Copy it instead."),
+                          setError(
+                            plainFailure(
+                              "Couldn't open the link",
+                              "Copy it instead.",
+                            ),
+                          ),
                         )
                     }
                   >
@@ -271,6 +326,7 @@ export function Evidence({
                           // control focus should come back to.
                           returnFocus.current =
                             menuTriggers.current.get(item.id) ?? null;
+                          setDialogError(null);
                           setComposing(true);
                           setEditing(item);
                           setDraft({
@@ -311,7 +367,9 @@ export function Evidence({
           type="button"
           onClick={() => {
             pages.current += 1;
-            void load().catch((reason: unknown) => setError(String(reason)));
+            void load().catch((reason: unknown) =>
+              setError(describeFailure(reason, "load more evidence")),
+            );
           }}
         >
           Load more evidence
@@ -324,6 +382,7 @@ export function Evidence({
         onCancel={() => {
           setDraft(blank);
           setEditing(null);
+          setDialogError(null);
         }}
         title={editing ? "Edit evidence" : "Add evidence"}
         description="Record a pull request, commit, branch, worktree, or verification result for this ticket."
@@ -340,7 +399,7 @@ export function Evidence({
         onSubmit={() => void save()}
         returnFocus={returnFocus}
       >
-        {error && <p role="alert">{error}</p>}
+        {dialogError && <FailureAlert size="compact" failure={dialogError} />}
         {changed && (
           <p role="status">
             Saved evidence changed while you were editing. Your draft is

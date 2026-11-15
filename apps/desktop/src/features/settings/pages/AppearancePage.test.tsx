@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { loadPreferences } from "@/lib/preferences";
 import { AppearancePage } from "@/features/settings/pages/AppearancePage";
@@ -106,8 +112,10 @@ test("a theme that cannot be saved says so and keeps the old choice", () => {
   });
   render(<AppearancePage />);
   fireEvent.click(screen.getByRole("radio", { name: /^Dark/ }));
-  expect(screen.getByRole("alert").textContent).toBe(
-    "Could not save the theme.",
+  // The failure sits under the group that failed, not under Open tickets.
+  const theme = screen.getByRole("region", { name: "Theme" });
+  expect(within(theme).getByRole("alert").textContent).toContain(
+    "Couldn't save the theme.",
   );
   expect(
     screen.getByRole("radio", { name: /^System/ }).getAttribute("aria-checked"),
@@ -120,8 +128,9 @@ test("an Open tickets choice that cannot be saved says so", () => {
   });
   render(<AppearancePage />);
   fireEvent.click(screen.getByRole("radio", { name: /Full width/ }));
-  expect(screen.getByRole("alert").textContent).toBe(
-    "Could not save the Open tickets choice.",
+  const open = screen.getByRole("region", { name: "Open tickets" });
+  expect(within(open).getByRole("alert").textContent).toContain(
+    "Couldn't save the Open tickets choice.",
   );
 });
 

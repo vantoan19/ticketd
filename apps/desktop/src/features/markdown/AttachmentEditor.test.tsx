@@ -418,7 +418,7 @@ test.each(["rich", "source"])(
     }
     fireEvent.click(screen.getByRole("button", { name: "Insert attachment" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-    await screen.findByText("Disk full");
+    await screen.findByText(/Disk full/);
     await waitFor(() =>
       expect(changed.mock.lastCall?.[0]).toContain("[last.txt]"),
     );

@@ -4,6 +4,10 @@ import {
   type AttachmentState,
   type AttachmentSearchResult,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 
 /** Typing settles this long before the search is sent. */
@@ -34,12 +38,12 @@ export function useAttachmentSearch(
     files: AttachmentSearchResult[];
     key: string | null;
     answered: { search: string; state: AttachmentState; offset: number };
-    error: string;
+    error: FailureDescription | null;
   }>({
     files: [],
     key: null,
     answered: { search, state, offset },
-    error: "",
+    error: null,
   });
   useEffect(() => {
     let current = true;
@@ -48,11 +52,16 @@ export function useAttachmentSearch(
       .search({ search: query, state, ticket, offset, limit: 50 })
       .then(
         (files) => {
-          if (current) setResult({ files, key, answered, error: "" });
+          if (current) setResult({ files, key, answered, error: null });
         },
         (reason: unknown) => {
           if (current)
-            setResult({ files: [], key, answered, error: String(reason) });
+            setResult({
+              files: [],
+              key,
+              answered,
+              error: describeFailure(reason, "load files"),
+            });
         },
       );
     return () => {

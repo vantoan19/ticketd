@@ -354,9 +354,8 @@ test("a failed refresh keeps the content and says the last attempt failed", asyn
   );
   expect(screen.getByText(/The last refresh failed/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-  expect(await screen.findByRole("alert")).toHaveProperty(
-    "textContent",
-    "Could not refresh: GitHub is down. Saved content is unchanged.",
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't refresh T-KQ1. GitHub is down. Saved content is unchanged.",
   );
 });
 

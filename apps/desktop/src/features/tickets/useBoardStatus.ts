@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { client, type Ticket } from "@/lib/api/client";
-import { toFailure } from "@/lib/api/bridge-failure";
+import { failureText } from "@/lib/api/describe-failure";
 import type { useTicketBoard } from "./useTicketBoard";
 import { ticketStatusChoices } from "./ticket-source";
 
@@ -103,7 +103,7 @@ export function useBoardStatus(workspace: {
       }
       setFailures((old) => ({
         ...old,
-        [reference]: `Could not confirm ${reference}'s status change: ${toFailure(reason).message}. ${placement}`,
+        [reference]: `${failureText(reason, `confirm ${reference}'s status change`)} ${placement}`,
       }));
     } finally {
       lock(reference, false);
@@ -156,7 +156,7 @@ export function useBoardStatus(workspace: {
     } catch (reason) {
       setFailures((old) => ({
         ...old,
-        [reference]: `Could not change ${reference}: ${toFailure(reason).message}. Try again.`,
+        [reference]: failureText(reason, `change the status of ${reference}`),
       }));
     } finally {
       lock(reference, false);

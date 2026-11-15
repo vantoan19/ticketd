@@ -271,10 +271,6 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
-.plan-add-error {
-  margin: 0;
-  color: var(--destructive);
-}
 .plan-documents {
   position: relative;
   display: flex;

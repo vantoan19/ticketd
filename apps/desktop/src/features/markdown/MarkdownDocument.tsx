@@ -19,6 +19,13 @@ import {
 } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
+import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { writeClipboard } from "@/lib/clipboard";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
@@ -36,6 +43,14 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
+/**
+ * Reports a link that could not open. The failure shows below the document,
+ * never inside the paragraph that holds the link.
+ * TODO(R1.8): send it to the pane status line once that lands.
+ */
+const LinkFailure = createContext<
+  (failure: { failure: FailureDescription; href: string } | null) => void
+>(() => {});
 const AttachmentReplacement = createContext<
   (node: ExtraProps["node"], uri: string) => ReferenceReplacement | undefined
 >(() => undefined);
@@ -183,27 +198,35 @@ function ExternalLink({
   href: string;
   children?: React.ReactNode;
 }) {
-  const [error, setError] = useState("");
+  const report = useContext(LinkFailure);
   return (
-    <>
-      <a
-        href={href}
-        rel="noreferrer"
-        onClick={(event) => {
-          event.preventDefault();
-          if (!href.startsWith("https://")) return;
-          workspaceClient.openLink(href).then(
-            () => setError(""),
-            (reason: unknown) =>
-              setError(`Could not open the link: ${String(reason)}`),
-          );
-        }}
-      >
-        {children}
-      </a>
-      {error && <small role="alert">{error}</small>}
-    </>
+    <a
+      href={href}
+      rel="noreferrer"
+      onClick={(event) => {
+        event.preventDefault();
+        if (!href.startsWith("https://")) return;
+        workspaceClient.openLink(href).then(
+          () => report(null),
+          (reason: unknown) =>
+            report({
+              failure: describeFailure(reason, `open ${hostOf(href)}`),
+              href,
+            }),
+        );
+      }}
+    >
+      {children}
+    </a>
   );
+}
+
+function hostOf(href: string) {
+  try {
+    return new URL(href).host || "the link";
+  } catch {
+    return "the link";
+  }
 }
 
 // Use the original fence interior: the Markdown AST normalizes CRLF and adds a
@@ -388,6 +411,10 @@ export function MarkdownDocument({
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
+  const [linkFailure, setLinkFailure] = useState<{
+    failure: FailureDescription;
+    href: string;
+  } | null>(null);
   const replacementHistory = useRef<string | null>(null);
   useEffect(
     () => () => {
@@ -436,19 +463,37 @@ export function MarkdownDocument({
         <MentionTarget.Provider value={mention ?? null}>
           <MarkdownSource.Provider value={source}>
             <AttachmentReplacement.Provider value={replacement}>
-              <ReactMarkdown
-                remarkPlugins={remarkPlugins}
-                urlTransform={(url) =>
-                  url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
-                }
-                components={components}
-              >
-                {source}
-              </ReactMarkdown>
+              <LinkFailure.Provider value={setLinkFailure}>
+                <ReactMarkdown
+                  remarkPlugins={remarkPlugins}
+                  urlTransform={(url) =>
+                    url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
+                  }
+                  components={components}
+                >
+                  {source}
+                </ReactMarkdown>
+              </LinkFailure.Provider>
             </AttachmentReplacement.Provider>
           </MarkdownSource.Provider>
         </MentionTarget.Provider>
       </TicketNavigation.Provider>
+      {linkFailure && (
+        <FailureAlert
+          size="compact"
+          failure={linkFailure.failure}
+          actions={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void writeClipboard(linkFailure.href)}
+            >
+              Copy link
+            </Button>
+          }
+        />
+      )}
     </div>
   );
 }

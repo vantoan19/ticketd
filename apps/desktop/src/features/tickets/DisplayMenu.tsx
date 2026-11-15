@@ -44,7 +44,7 @@ export function DisplayMenu({
                 onValueChange={(value) => {
                   if (!setPreference("ticketLayout", value))
                     onError(
-                      "Could not remember ticket layout. Check local storage and try again.",
+                      "Couldn't remember the ticket layout. This window can't store preferences right now.",
                     );
                 }}
                 options={[
@@ -62,7 +62,7 @@ export function DisplayMenu({
             onValueChange={(value) => {
               if (!setPreference("ticketRows", value))
                 onError(
-                  "Could not remember row style. Check local storage and try again.",
+                  "Couldn't remember the row style. This window can't store preferences right now.",
                 );
             }}
             options={[

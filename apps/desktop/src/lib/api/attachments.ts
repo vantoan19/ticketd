@@ -1,4 +1,5 @@
-import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/api/bridge-failure";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 

@@ -24,6 +24,13 @@ import {
   ticketStatusChoices,
 } from "./ticket-source";
 import { Button } from "@/components/ui/button";
+import { FailureCaption } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  failureText,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { RailSection } from "./RailSection";
 import { ticketStatuses } from "@/lib/statuses";
 import { StatusIcon } from "./StatusIcon";
@@ -189,7 +196,17 @@ export function TicketProperties({
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   // Leaving Duplicate drops its link, so the chosen status waits for a yes.
   const [leaving, setLeaving] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // A failed change per property: one caption under its value, "Not saved ·
+  // Retry", with the cause under Details. Nothing else in the rail turns red.
+  const [errors, setErrors] = useState<
+    Record<
+      string,
+      { failure: FailureDescription; label: string; retry: () => void } | null
+    >
+  >({});
+  // While the workspace cannot be written, the controls rest disabled; the
+  // workspace band says why once for the window.
+  const blocked = editingBlockedReason(useWorkspaceState()) !== null;
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [vocabularyError, setVocabularyError] = useState("");
   const [tagQuery, setTagQuery] = useState("");
@@ -207,7 +224,7 @@ export function TicketProperties({
         .catch((reason: unknown) => {
           if (active)
             setVocabularyError(
-              `Tag suggestions unavailable: ${String(reason)}. You can still enter a tag.`,
+              `${failureText(reason, "load tag suggestions")} You can still enter a tag.`,
             );
         });
     }, 150);
@@ -250,14 +267,18 @@ export function TicketProperties({
       });
     }
     setPending(key);
-    setErrors((old) => ({ ...old, [key]: "" }));
+    setErrors((old) => ({ ...old, [key]: null }));
     let updated: Ticket;
     try {
       updated = await action();
     } catch (reason) {
       setErrors((old) => ({
         ...old,
-        [key]: `Could not save ${key.toLowerCase()}: ${String(reason)}`,
+        [key]: {
+          failure: describeFailure(reason, `change the ${key.toLowerCase()}`),
+          label: "Not saved",
+          retry: () => void save(key, action),
+        },
       }));
       setPending("");
       restoreFocus();
@@ -269,7 +290,14 @@ export function TicketProperties({
     } catch (reason) {
       setErrors((old) => ({
         ...old,
-        [key]: `Saved, but refresh failed: ${String(reason)}`,
+        [key]: {
+          failure: describeFailure(reason, "refresh the ticket"),
+          label: "Saved, not refreshed",
+          retry: () => {
+            setErrors((current) => ({ ...current, [key]: null }));
+            void refresh().catch(() => {});
+          },
+        },
       }));
     } finally {
       setPending("");
@@ -277,7 +305,7 @@ export function TicketProperties({
     }
   }
   const statusTrigger = useRef<HTMLButtonElement>(null);
-  const disabled = ticket.trashed || !!pending;
+  const disabled = ticket.trashed || !!pending || blocked;
   const owner = externalSource(ticket);
   const ownerName = owner ? owner.provider_name : "";
   // While the issue is open its Todo, In progress and In review are local;
@@ -299,7 +327,13 @@ export function TicketProperties({
       <>
         {control}
         {pending === label && <small role="status">Saving…</small>}
-        {errors[label] && <small role="alert">{errors[label]}</small>}
+        {errors[label] && (
+          <FailureCaption
+            failure={errors[label].failure}
+            label={errors[label].label}
+            onRetry={errors[label].retry}
+          />
+        )}
       </>
     );
     return chips ? (

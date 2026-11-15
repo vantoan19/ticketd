@@ -726,6 +726,201 @@ body:has([data-slot="dialog-overlay"])
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.ui-notice-title-inline {
+  font-weight: 500;
+}
+
+/* Failure Details: raw text in 12px mono with Copy details, only on request. */
+.ui-failure-details {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-failure-details pre {
+  width: 100%;
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ui-failure-details-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+
+/* A region that could not load: the empty-state block with an alert icon. */
+.ui-failure-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 360px;
+  margin: 48px auto 0;
+  padding: 0 16px;
+  text-align: center;
+  text-wrap: pretty;
+}
+.ui-failure-state-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-panel);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+}
+.ui-failure-state-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.ui-failure-state-title {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.ui-failure-state-sentence {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-failure-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ui-failure-state-actions .ui-failure-details {
+  align-items: center;
+  text-align: left;
+}
+
+/* Startup recovery: the workspace could not be opened (DESIGN.md section 12). */
+.recovery-screen {
+  display: grid;
+  min-height: 100vh;
+  padding: 48px 16px;
+  background: var(--background);
+  color: var(--foreground);
+  place-items: start center;
+}
+.recovery-screen-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 12vh;
+  text-wrap: pretty;
+}
+.recovery-wordmark {
+  margin-bottom: 16px;
+  font-size: var(--text-wordmark);
+  font-weight: 600;
+}
+.recovery-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.recovery-sentence {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.recovery-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+}
+.recovery-path-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+.recovery-path-name {
+  overflow: hidden;
+  font-size: var(--text-code);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recovery-path-folder {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Truncate the start of a long folder, so its nearest folders stay readable. */
+  direction: rtl;
+  text-align: left;
+}
+.recovery-path-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* The workspace band: one 40px line for workspace-level state, at the top of the content panel. */
+.workspace-band {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 40px;
+  padding: 4px 8px 4px 16px;
+  background: var(--recessed);
+  box-shadow: inset 0 -1px 0 var(--border);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.workspace-band-message {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Dense rows and the rail: "● Not saved · Retry" on one caption line. */
+.ui-failure-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
 
 /* Card: surface, header band, body and recessed footer. */
 .ui-card {
@@ -1791,12 +1986,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .create-actions small {
   color: var(--muted-foreground);
 }
-.global-error {
+.app-preference-failure {
   flex: none;
-  padding: 12px 24px;
-  background: var(--error-surface);
-  color: var(--error-foreground);
-  font-size: var(--text-ui);
+  margin: 8px 16px 0;
 }
 
 /* Description and note content share a readable document surface. */

@@ -3,7 +3,12 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
+import { FailureState } from "@/components/ui/failure-alert";
 import { client } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { plainPassage } from "./plain-passage";
 import { EmphasizedPassage } from "./reference-passage";
 import { formatDateTime } from "@/lib/format";
@@ -43,7 +48,8 @@ export function Backlinks({
   const [links, setLinks] = useState<Link[]>([]);
   const [noteDates, setNoteDates] = useState<Record<string, string>>({});
   const [offset, setOffset] = useState(0);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     void client
@@ -51,7 +57,7 @@ export function Backlinks({
       .then(async (result) => {
         if (!active) return;
         setLinks(result);
-        setError("");
+        setError(null);
         // The mention itself carries no date, so read each note's.
         const dated = await Promise.all(
           result.flatMap((link) =>
@@ -77,12 +83,12 @@ export function Backlinks({
         );
       })
       .catch((reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active) setError(describeFailure(reason, "load mentions"));
       });
     return () => {
       active = false;
     };
-  }, [reference, revision, offset]);
+  }, [reference, revision, offset, attempt]);
   useEffect(() => {
     let active = true;
     if (!ticketId)
@@ -125,7 +131,13 @@ export function Backlinks({
             : undefined
         }
       />
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <FailureState
+          size="inline"
+          failure={error}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      )}
       <ul className="backlink-list">
         {documentLinks.map((link) => (
           <li key={`${link.source_id}-${link.passage}`}>

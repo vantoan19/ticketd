@@ -29,8 +29,14 @@ import {
   SettingsRowTile,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import { lineFailure } from "@/features/settings/settings-format";
 import { ago } from "@/features/tickets/ticket-source";
-import { toFailure } from "@/lib/api/bridge-failure";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { FieldError } from "@/components/ui/field";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { fileManagerName } from "@/lib/platform";
 import { revealFile } from "@/lib/reveal";
 import {
@@ -63,20 +69,21 @@ const contents = (counts: SyncCounts) =>
 function useCommand() {
   const { apply } = useSyncStatus();
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   // Set at once, where `busy` waits for a render: a confirmation that is
   // still closing cannot start its command a second time.
   const running = useRef(false);
-  async function run(command: () => Promise<SyncStatus>, failed: string) {
+  /** `action` says what did not happen: "connect Google Drive". */
+  async function run(command: () => Promise<SyncStatus>, action: string) {
     if (running.current) return false;
     running.current = true;
     setBusy(true);
-    setFailure("");
+    setFailure(null);
     try {
       apply(await command());
       return true;
     } catch (reason) {
-      setFailure(`${failed}: ${toFailure(reason).message}`);
+      setFailure(describeFailure(reason, action));
       return false;
     } finally {
       running.current = false;
@@ -86,12 +93,21 @@ function useCommand() {
   return { busy, failure, run };
 }
 
-function Failure({ children }: { children: string }) {
-  return children ? (
-    <p role="alert" className="settings-failure sync-failure">
-      {children}
-    </p>
-  ) : null;
+/**
+ * A command that failed (compact error Alert with Details), or a value that
+ * cannot be saved (a field message, nothing sent).
+ */
+function Failure({
+  children,
+}: {
+  children: FailureDescription | string | null;
+}) {
+  if (!children) return null;
+  return typeof children === "string" ? (
+    <FieldError className="mt-3">{children}</FieldError>
+  ) : (
+    <FailureAlert size="compact" failure={children} className="mt-3" />
+  );
 }
 
 function ConnectedAs({
@@ -184,7 +200,7 @@ const plainPath = (path: string) =>
 
 /** Says where the Workspace a download replaced was kept: its file's name, and a way to it. */
 function Replaced({ safetyBackup }: { safetyBackup: string }) {
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const { status } = useSyncStatus();
   // The confirmation counted every file in Drive; one that turned out
   // unreadable did not arrive. The replaced Workspace started with no notices,
@@ -237,7 +253,7 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
             size="sm"
             onClick={() =>
               void revealFile(safetyBackup).then((failed) =>
-                setFailure(failed ?? ""),
+                setFailure(failed ? lineFailure(failed) : null),
               )
             }
           >
@@ -278,7 +294,7 @@ function Connect() {
                 size="sm"
                 disabled={busy}
                 onClick={() =>
-                  void run(syncApi.connect, "Could not connect Google Drive")
+                  void run(syncApi.connect, "connect Google Drive")
                 }
               >
                 Connect Google Drive
@@ -336,7 +352,9 @@ function Choose({
   const now = useNow();
   const { busy, failure, run } = useCommand();
   const [options, setOptions] = useState<SyncSetupOptions | null>(null);
-  const [readFailure, setReadFailure] = useState("");
+  const [readFailure, setReadFailure] = useState<FailureDescription | null>(
+    null,
+  );
   const [choice, setChoice] = useState(UPLOAD);
   const [confirming, setConfirming] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -359,10 +377,7 @@ function Choose({
           setChoice(first.folder_id);
       })
       .catch((reason: unknown) => {
-        if (current)
-          setReadFailure(
-            `Could not read your Drive: ${toFailure(reason).message}`,
-          );
+        if (current) setReadFailure(describeFailure(reason, "read your Drive"));
       });
     return () => {
       current = false;
@@ -445,7 +460,7 @@ function Choose({
                           choice === RECONNECT
                             ? syncApi.reconnect
                             : syncApi.uploadWorkspace,
-                          "Sync did not start",
+                          "start sync",
                         )
                   }
                 >
@@ -467,7 +482,7 @@ function Choose({
           Starting sync…
         </p>
       )}
-      <Failure>{readFailure || failure}</Failure>
+      <Failure>{readFailure ?? failure}</Failure>
       <DialogShell
         open={switching}
         onOpenChange={setSwitching}
@@ -478,7 +493,7 @@ function Choose({
         width={480}
         onSubmit={() => {
           setSwitching(false);
-          void run(syncApi.disconnect, "Still connected");
+          void run(syncApi.disconnect, "disconnect from Google Drive");
         }}
       >
         <dl className="sync-summary">
@@ -505,7 +520,7 @@ function Choose({
               );
               onDownloaded(replaced.safety_backup);
               return replaced;
-            }, "This Workspace was not replaced");
+            }, "replace this Workspace");
           }}
         >
           <dl className="sync-summary">
@@ -589,7 +604,10 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
             }
             disabled={busy}
             onClick={() =>
-              void run(syncApi.recover, `${copy.action} did not work`)
+              void run(
+                syncApi.recover,
+                copy.action === "Retry" ? "sync" : copy.action.toLowerCase(),
+              )
             }
           >
             {copy.action}
@@ -602,7 +620,9 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
 }
 
 function Connected({ status }: { status: SyncStatus }) {
-  const [openFailure, setOpenFailure] = useState("");
+  const [openFailure, setOpenFailure] = useState<FailureDescription | null>(
+    null,
+  );
   const folder = status.folder?.name;
   return (
     <>
@@ -623,13 +643,11 @@ function Connected({ status }: { status: SyncStatus }) {
                 size="sm"
                 disabled={!folder}
                 onClick={() => {
-                  setOpenFailure("");
+                  setOpenFailure(null);
                   syncApi
                     .openFolder()
                     .catch((reason: unknown) =>
-                      setOpenFailure(
-                        `Could not open Drive: ${toFailure(reason).message}`,
-                      ),
+                      setOpenFailure(describeFailure(reason, "open Drive")),
                     );
                 }}
               >
@@ -683,7 +701,7 @@ function Disconnect({ folder }: { folder: string | undefined }) {
         width={480}
         onSubmit={() => {
           setDisconnecting(false);
-          void run(syncApi.disconnect, "Still connected");
+          void run(syncApi.disconnect, "disconnect from Google Drive");
         }}
       >
         <dl className="sync-summary">
@@ -705,10 +723,15 @@ function DesktopSettings() {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [name, setName] = useState("");
   const [seconds, setSeconds] = useState("");
-  const [failure, setFailureText] = useState("");
+  const [failure, setFailureText] = useState<
+    FailureDescription | string | null
+  >(null);
   // The message belongs to the section whose control caused it.
   const [failedName, setFailedName] = useState(false);
-  const setFailure = (text: string, name = false) => {
+  const setFailure = (
+    text: FailureDescription | string | null,
+    name = false,
+  ) => {
     setFailureText(text);
     setFailedName(name);
   };
@@ -725,9 +748,7 @@ function DesktopSettings() {
       })
       .catch((reason: unknown) => {
         if (current)
-          setFailure(
-            `Could not read the sync settings: ${toFailure(reason).message}`,
-          );
+          setFailure(describeFailure(reason, "read the sync settings"));
       });
     return () => {
       current = false;
@@ -736,7 +757,7 @@ function DesktopSettings() {
   async function save(change: Partial<SyncSettingsChange>) {
     if (!saved) return;
     setSaving(true);
-    setFailure("");
+    setFailure(null);
     try {
       const next = await syncApi.setSettings({
         desktop_name: saved.desktop_name,
@@ -748,9 +769,7 @@ function DesktopSettings() {
       setName(next.desktop_name);
       setSeconds(String(next.poll_interval_secs));
     } catch (reason) {
-      setFailure(
-        `Could not save the sync settings: ${toFailure(reason).message}`,
-      );
+      setFailure(describeFailure(reason, "save the sync settings"));
     } finally {
       setSaving(false);
     }
@@ -803,7 +822,7 @@ function DesktopSettings() {
             }
           />
         </SettingsList>
-        <Failure>{failedName ? failure : ""}</Failure>
+        <Failure>{failedName ? failure : null}</Failure>
       </SettingsSection>
       <SettingsSection title="Options">
         <SettingsList>
@@ -866,7 +885,7 @@ function DesktopSettings() {
             Saving…
           </p>
         )}
-        <Failure>{failedName ? "" : failure}</Failure>
+        <Failure>{failedName ? null : failure}</Failure>
       </SettingsSection>
     </>
   );

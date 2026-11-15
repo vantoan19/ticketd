@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Download, ExternalLink } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +17,10 @@ import {
   type MarkdownExport,
   type MarkdownExportSource,
 } from "@/lib/api/portable-export";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 
 export function ExportMarkdownButton({
   source,
@@ -27,12 +32,12 @@ export function ExportMarkdownButton({
   label?: string;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [result, setResult] = useState<MarkdownExport | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   async function run() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       // Capture the selection before the native folder dialog takes focus.
       const content = typeof source === "function" ? source() : source;
@@ -44,7 +49,7 @@ export function ExportMarkdownButton({
       if (typeof output === "string")
         setResult(await exportMarkdown(content, output));
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "export Markdown"));
     } finally {
       setBusy(false);
     }
@@ -53,7 +58,7 @@ export function ExportMarkdownButton({
     try {
       await revealItemInDir(`${result?.directory}/${path}`);
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "show the file in its folder"));
     }
   }
   return (
@@ -78,9 +83,11 @@ export function ExportMarkdownButton({
         </span>
       )}
       {error && !result && (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
+        <FailureAlert
+          size="compact"
+          failure={error}
+          onRetry={() => void run()}
+        />
       )}
       {result && (
         <Dialog
@@ -186,11 +193,7 @@ export function ExportMarkdownButton({
                 manifest before sharing.
               </p>
             )}
-            {error && (
-              <p role="alert" className="text-destructive text-sm">
-                {error}
-              </p>
-            )}
+            {error && <FailureAlert size="compact" failure={error} />}
             <DialogFooter>
               <Button variant="ghost" size="sm" onClick={() => setResult(null)}>
                 Done

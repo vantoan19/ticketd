@@ -43,7 +43,8 @@ export function MermaidDiagram({ source }: { source: string }) {
             source,
             dark,
             svg: "",
-            detail: reason instanceof Error ? reason.message : String(reason),
+            detail:
+              reason instanceof Error ? reason.message : "Rendering failed.",
             error: `Could not render this diagram. ${reason instanceof Error && /limit|configuration|external resources/.test(reason.message) ? reason.message : "Check its source in the editor."}`,
           });
       },

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,10 @@ import {
   type Attachment,
   type AttachmentCleanupReview,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { formatSize } from "./format-size";
 import { usageContext } from "./usage-context";
 
@@ -26,7 +31,7 @@ export function PurgeAttachment({
 }) {
   const [review, setReview] = useState<AttachmentCleanupReview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const pending = (review?.attachment ?? file).purge_state === "pending";
   useEffect(() => {
@@ -37,7 +42,8 @@ export function PurgeAttachment({
         if (current) setReview(value);
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setError(describeFailure(reason, "check the file's protections"));
       });
     return () => {
       current = false;
@@ -45,7 +51,7 @@ export function PurgeAttachment({
   }, [file.id]);
   async function purge() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await attachments.purge(file.id);
       onClose();
@@ -55,7 +61,7 @@ export function PurgeAttachment({
       } catch {
         // Keep the original failure and allow the same explicit action to retry.
       }
-      setError(String(reason));
+      setError(describeFailure(reason, "purge the file"));
     } finally {
       setBusy(false);
       onChanged();
@@ -103,21 +109,20 @@ export function PurgeAttachment({
               : review.reason}
           </p>
         )}
-        {error &&
-          (pending ? (
-            <>
-              <p role="alert">
-                Permanent purge is pending. Retry to finish or confirm
-                completion.
-              </p>
-              <details>
-                <summary>Details</summary>
-                <p className="attachment-hint">{error}</p>
-              </details>
-            </>
-          ) : (
-            <p role="alert">{error}</p>
-          ))}
+        {error && (
+          <FailureAlert
+            size="compact"
+            failure={
+              pending
+                ? {
+                    ...error,
+                    sentence:
+                      "The purge is still pending. Retry to finish it or confirm it completed.",
+                  }
+                : error
+            }
+          />
+        )}
         <div className="attachment-actions attachment-cleanup-footer">
           <Button
             ref={cancel}

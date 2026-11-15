@@ -44,9 +44,12 @@ import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
 import { useSyncNavigation } from "@/features/sync/sync-status";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import {
+  useDraftRecovery,
   useDraftRecoveryGeneration,
   useDraftRecoveryNotices,
 } from "@/lib/draft-recovery-context";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { WorkspaceBand } from "./WorkspaceBand";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
@@ -67,6 +70,7 @@ export function App() {
 function AppContent() {
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
+  const recovery = useDraftRecovery();
   const [view, setViewState] = useState<
     | "tickets"
     | "projects"
@@ -247,9 +251,6 @@ function AppContent() {
     null,
   );
   const [creating, setCreating] = useState(false);
-  // A sidebar choice that could not be saved. Its own state: a list load
-  // clears the workspace error, but not this, which lasts until a save works.
-  const [preferenceError, setPreferenceError] = useState("");
   // The status a group's Add action asked for; the sidebar's New ticket has none.
   const [createStatus, setCreateStatus] = useState<string | undefined>();
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -406,7 +407,7 @@ function AppContent() {
                             scope(...args);
                           }}
                           navigation={navigation}
-                          onError={setPreferenceError}
+                          onError={workspace.setError}
                           setCreating={(value) => {
                             if (value) setCreateStatus(undefined);
                             setCreating(value);
@@ -419,6 +420,12 @@ function AppContent() {
                         tabIndex={-1}
                         className="content-panel"
                       >
+                        <WorkspaceBand
+                          onRetry={() => {
+                            recovery.retry();
+                            void refresh({ reportFailure: true });
+                          }}
+                        />
                         {recoveryNotices}
                         {isMobile && view !== "settings" && (
                           <div className="mobile-nav-bar">
@@ -454,14 +461,22 @@ function AppContent() {
                             </Button>
                           )}
                         {error && (
-                          <p role="alert" className="global-error">
-                            {error}
-                          </p>
-                        )}
-                        {preferenceError && (
-                          <p role="alert" className="global-error">
-                            {preferenceError}
-                          </p>
+                          // A local preference could not be saved; it stays
+                          // until dismissed or a later save works, and a list
+                          // load never clears it. TODO(R1.8): the pane status line.
+                          <div className="app-preference-failure">
+                            <Alert tone="error" size="compact">
+                              <AlertDescription>{error}</AlertDescription>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => workspace.setError("")}
+                              >
+                                Dismiss
+                              </Button>
+                            </Alert>
+                          </div>
                         )}
                         <CreateTicketDialog
                           key={`new-ticket:${recoveryGeneration}`}

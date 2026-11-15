@@ -65,6 +65,8 @@ export function TicketDetailPane({
         updateTicket={updateTicket}
         position={workspace.layout === "board" ? null : position}
         onAdjacent={openAdjacent}
+        failure={workspace.detailFailure}
+        onRetry={workspace.retryDetail}
       />
     </>
   );

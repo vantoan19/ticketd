@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Layers, Link2, Network } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
 import { Item } from "@/components/ui/item";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
@@ -16,6 +17,11 @@ import {
   type Project,
   type Ticket,
 } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { toFailure } from "@/lib/api/bridge-failure";
 import { plansClient } from "@/lib/api/plans";
 import "@/features/tickets/linked-work.css";
 import { Reference } from "@/components/ui/reference";
@@ -31,29 +37,29 @@ function reasonFor(status: string) {
 }
 
 /**
- * Says what went wrong in terms of the two tickets, not the core's one-liner.
- * `refused` marks a choice that can never be added, so Add waits for another.
+ * Why a blocker was refused, in terms of the two tickets rather than the
+ * core's one-liner. A loop or a missing ticket is about the choice, so it reads
+ * as a field problem and Add waits for another choice; anything else is a
+ * failed action. Decided by the failure's kind, never by its message.
  */
 function dependencyError(
   reason: unknown,
   blocker: string,
   dependent: string,
-): { message: string; refused: boolean } {
-  const text = String(reason).replace(/^Error:\s*/, "");
-  if (blocker === dependent)
-    return { message: `${dependent} can’t block itself.`, refused: true };
-  // The core says "B can't block D: D already blocks B." or "D already reaches
-  // B through X → Y."; older cores only said "cycle".
-  if (/can.t block\b|cycle/i.test(text)) {
-    const through = /\bthrough (.+?)\.?$/.exec(text)?.[1];
+  action: string,
+): { field: string } | { failure: FailureDescription } {
+  const failure = toFailure(reason);
+  if (failure.kind === "cycle") {
+    if (blocker === dependent)
+      return { field: `${dependent} can’t block itself.` };
+    // The core may name the loop: "D already reaches B through X → Y."
+    const through = /\bthrough (.+?)\.?$/.exec(failure.message)?.[1];
     return {
-      message: `${dependent} already blocks ${blocker}${through ? ` through ${through}` : ""}, so ${blocker} can’t also block it. Choose another ticket.`,
-      refused: true,
+      field: `${blocker} already waits on ${dependent}${through ? ` through ${through}` : ""}, so it can’t block it. Choose another ticket.`,
     };
   }
-  if (/not found/i.test(text))
-    return { message: `No ticket ${blocker} exists.`, refused: true };
-  return { message: text, refused: false };
+  if (failure.kind === "not_found") return { field: `No ticket ${blocker}.` };
+  return { failure: describeFailure(reason, action) };
 }
 
 function Blockers({
@@ -74,7 +80,10 @@ function Blockers({
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<Ticket | null>(null);
   const [error, setError] = useState("");
-  const [refused, setRefused] = useState(false);
+  const [failure, setFailure] = useState<{
+    description: FailureDescription;
+    retry: () => void;
+  } | null>(null);
   const [pending, setPending] = useState(false);
   const blockers = graph.edges
     .filter((edge) => edge.dependent === member.reference)
@@ -98,14 +107,26 @@ function Blockers({
   ) {
     setPending(true);
     setError("");
+    setFailure(null);
     try {
       await client.changeDependency(kind, ref, member.reference);
       await refresh();
       return true;
     } catch (reason) {
-      const failure = dependencyError(reason, ref, member.reference);
-      setError(failure.message);
-      setRefused(kind === "add_dependency" && failure.refused);
+      const refused = dependencyError(
+        reason,
+        ref,
+        member.reference,
+        kind === "add_dependency"
+          ? `add ${ref} as a blocker`
+          : `remove ${ref} as a blocker`,
+      );
+      if ("field" in refused) setError(refused.field);
+      else
+        setFailure({
+          description: refused.failure,
+          retry: () => void change(kind, ref),
+        });
       return false;
     } finally {
       setPending(false);
@@ -203,7 +224,7 @@ function Blockers({
           className="plan-blocker-form"
           onSubmit={(event) => void add(event)}
         >
-          <Field data-invalid={error || search.error ? true : undefined}>
+          <Field>
             <FieldLabel htmlFor="plan-blocker">Add a blocker</FieldLabel>
             {chosen ? (
               <div className="link-ticket-chosen">
@@ -227,6 +248,7 @@ function Blockers({
               <>
                 <Input
                   id="plan-blocker"
+                  aria-invalid={error || search.error ? true : undefined}
                   value={query}
                   placeholder="Search by title, text or reference"
                   autoComplete="off"
@@ -267,10 +289,17 @@ function Blockers({
               <p className="plan-note">A ticket can’t block itself.</p>
             )}
           </Field>
+          {failure && (
+            <FailureAlert
+              size="compact"
+              failure={failure.description}
+              onRetry={failure.retry}
+            />
+          )}
           <Button
             type="submit"
             size="sm"
-            disabled={pending || !chosen || (refused && Boolean(error))}
+            disabled={pending || !chosen || Boolean(error)}
           >
             Add blocker
           </Button>
@@ -301,7 +330,8 @@ export function PlanDependencies({
   archived?: boolean;
 }) {
   const [graph, setGraph] = useState<DependencyGraph | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -309,17 +339,17 @@ export function PlanDependencies({
       (value) => {
         if (active) {
           setGraph(value);
-          setError("");
+          setError(null);
         }
       },
       (reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active) setError(describeFailure(reason, "load dependencies"));
       },
     );
     return () => {
       active = false;
     };
-  }, [id, revision]);
+  }, [id, revision, attempt]);
   const members = graph?.nodes.filter((node) => !node.boundary) ?? [];
   const outside = graph ? graph.nodes.length - members.length : 0;
   const total = graph?.total_members ?? members.length;
@@ -350,7 +380,12 @@ export function PlanDependencies({
   return (
     <section className="plan-dependencies" aria-label="Plan dependencies">
       {!empty && key}
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <FailureState
+          failure={error}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      )}
       {!graph && !error && (
         <EmptyState
           size="inline"

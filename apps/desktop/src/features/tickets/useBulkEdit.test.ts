@@ -33,11 +33,16 @@ test("a rejected batch names the ticket that prevented it and keeps the selectio
   const { result } = renderHook(() => useBulkEdit(async () => {}));
   act(() => result.current.selectAll(["T-KQ1", "T-KQ2", "T-KQ3"]));
   await act(() => result.current.applyOrganization({ plan_id: "e1" }, "ok"));
-  expect(result.current.failure).toEqual({
+  expect(result.current.failure).toMatchObject({
     reference: "T-KQ2",
     message: "T-KQ2: ticket is trashed. Nothing changed.",
     // The core refused the change itself, so sending it again cannot succeed.
     retryable: false,
+    description: {
+      title: "Couldn't change T-KQ2",
+      sentence: "Ticket is trashed. Nothing changed.",
+      action: null,
+    },
   });
   expect(result.current.selection).toEqual(["T-KQ1", "T-KQ2", "T-KQ3"]);
   act(() => result.current.toggle("T-KQ3"));

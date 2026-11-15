@@ -451,9 +451,7 @@ test.each(["draft_retentions", "draft_cutover_pending"] as const)(
     fireEvent.click(
       screen.getByRole("button", { name: "Replace workspace with backup" }),
     );
-    await screen.findByText(
-      /The restore finished, but open views could not reload/,
-    );
+    await screen.findByText(/The restore finished\. Restart ticketd/);
     const retainsAfterRestore = retainCalls;
     await expect(
       oldStore!.put("undo:history", null, [], "undo"),
@@ -465,8 +463,7 @@ test.each(["draft_retentions", "draft_cutover_pending"] as const)(
     expect(record.revision).toBe(2);
     expect(record.markdown).toEqual(["backup description"]);
     expect(
-      screen.getByText(/The restore finished, but open views could not reload/)
-        .textContent,
+      screen.getByText(/The restore finished\. Restart ticketd/).textContent,
     ).toContain("Restart ticketd to see the restored data.");
     expect(
       screen.queryByText(/Could not protect recoverable drafts/),

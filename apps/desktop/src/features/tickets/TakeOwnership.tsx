@@ -5,7 +5,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { client, type Ticket } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { externalSource } from "./ticket-source";
 
 /**
@@ -27,7 +32,7 @@ export function TakeOwnership({
   const cancel = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const requestId = useRef<string | null>(null);
   const source = externalSource(ticket);
   if (!source?.unavailable) return null;
@@ -35,14 +40,16 @@ export function TakeOwnership({
   async function confirm() {
     requestId.current ??= crypto.randomUUID();
     setPending(true);
-    setFailure("");
+    setFailure(null);
     try {
       await client.takeOwnership(ticket.reference, requestId.current);
       requestId.current = null;
       setOpen(false);
       await refresh();
     } catch (reason) {
-      setFailure(reason instanceof Error ? reason.message : String(reason));
+      setFailure(
+        describeFailure(reason, `take ownership of ${ticket.reference}`),
+      );
     } finally {
       setPending(false);
     }
@@ -50,7 +57,7 @@ export function TakeOwnership({
   return (
     <Popover open={open} onOpenChange={(next) => !pending && setOpen(next)}>
       <PopoverTrigger asChild>
-        <Button variant={variant} size="sm" onClick={() => setFailure("")}>
+        <Button variant={variant} size="sm" onClick={() => setFailure(null)}>
           Take ownership…
         </Button>
       </PopoverTrigger>
@@ -94,7 +101,7 @@ export function TakeOwnership({
           <span className="source-number">{source.display}</span> stays as
           provenance. GitHub comments stay as a read-only archive.
         </p>
-        {failure && <p role="alert">Could not take ownership: {failure}</p>}
+        {failure && <FailureAlert size="compact" failure={failure} />}
         <div className="take-ownership-actions">
           <Button
             ref={cancel}

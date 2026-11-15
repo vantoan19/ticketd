@@ -8,12 +8,11 @@ import {
   Terminal,
 } from "lucide-react";
 import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
+import { FailureState } from "@/components/ui/failure-alert";
 import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -127,7 +126,7 @@ function Loaded({ info }: { info: WorkspaceInfo }) {
   async function copyPath() {
     const failure = await writeClipboard(info.path);
     setMessage(
-      failure === null ? "Path copied." : `Could not copy the path: ${failure}`,
+      failure === null ? "Path copied." : `Couldn't copy the path: ${failure}.`,
     );
   }
   async function reveal() {
@@ -205,10 +204,10 @@ function Loaded({ info }: { info: WorkspaceInfo }) {
 
 export function LocationPage() {
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => {
-    setFailure("");
+    setFailure(null);
     setAttempt((value) => value + 1);
   }, []);
   useEffect(() => {
@@ -219,7 +218,7 @@ export function LocationPage() {
         if (current) setInfo(value);
       })
       .catch((reason: unknown) => {
-        if (current) setFailure(String(reason));
+        if (current) setFailure(describeFailure(reason, "read the workspace"));
       });
     return () => {
       current = false;
@@ -232,18 +231,14 @@ export function LocationPage() {
     >
       {failure ? (
         <SettingsSection title="Workspace file">
-          <Alert tone="error">
-            <AlertTitle>Could not read the workspace</AlertTitle>
-            <AlertDescription>
-              The path and contents could not be loaded. Reading never changes
-              the workspace. {failure}
-            </AlertDescription>
-            <AlertActions>
-              <Button type="button" variant="outline" size="sm" onClick={retry}>
-                Try again
-              </Button>
-            </AlertActions>
-          </Alert>
+          <FailureState
+            size="inline"
+            failure={{
+              ...failure,
+              sentence: `${failure.sentence} Reading never changes the workspace.`,
+            }}
+            onRetry={retry}
+          />
         </SettingsSection>
       ) : info ? (
         <Loaded info={info} />

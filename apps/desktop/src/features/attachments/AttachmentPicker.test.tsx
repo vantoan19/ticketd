@@ -309,7 +309,7 @@ test("retry refreshes a cached completed upload after permanent purge", async ()
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
-  await within(row).findByText("Insertion failed");
+  await within(row).findByText(/Insertion failed/);
   purged = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() =>
@@ -362,7 +362,7 @@ test("a cached Drive upload receipt cannot promise library availability after re
   await screen.findByText(/Destination: Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
-  await within(row).findByText("Insertion failed");
+  await within(row).findByText(/Insertion failed/);
   removed = true;
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() =>
@@ -526,7 +526,7 @@ test("explicit local fallback uses a new operation and retains the original Driv
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
   await screen.findByText(/Destination: Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText("Drive offline");
+  await screen.findByText(/Drive offline/);
   await waitFor(() =>
     expect(
       screen.getByRole("button", { name: "Upload locally instead" }),
@@ -862,12 +862,16 @@ test("legacy-shaped local capture queues keep their destination under a new Driv
 test("unavailable recovery storage blocks new uploads instead of losing retry identity", async () => {
   vi.stubGlobal("indexedDB", undefined);
   vi.mocked(open).mockResolvedValue(["C:/unsafe.txt"]);
-  vi.mocked(invoke).mockResolvedValue(104857600);
+  // Only recovery is missing; a destination that reads fine cannot hide it.
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_upload_destination" ? { kind: "local" } : 104857600,
+  );
   render(
     <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
   );
+  await screen.findByText(/Destination: /);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText(/No new uploads were started/);
+  await screen.findByText(/No uploads were started/);
   expect(
     vi
       .mocked(invoke)
@@ -899,7 +903,7 @@ test("mixed batches insert successes in selection order and retry the original f
     .mockResolvedValue(undefined);
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText("Disk full");
+  await screen.findByText(/Disk full/);
   await waitFor(() => expect(picked.mock.calls).toHaveLength(2));
   expect(picked.mock.calls.map((call) => call[0])).toEqual([
     file("first.txt"),

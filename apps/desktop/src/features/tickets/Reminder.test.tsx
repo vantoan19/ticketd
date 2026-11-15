@@ -34,7 +34,7 @@ test("requires a choice for repeated local times and rejects skipped times", () 
     fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
     const input = screen.getByLabelText("Local reminder date and time");
     fireEvent.change(input, { target: { value: "2030-03-10T02:30" } });
-    expect(screen.getByRole("alert").textContent).toContain("skipped");
+    expect(screen.getByRole("alert").textContent).toContain("skips this time");
     expect(screen.getByRole("button", { name: "Set reminder" })).toHaveProperty(
       "disabled",
       true,
@@ -56,6 +56,20 @@ test("requires a choice for repeated local times and rejects skipped times", () 
     if (original === undefined) delete process.env.TZ;
     else process.env.TZ = original;
   }
+});
+
+test("a year still being typed is not blamed on a clock change", () => {
+  const view = render(<Reminder reference="T-KQ1" revision={0} />);
+  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
+  fireEvent.change(screen.getByLabelText("Local reminder date and time"), {
+    target: { value: "0006-01-01T12:00" },
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByRole("button", { name: "Set reminder" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  view.unmount();
 });
 
 test("retries a lost snooze response with the original request and instant", async () => {

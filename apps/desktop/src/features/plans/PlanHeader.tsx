@@ -14,7 +14,7 @@ import {
   Pencil,
   Plus,
 } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
@@ -57,7 +57,7 @@ export function PlanHeader({
   mode: "list" | "board" | "dependencies";
   onModeChange: (mode: "list" | "board" | "dependencies") => void;
 }) {
-  const { view, loadError, pending, actionError, run } = state;
+  const { view, loadError, reload, pending, actionError, retry, run } = state;
   const openGraph = useContext(ContextGraphNavigation);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
@@ -107,7 +107,12 @@ export function PlanHeader({
       return;
     }
     setNameError("");
-    if (await run(() => plansClient.change(plan.id, name, null)))
+    if (
+      await run(
+        () => plansClient.change(plan.id, name, null),
+        `rename ${current.name}`,
+      )
+    )
       setRenaming(false);
   }
   function renameKey(event: KeyboardEvent) {
@@ -185,7 +190,10 @@ export function PlanHeader({
               size="sm"
               disabled={pending}
               onClick={() =>
-                void run(() => plansClient.change(plan.id, null, false))
+                void run(
+                  () => plansClient.change(plan.id, null, false),
+                  `reactivate ${current.name}`,
+                )
               }
             >
               <ArchiveRestore data-icon="inline-start" /> Reactivate
@@ -257,11 +265,12 @@ export function PlanHeader({
           className="plan-purpose-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void run(() => plansClient.setPurpose(plan.id, purpose)).then(
-              (saved) => {
-                if (saved) setEditingPurpose(false);
-              },
-            );
+            void run(
+              () => plansClient.setPurpose(plan.id, purpose),
+              "save the purpose",
+            ).then((saved) => {
+              if (saved) setEditingPurpose(false);
+            });
           }}
         >
           <FieldLabel htmlFor="plan-purpose">Purpose</FieldLabel>
@@ -305,12 +314,16 @@ export function PlanHeader({
           )}
         </div>
       )}
-      {((actionError && !archiving) || loadError) && (
-        <Alert tone="error" role="alert">
-          <AlertDescription>
-            {(!archiving && actionError) || loadError}
-          </AlertDescription>
-        </Alert>
+      {actionError && !archiving ? (
+        <FailureAlert
+          size="compact"
+          failure={actionError}
+          onRetry={() => void retry()}
+        />
+      ) : (
+        loadError && (
+          <FailureAlert size="compact" failure={loadError} onRetry={reload} />
+        )
       )}
       {view && (
         <div className="plan-summary">
@@ -357,18 +370,19 @@ export function PlanHeader({
         busy={pending}
         onSubmit={() => {
           setArchiveFailed(false);
-          void run(() => plansClient.change(plan.id, null, true)).then(
-            (archived) => {
-              if (archived) setArchiving(false);
-              else setArchiveFailed(true);
-            },
-          );
+          void run(
+            () => plansClient.change(plan.id, null, true),
+            `archive ${current.name}`,
+          ).then((archived) => {
+            // A failed archive keeps the dialog open with the reason; Archive
+            // is the retry.
+            if (archived) setArchiving(false);
+            else setArchiveFailed(true);
+          });
         }}
       >
         {archiveFailed && actionError && (
-          <Alert tone="error" size="compact">
-            <AlertDescription>{actionError}</AlertDescription>
-          </Alert>
+          <FailureAlert size="compact" failure={actionError} />
         )}
       </DialogShell>
       <AddTicketsDialog

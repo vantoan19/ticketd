@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Search, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +14,10 @@ import { Input } from "@/components/ui/input";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { typedReference } from "@/features/tickets/ticket-references";
 import { client, type Ticket } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import type { PlanViewState } from "./usePlanView";
 import { Reference } from "@/components/ui/reference";
@@ -33,10 +38,12 @@ export function AddTicketsDialog({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Ticket[] | null>(null);
-  const [searchError, setSearchError] = useState("");
+  const [searchError, setSearchError] = useState<FailureDescription | null>(
+    null,
+  );
   const [searches, setSearches] = useState(0);
   const [done, setDone] = useState("");
-  const { pending, actionError, run } = state;
+  const { pending, actionError, retry, run } = state;
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -66,7 +73,7 @@ export function AddTicketsDialog({
       ]).then(
         ([named, found]) => {
           if (!active) return;
-          setSearchError("");
+          setSearchError(null);
           const seen = new Set<string>();
           setResults(
             [...named, ...found].filter(
@@ -79,7 +86,7 @@ export function AddTicketsDialog({
           );
         },
         (reason: unknown) => {
-          if (active) setSearchError(String(reason));
+          if (active) setSearchError(describeFailure(reason, "search tickets"));
         },
       );
     }, 150);
@@ -113,10 +120,20 @@ export function AddTicketsDialog({
             }}
           />
         </label>
-        {(searchError || actionError) && (
-          <p role="alert" className="plan-add-error">
-            {searchError || actionError}
-          </p>
+        {searchError ? (
+          <FailureAlert
+            size="compact"
+            failure={searchError}
+            onRetry={() => setSearches((value) => value + 1)}
+          />
+        ) : (
+          actionError && (
+            <FailureAlert
+              size="compact"
+              failure={actionError}
+              onRetry={() => void retry()}
+            />
+          )
         )}
         {done && (
           <p role="status" className="plan-add-done">
@@ -159,8 +176,9 @@ export function AddTicketsDialog({
                   disabled={pending}
                   aria-label={`Add ${ticket.reference} to ${plan.name}`}
                   onClick={() =>
-                    void run(() =>
-                      plansClient.setMember(ticket.reference, plan.id),
+                    void run(
+                      () => plansClient.setMember(ticket.reference, plan.id),
+                      `add ${ticket.reference} to ${plan.name}`,
                     ).then((added) => {
                       if (!added) return;
                       setDone(

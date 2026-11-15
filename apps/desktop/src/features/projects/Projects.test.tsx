@@ -145,13 +145,24 @@ test("cancelling the folder picker keeps Create project disabled", async () => {
 });
 
 test("renames a project from its menu and shows a save failure in the dialog", async () => {
-  vi.spyOn(client, "editProject").mockRejectedValue("Name already used");
+  vi.spyOn(client, "editProject").mockRejectedValue({
+    code: "workspace_read_only",
+    message: "workspace database error: attempt to write a readonly database",
+  });
   render(<Projects {...props} />);
   openMenu("Actions for Original");
   fireEvent.click(await screen.findByRole("menuitem", { name: /Rename/ }));
   const dialog = await screen.findByRole("dialog", { name: "Rename project" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save name" }));
-  expect(await within(dialog).findByText("Name already used")).toBeTruthy();
+  const alert = await within(dialog).findByRole("alert");
+  expect(alert.textContent).toContain(
+    "Couldn't rename the project. The workspace is read-only, so nothing changed.",
+  );
+  // The raw text stays under Details, and the valid name is not marked invalid (PR-05).
+  expect(alert.textContent).not.toContain("readonly database");
+  expect(
+    within(dialog).getByLabelText("Project name").getAttribute("aria-invalid"),
+  ).toBeNull();
 });
 
 test("registers a checkout by choosing a folder", async () => {

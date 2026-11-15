@@ -21,6 +21,11 @@ import { chatSource } from "@/features/chats/quotes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   DropdownMenu,
@@ -82,6 +87,11 @@ const editDraftSchema = z.object({
 const requestSchema = z.object({ payload: z.string(), id: z.string() });
 const drafts = new Map<string, Draft>();
 const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
+
+/** A failure on this device's draft storage: plain words, nothing for Details. */
+function draftFailure(title: string, text: string): FailureDescription {
+  return { code: "failed", title, sentence: text, action: null, details: "" };
+}
 // Earlier versions kept details and the attachment under their own keys.
 const legacyDetailKey = (reference: string) =>
   `ticketd:activity-details:${reference}`;
@@ -190,7 +200,7 @@ export function Activity({
   const recoveryOwner = `activity:${ticketId}`;
   const now = useNow();
   const [feedback, setFeedback] = useState("");
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<FailureDescription | null>(null);
   const [targetMissing, setTargetMissing] = useState<string | null>(null);
   const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
   const targetRequest = useRef<{ id: string } | null>(null);
@@ -223,7 +233,7 @@ export function Activity({
       })
       .catch((reason: unknown) => {
         if (current && targetRequest.current === request)
-          setLoadError(String(reason));
+          setLoadError(describeFailure(reason, "load the linked update"));
       });
     return () => {
       current = false;
@@ -263,7 +273,7 @@ export function Activity({
       return rows;
     }, []);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [saved, setSaved] = useState<Draft>(
     () =>
       recovery.read(recoveryOwner, recoveryDraftSchema) ??
@@ -301,7 +311,12 @@ export function Activity({
       localStorage.removeItem(legacySupportKey(ticketId));
       if (patch.support !== undefined) localStorage.removeItem(requestKey);
     } catch {
-      setError("Could not save the unpublished update on this device.");
+      setError(
+        draftFailure(
+          "Couldn't save the unpublished update on this device",
+          "Copy it before you close ticketd.",
+        ),
+      );
     }
   }
   // Write the draft once more as the page goes away, so a quick quit keeps it.
@@ -334,7 +349,12 @@ export function Activity({
     try {
       localStorage.removeItem(requestKey);
     } catch {
-      setError("Could not clear the unpublished update on this device.");
+      setError(
+        draftFailure(
+          "Couldn't clear the unpublished update on this device",
+          "It may come back the next time this ticket opens.",
+        ),
+      );
     }
   }
   const draft = saved.brief;
@@ -370,7 +390,8 @@ export function Activity({
           setSupportTitle(document.title || document.heading || "Document");
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setError(describeFailure(reason, "load the attached Document"));
       });
     return () => {
       current = false;
@@ -408,11 +429,11 @@ export function Activity({
       .then(() => loadNotes())
       .then(() => {
         if (current) {
-          setLoadError("");
+          setLoadError(null);
         }
       })
       .catch((reason: unknown) => {
-        if (current) setLoadError(String(reason));
+        if (current) setLoadError(describeFailure(reason, "load activity"));
       })
       .finally(() => {
         if (current) setLoading(false);
@@ -444,7 +465,7 @@ export function Activity({
       return;
     busy.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       await recovery.flush();
       if (edit) {
@@ -515,7 +536,9 @@ export function Activity({
       await loadNotes();
       await onChanged?.();
     } catch (reason) {
-      setError(String(reason));
+      setError(
+        describeFailure(reason, edit ? "save the update" : "post the update"),
+      );
     } finally {
       busy.current = false;
       setPending(false);
@@ -525,7 +548,7 @@ export function Activity({
     if (busy.current) return;
     busy.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       const hadSupport = notes.some(
         (note) => note.id === id && note.supporting_document_id,
@@ -542,7 +565,7 @@ export function Activity({
       await loadNotes();
       await onChanged?.();
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "delete the update"));
     } finally {
       busy.current = false;
       setPending(false);
@@ -552,14 +575,14 @@ export function Activity({
     if (busy.current) return;
     busy.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       const page = await client.activityFeed(reference, feed.length);
       pages.current += 1;
       setFeed((previous) => [...previous, ...page]);
       setMore(page.length === 50);
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "load more activity"));
     } finally {
       busy.current = false;
       setPending(false);
@@ -699,10 +722,21 @@ export function Activity({
           </AlertDescription>
         </Alert>
       )}
-      {(error || loadError) && (
-        <Alert tone="error">
-          <AlertDescription>{error || loadError}</AlertDescription>
-        </Alert>
+      {error ? (
+        <FailureAlert size="compact" failure={error} />
+      ) : (
+        loadError && (
+          <FailureAlert
+            size="compact"
+            failure={loadError}
+            onRetry={() => {
+              setLoadError(null);
+              void loadNotes().catch((reason: unknown) =>
+                setLoadError(describeFailure(reason, "load activity")),
+              );
+            }}
+          />
+        )
       )}
       {!trashed && !composing && !edit && (
         <button

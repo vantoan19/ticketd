@@ -200,7 +200,9 @@ export function ContextGraphCanvas({
         { type: "module" },
       );
     } catch (reason) {
-      onErrorRef.current(`Graph layout failed: ${String(reason)}`);
+      onErrorRef.current(
+        reason instanceof Error ? reason.message : "The layout worker failed.",
+      );
       return;
     }
     worker.onmessage = (
@@ -211,14 +213,12 @@ export function ContextGraphCanvas({
       }>,
     ) => {
       if (event.data.id !== currentGeneration.current) return;
-      if (event.data.error)
-        onErrorRef.current(`Graph layout failed: ${event.data.error}`);
+      if (event.data.error) onErrorRef.current(event.data.error);
       else if (event.data.positions)
         onPositionsRef.current(event.data.positions);
     };
     worker.onerror = (event) => {
-      if (id === currentGeneration.current)
-        onErrorRef.current(`Graph layout failed: ${event.message}`);
+      if (id === currentGeneration.current) onErrorRef.current(event.message);
     };
     worker.postMessage({
       id,

@@ -7,7 +7,11 @@ import {
   WifiOff,
 } from "lucide-react";
 import { workspaceClient } from "@/lib/api/workspace";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Badge } from "@/components/ui/badge";
 import { APP_VERSION } from "@/lib/app-version";
 import { sectionMeta } from "@/features/settings/settings-sections";
@@ -70,7 +74,7 @@ function ExternalRow({
   url: string;
   /** For the failure sentence: "the documentation". */
   what: string;
-  onFailure: (message: string) => void;
+  onFailure: (failure: FailureDescription | null) => void;
 }) {
   return (
     <a
@@ -78,11 +82,11 @@ function ExternalRow({
       href={url}
       onClick={(event) => {
         event.preventDefault();
-        onFailure("");
+        onFailure(null);
         workspaceClient
           .openLink(url)
           .catch((reason: unknown) =>
-            onFailure(`Could not open ${what}: ${String(reason)}`),
+            onFailure(describeFailure(reason, `open ${what}`)),
           );
       }}
     >
@@ -92,17 +96,25 @@ function ExternalRow({
   );
 }
 
-function Failure({ message }: { message: string }): ReactNode {
-  return message ? (
-    <Alert tone="error" size="compact" className="mt-3">
-      <AlertDescription>{message}</AlertDescription>
-    </Alert>
+/** A link that would not open, shown under the list that holds it. */
+function Failure({
+  failure,
+}: {
+  failure: FailureDescription | null;
+}): ReactNode {
+  return failure ? (
+    <FailureAlert size="compact" failure={failure} className="mt-3" />
   ) : null;
 }
 
+type ListFailure = { list: "help" | "privacy"; failure: FailureDescription };
+
 export function AboutPage() {
   const { openPage } = useSettingsState();
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<ListFailure | null>(null);
+  const report =
+    (list: ListFailure["list"]) => (next: FailureDescription | null) =>
+      setFailure(next && { list, failure: next });
   return (
     <SettingsPage
       {...sectionMeta("about")}
@@ -134,14 +146,14 @@ export function AboutPage() {
             description="Guides for the desktop app and the command line."
             url={DOCUMENTATION_URL}
             what="the documentation"
-            onFailure={setFailure}
+            onFailure={report("help")}
           />
           <ExternalRow
             title="Report an issue"
             description="Opens the issue tracker in your browser. Include the version above."
             url={ISSUES_URL}
             what="the issue tracker"
-            onFailure={setFailure}
+            onFailure={report("help")}
           />
           <button
             type="button"
@@ -155,6 +167,7 @@ export function AboutPage() {
             <ChevronRight size={16} aria-hidden="true" />
           </button>
         </SettingsList>
+        <Failure failure={failure?.list === "help" ? failure.failure : null} />
       </SettingsSection>
 
       <SettingsSection title="Privacy and notices">
@@ -164,18 +177,20 @@ export function AboutPage() {
             description="What stays on this computer, and what each integration sends."
             url={PRIVACY_URL}
             what="the privacy notice"
-            onFailure={setFailure}
+            onFailure={report("privacy")}
           />
           <ExternalRow
             title="Third-party notices"
             description="Licenses for the libraries and fonts ticketd ships with."
             url={NOTICES_URL}
             what="the third-party notices"
-            onFailure={setFailure}
+            onFailure={report("privacy")}
           />
         </SettingsList>
+        <Failure
+          failure={failure?.list === "privacy" ? failure.failure : null}
+        />
       </SettingsSection>
-      <Failure message={failure} />
     </SettingsPage>
   );
 }

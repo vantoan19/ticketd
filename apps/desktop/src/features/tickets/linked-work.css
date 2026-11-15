@@ -224,11 +224,6 @@
     pointer-events: auto;
   }
 }
-.link-ticket-note {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
 .link-ticket-sentence {
   display: flex;
   flex-wrap: wrap;

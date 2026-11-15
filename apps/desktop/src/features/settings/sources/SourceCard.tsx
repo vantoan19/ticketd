@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AlignLeft, CircleDot, Link, RefreshCw } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
+import { FailureAlert, FailureDetails } from "@/components/ui/failure-alert";
+import { describeFailure } from "@/lib/api/describe-failure";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
@@ -38,6 +40,13 @@ import {
 } from "@/lib/api/sources";
 
 type Busy = "checking" | "previewing" | "saving" | null;
+
+/** What each command did not do, for its failure title. */
+const STEP = {
+  checking: "check the connection",
+  previewing: "preview matching issues",
+  saving: "save the configuration",
+} as const;
 
 function fieldErrors(failure: SourceFailure | null) {
   const grouped: Record<string, string[]> = {};
@@ -204,6 +213,7 @@ export function SourceCard({
   );
   const [busy, setBusy] = useState<Busy>(null);
   const [failure, setFailure] = useState<SourceFailure | null>(null);
+  const [failedStep, setFailedStep] = useState<Exclude<Busy, null>>("saving");
   const [connection, setConnection] = useState("");
   const [previewed, setPreviewed] = useState<{
     key: string;
@@ -251,7 +261,10 @@ export function SourceCard({
       const value = await work();
       if (request === latest.current) done(value);
     } catch (reason) {
-      if (request === latest.current) setFailure(toSourceFailure(reason));
+      if (request === latest.current) {
+        setFailedStep(kind);
+        setFailure(toSourceFailure(reason));
+      }
     } finally {
       if (request === latest.current) setBusy(null);
     }
@@ -412,9 +425,13 @@ export function SourceCard({
                       : health.health === "delayed"
                         ? `${connector.name} refresh is delayed`
                         : `${connector.name} is partly refreshed`}
-                    {health.error ? `: ${health.error.message}` : ""}
                   </span>
                 </StatusLabel>
+              }
+              trailing={
+                health.error && (
+                  <FailureDetails small details={health.error.message} />
+                )
               }
             />
           )}
@@ -453,12 +470,12 @@ export function SourceCard({
               onChange={edit}
             />
             {hint && <p className="settings-hint">{hint}</p>}
-            {failure && (
-              <p role="alert" className="settings-failure">
-                {failure.fields.length > 0
-                  ? "Fix the highlighted settings, then try again."
-                  : failure.message}
-              </p>
+            {/* Field problems show under their fields; only the rest shows here. */}
+            {failure && failure.fields.length === 0 && (
+              <FailureAlert
+                size="compact"
+                failure={describeFailure(failure, STEP[failedStep])}
+              />
             )}
             {notice && (
               <p className="settings-hint" role="status">

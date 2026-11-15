@@ -1,3 +1,4 @@
+import { failureText } from "@/lib/api/describe-failure";
 import {
   useContext,
   useEffect,
@@ -318,9 +319,7 @@ function PlacesGroup({ chat }: { chat: ChatState }) {
             void client.openFolder(chat.id).then(
               () => setFailure(""),
               (reason: unknown) =>
-                setFailure(
-                  reason instanceof Error ? reason.message : String(reason),
-                ),
+                setFailure(failureText(reason, "open the folder")),
             )
           }
         >

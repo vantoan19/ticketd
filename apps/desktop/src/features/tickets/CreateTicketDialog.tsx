@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
@@ -89,7 +94,10 @@ export function CreateTicketDialog({
       .put("new-ticket", payload, draft?.body ? [draft.body] : [])
       .catch(() => {});
   }, [draft, recovery]);
-  const [error, setError] = useState("");
+  // One failure for the whole dialog, above the footer. A workspace-level
+  // cause is also in the band, so this says only what it means for this ticket.
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const workspaceBlocked = editingBlockedReason(useWorkspaceState());
   const [confirmNewTicket, setConfirmNewTicket] = useState(false);
   const [pending, setPending] = useState(false);
   const [completedCreation, setCompletedCreation] = useState<{
@@ -180,7 +188,7 @@ export function CreateTicketDialog({
         !currentDraft.title.trim())
     )
       return;
-    setError("");
+    setError(null);
     lock.current = true;
     setPending(true);
     let submittedCreation = completedCreation;
@@ -239,13 +247,25 @@ export function CreateTicketDialog({
         refocusTitle.current = true;
       } else setDraft(null);
     } catch (reason) {
-      setError(
-        submittedCreation
-          ? `Ticket ${submittedCreation.reference} was created, but its draft could not be cleared: ${String(reason)}`
-          : creationAttempted
-            ? `Could not confirm whether the ticket was created. Retry safely with the same submission: ${String(reason)}`
-            : `Could not save the submission for a safe retry; no ticket was created: ${String(reason)}`,
-      );
+      if (submittedCreation) {
+        const failure = describeFailure(reason, "clear the draft");
+        setError({
+          ...failure,
+          sentence: `${submittedCreation.reference} was created. ${failure.sentence}`,
+        });
+      } else if (creationAttempted) {
+        const failure = describeFailure(reason, "confirm the new ticket");
+        setError({
+          ...failure,
+          sentence: `${failure.sentence} Retry safely: it never creates a second ticket.`,
+        });
+      } else {
+        const failure = describeFailure(reason, "create the ticket");
+        setError({
+          ...failure,
+          sentence: `${failure.sentence} Your draft is kept on this device.`,
+        });
+      }
     } finally {
       lock.current = false;
       setPending(false);
@@ -259,7 +279,7 @@ export function CreateTicketDialog({
     delete next.createMore;
     lock.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       recovery.retry();
       await recovery.put("new-ticket", next, next.body ? [next.body] : []);
@@ -268,9 +288,11 @@ export function CreateTicketDialog({
       setConfirmNewTicket(false);
       refocusTitle.current = true;
     } catch (reason) {
-      setError(
-        `Could not save the edited draft. The original submission is still available to retry: ${String(reason)}`,
-      );
+      const failure = describeFailure(reason, "save the edited draft");
+      setError({
+        ...failure,
+        sentence: `${failure.sentence} The original submission can still be retried.`,
+      });
     } finally {
       lock.current = false;
       setPending(false);
@@ -291,7 +313,9 @@ export function CreateTicketDialog({
       ? "Add a title to create"
       : pending
         ? "Creating…"
-        : null;
+        : workspaceBlocked && !error
+          ? workspaceBlocked
+          : null;
   return (
     <DialogShell
       open={open}
@@ -465,9 +489,7 @@ export function CreateTicketDialog({
           </div>
         </fieldset>
         {error && (
-          <Alert tone="error" ref={errorRef}>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+          <FailureAlert ref={errorRef} size="compact" failure={error} />
         )}
         {hasSubmission &&
           !completedCreation &&

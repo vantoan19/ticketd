@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { failureText } from "@/lib/api/describe-failure";
 import { notificationClient } from "@/lib/api/notifications";
 import {
   loadPreferences,
@@ -56,7 +57,7 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
     setFollowFailure(
       setPreference("followCreated", value)
         ? ""
-        : "Could not save the follow preference.",
+        : "Couldn't save the follow preference.",
     );
   }
 
@@ -64,7 +65,7 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
     setFailure("");
     if (!value) {
       if (!setPreference("notifyReminders", false))
-        setFailure("Could not save the notification preference.");
+        setFailure("Couldn't save the notification preference.");
       return;
     }
     setChecking(true);
@@ -75,12 +76,10 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
         return;
       }
       if (!setPreference("notifyReminders", true))
-        setFailure("Could not save the notification preference.");
+        setFailure("Couldn't save the notification preference.");
     } catch (reason) {
       setPreference("notifyReminders", false);
-      setFailure(
-        `Could not ask for notification permission: ${String(reason)}`,
-      );
+      setFailure(failureText(reason, "ask for notification permission"));
     } finally {
       setChecking(false);
     }

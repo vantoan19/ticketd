@@ -1,6 +1,8 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { failureText } from "@/lib/api/describe-failure";
 import { Label } from "@/components/ui/label";
 import type { ChoiceOption, SchemaField } from "@/lib/api/sources";
 import type { Draft } from "@/features/settings/sources/config-values";
@@ -72,9 +74,9 @@ function FieldNote({
         </p>
       )}
       {errors.map((message) => (
-        <p key={message} role="alert" className="settings-failure">
+        <FieldError key={message}>
           {explained ? message : `${field.label} ${message}`}
-        </p>
+        </FieldError>
       ))}
     </>
   );
@@ -127,11 +129,7 @@ function MultiSelectField({
         .catch((reason: unknown) => {
           if (request !== requests.current) return;
           setSuggestions([]);
-          setFailure(
-            reason instanceof Error
-              ? reason.message
-              : "Could not load suggestions.",
-          );
+          setFailure(failureText(reason, "load suggestions"));
         })
         .finally(() => {
           if (request === requests.current) setLoading(false);
@@ -277,11 +275,7 @@ function MultiSelectField({
           aria-label={`${field.label} suggestions`}
         >
           {loading && <p className="settings-hint">Searching…</p>}
-          {!loading && failure && (
-            <p role="alert" className="settings-failure">
-              {failure}
-            </p>
-          )}
+          {!loading && failure && <FieldError>{failure}</FieldError>}
           {!loading && !failure && available.length === 0 && (
             <p className="settings-hint">
               {query.trim() === ""

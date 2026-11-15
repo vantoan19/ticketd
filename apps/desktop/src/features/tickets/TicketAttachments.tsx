@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { File, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
 import { attachments, type Attachment } from "@/lib/api/attachments";
@@ -24,9 +29,16 @@ export function TicketAttachments(props: Props) {
 }
 
 function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
-  const [files, setFiles] = useState<Attachment[]>([]);
+  // Null until the first read answers: an unread section never claims "no files".
+  const [found, setFound] = useState<Attachment[] | null>(null);
+  const files = found ?? [];
   const [visits, setVisits] = useState(0);
-  const [error, setError] = useState("");
+  // A failed read and a failed action are told apart: the read replaces the
+  // list, the action shows where it was taken.
+  const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [picker, setPicker] = useState(false);
   const [selected, setSelected] = useState<Attachment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,14 +51,15 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
     let current = true;
     void attachments
       .forTicket(ticket.reference)
-      .then((found) => {
+      .then((list) => {
         if (current) {
-          setFiles(found);
-          setError("");
+          setFound(list);
+          setLoadFailure(null);
         }
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current)
+          setLoadFailure(describeFailure(reason, "load attachments"));
       });
     return () => {
       current = false;
@@ -59,15 +72,17 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
   );
   function changed() {
     setVisits((value) => value + 1);
-    void refresh().catch((reason: unknown) => setError(String(reason)));
+    void refresh().catch((reason: unknown) =>
+      setError(describeFailure(reason, "refresh the ticket")),
+    );
   }
   async function action(run: () => Promise<void>) {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await run();
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "detach the file"));
     } finally {
       setBusy(false);
     }
@@ -83,7 +98,7 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
                 aria-label={file.display_name}
                 type="button"
                 onClick={() => {
-                  setError("");
+                  setError(null);
                   setSelected(file);
                 }}
               >
@@ -102,8 +117,16 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
             </li>
           ))}
         </ul>
-        {!files.length && (
-          <p className="attachment-hint">No directly attached files</p>
+        {loadFailure && found === null && (
+          <FailureState
+            size="inline"
+            failure={loadFailure}
+            onRetry={() => setVisits((value) => value + 1)}
+          />
+        )}
+        {/* An empty section shows only its action; a trashed ticket has none. */}
+        {found?.length === 0 && ticket.trashed && (
+          <p className="attachment-hint">No attached files</p>
         )}
         {!ticket.trashed && (
           <Button variant="ghost" size="sm" onClick={() => setPicker(true)}>
@@ -111,7 +134,7 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
             Attach file
           </Button>
         )}
-        {error && !selected && <p role="alert">{error}</p>}
+        {error && !selected && <FailureAlert size="compact" failure={error} />}
       </div>
       <AttachmentPicker
         ticketReference={ticket.reference}
@@ -147,7 +170,7 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
           }
           actions={
             <>
-              {error && <p role="alert">{error}</p>}
+              {error && <FailureAlert size="compact" failure={error} />}
               {!ticket.trashed && (
                 <Button
                   variant="ghost"

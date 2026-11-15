@@ -43,7 +43,11 @@ import {
   useSyncEntries,
   type SyncEntry,
 } from "@/features/sync-review/inbox-entries";
-import { toFailure } from "@/lib/api/bridge-failure";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { syncReview, type ConflictSummary } from "@/lib/sync-review-api";
 
 const PAGE_SIZE = 50;
@@ -197,7 +201,11 @@ export function Inbox({
   const [pages, setPages] = useState(1);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [more, setMore] = useState(false);
-  const [error, setError] = useState("");
+  // A failed read can be retried by reading again; a failed mark or snooze is
+  // said once and done again by the person.
+  const [loadError, setLoadError] = useState<FailureDescription | null>(null);
+  const [actionError, setError] = useState<FailureDescription | null>(null);
+  const error = actionError ?? loadError;
   const [tick, setTick] = useState(0);
   const changeVersion = useWorkspaceChange();
   const sync = useSyncEntries(revision);
@@ -210,10 +218,10 @@ export function Inbox({
         if (!active) return;
         setEntries(result.entries);
         setMore(result.more);
-        setError("");
+        setLoadError(null);
       },
       (e: unknown) => {
-        if (active) setError(String(e));
+        if (active) setLoadError(describeFailure(e, "load the Inbox"));
       },
     );
     return () => {
@@ -226,7 +234,9 @@ export function Inbox({
         await inboxClient.setRead(ids.slice(start, start + MARK_BATCH), read);
       reload();
     } catch (e) {
-      setError(String(e));
+      setError(
+        describeFailure(e, read ? "mark updates as read" : "mark as unread"),
+      );
     }
   }
   async function snooze(entry: Entry, choice: SnoozeChoice) {
@@ -237,7 +247,7 @@ export function Inbox({
       );
       reload();
     } catch (e) {
-      setError(String(e));
+      setError(describeFailure(e, `snooze ${entry.reference}`));
     }
   }
   function changeFilter(next: InboxFilter) {
@@ -251,7 +261,9 @@ export function Inbox({
       if (ids.length) await syncReview.setRead(ids, read);
       sync.reload();
     } catch (e) {
-      setError(toFailure(e).message);
+      setError(
+        describeFailure(e, read ? "mark updates as read" : "mark as unread"),
+      );
     }
   }
   const syncShown = sync.entries.filter((e) => filter === "all" || !e.read);
@@ -292,7 +304,13 @@ export function Inbox({
         />
       </ListHeader>
       <div className="inbox-body">
-        {error && <p role="alert">{error}</p>}
+        {error && (
+          <FailureAlert
+            size="compact"
+            failure={error}
+            {...(!actionError && { onRetry: reload })}
+          />
+        )}
         {groups.map(({ group, entries: items }) => (
           <section key={group} aria-labelledby={`inbox-group-${group}`}>
             <h2 id={`inbox-group-${group}`}>{group}</h2>
@@ -433,7 +451,7 @@ export function Follow({
   chip?: boolean;
 }) {
   const [following, setFollowing] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   useEffect(() => {
     let active = true;
     void inboxClient
@@ -441,11 +459,11 @@ export function Follow({
       .then((value) => {
         if (active) {
           setFollowing(value);
-          setError("");
+          setError(null);
         }
       })
-      .catch((e) => {
-        if (active) setError(String(e));
+      .catch((e: unknown) => {
+        if (active) setError(describeFailure(e, "check Follow"));
       });
     return () => {
       active = false;
@@ -455,9 +473,14 @@ export function Follow({
     try {
       await inboxClient.setFollowing(reference, !following);
       setFollowing(!following);
-      setError("");
+      setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(
+        describeFailure(
+          e,
+          following ? `unfollow ${reference}` : `follow ${reference}`,
+        ),
+      );
     }
   }
   if (chip)
@@ -473,7 +496,7 @@ export function Follow({
           <Eye data-icon="inline-start" aria-hidden="true" />
           {following ? "Following" : "Follow"}
         </Button>
-        {error && <p role="alert">{error}</p>}
+        {error && <FailureState size="inline" failure={error} />}
       </>
     );
   return (
@@ -482,7 +505,7 @@ export function Follow({
         <Switch checked={following} onCheckedChange={() => void toggle()} />
         Follow
       </label>
-      {error && <p role="alert">{error}</p>}
+      {error && <FailureState size="inline" failure={error} />}
     </>
   );
 }

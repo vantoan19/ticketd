@@ -17,6 +17,11 @@ import { ArrowLeft, Maximize, Minus, Plus } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -503,7 +508,8 @@ export default function DependencyGraph({
 }) {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [center, setCenter] = useState(reference);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
@@ -513,17 +519,17 @@ export default function DependencyGraph({
       (value) => {
         if (active) {
           setGraph(value);
-          setError("");
+          setError(null);
         }
       },
       (reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active) setError(describeFailure(reason, "load the graph"));
       },
     );
     return () => {
       active = false;
     };
-  }, [center, revision]);
+  }, [center, revision, attempt]);
   const notice = graph ? scopeNotice(graph, center) : null;
   const selectedTicket = graph?.nodes.find(
     (node) => node.reference === selected,
@@ -545,7 +551,12 @@ export default function DependencyGraph({
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
-      {error && <p role="alert">Graph failed: {error}</p>}
+      {error && (
+        <FailureState
+          failure={error}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      )}
       {!graph && !error && <p role="status">Loading graph…</p>}
       {graph && (
         <div className="graph-body">

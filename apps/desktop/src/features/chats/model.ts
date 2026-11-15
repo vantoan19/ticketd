@@ -966,13 +966,27 @@ export type Notice = {
   help?: string;
 };
 
+/** A host message as a sentence; a bridge that never answered is "didn't start". */
+function hostWords(message: string, harness: string) {
+  if (/\bstopped during hello\b/i.test(message))
+    return `${harness} didn't start.`;
+  // Backticks stay: they mark a command or path to set in mono.
+  const text = message.trim();
+  if (!text) return "";
+  const capital = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?…]$/.test(capital) ? capital : `${capital}.`;
+}
+
 /**
  * The notice for a problem. The host titles it; the body says what to do.
  * Wording for the states the design drew is the design's; the rest (spec
  * table 21.6) say what was observed as plainly.
  */
 export function problemNotice(problem: Problem, harness: string): Notice {
-  const said = problem.message ? ` ${problem.message}` : "";
+  // Host text is trimmed and ends with a period, so it never runs into the
+  // next sentence; known host failures are said in plain words.
+  const plain = problem.message ? hostWords(problem.message, harness) : "";
+  const said = plain ? ` ${plain}` : "";
   const signIn = problem.command ? `\`${problem.command}\`` : harness;
   // A failure of the last turn can be sent past; only a probe that can tell
   // whether it still holds is worth offering.
@@ -996,14 +1010,14 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: problem.title,
-        body: `${problem.message ?? `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
+        body: `${plain || `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "sign_in_unknown":
       return {
         tone: "neutral",
         title: problem.title,
-        body: `${problem.message ?? `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
+        body: `${plain || `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_installed":
@@ -1020,7 +1034,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: problem.title,
-        body: `${problem.message ?? `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
+        body: `${plain || `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Update guide",
       };
@@ -1028,14 +1042,14 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "neutral",
         title: problem.title,
-        body: `${problem.message ?? `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
+        body: `${plain || `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
         actions: ["check"],
       };
     case "probe_failed":
       return {
         tone: "neutral",
         title: problem.title,
-        body: `It may still work.${said} Check again before sending.`,
+        body: plain ? `${plain} It may still work.` : "It may still work.",
         actions: ["check"],
       };
     case "usage_limit":
@@ -1043,7 +1057,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
         tone: "neutral",
         title: problem.title,
         body: [
-          problem.message,
+          plain,
           resetTime(problem.resets_at)
             ? `It says the limit resets ${resetTime(problem.resets_at)}.`
             : "It didn't say when the limit resets.",
@@ -1059,7 +1073,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${past ? "The last turn stopped here. " : ""}${problem.message ?? "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
+        body: `${past ? "The last turn stopped here. " : ""}${plain || "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
       };
@@ -1068,8 +1082,8 @@ export function problemNotice(problem: Problem, harness: string): Notice {
         tone: "neutral",
         title: problem.title,
         // With a message, a resend the person asked for was not accepted.
-        body: problem.message
-          ? `${problem.message} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
+        body: plain
+          ? `${plain} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
           : `ticketd has no confirmation that ${harness} received it. It may have started work. It hasn't been sent again. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`,
         actions: ["resend", "discard"],
       };
@@ -1113,7 +1127,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${problem.message ?? "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
+        body: `${plain || "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
         actions: ["check"],
       };
   }

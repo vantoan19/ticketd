@@ -17,6 +17,10 @@ import {
 } from "@/lib/api/sources";
 import { loadPreferences, usePreferences } from "@/lib/preferences";
 import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import {
   useOnWorkspaceChange,
   useWorkspaceChange,
 } from "@/lib/workspace-change";
@@ -114,7 +118,23 @@ export function useTicketWorkspace(
   );
   const clearMention = useCallback(() => setMention(null), []);
   const [details, setDetails] = useState<Record<string, Ticket>>({});
+  // A local preference (sidebar, display) that could not be saved. It stays
+  // until dismissed: a later list load has nothing to do with it.
   const [error, setError] = useState("");
+  // Why the list could not load, for the list's own failure state. Nothing is
+  // reported window-wide: the pane that failed says so.
+  const [listFailure, setListFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  // Why the open ticket could not be fetched, by reference: its pane says so.
+  const [detailFailures, setDetailFailures] = useState<
+    Record<string, FailureDescription>
+  >({});
+  const [detailAttempt, setDetailAttempt] = useState(0);
+  const retryDetail = useCallback(
+    () => setDetailAttempt((value) => value + 1),
+    [],
+  );
   const [loading, setLoading] = useState(true);
   const [listRevision, setRevision] = useState(0);
   // The list only changes when a listed ticket does, but a Document, Activity or
@@ -218,7 +238,7 @@ export function useTicketWorkspace(
         setPollTick((value) => value + 1);
         setQueryError(false);
         setRefreshFailed(false);
-        setError("");
+        setListFailure(null);
         // The same data again changes nothing, so views are not told to reload.
         const snapshot = JSON.stringify([trash, offset, result]);
         if (snapshot === lastSnapshot.current) return;
@@ -237,11 +257,8 @@ export function useTicketWorkspace(
         if (listLoaded.current) setRefreshFailed(true);
         else setQueryError(true);
         // Polling keeps the saved list quiet; an explicit retry explains its failure.
-        if (!listLoaded.current || options?.reportFailure) {
-          setError(
-            `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
-          );
-        }
+        if (!listLoaded.current || options?.reportFailure)
+          setListFailure(describeFailure(reason, "load tickets"));
       } finally {
         window.clearTimeout(timeout);
         if (request === generation.current) setLoading(false);
@@ -305,12 +322,22 @@ export function useTicketWorkspace(
             ...previous,
             [ticket.reference]: ticket,
           }));
+          setDetailFailures((previous) => {
+            if (!(selected in previous)) return previous;
+            const rest = { ...previous };
+            delete rest[selected];
+            return rest;
+          });
           setMention((current) => markReady(current, ticket.reference));
         }
       },
       (reason: unknown) => {
         if (!active) return;
-        setError(`Ticket refresh failed: ${String(reason)}`);
+        // The detail pane shows this in place of the ticket, with Retry.
+        setDetailFailures((previous) => ({
+          ...previous,
+          [selected]: describeFailure(reason, `load ${selected}`),
+        }));
         // Reveal against what is cached rather than never.
         setMention((current) => markReady(current, selected));
       },
@@ -318,7 +345,7 @@ export function useTicketWorkspace(
     return () => {
       active = false;
     };
-  }, [selected, revision, selections]);
+  }, [selected, revision, selections, detailAttempt]);
   // Trashing or restoring swaps the ticket's view; a mention does not outlive that.
   const trashed = selected ? details[selected]?.trashed : undefined;
   const [seen, setSeen] = useState<{
@@ -344,7 +371,7 @@ export function useTicketWorkspace(
       setSourceRefresh({
         running: false,
         report: null,
-        error: reason instanceof Error ? reason.message : String(reason),
+        error: describeFailure(reason, "refresh").sentence,
         errorAt: new Date().toISOString(),
       });
     }
@@ -529,6 +556,9 @@ export function useTicketWorkspace(
     setDetails,
     error,
     setError,
+    listFailure,
+    detailFailure: selected ? (detailFailures[selected] ?? null) : null,
+    retryDetail,
     loading,
     revision,
     refresh,

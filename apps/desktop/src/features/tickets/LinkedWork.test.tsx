@@ -193,9 +193,9 @@ test("loading and a failed read are distinct from having no links", async () => 
   bridge({ fail: { contextual_relationships: "database busy" } });
   renderSection(base);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not load relationships: database busy",
+    "Couldn't load relationships",
   );
-  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
 test("builds every row from the one relationships read, including all dependents", async () => {

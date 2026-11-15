@@ -450,7 +450,7 @@ test("a lost-response submission reuses its request ID and follow choice after r
   await waitFor(() => expect(recovery.records.has("new-ticket")).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   expect(
-    await screen.findByText(/Could not confirm whether the ticket was created/),
+    await screen.findByText(/Retry safely: it never creates a second ticket/),
   ).toBeTruthy();
   expect(recovery.records.get("new-ticket")?.payload).toMatchObject({
     title: "Created before restart",
@@ -513,7 +513,9 @@ test.each([false, true])(
     const title = await screen.findByRole("textbox", { name: "Title" });
     fireEvent.change(title, { target: { value: "Preserve my draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-    expect(await screen.findByText(/Could not confirm whether/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Retry safely: it never creates a second ticket/),
+    ).toBeTruthy();
     expect(title).toHaveProperty("disabled", true);
     const originalId = create.mock.calls[0]?.[7];
 
@@ -548,9 +550,7 @@ test.each([false, true])(
     finishSave();
     if (saveFails) {
       expect(
-        await screen.findByText(
-          /original submission is still available to retry/,
-        ),
+        await screen.findByText(/original submission can still be retried/),
       ).toBeTruthy();
       expect(title).toHaveProperty("disabled", true);
       expect(recovery.records.get("new-ticket")?.payload).toMatchObject({

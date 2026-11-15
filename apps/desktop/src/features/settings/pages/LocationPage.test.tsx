@@ -103,7 +103,7 @@ test("a failed copy says so in the footer", async () => {
   });
   render(<LocationPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
-  expect(await screen.findByText(/Could not copy the path/)).toBeTruthy();
+  expect(await screen.findByText(/Couldn't copy the path/)).toBeTruthy();
 });
 
 test("Show in the file manager reveals the file, and a failure lands in the footer", async () => {
@@ -116,18 +116,18 @@ test("Show in the file manager reveals the file, and a failure lands in the foot
   vi.mocked(workspaceClient.reveal).mockRejectedValueOnce(new Error("nope"));
   fireEvent.click(show);
   expect(
-    await screen.findByText(/Could not show the file: .*nope/),
+    await screen.findByText(/Couldn't show the file in .*\. Nope\./),
   ).toBeTruthy();
 });
 
-test("a workspace that cannot be read shows an Alert, and Try again reads it again", async () => {
+test("a workspace that cannot be read says so, and Retry reads it again", async () => {
   vi.mocked(workspaceClient.info).mockRejectedValueOnce(new Error("locked"));
   render(<LocationPage />);
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("Could not read the workspace");
-  expect(alert.textContent).toContain("locked");
+  expect(alert.textContent).toContain("Couldn't read the workspace");
+  expect(alert.textContent).toContain("Locked.");
   expect(screen.queryByText("Contents")).toBeNull();
-  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
   expect(await screen.findByText("Tickets")).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
 });

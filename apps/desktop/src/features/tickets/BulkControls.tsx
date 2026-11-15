@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,16 +40,20 @@ export function BulkControls({
   plans: TicketWorkspace["plans"];
 }) {
   const [tagMode, setTagMode] = useState<"add" | "remove" | null>(null);
-  const [detailsFor, setDetailsFor] = useState<unknown>(null);
-  const retry = useRef<HTMLButtonElement>(null);
   const failureNote = useRef<HTMLDivElement>(null);
   const { pending, failure, notice, selection } = bulk;
-  const showDetails = failure !== null && detailsFor === failure;
   // The menu that started a change is disabled, then gone, while it applies.
   // Say where focus goes next: Retry after a failure, the list heading after
   // success (its confirmation is already in the live region below).
   useEffect(() => {
-    if (failure) (retry.current ?? failureNote.current)?.focus();
+    if (!failure) return;
+    const note = failureNote.current;
+    const retry = failure.retryable
+      ? Array.from(note?.querySelectorAll("button") ?? []).find(
+          (button) => button.textContent === "Retry",
+        )
+      : undefined;
+    (retry ?? note)?.focus();
   }, [failure]);
   useEffect(() => {
     if (notice) document.getElementById("tickets-heading")?.focus();
@@ -97,6 +102,16 @@ export function BulkControls({
       role="region"
       aria-label="Bulk edit"
     >
+      {failure && (
+        // Above the bar, naming the ticket that prevented the change.
+        <div ref={failureNote} tabIndex={-1} className="bulk-failure">
+          <FailureAlert
+            size="compact"
+            failure={failure.description}
+            onRetry={() => void bulk.retry()}
+          />
+        </div>
+      )}
       {count > 0 && (
         <div className="bulk-bar">
           <span className="bulk-count" aria-live="polite">
@@ -275,41 +290,7 @@ export function BulkControls({
           Applying…
         </p>
       )}
-      {failure && (
-        <div
-          ref={failureNote}
-          tabIndex={-1}
-          className="bulk-message bulk-error"
-          role="alert"
-        >
-          <span
-            className="bulk-error-text"
-            data-open={showDetails || undefined}
-            title={showDetails ? undefined : failure.message}
-          >
-            {failure.message}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-expanded={showDetails}
-            onClick={() => setDetailsFor(showDetails ? null : failure)}
-          >
-            Details
-          </Button>
-          {failure.retryable && (
-            <Button
-              ref={retry}
-              variant="outline"
-              size="sm"
-              disabled={pending}
-              onClick={() => void bulk.retry()}
-            >
-              Retry
-            </Button>
-          )}
-        </div>
-      )}
+
       {notice && (
         <p className="bulk-message" role="status">
           {notice}.

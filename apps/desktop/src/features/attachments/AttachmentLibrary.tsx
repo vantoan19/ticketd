@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { ChevronRight, Paperclip, Plus, SearchX, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
@@ -9,6 +10,10 @@ import {
   type Attachment,
   type AttachmentState,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { AttachmentCleanup } from "./AttachmentCleanup";
 import { PurgeAttachment } from "./PurgeAttachment";
@@ -39,7 +44,12 @@ export function AttachmentLibrary({
   const [purging, setPurging] = useState<Attachment | null>(null);
   const [removing, setRemoving] = useState<Attachment | null>(null);
   const cleanupTrigger = useRef<HTMLButtonElement>(null);
-  const [restoreError, setRestoreError] = useState("");
+  // A restore or download that failed shows under the row it concerns.
+  const [rowFailure, setRowFailure] = useState<{
+    id: string;
+    failure: FailureDescription;
+    retry: () => void;
+  } | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
   const { files, loading, pending, error, answered } = useAttachmentSearch(
     search,
@@ -63,7 +73,6 @@ export function AttachmentLibrary({
       .filter(({ attachment }) => attachment.kind === "local_snapshot")
       .map(({ attachment }) => attachment.id),
   );
-  const [downloadError, setDownloadError] = useState("");
   // Only when there is another page to move to.
   const pagination = (
     <footer>
@@ -85,6 +94,31 @@ export function AttachmentLibrary({
       </div>
     </footer>
   );
+  function restore(file: Attachment) {
+    setRestoring(file.id);
+    setRowFailure(null);
+    void attachments
+      .restore(file.id, crypto.randomUUID())
+      .then(() => setRefresh((value) => value + 1))
+      .catch((reason: unknown) =>
+        setRowFailure({
+          id: file.id,
+          failure: describeFailure(reason, `restore ${file.display_name}`),
+          retry: () => restore(file),
+        }),
+      )
+      .finally(() => setRestoring(null));
+  }
+  function download(file: Attachment) {
+    setRowFailure(null);
+    availability.download(file.id).catch((reason: unknown) =>
+      setRowFailure({
+        id: file.id,
+        failure: describeFailure(reason, `download ${file.display_name}`),
+        retry: () => download(file),
+      }),
+    );
+  }
   return (
     <div className="attachment-workspace">
       <div className="attachment-library-bar">
@@ -148,9 +182,12 @@ export function AttachmentLibrary({
             ]}
           />
         </div>
-        {error && <p role="alert">{error}</p>}
-        {restoreError && <p role="alert">{restoreError}</p>}
-        {loading ? (
+        {error ? (
+          <FailureState
+            failure={error}
+            onRetry={() => setRefresh((value) => value + 1)}
+          />
+        ) : loading ? (
           <p role="status">Loading files…</p>
         ) : libraryEmpty ? (
           <EmptyState
@@ -158,7 +195,7 @@ export function AttachmentLibrary({
             title="No attachments yet"
             description="Files you attach to tickets and Documents appear here."
           />
-        ) : files.length === 0 && error ? null : files.length === 0 ? (
+        ) : files.length === 0 ? (
           <>
             <NoFiles
               search={answered.search.trim()}
@@ -193,150 +230,146 @@ export function AttachmentLibrary({
                 </thead>
                 <tbody>
                   {files.map(({ attachment: file, usage }) => (
-                    <tr key={file.id}>
-                      <td>
-                        <button
-                          type="button"
-                          className="attachment-row"
-                          aria-label={file.display_name}
-                          onClick={() => onPreview(file)}
-                        >
-                          <AttachmentThumbnail file={file} />
-                          <span>
-                            {file.display_name}
-                            <small>{file.original_filename}</small>
-                            {file.purge_state === "purged" ? (
-                              <small>
-                                Permanently purged · Bytes unavailable
-                              </small>
-                            ) : file.purge_state === "pending" ? (
-                              <small>
-                                Permanent purge pending · Bytes unavailable
-                              </small>
-                            ) : (
-                              file.quarantined && <small>Quarantined</small>
-                            )}
-                          </span>
-                        </button>
-                      </td>
-                      <td data-label="Storage">
-                        {file.kind === "local_snapshot" ? (
-                          <StorageAvailability
-                            name={file.display_name}
-                            availability={availability.of(file.id)}
-                          />
-                        ) : file.uploaded_copy ? (
-                          "Uploaded copy"
-                        ) : (
-                          "External reference"
-                        )}
-                      </td>
-                      <td data-label="Size">
-                        {file.size_bytes === null
-                          ? "—"
-                          : formatSize(file.size_bytes)}
-                      </td>
-                      <td data-label="Used in">
-                        <button
-                          type="button"
-                          className="attachment-usage-link"
-                          onClick={() => onPreview(file)}
-                        >
-                          {usage.protections.length
-                            ? `${usage.protections.length} ${usage.protections.length === 1 ? "place" : "places"}`
-                            : usage.legacy_drafts_pending
-                              ? "Recovery protected"
-                              : "Unused"}
-                        </button>
-                      </td>
-                      <td data-label="Added">
-                        {file.added_at ? (
-                          <time
-                            dateTime={file.added_at}
-                            title={formatDateTime(file.added_at)}
+                    <Fragment key={file.id}>
+                      <tr>
+                        <td>
+                          <button
+                            type="button"
+                            className="attachment-row"
+                            aria-label={file.display_name}
+                            onClick={() => onPreview(file)}
                           >
-                            {relativeDateTime(file.added_at)}
-                          </time>
-                        ) : (
-                          <span title="No registration date was recorded">
-                            Unknown
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {file.kind === "external_reference" && (
-                          <Button
-                            variant="ghost"
-                            aria-label={`Remove ${file.display_name} from ticketd`}
-                            onClick={() => setRemoving(file)}
+                            <AttachmentThumbnail file={file} />
+                            <span>
+                              {file.display_name}
+                              <small>{file.original_filename}</small>
+                              {file.purge_state === "purged" ? (
+                                <small>
+                                  Permanently purged · Bytes unavailable
+                                </small>
+                              ) : file.purge_state === "pending" ? (
+                                <small>
+                                  Permanent purge pending · Bytes unavailable
+                                </small>
+                              ) : (
+                                file.quarantined && <small>Quarantined</small>
+                              )}
+                            </span>
+                          </button>
+                        </td>
+                        <td data-label="Storage">
+                          {file.kind === "local_snapshot" ? (
+                            <StorageAvailability
+                              name={file.display_name}
+                              availability={availability.of(file.id)}
+                            />
+                          ) : file.uploaded_copy ? (
+                            "Uploaded copy"
+                          ) : (
+                            "External reference"
+                          )}
+                        </td>
+                        <td data-label="Size">
+                          {file.size_bytes === null
+                            ? "—"
+                            : formatSize(file.size_bytes)}
+                        </td>
+                        <td data-label="Used in">
+                          <button
+                            type="button"
+                            className="attachment-usage-link"
+                            onClick={() => onPreview(file)}
                           >
-                            Remove from ticketd
-                          </Button>
-                        )}
-                        {file.quarantined &&
-                          file.purge_state !== "purged" &&
-                          file.purge_state !== "pending" && (
-                            <Button
-                              variant="outline"
-                              aria-label={`Restore ${file.display_name}`}
-                              disabled={restoring !== null}
-                              onClick={() => {
-                                setRestoring(file.id);
-                                setRestoreError("");
-                                void attachments
-                                  .restore(file.id, crypto.randomUUID())
-                                  .then(() => setRefresh((value) => value + 1))
-                                  .catch((reason: unknown) =>
-                                    setRestoreError(String(reason)),
-                                  )
-                                  .finally(() => setRestoring(null));
-                              }}
+                            {usage.protections.length
+                              ? `${usage.protections.length} ${usage.protections.length === 1 ? "place" : "places"}`
+                              : usage.legacy_drafts_pending
+                                ? "Recovery protected"
+                                : "Unused"}
+                          </button>
+                        </td>
+                        <td data-label="Added">
+                          {file.added_at ? (
+                            <time
+                              dateTime={file.added_at}
+                              title={formatDateTime(file.added_at)}
                             >
-                              Restore
+                              {relativeDateTime(file.added_at)}
+                            </time>
+                          ) : (
+                            <span title="No registration date was recorded">
+                              Unknown
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {file.kind === "external_reference" && (
+                            <Button
+                              variant="ghost"
+                              aria-label={`Remove ${file.display_name} from ticketd`}
+                              onClick={() => setRemoving(file)}
+                            >
+                              Remove from ticketd
                             </Button>
                           )}
-                        {file.quarantined && file.purge_state !== "purged" && (
+                          {file.quarantined &&
+                            file.purge_state !== "purged" &&
+                            file.purge_state !== "pending" && (
+                              <Button
+                                variant="outline"
+                                aria-label={`Restore ${file.display_name}`}
+                                disabled={restoring !== null}
+                                onClick={() => restore(file)}
+                              >
+                                Restore
+                              </Button>
+                            )}
+                          {file.quarantined &&
+                            file.purge_state !== "purged" && (
+                              <Button
+                                variant="ghost"
+                                aria-label={`Permanently purge ${file.display_name}`}
+                                onClick={() => setPurging(file)}
+                              >
+                                {file.purge_state === "pending"
+                                  ? "Retry purge"
+                                  : "Permanently purge"}
+                              </Button>
+                            )}
+                          {availability.of(file.id)?.state ===
+                            "not_downloaded" && (
+                            <Button
+                              variant="ghost"
+                              aria-label={`Download ${file.display_name}`}
+                              onClick={() => download(file)}
+                            >
+                              Download
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
-                            aria-label={`Permanently purge ${file.display_name}`}
-                            onClick={() => setPurging(file)}
+                            aria-label={`Rename ${file.display_name}`}
+                            onClick={() => setRenaming(file)}
                           >
-                            {file.purge_state === "pending"
-                              ? "Retry purge"
-                              : "Permanently purge"}
+                            Rename
                           </Button>
-                        )}
-                        {availability.of(file.id)?.state ===
-                          "not_downloaded" && (
-                          <Button
-                            variant="ghost"
-                            aria-label={`Download ${file.display_name}`}
-                            onClick={() => {
-                              setDownloadError("");
-                              availability
-                                .download(file.id)
-                                .catch((reason: unknown) =>
-                                  setDownloadError(String(reason)),
-                                );
-                            }}
-                          >
-                            Download
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          aria-label={`Rename ${file.display_name}`}
-                          onClick={() => setRenaming(file)}
-                        >
-                          Rename
-                        </Button>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {rowFailure?.id === file.id && (
+                        <tr className="attachment-row-failure">
+                          <td colSpan={6}>
+                            <FailureAlert
+                              size="compact"
+                              failure={rowFailure.failure}
+                              onRetry={rowFailure.retry}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
             </div>
-            {downloadError && <p role="alert">{downloadError}</p>}
             {!onePage && pagination}
           </>
         )}

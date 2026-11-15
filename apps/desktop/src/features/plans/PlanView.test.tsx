@@ -274,7 +274,9 @@ test("a failed archive keeps its dialog open with the error", async () => {
   await chooseAction("Archive Plan…");
   fireEvent.click(screen.getByRole("button", { name: "Archive" }));
   const dialog = await screen.findByRole("dialog");
-  await within(dialog).findByText("workspace is read-only");
+  const failure = await within(dialog).findByRole("alert");
+  expect(failure.textContent).toContain("Couldn't archive");
+  expect(failure.textContent).toContain("Workspace is read-only.");
   expect(within(dialog).getByRole("button", { name: "Archive" })).toBeTruthy();
   expect(screen.getByText("Active Plan")).toBeTruthy();
 });

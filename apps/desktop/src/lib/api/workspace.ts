@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/api/bridge-failure";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { z } from "zod";
@@ -94,6 +94,10 @@ export type SafetyBackup = z.infer<typeof safetyBackupsSchema>[number];
 export const workspaceClient = {
   async info() {
     return workspaceInfoSchema.parse(await invoke("workspace_info"));
+  },
+  /** Where the workspace file is, read without opening it. */
+  async location() {
+    return z.string().parse(await invoke("workspace_location"));
   },
   /** The most recent successful backup, including ones made with the CLI. */
   async lastBackup() {

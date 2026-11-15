@@ -21,7 +21,9 @@ function withTimeout<T>(work: Promise<T>, ms: number) {
       },
       (reason: unknown) => {
         clearTimeout(timer);
-        reject(reason instanceof Error ? reason : new Error(String(reason)));
+        reject(
+          reason instanceof Error ? reason : new Error("Rendering failed."),
+        );
       },
     );
   });

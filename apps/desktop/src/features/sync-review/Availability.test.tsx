@@ -173,7 +173,7 @@ test("a download on open that fails says why and leaves Download", async () => {
   vi.mocked(syncReview.download).mockRejectedValue(new Error("offline"));
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
   expect((await screen.findAllByRole("alert"))[0]?.textContent).toContain(
-    "offline",
+    "Couldn't download the file. Offline.",
   );
   expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
   expect(syncReview.download).toHaveBeenCalledTimes(1);

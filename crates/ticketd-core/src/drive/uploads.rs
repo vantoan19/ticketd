@@ -324,9 +324,7 @@ impl Workspace {
             }
             total += count as u64;
             if total > limit {
-                return Err(Error::Attachment(format!(
-                    "file exceeds the workspace upload limit of {limit} bytes; change it in Settings > Attachments"
-                )));
+                return Err(Error::UploadLimit { limit });
             }
             if !progress(0, total) {
                 return Err(cancelled().into());

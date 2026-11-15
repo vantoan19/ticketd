@@ -93,7 +93,7 @@ test("a failed export says why and keeps the button usable", async () => {
   renderPage();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "The export was not saved: disk full",
+    "Couldn't save the export. Disk full.",
   );
   expect(screen.queryByText(/Export saved to/)).toBeNull();
   expect(
@@ -106,7 +106,7 @@ test("a save dialog that cannot open is reported", async () => {
   renderPage();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not open the save dialog: no window",
+    "Couldn't open the save dialog. No window.",
   );
 });
 
@@ -119,7 +119,7 @@ test("a file manager that cannot show the file is reported", async () => {
       name: `Show in ${fileManagerName()}`,
     }),
   );
-  expect((await screen.findByRole("alert")).textContent).toContain("gone");
+  expect((await screen.findByRole("alert")).textContent).toContain("Gone.");
 });
 
 test("each command can be copied with its placeholders in place", async () => {

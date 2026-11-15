@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Cloud, LaptopMinimal, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Popover,
   PopoverContent,
@@ -127,9 +128,11 @@ export function SourceRail({
             )}
           </div>
           {sync.failure && !sync.running && (
-            <small role="alert">
-              Could not refresh: {sync.failure} Saved content is unchanged.
-            </small>
+            <FailureAlert
+              size="compact"
+              failure={sync.failure}
+              onRetry={() => void sync.run()}
+            />
           )}
         </div>
       ) : ticket.source ? (

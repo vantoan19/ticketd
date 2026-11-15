@@ -105,7 +105,7 @@ it("tells a capture it is saved to Documents once it has text", async () => {
 });
 it("keeps a failed capture open and retries the same request before returning", async () => {
   vi.mocked(documents.save)
-    .mockRejectedValueOnce("disk full")
+    .mockRejectedValueOnce({ code: "disk_full", message: "disk full" })
     .mockResolvedValueOnce({
       id: "d1",
       title: null,
@@ -120,7 +120,7 @@ it("keeps a failed capture open and retries the same request before returning", 
     target: { value: "A thought" },
   });
   fireEvent.click(screen.getByText("Done"));
-  await screen.findByText(/couldn’t save your changes/);
+  await screen.findByText("Couldn't save the Document");
   expect(close).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Retry"));
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
@@ -132,14 +132,23 @@ it("keeps a failed capture open and retries the same request before returning", 
   expect(close).toHaveBeenCalledOnce();
 });
 it("after a failed capture save, closing explains the risk and can discard", async () => {
-  vi.mocked(documents.save).mockRejectedValue("disk full");
+  // DR-08: closing never waits on a save that cannot succeed.
+  vi.mocked(documents.save).mockRejectedValue({
+    code: "workspace_read_only",
+    message: "workspace database error: attempt to write a readonly database",
+  });
   const close = vi.fn();
   renderEditor(<DocumentEditor initial={null} onClose={close} />);
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
   fireEvent.click(screen.getByText("Done"));
-  await screen.findByText(/couldn’t save your changes/);
+  expect(
+    await screen.findByText(
+      "The workspace is read-only, so nothing changed. Your draft is still here.",
+    ),
+  ).toBeTruthy();
+  expect(close).not.toHaveBeenCalled();
   // Without draft recovery the draft would be lost, so × asks instead of hanging.
   fireEvent.click(screen.getByRole("button", { name: "Close and return" }));
   fireEvent.click(
@@ -817,9 +826,10 @@ it("refreshes silently when an outside change arrives and nothing is unsaved", a
 });
 it("sends the loaded revision and keeps the draft when the save is stale", async () => {
   vi.useFakeTimers();
-  vi.mocked(documents.save).mockRejectedValueOnce(
-    "document 'd1' was changed elsewhere since it was loaded",
-  );
+  vi.mocked(documents.save).mockRejectedValueOnce({
+    code: "conflict",
+    message: "document 'd1' was changed elsewhere since it was loaded",
+  });
   outside({ ...stored, body: "Via CLI", updated_at: "later" });
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("radio", { name: "Edit" }));

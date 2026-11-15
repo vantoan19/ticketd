@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/api/bridge-failure";
 export type Entry = {
   kind: string;
   from_value: string;

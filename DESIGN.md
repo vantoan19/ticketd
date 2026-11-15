@@ -571,10 +571,20 @@ Use a small set of observable states rather than transient notifications everywh
 | No filter matches               | Current query context and Clear filters                                  |
 | No selected ticket              | Quiet selection hint; no large illustration                              |
 | Missing/trashed reference       | Readable reference plus unavailable/trashed explanation                  |
-| Save failure                    | Draft stays editable with Retry and a clear failure message              |
+| Save failure                    | Draft stays editable; one plain failure with Retry and Details           |
 | External change beneath a draft | Local notice with explicit reload/overwrite choices                      |
 | Source refresh                  | Retain content; “Refreshing GitHub…”, then the new sync time             |
 | Source unavailable              | Last synced content stays readable; notice with Retry and Take ownership |
+
+### Failures and error language
+
+One cause is reported once, at the place it concerns, in plain words. The core sends each failure with a kind (`workspace_read_only`, `workspace_unreadable`, `workspace_locked`, `disk_full`, `not_found`, `cycle`, `conflict`, `too_large`, `not_signed_in`, `offline`, or `failed`); the interface chooses its words and next step by kind and never parses the message. `describeFailure(error, action)` in `lib/api/describe-failure.ts` returns the title, sentence, next step, and raw text, and lint rejects raw `String(reason)` text in the interface.
+
+- **Voice.** The title says what did not happen: “Couldn’t {verb} {object}”, sentence case, no period. One sentence follows with the plain cause and what is safe (“Nothing changed.”, “Your draft is kept on this device.”). The action is “Retry” only when retrying can succeed; otherwise it is the fix (“Change limit”, “Choose another ticket”). Core prefixes, “Error:”, CLI commands, backticks, byte counts, and absolute paths never appear outside Details.
+- **Details.** The raw text sits behind a “Details” toggle, in 12px mono with “Copy details”.
+- **By scope.** An invalid field shows a FieldError under it (`aria-invalid`, nothing is sent): an empty ticket title says “A ticket needs a title.” and keeps the last saved title. A failed action shows a compact error Alert under its control or above the dialog footer (FailureAlert). Dense rows and the ticket rail show one caption, “● Not saved · Retry”, with the cause under Details (FailureCaption). A region that cannot load shows “Couldn’t load {things}” with Retry in place of its content and never claims to be empty (FailureState). A failed background refresh keeps the content with “Can’t refresh. Showing the last list. Retry”. A dialog whose main task is blocked shows an error Alert at the top of its body.
+- **Workspace band.** Workspace-level state only (read-only, locked, unreadable, disk full, unsaved drafts not protected) is one 40px band inside the top edge of the content panel: `--recessed` with a bottom hairline, an attention dot, one sentence (“This workspace is read-only. Changes can’t be saved.”), Details, and Retry. There is at most one; it stays until Retry succeeds. Nothing else repeats the cause: editors add no notice of their own, and editing controls rest disabled with the reason.
+- **Startup.** When the workspace cannot be opened, the window shows a recovery screen in the app’s theme (the native title bar included): the wordmark, “ticketd can’t open this workspace”, the plain cause, the workspace file with Copy path and Show in Finder, Retry, and Details.
 
 Buttons and links change color/background without scale, translation, or opacity animation. Overlay motion uses the reference’s 200ms popover / 300ms modal duration, scale from 0.96, and `cubic-bezier(.175, .885, .32, 1.1)` easing. Avoid animated row reordering and decorative loading loops. Honor reduced-motion preferences with immediate state changes. Motion is never required to understand completion or selection.
 

@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Reference } from "@/components/ui/reference";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import type { TicketStart } from "@/features/chats/ticket-chat";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import type { ChatFailureNotice } from "@/features/chats/failure";
 import { Count } from "@/components/ui/count";
 import {
   DropdownMenu,
@@ -138,7 +139,7 @@ function ChatRow({
   tabStop: boolean;
   now: number;
   onOpen: () => void;
-  onResult: (failure: string) => void;
+  onResult: (failure: ChatFailureNotice | null) => void;
 }) {
   const row = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
@@ -255,7 +256,7 @@ export function ChatsView({
   const [open, setOpen] = useState<Open>(null);
   const [expanded, setExpanded] = useState(false);
   const [seenRequest, setSeenRequest] = useState(0);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   // A clicked notification opens its Chat under its own list, title focused.
   const { openRequest, chatRequest } = useChatFeature();
   const [seenOpen, setSeenOpen] = useState(openRequest?.n ?? 0);
@@ -367,15 +368,15 @@ export function ChatsView({
       </ListHeader>
       {failure && (
         <div className="chat-list-alert">
-          <Alert tone="error">
-            <AlertDescription>{failure}</AlertDescription>
-          </Alert>
+          <FailureAlert
+            size="compact"
+            failure={failure.failure}
+            {...(failure.retry && { onRetry: failure.retry })}
+          />
         </div>
       )}
       {list?.error && (
-        <p className="chat-list-empty" role="alert">
-          Could not load Chats: {list.error}
-        </p>
+        <FailureState failure={list.error} onRetry={list.retry} />
       )}
       {list && !list.error && list.chats.length === 0 && (
         <p className="chat-list-empty">{current?.empty}</p>

@@ -408,8 +408,8 @@ test("answering a request that expired behind a lost update is refused, then the
   client.dropChanges("c1", 1);
   act(() => client.push("c1", { ...approval, state: "expired" }));
   fireEvent.click(button("Allow once"));
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "The request had closed; your answer wasn't applied.",
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't apply your answer. The request had already closed.",
   );
   // The next change exposes the gap; the view takes a fresh snapshot.
   act(() => client.patch("c1", { activity: "idle" }));
@@ -1721,13 +1721,13 @@ test("a first message that was not sent opens the Chat with the text, and New Ch
   // The Chat that exists is opened, with the unsent words ready to send there.
   await screen.findByRole("heading", { name: "Left behind" });
   expect(composer()).toHaveProperty("value", "first try");
-  expect(screen.getByRole("alert").textContent).toContain("storage failed");
+  expect(screen.getByRole("alert").textContent).toContain("Storage failed.");
 
   // New Chat starts clean: a changed message is a new request, not a conflict.
   await newChat();
   expect(composer(describe)).toHaveProperty("value", "");
   await send("something else");
-  await screen.findByText(/Could not start the Chat: bridge closed/);
+  await screen.findByText("Couldn't start the Chat.");
   expect(asked[1]?.command_id).not.toBe(asked[0]?.command_id);
   // Sending the very same request again repeats its id, so it finds what it made.
   expect(composer(describe)).toHaveProperty("value", "something else");
@@ -1735,7 +1735,7 @@ test("a first message that was not sent opens the Chat with the text, and New Ch
   await waitFor(() => expect(asked).toHaveLength(3));
   expect(asked[2]?.command_id).toBe(asked[1]?.command_id);
   // Changing what is asked for makes it a new request.
-  await screen.findByText(/Could not start the Chat: bridge closed/);
+  await screen.findByText("Couldn't start the Chat.");
   await send("something else entirely");
   await waitFor(() => expect(asked).toHaveLength(4));
   expect(asked[3]?.command_id).not.toBe(asked[2]?.command_id);

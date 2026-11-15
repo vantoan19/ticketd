@@ -1,3 +1,8 @@
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -23,16 +28,20 @@ export function ExperimentalCard() {
   const client = useChatClient();
   const { openPage } = useSettingsState();
   const { enabled, setEnabled } = useChatFeature();
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<{
+    failure: FailureDescription;
+    value: boolean;
+  } | null>(null);
   /** How many Chats turning off would stop; set while the confirmation is open. */
   const [confirming, setConfirming] = useState<number | null>(null);
   const apply = (value: boolean) =>
     setEnabled(value).then(
-      () => setFailure(""),
+      () => setFailure(null),
       (reason: unknown) =>
-        setFailure(
-          `Could not turn Chat ${value ? "on" : "off"}: ${reason instanceof Error ? reason.message : String(reason)}`,
-        ),
+        setFailure({
+          failure: describeFailure(reason, `turn Chat ${value ? "on" : "off"}`),
+          value,
+        }),
     );
   async function change(value: boolean) {
     if (value) return apply(true);
@@ -81,9 +90,11 @@ export function ExperimentalCard() {
           </SettingsListFooter>
         </SettingsList>
         {failure && (
-          <p className="mt-3 text-xs leading-4 text-destructive" role="alert">
-            {failure}
-          </p>
+          <FailureAlert
+            size="compact"
+            failure={failure.failure}
+            onRetry={() => void apply(failure.value)}
+          />
         )}
       </div>
       <DialogShell

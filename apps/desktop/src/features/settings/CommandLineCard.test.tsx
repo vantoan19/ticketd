@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -97,9 +98,15 @@ test("an installation guide that cannot open says so", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Installation guide" }),
   );
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Could not open the installation guide: Error: No browser",
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain(
+    "Couldn't open the installation guide. No browser.",
   );
+  expect(alert.textContent).not.toContain("Error:");
+  // Retry opens the guide again and clears the failure when it succeeds.
+  vi.mocked(openUrl).mockResolvedValueOnce(undefined);
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });
 
 test("copies a quick-reference command", async () => {

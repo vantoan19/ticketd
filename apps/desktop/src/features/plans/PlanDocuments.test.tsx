@@ -33,9 +33,11 @@ test("adds context, designates a spec, and opens its source", async () => {
   });
   const state: PlanViewState = {
     view: null,
-    loadError: "",
+    loadError: null,
+    reload: vi.fn(),
     pending: false,
-    actionError: "",
+    actionError: null,
+    retry: vi.fn(async () => false),
     adding: false,
     setAdding: vi.fn(),
     run,

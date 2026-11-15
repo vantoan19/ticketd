@@ -121,8 +121,8 @@ test("saved locally: offline changes wait, and the popover offers Try now", asyn
   api.syncNow.mockImplementation(real.syncNow);
   vi.mocked(invoke).mockRejectedValue(hostFailure("no network"));
   fireEvent.click(within(dialog).getByRole("button", { name: "Try now" }));
-  expect((await within(dialog).findByRole("alert")).textContent).toBe(
-    "Sync did not run: no network",
+  expect((await within(dialog).findByRole("alert")).textContent).toContain(
+    "Couldn't sync. No network.",
   );
 });
 

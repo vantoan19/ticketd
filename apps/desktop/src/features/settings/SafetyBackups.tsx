@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { FolderOpen, ShieldCheck } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { workspaceClient, type SafetyBackup } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
@@ -28,8 +26,12 @@ const KIND_LABEL: Record<SafetyBackup["kind"], string> = {
 
 type Listing =
   | { status: "loading" }
-  | { status: "failed"; reason: string }
+  | { status: "failed"; failure: FailureDescription }
   | { status: "ready"; backups: SafetyBackup[] };
+
+function listFailure(reason: unknown) {
+  return describeFailure(reason, "list safety backups");
+}
 
 /** The safety and pre-migration backups kept next to the workspace. */
 export function SafetyBackups() {
@@ -43,7 +45,7 @@ export function SafetyBackups() {
         backups: await workspaceClient.safetyBackups(),
       });
     } catch (reason) {
-      setListing({ status: "failed", reason: String(reason) });
+      setListing({ status: "failed", failure: listFailure(reason) });
     }
   }, []);
   useEffect(() => {
@@ -55,7 +57,8 @@ export function SafetyBackups() {
         if (current) setListing({ status: "ready", backups });
       })
       .catch((reason: unknown) => {
-        if (current) setListing({ status: "failed", reason: String(reason) });
+        if (current)
+          setListing({ status: "failed", failure: listFailure(reason) });
       });
     return () => {
       current = false;
@@ -71,20 +74,11 @@ export function SafetyBackups() {
       caption="Kept next to the workspace before a restore or a format upgrade, including every retained local attachment file. Restore one the same way as any other backup."
     >
       {listing.status === "failed" ? (
-        <Alert tone="error">
-          <AlertTitle>Could not list safety backups</AlertTitle>
-          <AlertDescription>{listing.reason}</AlertDescription>
-          <AlertActions>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void load()}
-            >
-              Try again
-            </Button>
-          </AlertActions>
-        </Alert>
+        <FailureState
+          size="inline"
+          failure={listing.failure}
+          onRetry={() => void load()}
+        />
       ) : (
         <SettingsList>
           {listing.status === "loading" && (

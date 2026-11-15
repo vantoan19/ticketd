@@ -5,6 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileText, Pin, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import {
   documents,
   type Document,
@@ -110,7 +115,28 @@ export function Documents({
   const [offset, setOffset] = useState(0);
   const [recentOffset, setRecentOffset] = useState(0);
   const [pinOffset, setPinOffset] = useState(0);
-  const [error, setError] = useState("");
+  // The list's failure: a load replaces the list, an action shows beside it.
+  const [listError, setListError] = useState<{
+    failure: FailureDescription;
+    kind: "load" | "action";
+    retry: () => void;
+  } | null>(null);
+  // The reader's failure (pin, keep, tags), shown in the reader only.
+  const [readerError, setReaderError] = useState<{
+    failure: FailureDescription;
+    retry: () => void;
+  } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retryLoad = useCallback(() => setAttempt((value) => value + 1), []);
+  const failLoad = useCallback(
+    (reason: unknown, things: string) =>
+      setListError({
+        failure: describeFailure(reason, `load ${things}`),
+        kind: "load",
+        retry: retryLoad,
+      }),
+    [retryLoad],
+  );
   const [keptId, setKeptId] = useState<string | null>(null);
   // The Document last restored from Trash, said where the Include toggle sits
   // outside Trash, so nothing moves.
@@ -131,10 +157,10 @@ export function Documents({
         setRecent(r);
         setPins(p);
         setBrowseLoaded(true);
-        setError("");
+        setListError(null);
       })
-      .catch((e: unknown) => setError(String(e)));
-  }, [recentOffset, pinOffset, includeSupport]);
+      .catch((reason: unknown) => failLoad(reason, "Documents"));
+  }, [recentOffset, pinOffset, includeSupport, failLoad]);
   const loadTrash = useCallback(
     () =>
       void documents
@@ -142,15 +168,16 @@ export function Documents({
         .then((items) => {
           setTrash(items);
           setTrashLoaded(true);
-          setError("");
+          setListError(null);
         })
-        .catch((e: unknown) => setError(String(e))),
-    [trashOffset],
+        .catch((reason: unknown) => failLoad(reason, "Trash")),
+    [trashOffset, failLoad],
   );
   useEffect(() => {
     if (!active || !showTrash) return;
     loadTrash();
-  }, [active, showTrash, loadTrash, changeVersion]);
+    // `attempt` reloads after Retry.
+  }, [active, showTrash, loadTrash, changeVersion, attempt]);
   useEffect(() => {
     const index = focusAfterRestore.current;
     if (index === null) return;
@@ -173,25 +200,35 @@ export function Documents({
         .then((items) => {
           setAll(items);
           setAllLoaded(true);
-          setError("");
+          setListError(null);
         })
-        .catch((e: unknown) => setError(String(e)));
+        .catch((reason: unknown) => failLoad(reason, "Documents"));
     load();
-  }, [active, view, allOffset, includeSupport, changeVersion]);
+  }, [
+    active,
+    view,
+    allOffset,
+    includeSupport,
+    changeVersion,
+    attempt,
+    failLoad,
+  ]);
   useEffect(() => {
     if (target)
       void Promise.all([documents.open(target.id), documents.tags(target.id)])
         .then(([doc, values]) => {
           setSelected(doc);
           setTags(values);
-          setError("");
+          setListError(null);
+          setReaderError(null);
         })
-        .catch((e: unknown) => setError(String(e)));
-  }, [target]);
+        .catch((reason: unknown) => failLoad(reason, "the Document"));
+  }, [target, attempt, failLoad]);
   useEffect(() => {
     if (!active) return;
     refresh();
-  }, [active, capture, refresh, changeVersion]);
+    // `attempt` reloads after Retry.
+  }, [active, capture, refresh, changeVersion, attempt]);
   useEffect(() => {
     let current = true;
     if (!active || (!query.trim() && !filter.trim())) return;
@@ -201,21 +238,35 @@ export function Documents({
         .then((r) => {
           if (current) {
             setResults(r);
-            setError("");
+            setListError(null);
             setSearchKey(
               JSON.stringify([query, filter, offset, includeSupport]),
             );
           }
         })
-        .catch((e: unknown) => {
-          if (current) setError(String(e));
+        .catch((reason: unknown) => {
+          if (current)
+            setListError({
+              failure: describeFailure(reason, "search Documents"),
+              kind: "load",
+              retry: retryLoad,
+            });
         });
     };
     search();
     return () => {
       current = false;
     };
-  }, [active, query, filter, offset, includeSupport, changeVersion]);
+  }, [
+    active,
+    query,
+    filter,
+    offset,
+    includeSupport,
+    changeVersion,
+    attempt,
+    retryLoad,
+  ]);
   const noVisible =
     searchKey === JSON.stringify([query, filter, offset, includeSupport]) &&
     results.length === 0;
@@ -240,21 +291,46 @@ export function Documents({
       .then(([doc, values]) => {
         setSelected(doc);
         setTags(values);
-        setError("");
+        setListError(null);
+        setReaderError(null);
         refresh();
       })
-      .catch((e: unknown) => setError(String(e)));
+      .catch((reason: unknown) =>
+        setListError({
+          failure: describeFailure(reason, "open the Document"),
+          kind: "action",
+          retry: () => open(id),
+        }),
+      );
+  };
+  /** Runs a list action; a failure shows beside the list with Retry. */
+  const listAction = (action: string, change: () => Promise<unknown>) =>
+    void change().catch((reason: unknown) =>
+      setListError({
+        failure: describeFailure(reason, action),
+        kind: "action",
+        retry: () => listAction(action, change),
+      }),
+    );
+  /** Runs a reader action; a failure shows in the reader with Retry. */
+  const readerAction = (action: string, change: () => Promise<unknown>) => {
+    setReaderError(null);
+    void change().catch((reason: unknown) =>
+      setReaderError({
+        failure: describeFailure(reason, action),
+        retry: () => readerAction(action, change),
+      }),
+    );
   };
   const restore = (doc: DocumentSummary, index: number) =>
-    void documents
-      .setTrashed(doc.id, false, crypto.randomUUID())
-      .then(() => {
+    listAction(`restore ${doc.heading}`, () =>
+      documents.setTrashed(doc.id, false, crypto.randomUUID()).then(() => {
         setRestored(doc);
         focusAfterRestore.current = index;
         loadTrash();
         refresh();
-      })
-      .catch((e: unknown) => setError(String(e)));
+      }),
+    );
   const list = (items: DocumentSummary[], mark = "", inTrash = false) => (
     <ul className="document-list">
       {items.map((doc, index) => {
@@ -320,10 +396,9 @@ export function Documents({
                 size="icon-sm"
                 aria-label={`${pinned ? "Unpin" : "Pin"} ${doc.heading}`}
                 onClick={() =>
-                  void documents
-                    .pin(doc.id, !pinned)
-                    .then(refresh)
-                    .catch((e: unknown) => setError(String(e)))
+                  listAction(`${pinned ? "unpin" : "pin"} ${doc.heading}`, () =>
+                    documents.pin(doc.id, !pinned).then(refresh),
+                  )
                 }
               >
                 <Pin fill={pinned ? "currentColor" : "none"} />
@@ -354,7 +429,13 @@ export function Documents({
             )
           }
         />
-        {error && <p role="alert">{error}</p>}
+        {listError?.kind === "action" && (
+          <FailureAlert
+            size="compact"
+            failure={listError.failure}
+            onRetry={listError.retry}
+          />
+        )}
         <div className="documents-toolbar">
           <div className="documents-tabs">
             {(
@@ -459,7 +540,9 @@ export function Documents({
             </div>
           )}
         </div>
-        {showTrash ? (
+        {listError?.kind === "load" ? (
+          <FailureState failure={listError.failure} onRetry={listError.retry} />
+        ) : showTrash ? (
           <section ref={trashList}>
             {!trashLoaded ? (
               <EmptyState
@@ -658,12 +741,13 @@ export function Documents({
           initial={selected}
           active={active}
           pinned={pins.some((p) => p.id === selected.id)}
-          onTogglePin={() =>
-            void documents
-              .pin(selected.id, !pins.some((p) => p.id === selected.id))
-              .then(refresh)
-              .catch((e: unknown) => setError(String(e)))
-          }
+          onTogglePin={() => {
+            const pinned = pins.some((p) => p.id === selected.id);
+            readerAction(
+              pinned ? "unpin the Document" : "pin the Document",
+              () => documents.pin(selected.id, !pinned).then(refresh),
+            );
+          }}
           onOpenDocument={open}
           closeRequest={listRequest ?? 0}
           backLabel={backLabel}
@@ -687,14 +771,15 @@ export function Documents({
               {!trashed && selected.origin_brief && !selected.kept && (
                 <Button
                   onClick={() =>
-                    void documents
-                      .keep(selected.id, crypto.randomUUID())
-                      .then((doc) => {
-                        setSelected(doc);
-                        setKeptId(doc.id);
-                        refresh();
-                      })
-                      .catch((e: unknown) => setError(String(e)))
+                    readerAction("keep it in Documents", () =>
+                      documents
+                        .keep(selected.id, crypto.randomUUID())
+                        .then((doc) => {
+                          setSelected(doc);
+                          setKeptId(doc.id);
+                          refresh();
+                        }),
+                    )
                   }
                 >
                   Keep in Documents
@@ -708,7 +793,13 @@ export function Documents({
               )}
               <section aria-label="Document tags">
                 <h2>Tags</h2>
-                {error && <p role="alert">{error}</p>}
+                {readerError && (
+                  <FailureAlert
+                    size="compact"
+                    failure={readerError.failure}
+                    onRetry={readerError.retry}
+                  />
+                )}
                 <ul className="document-tags">
                   {tags.map((tag) => (
                     <li key={tag}>
@@ -719,12 +810,13 @@ export function Documents({
                         aria-label={`Remove tag ${tag}`}
                         disabled={trashed}
                         onClick={() =>
-                          void documents
-                            .tag(selected.id, tag, false)
-                            .then(() =>
-                              setTags(tags.filter((value) => value !== tag)),
-                            )
-                            .catch((e: unknown) => setError(String(e)))
+                          readerAction(`remove the tag ${tag}`, () =>
+                            documents
+                              .tag(selected.id, tag, false)
+                              .then(() =>
+                                setTags(tags.filter((value) => value !== tag)),
+                              ),
+                          )
                         }
                       >
                         ×
@@ -748,15 +840,17 @@ export function Documents({
                     onSubmit={(e) => {
                       e.preventDefault();
                       if (!newTag.trim()) return;
-                      void documents
-                        .tag(selected.id, newTag, true)
-                        .then(() => documents.tags(selected.id))
-                        .then((values) => {
-                          setTags(values);
-                          setNewTag("");
-                          setAddingTag(false);
-                        })
-                        .catch((error: unknown) => setError(String(error)));
+                      const tag = newTag;
+                      readerAction(`add the tag ${tag.trim()}`, () =>
+                        documents
+                          .tag(selected.id, tag, true)
+                          .then(() => documents.tags(selected.id))
+                          .then((values) => {
+                            setTags(values);
+                            setNewTag("");
+                            setAddingTag(false);
+                          }),
+                      );
                     }}
                   >
                     <label htmlFor="new-document-tag">Add tag</label>

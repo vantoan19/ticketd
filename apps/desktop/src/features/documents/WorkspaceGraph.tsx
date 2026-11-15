@@ -19,6 +19,12 @@ import {
 } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { layoutFailure } from "./graph-failure";
 import { ListHeader } from "@/components/ui/list-header";
 import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -90,7 +96,17 @@ export function WorkspaceGraph({
   const [selected, setSelected] = useState<string | null>(null);
   // A crowded workspace opens as a list; the map is one click away.
   const [mapChoice, setMapChoice] = useState<boolean | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{
+    failure: FailureDescription;
+    retry: () => void;
+  } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // Bumped by Retry after a layout failure: a new canvas lays the graph out again.
+  const [layoutRun, setLayoutRun] = useState(0);
+  const reload = () => {
+    setError(null);
+    setAttempt((value) => value + 1);
+  };
   const [loadingPage, setLoadingPage] = useState(false);
   const [fit, setFit] = useState(true);
   // Bumped when more ticket projects are known, so cards and the panel redraw.
@@ -134,16 +150,21 @@ export function WorkspaceGraph({
         if (active) {
           setGraph(value);
           setFit(true);
-          setError("");
+          setError(null);
         }
       })
       .catch((reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active)
+          setError({
+            failure: describeFailure(reason, "load the workspace graph"),
+            retry: reload,
+          });
       });
     return () => {
       active = false;
     };
-  }, [request]);
+    // `attempt` reloads after Retry.
+  }, [request, attempt]);
   const currentGraph = useRef(graph);
   // Bumped whenever the shown pages change, so a slower refresh can tell its
   // snapshot of them is stale and must not overwrite newer pages.
@@ -205,7 +226,11 @@ export function WorkspaceGraph({
           omitted: value.omitted || previous.next_cursor !== null,
         });
       } catch (reason: unknown) {
-        if (current) setError(String(reason));
+        if (current)
+          setError({
+            failure: describeFailure(reason, "load the workspace graph"),
+            retry: reload,
+          });
       }
     }
     void hydrate(2);
@@ -352,7 +377,10 @@ export function WorkspaceGraph({
       }
       setGraph(page);
     } catch (reason: unknown) {
-      setError(String(reason));
+      setError({
+        failure: describeFailure(reason, "show more of the graph"),
+        retry: () => void more(),
+      });
     } finally {
       setLoadingPage(false);
     }
@@ -376,7 +404,10 @@ export function WorkspaceGraph({
       });
       setAdjacencyLimit(limit);
     } catch (reason: unknown) {
-      setError(String(reason));
+      setError({
+        failure: describeFailure(reason, "show more connections"),
+        retry: () => void expandConnections(),
+      });
     } finally {
       setLoadingPage(false);
     }
@@ -535,11 +566,18 @@ export function WorkspaceGraph({
         </label>
       </div>
       <div className="context-graph-body" data-map={showMap || undefined}>
-        {error && <p role="alert">{error}</p>}
+        {error && (
+          <FailureAlert
+            size="compact"
+            failure={error.failure}
+            onRetry={error.retry}
+          />
+        )}
         {showMap ? (
           <div className="context-graph-main">
             {active && (
               <ContextGraphCanvas
+                key={layoutRun}
                 nodes={nodes}
                 edges={edges}
                 loading={!graph}
@@ -549,7 +587,15 @@ export function WorkspaceGraph({
                 viewport={viewport}
                 onViewport={setViewport}
                 onSelect={setSelected}
-                onError={setError}
+                onError={(details) =>
+                  setError({
+                    failure: layoutFailure(details),
+                    retry: () => {
+                      setError(null);
+                      setLayoutRun((value) => value + 1);
+                    },
+                  })
+                }
                 fit={fit}
                 onFitted={() => setFit(false)}
                 overlay={

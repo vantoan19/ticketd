@@ -231,7 +231,7 @@ test("an empty preview is allowed and a provider failure keeps the draft", async
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "rejected the credential",
+    "Couldn't preview matching issues. The account needs to be connected again.",
   );
   expect(screen.getByRole("button", { name: "Remove o/r" })).toBeTruthy();
   expect(

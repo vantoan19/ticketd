@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -10,6 +11,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { attachments, type Attachment } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 
 export function RenameAttachment({
   file,
@@ -22,11 +27,11 @@ export function RenameAttachment({
 }) {
   const [name, setName] = useState(file.display_name);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const request = useRef<{ name: string; id: string } | null>(null);
   async function save() {
     setBusy(true);
-    setError("");
+    setError(null);
     if (request.current?.name !== name)
       request.current = { name, id: crypto.randomUUID() };
     try {
@@ -38,7 +43,7 @@ export function RenameAttachment({
       onRenamed(renamed);
       onClose();
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "rename the file"));
     } finally {
       setBusy(false);
     }
@@ -54,7 +59,7 @@ export function RenameAttachment({
         <DialogHeader>
           <DialogTitle>Rename attachment</DialogTitle>
           <DialogDescription>
-            Change the display name used in the attachment browser.
+            The name ticketd shows for this file.
           </DialogDescription>
         </DialogHeader>
         <Label htmlFor="attachment-display-name">Display name</Label>
@@ -71,10 +76,15 @@ export function RenameAttachment({
           Original filename: {file.original_filename}
         </p>
         <p className="attachment-hint">
-          Existing link text stays exactly as authored. Renaming does not change
-          the original filename, file bytes, or identity.
+          Links keep their text; only the name shown in ticketd changes.
         </p>
-        {error && <p role="alert">{error}</p>}
+        {error && (
+          <FailureAlert
+            size="compact"
+            failure={error}
+            onRetry={() => void save()}
+          />
+        )}
         <div className="attachment-actions">
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel

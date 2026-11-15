@@ -20,7 +20,7 @@ export function useCopy() {
       return true;
     }
     setCopied("");
-    setError(`Could not copy ${label.toLowerCase()}: ${failure}`);
+    setError(`Couldn't copy ${label.toLowerCase()}: ${failure}.`);
     return false;
   }
   return { copied, error, copy };

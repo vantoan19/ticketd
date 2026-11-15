@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type Relationships, type Ticket } from "@/lib/api/client";
 import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import {
   linkLabel,
   linkRows,
   mergePage,
@@ -15,7 +19,7 @@ type Loaded = {
   reference: string;
   links: Relationships | null;
   /** Why the read failed, when it did. */
-  failure: string;
+  failure: FailureDescription | null;
 };
 
 /**
@@ -34,7 +38,7 @@ export function useLinkedWork(
   const [linking, setLinking] = useState<AddableKind | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState(false);
   /** The link just removed, so it can be put back. */
   const [removed, setRemoved] = useState<LinkRow | null>(null);
@@ -46,16 +50,23 @@ export function useLinkedWork(
     let active = true;
     client.contextualRelationships(reference, 0).then(
       (links) => {
-        if (active) setLoaded({ reference, links, failure: "" });
+        if (active) setLoaded({ reference, links, failure: null });
       },
       (reason: unknown) => {
         if (active)
-          setLoaded((previous) => ({
-            reference,
+          setLoaded((previous) => {
             // Keep what was shown for this ticket; say the refresh failed.
-            links: previous?.reference === reference ? previous.links : null,
-            failure: String(reason),
-          }));
+            const links =
+              previous?.reference === reference ? previous.links : null;
+            return {
+              reference,
+              links,
+              failure: describeFailure(
+                reason,
+                links ? "refresh relationships" : "load relationships",
+              ),
+            };
+          });
       },
     );
     return () => {
@@ -73,7 +84,7 @@ export function useLinkedWork(
     const id = attempts.current.get(key) ?? crypto.randomUUID();
     attempts.current.set(key, id);
     setPending(true);
-    setError("");
+    setError(null);
     try {
       await removeLink(reference, row.kind, row.reference, id);
       attempts.current.delete(key);
@@ -84,7 +95,10 @@ export function useLinkedWork(
       await refresh();
     } catch (reason) {
       setError(
-        `Could not remove ${linkLabel(row.kind)} ${row.reference}: ${String(reason)}`,
+        describeFailure(
+          reason,
+          `remove ${linkLabel(row.kind)} ${row.reference}`,
+        ),
       );
     } finally {
       setPending(false);
@@ -98,7 +112,7 @@ export function useLinkedWork(
     )
       return;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       await addLink(
         reference,
@@ -110,7 +124,7 @@ export function useLinkedWork(
       setReload((value) => value + 1);
       await refresh();
     } catch (reason) {
-      setError(`Could not put the link back: ${String(reason)}`);
+      setError(describeFailure(reason, "put the link back"));
     } finally {
       setPending(false);
     }
@@ -125,7 +139,7 @@ export function useLinkedWork(
           : previous,
       );
     } catch (reason) {
-      setError(`Could not load more links: ${String(reason)}`);
+      setError(describeFailure(reason, "load more links"));
     }
   }
   return {

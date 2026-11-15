@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { failureText } from "@/lib/api/describe-failure";
 
 /** Tauri intercepts OS file drops before DOM DataTransfer can expose paths. */
 export function useNativeFileDrop(
@@ -44,7 +45,7 @@ export function useNativeFileDrop(
       .catch((reason: unknown) => {
         if (!stopped)
           setFailure(
-            `File drop is unavailable: ${String(reason)}. Use Choose files instead.`,
+            `${failureText(reason, "turn on file drop")} Use Choose files instead.`,
           );
       });
     return () => {

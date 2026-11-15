@@ -131,7 +131,7 @@ test("an unreadable folder or a linked SKILL.md stays in its row with no Replace
     { ...codex, state: "not_a_file" },
   ]);
   render(<AgentSkillsCard />);
-  expect((await screen.findByRole("alert")).textContent).toBe(
+  expect((await screen.findByRole("alert")).textContent).toContain(
     "Access is denied.",
   );
   expect(screen.getByText("Could not check")).toBeTruthy();
@@ -154,7 +154,7 @@ test("Check again belongs to the Agents section and reads the folders again", as
   expect(invoke).toHaveBeenCalledTimes(2);
 });
 
-test("a failed read says so and offers Try again", async () => {
+test("a failed read says so and offers Retry", async () => {
   invoke
     .mockRejectedValueOnce(new Error("Disk unavailable"))
     .mockResolvedValueOnce([
@@ -163,9 +163,9 @@ test("a failed read says so and offers Try again", async () => {
     ]);
   render(<AgentSkillsCard />);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not check agent skills: Disk unavailable",
+    "Couldn't check agent skills",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(skillStatus()).toContain("Installed"));
   expect(screen.queryByRole("alert")).toBeNull();
 });

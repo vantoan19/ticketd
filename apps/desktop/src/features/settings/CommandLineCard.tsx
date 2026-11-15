@@ -1,14 +1,18 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw, Terminal } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { Step, Steps } from "@/components/ui/steps";
 import { workspaceClient } from "@/lib/api/workspace";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { cliClient, type CliStatus } from "@/lib/api/cli";
 import {
   SettingsList,
@@ -45,28 +49,25 @@ type Check =
 
 const mono = "font-mono";
 
-/** `onFailure` says why the guide did not open; "" clears it. */
+type Failure = { failure: FailureDescription; retry: () => void };
+
+/** Opens the guide; `onFailure` says why it did not open, and null clears it. */
 function InstallGuideLink({
   onFailure,
 }: {
-  onFailure: (message: string) => void;
+  onFailure: (failure: Failure | null) => void;
 }) {
+  const open = () => {
+    onFailure(null);
+    workspaceClient.openLink(INSTALL_GUIDE_URL).catch((reason: unknown) =>
+      onFailure({
+        failure: describeFailure(reason, "open the installation guide"),
+        retry: open,
+      }),
+    );
+  };
   return (
-    <Button
-      type="button"
-      variant="secondary"
-      size="sm"
-      onClick={() => {
-        onFailure("");
-        workspaceClient
-          .openLink(INSTALL_GUIDE_URL)
-          .catch((reason: unknown) =>
-            onFailure(
-              `Could not open the installation guide: ${String(reason)}`,
-            ),
-          );
-      }}
-    >
+    <Button type="button" variant="secondary" size="sm" onClick={open}>
       Installation guide
       <ExternalLink aria-hidden="true" />
     </Button>
@@ -123,7 +124,7 @@ function StatusRows({
   onGuideFailure,
 }: {
   check: Check;
-  onGuideFailure: (message: string) => void;
+  onGuideFailure: (failure: Failure | null) => void;
 }) {
   if (check.phase === "checking")
     return (
@@ -263,7 +264,7 @@ export function CommandLineCard({
 }) {
   const { openPage } = useSettingsState();
   const [check, setCheck] = useState<Check>({ phase: "checking" });
-  const [guideFailure, setGuideFailure] = useState("");
+  const [guideFailure, setGuideFailure] = useState<Failure | null>(null);
   const load = useCallback(() => {
     void cliClient.check().then(
       (status) => {
@@ -300,9 +301,12 @@ export function CommandLineCard({
           <StatusRows check={check} onGuideFailure={setGuideFailure} />
         </SettingsList>
         {guideFailure && (
-          <Alert tone="error" size="compact" className="mt-3">
-            <AlertDescription>{guideFailure}</AlertDescription>
-          </Alert>
+          <FailureAlert
+            size="compact"
+            className="mt-3"
+            failure={guideFailure.failure}
+            onRetry={guideFailure.retry}
+          />
         )}
       </SettingsSection>
       <SettingsSection

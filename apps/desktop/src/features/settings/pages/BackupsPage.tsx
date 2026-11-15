@@ -8,8 +8,13 @@ import {
   Minus,
 } from "lucide-react";
 import { client } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { workspaceClient, type BackupRecord } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
@@ -17,7 +22,11 @@ import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { revealFile } from "@/lib/reveal";
 import { PathText } from "@/features/projects/PathText";
-import { localDate, splitPath } from "@/features/settings/settings-format";
+import {
+  lineFailure,
+  localDate,
+  splitPath,
+} from "@/features/settings/settings-format";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import { sectionMeta } from "@/features/settings/settings-sections";
@@ -117,12 +126,12 @@ function LastBackupRow({
               <CircleAlert size={20} className="backups-icon-error" />
             </SettingsRowTile>
           }
-          title="Could not read the last backup"
-          description="This does not affect the backups themselves. Try again, or back up now."
+          title="Couldn't read the last backup"
+          description="The backups themselves are fine. Retry, or back up now."
           trailing={
             <>
-              <Button type="button" variant="ghost" onClick={onRetry}>
-                Try again
+              <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
+                Retry
               </Button>
               {backUp}
             </>
@@ -187,7 +196,7 @@ function LastBackupRow({
 
 function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
   const [last, setLast] = useState<LastBackup>({ status: "loading" });
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const choosing = useRef(false);
@@ -220,7 +229,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
     // Only one save sheet at a time; the row says nothing until a path returns.
     if (choosing.current) return;
     choosing.current = true;
-    setFailure("");
+    setFailure(null);
     setMessage("");
     try {
       const path = await workspaceClient.chooseSavePath({
@@ -236,7 +245,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
         recorded = await client.backupWorkspace(path);
       } catch (reason) {
         // The core says what happened, such as an existing file at the path.
-        setFailure(`The backup was not saved: ${String(reason)}`);
+        setFailure(describeFailure(reason, "save the backup"));
         return;
       }
       setMessage(
@@ -253,7 +262,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
         // Keep the previous status; the backup itself succeeded.
       }
     } catch (reason) {
-      setFailure(`Could not open the save dialog: ${String(reason)}`);
+      setFailure(describeFailure(reason, "open the save dialog"));
     } finally {
       choosing.current = false;
       setBusy(false);
@@ -261,17 +270,17 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
   }
   async function reveal(path: string) {
     const failure = await revealFile(path);
-    if (failure) setFailure(failure);
+    if (failure) setFailure(lineFailure(failure));
   }
   async function chooseBackup() {
-    setFailure("");
+    setFailure(null);
     try {
       const path = await workspaceClient.chooseBackupFile({
         title: "Choose a ticketd backup",
       });
       if (path !== null) setRestoring(path);
     } catch (reason) {
-      setFailure(`Could not open the file dialog: ${String(reason)}`);
+      setFailure(describeFailure(reason, "open the file dialog"));
     }
   }
   return (
@@ -288,11 +297,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
           <SettingsListFooter>
             Each backup goes to a new file you choose. A backup never replaces
             an existing file.
-            {failure && (
-              <p role="alert" className="backups-failure">
-                {failure}
-              </p>
-            )}
+            {failure && <FailureAlert size="compact" failure={failure} />}
             <p role="status" className="backups-message">
               {message}
             </p>

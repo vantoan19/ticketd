@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
 import {
   attachments,
   type Attachment,
   type DriveConfiguration,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { DriveSetupNotice } from "./DriveSetupNotice";
 
 export function DrivePicker({
@@ -35,7 +40,7 @@ export function DrivePicker({
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [selecting, setSelecting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const operation = useRef<string | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
@@ -46,7 +51,8 @@ export function DrivePicker({
         if (mounted.current) setConfiguration(value);
       })
       .catch((reason: unknown) => {
-        if (mounted.current) setError(String(reason));
+        if (mounted.current)
+          setError(describeFailure(reason, "read the Drive setup"));
       });
     return () => {
       mounted.current = false;
@@ -61,7 +67,7 @@ export function DrivePicker({
     operation.current = id;
     setSelecting(true);
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       const selected = await attachments.selectDrive(id);
       if (!mounted.current || operation.current !== id) return;
@@ -72,9 +78,20 @@ export function DrivePicker({
           selected: true,
         })),
       );
-      setError(selected.failures.join("\n"));
+      setError(
+        selected.failures.length
+          ? {
+              code: "failed",
+              title: `Couldn't select ${selected.failures.length} ${selected.failures.length === 1 ? "file" : "files"}`,
+              sentence: "Drive didn't allow them. The others are ready to add.",
+              action: null,
+              details: selected.failures.join("\n"),
+            }
+          : null,
+      );
     } catch (reason) {
-      if (mounted.current && operation.current === id) setError(String(reason));
+      if (mounted.current && operation.current === id)
+        setError(describeFailure(reason, "choose files in Google Drive"));
     } finally {
       if (operation.current === id) {
         operation.current = null;
@@ -91,16 +108,23 @@ export function DrivePicker({
     try {
       await attachments.cancelDriveSelection(id);
     } catch (reason) {
-      if (mounted.current) setError(String(reason));
+      if (mounted.current)
+        setError(describeFailure(reason, "cancel the Drive selection"));
     }
   }
   async function attach() {
     if (single && files.filter((item) => item.selected).length !== 1) {
-      setError("Choose exactly one file to replace this reference.");
+      setError({
+        code: "failed",
+        title: "Choose one file",
+        sentence: "Only one file can replace this reference.",
+        action: null,
+        details: "",
+      });
       return;
     }
     setBusy(true);
-    setError("");
+    setError(null);
     const failed: (typeof files)[number][] = [];
     const failures: string[] = [];
     try {
@@ -118,7 +142,9 @@ export function DrivePicker({
             );
         } catch (reason) {
           failed.push({ ...selected });
-          failures.push(`${selected.file.display_name}: ${String(reason)}`);
+          failures.push(
+            `${selected.file.display_name}: ${describeFailure(reason, "add").details}`,
+          );
         }
       }
       if (mounted.current && !failures.length) onComplete();
@@ -130,9 +156,14 @@ export function DrivePicker({
               item,
           ),
         );
-        setError(
-          `${failures.join("; ")}. Retry Add selected, or reuse from Existing files. Drive content is unchanged.`,
-        );
+        setError({
+          code: "failed",
+          title: `Couldn't add ${failures.length} ${failures.length === 1 ? "file" : "files"}`,
+          sentence:
+            "Drive content is unchanged. Retry Add selected, or reuse them from Existing files.",
+          action: null,
+          details: failures.join("\n"),
+        });
       }
     } finally {
       if (mounted.current) setBusy(false);
@@ -216,7 +247,7 @@ export function DrivePicker({
           dialog. No local snapshot is created.
         </p>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && <FailureAlert size="compact" failure={error} />}
       {!!files.length && (
         <div className="attachment-actions">
           <small>

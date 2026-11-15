@@ -61,7 +61,7 @@ export function SourceUnavailableNotice({
         <SourceLink url={source.url}>Open on {name}</SourceLink>
         {retrying && <span role="status">Refreshing {name}…</span>}
         {failure && !retrying && (
-          <span role="alert">Still unavailable: {failure}</span>
+          <span role="alert">Still unavailable. {failure.sentence}</span>
         )}
       </AlertActions>
     </Alert>

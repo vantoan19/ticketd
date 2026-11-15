@@ -18,11 +18,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { useCopy } from "@/components/ui/use-copy";
 import { client, type Project } from "@/lib/api/client";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { workspaceClient } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
 import { nameFromFolder } from "@/features/projects/paths";
@@ -98,13 +103,15 @@ function CheckoutRow({
   first: boolean;
   confirming: boolean;
   pending: boolean;
-  error: string;
+  error: FailureDescription | null;
   onAsk: () => void;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const manager = fileManagerName();
-  const [revealError, setRevealError] = useState("");
+  const [revealError, setRevealError] = useState<FailureDescription | null>(
+    null,
+  );
   if (confirming)
     return (
       <div
@@ -117,7 +124,9 @@ function CheckoutRow({
           no longer infer this project from that folder. The project and its
           tickets are unchanged.
         </p>
-        {error && <FieldError>{error}</FieldError>}
+        {error && (
+          <FailureAlert size="compact" failure={error} onRetry={onConfirm} />
+        )}
         <div className="checkout-confirm-actions">
           <Button
             type="button"
@@ -146,7 +155,7 @@ function CheckoutRow({
         <PathText path={path} />
         <span className="checkout-note">
           {first ? "First checkout" : "Checkout"}
-          {revealError && ` · ${revealError}`}
+          {revealError && ` · ${revealError.title}`}
         </span>
       </span>
       <CopyIcon label={`Copy checkout path ${path}`} text={path} />
@@ -156,8 +165,10 @@ function CheckoutRow({
         onClick={() =>
           void workspaceClient
             .reveal(path)
-            .then(() => setRevealError(""))
-            .catch((reason) => setRevealError(String(reason)))
+            .then(() => setRevealError(null))
+            .catch((reason) =>
+              setRevealError(describeFailure(reason, `show it in ${manager}`)),
+            )
         }
       >
         <FolderOpen aria-hidden />
@@ -192,14 +203,14 @@ function FolderPicker({
   hint?: string;
   onChoose: (path: string) => void;
 }) {
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   async function choose() {
     try {
       const chosen = await workspaceClient.chooseFolder({ title });
-      setError("");
+      setError(null);
       if (chosen) onChoose(chosen);
     } catch (reason) {
-      setError(String(reason));
+      setError(describeFailure(reason, "open the folder picker"));
     }
   }
   return (
@@ -222,7 +233,13 @@ function FolderPicker({
         </Button>
       </div>
       {hint && <small className="folder-hint">{hint}</small>}
-      {error && <FieldError>{error}</FieldError>}
+      {error && (
+        <FailureAlert
+          size="compact"
+          failure={error}
+          onRetry={() => void choose()}
+        />
+      )}
     </Field>
   );
 }
@@ -250,13 +267,16 @@ export function Projects({
   const [checkoutDrafts, setCheckoutDrafts] = useState<Record<string, string>>(
     {},
   );
-  const [error, setError] = useState("");
+  // A failed write: shown above the dialog footer, never on a valid field.
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState("");
   const [confirming, setConfirming] = useState<{
     id: string;
     path: string;
   } | null>(null);
-  const [removeError, setRemoveError] = useState("");
+  const [removeError, setRemoveError] = useState<FailureDescription | null>(
+    null,
+  );
   const [counts, setCounts] = useState<Record<string, TicketCount>>({});
   const [unassigned, setUnassigned] = useState(0);
 
@@ -304,22 +324,24 @@ export function Projects({
     : "";
 
   function open(next: OpenDialog) {
-    setError("");
+    setError(null);
     setDialog(next);
   }
   /** Runs a write, refreshes, and reports whether it all succeeded. */
   async function run(
     key: string,
     fn: () => Promise<unknown>,
-    fail: (message: string) => void,
+    action: string,
+    fail: (failure: FailureDescription | null) => void,
   ) {
     setPending(key);
+    fail(null);
     try {
       await fn();
       await onChange();
       return true;
     } catch (reason) {
-      fail(String(reason));
+      fail(describeFailure(reason, action));
       return false;
     } finally {
       setPending("");
@@ -341,6 +363,7 @@ export function Projects({
     const saved = await run(
       "save",
       () => client.createProject(newNameValue.trim(), newPath),
+      "create the project",
       setError,
     );
     if (!saved) return;
@@ -353,6 +376,7 @@ export function Projects({
     const saved = await run(
       "save",
       () => client.editProject(renaming.id, renameValue.trim(), renaming.path),
+      "rename the project",
       setError,
     );
     if (!saved) return;
@@ -364,6 +388,7 @@ export function Projects({
     const saved = await run(
       "checkout",
       () => client.registerCheckout(checkoutProject.id, checkoutPath),
+      "register the checkout",
       setError,
     );
     if (!saved) return;
@@ -371,10 +396,10 @@ export function Projects({
     setDialog(null);
   }
   async function removeCheckout(project: Project, path: string) {
-    setRemoveError("");
     const removed = await run(
       "remove",
       () => client.removeCheckout(project.id, path),
+      "remove the checkout",
       setRemoveError,
     );
     if (removed) setConfirming(null);
@@ -490,7 +515,7 @@ export function Projects({
                                 pending={pending === "remove"}
                                 error={removeError}
                                 onAsk={() => {
-                                  setRemoveError("");
+                                  setRemoveError(null);
                                   setConfirming({ id: item.id, path });
                                 }}
                                 onCancel={() => setConfirming(null)}
@@ -583,12 +608,16 @@ export function Projects({
               value={newNameValue}
               placeholder="Filled in from the folder name"
               autoComplete="off"
-              aria-invalid={!!error}
-              aria-describedby={error ? "project-form-error" : undefined}
               onChange={(e) => setNewName(e.target.value)}
             />
-            {error && <FieldError id="project-form-error">{error}</FieldError>}
           </Field>
+          {error && (
+            <FailureAlert
+              size="compact"
+              failure={error}
+              onRetry={() => void createProject()}
+            />
+          )}
         </div>
       </DialogShell>
       <DialogShell
@@ -613,15 +642,19 @@ export function Projects({
             id="rename-name"
             value={renameValue}
             autoComplete="off"
-            aria-invalid={!!error}
-            aria-describedby={error ? "rename-form-error" : undefined}
             onChange={(e) =>
               renaming &&
               setRenames((old) => ({ ...old, [renaming.id]: e.target.value }))
             }
           />
-          {error && <FieldError id="rename-form-error">{error}</FieldError>}
         </Field>
+        {error && (
+          <FailureAlert
+            size="compact"
+            failure={error}
+            onRetry={() => void renameProject()}
+          />
+        )}
       </DialogShell>
       <DialogShell
         open={!!checkoutProject}
@@ -651,7 +684,13 @@ export function Projects({
             }))
           }
         />
-        {error && <FieldError id="checkout-form-error">{error}</FieldError>}
+        {error && (
+          <FailureAlert
+            size="compact"
+            failure={error}
+            onRetry={() => void registerCheckout()}
+          />
+        )}
       </DialogShell>
     </section>
   );

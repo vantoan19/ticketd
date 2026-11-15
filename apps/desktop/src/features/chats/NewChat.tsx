@@ -1,3 +1,6 @@
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { describeFailure, sentence } from "@/lib/api/describe-failure";
+import { chatFailure, type ChatFailureNotice } from "@/features/chats/failure";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
@@ -138,7 +141,7 @@ export function NewChat({
   const [links, setLinks] = useState<LinkedRecord[]>(() =>
     start ? [start.ticket] : [],
   );
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   const [probe, setProbe] = useState(0);
   // Suggestions show only while the box is empty. Choosing one refills the box
   // (remounting the composer with the prompt) and links its records; both are
@@ -207,7 +210,13 @@ export function NewChat({
     let current = true;
     client.harnesses().then(
       (found) => current && setHarnesses(found),
-      (reason: unknown) => current && setFailure(String(reason)),
+      (reason: unknown) =>
+        current &&
+        setFailure(
+          chatFailure(reason, "list the agents", () =>
+            setProbe((count) => count + 1),
+          ),
+        ),
     );
     return () => {
       current = false;
@@ -273,8 +282,7 @@ export function NewChat({
           [harnessKey]: {
             harness_id: harnessKey,
             models: [],
-            unavailable:
-              reason instanceof Error ? reason.message : String(reason),
+            unavailable: describeFailure(reason, "list models").sentence,
           },
         })),
     );
@@ -455,14 +463,13 @@ export function NewChat({
                     carryIntoChat(
                       created.chat_id,
                       message,
-                      `Your first message was not sent: ${created.send_error}. It is in the box below.`,
+                      `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
                     );
-                  setFailure("");
+                  setFailure(null);
                   onCreated(created.chat_id);
                 } catch (reason) {
-                  setFailure(
-                    `Could not start the Chat: ${reason instanceof Error ? reason.message : String(reason)}`,
-                  );
+                  // Sending again repeats this same request safely.
+                  setFailure(chatFailure(reason, "start the Chat"));
                   throw reason;
                 }
               }}
@@ -515,7 +522,8 @@ export function NewChat({
                   onSelect={() =>
                     void client.pickFolder().then(
                       (path) => path && setFolder(path),
-                      (reason: unknown) => setFailure(String(reason)),
+                      (reason: unknown) =>
+                        setFailure(chatFailure(reason, "choose the folder")),
                     )
                   }
                 >
@@ -601,9 +609,11 @@ export function NewChat({
             />
           )}
           {failure && (
-            <p className="chat-fine" role="alert">
-              {failure}
-            </p>
+            <FailureAlert
+              size="compact"
+              failure={failure.failure}
+              {...(failure.retry && { onRetry: failure.retry })}
+            />
           )}
         </div>
       </div>
