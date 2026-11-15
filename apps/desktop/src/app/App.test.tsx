@@ -21,6 +21,11 @@ class ResizeObserverStub {
   constructor(private callback: ResizeObserverCallback) {}
   // The Tickets workspace stacks its panes when the content panel is narrow.
   observe(target: Element) {
+    if (ticketListWidth !== null && target.classList.contains("ticket-rows"))
+      this.callback(
+        [{ contentRect: { width: ticketListWidth } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
     if (narrowViewport && target.classList.contains("plan-workspace"))
       this.callback(
         [{ contentRect: { width: 500 } } as ResizeObserverEntry],
@@ -34,6 +39,7 @@ window.ResizeObserver = ResizeObserverStub;
 Element.prototype.scrollIntoView = () => {};
 
 let narrowViewport = false;
+let ticketListWidth: number | null = null;
 Object.defineProperty(window, "matchMedia", {
   value: () => ({
     matches: narrowViewport,
@@ -92,6 +98,7 @@ afterEach(() => {
   bridge.invoke.mockReset();
   localStorage.clear();
   narrowViewport = false;
+  ticketListWidth = null;
   clearWorkspaceFailure();
   // A command no fake answers means the bridge contract moved under the test.
   const unknown = unknownCommands.splice(0);
@@ -3461,6 +3468,54 @@ test("J and K swap the open document and Escape returns focus to its navigator r
     ),
   );
 });
+
+test.each(["All tickets", "Plan"])(
+  "%s keeps a narrow unselected list in the 36px ledger and uses the 52px navigator only for an open ticket",
+  async (view) => {
+    ticketListWidth = 480;
+    const ticket = bulkTicket(1, {
+      title: "Narrow list row",
+      plan_id: "narrow-plan",
+      tags: ["narrow"],
+    });
+    const plan = { id: "narrow-plan", name: "Narrow Plan", archived: false };
+    bridge.invoke.mockImplementation((command: string, args?: object) => {
+      if (command === "find_tickets") return [ticket];
+      if (command === "show_ticket") return ticket;
+      if (command === "list_plans") return [plan];
+      if (command === "show_plan")
+        return { plan, members: [ticket], counts: counted({ todo: 1 }) };
+      if (command === "count_tickets") return counted({ todo: 1 });
+      return bridgeDefault(command, args);
+    });
+    render(<App />);
+    if (view === "Plan")
+      fireEvent.click(
+        await screen.findByRole("button", { name: /^Narrow Plan/ }),
+      );
+    const row = await screen.findByRole("button", { name: /Narrow list row/ });
+    expect(row.closest("li")?.getAttribute("data-variant")).toBe("ledger");
+    expect(within(row).getByText("T-KQ1")).toBeTruthy();
+    expect(within(row).getByText("narrow")).toBeTruthy();
+    expect(row.querySelector(".ticket-navigator-caption")).toBeNull();
+
+    fireEvent.click(row);
+    await screen.findByRole("textbox", { name: "Title" });
+    expect(row.closest("li")?.getAttribute("data-variant")).toBe("navigator");
+    expect(within(row).getByText("T-KQ1")).toBeTruthy();
+    expect(row.querySelector(".ticket-navigator-caption")).toBeTruthy();
+    expect(within(row).queryByText("narrow")).toBeNull();
+    expect(row.querySelector(".ticket-row-state")).toBeNull();
+
+    fireEvent.keyDown(document.getElementById("detail-heading")!, {
+      key: "Escape",
+    });
+    await vi.waitFor(() =>
+      expect(row.closest("li")?.getAttribute("data-variant")).toBe("ledger"),
+    );
+    expect(document.activeElement).toBe(row);
+  },
+);
 
 test("a property drill-in highlights its current clearing value instead of the first project", async () => {
   const current = bulkTicket(1, {
