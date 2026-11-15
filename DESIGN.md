@@ -450,7 +450,7 @@ The list lives in `settings-sections.ts`; a section is added there with its page
 **Saving.** Each page uses one of three models and says which.
 
 - **Immediate:** Appearance, Attention, Attachments' destination and Chat apply when changed. There is no Save button; the panel bar says "Changes apply right away". A failure appears beside the control.
-- **Save on blur:** a text value, such as the upload limit, saves when the field loses focus and says "Saved" beside it. Invalid input and failures are stated next to the field and the previous value stays in force.
+- **Save on blur:** a text value, such as the upload limit, saves when the field loses focus and says "Saved" beside it for two seconds. Invalid input and failures are stated next to the field and the previous value stays in force; the next valid value clears the message, even when it is the value already saved.
 - **Explicit Save:** a source is the exception. Its discovery rules are a draft with a save bar stuck to the bottom of the panel: a status (dot and sentence: Saved configuration, Unsaved changes, or the rules changed and need a new preview), **Discard changes**, **Preview matches** (hidden once the preview is current) and primary **Save**. Save stays unavailable until Preview matches has run for the current rules and something changed. Saving turns discovery on and says that matching issues are imported on the next refresh. A saved source also shows its refresh schedule and its last refresh, with Refresh now in the Sync header.
 
 **Pages.**
