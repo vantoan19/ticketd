@@ -1,6 +1,6 @@
 import { EmptyState } from "@/components/ui/empty-state";
 import { emptyCopy } from "@/lib/empty-copy";
-import { useContext, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useContext, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   BellOff,
@@ -56,8 +56,8 @@ const EMPTY = {
   archived: "chats-archived",
   trashed: "chats-trash",
 } as const;
-/** The list pane's 360px plus the detail pane's 480px: below this one pane shows. */
-const STACK_MIN_WIDTH = 840;
+/** The list pane's 300px plus the detail pane's 480px: below this one pane shows. */
+const STACK_MIN_WIDTH = 780;
 const PANEL_STYLE = {
   display: "flex",
   flexDirection: "column",
@@ -396,23 +396,42 @@ export function ChatsView({
         <ChatListEmpty scope={scope} />
       )}
       <ul className="chat-rows" aria-label="Chats">
-        {list?.chats.map((chat, index) => (
-          <ChatRow
-            key={chat.id}
-            chat={chat}
-            now={now}
-            active={open?.kind === "chat" && open.id === chat.id}
-            tabStop={
-              list.chats.some(
-                (one) => open?.kind === "chat" && open.id === one.id,
-              )
-                ? open?.kind === "chat" && open.id === chat.id
-                : index === 0
-            }
-            onOpen={() => show({ kind: "chat", id: chat.id })}
-            onResult={setFailure}
-          />
-        ))}
+        {list?.chats
+          .slice()
+          .sort(
+            (a, b) =>
+              Number(b.status.rank === "approval") -
+              Number(a.status.rank === "approval"),
+          )
+          .map((chat, index, chats) => (
+            <Fragment key={chat.id}>
+              {scope === "active" &&
+                (index === 0 ||
+                  (chats[index - 1]?.status.rank === "approval") !==
+                    (chat.status.rank === "approval")) && (
+                  <li
+                    className="chat-list-group text-xs text-muted-foreground"
+                    role="presentation"
+                  >
+                    {chat.status.rank === "approval" ? "Needs you" : "Recent"}
+                  </li>
+                )}
+              <ChatRow
+                chat={chat}
+                now={now}
+                active={open?.kind === "chat" && open.id === chat.id}
+                tabStop={
+                  list.chats.some(
+                    (one) => open?.kind === "chat" && open.id === one.id,
+                  )
+                    ? open?.kind === "chat" && open.id === chat.id
+                    : index === 0
+                }
+                onOpen={() => show({ kind: "chat", id: chat.id })}
+                onResult={setFailure}
+              />
+            </Fragment>
+          ))}
       </ul>
     </section>
   );
@@ -474,7 +493,7 @@ export function ChatsView({
           // library would still claim presses near it.
           disabled={single}
         >
-          <ResizablePanel id="chat-list" minSize={360} defaultSize={384}>
+          <ResizablePanel id="chat-list" minSize={300} defaultSize={300}>
             {listPane}
           </ResizablePanel>
           <ResizableHandle aria-label="Resize Chat list" />

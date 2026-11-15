@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Time } from "@/components/ui/time";
 import { Disclosure } from "@/components/ui/disclosure";
 import { IconButton } from "@/components/ui/icon-button";
 import type { ChatState } from "@/features/chats/client";
@@ -159,6 +160,11 @@ function Request({
             </>
           )}
         </h3>
+        {!question && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            Asked <Time value={request.at} />
+          </span>
+        )}
         {count > 1 && (
           <span className="chat-request-count">
             {position} of {count}
@@ -166,6 +172,9 @@ function Request({
         )}
       </div>
       <div className="chat-request-body">
+        {!question && !request.ticketd?.length && request.command && (
+          <pre className="chat-out">{request.command}</pre>
+        )}
         {request.reason && (
           <p id={reasonId} className="chat-request-reason">
             <CodeSpans text={request.reason} />
