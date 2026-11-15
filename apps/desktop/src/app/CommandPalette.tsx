@@ -189,7 +189,7 @@ export function CommandPalette({
         >
           <DialogTitle className="sr-only">Go anywhere</DialogTitle>
           <DialogDescription className="sr-only">
-            Find a Ticket or open a view.
+            Find a Ticket, open a view or run an action.
           </DialogDescription>
           <Command
             variant="palette"
@@ -377,7 +377,14 @@ export function CommandPalette({
                           disabled={actions.blocked}
                           onSelect={() => drill(action.scope)}
                         >
-                          <Icon aria-hidden="true" />
+                          {action.scope === "Status" ? (
+                            <StatusIcon
+                              status={actions.ticket!.status}
+                              decorative
+                            />
+                          ) : (
+                            <Icon aria-hidden="true" />
+                          )}
                           <span className="flex-1">{action.label}</span>
                           <CommandShortcut>
                             {value} <KeyChords keys={keys.keys} />
