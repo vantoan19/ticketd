@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   Layers,
-  Plus,
   RefreshCw,
   SearchX,
   Ticket as TicketIcon,
@@ -9,6 +8,8 @@ import {
   X,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Kbd } from "@/components/ui/kbd";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { FailureDetails, FailureState } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
@@ -243,14 +244,17 @@ function TicketListBody({
           titleId="tickets-heading"
           caption={singleStatusNote}
           count={
-            <Count>
-              {filtered && scopeTotal != null
-                ? ofTotal(total, scopeTotal)
-                : total}
-              {!(filtered && scopeTotal != null) && (
-                <span className="sr-only"> {noun(total, "ticket")}</span>
-              )}
-            </Count>
+            // First run (S20): the title alone over an empty workspace.
+            !bare && (
+              <Count>
+                {filtered && scopeTotal != null
+                  ? ofTotal(total, scopeTotal)
+                  : total}
+                {!(filtered && scopeTotal != null) && (
+                  <span className="sr-only"> {noun(total, "ticket")}</span>
+                )}
+              </Count>
+            )
           }
           actions={
             <>
@@ -261,18 +265,22 @@ function TicketListBody({
                   tickets={tickets}
                 />
               )}
-              {/* Refresh always keeps its slot, so the header never shifts (P10). */}
-              <IconButton
-                label="Refresh"
-                disabled={sourceRefresh.running}
-                onClick={() =>
-                  void (configuredSources.length > 0
-                    ? refreshSources()
-                    : refresh({ reportFailure: true }))
-                }
-              >
-                <RefreshCw />
-              </IconButton>
+              {/* Refresh keeps its slot while there is anything to refresh,
+                  so the header never shifts (P10); over an empty workspace
+                  with no source it would act on nothing (S20). */}
+              {!(bare && !selected && configuredSources.length === 0) && (
+                <IconButton
+                  label="Refresh"
+                  disabled={sourceRefresh.running}
+                  onClick={() =>
+                    void (configuredSources.length > 0
+                      ? refreshSources()
+                      : refresh({ reportFailure: true }))
+                  }
+                >
+                  <RefreshCw />
+                </IconButton>
+              )}
               {!trash && !bare && (
                 <TicketFilters part="controls" {...filterProps} />
               )}
@@ -458,9 +466,13 @@ function TicketListBody({
                     action={
                       <Button
                         size="sm"
+                        aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
                         onClick={(event) => onCreate(event.currentTarget)}
                       >
-                        <Plus data-icon="inline-start" /> New ticket
+                        New ticket
+                        <Kbd tone="inverted" aria-hidden="true">
+                          {shortcutLabel("new-ticket")}
+                        </Kbd>
                       </Button>
                     }
                   />

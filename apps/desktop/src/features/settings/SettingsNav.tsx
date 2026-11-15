@@ -24,10 +24,13 @@ interface NavItem {
 /** Takes the workspace sidebar's place while Settings is open. */
 export function SettingsNav({
   onBack,
+  origin = "tickets",
   selected = "appearance",
   onSelect,
 }: {
   onBack: () => void;
+  /** Where Back returns, by name ("tickets", "Attachments"): shell SH-21. */
+  origin?: string;
   selected?: SettingsPageId;
   onSelect?: (page: SettingsPageId) => void;
 }) {
@@ -60,7 +63,7 @@ export function SettingsNav({
   return (
     <aside className="settings-nav" aria-label="Settings">
       <button type="button" className="settings-back" onClick={onBack}>
-        <ArrowLeft size={16} aria-hidden="true" /> Back to tickets
+        <ArrowLeft size={16} aria-hidden="true" /> Back to {origin}
       </button>
       <button
         type="button"

@@ -63,6 +63,19 @@ import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
 
+/** Each top-level view by name, for "Back to …" (Settings returns to it). */
+const VIEW_NAMES = {
+  tickets: "tickets",
+  projects: "Projects",
+  plans: "Plans",
+  "archived-plans": "Archived Plans",
+  settings: "Settings",
+  inbox: "Inbox",
+  documents: "Documents",
+  attachments: "Attachments",
+  chats: "Chats",
+} as const;
+
 export function App() {
   return (
     <WorkspaceChangeProvider value={useWorkspaceChangePoll()}>
@@ -419,6 +432,7 @@ function AppContent() {
                         <SettingsNav
                           selected={settingsSection}
                           onSelect={setSettingsSection}
+                          origin={VIEW_NAMES[viewBeforeSettings]}
                           onBack={() => {
                             returnToSettingsEntry.current = true;
                             setView(viewBeforeSettings);

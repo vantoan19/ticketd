@@ -406,7 +406,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   expect(
     screen.getByRole("navigation", { name: "Settings sections" }),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back to tickets" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to Projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
     "value",
@@ -591,6 +591,40 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
   expect(screen.queryAllByRole("tooltip")).toHaveLength(0);
 });
 
+test("first run shows the title and one New ticket action, no tools over nothing", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "count_tickets" ? bridgeDefault(command) : [],
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const header = document.querySelector<HTMLElement>(
+    '[data-slot="pane-header"]',
+  )!;
+  expect(within(header).getByRole("heading").textContent).toBe("All tickets");
+  // S20: no count, Refresh, Filters or Display act on an empty workspace.
+  expect(within(header).queryAllByRole("button")).toHaveLength(0);
+  expect(header.querySelector('[data-slot="count"]')).toBeNull();
+  const action = screen.getAllByRole("button", { name: "New ticket" })[1]!;
+  expect(action.getAttribute("aria-keyshortcuts")).toBe("C");
+});
+
+test("Settings' way back names the view it returns to", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  // Shell SH-21: it said "Back to tickets" whatever the origin.
+  fireEvent.click(screen.getByRole("button", { name: "Back to Attachments" }));
+  expect(screen.getByRole("heading", { name: "Attachments" })).toBeTruthy();
+});
+
 test("C opens New ticket from anywhere, but not while typing", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(bridgeDefault);
@@ -649,7 +683,13 @@ test("New ticket opens over the current view instead of switching to Tickets", a
 
 test("a sidebar choice that could not be saved stays reported after the list loads again", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(bridgeDefault);
+  // One ticket: an empty workspace has no Refresh (S20).
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string; reference?: string }) =>
+      command === "find_tickets"
+        ? unfilteredOnly(args)
+        : bridgeDefault(command, args),
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
