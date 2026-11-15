@@ -1,16 +1,18 @@
+import { OverlayBoundary } from "@/components/ui/overlay-boundary";
+import { useState } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureState } from "@/components/ui/failure-alert";
 import type { FailureDescription } from "@/lib/api/describe-failure";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
-import { useContext, useEffect, useRef } from "react";
+import { useContext, useEffect } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { type Project, type Ticket } from "@/lib/api/client";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
-import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 type NoteTarget = { id: string; key: number };
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
@@ -79,8 +81,7 @@ export function TicketDetails({
       document.getElementById("detail-heading")?.focus();
     }
   }, [selected]);
-  const pane = useRef<HTMLElement>(null);
-  const narrow = useNarrowPane(pane);
+  const [boundary, setBoundary] = useState<HTMLElement | null>(null);
   // A ticket's graph is the one graph view, opened on its dependencies.
   const openGraph = useContext(ContextGraphNavigation);
   const showGraph = (reference: string | null) => {
@@ -93,74 +94,87 @@ export function TicketDetails({
   );
   return (
     <section
-      ref={pane}
+      ref={setBoundary}
       className="ticket-detail"
       data-expanded={expanded || undefined}
       data-empty={selected === null || undefined}
       aria-labelledby="detail-heading"
     >
-      <TicketHeader
-        selected={selected}
-        ticket={ticket}
-        expanded={expanded}
-        onExpand={onExpand}
-        onReturn={onReturn}
-        onClose={() => open(null)}
-        {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
-        refresh={refresh}
-        updateTicket={updateTicket}
-        position={position}
-        projects={projects}
-        {...(returnLabel && { returnLabel })}
-        {...(onAdjacent && { onAdjacent })}
-      />
-      <div className="detail-scroll">
-        {selected === null && (
-          <EmptyState
-            size="hint"
-            title="Select a ticket to read it here"
-            footnote={
-              <>
-                <Kbd>↑</Kbd>
-                <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
-              </>
-            }
-          />
-        )}
-        {selected !== null && !ticket && failure && (
-          <FailureState failure={failure} {...(onRetry && { onRetry })} />
-        )}
-        {Object.values(details).map((item) => (
-          <TicketPage
-            key={item.id}
-            ticket={item}
-            active={item.reference === selected}
-            outsideResults={outsideResults && item.reference === selected}
-            narrow={narrow}
-            projects={projects}
-            plans={plans}
-            revision={revision}
-            refresh={refresh}
-            updateTicket={updateTicket}
-            select={open}
-            onOpenGraph={() => showGraph(item.reference)}
-            noteTarget={newest(
-              inboxTarget?.reference === item.reference ? inboxTarget : null,
-              mention?.reference === item.reference && mention.noteId
-                ? { id: mention.noteId, key: mention.key }
-                : null,
-            )}
-            mention={
-              mention?.reference === item.reference &&
-              !mention.noteId &&
-              mention.ready
-                ? mention
-                : null
-            }
-            onMention={(target) => setSelected(target.reference, target)}
-          />
-        ))}
-      </div>
+      <OverlayBoundary element={boundary}>
+        <TicketHeader
+          selected={selected}
+          ticket={ticket}
+          expanded={expanded}
+          onExpand={onExpand}
+          onReturn={onReturn}
+          onClose={() => open(null)}
+          {...(openGraph && { onOpenGraph: () => showGraph(selected) })}
+          refresh={refresh}
+          updateTicket={updateTicket}
+          position={position}
+          projects={projects}
+          {...(returnLabel && { returnLabel })}
+          {...(onAdjacent && { onAdjacent })}
+        />
+        <div className="detail-scroll">
+          {selected === null && (
+            <EmptyState
+              size="hint"
+              title="Select a ticket to read it here"
+              footnote={
+                <>
+                  <Kbd>↑</Kbd>
+                  <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
+                </>
+              }
+            />
+          )}
+          {selected !== null && !ticket && failure && (
+            <FailureState failure={failure} {...(onRetry && { onRetry })} />
+          )}
+          {selected !== null && !ticket && !failure && (
+            <div
+              className="detail-document"
+              role="status"
+              aria-label="Loading ticket"
+            >
+              <Skeleton className="h-9 w-3/4" />
+              <Skeleton className="mt-3 h-7 w-full" />
+              <Skeleton className="mt-8 h-11 w-full" />
+              <Skeleton className="mt-6 h-24 w-full" />
+            </div>
+          )}
+          {Object.values(details).map((item) => (
+            <TicketPage
+              key={item.id}
+              ticket={item}
+              active={item.reference === selected}
+              outsideResults={outsideResults && item.reference === selected}
+              projects={projects}
+              plans={plans}
+              revision={revision}
+              refresh={refresh}
+              updateTicket={updateTicket}
+              select={open}
+              onOpenGraph={() => showGraph(item.reference)}
+              noteTarget={newest(
+                inboxTarget?.reference === item.reference ? inboxTarget : null,
+                mention?.reference === item.reference && mention.noteId
+                  ? { id: mention.noteId, key: mention.key }
+                  : null,
+              )}
+              mention={
+                mention?.reference === item.reference &&
+                !mention.noteId &&
+                mention.ready
+                  ? mention
+                  : null
+              }
+              onMention={(target) => setSelected(target.reference, target)}
+            />
+          ))}
+        </div>
+      </OverlayBoundary>
     </section>
   );
 }

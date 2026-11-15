@@ -36,8 +36,8 @@ const DETAIL_PANEL_STYLE = {
   flexDirection: "column",
   overflow: "hidden",
 } as const;
-/** The list pane’s 360px plus the detail pane’s 480px: below this the panes stack. */
-const STACK_MIN_WIDTH = 840;
+/** Split mode is measured on the content panel; below 880px the ticket replaces its list. */
+const STACK_MIN_WIDTH = 880;
 const BOARD_SPLIT: Layout = { list: 44, detail: 56 };
 
 /**
@@ -131,8 +131,8 @@ export function TicketWorkspaceView({
   };
   const listSplit = useDefaultLayout({
     // Versioned: layouts saved by earlier builds (468px list) must not override
-    // the 384px default.
-    id: "ticketd.workspace.v2",
+    // the 360px default.
+    id: "ticketd.workspace.v3",
   });
   const boardSplit = useDefaultLayout({ id: "ticketd.workspace.board.v1" });
   const inboxSplit = useDefaultLayout({ id: "ticketd.workspace.inbox.v1" });
@@ -155,7 +155,7 @@ export function TicketWorkspaceView({
     const layout = splitLayouts.current[splitMode];
     // Change the library's layout without remounting the detail editor or board scrollers.
     if (layout) groupRef.current?.setLayout(layout);
-    else listPanelRef.current?.resize(splitMode === "inbox" ? 392 : 384);
+    else listPanelRef.current?.resize(splitMode === "inbox" ? 392 : 360);
   }, [splitMode, groupRef, listPanelRef]);
   const focusPane = useRef<"detail" | { reference: string | null } | null>(
     null,
@@ -188,18 +188,23 @@ export function TicketWorkspaceView({
   // On the board an open card is a peek over its right side; the columns keep
   // their width (S5). Narrow windows stack as before; Expand takes the page.
   const peek = board && selected !== null && !narrow && !expanded;
-  // Escape closes the peek, unless a field, menu or dialog inside it has it.
+  // The document owns J/K and Escape unless editing or an overlay owns them.
   const peekState = useRef({ peek, selected });
   useEffect(() => {
     peekState.current = { peek, selected };
   });
   useEffect(() => {
-    if (!peek) return;
+    if (!selected) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
       if (
-        event.key !== "Escape" ||
+        !["Escape", "j", "k"].includes(event.key) ||
         event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.isComposing ||
+        event.repeat ||
         !(target instanceof HTMLElement) ||
         !target.closest("#detail") ||
         target.isContentEditable ||
@@ -209,12 +214,14 @@ export function TicketWorkspaceView({
       )
         return;
       event.preventDefault();
-      focusPane.current = { reference: peekState.current.selected };
-      setSelected(null);
+      if (event.key === "Escape") {
+        focusPane.current = { reference: peekState.current.selected };
+        setSelected(null);
+      } else workspace.openAdjacent(event.key === "j" ? 1 : -1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [peek, setSelected]);
+  }, [selected, setSelected, workspace]);
   const [previousNarrow, setPreviousNarrow] = useState(narrow);
   if (previousNarrow !== narrow) {
     setPreviousNarrow(narrow);
@@ -313,8 +320,13 @@ export function TicketWorkspaceView({
           <ResizablePanel
             id="list"
             panelRef={listPanelRef}
-            minSize={360}
-            defaultSize={inboxMode ? 392 : 384}
+            minSize={inboxMode ? 360 : 300}
+            maxSize={
+              !inboxMode && !board && selected && !narrow && !expanded
+                ? 480
+                : undefined
+            }
+            defaultSize={inboxMode ? 392 : 360}
           >
             {inbox ?? (
               <TicketListPane

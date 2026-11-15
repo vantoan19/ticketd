@@ -81,11 +81,13 @@ export function PlanSplitBar({
   counts,
   className,
   decorative = false,
-}: Props) {
+  variant,
+}: Props & { variant?: "summary" }) {
   const { share } = progress(counts);
   return (
     <span
       className={cn("plan-split-bar", className)}
+      data-variant={variant}
       {...accessible(name, counts, decorative)}
     >
       {(

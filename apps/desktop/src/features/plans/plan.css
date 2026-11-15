@@ -1,5 +1,4 @@
-/* A Plan: its header spans both panes. One 48px PaneHeader, then one 32px
-   context line; neither changes height with state (DESIGN.md section 10). */
+/* A Plan: its header spans both panes. One 48px PaneHeader, then a summary; neither changes height with state (DESIGN.md section 10). */
 .plan-header {
   display: flex;
   flex: none;
@@ -16,20 +15,46 @@
   display: none;
 }
 
-/* Context line: purpose · progress · spec chip, one row that never wraps. */
+/* S11: purpose above a single progress row. Every state reserves both rows. */
 .plan-context {
   display: flex;
   flex: none;
-  align-items: center;
+  flex-direction: column;
   gap: 12px;
-  height: 32px;
+  height: 96px;
   min-width: 0;
-  padding: 0 8px 0 16px;
+  padding: 18px 20px;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  box-shadow: 0 1px 0 0 var(--header-boundary);
+}
+.plan-ring-slot {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.plan-list-options {
+  display: flex;
+  gap: 8px;
+}
+.plan-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  height: 24px;
+}
+.plan-summary-bar,
+.plan-summary-loading {
+  flex: 0 1 280px;
+  width: 280px;
+}
+.plan-summary-legend {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-summary-row > .plan-documents {
+  margin-left: auto;
 }
 .plan-context-note {
   white-space: nowrap;
@@ -39,7 +64,7 @@
 }
 .plan-purpose {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: none;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -84,7 +109,8 @@ button.plan-purpose:focus-visible {
   font-weight: 500;
 }
 .plan-purpose-field {
-  flex: 0 1 480px;
+  flex: none;
+  height: 24px;
   min-width: 160px;
   margin-inline-start: -6px;
 }

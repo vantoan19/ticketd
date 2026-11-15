@@ -95,13 +95,15 @@ function renderDetails() {
   );
 }
 
-test("a wide pane keeps the property rail and has no chip bar", async () => {
+test("a wide pane keeps the same wrapping property bar", async () => {
   renderDetails();
   resizePane(900);
   expect(
-    await screen.findByRole("complementary", { name: "Ticket properties" }),
+    await screen.findByRole("group", { name: "Ticket properties" }),
   ).toBeTruthy();
-  expect(screen.queryByRole("group", { name: "Ticket properties" })).toBeNull();
+  expect(
+    screen.queryByRole("complementary", { name: "Ticket properties" }),
+  ).toBeNull();
 });
 
 test("a narrow pane folds the rail into chips that open the same editors", async () => {
@@ -123,6 +125,7 @@ test("a narrow pane folds the rail into chips that open the same editors", async
     "Tags: release",
     "Follow",
     "Manage reminder",
+    "Add ticket property",
   ]);
   expect(bar.textContent).not.toContain("Local");
   // Follow is an icon toggle: its name stays "Follow" and aria-pressed says
@@ -157,25 +160,25 @@ test("narrow, Relationships and Documents follow the description as a section", 
   ).toBeTruthy();
 });
 
-test("widening the pane brings the rail back", async () => {
+test("widening the pane keeps the same bar", async () => {
   renderDetails();
   resizePane(500);
   await screen.findByRole("group", { name: "Ticket properties" });
   resizePane(800);
   expect(
-    await screen.findByRole("complementary", { name: "Ticket properties" }),
+    await screen.findByRole("group", { name: "Ticket properties" }),
   ).toBeTruthy();
 });
 
 test("a hidden pane reports no width and keeps its layout", async () => {
   renderDetails();
   resizePane(900);
-  await screen.findByRole("complementary", { name: "Ticket properties" });
+  await screen.findByRole("group", { name: "Ticket properties" });
   resizePane(0);
+  expect(screen.getByRole("group", { name: "Ticket properties" })).toBeTruthy();
   expect(
-    screen.getByRole("complementary", { name: "Ticket properties" }),
-  ).toBeTruthy();
-  expect(screen.queryByRole("group", { name: "Ticket properties" })).toBeNull();
+    screen.queryByRole("complementary", { name: "Ticket properties" }),
+  ).toBeNull();
 });
 
 test("narrow, an active ticket still shows its Latest update under the chips", async () => {

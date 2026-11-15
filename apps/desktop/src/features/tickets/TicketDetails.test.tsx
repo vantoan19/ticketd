@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 import { afterEach, expect, test, vi } from "vitest";
 import { TicketDetails } from "./TicketDetails";
 import type { Ticket } from "@/lib/api/client";
@@ -30,21 +29,6 @@ test("relationship navigation replaces the reference and focuses it outside the 
   expect(document.activeElement).toBe(heading);
   expect(heading.closest(".detail-scroll")).toBeNull();
   expect(document.querySelector(".detail-scroll")).toBeTruthy();
-});
-
-test("side by side, the document and the rail are separate bounded scrollers", () => {
-  const css = readFileSync("src/styles.css", "utf8");
-  const start = css.indexOf(
-    "@container ticket-detail (min-width: 760px) {\n  /* Side",
-  );
-  const block = css.slice(start, css.indexOf("\n}\n", start));
-  expect(block).toMatch(
-    /\.detail-scroll \{\s*display: flex;\s*flex-direction: column;\s*overflow: hidden;/,
-  );
-  expect(block).toMatch(/\.detail-content \{\s*height: 100%;\s*min-height: 0;/);
-  expect(block).toMatch(
-    /\.detail-document,\s*\.detail-content > \.ticket-properties \{\s*min-height: 0;\s*overflow-y: auto;/,
-  );
 });
 
 test("trashed ticket descriptions remain readable without editing controls", () => {

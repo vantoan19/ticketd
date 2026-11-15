@@ -152,7 +152,7 @@ async function openLaunch() {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
   const heading = await screen.findByRole("heading", { name: "Launch" });
-  await screen.findByRole("progressbar", { name: "Plan progress" });
+  await screen.findByRole("img", { name: /Launch, .* done/ });
   return heading;
 }
 const context = () => screen.getByRole("group", { name: "Plan context" });
@@ -168,9 +168,9 @@ test("the header counts the Plan's tickets and its progress, and Remove from Pla
   // The count sits beside the name; per-status counts live in the groups.
   expect(heading.parentElement!.textContent).toContain("3");
   expect(within(context()).getByText("1 of 2 done")).toBeTruthy();
-  const progress = screen.getByRole("progressbar", { name: "Plan progress" });
-  expect(progress.getAttribute("aria-valuenow")).toBe("1");
-  expect(progress.getAttribute("aria-valuemax")).toBe("2");
+  expect(
+    screen.getByRole("img", { name: "Launch, 1 of 2 done, 0 moving" }),
+  ).toBeTruthy();
   // An active Plan shows no state chip (plans PL-05).
   expect(screen.queryByText("Active Plan")).toBeNull();
 
@@ -265,7 +265,7 @@ test("archiving acts at once with Undo; an archived Plan reactivates from the Pl
   expect(await screen.findByText("Archived Launch")).toBeTruthy();
   // An archived Plan is read-only; Reactivate is its one action.
   expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Add to Plan…" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Add purpose" })).toBeNull();
   // Neither the row removal nor the per-group Add survive in an archived Plan.
   expect(
@@ -315,7 +315,7 @@ test("Undo after archiving makes the Plan active again", async () => {
 
 test("adds an existing ticket from search, with Undo", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Add to Plan…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add tickets" }));
   const dialog = await screen.findByRole("dialog", {
     name: "Add tickets to Launch",
   });
@@ -390,18 +390,29 @@ test("an open purpose draft does not carry over to another Plan", async () => {
   expect(calls.some(([command]) => command === "set_plan_purpose")).toBe(false);
 });
 
-test("one header across both panes holds the view switch and the list controls", async () => {
+test("one header across both panes holds the view switch and More opens the list controls", async () => {
   await openLaunch();
   const toggle = screen.getByRole("radiogroup", { name: "Plan view" });
-  expect(within(toggle).getByText("Dependencies")).toBeTruthy();
+  expect(within(toggle).getByText("Flow")).toBeTruthy();
   // The header spans both panes: the toggle is not inside the list section,
   // and the list has no second header of its own (list H-06, plans PL-08).
   const list = screen.getByRole("region", { name: "Launch" });
   expect(list.contains(toggle)).toBe(false);
   const header = toggle.closest('[data-slot="pane-header"]')!;
   expect(
-    within(header as HTMLElement).getByRole("button", { name: "Filters" }),
-  ).toBeTruthy();
+    within(header as HTMLElement).queryByRole("button", { name: "Filters" }),
+  ).toBeNull();
+  await chooseAction("Filter and display");
+  expect(await screen.findByRole("button", { name: "Filters" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Display" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "Plan list options" }), {
+    key: "Escape",
+  });
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Plan actions" }),
+    ),
+  );
   expect(list.querySelector('[data-slot="pane-header"]')).toBeNull();
 });
 

@@ -2424,7 +2424,7 @@ test("opens Capture from anywhere with the global shortcut", async () => {
   expect(await screen.findByRole("dialog")).toBeTruthy();
 });
 
-test("the ticket detail bounds its height so the document and rail can scroll on their own", async () => {
+test("the ticket detail bounds one document scroller and keeps properties in the document", async () => {
   vi.useFakeTimers();
   const ticket = {
     id: "1",
@@ -2460,14 +2460,16 @@ test("the ticket detail bounds its height so the document and rail can scroll on
   const bounded = detail.querySelectorAll(".detail-scroll");
   expect(bounded).toHaveLength(1);
   expect(bounded[0]!.parentElement).toBe(detail);
-  // The document column and the rail are siblings, each scrolling by its own
-  // overflow (styles.css) once the pane is wide enough for both.
+  // The property bar and connected context share one document scroller.
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
   expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
-  expect(content.querySelector(":scope > .ticket-properties")).toBeTruthy();
+  expect(content.querySelector(":scope > .ticket-properties")).toBeNull();
+  expect(
+    content.querySelector(".detail-document .property-strip"),
+  ).toBeTruthy();
 });
 
 test("the folded sidebar opens Projects and Plans as one menu each", async () => {
@@ -3354,6 +3356,144 @@ test("Inbox shares Needs you counts with the sidebar and keeps E/H on the opened
   expect(screen.queryByRole("dialog", { name: /command/i })).toBeNull();
 });
 
+test.each([
+  [
+    "Status: Todo",
+    "Status",
+    "Done",
+    "change_ticket",
+    { patch: { status: "Done" } },
+  ],
+  [
+    "Project: No project",
+    "Project",
+    "Next project",
+    "change_ticket",
+    { patch: { project_id: "project-next" } },
+  ],
+  ["Plan: No Plan", "Plan", "Next Plan", "set_plan", { plan: "plan-next" }],
+  ["Tags: No tags", "Tags", "polish", "add_tag", { tag: "polish" }],
+  ["Remind me", "Reminder", "Tomorrow", "set_reminder", {}],
+])(
+  "the %s chip opens the shared %s drill-in and mutation",
+  async (chip, scope, label, command, expected) => {
+    const current = bulkTicket(1, {
+      reference: "T-FV1",
+      title: "Document target",
+    });
+    bridge.invoke.mockImplementation((name: string, args?: object) => {
+      if (name === "find_tickets") return [current];
+      if (
+        ["show_ticket", "change_ticket", "set_plan", "add_tag"].includes(name)
+      )
+        return current;
+      if (name === "set_reminder") return null;
+      if (name === "list_projects")
+        return [
+          {
+            id: "project-next",
+            name: "Next project",
+            path: "/next",
+            paths: ["/next"],
+          },
+        ];
+      if (name === "list_plans")
+        return [
+          { id: "plan-next", name: "Next Plan", archived: false, purpose: "" },
+        ];
+      if (name === "search_tags") return ["polish"];
+      return bridgeDefault(name, args);
+    });
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Document target/ }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: chip }));
+    expect(await screen.findByText(`${scope} of T-FV1`)).toBeTruthy();
+    fireEvent.click(
+      await screen.findByRole("option", { name: new RegExp(`^${label}`) }),
+    );
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        command,
+        expect.objectContaining({ reference: "T-FV1", ...expected }),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Undo" })).toBeTruthy();
+  },
+);
+
+test("a read-only workspace disables description editing from the button and E", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  const edit = await screen.findByRole("button", {
+    name: "Add a description…",
+  });
+  act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
+  expect(edit.hasAttribute("disabled")).toBe(true);
+  fireEvent.keyDown(document.body, { key: "e" });
+  expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull();
+  expect(
+    screen.getByRole("textbox", { name: "Title" }).hasAttribute("disabled"),
+  ).toBe(true);
+});
+
+test("J and K swap the open document and Escape returns focus to its navigator row", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  await screen.findByRole("textbox", { name: "Title" });
+  const reference = document.getElementById("detail-heading")!;
+  reference.focus();
+  fireEvent.keyDown(reference, { key: "j" });
+  await vi.waitFor(() =>
+    expect(document.getElementById("detail-heading")?.textContent).toBe(
+      "T-KQ2",
+    ),
+  );
+  fireEvent.keyDown(document.getElementById("detail-heading")!, {
+    key: "Escape",
+  });
+  await vi.waitFor(() =>
+    expect(document.activeElement?.getAttribute("data-ticket-reference")).toBe(
+      "T-KQ2",
+    ),
+  );
+});
+
+test("a property drill-in highlights its current clearing value instead of the first project", async () => {
+  const current = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Current project",
+  });
+  bridge.invoke.mockImplementation((name: string, args?: object) => {
+    if (name === "find_tickets") return [current];
+    if (name === "show_ticket") return current;
+    if (name === "list_projects")
+      return [
+        {
+          id: "project-next",
+          name: "Next project",
+          path: "/next",
+          paths: ["/next"],
+        },
+      ];
+    return bridgeDefault(name, args);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Current project/ }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Project: No project" }),
+  );
+  const clear = await screen.findByRole("option", { name: "No project" });
+  await vi.waitFor(() =>
+    expect(clear.getAttribute("aria-selected")).toBe("true"),
+  );
+});
+
 test("sticky ledger keeps palette mutations in place until J leaves, then targets the newly focused ticket", async () => {
   let tickets = [
     bulkTicket(1, { title: "Sticky target", status: "In progress" }),
@@ -3715,6 +3855,76 @@ test("Plans with no Ready work keep canceled-only progress explicit without inve
   ).toBeTruthy();
 });
 
+test("Plan page keeps its view switch in the header and summarizes all members", async () => {
+  const plan = {
+    id: "P-page",
+    name: "Board polish",
+    archived: false,
+    purpose: "Make the board feel stable and fast.",
+  };
+  const ticket = bulkTicket(1, { plan_id: plan.id, project_id: "desktop" });
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans") return [plan];
+      if (command === "list_projects")
+        return [
+          { id: "desktop", name: "Desktop app", path: "/app", paths: ["/app"] },
+        ];
+      if (command === "find_tickets") return [ticket];
+      if (command === "plan_dependency_graph")
+        return {
+          nodes: [],
+          edges: [],
+          truncated: false,
+          max_nodes: 100,
+          max_depth: 10,
+          max_edges: 100,
+          max_work: 1000,
+          omitted_neighbors: false,
+          omitted_edges: false,
+        };
+      if (command === "show_plan")
+        return {
+          plan,
+          counts: counted({ todo: 3, in_progress: 2, done: 1 }),
+          members: [
+            ticket,
+            { ...ticket, reference: "T-KQ2", availability: "Ready" },
+          ],
+          documents: [],
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Board polish/ }));
+  expect(await screen.findByText("1 of 6 done")).toBeTruthy();
+  const summary = screen.getByRole("group", { name: "Plan context" });
+  expect(
+    within(summary).getByText("2 in progress · 3 to do, 2 ready"),
+  ).toBeTruthy();
+  expect(
+    within(summary).getByRole("img", {
+      name: "Board polish, 1 of 6 done, 2 moving",
+    }),
+  ).toBeTruthy();
+  const switcher = screen.getByRole("radiogroup", { name: "Plan view" });
+  const header = switcher.closest("header");
+  expect(
+    within(header!).getByRole("button", { name: "Add tickets" }),
+  ).toBeTruthy();
+  for (const name of ["Board", "Flow", "List"]) {
+    fireEvent.click(within(switcher).getByRole("radio", { name }));
+    expect(screen.getByRole("radiogroup", { name: "Plan view" })).toBe(
+      switcher,
+    );
+    expect(switcher.closest("header")).toBe(header);
+  }
+  const row = screen.getByRole("button", { name: /First/ });
+  expect(row.closest("li")?.textContent).toContain("Desktop app");
+  expect(row.closest("li")?.textContent).not.toContain("Board polish");
+});
+
 test("ticket state lanes join ranked linked Chats without changing unrelated rows", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient } = await import("@/features/chats/mock-client");
@@ -3796,23 +4006,27 @@ test("ticket state lanes join ranked linked Chats without changing unrelated row
   );
   const first = await screen.findByRole("button", { name: /First/ });
   await vi.waitFor(() =>
-    expect(within(first).getByText("Approval needed")).toBeTruthy(),
+    expect(within(first).getByLabelText("Approval needed")).toBeTruthy(),
   );
   const second = screen.getByRole("button", { name: /Second/ });
-  expect(within(second).getByText("Working")).toBeTruthy();
-  expect(within(second).getByRole("img", { name: "codex" })).toBeTruthy();
+  expect(within(second).getByLabelText("Working")).toBeTruthy();
+  expect(
+    within(within(second).getByLabelText("Working")).getByRole("img", {
+      name: "codex",
+    }),
+  ).toBeTruthy();
   const unrelated = screen.getByRole("button", { name: /Unrelated/ });
   expect(within(unrelated).queryByText(/Working|Approval needed/)).toBeNull();
-  expect(within(unrelated).getByText("Reminder due")).toBeTruthy();
+  expect(within(unrelated).getByLabelText("Reminder due")).toBeTruthy();
   expect(
-    within(screen.getByRole("button", { name: /Duplicate ticket/ })).getByText(
-      "Duplicate of T-KQ9",
-    ),
+    within(
+      screen.getByRole("button", { name: /Duplicate ticket/ }),
+    ).getByLabelText("Duplicate of T-KQ9"),
   ).toBeTruthy();
   list.mockResolvedValue([]);
   act(() => notify());
   await vi.waitFor(() =>
-    expect(within(first).getByText("Blocked by T-KQ9")).toBeTruthy(),
+    expect(within(first).getByLabelText("Blocked by T-KQ9")).toBeTruthy(),
   );
   expect(within(second).queryByText("Working")).toBeNull();
 });
@@ -3869,7 +4083,7 @@ test.each([
       null;
     render(<App />);
     const row = await screen.findByRole("button", { name: /First/ });
-    expect(within(row).getByText("Ready for review")).toBeTruthy();
+    expect(within(row).getByLabelText("Ready for review")).toBeTruthy();
     expect(publisherMark(row)).toBe(viewBox);
     fireEvent.click(row);
     const update = await screen.findByRole("article", {

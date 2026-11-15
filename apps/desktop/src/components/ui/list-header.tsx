@@ -81,8 +81,11 @@ export function PaneHeader({
   caption,
   className,
   titleControl,
+  variant = "default",
 }: {
   title: string;
+  /** Ticket headers supply their reference heading and shell controls in leading. */
+  variant?: "default" | "ticket";
   /** Renders the title as a control inside the heading (a menu trigger). */
   titleControl?: (title: string) => ReactNode;
   /** The heading's id, for `aria-labelledby` and focus after a change. */
@@ -120,9 +123,13 @@ export function PaneHeader({
         data-slot="pane-header"
         data-leading={leading || shell ? "" : undefined}
         data-collapsed={collapsed || undefined}
-        className={cn("ui-pane-header", className)}
+        className={cn(
+          "ui-pane-header",
+          variant === "ticket" && "detail-header",
+          className,
+        )}
       >
-        {shell && <ShellLeading />}
+        {shell && variant !== "ticket" && <ShellLeading />}
         {leading}
         <span className="ui-pane-header-title">
           {icon && (
@@ -130,27 +137,29 @@ export function PaneHeader({
               {icon}
             </span>
           )}
-          {titleEditor ??
-            (hideTitle ? (
-              <Heading id={titleId} className="sr-only">
-                {title}
-              </Heading>
-            ) : titleControl ? (
-              <Heading
-                id={titleId}
-                tabIndex={titleId ? -1 : undefined}
-                data-control=""
-              >
-                {titleControl(title)}
-              </Heading>
-            ) : (
-              // The full title while it is cut, below the header.
-              <Tooltip content={title} side="bottom" overflowOnly>
-                <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+          {variant === "ticket"
+            ? null
+            : (titleEditor ??
+              (hideTitle ? (
+                <Heading id={titleId} className="sr-only">
                   {title}
                 </Heading>
-              </Tooltip>
-            ))}
+              ) : titleControl ? (
+                <Heading
+                  id={titleId}
+                  tabIndex={titleId ? -1 : undefined}
+                  data-control=""
+                >
+                  {titleControl(title)}
+                </Heading>
+              ) : (
+                // The full title while it is cut, below the header.
+                <Tooltip content={title} side="bottom" overflowOnly>
+                  <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                    {title}
+                  </Heading>
+                </Tooltip>
+              )))}
           {count}
           {children}
         </span>

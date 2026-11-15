@@ -733,10 +733,11 @@ body:has([data-slot="dialog-overlay"])
   color: var(--foreground);
 }
 .ui-section-title {
-  font-size: var(--text-title);
+  font-size: var(--text-doc-title);
   font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
+  line-height: var(--text-doc-title-line);
+  letter-spacing: var(--text-doc-title-tracking);
+  text-wrap: balance;
 }
 /* A choice list's search row (P3): 32px, a hairline under it. */
 [data-slot="command-input-wrapper"] {
@@ -1323,10 +1324,11 @@ body:has([data-slot="dialog-overlay"])
   letter-spacing: -0.28px;
 }
 .ui-section-header > h1 {
-  font-size: var(--text-title);
+  font-size: var(--text-doc-title);
   font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
+  line-height: var(--text-doc-title-line);
+  letter-spacing: var(--text-doc-title-tracking);
+  text-wrap: balance;
 }
 /* bar: the panel header, 44px with a hairline under it. */
 .ui-section-header[data-bar] {
@@ -1944,7 +1946,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   height: 48px;
   /* The reference starts on the document's 32px gutter; the header never
      wraps and never grows a row (feedback goes to the status line). */
-  padding: 0 8px 0 32px;
+  padding: 0 10px 0 20px;
   background: var(--surface);
   color: var(--muted-foreground);
 }
@@ -1952,13 +1954,13 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .detail-header[data-empty] {
   box-shadow: none;
 }
-.detail-header h2 {
+.detail-header h1 {
   font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
 }
 .detail-header .detail-reference {
-  color: var(--foreground);
+  color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: var(--text-code);
   font-weight: 500;
@@ -1982,28 +1984,12 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .detail-document {
   min-width: 0;
-  padding: 24px 32px 48px;
+  padding: 28px 40px 96px;
+  width: 100%;
+  max-width: 680px;
+  margin-inline: auto;
 }
-@container ticket-detail (min-width: 760px) {
-  /* Side by side, the document and the rail each scroll on their own. */
-  .detail-scroll {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .detail-content {
-    height: 100%;
-    min-height: 0;
-    flex: 1 1 0;
-    grid-template-columns: minmax(0, 1fr) 232px;
-    grid-template-rows: minmax(0, 1fr);
-  }
-  .detail-document,
-  .detail-content > .ticket-properties {
-    min-height: 0;
-    overflow-y: auto;
-  }
-}
+
 .ticket-personal-actions {
   display: flex;
   align-items: center;
@@ -2026,10 +2012,11 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   border-radius: 0;
   box-shadow: none;
   color: var(--foreground);
-  font-size: var(--text-title);
+  font-size: var(--text-doc-title);
   font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
+  line-height: var(--text-doc-title-line);
+  letter-spacing: var(--text-doc-title-tracking);
+  text-wrap: balance;
 }
 .editor-title textarea:focus-visible {
   outline: 2px solid var(--ring);
@@ -2047,10 +2034,11 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 .detail-document > .detail-title {
   margin-bottom: 8px;
-  font-size: var(--text-title);
+  font-size: var(--text-doc-title);
   font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
+  line-height: var(--text-doc-title-line);
+  letter-spacing: var(--text-doc-title-tracking);
+  text-wrap: balance;
 }
 .reminder-popover {
   display: flex;
@@ -2351,8 +2339,8 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 
 /* Measured on the content panel (plan-workspace), so a collapsed sidebar keeps
-   the split for longer. 840px is useNarrowPane’s STACK_MIN_WIDTH. */
-@container plan-workspace (max-width: 839px) {
+   the split for longer. 880px is useNarrowPane’s STACK_MIN_WIDTH. */
+@container plan-workspace (max-width: 879px) {
   .ticket-workspace #list {
     flex: 1 1 0 !important;
   }
@@ -2981,4 +2969,24 @@ kbd,
   background: var(--card);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
+}
+
+.ticket-header-updated {
+  display: inline-flex;
+  gap: 8px;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+@container ticket-detail (max-width: 599px) {
+  .ticket-header-updated {
+    display: none;
+  }
+}
+.ticket-detail[data-expanded] .editor-title textarea,
+.ticket-detail[data-expanded] .detail-title {
+  font-size: var(--text-section);
+  line-height: var(--text-section-line);
+  letter-spacing: var(--text-section-tracking);
 }
