@@ -23,6 +23,11 @@ import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
+import {
+  RunNotices,
+  TicketRunsSection,
+} from "@/features/automations/TicketRuns";
+import { useTicketRuns } from "@/features/automations/use-ticket-runs";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import { externalSource, sourceState } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
@@ -121,6 +126,7 @@ export function TicketPage({
         )}
       </div>
     );
+  const ticketRuns = useTicketRuns(ticket.reference, active);
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts it at the top: document, rail, detail.
   const page = useRef<HTMLDivElement>(null);
@@ -255,6 +261,7 @@ export function TicketPage({
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
+  const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
   // Folded, the rail's values sit under the title as one strip, in rail
   // order; the state line is the editor's own row above it.
   const strip = narrow && (
@@ -309,6 +316,7 @@ export function TicketPage({
           <SourceUnavailableNotice ticket={ticket} refresh={refresh} />
         )}
         {active && <PublicationNotice ticket={ticket} refresh={refresh} />}
+        {active && <RunNotices {...ticketRuns} />}
         {ticket.trashed || contentLocked ? (
           <>
             {source && contentLocked ? (
@@ -374,6 +382,7 @@ export function TicketPage({
         {narrow && (
           <RailPlacement value="column">
             <div className="detail-connected">
+              {runs}
               {relationships}
               {files}
             </div>
@@ -429,6 +438,7 @@ export function TicketPage({
           onOpenTicket={select}
           onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
         >
+          {runs}
           {relationships}
           {files}
         </TicketProperties>

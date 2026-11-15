@@ -24,14 +24,14 @@ use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus, HistorySelection,
-    LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention, UncertainDecision,
-    close_action, quit_action, tray_tooltip,
+    LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention, Stopping,
+    UncertainDecision, close_action, quit_action, tray_tooltip,
 };
 use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
 /// Fired when any Chat's list row or the counts may have changed. Payload: `Overview`.
 const OVERVIEW_EVENT: &str = "chat-overview";
-/// Fired when Quit was asked for. Payload: how many Chats are working.
+/// Fired when Quit was asked for. Payload: `Stopping`.
 const QUIT_EVENT: &str = "chat-quit-requested";
 /// Fired when the person clicked a Chat's system notification. Payload: `OpenRequest`.
 const OPEN_EVENT: &str = "chat-open-requested";
@@ -110,6 +110,11 @@ impl ChatBridge {
             quit_confirmed: AtomicBool::new(false),
             notifications: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// For the Automation runner, which runs its agents on the same host.
+    pub fn chats(&self) -> Arc<Chats> {
+        self.chats.clone()
     }
 }
 
@@ -367,6 +372,19 @@ pub async fn chat_set_muted(
 #[tauri::command]
 pub async fn chat_overview(bridge: State<'_, ChatBridge>) -> Outcome<Overview> {
     bridge.chats.overview()
+}
+
+/// What turning Chat off would stop, for its confirmation.
+#[tauri::command]
+pub async fn chat_stopping(bridge: State<'_, ChatBridge>) -> Outcome<Stopping> {
+    let chats = bridge.chats.clone();
+    // Reads the Workspace: off the async threads.
+    tauri::async_runtime::spawn_blocking(move || chats.stopping())
+        .await
+        .map_err(|error| ChatFailure {
+            code: "failed",
+            message: error.to_string(),
+        })
 }
 
 #[tauri::command]
@@ -707,7 +725,8 @@ pub fn show_window(app: &AppHandle) {
     app.remove_tray_by_id(TRAY_ID);
 }
 
-/// Whether closing the window now hides it and keeps Chats working, instead of quitting.
+/// Whether closing the window now hides it and keeps Chats and Automations going,
+/// instead of quitting.
 /// The page asks before it starts its own way out.
 #[tauri::command]
 pub fn close_keeps_running(bridge: State<'_, ChatBridge>) -> bool {
@@ -725,18 +744,22 @@ fn page_close_keeps_running(bridge: &ChatBridge) -> bool {
 
 fn keeps_running(bridge: &ChatBridge) -> bool {
     !bridge.quit_confirmed.load(Ordering::SeqCst)
-        && close_action(bridge.chats.enabled(), bridge.chats.working()) == CloseAction::KeepRunning
+        && close_action(
+            bridge.chats.enabled(),
+            bridge.chats.stopping(),
+            bridge.chats.automations_on(),
+        ) == CloseAction::KeepRunning
 }
 
-/// Quit was asked for while Chats are working and the person has not confirmed: shows
-/// the window and asks there. `false` when the quit may go ahead.
+/// Quit was asked for while Chats are working or runs going and the person has not
+/// confirmed: shows the window and asks there. `false` when the quit may go ahead.
 pub fn confirms_quit(app: &AppHandle) -> bool {
     let bridge = app.state::<ChatBridge>();
     let confirmed = bridge.quit_confirmed.load(Ordering::SeqCst);
-    match quit_action(bridge.chats.working(), confirmed) {
-        QuitAction::Confirm(working) => {
+    match quit_action(bridge.chats.stopping(), confirmed) {
+        QuitAction::Confirm(stopping) => {
             show_window(app);
-            let _ = app.emit(QUIT_EVENT, working);
+            let _ = app.emit(QUIT_EVENT, stopping);
             true
         }
         QuitAction::Quit => false,
@@ -886,6 +909,10 @@ mod tests {
         // The page kept the window open (sync's "Keep open"): the next Quit asks again
         // and the next close hides the window while Chats work.
         let confirmed = bridge.quit_confirmed.load(Ordering::SeqCst);
-        assert_eq!(quit_action(2, confirmed), QuitAction::Confirm(2));
+        let working = Stopping { chats: 2, runs: 0 };
+        assert_eq!(
+            quit_action(working, confirmed),
+            QuitAction::Confirm(working)
+        );
     }
 }

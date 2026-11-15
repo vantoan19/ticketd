@@ -1938,3 +1938,137 @@ fn the_notice_about_an_oversized_record_goes_when_the_record_is_put_back_as_sync
     assert_eq!((report.uploaded, report.pending), (0, 0));
     assert_eq!(devices.workspaces[0].sync_notices().unwrap(), []);
 }
+
+#[test]
+fn changes_arriving_through_sync_are_logged_as_workspace_events_by_sync() {
+    use ticketd_core::{WorkspaceActor, WorkspaceEventType as Type};
+
+    let mut devices = devices();
+    let a = &mut devices.workspaces[0];
+    let ticket = a.create_ticket("First").unwrap();
+    let filled = TicketPatch {
+        body: Some("Details".into()),
+        status: Some(Status::InProgress),
+        ..Default::default()
+    };
+    a.change_ticket(&ticket.reference, filled).unwrap();
+    a.add_tag(&ticket.reference, "ui").unwrap();
+    devices.sync(0);
+    devices.sync(1);
+
+    // A ticket that arrives complete is one created event, not created then updated.
+    let kinds = |workspace: &Workspace, after: i64| {
+        workspace
+            .workspace_events_after(after, 100)
+            .unwrap()
+            .into_iter()
+            .map(|event| {
+                assert_eq!(event.ticket_id, ticket.id);
+                (event.kind, event.actor, event.current)
+            })
+            .collect::<Vec<_>>()
+    };
+    let sync = WorkspaceActor::WorkspaceSync;
+    assert_eq!(
+        kinds(&devices.workspaces[1], 0),
+        [
+            (
+                Type::TicketCreated,
+                sync,
+                Some(serde_json::json!({
+                    "title": "First", "body": "Details", "status": "In progress",
+                    "project_id": null, "plan_id": null,
+                }))
+            ),
+            (
+                Type::TicketTagAdded,
+                sync,
+                Some(serde_json::json!({"tag": "ui"}))
+            ),
+        ]
+    );
+    // Uploading logs nothing on the device that made the change.
+    let head_a = devices.workspaces[0].workspace_event_head().unwrap();
+    let head_b = devices.workspaces[1].workspace_event_head().unwrap();
+
+    let a = &mut devices.workspaces[0];
+    a.add_tag(&ticket.reference, "ready-for-triage").unwrap();
+    let local = kinds(&devices.workspaces[0], head_a);
+    devices.sync(0);
+    devices.sync(1);
+
+    assert_eq!(kinds(&devices.workspaces[0], head_a), local);
+    assert_eq!(
+        kinds(&devices.workspaces[1], head_b),
+        [(
+            Type::TicketTagAdded,
+            sync,
+            Some(serde_json::json!({"tag": "ready-for-triage"}))
+        )]
+    );
+}
+
+#[test]
+fn a_tag_arriving_through_workspace_sync_starts_no_run_and_one_added_here_does() {
+    use ticketd_core::{
+        AutomationAgentSettings, AutomationDefinition, Step, StepAction, Trigger, WorkspaceActor,
+    };
+
+    let mut devices = devices();
+    let [arriving, local] =
+        ["Arriving", "Local"].map(|title| devices.workspaces[0].create_ticket(title).unwrap());
+    devices.sync(0);
+    devices.sync(1);
+    let b = &mut devices.workspaces[1];
+    let agent = b
+        .create_automation_agent(AutomationAgentSettings::default())
+        .unwrap();
+    let automation = b
+        .create_automation(AutomationDefinition {
+            name: "Triage".into(),
+            trigger: Some(Trigger::TagAdded {
+                tag: "ready-for-triage".into(),
+            }),
+            conditions: Vec::new(),
+            steps: vec![Step {
+                id: "triage".into(),
+                action: StepAction::RunAgent {
+                    agent_id: Some(agent.id),
+                    execution_folder: Some("/work/app".into()),
+                    on_failure: None,
+                },
+            }],
+        })
+        .unwrap();
+    b.set_automation_enabled(&automation.id, true).unwrap();
+
+    // One tag is added on the other desktop and arrives; one is added here.
+    devices.workspaces[0]
+        .add_tag(&arriving.reference, "ready-for-triage")
+        .unwrap();
+    devices.sync(0);
+    devices.sync(1);
+    let b = &mut devices.workspaces[1];
+    b.add_tag(&local.reference, "ready-for-triage").unwrap();
+
+    b.queue_automation_runs().unwrap();
+    // The other desktop made that change and reacts to it; this one reacts only to
+    // its own. The arriving tag is read past, so it never starts a run later either.
+    let started: Vec<_> = b
+        .automation_runs(&automation.id)
+        .unwrap()
+        .into_iter()
+        .map(|run| (run.ticket.unwrap().id, run.event.unwrap().actor))
+        .collect();
+    assert_eq!(started, [(local.id, WorkspaceActor::Person)]);
+    assert_eq!(
+        b.automation_cursor(&automation.id).unwrap(),
+        Some(b.workspace_event_head().unwrap())
+    );
+    assert!(
+        b.show_ticket(&arriving.reference)
+            .unwrap()
+            .tags
+            .contains(&"ready-for-triage".to_owned())
+    );
+}

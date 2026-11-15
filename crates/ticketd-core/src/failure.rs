@@ -114,7 +114,10 @@ impl Error {
             | Self::PlanNotFound(_)
             | Self::ProjectNotFound(_)
             | Self::EvidenceNotFound(_)
-            | Self::ActivityNotFound(_) => FailureKind::NotFound,
+            | Self::ActivityNotFound(_)
+            | Self::AutomationAgentNotFound(_)
+            | Self::AutomationNotFound(_)
+            | Self::AutomationRunNotFound(_) => FailureKind::NotFound,
             Self::DependencyCycle { .. }
             | Self::DependencySelf(_)
             | Self::DuplicateCycle
@@ -122,6 +125,12 @@ impl Error {
             | Self::RelationshipSelfLink
             | Self::ReviewSameTicket => FailureKind::Cycle,
             Self::Attachment(_)
+            | Self::InvalidAutomationAgent(_)
+            | Self::AutomationAgentInUse(_)
+            | Self::AutomationRun(_)
+            | Self::AutomationRunAutomationDeleted
+            | Self::InvalidAutomation(_)
+            | Self::AutomationUnfinished(_)
             | Self::ChatTrashed(_)
             | Self::ChatSubmissionUnresolved(_)
             | Self::Chat(_)

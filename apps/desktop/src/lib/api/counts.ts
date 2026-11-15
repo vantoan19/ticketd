@@ -7,6 +7,8 @@ const sidebarCountsSchema = z.object({
   total: countSchema.optional(),
   ready: countSchema,
   in_progress: countSchema,
+  /** Automation runs that need attention and have not been acted on. */
+  runs_needing_you: countSchema.optional(),
 });
 
 export type SidebarCounts = z.infer<typeof sidebarCountsSchema>;

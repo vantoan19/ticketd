@@ -7,6 +7,7 @@ import { AgentSkillsPage } from "@/features/settings/pages/AgentSkillsPage";
 import { AppearancePage } from "@/features/settings/pages/AppearancePage";
 import { AttachmentsPage } from "@/features/settings/pages/AttachmentsPage";
 import { AttentionPage } from "@/features/settings/pages/AttentionPage";
+import { AutomationsPage } from "@/features/settings/pages/AutomationsPage";
 import { BackupsPage } from "@/features/settings/pages/BackupsPage";
 import { ChatPage } from "@/features/settings/pages/ChatPage";
 import { CommandLinePage } from "@/features/settings/pages/CommandLinePage";
@@ -89,6 +90,7 @@ export function SettingsView({
       {selected === "command-line" && <CommandLinePage />}
       {selected === "agent-skills" && <AgentSkillsPage />}
       {selected === "chat" && <ChatPage />}
+      {selected === "automations" && <AutomationsPage />}
       {selected === "google-drive" && <GoogleDrivePage />}
       {selected === "keyboard-shortcuts" && <KeyboardShortcutsPage />}
       {selected === "about" && <AboutPage />}

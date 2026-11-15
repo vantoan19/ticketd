@@ -5,6 +5,7 @@ import {
   ListTodo,
   MessagesSquare,
   MessageSquarePlus,
+  Workflow,
   Trash2,
   Settings,
   ChevronDown,
@@ -276,7 +277,7 @@ function CreateButtons({
   );
 }
 
-type View =
+export type View =
   | "tickets"
   | "projects"
   | "plans"
@@ -285,7 +286,8 @@ type View =
   | "inbox"
   | "documents"
   | "attachments"
-  | "chats";
+  | "chats"
+  | "automations";
 export function WorkspaceSidebar({
   view: viewName,
   workspaceGraphOpen = false,
@@ -380,6 +382,12 @@ export function WorkspaceSidebar({
       onSelect: () => setView("archived-plans"),
     },
   ];
+  // Ended as Needs attention, and not yet run again, taken over or dismissed.
+  const runsWaiting = counts?.runs_needing_you ?? 0;
+  const automationsLabel =
+    runsWaiting > 0
+      ? `Automations, ${runsWaiting} ${runsWaiting === 1 ? "run needs" : "runs need"} you`
+      : "Automations";
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
@@ -497,6 +505,24 @@ export function WorkspaceSidebar({
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
+            {chat.enabled && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={view === "automations"}
+                  tooltip={automationsLabel}
+                  aria-label={automationsLabel}
+                  onClick={() => setView("automations")}
+                >
+                  <Workflow size={16} /> Automations
+                  {runsWaiting > 0 && (
+                    <span className="sidebar-count" aria-hidden="true">
+                      <StatusDot tone="attention" />
+                      {runsWaiting}
+                    </span>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </nav>
         <span role="status" className="sr-only">
@@ -506,6 +532,9 @@ export function WorkspaceSidebar({
           {waiting > 0
             ? `${waiting} ${waiting === 1 ? "Chat" : "Chats"} waiting`
             : ""}
+        </span>
+        <span role="status" className="sr-only">
+          {chat.enabled && runsWaiting > 0 ? automationsLabel : ""}
         </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">

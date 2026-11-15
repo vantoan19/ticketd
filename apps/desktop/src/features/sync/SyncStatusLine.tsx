@@ -50,6 +50,8 @@ const REVIEW_KINDS = {
   document: ["Document", "Documents"],
   plan: ["Plan", "Plans"],
   project: ["project", "projects"],
+  automation_agent: ["agent", "agents"],
+  automation: ["Automation", "Automations"],
 } as const;
 
 /** "1 ticket needs review", "2 Documents need review", "3 records need review". */

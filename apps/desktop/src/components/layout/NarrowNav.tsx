@@ -7,18 +7,27 @@ import { Tooltip } from "@/components/ui/tooltip";
  * The narrow window's way to the navigation sheet: a 32px icon button in the
  * leading slot of the view's own header (DESIGN.md section 5), never a bar of
  * its own. What waits in the sheet shows as a dot on the icon's corner and in
- * the button's name: Chats waiting first, then unread Inbox items.
+ * the button's name: Chats waiting and runs that need the person first,
+ * then unread Inbox items.
  */
 export function NarrowNav({
   waitingChats,
+  waitingRuns = 0,
   unreadInbox,
 }: {
   waitingChats: number;
+  /** Automation runs that ended needing the person. */
+  waitingRuns?: number;
   unreadInbox: number;
 }) {
-  const waiting =
+  const waiting = [
     waitingChats > 0 &&
-    `${waitingChats} ${waitingChats === 1 ? "Chat" : "Chats"} waiting`;
+      `${waitingChats} ${waitingChats === 1 ? "Chat" : "Chats"} waiting`,
+    waitingRuns > 0 &&
+      `${waitingRuns} ${waitingRuns === 1 ? "run needs" : "runs need"} you`,
+  ]
+    .filter(Boolean)
+    .join(", ");
   const unread = unreadInbox > 0 && `${unreadInbox} unread in Inbox`;
   const name = ["Open navigation", waiting || unread]
     .filter(Boolean)

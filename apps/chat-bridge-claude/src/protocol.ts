@@ -50,6 +50,21 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     model: z.string().min(1).optional(),
     effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
     permission_mode: z.enum(["default", "acceptEdits", "plan"]).optional(),
+    /**
+     * Set for the Chat of an Automation run, where nobody can approve. The session
+     * runs in the "don't ask" permission mode: a tool on `allowed_tools` runs and
+     * anything else is denied without a prompt. The person's own Claude Code
+     * settings files are not loaded, so nothing in them adds to `allowed_tools`.
+     */
+    unattended: z
+      .strictObject({
+        /** Omitted for Claude Code's default model. */
+        model: z.string().min(1).optional(),
+        allowed_tools: z.array(z.string().min(1)),
+        disallowed_tools: z.array(z.string().min(1)),
+        max_turns: z.number().int().positive(),
+      })
+      .optional(),
   }),
   // Lists the models Claude Code offers without a session: no prompt is sent.
   z.strictObject({
@@ -330,7 +345,15 @@ type EventBody =
       errors: string[];
       stop_reason: string | null;
       terminal_reason: string | null;
-      denied_tool_names: string[];
+      /**
+       * What Claude Code denied: the tool, the command when it was a shell, and
+       * the path when it was a file tool.
+       */
+      denials: {
+        tool_name: string;
+        command: string | null;
+        path: string | null;
+      }[];
       queued_turn_count: number | null;
       num_turns: number | null;
       duration_ms: number | null;

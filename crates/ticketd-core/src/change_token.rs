@@ -9,6 +9,8 @@ fn is_untracked(table: &str) -> bool {
         || table == "request_outcomes"
         || table == "last_backup"
         || table == "document_opens"
+        // The event log is read by its own cursor and shown nowhere.
+        || table == "workspace_events"
         // Chat tables change many times a second while a turn streams; Chat views
         // follow `chat_changes` instead.
         || table == "chats"
@@ -31,13 +33,21 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for table in tables.iter().filter(|table| !is_untracked(table)) {
-        for event in ["INSERT", "UPDATE", "DELETE"] {
-            connection.execute_batch(&format!(
-                "CREATE TRIGGER IF NOT EXISTS workspace_change_{table}_{event} AFTER {event} ON \"{table}\" BEGIN UPDATE workspace_changes SET token = token + 1 WHERE id = 1; END;"
-            ))?;
-        }
+        track(connection, table)?;
     }
     connection.execute_batch("PRAGMA user_version = 45;")?;
+    Ok(())
+}
+
+/// Makes one table move the change token. For a table added after `migrate` last
+/// ran: running `migrate` again would also start tracking every other table added
+/// since, such as the sync bookkeeping a background run writes.
+pub(crate) fn track(connection: &Connection, table: &str) -> Result<(), Error> {
+    for event in ["INSERT", "UPDATE", "DELETE"] {
+        connection.execute_batch(&format!(
+            "CREATE TRIGGER IF NOT EXISTS workspace_change_{table}_{event} AFTER {event} ON \"{table}\" BEGIN UPDATE workspace_changes SET token = token + 1 WHERE id = 1; END;"
+        ))?;
+    }
     Ok(())
 }
 

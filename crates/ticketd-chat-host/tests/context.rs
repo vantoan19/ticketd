@@ -68,7 +68,8 @@ fn the_reference_names_current_records_and_how_to_fetch_them_without_their_conte
 
     let block = context::for_chat(&workspace, &chat.id, &cli()).unwrap();
     for expected in [
-        "`/opt/ticketd/bin/ticketd` (version 0.1.0)",
+        "the `ticketd` command (version 0.1.0), first on this Chat's PATH",
+        "Run it by that name, never by a path",
         "`ticketd skills get chat`",
         "Read the linked records before starting",
         "write progress back",
@@ -89,6 +90,8 @@ fn the_reference_names_current_records_and_how_to_fetch_them_without_their_conte
         );
     }
     assert!(!block.contains("stays in ticketd"), "{block}");
+    // L1: the path is not given, so the agent does not write it.
+    assert!(!block.contains("/opt/ticketd/bin"), "{block}");
     // Attribution is descriptive and is not the Chat's identity.
     assert!(!block.contains(&chat.id), "{block}");
 

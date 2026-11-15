@@ -417,7 +417,13 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** `warning`: said by the harness; it folds with its turn. `note`: ticketd's own. */
     reason: z.enum([
       "stopped",
+      // ticketd stopped the turn: it quit, Chat was turned off, the run was
+      // taken over, reached its time limit, or its step ended.
       "quit",
+      "turned_off",
+      "taken_over",
+      "time_limit",
+      "run_ended",
       "stop_unconfirmed",
       "failed",
       "note",
@@ -720,6 +726,15 @@ export type HistorySelection =
 export type Unsubscribe = () => void;
 
 /**
+ * What turning Chat off or quitting would stop: Chats working or waiting, and
+ * Automation runs that are going. A run's own Chat counts as its run.
+ */
+export interface Stopping {
+  chats: number;
+  runs: number;
+}
+
+/**
  * A command the host refused. `stale` means the request, turn or runtime it
  * named is no longer current; the view shows the current state instead. `gone`
  * means the file it named is no longer there.
@@ -852,8 +867,10 @@ export interface ChatClient {
   setNotify(enabled: boolean): Promise<void>;
   /** The person clicked a Chat's system notification. */
   onOpenRequested(listener: (request: OpenRequest) => void): Unsubscribe;
-  /** Quit was asked for while Chats work; `working` is how many. */
-  onQuitRequested(listener: (working: number) => void): Unsubscribe;
+  /** What turning Chat off would stop now, for its confirmation. */
+  stopping(): Promise<Stopping>;
+  /** Quit was asked for; it would stop `stopping`. */
+  onQuitRequested(listener: (stopping: Stopping) => void): Unsubscribe;
   answerQuit(quit: boolean): Promise<void>;
 }
 

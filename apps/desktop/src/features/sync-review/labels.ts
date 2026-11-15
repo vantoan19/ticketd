@@ -1,9 +1,15 @@
 import { formatTime, startOfLocalDay } from "@/lib/format";
 import type { ConflictField, RecordKind } from "@/lib/sync-review-api";
 
-/** The body of a ticket is its Description; a Document's is its Text. */
+/** What the text after a record's header is called: a ticket's is its Description. */
+const BODY_LABELS: Partial<Record<RecordKind, string>> = {
+  ticket: "Description",
+  automation_agent: "Instructions",
+  automation: "Trigger and steps",
+};
+
 export function fieldLabel(kind: RecordKind, field: string): string {
-  if (field === "body") return kind === "ticket" ? "Description" : "Text";
+  if (field === "body") return BODY_LABELS[kind] ?? "Text";
   const words = field.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }

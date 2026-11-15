@@ -97,6 +97,11 @@ pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(),
     freshness::migrate(connection)
 }
 
+/// Format version 82: the parts of each source that have been read.
+pub(crate) fn migrate_read_partitions(connection: &rusqlite::Connection) -> Result<(), Error> {
+    freshness::migrate_read_partitions(connection)
+}
+
 /// Step 29: preserve the count belonging to the last accepted provider run.
 pub(crate) fn migrate_run_counts(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate_run_counts(connection)

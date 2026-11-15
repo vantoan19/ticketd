@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "apps/desktop/src-tauri"]
-default-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host"]
+members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "apps/desktop/src-tauri"]
+default-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner"]
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +13,7 @@ repository = "https://github.com/vantoan19/ticketd"
 [workspace.dependencies]
 ticketd-core = { path = "crates/ticketd-core" }
 ticketd-chat-host = { path = "crates/ticketd-chat-host" }
+ticketd-automation-runner = { path = "crates/ticketd-automation-runner" }
 clap = { version = "4", features = ["derive"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-build = { version = "2", features = [] }
@@ -20,6 +21,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

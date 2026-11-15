@@ -102,6 +102,16 @@ pub(super) struct Session {
     tools: HashMap<String, ToolProgress>,
     /// The last non-retried error per turn, for a failed turn that carries none.
     turn_errors: HashMap<String, Value>,
+    /// Set for an unattended session: what every `turn/start` adds, which keeps
+    /// approvals off and the sandbox as the agent's allowed tools set it.
+    pub(super) turn_overrides: Option<Value>,
+    /// Why the open turn of an unattended session fails: the first tool Codex
+    /// declined, or file it declined or could not change, in the order they came.
+    declined: Vec<String>,
+    /// Why Codex could not start a command in the open turn of an unattended session.
+    not_started: Option<String>,
+    /// The turn a Stop was sent for: a tool of it that then fails was cut off.
+    interrupted: Option<NativeTurnId>,
     rate_limits: Option<Value>,
     /// MCP servers whose failed start was already reported in this session.
     failed_servers: HashSet<String>,
@@ -124,6 +134,11 @@ impl Session {
             self.written_submissions.pop_front();
         }
         self.written_submissions.push_back(submission.clone());
+    }
+
+    /// A Stop was sent for `turn`.
+    pub fn interrupt_asked(&mut self, turn: &NativeTurnId) {
+        self.interrupted = Some(turn.clone());
     }
 
     /// The runtime is gone: nothing is active and no request can be answered.
@@ -379,7 +394,27 @@ impl Session {
 
     fn turn_completed(&mut self, turn: &Value) -> Option<Vec<EventKind>> {
         let id = text(turn, &["id"])?;
+        let declined = Self::denied_reason(std::mem::take(&mut self.declined));
+        let not_started = self.not_started.take();
+        let ended_by = |kind, message| {
+            TurnOutcome::Failed(Problem {
+                kind,
+                message,
+                detail: None,
+                resets_at: None,
+            })
+        };
         let outcome = match text(turn, &["status"])? {
+            // Nobody approves for an unattended session, so a declined tool is one
+            // the agent needed and was denied, even if it then ended its turn.
+            "completed" if let Some(declined) = declined => {
+                ended_by(ProblemKind::ToolDenied, declined)
+            }
+            // Whatever the agent then said, it could not do its work (#387 D2).
+            "completed" if not_started.is_some() => ended_by(
+                ProblemKind::PermissionUnavailable,
+                not_started.unwrap_or_default(),
+            ),
             "completed" => TurnOutcome::Completed,
             "interrupted" => TurnOutcome::Interrupted,
             "failed" => {
@@ -430,6 +465,9 @@ impl Session {
         let kind = match text(error, &["codexErrorInfo"]) {
             Some("usageLimitExceeded" | "sessionBudgetExceeded") => ProblemKind::QuotaExhausted,
             Some("unauthorized") => ProblemKind::LoginRequired,
+            Some("sandboxError" | "tooManyDenials") if self.turn_overrides.is_some() => {
+                ProblemKind::ToolDenied
+            }
             Some("sandboxError") => ProblemKind::PermissionUnavailable,
             _ => ProblemKind::Other,
         };
@@ -527,6 +565,67 @@ impl Session {
         }]
     }
 
+    /// Codex could not start the command, so it never ran: it failed with no process,
+    /// the exit code Codex gives a command it could not run (-1), and no time taken.
+    /// A command that ran and failed has a process, its own exit code or a duration.
+    // ponytail: recognized by shape from items seen live (codex-cli 0.162.1, a Windows
+    // sandbox that would not set up: "Failed to create unified exec process: ...");
+    // the protocol documents no field for it.
+    fn never_started(item: &Value) -> bool {
+        let none_or = |field: &str, value: i64| {
+            item.get(field)
+                .is_none_or(|found| found.is_null() || found.as_i64() == Some(value))
+        };
+        text(item, &["status"]) == Some("failed")
+            && item.get("processId").is_none_or(Value::is_null)
+            && none_or("exitCode", -1)
+            && none_or("durationMs", 0)
+    }
+
+    /// The turn's denials as separate sentences, a file Codex could not change before a
+    /// command it could not run. An empty entry stands for a denial not worth naming.
+    fn denied_reason(mut denials: Vec<String>) -> Option<String> {
+        if denials.is_empty() {
+            return None;
+        }
+        denials.sort_by_key(|denial| !denial.starts_with("Codex could not change"));
+        denials.retain(|denial| !denial.is_empty());
+        Some(if denials.is_empty() {
+            "Codex could not run commands in this step.".to_owned()
+        } else {
+            denials.join(" ")
+        })
+    }
+
+    /// What an unattended turn fails on in this item, if anything: a tool Codex
+    /// declined, or a file it declined or could not change. Nobody approves for an
+    /// unattended session (see `server_request`), so a declined file change is one
+    /// outside the folders Codex may write to.
+    fn denial(kind: &str, title: &str, item: &Value) -> Option<String> {
+        let status = text(item, &["status"])?;
+        if kind != "fileChange" {
+            // Codex shell-quotes the command, doubling each backslash.
+            return (status == "declined")
+                .then(|| format!("Codex could not run {}.", title.replace("\\\\", "\\")));
+        }
+        let paths: Vec<&str> = item
+            .get("changes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|change| text(change, &["path"]))
+            .collect();
+        let why = match status {
+            "declined" => "it is outside the step's folder",
+            "failed" => "the file could not be written",
+            _ => return None,
+        };
+        Some(format!(
+            "Codex could not change {}: {why}.",
+            paths.join(", ")
+        ))
+    }
+
     fn tool(
         &mut self,
         turn: &str,
@@ -536,7 +635,38 @@ impl Session {
         item: &Value,
         completed: bool,
     ) -> EventKind {
+        if self.turn_overrides.is_some()
+            && let Some(denial) = Self::denial(kind, &title, item)
+            && !self.declined.contains(&denial)
+        {
+            // ticketd's own guide command is not what the person needs to hear about
+            // (#387 5A3): it still ends the turn as failed, with the generic reason.
+            if title.contains("ticketd skills get") {
+                self.declined.push(String::new());
+            } else {
+                self.declined.push(denial);
+            }
+        }
+        if kind == "commandExecution"
+            && self.turn_overrides.is_some()
+            && self.not_started.is_none()
+            && Self::never_started(item)
+        {
+            let output = text(item, &["aggregatedOutput"]).unwrap_or_default();
+            let reason = output.lines().map(str::trim).find(|line| !line.is_empty());
+            self.not_started = Some(
+                reason
+                    .unwrap_or("Codex could not start a command and gave no reason.")
+                    .to_owned(),
+            );
+        }
+        let cut_off = self
+            .interrupted
+            .as_ref()
+            .is_some_and(|stopped| stopped.0 == turn);
         let status = match text(item, &["status"]) {
+            // Left unfinished: the turn shows it as not finished (#387 3B3).
+            Some("failed") if cut_off => ToolStatus::Running,
             Some("failed") => ToolStatus::Failed,
             Some("declined") => ToolStatus::Declined,
             Some("inProgress") => ToolStatus::Running,
@@ -546,6 +676,8 @@ impl Session {
         };
         let output = text(item, &["aggregatedOutput"])
             .or_else(|| text(item, &["error", "message"]))
+            // What a dynamic tool (ticketd's own) returned.
+            .or_else(|| item["contentItems"][0]["text"].as_str())
             .map(str::to_owned);
         // The output travels in `output`; keep it out of the bounded detail.
         let mut rest = item.clone();
@@ -611,6 +743,19 @@ impl Session {
         if self.requests.contains_key(&request) {
             // Redelivery of a request that is already on screen.
             return (Vec::new(), None);
+        }
+        if self.turn_overrides.is_some() {
+            // Nobody is there to approve: decline, and Codex reports the item declined.
+            let result = match method {
+                "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+                    Some(json!({"decision": "decline"}))
+                }
+                "item/permissions/requestApproval" => Some(json!({"permissions": {}})),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return (Vec::new(), Some(json!({"id": id, "result": result})));
+            }
         }
         let reason = text(params, &["reason"]);
         let (kind, shown) = match method {
@@ -823,6 +968,17 @@ fn tool_title(kind: &str, item: &Value) -> Option<String> {
             format!("Edit {}", paths.join(", "))
         }
         "mcpToolCall" => format!("{}.{}", field("server"), field("tool")),
+        // ticketd's own tool is shown as the command the agent asked for.
+        "dynamicToolCall" if field("tool") == super::ticket_tool::NAME => {
+            let arguments = item["arguments"]["arguments"]
+                .as_array()
+                .into_iter()
+                .flatten();
+            let words: Vec<&str> = arguments.filter_map(Value::as_str).collect();
+            format!("{} {}", super::ticket_tool::NAME, words.join(" "))
+                .trim_end()
+                .to_owned()
+        }
         "dynamicToolCall" | "collabAgentToolCall" => field("tool").to_owned(),
         "webSearch" => format!("Web search: {}", field("query")),
         "imageView" => format!("View image {}", field("path")),

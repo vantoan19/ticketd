@@ -10,11 +10,17 @@ export type DayGroup = "Today" | "Yesterday" | "Earlier";
 export function entryNoun(entry: Entry): string {
   if (entry.kind === "reminder") return "reminder";
   if (entry.kind === "activity") return "update";
+  if (entry.kind === "automation_run") return "run";
   return "change";
 }
 
 /** A plain-language summary. Internal event keys never appear in it. */
 export function summarize(entry: Entry): string {
+  // A run that needs attention: its Automation, then why.
+  if (entry.kind === "automation_run")
+    return `${entry.editing_agent ?? "An Automation"} needs attention${
+      entry.to_value && `: ${entry.to_value}`
+    }`;
   const base =
     entry.kind === "reminder"
       ? "Your reminder is due"

@@ -41,7 +41,11 @@ impl From<ProblemKind> for ChatProblemKind {
             ProblemKind::NativeHistoryUnavailable => Self::HistoryLost,
             ProblemKind::SessionInUse => Self::SessionInUse,
             ProblemKind::PermissionUnavailable => Self::SandboxUnavailable,
-            ProblemKind::Other => Self::Failed,
+            // Only a run's Chat ends at its turn limit or on a denied tool, and the
+            // run says why; in the Chat itself the message is enough.
+            ProblemKind::TurnLimitReached | ProblemKind::ToolDenied | ProblemKind::Other => {
+                Self::Failed
+            }
         }
     }
 }

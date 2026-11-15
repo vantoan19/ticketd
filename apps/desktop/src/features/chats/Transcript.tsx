@@ -73,6 +73,7 @@ import {
   type Turn,
   type TurnRow,
   goneWords,
+  sentence,
 } from "@/features/chats/model";
 import { FileName } from "@/features/chats/FileName";
 import {
@@ -996,12 +997,20 @@ function TurnView({
 }
 
 function markerText(item: ItemOf<"marker">, harness: string) {
-  const detail = item.message ? ` ${item.message}` : "";
+  const detail = item.message ? ` ${sentence(item.message)}` : "";
   switch (item.reason) {
     case "stopped":
       return `You stopped this turn. Edits already made are kept.${detail}`;
     case "quit":
       return `Stopped when ticketd quit. Edits already made are kept.${detail}`;
+    case "turned_off":
+      return `Stopped when Chat was turned off. Edits already made are kept.${detail}`;
+    case "taken_over":
+      return `You took this run over. Edits already made are kept.${detail}`;
+    case "time_limit":
+      return `Stopped at the run's time limit. Edits already made are kept.${detail}`;
+    case "run_ended":
+      return `Stopped when its run step ended. Edits already made are kept.${detail}`;
     case "stop_unconfirmed":
       return `ticketd asked ${harness} to stop but it didn't confirm. It may still be running.${detail}`;
     case "failed":

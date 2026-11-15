@@ -250,7 +250,8 @@ export function ConflictReview({
                       />
                     )}
                   </ChoiceTiles>
-                  {body && (
+                  {/* An Automation's steps are taken whole from one desktop. */}
+                  {body && kind !== "automation" && (
                     <div className="sync-result">
                       {choice === "edited" ? (
                         <>

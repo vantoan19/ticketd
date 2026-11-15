@@ -10,7 +10,15 @@ import { invoke as bridge, structured } from "@/lib/api/bridge-failure";
 
 /** One record or file that has not reached Drive yet. */
 const pendingItemSchema = z.object({
-  kind: z.enum(["ticket", "document", "plan", "project", "attachment"]),
+  kind: z.enum([
+    "ticket",
+    "document",
+    "plan",
+    "project",
+    "automation_agent",
+    "automation",
+    "attachment",
+  ]),
   /** The record's or Attachment's GUID. */
   id: z.string(),
   /** The Ticket reference, for a ticket. */
@@ -22,7 +30,14 @@ export type SyncPendingItem = z.infer<typeof pendingItemSchema>;
 
 /** A record changed on two desktops in the same field, waiting for the person's choice. */
 const reviewItemSchema = z.object({
-  kind: z.enum(["ticket", "document", "plan", "project"]),
+  kind: z.enum([
+    "ticket",
+    "document",
+    "plan",
+    "project",
+    "automation_agent",
+    "automation",
+  ]),
   id: z.string(),
   reference: z.string().nullable(),
   title: z.string(),

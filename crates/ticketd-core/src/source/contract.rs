@@ -207,6 +207,9 @@ pub struct SkippedPartition {
     /// The setting that named the part, so a preview can point at it.
     #[serde(default)]
     pub field: Option<String>,
+    /// The part, as [`Connector::partition`] names it. Additive to contract 1.
+    #[serde(default)]
+    pub partition: String,
 }
 
 /// A request to create an ordinary issue. Connectors that do not declare
@@ -493,6 +496,29 @@ pub trait Connector: Send + Sync {
         config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError>;
+
+    /// The part of the source an issue belongs to: what discovery reads or skips
+    /// as a whole (for GitHub, the repository). ticketd keeps which parts it has
+    /// read, so the first read of one can be told from the reads that follow. A
+    /// source read as one whole keeps the default, a single unnamed part.
+    fn partition(&self, _reference: &ExternalRef) -> String {
+        String::new()
+    }
+
+    /// Every part `config` asks discovery to read, named as [`Self::partition`]
+    /// names them.
+    fn partitions(&self, _config: &ConfigValues) -> Vec<String> {
+        vec![String::new()]
+    }
+
+    /// The rules in `config` that narrow which issues of a part discovery lists
+    /// (for GitHub, the assignee and labels), as one stable text; empty when
+    /// nothing narrows them. ticketd keeps a part as read under these rules, so
+    /// loosening them reads the part as if for the first time: the issues that
+    /// become visible are a backlog, not news.
+    fn discovery_scope(&self, _config: &ConfigValues) -> String {
+        String::new()
+    }
 
     /// Returns every comment and timeline event of one issue, following the
     /// provider's paging itself. Only called when the descriptor declares

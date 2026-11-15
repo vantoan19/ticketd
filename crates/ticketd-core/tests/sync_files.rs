@@ -182,7 +182,8 @@ fn every_record_kind_round_trips_into_an_empty_workspace() {
     let files = export_all(&source);
     assert_eq!(
         SyncKind::ALL.map(|kind| source.sync_record_ids(kind).unwrap().len()),
-        [1, 3, 1, 4]
+        // Agents and Automations round-trip in `automation_sync.rs`.
+        [1, 3, 1, 4, 0, 0]
     );
 
     // Reversed: every relationship arrives before its target.

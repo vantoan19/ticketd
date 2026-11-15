@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import { useChatFeature } from "@/features/chats/use-chats";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { modifierKeyLabel } from "@/lib/platform";
 import {
@@ -42,8 +43,12 @@ interface NavIndicator {
 function useSettingsNavItems() {
   const { entries } = useSources();
   const { needsSetup } = useSettingsState();
+  const chat = useChatFeature();
   const items: NavItem[] = [
-    ...SETTINGS_SECTIONS,
+    // Automations are part of Chat: its switch shows and hides both.
+    ...SETTINGS_SECTIONS.filter(
+      (section) => section.id !== "automations" || chat.enabled,
+    ),
     ...entries.map(({ connector }) =>
       sourceSection(connector.provider, connector.name),
     ),

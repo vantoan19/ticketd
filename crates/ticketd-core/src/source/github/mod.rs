@@ -520,6 +520,7 @@ impl Connector for GithubConnector {
                             other => other.to_string(),
                         },
                         field: Some("repositories".to_owned()),
+                        partition: repository.to_lowercase(),
                     }],
                 });
             }
@@ -560,6 +561,40 @@ impl Connector for GithubConnector {
 
     fn destinations(&self, config: &ConfigValues) -> Vec<String> {
         Self::repositories(config)
+    }
+
+    // GitHub does not tell `Owner/Name` from `owner/name`, so neither do these.
+    fn partition(&self, reference: &ExternalRef) -> String {
+        let repository = reference
+            .locator
+            .rsplit_once('#')
+            .map_or(reference.locator.as_str(), |(repository, _)| repository);
+        repository.to_lowercase()
+    }
+
+    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
+        Self::repositories(config)
+            .iter()
+            .map(|repository| repository.to_lowercase())
+            .collect()
+    }
+
+    // GitHub matches logins and label names without regard to case.
+    fn discovery_scope(&self, config: &ConfigValues) -> String {
+        let mut scope = Vec::new();
+        if let Some(assignee) = config.get("assignee").and_then(Value::as_str) {
+            scope.push(format!("assignee={}", assignee.to_lowercase()));
+        }
+        let mut labels: Vec<String> = strings(config.get("labels"))
+            .iter()
+            .map(|label| label.to_lowercase())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        if !labels.is_empty() {
+            scope.push(format!("labels={}", labels.join(",")));
+        }
+        scope.join("&")
     }
 
     fn publish(

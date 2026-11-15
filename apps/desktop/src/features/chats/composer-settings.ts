@@ -52,8 +52,15 @@ export const changeHeld = (setting: HarnessSetting | null | undefined) =>
 export const shownOf = (setting: HarnessSetting) =>
   changeHeld(setting) ? (setting.change?.value ?? null) : currentOf(setting);
 
-/** A change the person asked for in this view, and what the host first said. */
-export type AskedChange = { setting: Setting; outcome: SettingChange };
+/**
+ * A change the person asked for in this view, and what the host first said.
+ * `label` is the choice's name when asked, for when the options are gone.
+ */
+export type AskedChange = {
+  setting: Setting;
+  outcome: SettingChange;
+  label?: string;
+};
 
 /**
  * The one line a refused or unconfirmed change leaves at the top of the dock;
@@ -71,7 +78,10 @@ export function settingLine(
     setting?.change?.value === asked.outcome.value
       ? setting.change
       : asked.outcome;
-  const wanted = labelOf(setting, outcome.value);
+  const listed = setting?.options.some((option) => option.id === outcome.value);
+  const wanted = listed
+    ? labelOf(setting, outcome.value)
+    : (asked.label ?? outcome.value);
   const reason = outcome.reason?.replace(/\.$/, "");
   switch (outcome.state) {
     case "refused":

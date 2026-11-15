@@ -10,7 +10,14 @@ import { invoke, structured } from "@/lib/api/bridge-failure";
  */
 
 /** Every synced record kind can conflict; only tickets and Documents keep History. */
-const recordKindSchema = z.enum(["ticket", "document", "plan", "project"]);
+const recordKindSchema = z.enum([
+  "ticket",
+  "document",
+  "plan",
+  "project",
+  "automation_agent",
+  "automation",
+]);
 export type RecordKind = z.infer<typeof recordKindSchema>;
 export type VersionedKind = "ticket" | "document";
 export type RecordKey = { kind: RecordKind; id: string };

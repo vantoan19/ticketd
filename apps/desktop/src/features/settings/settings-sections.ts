@@ -13,6 +13,7 @@ import {
   Search,
   Terminal,
   Upload,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -50,6 +51,13 @@ export const SETTINGS_SECTIONS = [
   },
   { id: "agent-skills", label: "Agent skills", group: "Agents", icon: Bot },
   { id: "chat", label: "Chat", group: "Agents", icon: MessageCircle },
+  // Listed only while Chat is on.
+  {
+    id: "automations",
+    label: "Automations",
+    group: "Agents",
+    icon: Workflow,
+  },
   {
     id: "google-drive",
     label: "Google Drive",

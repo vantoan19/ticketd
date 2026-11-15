@@ -24,7 +24,8 @@ use crate::host::{
     ChatProblem, ChatView, ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
     INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
     SNAPSHOT_ITEMS, STOPPED_BY_TICKETD, SendMode, SettingChangeState, StopState,
-    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal, problem_key,
+    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, TicketdStop, WorkspaceOpener, is_refusal,
+    problem_key,
 };
 use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
@@ -49,7 +50,7 @@ use crate::{
     InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
     Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
-    SubmissionId, SubmissionKind, Subscription, ToolStatus, TurnOutcome,
+    SubmissionId, SubmissionKind, Subscription, ToolStatus, TurnOutcome, Unattended,
 };
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
@@ -95,7 +96,7 @@ pub(crate) enum Command {
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
     /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
-    Shutdown(oneshot::Sender<Option<String>>),
+    Shutdown(TicketdStop, oneshot::Sender<Option<String>>),
 }
 
 /// The result of an adapter call that ran in its own task.
@@ -201,6 +202,8 @@ pub(crate) struct Supervisor {
     open_workspace: WorkspaceOpener,
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
+    /// Set for the Chat of an Automation run: every session opens with these settings.
+    unattended: Option<Unattended>,
     board: Arc<Board>,
     commands: mpsc::Receiver<Command>,
     done: mpsc::UnboundedSender<Done>,
@@ -241,6 +244,9 @@ pub(crate) struct Supervisor {
     checkpoint_at: Option<Instant>,
     stop_deadline: Option<Instant>,
     shutting_down: bool,
+    /// Why ticketd is shutting the Chat down, kept on a turn the harness reports
+    /// interrupted meanwhile, so it does not read as the person's stop.
+    shut_down_for: Option<TicketdStop>,
     /// The person resumed the queue or sent into it, so it may open a session. Without
     /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
     queue_started: bool,
@@ -276,6 +282,7 @@ impl Supervisor {
         adapter: Option<Arc<dyn HarnessAdapter>>,
         context: Option<ContextSource>,
         board: Arc<Board>,
+        unattended: Option<Unattended>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
@@ -284,6 +291,7 @@ impl Supervisor {
             open_workspace,
             adapter,
             context,
+            unattended,
             board,
             commands,
             done,
@@ -315,6 +323,7 @@ impl Supervisor {
             checkpoint_at: None,
             stop_deadline: None,
             shutting_down: false,
+            shut_down_for: None,
             queue_started: false,
             closing: false,
             unpublished: true,
@@ -338,9 +347,10 @@ impl Supervisor {
             .min();
             tokio::select! {
                 command = self.commands.recv() => match command {
-                    Some(Command::Shutdown(reply)) => {
+                    Some(Command::Shutdown(why, reply)) => {
                         self.shutting_down = true;
-                        let unconfirmed = self.stop_runtime(STOPPED_BY_TICKETD).await;
+                        self.shut_down_for = Some(why);
+                        let unconfirmed = self.stop_runtime(why.detail()).await;
                         self.publish();
                         self.board.report(&self.chat_id, None);
                         let _ = reply.send(unconfirmed);
@@ -510,7 +520,7 @@ impl Supervisor {
             // Views read the Chat again even when no record changed: what they show
             // can depend on the folder too, such as its branch.
             Command::Changed => self.last_live = None,
-            Command::Shutdown(_) => {}
+            Command::Shutdown(..) => {}
         }
     }
 
@@ -899,7 +909,15 @@ impl Supervisor {
         let source = self.context.clone();
         self.generations += 1;
         let generation = RuntimeGeneration(self.generations);
-        let request = OpenRequest {
+        // A Chat the person took over from a run is ordinary from here on, whether it
+        // resumes the agent's session or, because the run never got one, opens a fresh
+        // one: neither keeps the agent's settings. Unreadable is taken as taken over:
+        // the person's own settings are the safe ones to send.
+        let taken_over = self.unattended.is_none()
+            && self
+                .core(|core| core.chat_ran_an_automation_agent(&chat.id))
+                .unwrap_or(true);
+        let mut request = OpenRequest {
             generation,
             chat_id: chat.id.clone(),
             working_directory: PathBuf::from(&chat.execution_folder),
@@ -909,6 +927,9 @@ impl Supervisor {
                 SessionStart::Resume(_) => StartSettings::default(),
             },
             session,
+            unattended: self.unattended.clone(),
+            ticketd_cli: None,
+            taken_over,
         };
         self.opening = Some(Opening {
             generation,
@@ -925,6 +946,10 @@ impl Supervisor {
                     .unwrap_or_else(|error| Err(error.to_string())),
                 None => Ok(None),
             };
+            request.ticketd_cli = tokio::task::spawn_blocking(crate::cli::executable)
+                .await
+                .ok()
+                .flatten();
             let result = adapter.open(request).await;
             let _ = done.send(Done::Opened {
                 generation,
@@ -1404,6 +1429,28 @@ impl Supervisor {
                 Ok(())
             }
             Err(problem) => {
+                // A take-over: Codex records a thread id when it starts one but keeps nothing until
+                // the first turn runs, so a Chat whose session never completed a turn (a run
+                // taken over early) has nothing to resume: open a fresh session, with
+                // the same reply, rather than a dead Chat (#387 6A1).
+                if problem.kind == crate::ProblemKind::NativeHistoryUnavailable
+                    && opening.origin == ChatSessionOrigin::NativeResume
+                    && self.unattended.is_none()
+                    && self
+                        .core(|core| core.chat_ran_an_automation_agent(&self.chat_id))
+                        .unwrap_or(false)
+                    && self.never_completed_a_turn()
+                    && let Ok(chat) = self.core(|core| core.chat(&self.chat_id))
+                {
+                    self.open(
+                        &chat,
+                        SessionStart::New,
+                        ChatSessionOrigin::New,
+                        opening.preamble,
+                        opening.reply,
+                    );
+                    return;
+                }
                 self.pause(ChatProblem::OpenFailed {
                     problem: problem.clone(),
                     native_resume: opening.origin == ChatSessionOrigin::NativeResume,
@@ -1414,6 +1461,19 @@ impl Supervisor {
         if let Some(reply) = opening.reply {
             let _ = reply.send(result);
         }
+    }
+
+    /// Whether no turn of this Chat ever completed, so the harness may have kept nothing.
+    /// Unreadable counts as having completed one.
+    fn never_completed_a_turn(&self) -> bool {
+        const SCAN: usize = 200;
+        self.core(|core| core.chat_snapshot(&self.chat_id, SCAN))
+            .is_ok_and(|snapshot| {
+                !snapshot.earlier
+                    && !snapshot.items.iter().any(|item| {
+                        matches!(item, ticketd_core::ChatItem::Turn(turn) if turn.state == ChatTurnState::Completed)
+                    })
+            })
     }
 
     /// Maps what the adapter observed about one submission to core observations. An
@@ -1756,7 +1816,12 @@ impl Supervisor {
                         (ChatTurnState::Interrupted, None, None, None)
                     }
                     TurnOutcome::Completed => (ChatTurnState::Completed, None, None, None),
-                    TurnOutcome::Interrupted => (ChatTurnState::Interrupted, None, None, None),
+                    TurnOutcome::Interrupted => (
+                        ChatTurnState::Interrupted,
+                        self.shut_down_for.map(|why| why.detail().to_owned()),
+                        None,
+                        None,
+                    ),
                     TurnOutcome::Failed(problem) => (
                         ChatTurnState::Failed,
                         Some(problem.message.chars().take(CHAT_NOTICE_LIMIT).collect()),
@@ -1778,8 +1843,12 @@ impl Supervisor {
                     self.active = None;
                     self.stop = None;
                     self.stop_deadline = None;
-                    if state != ChatTurnState::Completed {
-                        // Queued input does not follow a turn that did not complete.
+                    // Queued input does not follow a turn that did not complete. A
+                    // take-over ends the agent's turn for the person, who is about to
+                    // send (#387 M2): their Chat's queue is not paused for it.
+                    if state != ChatTurnState::Completed
+                        && self.shut_down_for != Some(TicketdStop::TakenOver)
+                    {
                         let chat = self.chat_id.clone();
                         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                         self.direct.clear();

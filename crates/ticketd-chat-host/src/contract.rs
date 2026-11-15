@@ -140,8 +140,38 @@ pub struct OpenRequest {
     pub chat_id: String,
     pub working_directory: PathBuf,
     pub session: SessionStart,
+    /// Set for the Chat of an Automation run. `None` leaves the model, permissions and
+    /// tools to the harness's own configuration, with the person there to approve.
+    pub unattended: Option<Unattended>,
     /// The person's picks for a new session; empty for the harness's own settings.
+    /// An unattended run leaves it empty: its model comes from `unattended`.
     pub settings: StartSettings,
+    /// The ticketd CLI executable. Its folder goes first on the harness process's
+    /// `PATH`, so the agent runs it by its name, `ticketd`, and never needs its path.
+    pub ticketd_cli: Option<PathBuf>,
+    /// The Chat began as an Automation run's (its session, if any, started unattended),
+    /// and is the person's now, resumed or opened fresh: the harness must be told the person's own
+    /// approvals and sandbox, or it would keep the agent's.
+    pub taken_over: bool,
+}
+
+/// How a harness runs when nobody is there to approve: it never asks, and anything
+/// outside `tools` is denied. An adapter must never widen this to full access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unattended {
+    /// The Automation run, given to the harness process as
+    /// `ticketd_core::AUTOMATION_RUN_ID_VARIABLE` so the ticketd CLI it runs logs its
+    /// writes as an Automation's.
+    pub run_id: String,
+    /// `None` is the harness's default model.
+    pub model: Option<String>,
+    /// The agent's switches as saved. Codex has no command list (`any_command` and
+    /// `allowed_commands`: with `run_commands` it runs any), and no read switch of its
+    /// own: its shell does the reading.
+    pub tools: ticketd_core::AutomationAgentTools,
+    /// How many turns the agent may take, where the harness can cap them. Codex
+    /// cannot.
+    pub turn_limit: u32,
 }
 
 /// Settings a new session opens with, as chosen in New Chat. `None` leaves the
@@ -753,6 +783,10 @@ pub enum ProblemKind {
     SessionInUse,
     /// A required permission or sandbox capability is unavailable.
     PermissionUnavailable,
+    /// An unattended turn used up its turn limit before finishing.
+    TurnLimitReached,
+    /// An unattended turn tried a tool outside its allowed tools.
+    ToolDenied,
     Other,
 }
 

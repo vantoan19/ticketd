@@ -75,6 +75,7 @@ export function PaneHeader({
   titleEditor,
   count,
   leading,
+  hideTitle = false,
   children,
   actions,
   caption,
@@ -91,6 +92,8 @@ export function PaneHeader({
   titleEditor?: ReactNode;
   count?: ReactNode;
   leading?: ReactNode;
+  /** Keeps the title for screen readers only, where a control in the header names the view. */
+  hideTitle?: boolean;
   children?: ReactNode;
   actions?: ReactNode;
   caption?: string | null;
@@ -128,7 +131,11 @@ export function PaneHeader({
             </span>
           )}
           {titleEditor ??
-            (titleControl ? (
+            (hideTitle ? (
+              <Heading id={titleId} className="sr-only">
+                {title}
+              </Heading>
+            ) : titleControl ? (
               <Heading
                 id={titleId}
                 tabIndex={titleId ? -1 : undefined}

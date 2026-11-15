@@ -2,7 +2,7 @@
 //! traffic. Each fixture is a JSON-lines transcript: `client` frames the adapter must
 //! write, `server` frames app-server sends, and `mark` lines where the test acts.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -50,6 +50,9 @@ async fn open_with(fixture: &str, session: SessionStart) -> (Peer, Result<Opened
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -759,6 +762,9 @@ async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
         settings: StartSettings {
             model: Some("gpt-b".to_owned()),
             effort: Some("high".to_owned()),
@@ -853,6 +859,285 @@ fn a_failed_mcp_server_is_said_once_with_its_recovery_and_a_reroute_names_the_mo
     }
 }
 
+/// #387 3B3: a command a Stop cuts off completes as failed before the turn ends
+/// interrupted; it stays unfinished, which the turn then shows as "not finished".
+#[test]
+fn a_command_cut_off_by_a_stop_is_not_reported_as_failed() {
+    let mut session = Session::default();
+    session.notification("turn/started", &json!({"turn": {"id": "turn_1"}}));
+    let command = |status: &str| json!({"turnId": "turn_1", "item": {"id": "cmd_1", "type": "commandExecution", "command": "ticketd list", "status": status, "processId": "42", "exitCode": null}});
+    session.notification("item/started", &command("inProgress"));
+    session.interrupt_asked(&NativeTurnId::new("turn_1"));
+
+    let events = session.notification("item/completed", &command("failed"));
+
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            EventKind::ToolUpdated {
+                status: crate::ToolStatus::Running,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            EventKind::ToolUpdated {
+                status: crate::ToolStatus::Failed,
+                ..
+            }
+        )),
+        "{events:?}"
+    );
+}
+
+fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
+    crate::Unattended {
+        run_id: "run-1".into(),
+        model: Some("gpt-test".into()),
+        tools: ticketd_core::AutomationAgentTools {
+            read_files: true,
+            edit_files,
+            run_commands: true,
+            any_command: true,
+            allowed_commands: Vec::new(),
+            use_web,
+        },
+        turn_limit: 40,
+    }
+}
+
+fn agent(
+    read_files: bool,
+    edit_files: bool,
+    run_commands: bool,
+    use_web: bool,
+) -> crate::Unattended {
+    let mut agent = unattended(edit_files, use_web);
+    agent.tools.read_files = read_files;
+    agent.tools.run_commands = run_commands;
+    agent
+}
+
+/// Edit off is a read-only sandbox, Edit on writes only in the step's folder (the
+/// ticketd tool needs no other), Run off removes Codex's shell, and with neither Edit
+/// nor Run the agent has no environment at all: only ticketd's tool. "Read files"
+/// changes nothing here: Codex reads through its shell, which only Run switches.
+#[test]
+fn the_switches_become_codex_sandbox_shell_and_environment_settings() {
+    for (edit_files, run_commands, use_web) in [
+        (false, false, false),
+        (false, true, true),
+        (true, false, false),
+        (true, true, true),
+    ] {
+        let reading = |read_files| agent(read_files, edit_files, run_commands, use_web);
+        assert_eq!(
+            super::unattended_params(&reading(true), Path::new("/work/chat-1")),
+            super::unattended_params(&reading(false), Path::new("/work/chat-1")),
+            "reading is not a Codex setting"
+        );
+        let (thread, turn) = super::unattended_params(&reading(true), Path::new("/work/chat-1"));
+        let policy = if edit_files {
+            json!({
+                "type": "workspaceWrite",
+                "networkAccess": use_web,
+                "writableRoots": ["/work/chat-1"],
+                "excludeTmpdirEnvVar": true,
+                "excludeSlashTmp": true,
+            })
+        } else {
+            json!({"type": "readOnly", "networkAccess": use_web})
+        };
+        assert_eq!(
+            thread,
+            json!({
+                "approvalPolicy": "on-request",
+                "sandbox": if edit_files { "workspace-write" } else { "read-only" },
+                "model": "gpt-test",
+            })
+        );
+        assert_eq!(
+            turn,
+            json!({"approvalPolicy": "on-request", "sandboxPolicy": policy})
+        );
+        let overrides = super::switch_overrides(&reading(true).tools);
+        assert_eq!(overrides["features.shell_tool"], json!(run_commands));
+        assert_eq!(
+            overrides.get("features.view_image"),
+            (!run_commands).then_some(&json!(false))
+        );
+        assert_eq!(
+            super::has_no_environment(&reading(true).tools),
+            !edit_files && !run_commands
+        );
+    }
+}
+
+/// The fixture checks that the thread and every turn are started with approvals off
+/// and the sandbox, here for an agent with "Edit files" off; a command Codex declines then fails the turn as a denied tool.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("unattended"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(unattended(false, false)),
+        ticketd_cli: None,
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let mut opened = opened.expect("the thread opens");
+    drain(&mut opened.events).await;
+
+    submit(&mut peer, &opened.runtime, start_turn("sub-1", "Go")).await;
+
+    match drain(&mut opened.events).await.pop() {
+        Some(EventKind::TurnEnded {
+            outcome: TurnOutcome::Failed(problem),
+            ..
+        }) => {
+            assert_eq!(problem.kind, ProblemKind::ToolDenied);
+            assert!(problem.message.contains("curl example.com"), "{problem:?}");
+        }
+        other => panic!("a failed turn, got {other:?}"),
+    }
+}
+
+async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
+    let (mut peer, io) = pipes();
+    peer.load(fixture);
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(unattended(false, false)),
+        ticketd_cli: None,
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    tokio::join!(open_over(io, &request, options()), peer.play()).0
+}
+
+/// An unattended thread with the ticketd CLI opts into the experimental API, declares
+/// ticketd's own tool and tells the agent to use it. The tool refuses what could leave
+/// the run's Workspace or the step, and any other tool or thread.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_thread_declares_ticketds_own_tool_and_answers_only_it() {
+    let (mut peer, _opened) =
+        open_with_ticketd_tool(fixture!("unattended_ticket_tool"), unattended(true, false)).await;
+
+    // Every call in the rest of the script is answered as it is written.
+    peer.play().await;
+    peer.assert_nothing_written().await;
+}
+
+/// With neither Run commands nor Edit files on, the agent has no shell, a read-only
+/// sandbox and no Codex environment at all: only ticketd's tool is left.
+#[tokio::test(start_paused = true)]
+async fn an_agent_with_run_and_edit_off_gets_no_shell_and_no_environment() {
+    let (_peer, _opened) = open_with_ticketd_tool(
+        fixture!("unattended_no_environment"),
+        agent(true, false, false, false),
+    )
+    .await;
+}
+
+/// Opens an unattended thread for `agent` with the ticketd CLI over a fixture that
+/// holds `$CONFIG`, `$SPEC` and `$INSTRUCTIONS` where ticketd fills in what it sends.
+async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Peer, OpenedRuntime) {
+    let mut config = super::personal_tools_off(None);
+    let switches = super::switch_overrides(&agent.tools);
+    config
+        .as_object_mut()
+        .unwrap()
+        .extend(switches.as_object().unwrap().clone());
+    let script = fixture
+        .replace("$CONFIG", &config.to_string())
+        .replace("$SPEC", &super::ticket_tool::spec().to_string())
+        .replace(
+            "$INSTRUCTIONS",
+            &json!(super::ticket_tool::INSTRUCTIONS).to_string(),
+        );
+    let (mut peer, io) = pipes();
+    peer.load(&script);
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(agent),
+        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    (peer, opened.expect("the thread opens"))
+}
+
+/// The agent's ticketd tool call shows as the command it asked for, with its output.
+#[test]
+fn a_ticketd_tool_call_shows_as_the_command_with_its_output() {
+    let mut session = Session::default();
+    let item = json!({"type": "dynamicToolCall", "id": "item_3", "tool": "ticketd", "namespace": null,
+        "arguments": {"arguments": ["show", "T-1"]}, "status": "completed", "success": true,
+        "contentItems": [{"type": "inputText", "text": "T-1 Fix it"}]});
+    let params = json!({"turnId": "turn_1", "item": item});
+    match session.notification("item/completed", &params).as_slice() {
+        [
+            EventKind::ToolUpdated {
+                title,
+                output,
+                status,
+                ..
+            },
+        ] => {
+            assert_eq!(title, "ticketd show T-1");
+            assert_eq!(output.as_deref(), Some("T-1 Fix it"));
+            assert_eq!(*status, crate::ToolStatus::Succeeded);
+        }
+        other => panic!("one tool update, got {other:?}"),
+    }
+}
+
+/// A person's Chat, taken over or not, declares no tool and opts into nothing.
+#[tokio::test(start_paused = true)]
+async fn a_persons_chat_declares_no_tool_and_stays_off_the_experimental_api() {
+    let (_peer, opened) = open_with(fixture!("handshake"), SessionStart::New).await;
+    // The handshake fixture asks for no capabilities, so it fails if any were sent.
+    assert!(opened.is_ok());
+}
+
+/// On Windows an unattended run asks Codex whether its sandbox can start, and a
+/// Codex that says it cannot fails the run before any thread starts.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_run_fails_at_once_when_the_windows_sandbox_is_not_ready() {
+    let Err(problem) = open_unattended(fixture!("unattended_sandbox_not_ready")).await else {
+        panic!("the run fails");
+    };
+    assert_eq!(
+        problem.message,
+        "Codex could not start its sandbox on this computer. Update Codex (`codex update`) and try again."
+    );
+}
+
+/// A Codex that does not know the readiness method is carried on with as before.
+#[tokio::test(start_paused = true)]
+async fn a_codex_without_the_readiness_method_is_not_blocked() {
+    assert!(
+        open_unattended(fixture!("unattended_readiness_unknown"))
+            .await
+            .is_ok()
+    );
+}
+
 /// Codex reports a command the person declined as `declined`: it never ran, so it is
 /// not a failure.
 #[test]
@@ -868,6 +1153,271 @@ fn a_declined_command_is_declined_not_failed() {
     };
     assert_eq!(completed("declined"), crate::ToolStatus::Declined);
     assert_eq!(completed("failed"), crate::ToolStatus::Failed);
+}
+
+/// L4: in an unattended session a command Codex could not start (the item seen live
+/// when its Windows sandbox would not set up) fails the turn with Codex's own words,
+/// though the agent then ended its turn. A command that ran and failed does not.
+#[test]
+fn a_command_codex_could_not_start_fails_an_unattended_turn() {
+    let not_started = json!({
+        "type": "commandExecution", "id": "exec-1", "command": "ticketd show T-1",
+        "commandActions": [], "cwd": "/work", "status": "failed", "source": "unifiedExecStartup",
+        "aggregatedOutput": "Failed to create unified exec process: helper_unknown_error: setup refresh had errors",
+        "exitCode": -1, "durationMs": 0, "processId": null,
+    });
+    let mut ran = not_started.clone();
+    ran["exitCode"] = json!(1);
+    ran["durationMs"] = json!(840);
+    ran["processId"] = json!("12");
+    ran["aggregatedOutput"] = json!("1 test failed");
+
+    let outcome = |item: &Value, unattended: bool| {
+        let mut session = Session::default();
+        session.turn_overrides = unattended.then(|| json!({}));
+        let params = json!({"turnId": "turn_1", "item": item});
+        session.notification("item/completed", &params);
+        let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
+        match session.notification("turn/completed", &turn).pop() {
+            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
+            other => panic!("the turn ended, got {other:?}"),
+        }
+    };
+
+    match outcome(&not_started, true) {
+        TurnOutcome::Failed(problem) => {
+            assert_eq!(problem.kind, ProblemKind::PermissionUnavailable);
+            assert_eq!(
+                problem.message,
+                "Failed to create unified exec process: helper_unknown_error: setup refresh had errors"
+            );
+        }
+        other => panic!("a failed turn, got {other:?}"),
+    }
+    assert_eq!(outcome(&ran, true), TurnOutcome::Completed);
+    // A person's Chat is theirs to judge: Codex said the turn completed.
+    assert_eq!(outcome(&not_started, false), TurnOutcome::Completed);
+}
+
+/// 4B1: a file change Codex declined (outside the writable folders) or failed to write
+/// fails an unattended turn naming the file, though the agent then ended its turn. In
+/// a person's Chat the same items fail nothing.
+#[test]
+fn a_file_change_codex_declined_or_could_not_write_fails_an_unattended_turn_naming_the_file() {
+    let item = |status: &str| {
+        json!({"type": "fileChange", "id": "fc_1", "status": status,
+            "changes": [{"path": "/elsewhere/a.txt", "kind": {"type": "add"}, "diff": "hi\n"}]})
+    };
+    let outcome = |status: &str, unattended: bool| {
+        let mut session = Session::default();
+        session.turn_overrides = unattended.then(|| json!({}));
+        let params = json!({"turnId": "turn_1", "item": item(status)});
+        session.notification("item/completed", &params);
+        let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
+        match session.notification("turn/completed", &turn).pop() {
+            Some(EventKind::TurnEnded { outcome, .. }) => outcome,
+            other => panic!("the turn ended, got {other:?}"),
+        }
+    };
+    for (status, message) in [
+        (
+            "declined",
+            "Codex could not change /elsewhere/a.txt: it is outside the step's folder.",
+        ),
+        (
+            "failed",
+            "Codex could not change /elsewhere/a.txt: the file could not be written.",
+        ),
+    ] {
+        match outcome(status, true) {
+            TurnOutcome::Failed(problem) => {
+                assert_eq!(problem.kind, ProblemKind::ToolDenied, "{status}");
+                assert_eq!(problem.message, message);
+            }
+            other => panic!("{status}: a failed turn, got {other:?}"),
+        }
+        assert_eq!(outcome(status, false), TurnOutcome::Completed, "{status}");
+    }
+    assert_eq!(outcome("completed", true), TurnOutcome::Completed);
+
+    // #387 5A3: the file leads, each denial is its own sentence, and ticketd's own
+    // guide command, which the person never asked for, is not named.
+    let reason = |commands: &[&str], files: bool| {
+        let mut session = Session::default();
+        session.turn_overrides = Some(json!({}));
+        let mut items: Vec<Value> = commands
+            .iter()
+            .map(|command| {
+                json!({"type": "commandExecution", "id": "c_1", "command": command,
+                    "status": "declined"})
+            })
+            .collect();
+        if files {
+            items.push(item("declined"));
+        }
+        for item in items {
+            session.notification("item/completed", &json!({"turnId": "turn_1", "item": item}));
+        }
+        let turn = json!({"turn": {"id": "turn_1", "status": "completed"}});
+        match session.notification("turn/completed", &turn).pop() {
+            Some(EventKind::TurnEnded {
+                outcome: TurnOutcome::Failed(problem),
+                ..
+            }) => problem.message,
+            other => panic!("a failed turn, got {other:?}"),
+        }
+    };
+    let guide = "pwsh -Command 'ticketd skills get chat'";
+    assert_eq!(
+        reason(&["ls"], true),
+        "Codex could not change /elsewhere/a.txt: it is outside the step's folder. Codex could not run ls."
+    );
+    assert_eq!(
+        reason(&[guide], true),
+        "Codex could not change /elsewhere/a.txt: it is outside the step's folder."
+    );
+    assert_eq!(reason(&[guide, "ls"], false), "Codex could not run ls.");
+    // #387 6A2: Codex quotes a command like a POSIX shell, doubling its backslashes;
+    // the reason shows the command as typed.
+    assert_eq!(
+        reason(
+            &[r#""C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'echo "hi"'"#],
+            false
+        ),
+        r#"Codex could not run "C:\Program Files\PowerShell\7\pwsh.exe" -Command 'echo "hi"'."#
+    );
+    // Only the guide was declined: the agent still could not do its work.
+    assert_eq!(
+        reason(&[guide], false),
+        "Codex could not run commands in this step."
+    );
+}
+
+/// 4B1: Codex reports nothing at all for a patch its sandbox policy rejects outright
+/// (approvals off), so an unattended session lets Codex ask, and ticketd declines at
+/// once: the declined item names the file. A person's Chat still waits for the person.
+#[test]
+fn an_unattended_session_declines_every_approval_request_at_once() {
+    let ask = |session: &mut Session, method: &str| {
+        let params = json!({"threadId": "thr_1", "turnId": "turn_1", "itemId": "fc_1"});
+        session.server_request(&json!(0), method, &params)
+    };
+    let mut unattended = Session::default();
+    unattended.turn_overrides = Some(json!({}));
+    for (method, reply) in [
+        (
+            "item/fileChange/requestApproval",
+            json!({"id": 0, "result": {"decision": "decline"}}),
+        ),
+        (
+            "item/commandExecution/requestApproval",
+            json!({"id": 0, "result": {"decision": "decline"}}),
+        ),
+        (
+            "item/permissions/requestApproval",
+            json!({"id": 0, "result": {"permissions": {}}}),
+        ),
+    ] {
+        let (events, frame) = ask(&mut unattended, method);
+        assert_eq!((events.len(), frame), (0, Some(reply)), "{method}");
+    }
+    let (events, frame) = ask(&mut Session::default(), "item/fileChange/requestApproval");
+    assert_eq!((events.len(), frame), (1, None));
+}
+
+/// L5: an unattended thread starts none of the person's MCP servers (named from
+/// their configuration), plugins or apps, and runs none of their hooks, notify
+/// program, project instructions, memories, sub-agents, computer or browser use, or
+/// skills that Codex lets a thread switch off.
+#[test]
+fn an_unattended_thread_turns_off_what_codex_lets_it_of_the_persons_setup() {
+    let always = json!({
+        "features.plugins": false,
+        "features.apps": false,
+        "features.hooks": false,
+        "features.memories": false,
+        "features.multi_agent": false,
+        "features.computer_use": false,
+        "features.browser_use": false,
+        "notify": [],
+        "project_doc_max_bytes": 0,
+        "skills.bundled.enabled": false,
+        "skills.include_instructions": false,
+    });
+    let config =
+        json!({"mcp_servers": {"docs": {"command": "docs-mcp"}, "web": {"url": "https://x"}}});
+    let mut with_servers = always.clone();
+    with_servers["mcp_servers.docs.enabled"] = json!(false);
+    with_servers["mcp_servers.web.enabled"] = json!(false);
+    assert_eq!(super::personal_tools_off(Some(&config)), with_servers);
+    assert_eq!(super::personal_tools_off(None), always);
+}
+
+/// L2: a Chat taken over from a run resumes with the person's own approval policy
+/// and sandbox, and Codex's defaults for what their configuration leaves unset.
+#[test]
+fn a_taken_over_thread_resumes_with_the_persons_own_approvals() {
+    let config = json!({"approval_policy": "untrusted", "sandbox_mode": null});
+    assert_eq!(
+        super::own_approvals(Some(&config)),
+        json!({"approvalPolicy": "untrusted", "sandbox": "read-only"})
+    );
+    assert_eq!(
+        super::own_approvals(None),
+        json!({"approvalPolicy": "on-request", "sandbox": "read-only"})
+    );
+}
+
+/// L2 and L5 through the protocol: the fixtures check that an unattended thread
+/// reads the configuration and starts with the servers off, and that a taken-over
+/// thread reads it and resumes with the person's approvals.
+#[tokio::test(start_paused = true)]
+async fn a_taken_over_thread_is_resumed_with_its_configuration_read_first() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_taken_over"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("thr_1")),
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: true,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let mut opened = opened.expect("the thread resumes");
+    let events = drain(&mut opened.events).await;
+    let notice = events.iter().find_map(|event| match event {
+        EventKind::Notice { message, .. } => Some(message.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        notice.as_deref(),
+        Some("Model gpt-test, approval policy on-request, sandbox workspaceWrite")
+    );
+}
+
+/// The thread of a run keeps the ticketd tool Codex was given, so the Chat the person
+/// took over still answers it, without declaring anything on resume.
+#[tokio::test(start_paused = true)]
+async fn a_taken_over_chat_still_answers_the_ticketd_tool() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_taken_over_tool"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("thr_1")),
+        unattended: None,
+        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        taken_over: true,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let _opened = opened.expect("the thread resumes");
+    peer.play().await;
+    peer.assert_nothing_written().await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -936,6 +1486,9 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         chat_id: "chat-1".into(),
         working_directory: PathBuf::from("/work/chat-1"),
         session: SessionStart::New,
+        unattended: None,
+        ticketd_cli: None,
+        taken_over: false,
         settings: StartSettings::default(),
     };
     let listing = Options {
@@ -996,4 +1549,16 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
             turn: turn("turn_1")
         }
     );
+}
+
+#[test]
+fn open_refuses_a_codex_below_the_floor_with_the_picker_reason() {
+    let problem = super::too_old("codex-cli 0.162.1\n").unwrap();
+    assert_eq!(problem.kind, ProblemKind::IncompatibleVersion);
+    assert_eq!(
+        problem.message,
+        "ticketd needs Codex 0.163.0 or newer (run `codex update`)."
+    );
+    assert!(super::too_old("codex-cli 0.163.0").is_none());
+    assert!(super::too_old("codex-cli unknown").is_none());
 }
