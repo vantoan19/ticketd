@@ -78,13 +78,21 @@ test("Active and Archived are one segmented choice on the Plans page", () => {
 
 test("rows show each Plan's progress, leaving out Canceled tickets", async () => {
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "count_tickets" ? counts : null,
+    command === "show_plan"
+      ? {
+          plan: { id: "p", name: "Launch", archived: false },
+          counts,
+          members: [],
+        }
+      : command === "find_tickets_with_updates"
+        ? []
+        : null,
   );
   list(false, [{ id: "p", name: "Launch", archived: false, purpose: "" }]);
   const rows = screen.getByRole("list", { name: "Active Plans" });
   expect(await within(rows).findByText("3 of 5 done")).toBeTruthy();
   expect(
-    within(rows).getByRole("progressbar", { name: "Launch progress" }),
+    within(rows).getByRole("img", { name: "Launch, 3 of 5 done, 0 moving" }),
   ).toBeTruthy();
 });
 

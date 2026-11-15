@@ -4,31 +4,17 @@ import { Button } from "@/components/ui/button";
 import { Count } from "@/components/ui/count";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
-import { Progress } from "@/components/ui/progress";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Tooltip } from "@/components/ui/tooltip";
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { client } from "@/lib/api/client";
+import type { Project } from "@/lib/api/client";
 import { describeFailure } from "@/lib/api/describe-failure";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import { emptyCopy } from "@/lib/empty-copy";
+import { matchesShortcut, shortcutLabel } from "@/lib/shortcuts";
+import { Tooltip } from "@/components/ui/tooltip";
 import { NewPlanDialog } from "./NewPlanDialog";
+import { PlanCard } from "./PlanCard";
 import "./plan.css";
-
-/** What a Plan's tickets add up to: done of those that can still be done. */
-type Progressed = { done: number; counted: number };
-
-const COUNT_FILTER = {
-  query: "",
-  unlinked: false,
-  status: null,
-  tags: [],
-  availability: null,
-  family: null,
-  limit: 1,
-  offset: 0,
-};
-
 /**
  * The Plans page (DESIGN.md section 10): a management page with "New Plan"
  * in its header, Active and Archived as one segmented choice, and one row per
@@ -36,12 +22,16 @@ const COUNT_FILTER = {
  */
 export function PlanList({
   plans,
+  projects = [],
+  onTicket,
   archived,
   onOpen,
   onArchivedChange,
   refresh,
 }: {
   plans: Plan[];
+  projects?: Project[];
+  onTicket?: (reference: string) => void;
   archived: boolean;
   onOpen: (id: string) => void;
   /** Switches between the Active and Archived Plans. */
@@ -50,29 +40,33 @@ export function PlanList({
 }) {
   const [creating, setCreating] = useState(false);
   const [pending, setPending] = useState("");
-  const [progress, setProgress] = useState<Record<string, Progressed>>({});
   const statusLine = useStatusLine();
   const shown = plans.filter((item) => item.archived === archived);
   const empty = emptyCopy(archived ? "plans-archived" : "plans");
 
   useEffect(() => {
-    let active = true;
-    for (const item of plans)
-      void client
-        .countTickets({ ...COUNT_FILTER, project: null, plan: item.id })
-        .then((c) => {
-          if (!active) return;
-          const counted = c.total - c.canceled - c.duplicate;
-          setProgress((old) => ({
-            ...old,
-            [item.id]: { done: c.done, counted },
-          }));
-        })
-        .catch(() => {});
-    return () => {
-      active = false;
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        document.querySelector(
+          '[role="dialog"], [role="menu"], [role="listbox"]',
+        ) ||
+        (event.target instanceof Element &&
+          event.target.closest(
+            "input, textarea, select, [contenteditable=true]",
+          ))
+      )
+        return;
+      if (matchesShortcut(event, "new-plan")) {
+        event.preventDefault();
+        setCreating(true);
+      }
     };
-  }, [plans]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   async function reactivate(item: Plan) {
     setPending(item.id);
@@ -101,29 +95,33 @@ export function PlanList({
   }
 
   return (
-    <ManagementPage aria-labelledby="plan-index-heading">
+    <ManagementPage layout="centered" aria-labelledby="plan-index-heading">
       <PageHeader
         title="Plans"
         titleId="plan-index-heading"
         {...(shown.length > 0 && { count: <Count>{shown.length}</Count> })}
         lede="A Plan groups the tickets that ship together, across projects."
         actions={
-          <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus data-icon="inline-start" /> New Plan
-          </Button>
-        }
-        toolbar={
-          onArchivedChange && (
-            <SegmentedControl
-              aria-label="Which Plans"
-              value={archived ? "archived" : "active"}
-              onValueChange={(value) => onArchivedChange(value === "archived")}
-              options={[
-                { value: "active", label: "Active" },
-                { value: "archived", label: "Archived" },
-              ]}
-            />
-          )
+          <>
+            {onArchivedChange && (
+              <SegmentedControl
+                aria-label="Which Plans"
+                value={archived ? "archived" : "active"}
+                onValueChange={(value) =>
+                  onArchivedChange(value === "archived")
+                }
+                options={[
+                  { value: "active", label: "Active" },
+                  { value: "archived", label: "Archived" },
+                ]}
+              />
+            )}
+            <Tooltip content="New Plan" shortcut={shortcutLabel("new-plan")}>
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <Plus data-icon="inline-start" /> New Plan
+              </Button>
+            </Tooltip>
+          </>
         }
       />
       {shown.length === 0 ? (
@@ -138,51 +136,35 @@ export function PlanList({
           className="plan-index-list"
           aria-label={archived ? "Archived Plans" : "Active Plans"}
         >
-          {shown.map((item) => {
-            const counts = progress[item.id];
-            return (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className="plan-index-row"
-                  onClick={() => onOpen(item.id)}
-                >
-                  <Layers aria-hidden="true" />
-                  <Tooltip content={item.name} overflowOnly>
-                    <span className="plan-index-name">{item.name}</span>
-                  </Tooltip>
-                  <span className="plan-index-meta">
-                    {counts &&
-                      (counts.counted > 0 ? (
-                        <>
-                          <Progress
-                            aria-label={`${item.name} progress`}
-                            value={counts.done}
-                            max={counts.counted}
-                          />
-                          {counts.done} of {counts.counted} done
-                        </>
-                      ) : (
-                        "No tickets"
-                      ))}
-                  </span>
-                </button>
+          {shown.map((item) => (
+            <li key={item.id}>
+              <PlanCard
+                plan={item}
+                projects={projects}
+                onOpen={() => onOpen(item.id)}
+                {...(onTicket && { onTicket })}
+              >
                 {archived && (
                   <span className="plan-index-action">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={pending === item.id}
-                      aria-label={`Reactivate ${item.name}`}
-                      onClick={() => void reactivate(item)}
+                    <Tooltip
+                      content="Reactivate Plan"
+                      shortcut={shortcutLabel("list-open")}
                     >
-                      <ArchiveRestore data-icon="inline-start" /> Reactivate
-                    </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={pending === item.id}
+                        aria-label={`Reactivate ${item.name}`}
+                        onClick={() => void reactivate(item)}
+                      >
+                        <ArchiveRestore data-icon="inline-start" /> Reactivate
+                      </Button>
+                    </Tooltip>
                   </span>
                 )}
-              </li>
-            );
-          })}
+              </PlanCard>
+            </li>
+          ))}
         </ul>
       )}
       <NewPlanDialog
