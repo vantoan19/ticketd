@@ -24,23 +24,83 @@ use ticketd_core::{
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
-/// the interface never has to parse it to decide what to do.
+/// the interface never has to parse it to decide what to do; it keeps the
+/// underlying cause for the interface's "Details".
 #[derive(Debug, serde::Serialize)]
-struct BridgeFailure {
-    /// `batch_operation` (see `index`), `review_changed`, `review_mode`, or `failed`.
+pub(crate) struct BridgeFailure {
+    /// The core's [`ticketd_core::FailureKind`] code (such as `workspace_read_only`,
+    /// `not_found` or `cycle`), a source or publication code, `batch_operation`
+    /// (see `index` and `cause`), `review_changed`, `review_mode`, or `failed`.
     code: &'static str,
     /// For `batch_operation`, which operation of the batch was rejected.
     index: Option<usize>,
+    /// For `batch_operation`, the kind of the rejected operation's failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cause: Option<&'static str>,
     message: String,
 }
 
 impl BridgeFailure {
-    fn plain(message: &str) -> Self {
+    pub(crate) fn plain(message: &str) -> Self {
+        Self::coded("failed", message.into())
+    }
+
+    fn coded(code: &'static str, message: String) -> Self {
         Self {
-            code: "failed",
+            code,
             index: None,
-            message: message.into(),
+            cause: None,
+            message,
         }
+    }
+}
+
+impl std::fmt::Display for BridgeFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// A message the desktop wrote itself, such as an unexpected result.
+impl From<String> for BridgeFailure {
+    fn from(message: String) -> Self {
+        Self::coded("failed", message)
+    }
+}
+
+impl From<&str> for BridgeFailure {
+    fn from(message: &str) -> Self {
+        Self::plain(message)
+    }
+}
+
+/// Failures from the desktop host itself (windows, IPC, the opener) have no domain kind.
+macro_rules! plain_failure {
+    ($($error:ty),* $(,)?) => {$(
+        impl From<$error> for BridgeFailure {
+            fn from(error: $error) -> Self {
+                Self::coded("failed", error.to_string())
+            }
+        }
+    )*};
+}
+plain_failure!(
+    tauri::Error,
+    tauri_plugin_opener::Error,
+    serde_json::Error,
+    tauri::http::header::ToStrError,
+);
+
+impl<T> From<std::sync::PoisonError<T>> for BridgeFailure {
+    fn from(error: std::sync::PoisonError<T>) -> Self {
+        Self::coded("failed", error.to_string())
+    }
+}
+
+impl From<ticketd_core::drive::DriveError> for BridgeFailure {
+    fn from(error: ticketd_core::drive::DriveError) -> Self {
+        let message = error.message.clone();
+        Self::coded(ticketd_core::Error::Drive(error).kind().code(), message)
     }
 }
 
@@ -50,28 +110,23 @@ impl From<ticketd_core::Error> for BridgeFailure {
             ticketd_core::Error::BatchOperation { index, source } => Self {
                 code: "batch_operation",
                 index: Some(index),
+                cause: Some(source.kind().code()),
                 message: source.to_string(),
             },
-            ticketd_core::Error::DependencyReviewChanged => Self {
-                code: "review_changed",
-                index: None,
-                message: ticketd_core::Error::DependencyReviewChanged.to_string(),
-            },
-            ticketd_core::Error::SyncReviewChanged => Self {
-                code: "review_changed",
-                index: None,
-                message: ticketd_core::Error::SyncReviewChanged.to_string(),
-            },
-            ticketd_core::Error::DependencyReviewMode(mode) => Self {
-                code: "review_mode",
-                index: None,
-                message: ticketd_core::Error::DependencyReviewMode(mode).to_string(),
-            },
-            other => Self {
-                code: "failed",
-                index: None,
-                message: other.to_string(),
-            },
+            ticketd_core::Error::DependencyReviewChanged
+            | ticketd_core::Error::SyncReviewChanged => {
+                Self::coded("review_changed", error.to_string())
+            }
+            ticketd_core::Error::DependencyReviewMode(_) => {
+                Self::coded("review_mode", error.to_string())
+            }
+            ticketd_core::Error::Source(ref source) => {
+                Self::coded(source.code(), error.to_string())
+            }
+            ticketd_core::Error::Publication(ref publication) => {
+                Self::coded(publication.code(), error.to_string())
+            }
+            other => Self::coded(other.kind().code(), other.to_string()),
         }
     }
 }
@@ -83,16 +138,19 @@ fn open_workspace() -> Result<Workspace, ticketd_core::Error> {
 }
 
 #[tauri::command]
-fn recent_documents(offset: u32, include_support: bool) -> Result<Vec<DocumentSummary>, String> {
+fn recent_documents(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.recent_documents_including_support(50, offset, include_support))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn pinned_documents(offset: u32) -> Result<Vec<DocumentSummary>, String> {
+fn pinned_documents(offset: u32) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.pinned_documents(50, offset))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn search_documents(
@@ -100,7 +158,7 @@ fn search_documents(
     tag: Option<String>,
     offset: u32,
     include_support: bool,
-) -> Result<Vec<DocumentSearchResult>, String> {
+) -> Result<Vec<DocumentSearchResult>, BridgeFailure> {
     open_workspace()
         .and_then(|w| {
             w.search_documents_including_support(
@@ -111,50 +169,57 @@ fn search_documents(
                 include_support,
             )
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn keep_document(id: String, request_id: String) -> Result<Document, String> {
+fn keep_document(id: String, request_id: String) -> Result<Document, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), WriteRequest::KeepDocument { id }))
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Document(document) => Ok(document),
         _ => Err("Unexpected document result".into()),
     }
 }
 #[tauri::command]
-fn set_document_pin(id: String, pinned: bool) -> Result<(), String> {
+fn set_document_pin(id: String, pinned: bool) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_document_pin(&id, pinned))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn document_tags(id: String) -> Result<Vec<String>, String> {
+fn document_tags(id: String) -> Result<Vec<String>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.document_tags(&id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), String> {
+fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_document_tag(&id, &tag, present))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn all_documents(offset: u32, include_support: bool) -> Result<Vec<DocumentSummary>, String> {
+fn all_documents(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.all_documents_page(50, offset, include_support))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn trashed_documents(offset: u32) -> Result<Vec<DocumentSummary>, String> {
+fn trashed_documents(offset: u32) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.trashed_documents_page(50, offset))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_document_trashed(id: String, trashed: bool, request_id: String) -> Result<Document, String> {
+fn set_document_trashed(
+    id: String,
+    trashed: bool,
+    request_id: String,
+) -> Result<Document, BridgeFailure> {
     let request = if trashed {
         WriteRequest::TrashDocument { id }
     } else {
@@ -162,29 +227,29 @@ fn set_document_trashed(id: String, trashed: bool, request_id: String) -> Result
     };
     match open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), request))
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Document(document) => Ok(document),
         _ => Err("Unexpected document result".into()),
     }
 }
 #[tauri::command]
-fn show_document(id: String) -> Result<Document, String> {
+fn show_document(id: String) -> Result<Document, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.show_document(&id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn document_version(id: String) -> Result<(String, bool), String> {
+fn document_version(id: String) -> Result<(String, bool), BridgeFailure> {
     open_workspace()
         .and_then(|w| w.document_version(&id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn open_document(id: String) -> Result<Document, String> {
+fn open_document(id: String) -> Result<Document, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.open_document(&id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn save_document(
@@ -194,7 +259,7 @@ fn save_document(
     title_changed: bool,
     expected_updated_at: Option<String>,
     request_id: String,
-) -> Result<Document, String> {
+) -> Result<Document, BridgeFailure> {
     // Autosaving an existing Document is last-write-wins and idempotent, so it skips the
     // replay record that would otherwise keep a full copy of every autosaved body forever.
     // Creating still uses the request ID, because a repeated create would duplicate.
@@ -205,7 +270,7 @@ fn save_document(
         };
         return match open_workspace()
             .and_then(|mut w| w.write(Some(&request_id), request))
-            .map_err(|e| e.to_string())?
+            .map_err(BridgeFailure::from)?
         {
             WriteResult::Document(document) => Ok(document),
             _ => Err("Unexpected save result".into()),
@@ -218,14 +283,14 @@ fn save_document(
     };
     open_workspace()
         .and_then(|mut w| w.change_document(&id, patch))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn context_link_markdown(reference: String) -> Result<String, String> {
+fn context_link_markdown(reference: String) -> Result<String, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.context_link_markdown(&reference))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn document_context_links(
@@ -236,7 +301,7 @@ fn document_context_links(
         Vec<ticketd_core::ContextLink>,
         Vec<ticketd_core::ContextLink>,
     ),
-    String,
+    BridgeFailure,
 > {
     open_workspace()
         .and_then(|w| {
@@ -264,7 +329,7 @@ fn document_context_links(
             }
             Ok((w.context_links(&id, 100, 0)?, backlinks))
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn ticket_from_document(
@@ -272,7 +337,7 @@ fn ticket_from_document(
     title: String,
     request_id: String,
     follow: Option<bool>,
-) -> Result<ticketd_core::Ticket, String> {
+) -> Result<ticketd_core::Ticket, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -284,7 +349,7 @@ fn ticket_from_document(
                 },
             )
         })
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected ticket result".into()),
@@ -292,17 +357,17 @@ fn ticket_from_document(
 }
 
 #[tauri::command]
-fn reminder(reference: String) -> Result<Option<String>, String> {
+fn reminder(reference: String) -> Result<Option<String>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.reminder(&reference))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn set_reminder(
     reference: String,
     due_at: Option<String>,
     request_id: String,
-) -> Result<(), String> {
+) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -311,26 +376,26 @@ fn set_reminder(
             )
         })
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn inbox(
     offset: u32,
     limit: Option<u32>,
     unread_only: Option<bool>,
-) -> Result<Vec<InboxEntry>, String> {
+) -> Result<Vec<InboxEntry>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.inbox_page(limit.unwrap_or(100), offset, unread_only.unwrap_or(false)))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn workspace_change_token() -> Result<i64, String> {
+fn workspace_change_token() -> Result<i64, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.change_token())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn sidebar_counts() -> Result<SidebarCounts, String> {
+fn sidebar_counts() -> Result<SidebarCounts, BridgeFailure> {
     open_workspace()
         .and_then(|w| {
             let mut counts = w.sidebar_counts()?;
@@ -338,16 +403,20 @@ fn sidebar_counts() -> Result<SidebarCounts, String> {
             counts.unread_inbox += sync_commands::unread(&w)?;
             Ok(counts)
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn is_following(reference: String) -> Result<bool, String> {
+fn is_following(reference: String) -> Result<bool, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.is_following(&reference))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_following(reference: String, following: bool, request_id: String) -> Result<(), String> {
+fn set_following(
+    reference: String,
+    following: bool,
+    request_id: String,
+) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -359,67 +428,67 @@ fn set_following(reference: String, following: bool, request_id: String) -> Resu
             )
         })
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), String> {
+fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), WriteRequest::SetInboxRead { ids, read }))
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 // `async` commands run off the main thread, so a slow integrity check or copy
 // of a large workspace file does not freeze the window.
 #[tauri::command(async)]
-fn export_workspace(path: String) -> Result<(), String> {
+fn export_workspace(path: String) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.export_file(path))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn list_projects() -> Result<Vec<Project>, String> {
+fn list_projects() -> Result<Vec<Project>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.list_projects())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 /// The favicon a Project's folder ships, probed now and never stored. `None` when no
 /// checkout has one, so the Project shows its letter tile.
 #[tauri::command(async)]
-fn project_icon(id: String) -> Result<Option<folder_probe::Favicon>, String> {
+fn project_icon(id: String) -> Result<Option<folder_probe::Favicon>, BridgeFailure> {
     let project = open_workspace()
         .and_then(|w| w.show_project(&id))
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
     Ok(std::iter::once(&project.path)
         .chain(&project.paths)
         .find_map(|path| folder_probe::favicon(std::path::Path::new(path))))
 }
 #[tauri::command]
-fn create_project(name: String, path: String) -> Result<Project, String> {
+fn create_project(name: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.create_project(&name, &path))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn edit_project(id: String, name: String, path: String) -> Result<Project, String> {
+fn edit_project(id: String, name: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.edit_project(&id, &name, &path))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn context_graph(reference: String, include_details: bool) -> Result<ContextGraph, String> {
+fn context_graph(reference: String, include_details: bool) -> Result<ContextGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.context_graph(&reference, include_details))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn workspace_graph(request: WorkspaceGraphRequest) -> Result<WorkspaceGraph, String> {
+fn workspace_graph(request: WorkspaceGraphRequest) -> Result<WorkspaceGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.workspace_graph(&request))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn context_graph_expanded(
@@ -427,26 +496,26 @@ fn context_graph_expanded(
     include_details: bool,
     expanded_ids: Vec<String>,
     pages: Vec<ContextGraphPage>,
-) -> Result<ContextGraph, String> {
+) -> Result<ContextGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| {
             w.context_graph_with_pages(&reference, include_details, &expanded_ids, &pages)
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn dependency_graph(reference: String) -> Result<DependencyGraph, String> {
+fn dependency_graph(reference: String) -> Result<DependencyGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.dependency_graph(&reference))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn plan_dependency_graph(id: String) -> Result<DependencyGraph, String> {
+fn plan_dependency_graph(id: String) -> Result<DependencyGraph, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.plan_dependency_graph(&id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
@@ -454,49 +523,51 @@ fn ticket_backlinks(
     reference: String,
     limit: u32,
     offset: u32,
-) -> Result<Vec<ticketd_core::Backlink>, String> {
+) -> Result<Vec<ticketd_core::Backlink>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.backlinks(&reference, limit, offset))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 /// The source's comments and events retrieved for a ticket (read-only).
 #[tauri::command]
 fn source_conversation(
     reference: String,
-) -> Result<Vec<ticketd_core::source::ConversationEntry>, String> {
+) -> Result<Vec<ticketd_core::source::ConversationEntry>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.source_conversation(&reference))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn show_ticket(reference: String) -> Result<Ticket, String> {
+fn show_ticket(reference: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.show_ticket(&reference))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
 fn find_tickets_with_updates(
     filter: TicketFilter,
-) -> Result<Vec<ticketd_core::TicketWithUpdate>, String> {
+) -> Result<Vec<ticketd_core::TicketWithUpdate>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.find_tickets_with_updates(&filter))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, String> {
+fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.count_tickets(&filter))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 /// How many tickets each source filter (All, a provider, Local) would show.
 #[tauri::command]
-fn count_by_source(filter: TicketFilter) -> Result<ticketd_core::source::SourceCounts, String> {
+fn count_by_source(
+    filter: TicketFilter,
+) -> Result<ticketd_core::source::SourceCounts, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.count_by_source(&filter))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn search_tickets(
@@ -505,35 +576,35 @@ fn search_tickets(
     unlinked: bool,
     limit: u32,
     offset: u32,
-) -> Result<Vec<Ticket>, String> {
+) -> Result<Vec<Ticket>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.search_tickets(&query, project.as_deref(), unlinked, limit, offset))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn list_trash() -> Result<Vec<Ticket>, String> {
+fn list_trash() -> Result<Vec<Ticket>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.list_trash())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_trashed(reference: String, trashed: bool) -> Result<Ticket, String> {
+fn set_trashed(reference: String, trashed: bool) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_trashed(&reference, trashed, None))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn register_checkout(id: String, path: String) -> Result<Project, String> {
+fn register_checkout(id: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.register_checkout(&id, &path))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn remove_checkout(id: String, path: String) -> Result<Project, String> {
+fn remove_checkout(id: String, path: String) -> Result<Project, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.remove_checkout(&id, &path))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
@@ -547,7 +618,7 @@ fn create_ticket(
     tags: Vec<String>,
     follow: bool,
     request_id: Option<String>,
-) -> Result<Ticket, String> {
+) -> Result<Ticket, BridgeFailure> {
     match open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
@@ -563,7 +634,7 @@ fn create_ticket(
                 },
             )
         })
-        .map_err(|error| error.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected ticket creation result".into()),
@@ -629,7 +700,7 @@ fn change_ticket(
     reference: String,
     patch: TicketPatch,
     request_id: Option<String>,
-) -> Result<Ticket, String> {
+) -> Result<Ticket, BridgeFailure> {
     match open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
@@ -637,7 +708,7 @@ fn change_ticket(
                 WriteRequest::ChangeTicket { reference, patch },
             )
         })
-        .map_err(|error| error.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected ticket result".into()),
@@ -645,24 +716,24 @@ fn change_ticket(
 }
 
 #[tauri::command]
-fn ticket_history(reference: String) -> Result<Vec<HistoryEntry>, String> {
+fn ticket_history(reference: String) -> Result<Vec<HistoryEntry>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.ticket_history(&reference))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, String> {
+fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.evidence(&reference, 50, offset))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn add_evidence(
     reference: String,
     input: EvidenceInput,
     request_id: String,
-) -> Result<Evidence, String> {
+) -> Result<Evidence, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -670,7 +741,7 @@ fn add_evidence(
                 WriteRequest::AddEvidence { reference, input },
             )
         })
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Evidence(value) => Ok(value),
         _ => Err("Unexpected evidence result".into()),
@@ -682,7 +753,7 @@ fn edit_evidence(
     id: String,
     input: EvidenceInput,
     request_id: String,
-) -> Result<Evidence, String> {
+) -> Result<Evidence, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -694,14 +765,14 @@ fn edit_evidence(
                 },
             )
         })
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Evidence(value) => Ok(value),
         _ => Err("Unexpected evidence result".into()),
     }
 }
 #[tauri::command]
-fn delete_evidence(reference: String, id: String, request_id: String) -> Result<(), String> {
+fn delete_evidence(reference: String, id: String, request_id: String) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -710,13 +781,13 @@ fn delete_evidence(reference: String, id: String, request_id: String) -> Result<
             )
         })
         .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn latest_update(reference: String) -> Result<Option<LatestUpdate>, String> {
+fn latest_update(reference: String) -> Result<Option<LatestUpdate>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.latest_update(&reference))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
@@ -724,30 +795,30 @@ fn activity_feed(
     reference: String,
     limit: u32,
     offset: u32,
-) -> Result<Vec<ticketd_core::ActivityFeedEntry>, String> {
+) -> Result<Vec<ticketd_core::ActivityFeedEntry>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.activity_feed(&reference, limit, offset))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn get_activity(reference: String, id: String) -> Result<Option<Activity>, String> {
+fn get_activity(reference: String, id: String) -> Result<Option<Activity>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| match workspace.activity(&reference, &id) {
             Ok(note) => Ok(Some(note)),
             Err(ticketd_core::Error::ActivityNotFound(_)) => Ok(None),
             Err(error) => Err(error),
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn add_activity(reference: String, brief: String) -> Result<Activity, String> {
+fn add_activity(reference: String, brief: String) -> Result<Activity, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| {
             let activity = workspace.add_activity(&reference, &brief, None)?;
             workspace.discard_inbox_for_own_update(&activity.id)?;
             Ok(activity)
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn add_activity_with_details(
@@ -756,7 +827,7 @@ fn add_activity_with_details(
     details: Option<String>,
     existing_document_id: Option<String>,
     request_id: String,
-) -> Result<Activity, String> {
+) -> Result<Activity, BridgeFailure> {
     let request = WriteRequest::AddActivityWithDetails {
         reference,
         brief,
@@ -764,16 +835,16 @@ fn add_activity_with_details(
         details,
         existing_document_id,
     };
-    let mut workspace = open_workspace().map_err(|error| error.to_string())?;
+    let mut workspace = open_workspace().map_err(BridgeFailure::from)?;
     match workspace
         .write(Some(&request_id), request)
-        .map_err(|error| error.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Activity(activity) => {
             // The person who wrote it is not notified of their own update.
             workspace
                 .discard_inbox_for_own_update(&activity.id)
-                .map_err(|error| error.to_string())?;
+                .map_err(BridgeFailure::from)?;
             Ok(activity)
         }
         _ => Err("Unexpected activity result".into()),
@@ -781,37 +852,41 @@ fn add_activity_with_details(
 }
 
 #[tauri::command]
-fn edit_activity(reference: String, id: String, patch: ActivityPatch) -> Result<Activity, String> {
+fn edit_activity(
+    reference: String,
+    id: String,
+    patch: ActivityPatch,
+) -> Result<Activity, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.edit_activity(&reference, &id, patch))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn delete_activity(reference: String, id: String) -> Result<(), String> {
+fn delete_activity(reference: String, id: String) -> Result<(), BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.delete_activity(&reference, &id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn search_tags(query: String) -> Result<Vec<String>, String> {
+fn search_tags(query: String) -> Result<Vec<String>, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| workspace.search_tags(&query, 50))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn add_tag(reference: String, tag: String) -> Result<Ticket, String> {
+fn add_tag(reference: String, tag: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.add_tag(&reference, &tag))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn remove_tag(reference: String, tag: String) -> Result<Ticket, String> {
+fn remove_tag(reference: String, tag: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.remove_tag(&reference, &tag))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
@@ -819,7 +894,7 @@ fn preview_duplicate_dependencies(
     source: String,
     canonical: String,
     separate: Option<bool>,
-) -> Result<ticketd_core::DuplicateDependencyPreview, String> {
+) -> Result<ticketd_core::DuplicateDependencyPreview, BridgeFailure> {
     open_workspace()
         .and_then(|workspace| {
             if separate.unwrap_or(false) {
@@ -828,7 +903,7 @@ fn preview_duplicate_dependencies(
                 workspace.preview_duplicate_dependencies(&source, &canonical)
             }
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 /// What a whole set of choices does to each waiting ticket, for the review to show.
@@ -908,7 +983,7 @@ fn edit_dependencies_reviewed(
 }
 
 #[tauri::command]
-fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String> {
+fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, BridgeFailure> {
     let result = open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
@@ -919,7 +994,7 @@ fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String
                 },
             )
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
     match result {
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected write result".into()),
@@ -927,7 +1002,7 @@ fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String
 }
 
 #[tauri::command]
-fn take_ownership(reference: String, request_id: String) -> Result<Ticket, String> {
+fn take_ownership(reference: String, request_id: String) -> Result<Ticket, BridgeFailure> {
     let result = open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
@@ -938,7 +1013,7 @@ fn take_ownership(reference: String, request_id: String) -> Result<Ticket, Strin
                 },
             )
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
     match result {
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected write result".into()),
@@ -949,7 +1024,7 @@ fn take_ownership(reference: String, request_id: String) -> Result<Ticket, Strin
 fn contextual_relationships(
     reference: String,
     offset: u32,
-) -> Result<ticketd_core::TicketContext, String> {
+) -> Result<ticketd_core::TicketContext, BridgeFailure> {
     open_workspace()
         .and_then(|w| {
             w.ticket_context(
@@ -961,7 +1036,7 @@ fn contextual_relationships(
                 },
             )
         })
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
@@ -971,7 +1046,7 @@ fn change_contextual_relationship(
     kind: ticketd_core::RelationshipKind,
     add: bool,
     request_id: String,
-) -> Result<Ticket, String> {
+) -> Result<Ticket, BridgeFailure> {
     let request = if add {
         WriteRequest::AddContextualRelationship {
             source,
@@ -989,7 +1064,7 @@ fn change_contextual_relationship(
     };
     match open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), request))
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected write result".into()),
@@ -997,37 +1072,37 @@ fn change_contextual_relationship(
 }
 
 #[tauri::command]
-fn add_dependency(blocker: String, dependent: String) -> Result<Ticket, String> {
+fn add_dependency(blocker: String, dependent: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.add_dependency(&blocker, &dependent, None))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn remove_dependency(blocker: String, dependent: String) -> Result<Ticket, String> {
+fn remove_dependency(blocker: String, dependent: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.remove_dependency(&blocker, &dependent, None))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn detach_child(parent: String, child: String) -> Result<Ticket, String> {
+fn detach_child(parent: String, child: String) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.detach_child(&parent, &child, None))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, String> {
+fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut workspace| workspace.set_parent(&reference, parent.as_deref(), None))
-        .map_err(|error| error.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
-fn list_plans() -> Result<Vec<Plan>, String> {
+fn list_plans() -> Result<Vec<Plan>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.list_plans(true))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
 fn set_plan_document(
@@ -1035,7 +1110,7 @@ fn set_plan_document(
     document_id: String,
     present: bool,
     request_id: String,
-) -> Result<Plan, String> {
+) -> Result<Plan, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -1047,7 +1122,7 @@ fn set_plan_document(
                 },
             )
         })
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Plan(plan) => Ok(plan),
         _ => Err("Unexpected Plan result".into()),
@@ -1060,7 +1135,7 @@ fn set_ticket_document(
     document_id: String,
     present: bool,
     request_id: String,
-) -> Result<Ticket, String> {
+) -> Result<Ticket, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -1072,7 +1147,7 @@ fn set_ticket_document(
                 },
             )
         })
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected ticket result".into()),
@@ -1084,7 +1159,7 @@ fn set_plan_spec(
     plan_id: String,
     document_id: Option<String>,
     request_id: String,
-) -> Result<Plan, String> {
+) -> Result<Plan, BridgeFailure> {
     match open_workspace()
         .and_then(|mut w| {
             w.write(
@@ -1095,7 +1170,7 @@ fn set_plan_spec(
                 },
             )
         })
-        .map_err(|e| e.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Plan(plan) => Ok(plan),
         _ => Err("Unexpected Plan result".into()),
@@ -1103,66 +1178,78 @@ fn set_plan_spec(
 }
 
 #[tauri::command]
-fn show_plan(id: String) -> Result<PlanView, String> {
+fn show_plan(id: String) -> Result<PlanView, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.show_plan(&id))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn create_plan(name: String) -> Result<Plan, String> {
+fn create_plan(name: String) -> Result<Plan, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.create_plan(&name))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn change_plan(id: String, name: Option<String>, archived: Option<bool>) -> Result<Plan, String> {
+fn change_plan(
+    id: String,
+    name: Option<String>,
+    archived: Option<bool>,
+) -> Result<Plan, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.change_plan(&id, name.as_deref(), archived))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_plan_purpose(id: String, purpose: String) -> Result<Plan, String> {
+fn set_plan_purpose(id: String, purpose: String) -> Result<Plan, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_plan_purpose(&id, &purpose))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, String> {
+fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, BridgeFailure> {
     open_workspace()
         .and_then(|mut w| w.set_plan(&reference, plan.as_deref(), None))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 /// Saves a backup. Returns whether it was also recorded as the last backup.
 #[tauri::command(async)]
-fn backup_workspace(path: String) -> Result<bool, String> {
+fn backup_workspace(path: String) -> Result<bool, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.backup(&path))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn last_backup() -> Result<Option<BackupRecord>, String> {
+fn last_backup() -> Result<Option<BackupRecord>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.last_backup())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
+}
+/// Where the workspace file is, read without opening it: the startup recovery
+/// screen names the file even when it cannot be opened.
+#[tauri::command]
+fn workspace_location() -> Result<String, BridgeFailure> {
+    ticketd_core::default_workspace_path()
+        .map(|path| path.display().to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn workspace_info() -> Result<WorkspaceInfo, String> {
+fn workspace_info() -> Result<WorkspaceInfo, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.workspace_info())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
-fn inspect_backup(path: String) -> Result<BackupInspection, String> {
+fn inspect_backup(path: String) -> Result<BackupInspection, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.inspect_backup(path))
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 #[tauri::command]
-fn safety_backups() -> Result<Vec<SafetyBackup>, String> {
+fn safety_backups() -> Result<Vec<SafetyBackup>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.safety_backups())
-        .map_err(|e| e.to_string())
+        .map_err(BridgeFailure::from)
 }
 
 /// A source operation that failed. `code` is the core's stable kind, and
@@ -1596,6 +1683,7 @@ pub fn run() -> Result<(), tauri::Error> {
             save_source,
             last_backup,
             workspace_info,
+            workspace_location,
             chat_commands::restore_workspace,
             inspect_backup,
             safety_backups,
@@ -1757,5 +1845,34 @@ mod tests {
         assert!(!holds_exit(Some(0), false));
         assert!(!holds_exit(None, false));
         assert!(!holds_exit(Some(tauri::RESTART_EXIT_CODE), true));
+    }
+
+    #[test]
+    fn a_failure_crosses_the_bridge_with_its_kind_and_cause() {
+        let read_only = || {
+            ticketd_core::Error::Directory(std::io::Error::new(
+                std::io::ErrorKind::ReadOnlyFilesystem,
+                "read-only file system",
+            ))
+        };
+        let failure =
+            serde_json::to_value(super::BridgeFailure::from(read_only())).expect("serializable");
+        assert_eq!(failure["code"], "workspace_read_only");
+        // The raw cause stays readable for Details.
+        assert!(
+            failure["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("read-only file system"))
+        );
+        let batch = serde_json::to_value(super::BridgeFailure::from(
+            ticketd_core::Error::BatchOperation {
+                index: 1,
+                source: Box::new(read_only()),
+            },
+        ))
+        .expect("serializable");
+        assert_eq!(batch["code"], "batch_operation");
+        assert_eq!(batch["index"], 1);
+        assert_eq!(batch["cause"], "workspace_read_only");
     }
 }
