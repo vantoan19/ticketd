@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/popover";
 import { Layers, ListFilter, Search, X } from "lucide-react";
 import { PaneHeaderButton } from "@/components/ui/list-header";
+import { FilterChip } from "@/components/ui/badge";
 import { plural } from "@/lib/format";
 import { client, type Ticket } from "@/lib/api/client";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -67,37 +68,42 @@ export function TicketFilters(p: Props) {
     .map((tag) => tag.trim())
     .filter(Boolean);
   const setTagList = (next: string[]) => update(p.setTags, next.join(", "));
+  type Chip = { dimension: string; value: string; clear: () => void };
   const chips = [
     p.query.trim() && {
-      label: `Search: ${p.query.trim()}`,
+      dimension: "Search",
+      value: p.query.trim(),
       clear: () => update(p.setQuery, ""),
     },
     !p.navigation.plan &&
       p.plan && {
-        label: `Plan is ${p.plans.find((item) => item.id === p.plan)?.name ?? p.plan}`,
+        dimension: "Plan",
+        value: p.plans.find((item) => item.id === p.plan)?.name ?? p.plan,
         clear: () => update(p.setPlan, ""),
       },
     p.navigation.kind !== "progress" &&
       p.status && {
-        label: `Status is ${p.status}`,
+        dimension: "Status",
+        value: p.status,
         clear: () => update(p.setStatus, ""),
       },
     ...tagList.map((tag) => ({
-      label: `Tag is ${tag}`,
+      dimension: "Tag",
+      value: tag,
       clear: () => setTagList(tagList.filter((item) => item !== tag)),
     })),
     p.navigation.kind !== "ready" &&
       p.availability && {
-        label: `Availability is ${p.availability}`,
+        dimension: "Availability",
+        value: p.availability,
         clear: () => update(p.setAvailability, ""),
       },
     p.family && {
-      label: `Parent is ${p.family}`,
+      dimension: "Parent",
+      value: p.family,
       clear: () => update(p.setFamily, ""),
     },
-  ].filter((chip): chip is { label: string; clear: () => void } =>
-    Boolean(chip),
-  );
+  ].filter((chip): chip is Chip => Boolean(chip));
   const filterCount = chips.length - (p.query.trim() ? 1 : 0);
   const ofTotal = `${p.total} of ${p.scopeTotal ?? p.total}`;
   return (
@@ -283,16 +289,16 @@ export function TicketFilters(p: Props) {
       {p.part !== "controls" && chips.length > 0 && (
         <div className="filter-chips" aria-label="Active filters">
           {chips.map((chip, index) => (
-            <Button
-              key={`${chip.label}-${index}`}
-              variant="outline"
-              size="sm"
-              aria-label={`Remove ${chip.label}`}
-              onClick={chip.clear}
-            >
-              {chip.label}
-              <X data-icon="inline-end" />
-            </Button>
+            <FilterChip
+              key={`${chip.dimension}-${chip.value}-${index}`}
+              dimension={chip.dimension}
+              value={chip.value}
+              removeLabel={`Remove ${chip.dimension}${chip.dimension === "Search" ? ":" : " is"} ${chip.value}`}
+              onRemove={chip.clear}
+              {...(chip.dimension !== "Search" && {
+                onEdit: () => setFiltersOpen(true),
+              })}
+            />
           ))}
           <Button
             variant="ghost"

@@ -490,8 +490,8 @@
 }
 
 /* Badges: the 28px record chip and filter chip (P11). */
-.ui-badge-record,
-.ui-badge-filter {
+.ui-badge.ui-badge-record,
+.ui-badge.ui-badge-filter {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -502,11 +502,28 @@
   font-size: var(--text-ui);
   line-height: 28px;
 }
-.ui-badge-record {
+.ui-badge.ui-badge-record {
   max-width: 280px;
 }
-.ui-badge-filter {
-  padding-inline-end: 4px;
+.ui-badge.ui-badge-filter {
+  gap: 4px;
+  padding-inline: 8px 2px;
+}
+.ui-badge-filter [data-slot="badge-edit"] {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ui-badge-filter [data-slot="badge-value"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ui-badge-dimension {
   color: var(--muted-foreground);
