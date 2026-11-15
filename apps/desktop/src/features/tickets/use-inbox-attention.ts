@@ -6,6 +6,8 @@ import type { AttentionContext } from "./inboxModel";
 export type Attention = AttentionContext & {
   entries: Entry[];
   approvals: ChatSummary[];
+  /** Active summaries shared by ticket state lanes; no per-row queries. */
+  chats: ChatSummary[];
   needsCount: number;
   loading: boolean;
   error: FailureDescription | null;

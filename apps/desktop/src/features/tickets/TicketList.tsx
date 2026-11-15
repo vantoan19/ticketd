@@ -1,6 +1,15 @@
 import { useNow } from "@/lib/use-now";
 import { useRef, useState, type ReactNode } from "react";
-import { Cloud, CornerDownRight, Folder, Layers, Plus } from "lucide-react";
+import {
+  AlarmClock,
+  Bot,
+  Cloud,
+  CornerDownRight,
+  Folder,
+  Layers,
+  LoaderCircle,
+  Plus,
+} from "lucide-react";
 import { Item } from "@/components/ui/item";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -8,6 +17,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
 import { RowTags } from "./RowTags";
 import { HarnessMark } from "@/features/chats/HarnessMark";
+import { editingHarness } from "@/features/chats/editing-harness";
 import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
@@ -24,6 +34,8 @@ import "./ticket-list.css";
 import { Badge } from "@/components/ui/badge";
 import { Count } from "@/components/ui/count";
 import { Reference } from "@/components/ui/reference";
+import { useInboxAttention } from "./use-inbox-attention";
+import type { ChatSummary } from "@/features/chats/client";
 import { useConflicts } from "@/features/sync-review/use-conflicts";
 
 export function TicketList({
@@ -76,6 +88,16 @@ export function TicketList({
   /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
   simple?: boolean;
 }) {
+  const attention = useInboxAttention();
+  const ticketChats = new Map<string, ChatSummary>();
+  for (const chat of attention?.chats ?? []) {
+    if (chat.status.rank !== "working" && chat.status.rank !== "approval")
+      continue;
+    for (const { reference } of chat.tickets) {
+      if (ticketChats.get(reference)?.status.rank !== "approval")
+        ticketChats.set(reference, chat);
+    }
+  }
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
@@ -310,6 +332,8 @@ export function TicketList({
                   scope={scope}
                   simple={simple}
                   needsReview={needsReview.has(ticket.id)}
+                  chat={ticketChats.get(ticket.reference)}
+                  reminder={attention?.reminders.get(ticket.reference)}
                 />
               </button>
               {rowAction && (
@@ -360,11 +384,15 @@ function RowDetails({
   scope,
   simple,
   needsReview,
+  chat,
+  reminder,
 }: {
   ticket: Ticket;
   scope: RowScope;
   simple: boolean;
   needsReview: boolean;
+  chat: ChatSummary | undefined;
+  reminder: string | null | undefined;
 }) {
   const now = useNow();
   const state = readiness(ticket);
@@ -373,30 +401,67 @@ function RowDetails({
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   const contextLabel =
     context?.label ?? (ticket.project_id ? "" : "No project");
+  const update = ticket.progress_summary;
+  const harness = editingHarness(update?.editing_agent);
+  const due = reminder && Date.parse(reminder) <= now;
+  const live = chat?.status.rank;
   const label = needsReview
     ? "Needs review"
     : unavailable
       ? "Source unavailable"
-      : state.kind === "blocked"
-        ? readinessLabel(state)
-        : duplicate?.kind === "duplicate"
-          ? duplicate.label
-          : "";
-  const update = ticket.progress_summary;
+      : live === "approval"
+        ? "Approval needed"
+        : live === "working"
+          ? "Working"
+          : state.kind === "blocked"
+            ? readinessLabel(state)
+            : due
+              ? "Reminder due"
+              : ticket.status === "In review" && update?.editing_agent
+                ? "Ready for review"
+                : duplicate?.kind === "duplicate"
+                  ? duplicate.label
+                  : "";
   return (
     <>
       <span className="ticket-row-state" aria-label={label || undefined}>
         {label && (
           <Tooltip content={label}>
-            <span className="ticket-row-state-content">
-              {duplicate?.kind === "duplicate" &&
-              !needsReview &&
-              !unavailable ? (
+            <span
+              className={`ticket-row-state-content ${label === "Working" ? "text-foreground" : label === "Approval needed" || state.kind === "blocked" ? "text-status-blocked" : ""}`}
+            >
+              {label === "Working" && chat ? (
+                <HarnessMark
+                  harness={chat.harness_id}
+                  name={chat.harness_name}
+                />
+              ) : label === "Ready for review" ? (
+                harness ? (
+                  <HarnessMark
+                    harness={harness}
+                    name={update?.editing_agent ?? ""}
+                  />
+                ) : (
+                  <Bot size={12} aria-hidden="true" />
+                )
+              ) : label === "Reminder due" ? (
+                <AlarmClock size={12} aria-hidden="true" />
+              ) : label === duplicate?.label &&
+                duplicate?.kind === "duplicate" &&
+                !needsReview &&
+                !unavailable ? (
                 <StatusIcon status="Duplicate" size={12} decorative />
               ) : (
                 <StatusDot tone="attention" size={6} />
               )}
               <span className="ticket-row-state-label">{label}</span>
+              {label === "Working" && (
+                <LoaderCircle
+                  size={12}
+                  className="chat-spin"
+                  aria-hidden="true"
+                />
+              )}
             </span>
           </Tooltip>
         )}
@@ -434,11 +499,15 @@ function RowDetails({
         <span className="ticket-row-update">
           {update?.editing_agent ? (
             <>
-              <HarnessMark
-                harness={update.editing_agent}
-                name={update.editing_agent}
-                decorative
-              />
+              {harness ? (
+                <HarnessMark
+                  harness={harness}
+                  name={update.editing_agent}
+                  decorative
+                />
+              ) : (
+                <Bot size={12} aria-hidden="true" />
+              )}
               <span>{update.editing_agent}:</span>
               <span className="ticket-row-update-brief">
                 {progressBrief(update.brief.text)}

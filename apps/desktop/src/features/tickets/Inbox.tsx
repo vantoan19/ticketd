@@ -63,6 +63,7 @@ import { useInboxAttention } from "./use-inbox-attention";
 import { useChatClient } from "@/features/chats/client";
 import { useChatFeature } from "@/features/chats/use-chats";
 import { HarnessMark } from "@/features/chats/HarnessMark";
+import { editingHarness } from "@/features/chats/editing-harness";
 import { Count } from "@/components/ui/count";
 const PAGE_SIZE = 50;
 const MARK_BATCH = 100;
@@ -70,15 +71,7 @@ const MARK_BATCH = 100;
 function EntryIcon({ entry }: { entry: Entry }) {
   if (entry.kind === "reminder") return <AlarmClock aria-hidden="true" />;
   if (entry.kind === "activity") {
-    const agent = entry.editing_agent?.toLowerCase();
-    const harness =
-      agent === "codex"
-        ? "codex"
-        : agent === "claude" ||
-            agent === "claude-code" ||
-            agent === "claude code"
-          ? "claude-code"
-          : null;
+    const harness = editingHarness(entry.editing_agent);
     return harness ? (
       <HarnessMark
         harness={harness}
