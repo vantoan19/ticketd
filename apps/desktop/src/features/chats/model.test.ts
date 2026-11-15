@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type {
   ChatSnapshot,
   Step,
@@ -429,6 +429,29 @@ test("a usage limit says when it resets, or says that the provider did not", () 
     "It didn't say when the limit resets.",
   );
 });
+
+test("CH-34: a reset time reads in the computer's own clock, as message times do", () => {
+  // A computer set to a 24-hour clock: only the default locale says 15:00.
+  const clock = vi
+    .spyOn(Date.prototype, "toLocaleTimeString")
+    .mockImplementation(function (this: Date, locale) {
+      return locale === undefined ? "15:00" : "3:00 PM";
+    });
+  try {
+    const at = new Date(2026, 10, 12, 15, 0).getTime() / 1000;
+    const told = noticeOf({ kind: "usage_limit", resets_at: at }).body;
+    expect(told).toContain(`resets on ${shortDay(at)} at 15:00.`);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+/** The day as the computer's own locale writes it. */
+const shortDay = (seconds: number) =>
+  new Date(seconds * 1000).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 
 test("a refused resend is said first, and the first attempt stays unconfirmed", () => {
   const notice = noticeOf({

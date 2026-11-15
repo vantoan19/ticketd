@@ -92,6 +92,7 @@ import { ImageTiles } from "@/features/chats/ImageTiles";
 import { OutputBox } from "@/features/chats/OutputBox";
 import { ReceiptRow } from "@/features/chats/ReceiptRow";
 import { useReading } from "@/features/chats/use-transcript-scroll";
+import { formatTime } from "@/lib/format";
 
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
@@ -120,12 +121,7 @@ const OpeningContext = createContext(false);
 /** "10:44": when your message was sent, as the hover line says it. */
 const sentAt = (stamp: string) => {
   const date = new Date(stamp);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleTimeString(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  return Number.isNaN(date.getTime()) ? "" : formatTime(date);
 };
 
 /**

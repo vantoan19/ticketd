@@ -12,6 +12,7 @@ import type {
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
+import { formatTime } from "@/lib/format";
 
 /**
  * Applies one change-log entry to the snapshot it follows. Returns "resync"
@@ -1118,20 +1119,20 @@ export function problemNotice(problem: Problem, harness: string): Notice {
   }
 }
 
-/** "on Nov 12 at 3:00 PM", local time, from seconds since the epoch; "" when there is none. */
+/** A short day such as "Nov 12", in the computer's own locale. */
+const shortDay = (date: Date) =>
+  date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+/**
+ * "on Nov 12 at 3:00 PM" ("at 15:00" on a 24-hour clock): local time in the
+ * computer's own format, as every clock time in the app reads (CH-34), from
+ * seconds since the epoch; "" when there is none.
+ */
 function resetTime(seconds: number | null | undefined): string {
   if (seconds == null) return "";
   const at = new Date(seconds * 1000);
   if (Number.isNaN(at.getTime())) return "";
-  const day = at.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-  const time = at.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `on ${day} at ${time}`;
+  return `on ${shortDay(at)} at ${formatTime(at)}`;
 }
 
 /** "now", "2m", "1h", "Yesterday", "Nov 8": the trailing time of a Chat row. */
@@ -1145,7 +1146,7 @@ export function chatTime(timestamp: string, now = Date.now()): string {
     return `${Math.floor(minutes / 60)}h`;
   if (new Date(now - 86_400_000).toDateString() === then.toDateString())
     return "Yesterday";
-  return then.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return shortDay(then);
 }
 
 /** KiB or MiB to one decimal, as the truncation note states sizes. */
