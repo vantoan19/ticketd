@@ -7,10 +7,10 @@ import {
   clearWorkspaceFailure,
   reportWorkspaceFailure,
 } from "./workspace-state";
-import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FailureAlert } from "@/components/ui/failure-alert";
+import { FailureDetails } from "@/components/ui/failure-alert";
+import { StatusDot } from "@/components/ui/status-dot";
 import { describeFailure } from "@/lib/api/describe-failure";
 import {
   DraftRecoveryContext as Context,
@@ -352,39 +352,37 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
         <EmptyState size="hint" role="status" title="Opening workspace…" />
       </div>
     );
-  // The legacy-draft cutover notice sits in the flow at the top of the main
-  // content (see useDraftRecoveryNotices). A failure to protect drafts is not
-  // shown here: the workspace band reports it once for the whole window.
+  // The legacy-draft review is workspace-level and lasting, so it takes the
+  // workspace band's anatomy at the top of the content panel (see
+  // useDraftRecoveryNotices): one 40px line, never a card that pushes the
+  // panes. A failure to protect drafts is not shown here: the workspace band
+  // reports it once for the whole window.
+  const failed =
+    cutoverFailure !== null &&
+    describeFailure(cutoverFailure, "finish the draft review");
   const notices = cutoverPending && (
-    <div className="mx-auto flex max-h-1/2 w-full max-w-xl flex-none flex-col gap-2 overflow-y-auto p-2">
-      <Alert role="status">
-        <AlertDescription>
-          Files are protected while legacy drafts are reviewed. Open each
-          desktop profile to import its drafts before allowing cleanup.
-        </AlertDescription>
-        <AlertActions>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setCutoverFailure(null);
-              void draftRetention
-                .completeCutover()
-                .then(() => setCutoverPending(false))
-                .catch((reason: unknown) => setCutoverFailure(reason));
-            }}
-          >
-            All desktop profiles reviewed
-          </Button>
-        </AlertActions>
-      </Alert>
-      {cutoverFailure !== null && (
-        <FailureAlert
-          size="compact"
-          failure={describeFailure(cutoverFailure, "finish the draft review")}
-        />
-      )}
+    <div role="status" data-slot="workspace-band" className="workspace-band">
+      <p className="workspace-band-message">
+        <StatusDot tone={failed ? "attention" : "neutral"} size={10} />
+        {failed
+          ? `${failed.title}. Files stay protected.`
+          : "Files stay protected until every desktop profile has imported its legacy drafts."}
+      </p>
+      {failed && <FailureDetails details={failed.details} />}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          setCutoverFailure(null);
+          void draftRetention
+            .completeCutover()
+            .then(() => setCutoverPending(false))
+            .catch((reason: unknown) => setCutoverFailure(reason));
+        }}
+      >
+        All desktop profiles reviewed
+      </Button>
     </div>
   );
   return (

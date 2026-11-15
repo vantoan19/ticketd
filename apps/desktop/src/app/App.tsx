@@ -58,6 +58,7 @@ import {
 } from "@/lib/draft-recovery-context";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { WorkspaceBand } from "./WorkspaceBand";
+import { useWorkspaceState } from "@/lib/workspace-state";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { useChatFeature } from "@/features/chats/use-chats";
@@ -81,6 +82,7 @@ export function App() {
 function AppContent() {
   const recoveryGeneration = useDraftRecoveryGeneration();
   const recoveryNotices = useDraftRecoveryNotices();
+  const workspaceProblem = useWorkspaceState();
   const recovery = useDraftRecovery();
   const [view, setViewState] = useState<
     | "tickets"
@@ -462,6 +464,9 @@ function AppContent() {
                               void refresh({ reportFailure: true });
                             }}
                           />
+                          {/* At most one band: a workspace failure outranks
+                              the legacy-draft review. */}
+                          {!workspaceProblem && recoveryNotices}
                           {/* Views without a pane of their own post here. */}
                           <StatusLineRegion>
                             <ShellSlotProvider
@@ -497,7 +502,6 @@ function AppContent() {
                                 )
                               }
                             >
-                              {recoveryNotices}
                               {/* Until Documents and the Plan header take a
                                 PaneHeader, their leading controls sit in one
                                 48px row of their own (P14). */}
