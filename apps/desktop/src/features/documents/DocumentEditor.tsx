@@ -222,7 +222,7 @@ export function DocumentEditor({
     (item) => item.kind === "document" && item.id === initial?.id,
   );
   const [historyOpen, setHistoryOpen] = useState(false);
-  // The session row's middle, where the editor puts its formatting (P16).
+  // The floating bar's controls slot, where the editor puts its formatting.
   const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   const recovery = useDraftRecovery();
   const recoveryOwner = `document:${initial?.id ?? "capture"}`;
@@ -824,9 +824,14 @@ export function DocumentEditor({
   }, [status]);
   const isSaved = status === "Saved on this computer";
   const sync = useRecordSyncState(savedDocument?.id ?? null, isSaved);
+  const reviewRequired = needsReview || sync === "needs_review";
   const statusLine = (
-    <span role="status" className="document-status">
-      {isSaved && (needsReview || sync === "needs_review") ? (
+    <span
+      role="status"
+      aria-label={capture ? "Document save status" : "Document sync status"}
+      className="document-status"
+    >
+      {reviewRequired ? (
         // Saved, but changed on two desktops: that is the state worth saying.
         <>
           <StatusDot tone="attention" size={10} />
@@ -1096,30 +1101,30 @@ export function DocumentEditor({
               {planSupport &&
                 ` · supporting Document of the Plan ${planSupport.label}`}
             </p>
-            {(needsReview || sync === "needs_review") && statusLine}
+            {(isSaved || reviewRequired) && statusLine}
           </div>
         )}
         {initial && writing && (
           <FloatingEditBar
             status={
               failed && !external ? (
-                <span role="status">
+                <span role="status" aria-label="Document save status">
                   Not saved{" "}
                   <Button variant="link" size="inline" onClick={retry}>
                     Retry
                   </Button>
                 </span>
-              ) : isSaved && (needsReview || sync === "needs_review") ? (
-                statusLine
               ) : isSaved ? (
                 fadedStatus === status ? null : (
-                  <span role="status">
+                  <span role="status" aria-label="Document save status">
                     <Check className="size-3" aria-hidden="true" />
                     Saved
                   </span>
                 )
               ) : (
-                statusLine
+                <span role="status" aria-label="Document save status">
+                  {status}
+                </span>
               )
             }
             controlsRef={setSessionHost}

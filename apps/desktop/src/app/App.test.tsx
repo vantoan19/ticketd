@@ -17,6 +17,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+import { syncStatus } from "@/features/sync/sync-fixtures";
 
 class ResizeObserverStub {
   constructor(private callback: ResizeObserverCallback) {}
@@ -4254,6 +4255,93 @@ test("floating save feedback retains a failed description draft and retries it",
   expect(
     within(bar).getByRole("button", { name: "Done editing" }),
   ).toBeTruthy();
+});
+
+test("Document sync metadata survives floating Saved feedback and waits for Drive confirmation", async () => {
+  let stored = {
+    id: "document-sync",
+    title: "Sync safety",
+    body: "Keep this thought",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: "2026-11-01T00:00:00Z",
+    trashed: false,
+  };
+  let uploaded = false;
+  let finishSave = () => {};
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "recent_documents")
+      return [{ id: stored.id, heading: stored.title }];
+    if (command === "open_document" || command === "show_document")
+      return stored;
+    if (command === "document_tags") return [];
+    if (command === "document_version")
+      return [stored.updated_at, stored.trashed];
+    if (command === "sync_status")
+      return syncStatus(
+        uploaded
+          ? {}
+          : {
+              state: "upload_pending",
+              pending_uploads: [
+                {
+                  kind: "document",
+                  id: stored.id,
+                  reference: null,
+                  title: stored.title,
+                },
+              ],
+            },
+      );
+    if (command === "save_document") {
+      stored = {
+        ...stored,
+        title: (args as { title: string }).title,
+        updated_at: "2026-11-01T00:00:01Z",
+      };
+      return new Promise((resolve) => {
+        finishSave = () => resolve(stored);
+      });
+    }
+    return bridgeDefault(command, args as { id?: string; reference?: string });
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Sync safety" }));
+  const metadata = await screen.findByRole("status", {
+    name: "Document sync status",
+  });
+  expect(metadata.textContent).toBe("Saved on this computer");
+  const stateRow = metadata.parentElement!;
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Sync safety revised" },
+  });
+  const bar = screen.getByRole("group", { name: "Edit controls" });
+  expect(await within(bar).findByText("Saving…")).toBeTruthy();
+  expect(within(stateRow).queryByText("Synced to Drive")).toBeNull();
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "save_document",
+      expect.objectContaining({ title: "Sync safety revised" }),
+    ),
+  );
+  await act(async () => finishSave());
+  expect(await within(bar).findByText("Saved")).toBeTruthy();
+  expect(
+    screen.getByRole("status", { name: "Document sync status" }).textContent,
+  ).toBe("Saved on this computer");
+  expect(within(stateRow).queryByText("Synced to Drive")).toBeNull();
+  uploaded = true;
+  expect(await within(stateRow).findByText("Synced to Drive")).toBeTruthy();
+  await vi.waitFor(() => expect(within(bar).queryByText("Saved")).toBeNull(), {
+    timeout: 4000,
+  });
+  expect(
+    screen.getByRole("status", { name: "Document sync status" }).parentElement,
+  ).toBe(stateRow);
+  fireEvent.click(within(bar).getByRole("button", { name: "Done editing" }));
+  expect(within(stateRow).getByText("Synced to Drive")).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "Edit controls" })).toBeNull();
 });
 
 test("Plan Flow uses all members, selects only incident edges, opens tickets and enters the scoped Workspace graph", async () => {
