@@ -21,24 +21,27 @@ function list(archived: boolean, onBrowsePlans = () => {}) {
 test("an empty Plans list explains itself with the shared empty state", () => {
   list(false);
   expect(screen.getByText("No Plans yet")).toBeTruthy();
-  expect(screen.getByText(/groups tickets toward one goal/)).toBeTruthy();
+  expect(
+    screen.getByText("A Plan groups the tickets that ship together."),
+  ).toBeTruthy();
 });
 
 test("an empty archive says what lands there", () => {
   list(true);
   expect(screen.getByText("No archived Plans")).toBeTruthy();
-  expect(screen.getByText(/kept here, read-only/)).toBeTruthy();
+  expect(screen.getByText("Plans you archive wait here.")).toBeTruthy();
 });
 
 test("an empty archive offers a way back to Plans", () => {
   const back = vi.fn();
   list(true, back);
-  fireEvent.click(screen.getByRole("button", { name: "Back to Plans" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show active Plans" }));
   expect(back).toHaveBeenCalled();
 });
 
-test("an empty Plans list offers the action that fills it", () => {
+test("an empty Plans list adds no second action beside the create form", () => {
+  // P9 action rule: the form above already fills the page.
   list(false);
-  fireEvent.click(screen.getByRole("button", { name: "Name a Plan" }));
-  expect(document.activeElement).toBe(screen.getByLabelText("New Plan name"));
+  expect(screen.getByLabelText("New Plan name")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Name a Plan" })).toBeNull();
 });

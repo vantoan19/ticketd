@@ -1,3 +1,4 @@
+import { Pager } from "@/components/ui/pager";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Tooltip } from "@/components/ui/tooltip";
 import { documents } from "@/features/documents/api";
@@ -1191,15 +1192,11 @@ export function Activity({
         </Timeline>
       )}
       {more && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => void loadMore()}
-        >
-          Load more activity
-        </Button>
+        <Pager
+          noun="activity"
+          loading={pending}
+          onMore={() => void loadMore()}
+        />
       )}
     </section>
   );

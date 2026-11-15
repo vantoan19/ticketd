@@ -625,12 +625,9 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Folder reset-email, missing").textContent).toBe("reset-email");
   // The path reads like the folder popover's: one line, not a code block.
   const notice = screen.getByRole("alert");
-  const path = notice.querySelector<HTMLElement>(".path-text")!;
-  fireEvent.pointerMove(path);
-  expect((await screen.findByRole("tooltip")).textContent).toBe(
+  expect(notice.querySelector('[data-slot="path-text"]')?.textContent).toBe(
     "~/ticketd/chats/reset-email",
   );
-  fireEvent.keyDown(document.body, { key: "Escape" });
   expect(notice.querySelector("code")).toBeNull();
   expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
   client.nextFolder = "~/code/emails";
@@ -730,9 +727,7 @@ test("archive keeps the work running; trash stops it and restore re-runs nothing
   openMenu("Chat actions");
   fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
   expect(await screen.findByRole("button", { name: "Unarchive" })).toBeTruthy();
-  expect(
-    await screen.findByText("No Chats yet. Start one with New Chat."),
-  ).toBeTruthy();
+  expect(await screen.findByText("No Chats yet")).toBeTruthy();
   expect(button("Stop")).toBeTruthy();
   expect((await client.openChat("kept")).chat.activity).toBe("working");
 

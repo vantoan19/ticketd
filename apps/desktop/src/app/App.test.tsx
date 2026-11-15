@@ -93,7 +93,9 @@ test("Attachments opens from the existing Context navigation without replacing t
   expect(
     await screen.findByRole("heading", { name: "Attachments" }),
   ).toBeTruthy();
-  expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
+  // An empty library says so, with no search over nothing (P9).
+  expect(await screen.findByText("No attachments yet")).toBeTruthy();
+  expect(screen.queryByRole("searchbox", { name: "Search files" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
   expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
 });
@@ -123,9 +125,25 @@ async function openManageMenu(label: string, item: string) {
   fireEvent.click(screen.getByRole("menuitem", { name: item }));
 }
 
-async function openNewTicket(
-  trigger = screen.getByRole("button", { name: "New ticket" }),
-) {
+/** One ticket for an unfiltered read, none once a search or filter narrows it. */
+function unfilteredOnly(args: unknown) {
+  const filter = (
+    args as {
+      filter?: { query?: string; tags?: string[]; status?: string | null };
+    }
+  )?.filter;
+  const narrowed =
+    Boolean(filter?.query) ||
+    (filter?.tags?.length ?? 0) > 0 ||
+    Boolean(filter?.status);
+  return narrowed ? [] : [bulkTicket(1)];
+}
+
+/** The sidebar's New ticket menu; an empty list may offer its own New ticket too. */
+const sidebarNewTicket = () =>
+  screen.getAllByRole("button", { name: "New ticket" })[0]!;
+
+async function openNewTicket(trigger = sidebarNewTicket()) {
   fireEvent.keyDown(trigger, { key: "Enter" });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -366,7 +384,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans")
         return [{ id: "e1", name: "Old plan", archived: true }];
-      if (command === "list_projects" || command === "find_tickets") return [];
+      // One unfiltered ticket: an empty workspace offers no Filters (P9).
+      if (command === "find_tickets") return unfilteredOnly(args);
+      if (command === "list_projects") return [];
       return bridgeDefault(command, args);
     },
   );
@@ -532,12 +552,13 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  for (const name of ["New ticket", "Create your first ticket"]) {
-    const trigger = screen.getByRole("button", {
-      name,
-    });
+  // The sidebar's menu, then the first-run empty state's own New ticket.
+  for (const index of [0, 1]) {
+    const trigger = screen.getAllByRole("button", { name: "New ticket" })[
+      index
+    ]!;
     trigger.focus();
-    if (name === "New ticket") await openNewTicket(trigger);
+    if (index === 0) await openNewTicket(trigger);
     else fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
     expect(document.activeElement).toBe(
@@ -561,7 +582,7 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  const trigger = screen.getByRole("button", { name: "New ticket" });
+  const trigger = sidebarNewTicket();
   fireEvent.keyDown(document.body, { key: "Tab" });
   trigger.focus();
   await act(async () => {
@@ -741,7 +762,8 @@ test("removes one filter chip and shows the query when nothing matches", async (
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans" || command === "list_projects") return [];
-      if (command === "find_tickets") return [];
+      // One unfiltered ticket: an empty workspace offers no Search (P9).
+      if (command === "find_tickets") return unfilteredOnly(args);
       if (command === "search_tags") return ["bug", "ui"];
       return bridgeDefault(command, args);
     },
@@ -1201,11 +1223,12 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   ).toBe("true");
   expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
   expect(screen.queryByText("2 selected")).toBeNull();
+  // The outcome is the pane's status line, where the bar was (P6).
   expect(
-    within(screen.getByRole("region", { name: "Bulk edit" })).getByRole(
-      "status",
-    ).textContent,
-  ).toContain("Set 2 tickets to Done");
+    screen
+      .getAllByRole("status")
+      .some((line) => line.textContent?.includes("Set 2 tickets to Done")),
+  ).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
   expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
@@ -1264,10 +1287,11 @@ test("names the ticket the core rejected and offers no Retry that cannot succeed
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert");
+  expect(alert.getAttribute("data-slot")).toBe("status-line");
   expect(alert.textContent).toContain("T-KQ2 is trashed");
   expect(alert.textContent).toContain("Nothing changed.");
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-  expect(document.activeElement?.contains(alert)).toBe(true);
+  expect(alert.contains(document.activeElement)).toBe(true);
   expect(screen.getByText("2 selected")).toBeTruthy();
 });
 
@@ -1652,7 +1676,11 @@ test("totals and group counts describe the whole result, not the loaded page", a
     count_tickets: counted({ in_progress: 1, todo: 119 }),
   });
   expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
-  expect(screen.getByText("120", { selector: ".list-header p" })).toBeTruthy();
+  expect(
+    screen.getByText("120", {
+      selector: '.ui-pane-header [data-slot="count"]',
+    }),
+  ).toBeTruthy();
   // One Todo ticket is on this page of the 119 in the result.
   expect(screen.getByText("1 of 119")).toBeTruthy();
   expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
@@ -2088,7 +2116,9 @@ test("a later page that empties moves back to the last page that exists", async 
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(offsets.at(-1)).toBe(0);
-  expect(screen.getByText("50", { selector: ".list-header p" })).toBeTruthy();
+  expect(
+    screen.getByText("50", { selector: '.ui-pane-header [data-slot="count"]' }),
+  ).toBeTruthy();
   expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
 });
 

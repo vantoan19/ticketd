@@ -1,24 +1,19 @@
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useEffect, useState } from "react";
-import {
-  Check,
-  Copy,
-  Folder,
-  FolderOpen,
-  Pencil,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { Folder, FolderOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Item } from "@/components/ui/item";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert } from "@/components/ui/failure-alert";
+import { Count } from "@/components/ui/count";
+import { PageHeader } from "@/components/ui/page-header";
+import { emptyCopy } from "@/lib/empty-copy";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { useCopy } from "@/components/ui/use-copy";
+import { CopyButton } from "@/components/ui/copy-button";
 import { client, type Project } from "@/lib/api/client";
 import {
   describeFailure,
@@ -26,11 +21,10 @@ import {
 } from "@/lib/api/describe-failure";
 import { workspaceClient } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
-import { nameFromFolder } from "@/features/projects/paths";
+import { nameFromFolder } from "@/lib/paths";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
-import { PathText } from "@/features/projects/PathText";
+import { PathText } from "@/components/ui/path-text";
 import "./projects.css";
-import { SectionHeader } from "@/components/ui/section-header";
 
 type OpenDialog =
   | { kind: "project" }
@@ -61,26 +55,6 @@ function ticketsLabel(count: TicketCount | undefined) {
   if (!count) return "";
   const noun = count.total === 1 ? "ticket" : "tickets";
   return `${count.total} ${noun} · ${count.open} open`;
-}
-
-/** An icon button that copies text and announces it. */
-function CopyIcon({ label, text }: { label: string; text: string }) {
-  const { copied, error, copy } = useCopy();
-  return (
-    <>
-      <IconButton
-        type="button"
-        label={label}
-        onClick={() => void copy("text", text)}
-      >
-        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-      </IconButton>
-      <span className="sr-only" role="status">
-        {copied && "Copied"}
-        {error && "Copy unavailable. Select the text."}
-      </span>
-    </>
-  );
 }
 
 function CheckoutRow({
@@ -148,13 +122,13 @@ function CheckoutRow({
   return (
     <Item>
       <span className="checkout-text">
-        <PathText path={path} />
+        <PathText path={path} layout="inline" />
         <span className="checkout-note">
           {first ? "First checkout" : "Checkout"}
           {revealError && ` · ${revealError.title}`}
         </span>
       </span>
-      <CopyIcon label={`Copy checkout path ${path}`} text={path} />
+      <CopyButton label="Copy path" subject={path} text={path} />
       <IconButton
         type="button"
         label={`Show ${path} in ${manager}`}
@@ -213,9 +187,8 @@ function FolderPicker({
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
         />
-        {/* PathText carries the full path in its own tooltip. */}
         <span className="folder-path" data-empty={!path}>
-          {path ? <PathText path={path} /> : "No folder chosen"}
+          {path ? <PathText path={path} layout="inline" /> : "No folder chosen"}
         </span>
         <Button type="button" variant="outline" size="sm" onClick={choose}>
           {path ? "Change…" : "Choose folder…"}
@@ -404,17 +377,14 @@ export function Projects({
 
   return (
     <section className="projects-column" aria-label="Project management">
-      <SectionHeader
-        level={1}
+      <PageHeader
         title="Projects"
-        count={projects.length > 0 ? projects.length : undefined}
-        actions={projects.length > 0 && newProject}
+        {...(projects.length > 0 && {
+          count: <Count>{projects.length}</Count>,
+          actions: newProject,
+        })}
+        lede="A project is a repository. Its identity survives moves and renames, and each checkout lets the command line infer the project from the folder you are in."
       />
-      <p className="projects-description">
-        A project is a repository. Its identity survives moves and renames, and
-        each checkout lets the command line infer the project from the folder
-        you are in.
-      </p>
       {loading ? (
         <EmptyState
           size="inline"
@@ -424,8 +394,8 @@ export function Projects({
       ) : projects.length === 0 ? (
         <EmptyState
           icon={<Folder aria-hidden />}
-          title="No projects yet"
-          description="Add a repository to link tickets to it and let the command line pick it from a registered checkout."
+          title={emptyCopy("projects").title}
+          description={emptyCopy("projects").sentence}
           action={newProject}
         />
       ) : (
@@ -523,10 +493,7 @@ export function Projects({
                       <Tooltip content={item.id}>
                         <code tabIndex={0}>{truncateId(item.id)}</code>
                       </Tooltip>
-                      <CopyIcon
-                        label={`Copy project ID of ${item.name}`}
-                        text={item.id}
-                      />
+                      <CopyButton label="Copy project ID" text={item.id} />
                       <span className="projects-spacer" />
                       <span>
                         Used by <code>ticketd list --project</code>

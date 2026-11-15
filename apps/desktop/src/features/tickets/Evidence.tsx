@@ -1,3 +1,4 @@
+import { Pager } from "@/components/ui/pager";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -366,19 +367,15 @@ export function Evidence({
         ))}
       </ol>
       {more && (
-        <Button
-          variant="outline"
-          size="sm"
-          type="button"
-          onClick={() => {
+        <Pager
+          noun="evidence"
+          onMore={() => {
             pages.current += 1;
             void load().catch((reason: unknown) =>
               setError(describeFailure(reason, "load more evidence")),
             );
           }}
-        >
-          Load more evidence
-        </Button>
+        />
       )}
       <DialogShell
         open={!trashed && composing}

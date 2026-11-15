@@ -1,3 +1,4 @@
+import { emptyCopy } from "@/lib/empty-copy";
 import { useEffect, useState } from "react";
 import {
   AlarmClock,
@@ -19,7 +20,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
 import { inboxClient } from "@/lib/api/inbox";
@@ -272,7 +273,7 @@ export function Inbox({
   const groups = groupEntries(mergeByTime(entries, syncShown), new Date());
   return (
     <div className="inbox">
-      <ListHeader
+      <PaneHeader
         title="Inbox"
         actions={
           <Button
@@ -302,7 +303,7 @@ export function Inbox({
             { value: "unread", label: "Unread" },
           ]}
         />
-      </ListHeader>
+      </PaneHeader>
       <div className="inbox-body">
         {error && (
           <FailureAlert
@@ -389,10 +390,9 @@ export function Inbox({
           filter === "all" &&
           !error && (
             <EmptyState
-              className="p-0 pb-10 md:p-0 md:pb-10"
               icon={<InboxIcon />}
-              title="Nothing in your Inbox"
-              description="Changes on tickets you follow, and reminders that come due, appear here."
+              title={emptyCopy("inbox-all").title}
+              description={emptyCopy("inbox-all").sentence}
               action={
                 <Button variant="outline" size="sm" onClick={onBrowse}>
                   Browse tickets to follow

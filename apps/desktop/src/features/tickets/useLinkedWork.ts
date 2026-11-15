@@ -1,3 +1,4 @@
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type Relationships, type Ticket } from "@/lib/api/client";
 import {
@@ -40,8 +41,8 @@ export function useLinkedWork(
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<FailureDescription | null>(null);
   const [pending, setPending] = useState(false);
-  /** The link just removed, so it can be put back. */
-  const [removed, setRemoved] = useState<LinkRow | null>(null);
+  // A removal acts at once; the pane's status line offers Undo (P7).
+  const statusLine = useStatusLine();
   const attempts = useRef(new Map<string, string>());
   const reference = ticket.reference;
 
@@ -88,11 +89,15 @@ export function useLinkedWork(
     try {
       await removeLink(reference, row.kind, row.reference, id);
       attempts.current.delete(key);
-      setRemoved(
-        row.kind === "duplicate_of" || row.kind === "duplicates" ? null : row,
-      );
       setReload((value) => value + 1);
       await refresh();
+      // A duplicate link is undone through its own review, not by Undo.
+      const kind = row.kind;
+      if (kind !== "duplicate_of" && kind !== "duplicates")
+        statusLine.show({
+          message: `Removed the link to ${row.reference}`,
+          undo: () => putBack(kind, row.reference),
+        });
     } catch (reason) {
       setError(
         describeFailure(
@@ -104,27 +109,13 @@ export function useLinkedWork(
       setPending(false);
     }
   }
-  async function undoRemove() {
-    if (
-      !removed ||
-      removed.kind === "duplicate_of" ||
-      removed.kind === "duplicates"
-    )
-      return;
+  /** Undo for a removal: adds the link back, or throws so the line can say why. */
+  async function putBack(kind: AddableKind, target: string) {
     setPending(true);
-    setError(null);
     try {
-      await addLink(
-        reference,
-        removed.kind,
-        removed.reference,
-        crypto.randomUUID(),
-      );
-      setRemoved(null);
+      await addLink(reference, kind, target, crypto.randomUUID());
       setReload((value) => value + 1);
       await refresh();
-    } catch (reason) {
-      setError(describeFailure(reason, "put the link back"));
     } finally {
       setPending(false);
     }
@@ -151,8 +142,6 @@ export function useLinkedWork(
     error,
     pending,
     remove,
-    removed,
-    undoRemove,
     showMore,
     retry,
     refresh,

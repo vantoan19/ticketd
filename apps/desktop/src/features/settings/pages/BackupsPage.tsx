@@ -15,19 +15,14 @@ import {
 import { workspaceClient, type BackupRecord } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
-import { Tooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
 import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { revealFile } from "@/lib/reveal";
-import { PathText } from "@/features/projects/PathText";
-import {
-  lineFailure,
-  localDate,
-  splitPath,
-} from "@/features/settings/settings-format";
+import { PathText } from "@/components/ui/path-text";
+import { lineFailure, localDate } from "@/features/settings/settings-format";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import { sectionMeta } from "@/features/settings/settings-sections";
@@ -154,7 +149,6 @@ function LastBackupRow({
       />
     );
   const { record } = last;
-  const { folder, name } = splitPath(record.path);
   return (
     <SettingsRow
       leading={
@@ -174,10 +168,7 @@ function LastBackupRow({
         // The file name whole on its own line; the folder under it gives way
         // in the middle, with the full path on hover.
         <span className="backups-last-path">
-          <Tooltip content={name} overflowOnly>
-            <code className="backups-file">{name}</code>
-          </Tooltip>
-          {folder && <PathText path={folder} />}
+          <PathText path={record.path} />
         </span>
       }
       trailing={

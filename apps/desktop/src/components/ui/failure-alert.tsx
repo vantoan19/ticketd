@@ -15,7 +15,8 @@ import type { FailureDescription } from "@/lib/api/describe-failure";
 /**
  * "Details": a ghost toggle that reveals the raw failure text in 12px mono with
  * "Copy details". The raw text never appears anywhere else.
- * TODO(R2.6): use the shared Disclosure once it lands in components/ui.
+ * Not the shared Disclosure: its toggle sits in an action row beside Retry
+ * while the text opens below, and the text is not mounted until asked for.
  */
 export function FailureDetails({
   details,

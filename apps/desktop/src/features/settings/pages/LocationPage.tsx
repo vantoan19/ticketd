@@ -16,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PathText } from "@/features/projects/PathText";
+import { PathText } from "@/components/ui/path-text";
 import { fileManagerName } from "@/lib/platform";
 import { writeClipboard } from "@/lib/clipboard";
 import { revealFile } from "@/lib/reveal";
@@ -154,7 +154,7 @@ function Loaded({ info }: { info: WorkspaceInfo }) {
             description={
               folder && (
                 <span className="location-folder">
-                  <PathText path={folder} />
+                  <PathText path={folder} layout="folder" />
                 </span>
               )
             }

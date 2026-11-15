@@ -120,7 +120,9 @@ test("a very dense neighbourhood stays a list and groups rows by relationship", 
   expect(
     screen.queryByRole("button", { name: "Center on Ticket 10" }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Load more Mentions" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Show \d+ more Mentions$/ }),
+  );
   expect(
     screen.getByRole("button", { name: "Center on Ticket 10" }),
   ).toBeTruthy();

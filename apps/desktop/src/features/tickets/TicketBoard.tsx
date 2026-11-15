@@ -1,16 +1,11 @@
+import { Pager } from "@/components/ui/pager";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useEffect } from "react";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  CornerDownRight,
-  Folder,
-  Layers,
-  MoreHorizontal,
-  X,
-} from "lucide-react";
+import { CornerDownRight, Folder, Layers, MoreHorizontal } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +25,9 @@ import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
 import { useBoardDrag } from "./useBoardDrag";
 import "./ticket-board.css";
+
+/** Cards the board reads per column at a time (useTicketBoard). */
+const BOARD_PAGE = 50;
 import { Reference } from "@/components/ui/reference";
 
 export function TicketBoard({
@@ -52,33 +50,21 @@ export function TicketBoard({
     workspace.availability,
   );
   const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
+  // A confirmed move is said in the pane's status line, never inserted above
+  // the columns (it pushed the board down; list B-04).
+  const statusLine = useStatusLine();
+  const { notice, dismissNotice } = statusAction;
+  useEffect(() => {
+    if (!notice) return;
+    statusLine.show({ message: notice });
+    dismissNotice();
+  }, [notice, dismissNotice, statusLine]);
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
   );
   return (
     <>
-      <div
-        className={statusAction.notice ? undefined : "sr-only"}
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {statusAction.notice && (
-          <Alert role="none" size="compact">
-            <AlertDescription>{statusAction.notice}</AlertDescription>
-            <IconButton
-              label="Dismiss status update"
-              onClick={() => {
-                statusAction.dismissNotice();
-                boardRef.current?.focus({ preventScroll: true });
-              }}
-            >
-              <X />
-            </IconButton>
-          </Alert>
-        )}
-      </div>
       {Object.entries(statusAction.failures)
         .filter(([, message]) => message)
         .map(([reference, message]) => (
@@ -339,20 +325,14 @@ export function TicketBoard({
                   />
                 )}
                 {total !== null && items.length < total && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={loading}
-                      onClick={() => void workspace.board.loadMore(status)}
-                      aria-label={`Load more ${status}`}
-                    >
-                      Load more
-                    </Button>
-                    <p className="board-loaded">
-                      {items.length} of {total} loaded
-                    </p>
-                  </>
+                  // The pager keeps its place while the next cards load, so
+                  // a card never lands under the pointer (list BD-09).
+                  <Pager
+                    more={Math.min(BOARD_PAGE, total - items.length)}
+                    noun={status}
+                    loading={loading}
+                    onMore={() => void workspace.board.loadMore(status)}
+                  />
                 )}
               </div>
             </section>

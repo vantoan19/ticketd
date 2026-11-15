@@ -133,7 +133,7 @@ export function DialogShell({
     >
       {primaryLabel}
       {primaryHint && (
-        <Kbd variant="inverted" aria-hidden="true">
+        <Kbd tone="inverted" aria-hidden="true">
           {primaryHint}
         </Kbd>
       )}

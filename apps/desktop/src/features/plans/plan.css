@@ -118,8 +118,7 @@
   height: 16px;
   background: var(--border);
 }
-.plan-header h1,
-.plan-index h1 {
+.plan-header h1 {
   margin: 0;
   color: var(--foreground);
   font-size: var(--text-title);
@@ -185,21 +184,6 @@
 .plan-create [data-slot="field"] {
   flex: 1 1 200px;
   max-width: 360px;
-}
-/* Matches the other management pages: one centered column. */
-.plan-index {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 768px;
-  padding: 32px var(--page-gutter) 48px;
-  overflow-y: auto;
-}
-.plan-index > h1 + .plan-note {
-  margin-top: -12px;
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .plan-index-list {
   display: flex;
@@ -460,12 +444,6 @@
   flex: 1;
   min-height: 0;
   max-width: none;
-}
-.plan-dependencies-card [data-slot="empty-header"] {
-  max-width: 420px;
-}
-.plan-dependencies-card [data-slot="empty-description"] {
-  max-width: 420px;
 }
 .plan-dependencies-key-box {
   outline: none;

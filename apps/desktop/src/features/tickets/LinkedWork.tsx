@@ -145,19 +145,6 @@ export function LinkedWork({
             />
           )}
           {error && <FailureAlert size="compact" failure={error} />}
-          {work.removed && (
-            <p role="status" className="linked-work-note">
-              Removed {linkLabel(work.removed.kind)} {work.removed.reference}.{" "}
-              <Button
-                variant="link"
-                size="xs"
-                disabled={pending}
-                onClick={() => void work.undoRemove()}
-              >
-                Undo
-              </Button>
-            </p>
-          )}
         </div>
       </RailSection>
     );
@@ -236,19 +223,6 @@ export function LinkedWork({
             failure={current.failure}
             onRetry={work.retry}
           />
-        )}
-        {work.removed && (
-          <p role="status" className="linked-work-note">
-            Removed {linkLabel(work.removed.kind)} {work.removed.reference}.{" "}
-            <Button
-              variant="link"
-              size="xs"
-              disabled={pending}
-              onClick={() => void work.undoRemove()}
-            >
-              Undo
-            </Button>
-          </p>
         )}
         <ul className="linked-work-rows">
           {rows.slice(0, split).map((row, index) => renderRow(row, index))}

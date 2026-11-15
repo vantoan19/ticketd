@@ -1,11 +1,14 @@
 import { Fragment, useRef, useState } from "react";
-import { ChevronRight, Paperclip, Plus, SearchX, Settings } from "lucide-react";
+import { Paperclip, Plus, SearchX, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
-import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { SearchInput } from "@/components/ui/search-input";
 import { Tooltip } from "@/components/ui/tooltip";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Time } from "@/components/ui/time";
+import { emptyCopy } from "@/lib/empty-copy";
 import {
   attachments,
   type Attachment,
@@ -15,7 +18,6 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { AttachmentCleanup } from "./AttachmentCleanup";
 import { PurgeAttachment } from "./PurgeAttachment";
 import { RemoveRemoteAttachment } from "./RemoveRemoteAttachment";
@@ -122,67 +124,69 @@ export function AttachmentLibrary({
   }
   return (
     <div className="attachment-workspace">
-      <div className="attachment-library-bar">
-        <nav aria-label="Attachment location">
-          <span>Workspace</span>
-          <ChevronRight aria-hidden="true" />
-          <span aria-current="page">Attachments</span>
-        </nav>
-        {onOpenSettings && (
-          <Button variant="ghost" size="sm" onClick={onOpenSettings}>
-            <Settings aria-hidden="true" />
-            Storage settings
-          </Button>
-        )}
-      </div>
       <section className="attachment-library" aria-label="Attachment library">
-        <header>
-          <div>
-            <h1>Attachments</h1>
-            <p>Files used across your tickets and Documents.</p>
-          </div>
-          <div className="attachment-actions">
-            {!libraryEmpty && (
+        <PageHeader
+          title="Attachments"
+          lede="Files used across your tickets and Documents."
+          actions={
+            <>
+              {onOpenSettings && (
+                <Button variant="ghost" size="sm" onClick={onOpenSettings}>
+                  <Settings aria-hidden="true" />
+                  Storage settings
+                </Button>
+              )}
+              {!libraryEmpty && (
+                <Button
+                  ref={cleanupTrigger}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCleanup(true)}
+                >
+                  Clean up
+                </Button>
+              )}
               <Button
-                ref={cleanupTrigger}
-                variant="outline"
-                onClick={() => setCleanup(true)}
+                ref={addTrigger}
+                size="sm"
+                onClick={() => setPicker(true)}
               >
-                Clean up
+                <Plus aria-hidden="true" />
+                Add files
               </Button>
-            )}
-            <Button ref={addTrigger} onClick={() => setPicker(true)}>
-              <Plus aria-hidden="true" />
-              Add files
-            </Button>
-          </div>
-        </header>
-        <div className="attachment-library-tools">
-          <Input
-            type="search"
-            aria-label="Search files"
-            placeholder="Search names and metadata…"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setOffset(0);
-            }}
-          />
-          <SegmentedControl
-            aria-label="File usage"
-            value={state}
-            onValueChange={(next) => {
-              setState(next);
-              setOffset(0);
-            }}
-            options={[
-              { value: "all", label: "All files" },
-              { value: "in_use", label: "In use" },
-              { value: "unused", label: "Unused" },
-              { value: "quarantined", label: "Quarantine" },
-            ]}
-          />
-        </div>
+            </>
+          }
+          // Chrome rule (P9): no search or usage filter over an empty library.
+          {...(!libraryEmpty && {
+            toolbar: (
+              <>
+                <SearchInput
+                  aria-label="Search files"
+                  placeholder="Search files…"
+                  value={search}
+                  onValueChange={(value) => {
+                    setSearch(value);
+                    setOffset(0);
+                  }}
+                />
+                <SegmentedControl
+                  aria-label="File usage"
+                  value={state}
+                  onValueChange={(next) => {
+                    setState(next);
+                    setOffset(0);
+                  }}
+                  options={[
+                    { value: "all", label: "All files" },
+                    { value: "in_use", label: "In use" },
+                    { value: "unused", label: "Unused" },
+                    { value: "quarantined", label: "Quarantine" },
+                  ]}
+                />
+              </>
+            ),
+          })}
+        />
         {error ? (
           <FailureState
             failure={error}
@@ -193,8 +197,8 @@ export function AttachmentLibrary({
         ) : libraryEmpty ? (
           <EmptyState
             icon={<Paperclip />}
-            title="No attachments yet"
-            description="Files you attach to tickets and Documents appear here."
+            title={emptyCopy("attachments").title}
+            description={emptyCopy("attachments").sentence}
           />
         ) : files.length === 0 ? (
           <>
@@ -290,11 +294,7 @@ export function AttachmentLibrary({
                         </td>
                         <td data-label="Added">
                           {file.added_at ? (
-                            <Tooltip content={formatDateTime(file.added_at)}>
-                              <time dateTime={file.added_at} tabIndex={0}>
-                                {relativeDateTime(file.added_at)}
-                              </time>
-                            </Tooltip>
+                            <Time value={file.added_at} />
                           ) : (
                             <Tooltip content="No registration date was recorded">
                               <span tabIndex={0}>Unknown</span>
@@ -409,8 +409,8 @@ export function AttachmentLibrary({
             file={removing}
             onClose={() => setRemoving(null)}
             onChanged={() => setRefresh((value) => value + 1)}
+            // Clean up leaves with the last file (chrome rule); Add files stays.
             onRemovedFocus={() =>
-              // Clean up is gone once the last file is.
               (cleanupTrigger.current ?? addTrigger.current)?.focus()
             }
           />
@@ -442,43 +442,41 @@ function NoFiles({
   onClearSearch: () => void;
   onShowAll: () => void;
 }) {
-  if (search)
+  if (search) {
+    const copy = emptyCopy("attachments-search", {
+      query: search,
+      name: STATE_NAMES[state],
+    });
     return (
       <EmptyState
         icon={<SearchX />}
-        title={`No files match “${search}”`}
-        description={`Searched names and metadata in ${STATE_NAMES[state]}.`}
+        title={copy.title}
+        description={copy.sentence}
         action={
           <Button variant="outline" size="sm" onClick={onClearSearch}>
-            Clear search
+            {copy.action}
           </Button>
         }
       />
     );
-  if (later || state === "all") return <EmptyState title="No more files" />;
-  const copy = {
-    in_use: {
-      title: "No files in use",
-      description: "Files a ticket or Document links to appear here.",
-    },
-    unused: {
-      title: "No unused files",
-      description: "Files no ticket or Document links to appear here.",
-    },
-    quarantined: {
-      title: "Quarantine is empty",
-      description:
-        "Files you clean up wait here until you restore or purge them.",
-    },
-  }[state];
+  }
+  if (later || state === "all")
+    return <EmptyState title={emptyCopy("attachments-more").title} />;
+  const copy = emptyCopy(
+    state === "in_use"
+      ? "attachments-in-use"
+      : state === "unused"
+        ? "attachments-unused"
+        : "attachments-quarantine",
+  );
   return (
     <EmptyState
       icon={<SearchX />}
       title={copy.title}
-      description={copy.description}
+      description={copy.sentence}
       action={
         <Button variant="outline" size="sm" onClick={onShowAll}>
-          Show all files
+          {copy.action}
         </Button>
       }
     />

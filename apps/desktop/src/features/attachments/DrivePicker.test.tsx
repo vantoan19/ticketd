@@ -57,11 +57,13 @@ test("unconfigured Drive keeps setup details collapsed and local sources usable"
     "textContent",
     "Google Drive setup is required before connecting.",
   );
-  const instructions = screen.getByText(diagnostic).closest("details");
-  expect(instructions).not.toBeNull();
-  expect(instructions?.open).toBe(false);
-  fireEvent.click(screen.getByText("Setup instructions", { exact: true }));
-  expect(instructions?.open).toBe(true);
+  // A Disclosure, closed until asked for.
+  const instructions = screen.getByRole("button", {
+    name: "Setup instructions",
+  });
+  expect(instructions.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(instructions);
+  expect(instructions.getAttribute("aria-expanded")).toBe("true");
   expect(
     screen
       .getByRole("button", { name: "Choose in Google Drive" })
@@ -94,8 +96,8 @@ test("choosing an upload folder shows typed setup guidance collapsed while local
     "textContent",
     "Google Drive setup is required before connecting.",
   );
-  const details = screen.getByText(diagnostic).closest("details");
-  expect(details?.open).toBe(false);
+  const details = screen.getByRole("button", { name: "Setup instructions" });
+  expect(details.getAttribute("aria-expanded")).toBe("false");
   expect(
     screen
       .getByRole("button", { name: "Choose files" })
@@ -105,8 +107,8 @@ test("choosing an upload folder shows typed setup guidance collapsed while local
     "select_drive_upload_folder",
     expect.anything(),
   );
-  fireEvent.click(screen.getByText("Setup instructions", { exact: true }));
-  expect(details?.open).toBe(true);
+  fireEvent.click(details);
+  expect(details.getAttribute("aria-expanded")).toBe("true");
   expect(screen.getByText(diagnostic)).toBeTruthy();
 });
 

@@ -47,8 +47,12 @@ test("while the workspace is read the page shows skeletons, not facts", async ()
 test("the workspace file row names the file in its own line and its folder beneath", async () => {
   render(<LocationPage />);
   expect(await screen.findByText("Tickets")).toBeTruthy();
-  const folder = document.querySelector<HTMLElement>(".path-text")!;
+  // The full path is in the PathText tooltip, never a native title.
+  const folder = document.querySelector<HTMLElement>(
+    '[data-slot="path-text"]',
+  )!;
   expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
+  expect(folder.getAttribute("title")).toBeNull();
   fireEvent.pointerMove(folder);
   expect((await screen.findByRole("tooltip")).textContent).toBe(
     "/Users/ada/Library/Application Support/ticketd",

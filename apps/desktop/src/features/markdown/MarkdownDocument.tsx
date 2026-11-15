@@ -19,13 +19,9 @@ import {
 } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
-import { Button } from "@/components/ui/button";
-import { FailureAlert } from "@/components/ui/failure-alert";
-import {
-  describeFailure,
-  type FailureDescription,
-} from "@/lib/api/describe-failure";
 import { writeClipboard } from "@/lib/clipboard";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
@@ -43,14 +39,6 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
-/**
- * Reports a link that could not open. The failure shows below the document,
- * never inside the paragraph that holds the link.
- * TODO(R1.8): send it to the pane status line once that lands.
- */
-const LinkFailure = createContext<
-  (failure: { failure: FailureDescription; href: string } | null) => void
->(() => {});
 const AttachmentReplacement = createContext<
   (node: ExtraProps["node"], uri: string) => ReferenceReplacement | undefined
 >(() => undefined);
@@ -133,13 +121,7 @@ function DocumentLink({
   if (href?.startsWith("ticketd://plan/")) {
     const id = href.slice("ticketd://plan/".length);
     return openPlan ? (
-      <button
-        type="button"
-        className="context-link"
-        onClick={() => openPlan(id)}
-      >
-        {children}
-      </button>
+      <RecordLink onClick={() => openPlan(id)}>{children}</RecordLink>
     ) : (
       <>{children}</>
     );
@@ -147,14 +129,10 @@ function DocumentLink({
   if (href?.startsWith("ticketd://document/")) {
     const id = href.slice("ticketd://document/".length);
     return openDocument ? (
-      <button
-        type="button"
-        className="context-link"
-        onClick={() => openDocument(id)}
-      >
+      <RecordLink onClick={() => openDocument(id)}>
         {children}
         <TrashedMark id={id} revision={revision} />
-      </button>
+      </RecordLink>
     ) : (
       <>{children}</>
     );
@@ -186,6 +164,15 @@ function DocumentLink({
   );
 }
 
+/** The host a link points at, for "Couldn't open example.com". */
+function linkHost(href: string): string {
+  try {
+    return new URL(href).host || href;
+  } catch {
+    return href;
+  }
+}
+
 /**
  * A link in Markdown, including text written at a source such as GitHub. The app
  * window never navigates: an https link opens in the default browser, and any
@@ -198,7 +185,9 @@ function ExternalLink({
   href: string;
   children?: React.ReactNode;
 }) {
-  const report = useContext(LinkFailure);
+  // A failure is an outcome, not part of the text: it goes to the pane's
+  // status line instead of being inserted after the link (detA MK, P8).
+  const statusLine = useStatusLine();
   return (
     <a
       href={href}
@@ -206,27 +195,24 @@ function ExternalLink({
       onClick={(event) => {
         event.preventDefault();
         if (!href.startsWith("https://")) return;
-        workspaceClient.openLink(href).then(
-          () => report(null),
-          (reason: unknown) =>
-            report({
-              failure: describeFailure(reason, `open ${hostOf(href)}`),
-              href,
-            }),
+        workspaceClient.openLink(href).catch(() =>
+          statusLine.show({
+            tone: "error",
+            message: `Couldn't open ${linkHost(href)}`,
+            action: {
+              label: "Copy link",
+              run: async () => {
+                const failure = await writeClipboard(href);
+                if (failure !== null) throw new Error(failure);
+              },
+            },
+          }),
         );
       }}
     >
       {children}
     </a>
   );
-}
-
-function hostOf(href: string) {
-  try {
-    return new URL(href).host || "the link";
-  } catch {
-    return "the link";
-  }
 }
 
 // Use the original fence interior: the Markdown AST normalizes CRLF and adds a
@@ -411,10 +397,6 @@ export function MarkdownDocument({
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
-  const [linkFailure, setLinkFailure] = useState<{
-    failure: FailureDescription;
-    href: string;
-  } | null>(null);
   const replacementHistory = useRef<string | null>(null);
   useEffect(
     () => () => {
@@ -463,37 +445,19 @@ export function MarkdownDocument({
         <MentionTarget.Provider value={mention ?? null}>
           <MarkdownSource.Provider value={source}>
             <AttachmentReplacement.Provider value={replacement}>
-              <LinkFailure.Provider value={setLinkFailure}>
-                <ReactMarkdown
-                  remarkPlugins={remarkPlugins}
-                  urlTransform={(url) =>
-                    url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
-                  }
-                  components={components}
-                >
-                  {source}
-                </ReactMarkdown>
-              </LinkFailure.Provider>
+              <ReactMarkdown
+                remarkPlugins={remarkPlugins}
+                urlTransform={(url) =>
+                  url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
+                }
+                components={components}
+              >
+                {source}
+              </ReactMarkdown>
             </AttachmentReplacement.Provider>
           </MarkdownSource.Provider>
         </MentionTarget.Provider>
       </TicketNavigation.Provider>
-      {linkFailure && (
-        <FailureAlert
-          size="compact"
-          failure={linkFailure.failure}
-          actions={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void writeClipboard(linkFailure.href)}
-            >
-              Copy link
-            </Button>
-          }
-        />
-      )}
     </div>
   );
 }

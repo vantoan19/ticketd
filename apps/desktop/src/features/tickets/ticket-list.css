@@ -238,19 +238,6 @@
     padding-inline: 4px;
   }
 }
-.bulk-message {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding-inline: 8px;
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.bulk-failure {
-  padding-inline: 8px;
-}
 .bulk-menu-count {
   margin-left: auto;
   padding-left: 16px;
@@ -364,9 +351,13 @@
   background: var(--recessed);
 }
 .source-refresh {
+  max-width: 130px;
+  overflow: hidden;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ticket-row-time {
   flex: none;

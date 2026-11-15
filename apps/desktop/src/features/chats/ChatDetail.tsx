@@ -31,8 +31,8 @@ import {
 } from "@/components/ui/popover";
 import { useCopy } from "@/components/ui/use-copy";
 import { workspaceClient } from "@/lib/api/workspace";
-import { PathText } from "@/features/projects/PathText";
-import { withoutVerbatim } from "@/features/projects/paths";
+import { PathText } from "@/components/ui/path-text";
+import { withoutVerbatim } from "@/lib/paths";
 import { ActivityDock } from "@/features/chats/ActivityDock";
 import { focusFirstChoice } from "@/features/chats/dock-focus";
 import { DockSlot } from "@/features/chats/DockSlot";
@@ -116,7 +116,7 @@ function NoticeText({ text, path }: { text: string; path?: string }) {
       if (punctuation) parts[index + 1] = next.slice(punctuation.length);
       nodes.push(
         <span key={index} className="notice-path">
-          <PathText path={path} />
+          <PathText path={path} layout="inline" />
           {punctuation}
         </span>,
       );

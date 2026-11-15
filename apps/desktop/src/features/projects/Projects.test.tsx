@@ -42,9 +42,12 @@ test("shows checkouts home-relative on one line with the full path on hover", as
   render(<Projects {...props} />);
   const list = screen.getByRole("list", { name: "Checkouts of Original" });
   const [first, second] = Array.from(
-    list.querySelectorAll<HTMLElement>(".path-text"),
+    list.querySelectorAll<HTMLElement>('[data-slot="path-text"]'),
   );
   expect(first!.textContent).toBe("~/src/old");
+  expect(second!.textContent).toBe("/other/checkout");
+  // The full path is in a tooltip (P4), not a native title.
+  expect(list.querySelector("[title]")).toBeNull();
   expect(await hoverTooltip(first!)).toBe("/Users/me/src/old");
   expect(await hoverTooltip(second!)).toBe("/other/checkout");
 });
@@ -78,10 +81,10 @@ test("copies a checkout path and the project ID, and shows the folder in the fil
   const reveal = vi.spyOn(workspaceClient, "reveal").mockResolvedValue();
   render(<Projects {...props} />);
   expect(screen.getByText(/identity survives moves and renames/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /Copy project ID/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Copy project ID" }));
   expect(writeText).toHaveBeenCalledWith("p1");
   fireEvent.click(
-    screen.getByRole("button", { name: "Copy checkout path /other/checkout" }),
+    screen.getByRole("button", { name: "Copy path /other/checkout" }),
   );
   expect(writeText).toHaveBeenCalledWith("/other/checkout");
   fireEvent.click(
@@ -252,5 +255,6 @@ test("a long checkout path keeps all its text for the middle to truncate", () =>
   const long =
     "/private/tmp/claude-501/-Users-me-Projects/8b654d0c-8f7d/repo-api";
   render(<Projects {...props} projects={[{ ...project, paths: [long] }]} />);
-  expect(document.querySelector(".path-text")!.textContent).toBe(long);
+  const path = document.querySelector('[data-slot="path-text"]');
+  expect(path?.textContent).toBe(long);
 });

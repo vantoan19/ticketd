@@ -12,22 +12,11 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
-/* Two lines: the file name, never broken inside a word, then its folder,
-   which gives way in the middle. The row keeps its height for any path. */
+/* The shared PathText: the file name, then its folder shortened in the
+   middle. The row keeps its height for any path. */
 .backups-last-path {
   display: flex;
-  flex-direction: column;
   min-width: 0;
-}
-.backups-last-path .backups-file {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.backups-last-path .path-text {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  color: var(--muted-foreground);
 }
 .backups-icon-error {
   color: var(--error-foreground);

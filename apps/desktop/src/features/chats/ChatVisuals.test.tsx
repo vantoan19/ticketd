@@ -322,7 +322,8 @@ test("a message that the pane later narrows to more than four lines offers Show 
   expect(screen.getByRole("button", { name: "Show more" })).toBeTruthy();
 });
 
-test("CH-31: a one-line message whose mention pokes out of its line has no Show more", async () => {
+test("a one-line message whose mention pokes past its line offers no Show more", async () => {
+  // CH-31: the mention chip overflows the 20px line by 2px.
   await show([
     {
       chat: chatState({ id: "c1", title: "Limiter" }),
@@ -331,7 +332,7 @@ test("CH-31: a one-line message whose mention pokes out of its line has no Show 
           id: "u1",
           at,
           kind: "user",
-          text: "Implement T-12.",
+          text: "Implement T-MP2.",
           delivery: "delivered",
         },
       ],
@@ -339,7 +340,6 @@ test("CH-31: a one-line message whose mention pokes out of its line has no Show 
   ]);
   const box = document.querySelector<HTMLElement>(".chat-you > div")!;
   box.style.lineHeight = "20px";
-  // The mention's 24px hit area overflows the 20px line by 2px.
   Object.defineProperty(box, "clientHeight", { configurable: true, value: 20 });
   Object.defineProperty(box, "scrollHeight", {
     configurable: true,

@@ -1,3 +1,4 @@
+import { renderedLines } from "@/components/ui/rendered-lines";
 import {
   Fragment,
   createContext,
@@ -203,22 +204,13 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
   // Measured again whenever the message's width changes: a pane narrowed after
-  // the message was shown clamps it, and then it needs Show more. A clamped box
-  // reports only its four lines as its scroll height in WebKit and Chrome, so the
-  // full height is read with the clamp lifted for the measurement. Only a hidden
-  // line counts: a mention's 24px hit area pokes 2px out of a 20px line (CH-31),
-  // so anything under half a line is not more text.
+  // the message was shown clamps it, and then it needs Show more. Decided by
+  // rendered lines, not pixels: a mention chip overflows its line by 2px and
+  // made one-line messages offer Show more (CH-31).
   useLayoutEffect(() => {
     const box = text.current;
     if (!box || more) return;
-    const measure = () => {
-      const clamped = box.clientHeight;
-      box.removeAttribute("data-clamped");
-      const full = box.scrollHeight;
-      box.setAttribute("data-clamped", "");
-      const line = Number.parseFloat(getComputedStyle(box).lineHeight) || 0;
-      setLong(full - clamped > Math.max(1, line / 2));
-    };
+    const measure = () => setLong(renderedLines(box) > 4);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);

@@ -197,7 +197,7 @@ function Tooltip({
       <TooltipContent side={side ?? regionSide ?? fallbackSide} align={align}>
         {content}
         {keys.map((key) => (
-          <Kbd key={key} variant="inverted">
+          <Kbd key={key} tone="inverted">
             {key}
           </Kbd>
         ))}

@@ -154,11 +154,11 @@ test("the Location page shows the path, counts, size, and format version", async
       onOpenInbox={() => {}}
     />,
   );
-  await waitFor(() =>
-    expect(document.querySelector(".path-text")).not.toBeNull(),
-  );
-  const folder = document.querySelector<HTMLElement>(".path-text")!;
-  expect(screen.getAllByText("workspace.sqlite3").length).toBeGreaterThan(0);
+  await screen.findAllByText("workspace.sqlite3");
+  // The full path is in the PathText tooltip, not a native title.
+  const folder = document.querySelector<HTMLElement>(
+    '[data-slot="path-text"]',
+  )!;
   expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
   fireEvent.pointerMove(folder);
   expect((await screen.findByRole("tooltip")).textContent).toBe(

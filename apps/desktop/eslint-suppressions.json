@@ -14,14 +14,6 @@
       "count": 1
     }
   },
-  "src/components/ui/empty-state.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
-    },
-    "shadcn/no-restyle": {
-      "count": 12
-    }
-  },
   "src/components/ui/field.tsx": {
     "shadcn/no-restyle": {
       "count": 10
@@ -102,7 +94,7 @@
   },
   "src/features/tickets/Inbox.tsx": {
     "shadcn/no-restyle": {
-      "count": 5
+      "count": 1
     }
   },
   "src/features/tickets/LinkedWork.tsx": {
@@ -160,17 +152,7 @@
       "count": 2
     }
   },
-  "src/features/tickets/TicketHeader.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
   "src/features/tickets/TicketList.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
-  "src/features/tickets/TicketListPane.tsx": {
     "shadcn/no-restyle": {
       "count": 1
     }

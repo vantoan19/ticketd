@@ -1,3 +1,4 @@
+import { Pager } from "@/components/ui/pager";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
@@ -8,7 +9,8 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { layoutFailure } from "./graph-failure";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
+import { Count } from "@/components/ui/count";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
@@ -320,7 +322,7 @@ export function ContextGraph({
   );
   return (
     <section className="context-graph-page" aria-label="Context graph">
-      <ListHeader
+      <PaneHeader
         title="Context graph"
         actions={
           <>
@@ -357,13 +359,13 @@ export function ContextGraph({
           <span className="context-graph-subject">{centerLabel}</span>
         )}
         {graph && (
-          <p>
+          <Count>
             {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"} ·{" "}
             {relationships}{" "}
             {relationships === 1 ? "relationship" : "relationships"}
-          </p>
+          </Count>
         )}
-      </ListHeader>
+      </PaneHeader>
       <div className="context-graph-body">
         {error && (
           <FailureState
@@ -518,19 +520,16 @@ export function ContextGraph({
                 ))}
               </ul>
               {group.nodes.length > limit && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-label={`Load more ${group.title}`}
-                  onClick={() =>
+                <Pager
+                  more={Math.min(GROUP_PAGE, group.nodes.length - limit)}
+                  noun={group.title}
+                  onMore={() =>
                     setShownPerKind((value) => ({
                       ...value,
                       [group.key]: limit + GROUP_PAGE,
                     }))
                   }
-                >
-                  Load more
-                </Button>
+                />
               )}
             </div>
           );

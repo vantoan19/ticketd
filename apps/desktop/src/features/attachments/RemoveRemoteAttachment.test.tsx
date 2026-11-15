@@ -155,8 +155,8 @@ test("remote removal is explicit, keeps a Drive link and retries the same reques
       screen.queryByRole("button", { name: file.display_name }),
     ).toBeNull(),
   );
+  // The library is now empty, so Clean up is gone and Add files takes focus.
   await waitFor(() =>
-    // The library is empty now, so Clean up is gone and Add files takes focus.
     expect(document.activeElement?.textContent).toBe("Add files"),
   );
 });

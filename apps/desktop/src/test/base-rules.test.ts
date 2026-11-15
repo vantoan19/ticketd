@@ -34,9 +34,16 @@ const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({
 
 it("styles a record link wherever it is used, not only inside Markdown", () => {
   // The attachment preview is portalled outside .markdown-document, so its
-  // "Used in" links rendered as bare centred buttons (shell AT-11).
-  const link = rules.find((rule) => rule.selectors.includes(".context-link"));
-  expect(link?.body).toMatch(/text-decoration:\s*underline/);
+  // "Used in" links rendered as bare centred buttons (shell AT-11). RecordLink
+  // carries its own rule in the shared patterns, not a Markdown descendant.
+  const patterns = readFileSync(
+    join(__dirname, "..", "components", "ui", "patterns.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const link = [...patterns.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) =>
+    selectorList(match[1] ?? "").includes(".ui-record-link"),
+  );
+  expect(link?.[2]).toMatch(/text-decoration:\s*underline/);
 });
 
 it("draws only text-like inputs as 40px fields", () => {

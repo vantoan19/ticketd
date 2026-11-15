@@ -1,3 +1,5 @@
+import { Disclosure } from "@/components/ui/disclosure";
+import { RecordLink } from "@/components/ui/record-link";
 import {
   useCallback,
   useContext,
@@ -466,9 +468,7 @@ export function AttachmentPreview({
                             {(entry.target?.kind === "ticket" && openTicket) ||
                             (entry.target?.kind === "document" &&
                               openDocument) ? (
-                              <button
-                                type="button"
-                                className="context-link"
+                              <RecordLink
                                 onClick={() => {
                                   close();
                                   if (entry.target?.kind === "ticket")
@@ -478,7 +478,7 @@ export function AttachmentPreview({
                                 }}
                               >
                                 {entry.label}
-                              </button>
+                              </RecordLink>
                             ) : (
                               <strong>{entry.label}</strong>
                             )}
@@ -525,8 +525,7 @@ export function AttachmentPreview({
                       original attachment.
                     </p>
                   )}
-                  <details>
-                    <summary>Original name &amp; identity</summary>
+                  <Disclosure label="Original name and identity">
                     <dl className="attachment-metadata">
                       <dt>Original filename</dt>
                       <dd>{file.original_filename}</dd>
@@ -535,7 +534,7 @@ export function AttachmentPreview({
                         <code>{file.id}</code>
                       </dd>
                     </dl>
-                  </details>
+                  </Disclosure>
                 </>
               )}
               {/* While the file waits in Drive, the preview pane shows the failure. */}

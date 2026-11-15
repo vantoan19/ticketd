@@ -51,8 +51,10 @@ export function ChoiceTiles({
  * One choice in `ChoiceTiles`. `preview` is drawn above the title (a small
  * picture of the result); `children` sit under the description for extra
  * detail and must not be interactive. Without a preview the tile is plain and
- * padded evenly; a plain tile may carry an `icon`, drawn in a small tile at
- * the start of a top row with the radio at its end. The chosen tile wears a 2px interactive ring.
+ * padded evenly; a plain tile may carry an `icon`, drawn in a small tile on
+ * its own top row. The radio always leads the title row (P11). The chosen
+ * tile wears a 2px interactive ring; a disabled tile drops its ring and reads
+ * in `--disabled-foreground`, its description saying why.
  */
 export function ChoiceTile({
   value,
@@ -94,25 +96,22 @@ export function ChoiceTile({
             ? "px-4 py-3.5 gap-3.5"
             : "px-4 py-3.5",
         "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-(--ring)",
-        "disabled:cursor-not-allowed disabled:bg-(--recessed) disabled:text-(--disabled-foreground)",
+        "disabled:cursor-not-allowed disabled:bg-(--recessed) disabled:text-(--disabled-foreground) disabled:shadow-none",
         className,
       )}
     >
       {preview}
       {icon && (
-        <span className="flex items-start justify-between gap-3">
-          <span
-            aria-hidden="true"
-            data-slot="choice-tile-icon"
-            className="flex size-9 items-center justify-center rounded-md bg-(--recessed) text-foreground shadow-(--shadow-border-base) group-disabled:text-(--disabled-foreground)"
-          >
-            {icon}
-          </span>
-          {radio}
+        <span
+          aria-hidden="true"
+          data-slot="choice-tile-icon"
+          className="flex size-9 items-center justify-center rounded-md bg-(--recessed) text-foreground shadow-(--shadow-border-base) group-disabled:text-(--disabled-foreground)"
+        >
+          {icon}
         </span>
       )}
       <span className={cn("flex items-start gap-2.5", preview && "px-1")}>
-        {!icon && radio}
+        {radio}
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="font-medium">{title}</span>
           {description && (

@@ -1,6 +1,7 @@
+import { emptyCopy } from "@/lib/empty-copy";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
-import { Search } from "lucide-react";
+import { Network, Search, SearchX } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
@@ -26,7 +27,8 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { layoutFailure } from "./graph-failure";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
+import { Count } from "@/components/ui/count";
 import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
@@ -479,7 +481,7 @@ export function WorkspaceGraph({
   );
   return (
     <section className="context-graph-page" aria-label="Workspace graph">
-      <ListHeader
+      <PaneHeader
         title="Workspace graph"
         actions={
           <>
@@ -498,13 +500,13 @@ export function WorkspaceGraph({
         }
       >
         {graph && (
-          <p>
+          <Count>
             {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"} ·{" "}
             {relationshipCount}{" "}
             {relationshipCount === 1 ? "relationship" : "relationships"}
-          </p>
+          </Count>
         )}
-      </ListHeader>
+      </PaneHeader>
       <div className="context-graph-toolbar">
         <span className="context-graph-search-field">
           <Search aria-hidden="true" />
@@ -658,17 +660,21 @@ export function WorkspaceGraph({
         {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
           <div className="context-graph-status">
             <EmptyState
-              size="inline"
               role="status"
-              description={`${
+              anchor="center"
+              icon={filtered ? <SearchX /> : <Network />}
+              title={
                 filtered
-                  ? "No items match these filters."
-                  : "Nothing to show yet."
-              }${
-                kind && relationship
-                  ? " A connection to an item of another type is not shown while Item type is set."
-                  : ""
-              }`}
+                  ? "No items match these filters"
+                  : emptyCopy("workspace-graph").title
+              }
+              description={
+                filtered
+                  ? kind && relationship
+                    ? "A connection to an item of another type is not shown while Item type is set."
+                    : "Clear the filters to see the whole workspace."
+                  : emptyCopy("workspace-graph").sentence
+              }
               action={
                 filtered && (
                   <Button variant="outline" size="sm" onClick={clearFilters}>

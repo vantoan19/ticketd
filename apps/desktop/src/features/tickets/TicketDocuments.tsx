@@ -11,6 +11,7 @@ import {
 import { Tooltip } from "@/components/ui/tooltip";
 import { Item } from "@/components/ui/item";
 import { IconButton } from "@/components/ui/icon-button";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import {
   Popover,
   PopoverContent,
@@ -47,6 +48,7 @@ export function TicketDocuments({
   const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
     null,
   );
+  const statusLine = useStatusLine();
   // Trashing or restoring a Document elsewhere does not change this ticket, so
   // coming back to the window checks again as well as a new workspace revision.
   const [visits, setVisits] = useState(0);
@@ -91,6 +93,7 @@ export function TicketDocuments({
       await documents.setTicketDocument(ticket.reference, id, present);
       setVisits((value) => value + 1);
       await refresh();
+      return true;
     } catch (reason) {
       setError(
         describeFailure(
@@ -98,7 +101,24 @@ export function TicketDocuments({
           present ? "attach the Document" : "unlink the Document",
         ),
       );
+      return false;
     }
+  }
+  /** Unlinks at once; the pane's status line offers Undo (P7). */
+  async function unlink(link: DocumentLink) {
+    if (!(await change(link.target_id, false))) return;
+    statusLine.show({
+      message: `Unlinked ${link.target_label}`,
+      undo: async () => {
+        await documents.setTicketDocument(
+          ticket.reference,
+          link.target_id,
+          true,
+        );
+        setVisits((value) => value + 1);
+        await refresh();
+      },
+    });
   }
   async function add(picked: DocumentSummary) {
     setOpen(false);
@@ -139,7 +159,7 @@ export function TicketDocuments({
                       type="button"
                       className="ticket-documents-unlink"
                       aria-label={`Unlink ${link.target_label}`}
-                      onClick={() => void change(link.target_id, false)}
+                      onClick={() => void unlink(link)}
                     >
                       <X aria-hidden="true" />
                     </button>

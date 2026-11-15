@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -123,8 +124,10 @@ test("explicit local cleanup reviews protections and restores quarantine", async
   fireEvent.click(screen.getByRole("button", { name: "Clean up" }));
   await screen.findByRole("dialog", { name: "Review unused attachments" });
   await screen.findByRole("checkbox", { name: "Select Unused trace" });
-  const protections = screen.getByText("Protected or unavailable (1)");
-  expect(protections.closest("details")).toHaveProperty("open", false);
+  const protections = screen.getByRole("button", {
+    name: /^Protected or unavailable\s*1$/,
+  });
+  expect(protections.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(protections);
   expect(screen.getByText("Protected · Recoverable draft")).toBeTruthy();
   expect(screen.queryByText("Protected by recoverable draft")).toBeNull();
@@ -271,9 +274,13 @@ test("library searches core metadata and state and opens the chosen stable file"
   fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
     target: { value: "no match" },
   });
-  await screen.findByText("No files match “no match”");
+  await screen.findByText("No attachments match “no match”");
   expect(screen.queryByRole("table")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+  // The empty state's Clear search, not the search field's own clear button.
+  const empty = screen
+    .getByText("No attachments match “no match”")
+    .closest<HTMLElement>('[data-slot="empty-state"]')!;
+  fireEvent.click(within(empty).getByRole("button", { name: "Clear search" }));
   expect(await screen.findByRole("button", { name: "Trace" })).toBeTruthy();
 });
 
@@ -354,7 +361,7 @@ test("an empty library says so, with no table, paging or Clean up over nothing",
   vi.mocked(invoke).mockResolvedValue([]);
   render(<AttachmentLibrary onPreview={() => {}} />);
   expect(await screen.findByText("No attachments yet")).toBeTruthy();
-  expect(screen.queryByText(/No files match/)).toBeNull();
+  expect(screen.queryByText(/No attachments match/)).toBeNull();
   expect(screen.queryByRole("table")).toBeNull();
   expect(screen.queryByRole("button", { name: "Previous files" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Next files" })).toBeNull();

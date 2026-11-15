@@ -10,9 +10,14 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureDetails, FailureState } from "@/components/ui/failure-alert";
-import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
+import { PaneHeader } from "@/components/ui/list-header";
+import { StatusLineRegion } from "@/components/ui/status-line";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { emptyCopy } from "@/lib/empty-copy";
+import { noun, ofTotal } from "@/lib/format";
 import type { PlanViewState } from "@/features/plans/usePlanView";
 import { plansClient } from "@/lib/api/plans";
 import { planSummary } from "@/features/plans/plan-summary";
@@ -32,8 +37,22 @@ import {
   type TicketWorkspace,
 } from "@/features/tickets/useTicketWorkspace";
 
-/** The list header, filters, bulk editing, result states, and pagination. */
-export function TicketListPane({
+type Props = Parameters<typeof TicketListBody>[0];
+
+/**
+ * The list header, filters, bulk editing, result states, and pagination. The
+ * pane has its own status line for outcomes such as "Removed T-1 from Q3 ·
+ * Undo".
+ */
+export function TicketListPane(props: Props) {
+  return (
+    <StatusLineRegion host={props.listRef}>
+      <TicketListBody {...props} />
+    </StatusLineRegion>
+  );
+}
+
+function TicketListBody({
   workspace,
   bulk,
   listRef,
@@ -89,19 +108,9 @@ export function TicketListPane({
     listFailure,
     refreshFailed,
   } = workspace;
-  // An Plan scope shows the Plan's own header instead of a plain title.
+  // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
-  const [removed, setRemoved] = useState<{
-    reference: string;
-    plan: string;
-    name: string;
-  } | null>(null);
-  // The Undo offer is short-lived: it must not linger after the ticket is re-added.
-  useEffect(() => {
-    if (!removed) return;
-    const timer = window.setTimeout(() => setRemoved(null), 10_000);
-    return () => window.clearTimeout(timer);
-  }, [removed]);
+  const statusLine = useStatusLine();
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
   // An archived Plan is read-only: no new tickets into it, no removing from it.
@@ -116,6 +125,20 @@ export function TicketListPane({
   const filterCount =
     [plan, status, availability, family].filter(Boolean).length +
     tags.split(",").filter((tag) => tag.trim()).length;
+  // Chrome rule (P9): Search, Filters and Display act on nothing in an empty
+  // workspace or an empty Trash. A narrower view that is empty keeps them,
+  // since its tickets may only be elsewhere in the workspace.
+  const bare =
+    !loading &&
+    !queryError &&
+    !refreshFailed &&
+    total === 0 &&
+    tickets.length === 0 &&
+    !filtered &&
+    (trash ||
+      (navigation.kind === "all" &&
+        navigation.project === "all" &&
+        !navigation.plan));
   const visibleTickets = tickets.filter(
     (item) =>
       filter === "all" ||
@@ -164,6 +187,8 @@ export function TicketListPane({
     previousView.current = viewKey;
     clearSelection();
   }, [viewKey, clearSelection]);
+  // Failures and confirmations stay mounted so the bar can post them to the
+  // status line; the bar itself shows only while tickets are selected.
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
@@ -209,76 +234,57 @@ export function TicketListPane({
             </span>
           )}
           <span className="plan-list-spacer" />
-          <TicketFilters part="controls" labeledFilter {...filterProps} />
-          <DisplayMenu onError={workspace.setError} rowsOnly />
+          {!bare && <TicketFilters part="controls" {...filterProps} />}
+          {!bare && <DisplayMenu onError={workspace.setError} rowsOnly />}
         </div>
       ) : (
-        <div className="list-header">
-          <Tooltip content={scopeName} side="bottom" overflowOnly>
-            <h1 id="tickets-heading" tabIndex={-1}>
-              {scopeName}
-            </h1>
-          </Tooltip>
-          <p>
-            {filtered && scopeTotal !== undefined
-              ? `${total} of ${scopeTotal}`
-              : total}
-            {!(filtered && scopeTotal !== undefined) && (
-              <span className="sr-only">
-                {" "}
-                {total === 1 ? "ticket" : "tickets"}
-              </span>
-            )}
-          </p>
-          <IconButton
-            className="list-refresh"
-            label="Refresh"
-            disabled={sourceRefresh.running}
-            onClick={() =>
-              void (configuredSources.length > 0
-                ? refreshSources()
-                : refresh({ reportFailure: true }))
-            }
-          >
-            <RefreshCw />
-          </IconButton>
-          {!trash && (
-            <TicketFilters part="controls" labeledFilter {...filterProps} />
-          )}
-          <DisplayMenu
-            onError={workspace.setError}
-            rowsOnly={trash || Boolean(navigation.plan)}
-          />
-          {configuredSources.length > 0 && (
-            <SourceRefresh
-              providers={configuredSources}
-              state={sourceRefresh}
-              tickets={tickets}
-            />
-          )}
-        </div>
-      )}
-      {singleStatusNote && (
-        <p className="list-description">{singleStatusNote}</p>
-      )}
-      {removed && removed.plan === planScope && (
-        <p className="plan-undo" role="status">
-          Removed {removed.reference} from {removed.name}.{" "}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={planState.pending}
-            onClick={() =>
-              void planState
-                .run(() =>
-                  plansClient.setMember(removed.reference, removed.plan),
-                )
-                .then(() => setRemoved(null))
-            }
-          >
-            Undo
-          </Button>
-        </p>
+        <PaneHeader
+          title={scopeName}
+          titleId="tickets-heading"
+          caption={singleStatusNote}
+          count={
+            <Count>
+              {filtered && scopeTotal != null
+                ? ofTotal(total, scopeTotal)
+                : total}
+              {!(filtered && scopeTotal != null) && (
+                <span className="sr-only"> {noun(total, "ticket")}</span>
+              )}
+            </Count>
+          }
+          actions={
+            <>
+              {configuredSources.length > 0 && (
+                <SourceRefresh
+                  providers={configuredSources}
+                  state={sourceRefresh}
+                  tickets={tickets}
+                />
+              )}
+              {/* Refresh always keeps its slot, so the header never shifts (P10). */}
+              <IconButton
+                label="Refresh"
+                disabled={sourceRefresh.running}
+                onClick={() =>
+                  void (configuredSources.length > 0
+                    ? refreshSources()
+                    : refresh({ reportFailure: true }))
+                }
+              >
+                <RefreshCw />
+              </IconButton>
+              {!trash && !bare && (
+                <TicketFilters part="controls" {...filterProps} />
+              )}
+              {!bare && (
+                <DisplayMenu
+                  onError={workspace.setError}
+                  rowsOnly={trash || Boolean(navigation.plan)}
+                />
+              )}
+            </>
+          }
+        />
       )}
       {
         <>
@@ -342,33 +348,23 @@ export function TicketListPane({
                 trash ? (
                   <EmptyState
                     icon={<Trash2 />}
-                    title="Trash is empty"
-                    description="Trashed tickets wait here until you restore them."
+                    {...copyProps(emptyCopy("tickets-trash"))}
                   />
                 ) : filtered ? (
                   <EmptyState
                     icon={<SearchX />}
-                    title={
-                      query
-                        ? `No tickets match “${query}”`
-                        : "No matching tickets"
-                    }
-                    description={
-                      query
-                        ? `Searched titles, descriptions and updates in ${scopeName}${
-                            filterCount
-                              ? `, with ${filterCount} ${filterCount === 1 ? "filter" : "filters"} on`
-                              : ""
-                          }.`
-                        : "Nothing matches the current filters."
-                    }
+                    {...copyProps(
+                      emptyCopy(
+                        query
+                          ? filterCount
+                            ? "tickets-search-filtered"
+                            : "tickets-search"
+                          : "tickets-filters",
+                        { query, name: scopeName, filters: filterCount },
+                      ),
+                    )}
                     action={
-                      query ||
-                      tags ||
-                      status ||
-                      availability ||
-                      family ||
-                      plan ? (
+                      query || filterCount > 0 ? (
                         <>
                           {query && (
                             <Button
@@ -382,11 +378,7 @@ export function TicketListPane({
                               Clear search
                             </Button>
                           )}
-                          {(tags ||
-                            status ||
-                            availability ||
-                            family ||
-                            plan) && (
+                          {filterCount > 0 && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -402,55 +394,73 @@ export function TicketListPane({
                 ) : planScope ? (
                   <EmptyState
                     icon={<Layers />}
-                    title="No tickets in this Plan"
-                    description="Start with a new ticket, or bring in existing ones."
+                    {...copyProps(
+                      emptyCopy(addDisabled ? "plan-archived" : "plan-empty", {
+                        name: scopedPlan?.name ?? scopeName,
+                      }),
+                    )}
                     action={
-                      <>
-                        <Button
-                          size="sm"
-                          onClick={(event) => onCreate(event.currentTarget)}
-                        >
-                          <Plus data-icon="inline-start" /> Create ticket
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => planState.setAdding(true)}
-                        >
-                          Add existing tickets
-                        </Button>
-                      </>
+                      addDisabled ? undefined : (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => planState.setAdding(true)}
+                          >
+                            Add to Plan…
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(event) => onCreate(event.currentTarget)}
+                          >
+                            New ticket
+                          </Button>
+                        </>
+                      )
                     }
                   />
-                ) : navigation.project !== "all" ||
-                  navigation.plan ||
-                  navigation.kind !== "all" ? (
+                ) : navigation.kind === "ready" ? (
                   <EmptyState
                     icon={<TicketIcon />}
-                    title="No tickets in this scope"
-                    description="Create a ticket or choose another view."
+                    {...copyProps(emptyCopy("tickets-ready"))}
+                  />
+                ) : navigation.kind === "progress" ? (
+                  <EmptyState
+                    icon={<TicketIcon />}
+                    {...copyProps(emptyCopy("tickets-progress"))}
+                  />
+                ) : navigation.project === "unlinked" ? (
+                  <EmptyState
+                    icon={<TicketIcon />}
+                    {...copyProps(emptyCopy("tickets-no-project"))}
+                  />
+                ) : navigation.project !== "all" ? (
+                  <EmptyState
+                    icon={<TicketIcon />}
+                    {...copyProps(
+                      emptyCopy("tickets-project", { name: scopeName }),
+                    )}
                     action={
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={(event) => onCreate(event.currentTarget)}
                       >
-                        Create ticket
+                        New ticket
                       </Button>
                     }
                   />
                 ) : (
                   <EmptyState
                     icon={<TicketIcon />}
-                    title="Your workspace is ready"
-                    description="Create your first ticket to start keeping track of work."
+                    {...copyProps(emptyCopy("tickets-first-run"))}
                     action={
                       <Button
                         size="sm"
                         onClick={(event) => onCreate(event.currentTarget)}
                       >
-                        <Plus data-icon="inline-start" /> Create your first
-                        ticket
+                        <Plus data-icon="inline-start" /> New ticket
                       </Button>
                     }
                   />
@@ -511,29 +521,35 @@ export function TicketListPane({
                     {...(scopedPlan &&
                       planWritable && {
                         rowAction: (ticket: Ticket) => (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
+                          <IconButton
                             disabled={planState.pending}
-                            aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
-                            title="Remove from Plan"
+                            label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
                             onClick={() =>
                               void planState
                                 .run(() =>
                                   plansClient.setMember(ticket.reference, null),
                                 )
                                 .then((done) => {
-                                  if (done)
-                                    setRemoved({
-                                      reference: ticket.reference,
-                                      plan: scopedPlan.id,
-                                      name: scopedPlan.name,
-                                    });
+                                  if (!done) return;
+                                  const { reference } = ticket;
+                                  const { id, name } = scopedPlan;
+                                  statusLine.show({
+                                    message: `Removed ${reference} from ${name}`,
+                                    undo: async () => {
+                                      const back = await planState.run(() =>
+                                        plansClient.setMember(reference, id),
+                                      );
+                                      if (!back)
+                                        throw new Error(
+                                          `${reference} is still outside ${name}`,
+                                        );
+                                    },
+                                  });
                                 })
                             }
                           >
                             <X />
-                          </Button>
+                          </IconButton>
                         ),
                       })}
                   />
@@ -593,4 +609,9 @@ export function TicketListPane({
       )}
     </section>
   );
+}
+
+/** An empty state's title and sentence from the copy registry. */
+function copyProps(copy: { title: string; sentence: string }) {
+  return { title: copy.title, description: copy.sentence };
 }

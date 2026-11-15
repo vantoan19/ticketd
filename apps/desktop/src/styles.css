@@ -434,7 +434,7 @@
   background: transparent;
 }
 .ui-button-link {
-  color: var(--foreground);
+  color: var(--link-foreground);
   background: transparent;
   text-underline-offset: 4px;
 }
@@ -882,30 +882,9 @@ body:has([data-slot="dialog-overlay"])
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
 }
-.recovery-path-text {
-  display: flex;
+.recovery-path [data-slot="path-text"] {
   flex: 1;
-  flex-direction: column;
   min-width: 0;
-  font-family: var(--font-mono);
-}
-.recovery-path-name {
-  overflow: hidden;
-  font-size: var(--text-code);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.recovery-path-folder {
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* Truncate the start of a long folder, so its nearest folders stay readable. */
-  direction: rtl;
-  text-align: left;
 }
 .recovery-path-actions {
   display: flex;
@@ -1666,10 +1645,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   background: var(--accent);
   color: var(--foreground);
 }
-.list-refresh {
-  margin-left: auto;
-  color: var(--muted-foreground);
-}
 .ticket-workspace {
   display: flex;
   flex: 1;
@@ -1702,31 +1677,12 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   overflow-x: hidden;
   overflow-y: auto;
 }
-.list-header {
-  box-shadow: 0 1px 0 0 var(--header-boundary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 48px;
-  padding: 0 8px 0 16px;
-}
 .management h1 {
   font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
   color: var(--foreground);
-}
-.list-header h1 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
-}
-.list-header p {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 .management > p {
   margin-top: 8px;
@@ -1949,23 +1905,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .ticket-workspace.expanded #detail {
   flex: 1 1 0 !important;
 }
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 64px 24px;
-  text-align: center;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-}
-.empty-state strong {
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-  font-weight: 500;
-  letter-spacing: -0.28px;
-}
 /* One content gutter for the management pages (Projects, Plans, Documents):
    their titles start at the same x, whatever each column's width. */
 :root {
@@ -2019,10 +1958,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .create-actions small {
   color: var(--muted-foreground);
 }
-.app-preference-failure {
-  flex: none;
-  margin: 8px 16px 0;
-}
 
 /* Description and note content share a readable document surface. */
 .markdown-document {
@@ -2066,25 +2001,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .markdown-document li.task-list-item {
   list-style: none;
   margin-left: -20px;
-}
-/* A record link (a ticket, Document or attachment that opens in place) is a
-   button drawn as a link. It is styled everywhere, not only inside Markdown:
-   portalled dialogs such as the attachment preview use it too (shell AT-11). */
-.context-link {
-  display: inline;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  text-align: inherit;
-  color: var(--foreground);
-  text-decoration: underline;
-  text-decoration-color: var(--interactive);
-  text-underline-offset: 4px;
-  cursor: pointer;
-}
-.context-link:hover {
-  color: var(--interactive);
 }
 .markdown-document li + li {
   margin-top: 4px;
@@ -2281,12 +2197,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   .detail-header {
     gap: 4px;
   }
-  .list-header {
-    padding-inline: 16px 8px;
-  }
-  .list-controls {
-    padding-inline: 16px;
-  }
   .create-actions {
     flex-wrap: wrap;
   }
@@ -2374,20 +2284,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   width: min(1120px, calc(100vw - 64px));
   height: min(800px, calc(100dvh - 64px));
   max-height: none;
-}
-
-.list-header:has(.source-refresh:not(:empty)) > p {
-  display: none;
-}
-.list-header .source-refresh {
-  order: -1;
-  max-width: 130px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.list-header h1 {
-  order: -2;
 }
 
 /* The tooltip chip (DESIGN.md section 4): 12/16 text, 4px 8px, wrapping at
