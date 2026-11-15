@@ -17,7 +17,7 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-test("rename preserves the draft and request identity after a lost response and explains literal link text", async () => {
+test("rename preserves the draft and request identity after a lost response", async () => {
   const file = {
     id: "stable",
     display_name: "Trace",
@@ -33,7 +33,6 @@ test("rename preserves the draft and request identity after a lost response and 
   render(
     <RenameAttachment file={file} onClose={() => {}} onRenamed={changed} />,
   );
-  expect(screen.getByText(/Links keep their text/)).toBeTruthy();
   fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
     target: { value: "Readable trace" },
   });

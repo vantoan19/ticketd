@@ -1,19 +1,9 @@
-import { DrivePicker } from "./DrivePicker";
-import { DriveSetupNotice } from "./DriveSetupNotice";
-import { formatSize } from "./format-size";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FailureAlert } from "@/components/ui/failure-alert";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { FailureAlert, FailureDetails } from "@/components/ui/failure-alert";
+import { Progress } from "@/components/ui/progress";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   attachments,
@@ -28,11 +18,20 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import "@/features/tickets/ticket-attachments.css";
-import "./attachment-library.css";
+import { SettingsNavigation } from "@/lib/settings-navigation";
+import "./attachment-picker.css";
+import { DrivePicker } from "./DrivePicker";
+import { addDriveFiles, type DriveChoice } from "./drive-choices";
+import { DriveSetupNotice } from "./DriveSetupNotice";
+import {
+  ExistingAttachments,
+  type ExistingChoice,
+} from "./ExistingAttachments";
+import { FileIcon } from "./AttachmentThumbnail";
+import { fileType } from "./file-words";
+import { formatSize } from "./format-size";
 import { useNativeFileDrop } from "./use-native-file-drop";
 import { UploadRecovery, type UploadRecord } from "./upload-recovery";
-import { ExistingAttachments } from "./ExistingAttachments";
 
 type UploadAttempt = UploadRecord & {
   state:
@@ -54,18 +53,16 @@ function plainFailure(
   return { code, title, sentence, action, details: "" };
 }
 
-/** A file over the workspace limit: the sizes, and the limit as the fix. */
+/**
+ * A file over the workspace limit, said as the row reads it: "Too large:
+ * 101 MB. The limit is 100 MB." The fix is the limit, never Retry (P8).
+ */
 function tooLarge(size: number | null, limit: number | null) {
   return plainFailure(
-    "Too large",
-    [
-      size === null
-        ? "The file is larger than the upload limit."
-        : `The file is ${formatSize(size)}.`,
-      limit === null ? "" : `The limit is ${formatSize(limit)}.`,
-    ]
-      .filter(Boolean)
-      .join(" "),
+    size === null ? "Too large" : `Too large: ${formatSize(size)}`,
+    limit === null
+      ? "It is over the upload limit."
+      : `The limit is ${formatSize(limit)}.`,
     "change_limit",
     "too_large",
   );
@@ -82,10 +79,13 @@ export function AttachmentPicker({
   ticketReference = null,
   purpose = "insert",
   single = false,
+  replacing,
 }: {
   open: boolean;
   ticketReference?: string | null | undefined;
   purpose?: "insert" | "store";
+  /** The name of the file a replacement swaps out: titles "Replace notes.txt". */
+  replacing?: string | undefined;
   onOpenChange: (open: boolean) => void;
   onPick: (
     file: Attachment,
@@ -96,7 +96,10 @@ export function AttachmentPicker({
   single?: boolean;
 }) {
   const [tab, setTab] = useState<"upload" | "existing" | "drive">("upload");
-  const [id, setId] = useState("");
+  const [existing, setExisting] = useState<ExistingChoice[]>([]);
+  const [driveFiles, setDriveFiles] = useState<DriveChoice[]>([]);
+  const [over, setOver] = useState(false);
+  const openSettingsPage = useContext(SettingsNavigation);
   const [rows, setRows] = useState<UploadAttempt[]>([]);
   const attempts = useRef<UploadAttempt[]>([]);
   const [busy, setBusy] = useState(false);
@@ -120,7 +123,6 @@ export function AttachmentPicker({
     useState<DriveConfiguration | null>(null);
   const folderSelection = useRef<string | null>(null);
   const insertion = useRef(0);
-  const reuseRequests = useRef(new Map<string, string>());
   const running = useRef(false);
   const pick = useRef(onPick);
   const dropTarget = useRef<HTMLDivElement>(null);
@@ -159,7 +161,7 @@ export function AttachmentPicker({
           ...record,
           state: "canceled",
           progress: { copied: 0, total: 0 },
-          note: "Recovered upload. Retry to insert at the current caret.",
+          note: "Not finished last time. Retry to add it.",
         })),
       );
       update();
@@ -181,6 +183,9 @@ export function AttachmentPicker({
     if (!next) {
       insertion.current += 1;
       setExplicitDestination(null);
+      setExisting([]);
+      setDriveFiles([]);
+      setOver(false);
       if (folderSelection.current)
         void attachments
           .cancelDriveSelection(folderSelection.current)
@@ -261,8 +266,8 @@ export function AttachmentPicker({
           )
             throw new Error(
               next.stored.purge_state === "purged"
-                ? "Local bytes were permanently purged. Restore an older complete backup or choose a new upload; retry keeps this unavailable identity."
-                : "Permanent purge is pending; local bytes are unavailable. Finish the explicit purge in Attachments or deliberately restore an older complete backup.",
+                ? "This file was deleted permanently. Choose it again from your computer."
+                : "This file is being deleted permanently. Choose it again from your computer.",
             );
           if (isCanceled(next) || insertion.current !== currentInsertion) {
             next.state = "canceled";
@@ -295,7 +300,7 @@ export function AttachmentPicker({
             setError({
               ...failure,
               sentence:
-                "The file is attached. Reuse it from Existing files rather than uploading again.",
+                "The file is attached. Reuse it from Existing files instead of uploading it again.",
             });
           } else if (next.state !== "canceled") {
             next.state = "failed";
@@ -418,8 +423,9 @@ export function AttachmentPicker({
   }
   const dropFailure = useNativeFileDrop(
     dropTarget,
-    open && tab === "upload",
+    open && (tab === "upload" || purpose === "store"),
     (paths) => enqueue(paths),
+    setOver,
   );
   const received = useRef<typeof capture>(undefined);
   useEffect(() => {
@@ -467,7 +473,7 @@ export function AttachmentPicker({
   function uploadLocally(row: UploadAttempt) {
     row.state = "canceled";
     row.note =
-      "Local upload chosen explicitly. Any completed remote file remains in Drive; this Drive operation is retained for status checks.";
+      "Uploading to this computer instead. Anything already in Drive stays there.";
     const local: UploadAttempt = {
       source: row.source,
       name: row.name,
@@ -481,68 +487,230 @@ export function AttachmentPicker({
     update();
     void run();
   }
-  async function reuse(attachmentId: string) {
+  /** Settings, from inside the dialog: close it first, then open the page. */
+  const openSettings = openSettingsPage
+    ? (page: "attachments" | "google-drive") => () => {
+        changeOpen(false);
+        openSettingsPage(page);
+      }
+    : undefined;
+  async function insertExisting() {
+    if (single && existing.length !== 1) {
+      setError(
+        plainFailure(
+          "Choose one file",
+          "Only one file can replace this reference.",
+        ),
+      );
+      return;
+    }
+    const session = insertion.current;
+    const canceled = () =>
+      new Error("Insertion was canceled. The file remains in the workspace.");
     setBusy(true);
     setError(null);
     try {
-      const currentInsertion = insertion.current;
-      const file = await attachments.inspect(attachmentId.trim());
-      if (insertion.current !== currentInsertion) return;
-      const requestId =
-        reuseRequests.current.get(file.id) ?? crypto.randomUUID();
-      reuseRequests.current.set(file.id, requestId);
-      await onPick(file, requestId);
-      reuseRequests.current.delete(file.id);
-      if (insertion.current === currentInsertion) changeOpen(false);
+      for (const item of existing) {
+        if (insertion.current !== session) throw canceled();
+        const stored = await attachments.inspect(item.file.id);
+        if (insertion.current !== session) throw canceled();
+        await pick.current(stored, item.requestId);
+        setExisting((rows) =>
+          rows.filter((row) => row.file.id !== item.file.id),
+        );
+      }
+      if (insertion.current === session) changeOpen(false);
     } catch (reason) {
-      setError(describeFailure(reason, "reuse the file"));
+      if (insertion.current === session)
+        setError(
+          describeFailure(
+            reason,
+            existing.length === 1 ? "insert the file" : "insert the files",
+          ),
+        );
     } finally {
       setBusy(false);
     }
   }
-  const existingInsertion = insertion.current;
+  async function addDrive() {
+    const chosen = driveFiles.filter((item) => item.selected);
+    if (single && chosen.length !== 1) {
+      setError(
+        plainFailure(
+          "Choose one file",
+          "Only one file can replace this reference.",
+        ),
+      );
+      return;
+    }
+    const session = insertion.current;
+    const live = () => insertion.current === session;
+    setBusy(true);
+    setError(null);
+    try {
+      const { left, failure } = await addDriveFiles(
+        driveFiles,
+        (file, requestId, beforeId) =>
+          beforeId === undefined
+            ? pick.current(file, requestId)
+            : pick.current(file, requestId, beforeId),
+        live,
+      );
+      if (!live()) return;
+      setDriveFiles(left);
+      if (failure) setError(failure);
+      else changeOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function removeRow(row: UploadAttempt) {
+    void loadRecovery()
+      .then(async (journal) => {
+        await journal?.remove(row.requestId);
+        attempts.current = attempts.current.filter((other) => other !== row);
+        update();
+      })
+      .catch((reason: unknown) =>
+        setError(describeFailure(reason, "remove the upload")),
+      );
+  }
+  function checkDrive(row: UploadAttempt) {
+    setBusy(true);
+    void attachments
+      .checkDriveUpload(row.requestId)
+      .then(async (result) => {
+        if (result.attachment) {
+          row.stored = result.attachment;
+          await (await loadRecovery())?.put(row);
+          delete row.failure;
+          row.note = "The upload finished. Retry to add it.";
+        } else
+          row.note =
+            "Not confirmed yet. Retry checks Drive again before sending anything.";
+        update();
+      })
+      .catch((reason: unknown) => {
+        row.failure = describeFailure(reason, "check the upload");
+        update();
+      })
+      .finally(() => setBusy(false));
+  }
+  const store = purpose === "store";
+  const title = store
+    ? "Add files"
+    : replacing
+      ? `Replace ${replacing}`
+      : ticketReference
+        ? `Attach to ${ticketReference}`
+        : "Attach file";
+  const description = store
+    ? "Files you add stay in this workspace, ready for any ticket or Document."
+    : replacing
+      ? "Only this reference changes. Other places keep the original file."
+      : undefined;
+  const shownTab = store ? "upload" : tab;
+  const added = rows.filter((row) => row.state === "inserted").length;
+  const attention = rows.filter(
+    (row) => row.state === "failed" || row.state === "canceled",
+  ).length;
+  const working = rows.length - added - attention;
+  const uploadNote = [
+    added && `${added} ${store ? "added" : "attached"}`,
+    working && `${working} uploading`,
+    attention && `${attention} not added`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const chosenDrive = driveFiles.filter((item) => item.selected).length;
+  const footer =
+    shownTab === "upload"
+      ? {
+          primaryLabel: single ? "Choose file" : "Choose files",
+          blockedReason: null,
+          footerNote: uploadNote || null,
+          onSubmit: () => void choose(),
+        }
+      : shownTab === "existing"
+        ? {
+            primaryLabel: "Insert selected",
+            blockedReason: busy
+              ? "Inserting…"
+              : existing.length
+                ? null
+                : single
+                  ? "Choose the file to use instead."
+                  : "Choose files to insert.",
+            footerNote: `${existing.length} selected · No copy is made.`,
+            onSubmit: () => void insertExisting(),
+          }
+        : {
+            primaryLabel: "Add selected",
+            blockedReason: busy
+              ? "Adding…"
+              : chosenDrive
+                ? null
+                : "Choose files in Google Drive first.",
+            footerNote: `${chosenDrive} selected`,
+            onSubmit: () => void addDrive(),
+          };
+  const shownError =
+    error &&
+    (shownTab === "existing" && existing.length ? (
+      <FailureAlert
+        size="compact"
+        failure={error}
+        onRetry={() => void insertExisting()}
+      />
+    ) : (
+      <FailureAlert size="compact" failure={error} />
+    ));
   return (
-    <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent
-        ref={dropTarget}
-        size="md"
-        // Existing files stays inside the window and only its list scrolls,
-        // so Insert selected is always in view (AT-19).
-        {...(tab === "existing" && {
-          className: "flex flex-col overflow-hidden",
-        })}
-      >
-        <DialogHeader>
-          <DialogTitle>
-            {purpose === "store" ? "Add files" : "Attach file"}
-          </DialogTitle>
-          <DialogDescription>
-            {purpose === "store"
-              ? "Store files in this workspace for reuse across tickets and Documents."
-              : "Upload, reuse a workspace file, or select a Google Drive reference."}
-          </DialogDescription>
-        </DialogHeader>
-        {purpose === "insert" && (
+    <DialogShell
+      open={open}
+      onOpenChange={changeOpen}
+      title={title}
+      {...(description && { description })}
+      primaryLabel={footer.primaryLabel}
+      blockedReason={footer.blockedReason}
+      footerNote={footer.footerNote}
+      onSubmit={footer.onSubmit}
+      initialFocus={shownTab === "existing" ? "first" : "primary"}
+      error={shownError || null}
+      {...(!store && {
+        tabs: (
           <SegmentedControl
             aria-label="Attachment source"
+            className="w-full"
             value={tab}
-            onValueChange={setTab}
+            onValueChange={(next) => {
+              setError(null);
+              setTab(next);
+            }}
             options={[
               { value: "upload", label: "Upload", disabled: busy },
               { value: "existing", label: "Existing files", disabled: busy },
               { value: "drive", label: "Google Drive", disabled: busy },
             ]}
           />
-        )}
-        {tab === "upload" || purpose === "store" ? (
-          <>
+        ),
+      })}
+    >
+      <div className="attachment-picker" ref={dropTarget}>
+        {shownTab === "upload" ? (
+          <div className="attachment-picker-upload">
             <div
-              className="attachment-upload"
+              className="attachment-dropzone"
+              data-over={over || undefined}
+              data-compact={rows.length > 0 || undefined}
               onDragOver={(event) => {
-                if (event.dataTransfer.types.includes("Files"))
-                  event.preventDefault();
+                if (!event.dataTransfer.types.includes("Files")) return;
+                event.preventDefault();
+                setOver(true);
               }}
+              onDragLeave={() => setOver(false)}
               onDrop={(event) => {
+                setOver(false);
                 if (!event.dataTransfer.files.length) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -550,307 +718,299 @@ export function AttachmentPicker({
               }}
             >
               <Upload aria-hidden="true" />
-              <p>Drop files here or choose from your computer</p>
-              <p className="attachment-hint">
-                Any file type ·{" "}
-                {limit === null
-                  ? "Reading workspace limit…"
-                  : `Up to ${formatSize(limit)} per file`}
+              <p>
+                {over
+                  ? "Drop to upload"
+                  : single
+                    ? "Drop a file here, or choose it from your computer."
+                    : "Drop files here, or choose them from your computer."}
               </p>
-              <Button disabled={busy} onClick={() => void choose()}>
-                {single ? "Choose file" : "Choose files"}
-              </Button>
-              <small>
+              <p className="attachment-hint">
+                {limit === null
+                  ? "Any file type"
+                  : `Any file type · Up to ${formatSize(limit)} each`}
+              </p>
+            </div>
+            <div className="attachment-destination">
+              <span className="attachment-hint">
                 {!displayedDestination
-                  ? "Reading upload destination…"
+                  ? "Reading where uploads go…"
                   : destination
-                    ? `Destination: Google Drive · ${folderName}`
-                    : "Destination: Local workspace"}
-              </small>
-              <div className="attachment-actions">
+                    ? `Uploads go to Google Drive · ${folderName}`
+                    : "Uploads stay on this computer"}
+              </span>
+              <Button
+                type="button"
+                variant="link"
+                size="inline"
+                disabled={busy}
+                onClick={() => void chooseFolder()}
+              >
+                Choose Drive folder
+              </Button>
+              {destination && (
                 <Button
-                  variant="ghost"
+                  type="button"
+                  variant="link"
+                  size="inline"
                   disabled={busy}
-                  onClick={() => void chooseFolder()}
+                  onClick={() => setExplicitDestination({ kind: "local" })}
                 >
-                  Choose Drive folder
+                  Use this computer
                 </Button>
-                {destination && (
-                  <Button
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => {
-                      setExplicitDestination({ kind: "local" });
-                    }}
-                  >
-                    Use local for new uploads
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
             {folderConfiguration && (
-              <DriveSetupNotice configuration={folderConfiguration} />
+              <DriveSetupNotice
+                configuration={folderConfiguration}
+                onOpenSettings={openSettings?.("google-drive")}
+              />
+            )}
+            {dropFailure && (
+              <p role="alert" className="attachment-hint">
+                {dropFailure}
+              </p>
             )}
             {rows.length > 0 && (
-              <ul className="attachment-uploads" aria-label="Uploads">
+              <ul className="attachment-queue" aria-label="Uploads">
                 {rows.map((row) => (
-                  <li key={row.requestId} aria-label={row.name}>
-                    <div>
-                      <strong>{row.name}</strong>
-                      <small className="attachment-hint">
-                        {row.stored
-                          ? formatSize(row.stored.size_bytes)
-                          : row.progress.total
-                            ? `${formatSize(row.progress.copied)} / ${formatSize(row.progress.total)}`
-                            : "Size pending"}
-                      </small>
-                      <p role="status">
-                        {row.state === "inserted"
-                          ? purpose === "store"
-                            ? "Stored"
-                            : "Attached"
-                          : row.state === "canceled"
-                            ? "Canceled"
-                            : row.state === "failed"
-                              ? "Needs retry"
-                              : row.state === "queued"
-                                ? "Queued"
-                                : row.state === "attaching"
-                                  ? "Attaching file…"
-                                  : "Storing file…"}
-                      </p>
-                      {(row.state === "uploading" ||
-                        row.state === "attaching") && (
-                        <progress
-                          aria-label={`Upload ${row.name}`}
-                          value={row.progress.copied}
-                          max={row.progress.total || 1}
-                        />
-                      )}
-                      {row.note && (
-                        <p className="attachment-hint">{row.note}</p>
-                      )}
-                      {row.failure && (
-                        <FailureAlert size="compact" failure={row.failure} />
-                      )}
-                      {row.stored && row.state !== "inserted" && (
-                        <p className="attachment-hint">
-                          Stored as {row.stored.id}.{" "}
-                          {row.stored.purge_state === "purged" ||
-                          row.stored.purge_state === "pending"
-                            ? "Local bytes are unavailable. Its identity remains in Existing files for inspection."
-                            : row.destination
-                              ? "Any completed file remains in Drive. Retry checks whether its ticketd record is still registered."
-                              : "Retry checks current availability before reuse. Inspect its identity in Existing files."}
-                        </p>
-                      )}
-                      {row.destination && (
-                        <p className="attachment-hint">
-                          Google Drive ·{" "}
-                          {row.destinationName || "Selected upload folder"} ·
-                          Uploaded copy · Original bytes are not guaranteed. Any
-                          completed file remains in Drive.
-                        </p>
-                      )}
-                    </div>
-                    <div className="attachment-actions">
-                      {(row.state === "failed" || row.state === "canceled") && (
-                        <>
-                          {row.destination && !row.stored && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={busy}
-                                onClick={() => {
-                                  setBusy(true);
-                                  void attachments
-                                    .checkDriveUpload(row.requestId)
-                                    .then(async (result) => {
-                                      if (result.attachment) {
-                                        row.stored = result.attachment;
-                                        await (await loadRecovery())?.put(row);
-                                        delete row.failure;
-                                        row.note =
-                                          "Upload complete. Retry to insert the existing uploaded copy.";
-                                      } else
-                                        row.note =
-                                          "Not confirmed complete. Retry reconciles the same remote ID before sending bytes.";
-                                      update();
-                                    })
-                                    .catch((reason: unknown) => {
-                                      row.failure = describeFailure(
-                                        reason,
-                                        "check the upload",
-                                      );
-                                      update();
-                                    })
-                                    .finally(() => setBusy(false));
-                                }}
-                              >
-                                Check status
-                              </Button>
-                              <Button
-                                disabled={busy}
-                                variant="ghost"
-                                onClick={() => uploadLocally(row)}
-                              >
-                                Upload locally instead
-                              </Button>
-                            </>
-                          )}
-                          {row.destination && (
-                            <Button
-                              variant="ghost"
-                              onClick={() =>
-                                void attachments
-                                  .openDriveUpload(row.requestId)
-                                  .catch((reason: unknown) =>
-                                    setError(
-                                      describeFailure(
-                                        reason,
-                                        "open the file in Drive",
-                                      ),
-                                    ),
-                                  )
-                              }
-                            >
-                              Open in Drive
-                            </Button>
-                          )}
-                          {(row.state === "canceled" ||
-                            !row.failure ||
-                            row.failure.action === "retry") && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={busy}
-                              onClick={() => {
-                                row.state = "queued";
-                                update();
-                                void run();
-                              }}
-                            >
-                              Retry
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            disabled={busy}
-                            onClick={() => {
-                              void loadRecovery()
-                                .then(async (journal) => {
-                                  await journal?.remove(row.requestId);
-                                  attempts.current = attempts.current.filter(
-                                    (other) => other !== row,
-                                  );
-                                  update();
-                                })
-                                .catch((reason: unknown) =>
-                                  setError(
-                                    describeFailure(
-                                      reason,
-                                      "dismiss the upload",
-                                    ),
-                                  ),
-                                );
-                            }}
-                          >
-                            Dismiss
-                          </Button>
-                        </>
-                      )}
-                      {(["queued", "uploading"] as string[]).includes(
-                        row.state,
-                      ) && (
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            row.state = "canceled";
-                            update();
-                            void attachments
-                              .cancel(row.requestId)
-                              .catch((reason: unknown) => {
-                                const failure = describeFailure(
-                                  reason,
-                                  "confirm the cancellation",
-                                );
-                                row.failure = {
-                                  ...failure,
-                                  action: null,
-                                  sentence: `${failure.sentence} Any completed file stays available.`,
-                                };
-                                update();
-                              });
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      )}
-                    </div>
-                  </li>
+                  <UploadRow
+                    key={row.requestId}
+                    row={row}
+                    store={store}
+                    busy={busy}
+                    onRetry={() => {
+                      row.state = "queued";
+                      update();
+                      void run();
+                    }}
+                    onRemove={() => removeRow(row)}
+                    onCancel={() => {
+                      row.state = "canceled";
+                      update();
+                      void attachments
+                        .cancel(row.requestId)
+                        .catch((reason: unknown) => {
+                          const failure = describeFailure(
+                            reason,
+                            "confirm the cancellation",
+                          );
+                          row.failure = {
+                            ...failure,
+                            action: null,
+                            sentence: `${failure.sentence} Any finished file stays available.`,
+                          };
+                          update();
+                        });
+                    }}
+                    onCheckDrive={() => checkDrive(row)}
+                    onUploadLocally={() => uploadLocally(row)}
+                    onOpenDrive={() =>
+                      void attachments
+                        .openDriveUpload(row.requestId)
+                        .catch((reason: unknown) =>
+                          setError(
+                            describeFailure(reason, "open the file in Drive"),
+                          ),
+                        )
+                    }
+                    onChangeLimit={openSettings?.("attachments")}
+                  />
                 ))}
               </ul>
             )}
-            <p className="attachment-hint">
-              {purpose === "store"
-                ? "Stored files remain available for reuse. Choose them in a ticket or Document to create a reference."
-                : "Completed files remain available if insertion is canceled or saving fails. Retry keeps the original upload identity."}
-            </p>
-          </>
-        ) : tab === "drive" ? (
+          </div>
+        ) : shownTab === "drive" ? (
           open && (
             <DrivePicker
-              single={single}
-              onComplete={() => changeOpen(false)}
-              onPick={onPick}
+              files={driveFiles}
+              onFilesChange={setDriveFiles}
+              busy={busy}
+              onBusyChange={setBusy}
+              onFailure={setError}
+              onOpenSettings={openSettings?.("google-drive")}
             />
           )
         ) : (
-          <div className="attachment-existing">
-            <Label htmlFor="reuse-attachment-id">Attachment ID</Label>
-            <div className="attachment-actions">
-              <Input
-                id="reuse-attachment-id"
-                value={id}
-                onChange={(event) => setId(event.target.value)}
-              />
-              <Button
-                disabled={busy || !id.trim()}
-                onClick={() => void reuse(id)}
-              >
-                Reuse ID
-              </Button>
-            </div>
-            <ExistingAttachments
-              single={single}
-              ticketReference={ticketReference}
-              onBusyChange={setBusy}
-              onDone={() => {
-                if (insertion.current === existingInsertion) changeOpen(false);
-              }}
-              onPick={async (file, requestId) => {
-                if (insertion.current !== existingInsertion)
-                  throw new Error(
-                    "Insertion was canceled. The file remains in the workspace.",
-                  );
-                const stored = await attachments.inspect(file.id);
-                if (insertion.current !== existingInsertion)
-                  throw new Error(
-                    "Insertion was canceled. The file remains in the workspace.",
-                  );
-                await pick.current(stored, requestId);
-              }}
-            />
-          </div>
+          <ExistingAttachments
+            single={single}
+            ticketReference={ticketReference}
+            selected={existing}
+            onSelectedChange={(next) => {
+              setError(null);
+              setExisting(next);
+            }}
+            busy={busy}
+          />
         )}
-        {error && <FailureAlert size="compact" failure={error} />}
-        {dropFailure && (
-          <p role="alert" className="attachment-hint">
-            {dropFailure}
+      </div>
+    </DialogShell>
+  );
+}
+
+/**
+ * One file in the upload queue: its glyph and name, one caption with its
+ * state ("31 KB of 2 MB", "Attached", "Too large: 101 MB. The limit is
+ * 100 MB."), and only the actions that can help, never a primary.
+ */
+function UploadRow({
+  row,
+  store,
+  busy,
+  onRetry,
+  onRemove,
+  onCancel,
+  onCheckDrive,
+  onUploadLocally,
+  onOpenDrive,
+  onChangeLimit,
+}: {
+  row: UploadAttempt;
+  store: boolean;
+  busy: boolean;
+  onRetry: () => void;
+  onRemove: () => void;
+  onCancel: () => void;
+  onCheckDrive: () => void;
+  onUploadLocally: () => void;
+  onOpenDrive: () => void;
+  onChangeLimit: (() => void) | undefined;
+}) {
+  const stopped = row.state === "failed" || row.state === "canceled";
+  const total = row.stored?.size_bytes ?? (row.progress.total || null);
+  const status =
+    row.state === "inserted"
+      ? store
+        ? "Added"
+        : "Attached"
+      : row.state === "canceled"
+        ? "Canceled"
+        : row.state === "failed"
+          ? null
+          : row.state === "queued"
+            ? "Waiting…"
+            : row.state === "attaching"
+              ? "Attaching…"
+              : row.progress.total
+                ? `${formatSize(row.progress.copied)} of ${formatSize(row.progress.total)}`
+                : "Uploading…";
+  const failure = row.state === "failed" ? row.failure : undefined;
+  return (
+    <li aria-label={row.name} className="attachment-upload-row">
+      <FileIcon
+        family={fileType(row.name).family}
+        className="attachment-upload-glyph"
+      />
+      <div className="attachment-upload-text">
+        <span className="attachment-upload-name">{row.name}</span>
+        {failure ? (
+          <p role="alert" className="attachment-upload-failure">
+            {failure.title}. {failure.sentence}
+          </p>
+        ) : (
+          <p role="status" className="attachment-hint">
+            {[
+              status,
+              total !== null && row.state === "inserted" && formatSize(total),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         )}
-      </DialogContent>
-    </Dialog>
+        {(row.state === "uploading" || row.state === "attaching") && (
+          <Progress
+            aria-label={`Upload ${row.name}`}
+            value={
+              row.progress.total
+                ? Math.round((row.progress.copied / row.progress.total) * 100)
+                : 0
+            }
+          />
+        )}
+        {row.note && <p className="attachment-hint">{row.note}</p>}
+        {row.destination && stopped && (
+          <p className="attachment-hint">
+            Google Drive · {row.destinationName || "the chosen folder"}.
+            Anything already uploaded stays in Drive.
+          </p>
+        )}
+        {failure?.details && <FailureDetails small details={failure.details} />}
+      </div>
+      <div className="attachment-upload-actions">
+        {stopped && (
+          <>
+            {failure?.action === "change_limit" && onChangeLimit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onChangeLimit}
+              >
+                Change limit
+              </Button>
+            )}
+            {row.destination && !row.stored && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={onCheckDrive}
+                >
+                  Check status
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={onUploadLocally}
+                >
+                  Upload locally instead
+                </Button>
+              </>
+            )}
+            {row.destination && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onOpenDrive}
+              >
+                Open in Drive
+              </Button>
+            )}
+            {(row.state === "canceled" ||
+              !row.failure ||
+              row.failure.action === "retry") && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={onRetry}
+              >
+                Retry
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={onRemove}
+            >
+              Remove
+            </Button>
+          </>
+        )}
+        {(row.state === "queued" || row.state === "uploading") && (
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+      </div>
+    </li>
   );
 }

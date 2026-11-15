@@ -95,6 +95,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const usage = {
+  eligible: true,
+  legacy_drafts_pending: false,
+  protections: [],
+};
+
 test("portable export captures only the selected source Markdown without editing the draft", async () => {
   vi.mocked(open).mockResolvedValue("C:/sharing");
   vi.mocked(invoke).mockImplementation(async (command) =>
@@ -774,7 +780,9 @@ test("source insertion reuses a stored identity while preserving image syntax an
           ? 104857600
           : command === "attachment_uri"
             ? uri
-            : file,
+            : command === "search_attachments"
+              ? [{ attachment: file, related: false, usage }]
+              : file,
   );
   function Draft() {
     const [value, setValue] = useState(original);
@@ -795,10 +803,18 @@ test("source insertion reuses a stored identity while preserving image syntax an
   source.focus();
   fireEvent.click(screen.getByRole("button", { name: "Insert attachment" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Attachment ID" }), {
-    target: { value: file.id },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Reuse ID" }));
+  // A pasted ticketd link finds its file.
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search existing files" }),
+    { target: { value: `<ticketd://attachment/workspace-test/${file.id}>` } },
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("search_attachments", {
+      query: expect.objectContaining({ search: file.id }),
+    }),
+  );
+  fireEvent.click(await screen.findByRole("checkbox", { name: /^Select / }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await waitFor(() =>
     expect(changed).toHaveBeenLastCalledWith(
       `[trace [final].log](${uri})${original}`,
@@ -825,7 +841,15 @@ test("source insertion inside a table escapes filename pipes without adding a co
         ? "workspace-test"
         : command === "attachment_uri"
           ? uri
-          : { ...file, display_name: "trace | final" },
+          : command === "search_attachments"
+            ? [
+                {
+                  attachment: { ...file, display_name: "trace | final" },
+                  related: false,
+                  usage,
+                },
+              ]
+            : { ...file, display_name: "trace | final" },
   );
   function Draft() {
     const [value, setValue] = useState(original);
@@ -851,10 +875,18 @@ test("source insertion inside a table escapes filename pipes without adding a co
   });
   fireEvent.click(screen.getByRole("button", { name: "Insert attachment" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Attachment ID" }), {
-    target: { value: file.id },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Reuse ID" }));
+  // A pasted ticketd link finds its file.
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search existing files" }),
+    { target: { value: `<ticketd://attachment/workspace-test/${file.id}>` } },
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("search_attachments", {
+      query: expect.objectContaining({ search: file.id }),
+    }),
+  );
+  fireEvent.click(await screen.findByRole("checkbox", { name: /^Select / }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await waitFor(() =>
     expect(changed).toHaveBeenLastCalledWith(
       `| File |\n| --- |\n| before [trace \\| final](${uri})after |`,

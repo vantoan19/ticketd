@@ -141,8 +141,8 @@ test("a direct preview replaces only its selected ticket association through the
     <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-  await screen.findByText("The local file could not be found");
-  fireEvent.click(screen.getByRole("button", { name: "Choose a replacement" }));
+  await screen.findByText("This file is missing from this computer");
+  fireEvent.click(screen.getByRole("button", { name: "Replace file…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
     await screen.findByRole("radio", { name: "Select New trace" }),
@@ -224,8 +224,7 @@ test("a failed association retains the completed upload and retry links the same
   );
   fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
-  await screen.findByText(/Stored as f1/);
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
   await screen.findByRole("button", { name: "Trace" });
   expect(
     vi

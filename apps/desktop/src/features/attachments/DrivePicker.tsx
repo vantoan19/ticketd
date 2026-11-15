@@ -1,48 +1,45 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FailureAlert } from "@/components/ui/failure-alert";
-import { Input } from "@/components/ui/input";
-import {
-  attachments,
-  type Attachment,
-  type DriveConfiguration,
-} from "@/lib/api/attachments";
+import { attachments, type DriveConfiguration } from "@/lib/api/attachments";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { DriveSetupNotice } from "./DriveSetupNotice";
+import { AttachmentThumbnail } from "./AttachmentThumbnail";
+import type { DriveChoice } from "./drive-choices";
 
+/**
+ * The Google Drive tab: choose files in the browser picker, then keep or drop
+ * each one with its checkbox. The picker owns the chosen files and adds them
+ * from its footer ("Add selected"). Unconfigured Drive shows one line and the
+ * way to Settings, never a disabled button.
+ */
 export function DrivePicker({
-  onPick,
-  onComplete,
-  single = false,
+  files,
+  onFilesChange,
+  busy,
+  onBusyChange,
+  onFailure,
+  onOpenSettings,
 }: {
-  single?: boolean;
-  onPick: (
-    file: Attachment,
-    requestId: string,
-    beforeId?: string,
-  ) => Promise<void>;
-  onComplete: () => void;
+  files: DriveChoice[];
+  onFilesChange: (next: DriveChoice[]) => void;
+  busy: boolean;
+  onBusyChange: (busy: boolean) => void;
+  onFailure: (failure: FailureDescription | null) => void;
+  onOpenSettings?: (() => void) | undefined;
 }) {
   const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
     null,
   );
-  const [files, setFiles] = useState<
-    {
-      file: Attachment;
-      requestId: string;
-      selected: boolean;
-      beforeId?: string;
-    }[]
-  >([]);
-  const [search, setSearch] = useState("");
-  const [busy, setBusy] = useState(false);
   const [selecting, setSelecting] = useState(false);
-  const [error, setError] = useState<FailureDescription | null>(null);
   const operation = useRef<string | null>(null);
   const mounted = useRef(true);
+  const report = useRef(onFailure);
+  useEffect(() => {
+    report.current = onFailure;
+  });
   useEffect(() => {
     mounted.current = true;
     void attachments
@@ -52,7 +49,7 @@ export function DrivePicker({
       })
       .catch((reason: unknown) => {
         if (mounted.current)
-          setError(describeFailure(reason, "read the Drive setup"));
+          report.current(describeFailure(reason, "read the Drive setup"));
       });
     return () => {
       mounted.current = false;
@@ -66,19 +63,19 @@ export function DrivePicker({
     const id = crypto.randomUUID();
     operation.current = id;
     setSelecting(true);
-    setBusy(true);
-    setError(null);
+    onBusyChange(true);
+    onFailure(null);
     try {
       const selected = await attachments.selectDrive(id);
       if (!mounted.current || operation.current !== id) return;
-      setFiles(
+      onFilesChange(
         selected.files.map((file) => ({
           file,
           requestId: crypto.randomUUID(),
           selected: true,
         })),
       );
-      setError(
+      onFailure(
         selected.failures.length
           ? {
               code: "failed",
@@ -91,12 +88,12 @@ export function DrivePicker({
       );
     } catch (reason) {
       if (mounted.current && operation.current === id)
-        setError(describeFailure(reason, "choose files in Google Drive"));
+        onFailure(describeFailure(reason, "choose files in Google Drive"));
     } finally {
       if (operation.current === id) {
         operation.current = null;
         if (mounted.current) {
-          setBusy(false);
+          onBusyChange(false);
           setSelecting(false);
         }
       }
@@ -109,158 +106,85 @@ export function DrivePicker({
       await attachments.cancelDriveSelection(id);
     } catch (reason) {
       if (mounted.current)
-        setError(describeFailure(reason, "cancel the Drive selection"));
+        onFailure(describeFailure(reason, "cancel the Drive selection"));
     }
   }
-  async function attach() {
-    if (single && files.filter((item) => item.selected).length !== 1) {
-      setError({
-        code: "failed",
-        title: "Choose one file",
-        sentence: "Only one file can replace this reference.",
-        action: null,
-        details: "",
-      });
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    const failed: (typeof files)[number][] = [];
-    const failures: string[] = [];
-    try {
-      for (const selected of files.filter((item) => item.selected)) {
-        if (!mounted.current) return;
-        try {
-          if (selected.beforeId)
-            await onPick(selected.file, selected.requestId, selected.beforeId);
-          else await onPick(selected.file, selected.requestId);
-          // A failed earlier file retries before the first later success.
-          for (const item of failed) item.beforeId ??= selected.file.id;
-          if (mounted.current)
-            setFiles((current) =>
-              current.filter((item) => item.requestId !== selected.requestId),
-            );
-        } catch (reason) {
-          failed.push({ ...selected });
-          failures.push(
-            `${selected.file.display_name}: ${describeFailure(reason, "add").details}`,
-          );
-        }
-      }
-      if (mounted.current && !failures.length) onComplete();
-      else if (mounted.current) {
-        setFiles((current) =>
-          current.map(
-            (item) =>
-              failed.find((failure) => failure.requestId === item.requestId) ??
-              item,
-          ),
-        );
-        setError({
-          code: "failed",
-          title: `Couldn't add ${failures.length} ${failures.length === 1 ? "file" : "files"}`,
-          sentence:
-            "Drive content is unchanged. Retry Add selected, or reuse them from Existing files.",
-          action: null,
-          details: failures.join("\n"),
-        });
-      }
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
-  }
+  if (configuration && !configuration.configured)
+    return (
+      <div className="attachment-existing">
+        <DriveSetupNotice
+          configuration={configuration}
+          onOpenSettings={onOpenSettings}
+        />
+      </div>
+    );
   return (
     <div className="attachment-existing">
-      <div className="attachment-drive-connection">
-        <strong>Your Google Drive</strong>
-        <small>Using your existing file permissions</small>
-      </div>
-      <p className="attachment-hint">
-        External references show current Drive content. Google Docs, Sheets and
-        Slides open in Drive.
-      </p>
-      {configuration && <DriveSetupNotice configuration={configuration} />}
-      <Button
-        disabled={busy || !configuration?.configured}
-        onClick={() => void choose()}
-      >
-        Choose in Google Drive
-      </Button>
-      {selecting && (
-        <>
-          <p role="status">
-            Choose files in your system browser, then return here.
-          </p>
-          <Button variant="outline" onClick={() => void cancel()}>
-            Cancel Drive selection
+      <div className="attachment-drive-choose">
+        <p>
+          Link files from your Google Drive. They stay in Drive with their
+          sharing unchanged; only the files you choose are shared with ticketd.
+        </p>
+        {selecting ? (
+          <>
+            <p role="status" className="attachment-hint">
+              Choose files in your browser, then come back here.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void cancel()}
+            >
+              Cancel Drive selection
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy || !configuration}
+            onClick={() => void choose()}
+          >
+            {files.length ? "Choose other files…" : "Choose in Google Drive"}
           </Button>
-        </>
-      )}
-      {!!files.length && (
-        <Input
-          aria-label="Search selected Drive files"
-          placeholder="Search selected Drive files…"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      )}
-      <ul aria-label="Selected Drive files">
-        {files
-          .filter(({ file }) =>
-            file.display_name
-              .toLocaleLowerCase()
-              .includes(search.toLocaleLowerCase()),
-          )
-          .map((selected) => (
-            <li key={selected.file.id}>
-              <label className="attachment-row">
+        )}
+      </div>
+      {files.length > 0 && (
+        <ul aria-label="Selected Drive files">
+          {files.map((choice) => (
+            <li key={choice.file.id}>
+              <label
+                className="attachment-choice"
+                data-checked={choice.selected || undefined}
+              >
                 <input
                   type="checkbox"
-                  aria-label={selected.file.display_name}
-                  checked={selected.selected}
+                  aria-label={choice.file.display_name}
+                  checked={choice.selected}
                   disabled={busy}
                   onChange={(event) =>
-                    setFiles((current) =>
-                      current.map((item) =>
-                        item === selected
+                    onFilesChange(
+                      files.map((item) =>
+                        item === choice
                           ? { ...item, selected: event.target.checked }
                           : item,
                       ),
                     )
                   }
                 />
-                <span>
-                  {selected.file.display_name}
-                  <small>Google Drive · External reference</small>
+                <AttachmentThumbnail file={choice.file} size="row" />
+                <span className="attachment-choice-text">
+                  <span className="attachment-choice-name">
+                    {choice.file.display_name}
+                  </span>
+                  <small>Google Drive · Linked to the current file</small>
                 </span>
               </label>
             </li>
           ))}
-      </ul>
-      <p className="attachment-drive-notice">
-        Only files you select are authorized for ticketd. Sharing permissions
-        stay unchanged.
-      </p>
-      {!!files.length && (
-        <p className="attachment-hint">
-          Selected files remain available in Existing files if you close this
-          dialog. No local snapshot is created.
-        </p>
-      )}
-      {error && <FailureAlert size="compact" failure={error} />}
-      {!!files.length && (
-        <div className="attachment-actions">
-          <small>
-            {files.filter((item) => item.selected).length} selected · Linked to
-            current Drive content
-          </small>
-          <Button
-            disabled={busy || !files.some((item) => item.selected)}
-            onClick={() => void attach()}
-          >
-            Add selected
-          </Button>
-        </div>
+        </ul>
       )}
     </div>
   );
