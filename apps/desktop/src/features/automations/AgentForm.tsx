@@ -407,8 +407,8 @@ export function AgentForm({
             </ChoiceTiles>
             {missing.map(({ id, name }) => (
               <p key={id} className="agent-hint">
-                {name} cannot run on this computer. Install or update it, then
-                open this again.
+                {statusOf.reason(id) ??
+                  `${name} cannot run on this computer. Install or update it, then open this again.`}
               </p>
             ))}
           </div>

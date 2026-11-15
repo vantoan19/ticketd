@@ -271,6 +271,24 @@ test("a harness that is not installed says so and cannot be chosen", async () =>
   expect(stored[0]?.harness).toBe("claude-code");
 });
 
+test("an incompatible harness gives the host's reason in the agent editor, the one the Chat picker shows", async () => {
+  const reason =
+    "Found Codex 0.162.1 at `codex.exe`. ticketd needs Codex 0.163.0 or newer (run `codex update`).";
+  const client = createMockChatClient({
+    harnesses: [
+      { id: "claude-code", name: "Claude Code", status: "ready" },
+      { id: "codex", name: "Codex", status: "incompatible", message: reason },
+    ],
+  });
+  await open(client, [
+    { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+
+  expect(await screen.findByText(reason)).toBeTruthy();
+  expect(screen.queryByText(/cannot run on this computer/)).toBeNull();
+});
+
 test("an edit is saved as it is made and shows in the list", async () => {
   await open(undefined, [
     { id: "a1", ...DEFAULTS, name: "Triage" } as unknown as AutomationAgent,
