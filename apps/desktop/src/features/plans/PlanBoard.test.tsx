@@ -317,7 +317,7 @@ test("archiving a Plan on Board preserves ticket editing and restricts Plan memb
   expect(screen.getByRole("button", { name: "Add tickets" })).toBeTruthy();
 });
 
-test("Plan ticket details retain their draft and return to the same Board position and card focus after Dependencies", async () => {
+test("Plan ticket details retain their draft and return to the same Board position and card focus after Flow", async () => {
   render(<App />);
   await settle();
   await openPlan();
@@ -334,7 +334,7 @@ test("Plan ticket details retain their draft and return to the same Board positi
   });
   chooseView("Flow");
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "See all Plan tickets" }));
+  chooseView("Board");
   await settle();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
@@ -376,7 +376,7 @@ function chooseView(name: string) {
   );
 }
 
-test("Plans remember List and Board independently of Dependencies while preserving their header and context", async () => {
+test("Plans remember List and Board independently of Flow while preserving their header and context", async () => {
   render(<App />);
   await settle();
   await openPlan();
@@ -402,7 +402,7 @@ test("Plans remember List and Board independently of Dependencies while preservi
   expect(
     JSON.parse(localStorage.getItem("ticketd.preferences")!).ticketLayout,
   ).toBe("board");
-  fireEvent.click(screen.getByRole("button", { name: "See all Plan tickets" }));
+  chooseView("Board");
   await settle();
   expect(
     screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
@@ -435,7 +435,7 @@ test("a Plan's chosen ticket layout survives restarting the desktop", async () =
   await settle();
   chooseView("Flow");
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "See all Plan tickets" }));
+  chooseView("List");
   await settle();
   expect(
     screen.getByRole("radio", { name: "List" }).getAttribute("aria-checked"),

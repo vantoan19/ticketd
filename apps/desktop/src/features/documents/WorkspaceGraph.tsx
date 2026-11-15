@@ -1,3 +1,4 @@
+import { planWorkspaceGraph } from "@/features/plans/plan-workspace-graph";
 import { emptyCopy } from "@/lib/empty-copy";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -81,12 +82,14 @@ function connectionSummary(graph: Graph): string {
 }
 
 export function WorkspaceGraph({
+  planId = null,
   active,
   revision,
   onBack,
   onFocus,
   onOpen,
 }: {
+  planId?: string | null;
   active: boolean;
   revision: number;
   /** Leaves the graph for All tickets (the empty state's way out). */
@@ -154,8 +157,11 @@ export function WorkspaceGraph({
     currentRequest.current = request;
     cursors.current = [null];
     let active = true;
-    void client
-      .workspaceGraph(request)
+    void (
+      planId
+        ? planWorkspaceGraph(planId, request)
+        : client.workspaceGraph(request)
+    )
       .then((value) => {
         if (active) {
           setGraph(value);
@@ -174,7 +180,7 @@ export function WorkspaceGraph({
       active = false;
     };
     // `attempt` reloads after Retry.
-  }, [request, attempt]);
+  }, [request, attempt, planId]);
   const currentGraph = useRef(graph);
   // Bumped whenever the shown pages change, so a slower refresh can tell its
   // snapshot of them is stale and must not overwrite newer pages.
@@ -186,6 +192,25 @@ export function WorkspaceGraph({
   const observedRevision = useRef(revision);
   useEffect(() => {
     if (!active || revision === observedRevision.current) return;
+    if (planId) {
+      observedRevision.current = revision;
+      let current = true;
+      void planWorkspaceGraph(planId, request).then(
+        (value) => {
+          if (current) setGraph(value);
+        },
+        (reason: unknown) => {
+          if (current)
+            setError({
+              failure: describeFailure(reason, "load the Plan graph"),
+              retry: reload,
+            });
+        },
+      );
+      return () => {
+        current = false;
+      };
+    }
     observedRevision.current = revision;
     if (!currentGraph.current) return;
     let current = true;
@@ -247,7 +272,7 @@ export function WorkspaceGraph({
     return () => {
       current = false;
     };
-  }, [active, revision, request, adjacencyLimit]);
+  }, [active, revision, request, adjacencyLimit, planId]);
   // A map of more than a couple of dozen cards cannot be read; it shows the newest.
   const mapNodes = useMemo(
     () => (graph?.nodes ?? []).slice(0, MAP_CARDS),
@@ -399,12 +424,15 @@ export function WorkspaceGraph({
     const limit = Math.min(adjacencyLimit * 2, 12);
     setLoadingPage(true);
     try {
-      const page = await client.workspaceGraph({
+      const expansion = {
         ...request,
         adjacency_limit: limit,
         visible_ids: graph.nodes.map((node) => node.id),
         hydrate_only: true,
-      });
+      };
+      const page = await (planId
+        ? planWorkspaceGraph(planId, expansion)
+        : client.workspaceGraph(expansion));
       if (currentRequest.current !== request) return;
       setGraph({
         ...page,
@@ -437,22 +465,36 @@ export function WorkspaceGraph({
       {showMap && graph.nodes.length > MAP_CARDS
         ? ` · The map shows the newest ${MAP_CARDS}`
         : ""}
-      {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
-        <>
-          {" · "}
-          <Button
-            variant="link"
-            size="sm"
-            disabled={loadingPage}
-            onClick={() => void expandConnections()}
-          >
-            Show more connections
-          </Button>
-        </>
-      )}
-      {graph.omitted_groups.length > 0 && adjacencyLimit >= 12 && (
-        <> · Some connections are hidden; open an item to see all</>
-      )}
+      {planId &&
+        graph.omitted_groups.includes("Plan connections across batches") && (
+          <>
+            {" "}
+            · Some connections across the 100-item graph limit are hidden; open
+            an item to see its connections
+          </>
+        )}
+      {graph.omitted_groups.some(
+        (group) => group !== "Plan connections across batches",
+      ) &&
+        adjacencyLimit < 12 && (
+          <>
+            {" · "}
+            <Button
+              variant="link"
+              size="sm"
+              disabled={loadingPage}
+              onClick={() => void expandConnections()}
+            >
+              Show more connections
+            </Button>
+          </>
+        )}
+      {graph.omitted_groups.some(
+        (group) => group !== "Plan connections across batches",
+      ) &&
+        adjacencyLimit >= 12 && (
+          <> · Some connections are hidden; open an item to see all</>
+        )}
       {graph.next_cursor && (
         <>
           {" · "}
@@ -633,6 +675,9 @@ export function WorkspaceGraph({
         }
       />
       <div className="cgraph-filters" data-wrap="">
+        {planId && (
+          <span className="ui-graph-panel-caption">Filtered to this Plan</span>
+        )}
         <SearchInput
           className="w-60 max-w-full"
           aria-label="Search"

@@ -19,5 +19,9 @@ export const ProjectNavigation = createContext<((id: string) => void) | null>(
  * `dependencies` opens a ticket's graph on its dependencies.
  */
 export const ContextGraphNavigation = createContext<
-  ((id: string, options?: { dependencies?: boolean }) => void) | null
+  | ((
+      id: string,
+      options?: { dependencies?: boolean; workspacePlan?: string },
+    ) => void)
+  | null
 >(null);

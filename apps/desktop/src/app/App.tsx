@@ -216,6 +216,9 @@ function AppContent() {
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   // A ticket's graph opened from its header or rail starts on its dependencies.
   const [graphDependencies, setGraphDependencies] = useState(false);
+  const [workspaceGraphPlan, setWorkspaceGraphPlan] = useState<string | null>(
+    null,
+  );
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
   // Once opened it stays mounted (hidden), so coming back restores its filters,
   // selection and viewport exactly as Back does.
@@ -456,7 +459,8 @@ function AppContent() {
           // A ticket's graph opened from its header or rail starts on its
           // dependencies; anything else shows all connections.
           setGraphDependencies(options?.dependencies ?? false);
-          navigate({ graph: id });
+          setWorkspaceGraphPlan(options?.workspacePlan ?? null);
+          navigate({ graph: options?.workspacePlan ? "__workspace__" : id });
         }}
         settings={(page) => {
           // Opening Settings starts on Appearance, so choose the page after.
@@ -539,6 +543,7 @@ function AppContent() {
                           onCreated={(id) => scope("all", "all", id)}
                         />
                         <CommandPalette
+                          currentPlan={navigation.plan || null}
                           createDisabledReason={createDisabledReason}
                           create={(kind) => {
                             if (editingBlockedReason(workspaceProblem)) return;
@@ -815,6 +820,7 @@ function AppContent() {
                                     hidden={graphOrigin !== "__workspace__"}
                                   >
                                     <WorkspaceGraph
+                                      planId={workspaceGraphPlan}
                                       active={graphOrigin === "__workspace__"}
                                       revision={revision}
                                       onBack={() => {
