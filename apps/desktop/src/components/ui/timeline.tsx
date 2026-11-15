@@ -61,6 +61,7 @@ function EventRow({
  */
 function CommentRow({
   icon: Icon,
+  mark,
   header,
   actions,
   label,
@@ -69,6 +70,7 @@ function CommentRow({
   ...props
 }: Omit<React.ComponentProps<"li">, "children"> & {
   icon: LucideIcon;
+  mark?: React.ReactNode;
   header: React.ReactNode;
   actions?: React.ReactNode;
   label: string;
@@ -81,7 +83,7 @@ function CommentRow({
       {...props}
     >
       <span data-slot="event-row-badge" className="ui-event-row-badge">
-        <Icon aria-hidden="true" />
+        {mark ?? <Icon aria-hidden="true" />}
       </span>
       <article aria-label={label} className="ui-comment-row-main">
         <div className="ui-comment-row-header">

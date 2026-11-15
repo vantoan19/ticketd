@@ -3714,3 +3714,176 @@ test("Plans with no Ready work keep canceled-only progress explicit without inve
     await screen.findByRole("heading", { name: "Stopped work" }),
   ).toBeTruthy();
 });
+
+test("ticket state lanes join ranked linked Chats without changing unrelated rows", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient } = await import("@/features/chats/mock-client");
+  const client = createMockChatClient({ enabled: true });
+  let notify = () => {};
+  vi.spyOn(client, "subscribeOverview").mockImplementation((listener) => {
+    notify = () =>
+      listener({ needs_you: 0, unread: 0, app_icon: 0, working: 0 });
+    return () => {};
+  });
+  const summaries = [
+    ["working", "T-KQ1", "codex"],
+    ["approval", "T-KQ1", "claude-code"],
+    ["working", "T-KQ2", "codex"],
+  ] as const;
+  const list = vi.spyOn(client, "listChats").mockResolvedValue(
+    summaries.map(([rank, reference, harness_id], i) => ({
+      id: String(i),
+      title: "Linked Chat",
+      harness_id,
+      harness_name: harness_id,
+      tickets: [{ reference, status: "Todo" }],
+      retention: "active",
+      activity: "working",
+      needs_you: rank === "approval",
+      updated_at: "2026-11-15T00:00:00Z",
+      status: {
+        rank,
+        unseen: false,
+        word: rank === "approval" ? "Approval needed" : "Working",
+      },
+      muted: false,
+    })),
+  );
+  bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "find_tickets")
+      return [
+        bulkTicket(1, {
+          availability: "Blocked",
+          prerequisites: [
+            {
+              reference: "T-KQ9",
+              title: "Blocker",
+              status: "Todo",
+              trashed: false,
+              unresolved: true,
+            },
+          ],
+        }),
+        bulkTicket(2),
+        bulkTicket(3, { title: "Unrelated" }),
+        bulkTicket(4, {
+          title: "Duplicate ticket",
+          status: "Duplicate",
+          duplicate_of: "T-KQ9",
+        }),
+      ];
+    if (command === "inbox")
+      return [
+        {
+          id: 92,
+          reference: "T-KQ3",
+          title: "Unrelated",
+          kind: "reminder",
+          from_value: "",
+          to_value: "2020-01-01T00:00:00Z",
+          timestamp: "2020-01-01T00:00:00Z",
+          read: false,
+          editing_agent: null,
+        },
+      ];
+    if (command === "reminder") return "2020-01-01T00:00:00Z";
+    return bridgeDefault(command, args as undefined);
+  });
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  const first = await screen.findByRole("button", { name: /First/ });
+  await vi.waitFor(() =>
+    expect(within(first).getByText("Approval needed")).toBeTruthy(),
+  );
+  const second = screen.getByRole("button", { name: /Second/ });
+  expect(within(second).getByText("Working")).toBeTruthy();
+  expect(within(second).getByRole("img", { name: "codex" })).toBeTruthy();
+  const unrelated = screen.getByRole("button", { name: /Unrelated/ });
+  expect(within(unrelated).queryByText(/Working|Approval needed/)).toBeNull();
+  expect(within(unrelated).getByText("Reminder due")).toBeTruthy();
+  expect(
+    within(screen.getByRole("button", { name: /Duplicate ticket/ })).getByText(
+      "Duplicate of T-KQ9",
+    ),
+  ).toBeTruthy();
+  list.mockResolvedValue([]);
+  act(() => notify());
+  await vi.waitFor(() =>
+    expect(within(first).getByText("Blocked by T-KQ9")).toBeTruthy(),
+  );
+  expect(within(second).queryByText("Working")).toBeNull();
+});
+
+test.each([
+  ["claude", "0 0 256 257"],
+  ["codex", "100 100 411 411"],
+  ["release-bot", null],
+])(
+  "%s attribution uses known marks on rows, updates and Inbox entries",
+  async (agent, viewBox) => {
+    const at = "2026-11-15T00:00:00Z";
+    const activity = {
+      id: "agent-update",
+      ticket_id: "1",
+      brief: "Harness update",
+      editing_agent: agent,
+      reported_at: at,
+      updated_at: at,
+    };
+    const ticket = bulkTicket(1, {
+      status: "In review",
+      progress_summary: {
+        activity_id: activity.id,
+        brief: { text: activity.brief, truncated: false },
+        editing_agent: agent,
+        reported_at: at,
+        updated_at: at,
+        supporting_document_id: null,
+      },
+    });
+    bridge.invoke.mockImplementation((command: string, args: unknown) => {
+      if (command === "find_tickets" || command === "show_ticket")
+        return command === "find_tickets" ? [ticket] : ticket;
+      if (command === "activity_feed") return [{ type: "authored", activity }];
+      if (command === "inbox")
+        return [
+          {
+            id: 91,
+            reference: ticket.reference,
+            title: ticket.title,
+            kind: "activity",
+            from_value: "",
+            to_value: activity.brief,
+            timestamp: at,
+            read: false,
+            editing_agent: agent,
+          },
+        ];
+      return bridgeDefault(command, args as undefined);
+    });
+    const publisherMark = (element: Element) =>
+      element.querySelector(".harness-mark svg")?.getAttribute("viewBox") ??
+      null;
+    render(<App />);
+    const row = await screen.findByRole("button", { name: /First/ });
+    expect(within(row).getByText("Ready for review")).toBeTruthy();
+    expect(publisherMark(row)).toBe(viewBox);
+    fireEvent.click(row);
+    const update = await screen.findByRole("article", {
+      name: `Update by ${agent}`,
+    });
+    expect(within(update).getByText(agent)).toBeTruthy();
+    expect(publisherMark(update.closest('[data-slot="comment-row"]')!)).toBe(
+      viewBox,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+    const entry = await screen.findByRole("button", {
+      name: /T-KQ1.*First.*Harness update/,
+    });
+    expect(within(entry).getByText(agent)).toBeTruthy();
+    expect(publisherMark(entry)).toBe(viewBox);
+  },
+);

@@ -26,6 +26,7 @@ export function InboxAttentionProvider({
   const [state, setState] = useState<Omit<Attention, "needsCount" | "reload">>({
     entries: [],
     approvals: [],
+    chats: [],
     statuses: new Map(),
     reminders: new Map(),
     latestStatusChanges: new Map(),
@@ -100,6 +101,7 @@ export function InboxAttentionProvider({
           ),
           reminders: new Map(reminders),
           approvals: approvalChats(summaries),
+          chats: summaries,
           loading: false,
           error: null,
         });

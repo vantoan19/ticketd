@@ -1,3 +1,5 @@
+import { HarnessMark } from "@/features/chats/HarnessMark";
+import { editingHarness } from "@/features/chats/editing-harness";
 import { Pager } from "@/components/ui/pager";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -1035,6 +1037,15 @@ export function Activity({
               <CommentRow
                 key={`note-${item.note.id}`}
                 icon={item.note.editing_agent ? Bot : MessageSquare}
+                mark={
+                  editingHarness(item.note.editing_agent) ? (
+                    <HarnessMark
+                      harness={editingHarness(item.note.editing_agent)}
+                      name={item.note.editing_agent ?? ""}
+                      decorative
+                    />
+                  ) : undefined
+                }
                 label={`Update by ${item.note.editing_agent ?? "you"}`}
                 ref={
                   active &&
