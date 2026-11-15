@@ -40,6 +40,7 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
 import { Kbd } from "@/components/ui/kbd";
 import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
+import { Count } from "@/components/ui/count";
 import { Time } from "@/components/ui/time";
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import {
@@ -791,7 +792,7 @@ export function DocumentEditor({
     <Input
       id="document-title"
       aria-label="Title"
-      className={capture ? undefined : "document-title-input"}
+      variant={capture ? "default" : "title"}
       placeholder={capture ? "e.g. Retry policy for uploads" : "Title"}
       readOnly={locked}
       value={title || (head ? heading : "")}
@@ -910,6 +911,7 @@ export function DocumentEditor({
     : connected.find(
         (item) => item.kind === "plan" && item.attachment && item.attached,
       );
+  const crumbPlan = planSpec ?? planSupport;
   // Plans this Document is the spec of (or supports) have their own section; a Plan that is only
   // attached is not a mention, and every other connection is a mention, listed once.
   const isMention = (item: (typeof connected)[number]) =>
@@ -985,34 +987,46 @@ export function DocumentEditor({
     >
       {initial && (
         <header className="document-bar">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="document-crumb"
-            aria-label={backLabel}
-            onClick={requestClose}
-          >
-            <ArrowLeft aria-hidden="true" />
-            {backLabel.replace(/^Back to /, "")}
-          </Button>
+          <span className="document-return">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={backLabel}
+              onClick={requestClose}
+            >
+              <ArrowLeft aria-hidden="true" />
+              {backLabel.replace(/^Back to /, "")}
+            </Button>
+          </span>
+          {crumbPlan && (
+            <span className="document-plan-crumb">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Open Plan ${crumbPlan.label}`}
+                onClick={() => navigate(() => onOpenPlan?.(crumbPlan.id))}
+              >
+                <Layers aria-hidden="true" />
+                {crumbPlan.label}
+              </Button>
+            </span>
+          )}
           <span aria-hidden="true" className="document-crumb-sep">
             /
           </span>
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
-            {!writing && (
-              <Button
-                ref={editTrigger}
-                variant="ghost"
-                size="sm"
-                aria-keyshortcuts="E"
-                disabled={transitioning}
-                onClick={() => setEditing(true)}
-              >
-                Edit
-                <Kbd aria-hidden="true">E</Kbd>
-              </Button>
-            )}
+            <Button
+              ref={editTrigger}
+              variant="ghost"
+              size="sm"
+              aria-keyshortcuts="E"
+              disabled={transitioning || writing || trashed}
+              onClick={() => setEditing(true)}
+            >
+              Edit
+              <Kbd aria-hidden="true">E</Kbd>
+            </Button>
             {onTogglePin && (
               <IconButton
                 label={pinned ? "Unpin Document" : "Pin Document"}
@@ -1068,17 +1082,19 @@ export function DocumentEditor({
       <div className="document-main">
         {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
         {trashed && (
-          <Alert role="status" size="compact">
-            <AlertDescription>In Trash</AlertDescription>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={transitioning}
-              onClick={toggleTrash}
-            >
-              Restore
-            </Button>
-          </Alert>
+          <div className="document-trash-notice">
+            <Alert role="status" size="compact">
+              <AlertDescription>In Trash</AlertDescription>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={transitioning}
+                onClick={toggleTrash}
+              >
+                Restore
+              </Button>
+            </Alert>
+          </div>
         )}
         {initial &&
           (writing ? (
@@ -1288,192 +1304,198 @@ export function DocumentEditor({
           )}
         </div>
         {capture && titleField}
-      </div>
-      {initial && (
-        <aside className="document-rail" aria-label="Document details">
-          {linkError && (
-            <FailureAlert
-              size="compact"
-              failure={linkError}
-              onRetry={() => {
-                setLinkError(null);
-                refreshLinks();
-              }}
-            />
-          )}
-          {mentions.length > 0 && (
-            <section aria-label="Mentions">
-              <h2>Mentions</h2>
-              {links.some((group) => group.length === 100) && (
-                <p>Showing the first 100 items in each direction.</p>
-              )}
-              <ul>{mentions.map((item) => connectionRow(item))}</ul>
-              {passages.length > 0 && (
-                <div className="document-passage-caption">
-                  <span>
-                    {passages.length === 1 && mentions.length > 1
-                      ? mentions.length === 2
-                        ? "Both from"
-                        : "All from"
-                      : "From"}{" "}
-                    “
-                  </span>
-                  {passages.map((passage) => passageView(passage))}
-                  <span aria-hidden="true">”</span>
-                </div>
-              )}
+        {initial && (
+          <aside className="document-rail" aria-label="Document details">
+            <header className="document-linked-header">
+              <h2>Linked</h2>
+              <Count>{connected.length}</Count>
+            </header>
+            {linkError && (
+              <FailureAlert
+                size="compact"
+                failure={linkError}
+                onRetry={() => {
+                  setLinkError(null);
+                  refreshLinks();
+                }}
+              />
+            )}
+            {mentions.length > 0 && (
+              <section aria-label="Mentions">
+                <h2>Mentions</h2>
+                {links.some((group) => group.length === 100) && (
+                  <p>Showing the first 100 items in each direction.</p>
+                )}
+                <ul>{mentions.map((item) => connectionRow(item))}</ul>
+                {passages.length > 0 && (
+                  <div className="document-passage-caption">
+                    <span>
+                      {passages.length === 1 && mentions.length > 1
+                        ? mentions.length === 2
+                          ? "Both from"
+                          : "All from"
+                        : "From"}{" "}
+                      “
+                    </span>
+                    {passages.map((passage) => passageView(passage))}
+                    <span aria-hidden="true">”</span>
+                  </div>
+                )}
+              </section>
+            )}
+            {attachments.length > 0 && (
+              <section aria-label={attachmentLabel}>
+                <h2>{attachmentLabel}</h2>
+                <ul>{attachments.map((item) => connectionRow(item))}</ul>
+              </section>
+            )}
+            {typeof children === "function" ? children({ trashed }) : children}
+            <section aria-label="Document properties">
+              <dl>
+                {initial.origin_ticket && (
+                  <>
+                    <dt>Origin</dt>
+                    <dd>
+                      <Button
+                        variant="link"
+                        onClick={() =>
+                          navigate(() => onOpenTicket?.(initial.origin_ticket!))
+                        }
+                      >
+                        {initial.origin_ticket} · Update details
+                      </Button>
+                    </dd>
+                  </>
+                )}
+                <dt>Visibility</dt>
+                <dd>
+                  {initial.origin_brief
+                    ? initial.kept
+                      ? "Kept in Documents"
+                      : "Hidden with its update"
+                    : "Shown in Documents"}
+                </dd>
+              </dl>
+              <p className="document-timestamps">
+                {updatedAt === createdAt ? (
+                  <>
+                    Created and updated <DocumentDate value={updatedAt} />
+                  </>
+                ) : (
+                  <>
+                    Updated <DocumentDate value={updatedAt} /> · created{" "}
+                    <DocumentDate value={createdAt} />
+                  </>
+                )}
+              </p>
             </section>
-          )}
-          {attachments.length > 0 && (
-            <section aria-label={attachmentLabel}>
-              <h2>{attachmentLabel}</h2>
-              <ul>{attachments.map((item) => connectionRow(item))}</ul>
-            </section>
-          )}
-          {typeof children === "function" ? children({ trashed }) : children}
-          <section aria-label="Document properties">
-            <dl>
-              {initial.origin_ticket && (
-                <>
-                  <dt>Origin</dt>
-                  <dd>
-                    <Button
-                      variant="link"
-                      onClick={() =>
-                        navigate(() => onOpenTicket?.(initial.origin_ticket!))
-                      }
-                    >
-                      {initial.origin_ticket} · Update details
-                    </Button>
-                  </dd>
-                </>
-              )}
-              <dt>Visibility</dt>
-              <dd>
-                {initial.origin_brief
-                  ? initial.kept
-                    ? "Kept in Documents"
-                    : "Hidden with its update"
-                  : "Shown in Documents"}
-              </dd>
-            </dl>
-            <p className="document-timestamps">
-              {updatedAt === createdAt ? (
-                <>
-                  Created and updated <DocumentDate value={updatedAt} />
-                </>
-              ) : (
-                <>
-                  Updated <DocumentDate value={updatedAt} /> · created{" "}
-                  <DocumentDate value={createdAt} />
-                </>
-              )}
-            </p>
-          </section>
-          <div className="document-rail-actions">
-            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-              <PopoverTrigger asChild>
-                <Button disabled={locked} variant="ghost">
-                  <Link2 aria-hidden="true" />
-                  Link a Document
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start">
-                <DocumentPicker
-                  exclude={[initial.id]}
-                  onPick={(picked) => {
-                    const link = documentLinkMarkdown(
-                      picked.id,
-                      picked.heading,
-                    );
-                    const next = draft.current.body
-                      ? `${draft.current.body}\n\n${link}`
-                      : link;
-                    draft.current = { ...draft.current, body: next };
-                    setBody(next);
-                    setLinkError(null);
-                    setPickerOpen(false);
+            <div className="document-rail-actions">
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button disabled={locked} variant="ghost">
+                    <Link2 aria-hidden="true" />
+                    Link a Document
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start">
+                  <DocumentPicker
+                    exclude={[initial.id]}
+                    onPick={(picked) => {
+                      const link = documentLinkMarkdown(
+                        picked.id,
+                        picked.heading,
+                      );
+                      const next = draft.current.body
+                        ? `${draft.current.body}\n\n${link}`
+                        : link;
+                      draft.current = { ...draft.current, body: next };
+                      setBody(next);
+                      setLinkError(null);
+                      setPickerOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+              {!creatingFromDocument && (
+                <Button
+                  variant="ghost"
+                  disabled={locked}
+                  onClick={() => {
+                    // One click creates: the title starts as the Document's heading.
+                    if (!ticketTitle.trim()) setTicketTitle(heading);
+                    setCreatingFromDocument(true);
                   }}
+                >
+                  <SquarePen aria-hidden="true" />
+                  Create ticket from this
+                </Button>
+              )}
+              {onOpenGraph && (
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate(() => onOpenGraph(initial.id))}
+                >
+                  <Network aria-hidden="true" />
+                  Open graph
+                </Button>
+              )}
+            </div>
+            <div
+              hidden={!creatingFromDocument}
+              className="document-create-ticket"
+            >
+              <Field>
+                <FieldLabel htmlFor="ticket-from-document">
+                  New ticket title
+                </FieldLabel>
+                <Input
+                  id="ticket-from-document"
+                  value={ticketTitle}
+                  onChange={(event) => setTicketTitle(event.target.value)}
                 />
-              </PopoverContent>
-            </Popover>
-            {!creatingFromDocument && (
+              </Field>
               <Button
-                variant="ghost"
-                disabled={locked}
+                disabled={locked || !ticketTitle.trim()}
                 onClick={() => {
-                  // One click creates: the title starts as the Document's heading.
-                  if (!ticketTitle.trim()) setTicketTitle(heading);
-                  setCreatingFromDocument(true);
+                  if (creatingTicket.current) return;
+                  if (
+                    !ticketRequest.current ||
+                    ticketRequest.current.title !== ticketTitle
+                  )
+                    ticketRequest.current = {
+                      title: ticketTitle,
+                      id: crypto.randomUUID(),
+                    };
+                  creatingTicket.current = true;
+                  setCreateError(null);
+                  void documents
+                    .createTicket(
+                      initial.id,
+                      ticketTitle,
+                      ticketRequest.current.id,
+                    )
+                    .then((ticket) =>
+                      navigate(() => onOpenTicket?.(ticket.reference)),
+                    )
+                    .catch((error: unknown) =>
+                      setCreateError(
+                        describeFailure(error, "create the ticket"),
+                      ),
+                    )
+                    .finally(() => {
+                      creatingTicket.current = false;
+                    });
                 }}
               >
-                <SquarePen aria-hidden="true" />
-                Create ticket from this
+                Create ticket
               </Button>
-            )}
-            {onOpenGraph && (
-              <Button
-                variant="ghost"
-                onClick={() => navigate(() => onOpenGraph(initial.id))}
-              >
-                <Network aria-hidden="true" />
-                Open graph
-              </Button>
-            )}
-          </div>
-          <div
-            hidden={!creatingFromDocument}
-            className="document-create-ticket"
-          >
-            <Field>
-              <FieldLabel htmlFor="ticket-from-document">
-                New ticket title
-              </FieldLabel>
-              <Input
-                id="ticket-from-document"
-                value={ticketTitle}
-                onChange={(event) => setTicketTitle(event.target.value)}
-              />
-            </Field>
-            <Button
-              disabled={locked || !ticketTitle.trim()}
-              onClick={() => {
-                if (creatingTicket.current) return;
-                if (
-                  !ticketRequest.current ||
-                  ticketRequest.current.title !== ticketTitle
-                )
-                  ticketRequest.current = {
-                    title: ticketTitle,
-                    id: crypto.randomUUID(),
-                  };
-                creatingTicket.current = true;
-                setCreateError(null);
-                void documents
-                  .createTicket(
-                    initial.id,
-                    ticketTitle,
-                    ticketRequest.current.id,
-                  )
-                  .then((ticket) =>
-                    navigate(() => onOpenTicket?.(ticket.reference)),
-                  )
-                  .catch((error: unknown) =>
-                    setCreateError(describeFailure(error, "create the ticket")),
-                  )
-                  .finally(() => {
-                    creatingTicket.current = false;
-                  });
-              }}
-            >
-              Create ticket
-            </Button>
-            {createError && (
-              <FailureAlert size="compact" failure={createError} />
-            )}
-          </div>
-        </aside>
-      )}
+              {createError && (
+                <FailureAlert size="compact" failure={createError} />
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
     </DocumentSurface>
   );
 }
@@ -1571,7 +1593,8 @@ function ConnectedLabel({ item }: { item: Connection }) {
         ) : loading ? (
           <Skeleton
             aria-hidden="true"
-            className="size-4 shrink-0 rounded-full"
+            shape="circle"
+            className="size-4 shrink-0"
           />
         ) : (
           <CircleDashed aria-hidden="true" />

@@ -13,7 +13,10 @@ import {
 } from "@/features/documents/navigation";
 import { ContextGraph } from "@/features/documents/ContextGraph";
 import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
-import { Documents } from "@/features/documents/Documents";
+import {
+  Documents,
+  type DocumentCommands,
+} from "@/features/documents/Documents";
 import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
@@ -166,6 +169,8 @@ function AppContent() {
       return release;
     }
   }, [view]);
+  const [documentCommands, setDocumentCommands] =
+    useState<DocumentCommands | null>(null);
   const [documentListRequest, setDocumentListRequest] = useState(0);
   const [creatingPlan, setCreatingPlan] = useState(false);
   const openView = (next: typeof view) => {
@@ -543,6 +548,12 @@ function AppContent() {
                           onCreated={(id) => scope("all", "all", id)}
                         />
                         <CommandPalette
+                          {...{
+                            documentCommands:
+                              view === "documents" && graphOrigin === null
+                                ? documentCommands
+                                : null,
+                          }}
                           currentPlan={navigation.plan || null}
                           workspaceGraphActive={graphOrigin === "__workspace__"}
                           createDisabledReason={createDisabledReason}
@@ -780,6 +791,7 @@ function AppContent() {
                                   }
                                 >
                                   <Documents
+                                    onCommandsChange={setDocumentCommands}
                                     key={`documents:${recoveryGeneration}`}
                                     active={view === "documents"}
                                     listRequest={documentListRequest}

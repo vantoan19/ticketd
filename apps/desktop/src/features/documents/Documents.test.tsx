@@ -113,9 +113,13 @@ it("searches and opens a result using keyboard accessible controls", async () =>
       target={null}
     />,
   );
-  fireEvent.change(screen.getByLabelText("Search Documents"), {
-    target: { value: "compass" },
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Search Documents" }));
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search Documents" }),
+    {
+      target: { value: "compass" },
+    },
+  );
   const result = await screen.findByRole("button", { name: "Compass" });
   result.focus();
   expect(document.activeElement).toBe(result);
@@ -137,9 +141,13 @@ it("offers a clear way back from an empty Document search", async () => {
       target={null}
     />,
   );
-  fireEvent.change(screen.getByLabelText("Search Documents"), {
-    target: { value: "missing" },
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Search Documents" }));
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search Documents" }),
+    {
+      target: { value: "missing" },
+    },
+  );
   await screen.findByText(/No Documents match .missing./);
   fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
   expect(
@@ -173,11 +181,15 @@ it("shows snippet, tags and date per row, highlights matches and refocuses searc
     />,
   );
   // A row is the title and one meta line; the snippet shows in search results.
-  expect(await screen.findByText("Today")).toBeTruthy();
+  expect((await screen.findByText("now")).tagName).toBe("TIME");
   expect(screen.queryByText("First plan text")).toBeNull();
-  fireEvent.change(screen.getByLabelText("Search Documents"), {
-    target: { value: "plan" },
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Search Documents" }));
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search Documents" }),
+    {
+      target: { value: "plan" },
+    },
+  );
   await screen.findByText("1 result");
   expect(document.querySelector("mark")?.textContent).toBe("plan");
   fireEvent.click(screen.getByRole("button", { name: "Clear search" }));

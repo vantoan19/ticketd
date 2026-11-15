@@ -13,15 +13,18 @@ function Input({
   type,
   variant = "default",
   ...props
-}: React.ComponentProps<"input"> & { variant?: "default" | "inline" }) {
+}: React.ComponentProps<"input"> & {
+  variant?: "default" | "inline" | "title";
+}) {
   return (
     <input
       type={type}
       data-slot="input"
-      data-variant={variant === "inline" ? "inline" : undefined}
+      data-variant={variant === "default" ? undefined : variant}
       className={cn(
         "ui-input h-10 w-full min-w-0 px-3 py-2 selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-8 file:border-0 file:bg-transparent file:text-sm file:font-normal file:text-foreground disabled:pointer-events-none",
         variant === "inline" && "ui-input-inline",
+        variant === "title" && "ui-input-title",
         className,
       )}
       {...props}
