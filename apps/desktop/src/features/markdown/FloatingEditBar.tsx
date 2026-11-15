@@ -21,8 +21,9 @@ export function FloatingEditBar({
         ref={(element) => {
           if (element)
             setPane(
-              element.closest(".ticket-detail, .context-view-wrapper") ??
-                element.parentElement,
+              element.closest(
+                ".ticket-detail, .document-workspace, .context-view-wrapper",
+              ) ?? element.parentElement,
             );
         }}
       />

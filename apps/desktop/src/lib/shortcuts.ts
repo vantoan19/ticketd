@@ -93,6 +93,31 @@ export const SHORTCUTS = [
     note: "While Settings is open.",
   },
   {
+    id: "documents-search",
+    keys: [["/"]],
+    scope: "Lists",
+    label: "Search this Documents list",
+  },
+  {
+    id: "documents-move",
+    keys: [["↑"], ["↓"], ["J"], ["K"], ["Home"], ["End"]],
+    scope: "Lists",
+    label: "Move between Documents",
+  },
+  {
+    id: "documents-pin",
+    keys: [["P"]],
+    scope: "Lists",
+    label: "Pin or unpin the focused Document",
+  },
+  {
+    id: "documents-time",
+    keys: [["→"]],
+    scope: "Lists",
+    label: "Focus the Document’s exact updated time",
+    note: "Escape or Left arrow returns to the row.",
+  },
+  {
     id: "board-move",
     keys: [["↑"], ["↓"], ["←"], ["→"]],
     scope: "Lists",

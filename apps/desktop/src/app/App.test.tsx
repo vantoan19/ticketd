@@ -5151,6 +5151,269 @@ test.each([null, "codex"])(
   },
 );
 
+test("Documents folds local search in its header and navigates one row stop without replacing the reader metadata", async () => {
+  const docs = [
+    {
+      id: "guide",
+      title: "Reader guide",
+      body: "Keep this paragraph.",
+      created_at: "2026-11-01T00:00:00Z",
+      updated_at: "2026-11-01T00:00:00Z",
+      trashed: false,
+    },
+    {
+      id: "spec",
+      title: "Reader spec",
+      body: "The next paragraph.",
+      created_at: "2026-11-02T00:00:00Z",
+      updated_at: "2026-11-02T00:00:00Z",
+      trashed: false,
+    },
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args: { id?: string; query?: string }) => {
+      if (command === "recent_documents" || command === "all_documents")
+        return docs.map((doc) => ({
+          id: doc.id,
+          heading: doc.title,
+          updated_at: doc.updated_at,
+        }));
+      if (command === "search_documents")
+        return docs
+          .filter((doc) => doc.title.includes(args.query ?? ""))
+          .map((doc) => ({
+            id: doc.id,
+            heading: doc.title,
+            updated_at: doc.updated_at,
+          }));
+      if (command === "open_document" || command === "show_document")
+        return docs.find((doc) => doc.id === args.id);
+      if (command === "document_tags") return [];
+      if (command === "document_version")
+        return [docs.find((doc) => doc.id === args.id)?.updated_at, false];
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
+  const first = await screen.findByRole("button", { name: "Reader guide" });
+  const navigator = first.closest(".documents-list-view")!;
+  const header = within(navigator as HTMLElement)
+    .getByRole("heading", { name: "Documents" })
+    .closest("header")!;
+  expect(within(navigator as HTMLElement).queryByRole("searchbox")).toBeNull();
+  fireEvent.click(
+    within(header).getByRole("button", { name: "Search Documents" }),
+  );
+  const search = within(header).getByRole("searchbox", {
+    name: "Search Documents",
+  });
+  fireEvent.change(search, { target: { value: "spec" } });
+  expect(
+    await screen.findByRole("button", { name: "Reader spec" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(search, { key: "Escape" });
+  expect(within(header).queryByRole("searchbox")).toBeNull();
+  const rows = await within(navigator as HTMLElement).findAllByRole("button", {
+    name: /^Reader (guide|spec)$/,
+  });
+  expect(rows.filter((row) => row.tabIndex === 0)).toHaveLength(1);
+  rows[0]!.focus();
+  fireEvent.keyDown(rows[0]!, { key: "j" });
+  expect(document.activeElement).toBe(rows[1]);
+  fireEvent.keyDown(rows[1]!, { key: "Enter" });
+  expect(
+    await screen.findByRole("heading", { name: "Reader spec" }),
+  ).toBeTruthy();
+  expect(
+    within(navigator as HTMLElement)
+      .getByRole("heading", { name: "Documents" })
+      .closest("header"),
+  ).toBe(header);
+  fireEvent.keyDown(rows[1]!, { key: "/" });
+  expect(within(header).getByRole("searchbox")).toBeTruthy();
+  fireEvent.keyDown(within(header).getByRole("searchbox"), {
+    key: "k",
+    ctrlKey: true,
+  });
+  const palette = await screen.findByRole("dialog");
+  expect(within(palette).getByRole("combobox")).toBeTruthy();
+  fireEvent.keyDown(within(palette).getByRole("combobox"), { key: "Escape" });
+  fireEvent.keyDown(within(header).getByRole("searchbox"), { key: "Escape" });
+  const metadata = screen.getByRole("status", {
+    name: "Document sync status",
+  }).parentElement;
+  fireEvent.keyDown(document.body, { key: "e" });
+  expect(
+    await screen.findByRole("group", { name: "Edit controls" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("status", { name: "Document sync status" }).parentElement,
+  ).toBe(metadata);
+  fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
+  rows[1]!.focus();
+  fireEvent.keyDown(rows[1]!, { key: "Escape" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("heading", { name: "Reader spec" })).toBeNull(),
+  );
+  expect(
+    within(navigator as HTMLElement).getByRole("button", {
+      name: "Reader spec",
+    }),
+  ).toBe(rows[1]);
+});
+
+test("Documents keeps pin grouping under keyboard focus, exposes exact times and restores a linked Plan Document", async () => {
+  const timestamp = "2026-11-01T09:30:00Z";
+  let pinned = false;
+  let trashed = true;
+  const stored = () => ({
+    id: "linked-guide",
+    title: "Linked guide",
+    body: "A reusable guide.",
+    created_at: timestamp,
+    updated_at: timestamp,
+    trashed,
+  });
+  const summary = {
+    id: "linked-guide",
+    heading: "Linked guide",
+    updated_at: timestamp,
+  };
+  const other = {
+    id: "other-guide",
+    heading: "Other guide",
+    updated_at: timestamp,
+  };
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args: { id?: string; pinned?: boolean; trashed?: boolean },
+    ) => {
+      if (command === "list_plans")
+        return [{ id: "guide-plan", name: "Guide launch", archived: false }];
+      if (command === "recent_documents")
+        return trashed ? [other] : [other, summary];
+      if (command === "trashed_documents") return trashed ? [summary] : [];
+      if (command === "pinned_documents") return pinned ? [summary] : [];
+      if (command === "set_document_pin") {
+        pinned = args.pinned ?? false;
+        return null;
+      }
+      if (command === "set_document_trashed") {
+        trashed = args.trashed ?? false;
+        return stored();
+      }
+      if (command === "open_document" || command === "show_document")
+        return stored();
+      if (command === "document_version") return [timestamp, trashed];
+      if (command === "document_tags") return [];
+      if (command === "document_context_links" && args.id === summary.id)
+        return [
+          [],
+          [
+            {
+              source_id: "guide-plan",
+              target_id: summary.id,
+              source_kind: "plan",
+              target_kind: "document",
+              passage: "",
+              source_label: "Guide launch",
+              target_label: summary.heading,
+              source_trashed: false,
+              target_trashed: trashed,
+              explicit: true,
+            },
+          ],
+        ];
+      if (command === "show_plan")
+        return {
+          plan: {
+            id: "guide-plan",
+            name: "Guide launch",
+            archived: false,
+            spec_document_id: null,
+          },
+          counts: {
+            todo: 0,
+            in_progress: 0,
+            in_review: 0,
+            done: 0,
+            canceled: 0,
+          },
+          members: [],
+          documents: [{ ...summary, trashed: false }],
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Linked guide" }));
+  expect(
+    await screen.findByRole("heading", { name: "Linked guide" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Edit" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  const reader = screen
+    .getByRole("heading", { name: "Linked guide" })
+    .closest("article")!;
+  const linked = within(reader).getByRole("complementary", {
+    name: "Document details",
+  });
+  expect(within(linked).getByRole("heading", { name: "Linked" })).toBeTruthy();
+  expect(
+    await within(linked).findByRole("button", { name: "Guide launch" }),
+  ).toBeTruthy();
+  fireEvent.click(within(reader).getByRole("button", { name: "Restore" }));
+  await vi.waitFor(() =>
+    expect(screen.getByRole("button", { name: "Edit" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+  const row = await screen.findByRole("button", { name: "Linked guide" });
+  const navigator = row.closest(".documents-list-view") as HTMLElement;
+  const order = () =>
+    within(navigator)
+      .getAllByRole("button", { name: /^(Other|Linked) guide$/ })
+      .map((button) => button.textContent);
+  expect(order()).toEqual(["Other guide", "Linked guide"]);
+  row.focus();
+  fireEvent.keyDown(row, { key: "p" });
+  await vi.waitFor(() =>
+    expect(
+      within(navigator)
+        .getByRole("button", { name: "Unpin Linked guide" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true"),
+  );
+  expect(order()).toEqual(["Other guide", "Linked guide"]);
+  fireEvent.keyDown(row, { key: "ArrowRight" });
+  expect(document.activeElement?.tagName).toBe("TIME");
+  expect(await screen.findByRole("tooltip")).toHaveProperty(
+    "textContent",
+    new Date(timestamp).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }),
+  );
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(document.activeElement).toBe(row);
+  act(() => screen.getByRole("button", { name: "Document actions" }).focus());
+  await vi.waitFor(() =>
+    expect(order()).toEqual(["Linked guide", "Other guide"]),
+  );
+  fireEvent.click(within(linked).getByRole("button", { name: "Guide launch" }));
+  expect(
+    await screen.findByRole("heading", { name: "Guide launch" }),
+  ).toBeTruthy();
+});
+
 test("New Chat exposes its complete current pick before the first message", async () => {
   const { ChatClientContext } = await import("@/features/chats/client");
   const { createMockChatClient } = await import("@/features/chats/mock-client");

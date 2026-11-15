@@ -69,6 +69,9 @@
   --text-preview-line: 18px;
   --text-reading: 16px;
   --text-reading-line: 26px;
+  --text-reading-heading: 18px;
+  --text-reading-heading-line: 28px;
+  --text-reading-heading-tracking: -0.2px;
   --text-doc: 15px;
   --text-doc-line: 24px;
   --text-doc-title: 28px;
@@ -3114,6 +3117,163 @@ kbd,
 }
 .ui-agent-state {
   animation: palette-scrim var(--dur-2) var(--ease-in-out);
+}
+
+/* Documents use the shared pane, navigator and reading roles (S13). */
+.documents-list-view {
+  box-shadow: inset -1px 0 0 var(--border);
+}
+.documents-list-view > [data-slot="pane-header"] {
+  background: var(--surface);
+}
+.documents-group {
+  background: var(--recessed);
+  border-radius: var(--radius-card);
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+}
+.documents-page .document-list-open {
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-ui);
+  font-weight: 400;
+  line-height: var(--text-ui-line);
+  cursor: pointer;
+}
+.ui-item-navigator[data-open] {
+  background: var(--accent);
+}
+.ui-item-navigator:has(.document-list-open:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.document-list-open:focus-visible {
+  outline: none;
+}
+.document-list-kind,
+.document-list-meta,
+.document-list-date,
+.documents-include {
+  color: var(--muted-foreground);
+}
+.document-list-meta,
+.document-list-date,
+.documents-include {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.document-list time:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-segment);
+}
+.document-list mark {
+  background: var(--accent);
+  color: inherit;
+}
+.document-bar {
+  box-shadow: 0 1px 0 var(--border);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.document-bar .document-return,
+.document-bar .document-plan-crumb,
+.document-crumb-sep {
+  color: var(--muted-foreground);
+}
+.document-title,
+.ui-input-title {
+  font-size: var(--text-section);
+  line-height: var(--text-section-line);
+  font-weight: 600;
+  letter-spacing: var(--text-section-tracking);
+}
+.ui-input-title {
+  background: transparent;
+  box-shadow: none;
+}
+.document-subtitle,
+.document-status {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.document-workspace .document-body {
+  --text-editor: var(--text-reading);
+  --text-editor-line: var(--text-reading-line);
+}
+.document-workspace .document-body :is(.markdown-document, .rich-document) {
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  :is(h2, h3, h4, h5, h6) {
+  font-size: var(--text-reading-heading);
+  line-height: var(--text-reading-heading-line);
+  font-weight: 600;
+  letter-spacing: var(--text-reading-heading-tracking);
+}
+.document-workspace .document-body .markdown-editor {
+  margin: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.document-workspace .document-body .rich-document {
+  padding: 0;
+  min-height: 0;
+}
+.document-rail {
+  background: transparent;
+  box-shadow: inset 0 1px 0 var(--border);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.document-linked-header h2 {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.document-rail section > h2,
+.document-rail dt,
+.document-rail p {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-weight: 400;
+}
+.document-rail .connected-label {
+  line-height: var(--text-ui-line);
+}
+.document-rail .document-tags li {
+  box-shadow: var(--shadow-border-base);
+  border-radius: var(--radius);
+}
+.document-rail-actions {
+  box-shadow: inset 0 1px 0 var(--border);
+}
+.document-trash-notice > [data-slot="alert"] {
+  height: 32px;
+  padding: 0 8px;
+}
+
+.ui-input-title {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.ui-skeleton[data-shape="circle"] {
+  border-radius: var(--radius-pill);
+}
+.document-list li[data-pinned] .document-list-pin {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* Document relationship groups share the section typography and neutral rows. */
