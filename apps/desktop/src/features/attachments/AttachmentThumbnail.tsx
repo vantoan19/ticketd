@@ -44,7 +44,7 @@ export function AttachmentThumbnail({
   size = "icon",
 }: {
   file: Attachment;
-  size?: "icon" | "row" | "tile";
+  size?: "icon" | "row" | "tile" | "navigator";
 }) {
   const [image, setImage] = useState<{ id: string; url: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
