@@ -416,7 +416,7 @@ test("a usage limit says when it resets, or says that the provider did not", () 
     resets_at: at,
   }).body;
   expect(told).toContain("You've hit your limit.");
-  expect(told).toContain("It says the limit resets on Nov 12 at 3:00 PM.");
+  expect(told).toContain("It resets on Nov 12 at 3:00 PM.");
   expect(told).not.toContain("didn't say");
 
   const untold = noticeOf({
@@ -424,9 +424,9 @@ test("a usage limit says when it resets, or says that the provider did not", () 
     message: "You've hit your limit.",
   }).body;
   expect(untold).toContain("You've hit your limit.");
-  expect(untold).toContain("It didn't say when the limit resets.");
+  expect(untold).toContain("It didn't say when it resets.");
   expect(noticeOf({ kind: "usage_limit" }).body).toContain(
-    "It didn't say when the limit resets.",
+    "It didn't say when it resets.",
   );
 });
 
@@ -462,7 +462,9 @@ test("a refused resend is said first, and the first attempt stays unconfirmed", 
     /^You asked to send it again and Codex did not accept that: busy\. /,
   );
   expect(notice.body).not.toContain("It hasn't been sent again");
-  expect(notice.body).toContain("no confirmation");
+  expect(notice.body).toContain("may still have received the first attempt");
+  // It needs the person: the attention tone (CH-35).
+  expect(notice.tone).toBe("attention");
   expect(notice.actions).toEqual(["resend", "discard"]);
 });
 
@@ -787,7 +789,7 @@ test("an unseen Chat opened for the first time marks its last ended turn New", (
 
 test("a stop that was not confirmed is one notice, and Stop itself is the retry", () => {
   expect(noticeOf({ kind: "stop_unconfirmed" })).toEqual({
-    tone: "neutral",
+    tone: "attention",
     title: "Stop not confirmed",
     body: "Codex may still be running.",
     actions: [],

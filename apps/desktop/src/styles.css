@@ -748,6 +748,18 @@ body:has([data-slot="dialog-overlay"])
 .ui-notice-error .ui-notice-description {
   color: var(--error-foreground);
 }
+/* A notice that is a section of a surface with its own ring. */
+.ui-notice-flat,
+.ui-notice-error.ui-notice-flat {
+  gap: 8px;
+  padding-block: 12px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.ui-notice-error.ui-notice-flat .ui-notice-description {
+  color: var(--muted-foreground);
+}
 .ui-notice-compact {
   flex-direction: row;
   align-items: center;

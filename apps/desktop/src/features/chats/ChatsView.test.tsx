@@ -155,8 +155,7 @@ test("while a turn runs, Enter steers, Cmd+Enter queues, and the caret holds bot
   fireEvent.keyDown(composer("Steer Codex"), { key: "Enter", metaKey: true });
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("also cover the admin login")).toBeTruthy();
-  expect(screen.getByText("Queued 1")).toBeTruthy();
-  expect(screen.getByText("After this turn")).toBeTruthy();
+  expect(screen.getByText("Queued 1 · After this turn")).toBeTruthy();
 
   type("use Redis", "Steer Codex");
   fireEvent.keyDown(composer("Steer Codex"), { key: "Enter" });
@@ -250,11 +249,11 @@ test("Esc stops the turn from an empty box and pauses the queue, which waits for
     ),
   ).toBeTruthy();
   // The queue shows it is paused.
-  expect(screen.getByText("Paused")).toBeTruthy();
+  expect(screen.getByText(/^Queued \d+ · Paused$/)).toBeTruthy();
   expect(screen.getByText("then add tests")).toBeTruthy();
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
   fireEvent.click(button("Resume"));
-  await waitFor(() => expect(screen.queryByText("Paused")).toBeNull());
+  await waitFor(() => expect(screen.queryByText(/· Paused$/)).toBeNull());
 });
 
 test("Esc is not a stop from a request or just after closing a menu; Stop leaves focus in the box", async () => {
@@ -395,7 +394,12 @@ test("an expired request cannot be answered", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [{ ...approval, state: "expired" }]),
   );
-  const receipt = screen.getByText("Expired · npm install @pagerduty/pdjs");
+  // What expired is set in mono, as step targets are (CH-30).
+  const receipt = screen.getByText("npm install @pagerduty/pdjs");
+  expect(receipt.tagName).toBe("CODE");
+  expect(receipt.parentElement?.textContent).toBe(
+    "Expired · npm install @pagerduty/pdjs",
+  );
   expect(receipt.closest("button")).toBeNull();
   noButton("Allow once");
 });
@@ -413,9 +417,11 @@ test("answering a request that expired behind a lost update is refused, then the
   );
   // The next change exposes the gap; the view takes a fresh snapshot.
   act(() => client.patch("c1", { activity: "idle" }));
-  expect(
-    await screen.findByText("Expired · npm install @pagerduty/pdjs"),
-  ).toBeTruthy();
+  await waitFor(() =>
+    expect(document.querySelector(".chat-receipt")?.textContent).toBe(
+      "Expired · npm install @pagerduty/pdjs",
+    ),
+  );
   noButton("Allow once");
 });
 
@@ -554,7 +560,7 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
   const notice = screen.getByRole("alert");
   expect(notice.textContent).toContain("Codex reached your usage limit");
   expect(notice.textContent).toContain(
-    "It says the limit resets on Nov 12 at 3:00 PM. Your work so far is kept. ticketd won't switch model or billing.",
+    "It resets on Nov 12 at 3:00 PM. The last turn stopped there; your work so far is kept.",
   );
   // It is why the last turn stopped: the person can still send.
   type("try again");
@@ -631,7 +637,7 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(notice.querySelector("code")).toBeNull();
   expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
   client.nextFolder = "~/code/emails";
-  fireEvent.click(button("Pick another folder…"));
+  fireEvent.click(button("Choose a folder…"));
   expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
   expect(button("Folder emails").textContent).toBe("emails");
 });
@@ -2213,7 +2219,9 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   expect(button("Permissions: Accept edits").textContent).toBe("Accept edits");
 
   fireEvent.click(button(picker));
-  expect(await screen.findByText("From your next message")).toBeTruthy();
+  expect(
+    await screen.findByText("Applies from your next message."),
+  ).toBeTruthy();
   // A Chat keeps its harness: only its own tab shows.
   expect(screen.getByRole("tab", { name: "Claude Code" })).toBeTruthy();
   expect(screen.queryByRole("tab", { name: "Codex" })).toBeNull();
@@ -2242,7 +2250,7 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   );
 });
 
-test("a change held for the turn's end shows the new value, From your next message", async () => {
+test("a change held for the turn's end shows the new value with a clock, never squeezing it", async () => {
   await open(
     one({
       id: "held",
@@ -2263,12 +2271,16 @@ test("a change held for the turn's end shows the new value, From your next messa
       },
     }),
   );
-  const trigger = button("Codex, model Sonnet 5");
+  const trigger = button("Codex, model Sonnet 5, from your next message");
   expect(trigger.textContent).toBe("Sonnet 5");
   expect(trigger.querySelector(".chat-spin")).toBeNull();
-  expect(screen.getByText("From your next message")).toBeTruthy();
+  // Marked by a clock, not by words beside the trigger (CH-19).
+  expect(trigger.querySelector(".chat-control-held")).not.toBeNull();
+  expect(screen.queryByText(/from your next message/i)).toBeNull();
   fireEvent.click(trigger);
-  expect(await screen.findAllByText("From your next message")).toHaveLength(2);
+  expect(
+    await screen.findByText("Applies from your next message."),
+  ).toBeTruthy();
   expect(screen.queryByText("From the next request")).toBeNull();
 });
 
@@ -2314,9 +2326,7 @@ test("LIVE-4: a ticketd approval says what it does, names the Project, and shows
     name: "Codex wants to read Project Storefront",
   });
   expect(request.textContent).not.toContain("/Users/me");
-  fireEvent.click(
-    within(request).getByRole("button", { name: "Show command" }),
-  );
+  fireEvent.click(within(request).getByRole("button", { name: "Command" }));
   expect(within(request).getByText(exact)).toBeTruthy();
 });
 
@@ -2370,6 +2380,36 @@ test("CH-12: Expand keeps New Chat's links and harness check, and the list stays
   expect(document.querySelector(".chat-new")).toBe(pane);
   expect(document.querySelector(".chat-rows")).toBe(list);
   expect(linked()).not.toBeNull();
+});
+
+test("the notice, the request and the message box are one tray; options carry no number badge", async () => {
+  await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "waiting",
+        problem: { kind: "usage_limit", past: true },
+      },
+      [question],
+    ),
+  );
+  const request = await screen.findByRole("group", {
+    name: /Redis is unreachable/,
+  });
+  const tray = request.closest<HTMLElement>(".chat-tray")!;
+  expect(tray).not.toBeNull();
+  expect(within(tray).getByText(/^It didn't say when it resets/)).toBeTruthy();
+  expect(within(tray).getByLabelText(/^Answer/)).toBeTruthy();
+  // It needs the person, so its title wears the attention dot (CH-35).
+  expect(
+    within(tray).getByRole("alert").querySelector('[data-slot="status-dot"]'),
+  ).not.toBeNull();
+  const option = within(tray).getByRole("button", { name: /^Fail open/ });
+  expect(option.textContent).toBe(
+    "Fail openLet logins through and log a warning",
+  );
+  expect(option.getAttribute("aria-keyshortcuts")).toBe("1");
 });
 
 test("with no Chat open the detail pane is New Chat, and the pencil keeps its draft", async () => {

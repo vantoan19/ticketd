@@ -433,6 +433,7 @@ export function NewChat({
                       return (
                         other?.problem && (
                           <ProblemNotice
+                            flat
                             problem={other.problem}
                             harness={other.name}
                             onAction={() => setProbe((count) => count + 1)}

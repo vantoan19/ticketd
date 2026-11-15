@@ -957,7 +957,11 @@ export type NoticeAction =
   | "resume";
 
 export type Notice = {
-  tone: "neutral" | "error";
+  /**
+   * `attention` when the problem needs the person (sign-in, an unconfirmed
+   * delivery, a missing folder, a usage limit); `error` for a failure.
+   */
+  tone: "neutral" | "attention" | "error";
   title: string;
   /** Backticks mark a command or path to set in mono. */
   body: string;
@@ -995,20 +999,20 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "not_signed_in":
       if (past)
         return {
-          tone: "neutral",
+          tone: "attention",
           title: problem.title,
           body: `The last turn stopped because ${harness} wasn't signed in. Run ${signIn} in a terminal and sign in, then check again or send your message. ticketd never asks for your password or keys.${said}`,
           actions: problem.command ? ["copy-command", "check"] : ["check"],
         };
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `Run ${signIn} in a terminal and sign in, then check again. ticketd never asks for your password or keys.${said}`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_subscription":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `${plain || `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
@@ -1022,7 +1026,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       };
     case "not_installed":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `ticketd couldn't find ${harness} on this computer. Install it, then ${problem.command ? `run ${signIn} in a terminal and sign in, then ` : ""}check again. What you typed is kept.`,
         actions: problem.command
@@ -1032,7 +1036,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       };
     case "incompatible":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `${plain || `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
@@ -1040,7 +1044,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       };
     case "unavailable":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `${plain || `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
         actions: ["check"],
@@ -1054,16 +1058,17 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       };
     case "usage_limit":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
+        // The fact, then what is safe: two short sentences (CH-36).
         body: [
           plain,
           resetTime(problem.resets_at)
-            ? `It says the limit resets ${resetTime(problem.resets_at)}.`
-            : "It didn't say when the limit resets.",
-          "Your work so far is kept. ticketd won't switch model or billing.",
-          past &&
-            "That is why the last turn stopped; you can send again once the limit has reset.",
+            ? `It resets ${resetTime(problem.resets_at)}.`
+            : "It didn't say when it resets.",
+          past
+            ? "The last turn stopped there; your work so far is kept."
+            : "Your work so far is kept.",
         ]
           .filter(Boolean)
           .join(" "),
@@ -1079,24 +1084,24 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       };
     case "uncertain_delivery":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         // With a message, a resend the person asked for was not accepted.
         body: plain
-          ? `${plain} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
-          : `ticketd has no confirmation that ${harness} received it. It may have started work. It hasn't been sent again. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`,
+          ? `${plain} ${harness} may still have received the first attempt and started work.`
+          : `ticketd has no confirmation that ${harness} received it, so it may have started work. If you don't send it again, it stays here marked as not confirmed.`,
         actions: ["resend", "discard"],
       };
     case "folder_missing":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.`,
         actions: ["check", "pick-folder"],
       };
     case "history_lost":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: "You can still read it here. To keep going, resume in a fresh session and choose which history to give it.",
         actions: ["resume"],
@@ -1104,13 +1109,13 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "session_in_use":
       if (past)
         return {
-          tone: "neutral",
+          tone: "attention",
           title: problem.title,
           body: `The last turn stopped because of that. Close it there before you send again.${said}`,
           actions: [],
         };
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `Close it there, then check again. Nothing was sent.${said}`,
         actions: ["check"],
@@ -1118,7 +1123,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "stop_unconfirmed":
       // Stop stays enabled as the retry, so the notice offers nothing else.
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `${harness} may still be running.`,
         actions: [],
