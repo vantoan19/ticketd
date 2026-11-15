@@ -378,7 +378,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
+  fireEvent.keyDown(document.body, { key: "r" });
   await act(async () => {
     await vi.dynamicImportSettled();
     await vi.advanceTimersByTimeAsync(0);
@@ -5662,3 +5662,331 @@ test.each(["missing", "quarantined", "unavailable"])(
     ).toHaveProperty("value", "Attachment owner");
   },
 );
+
+test("a blocker removed and re-added through Linked is visible and can be removed with Undo", async () => {
+  const current = bulkTicket(1, { title: "Waiting outcome" });
+  const blocker = bulkTicket(2, { title: "Required outcome" });
+  let linked = true;
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args?: { reference?: string; prerequisite?: string; dependent?: string },
+    ) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket")
+        return args?.reference === blocker.reference ? blocker : current;
+      if (command === "search_tickets") return [blocker];
+      if (command === "add_dependency" || command === "remove_dependency") {
+        linked = command === "add_dependency";
+        return current;
+      }
+      if (command === "contextual_relationships") {
+        const result = bridgeDefault(command) as {
+          relationships: {
+            prerequisites: { items: unknown[]; next_offset: null };
+          };
+        };
+        result.relationships.prerequisites = {
+          next_offset: null,
+          items: linked
+            ? [
+                {
+                  reference: blocker.reference,
+                  title: { text: blocker.title },
+                  status: "Todo",
+                  trashed: false,
+                  unresolved: true,
+                },
+              ]
+            : [],
+        };
+        return result;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Waiting outcome/ }),
+  );
+  const removeLabel = `Remove ${blocker.reference} from Blocked by`;
+  const remove = await screen.findByRole("button", { name: removeLabel });
+  vi.useFakeTimers();
+  fireEvent.click(remove);
+  await act(async () => vi.advanceTimersByTimeAsync(401));
+  vi.useRealTimers();
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: removeLabel })).toBeNull(),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Link a ticket" }));
+  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
+  fireEvent.click(
+    within(dialog).getByRole("combobox", { name: /Relationship/ }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: "is blocked by" }));
+  fireEvent.change(
+    within(dialog).getByRole("combobox", {
+      name: "Ticket",
+    }),
+    { target: { value: blocker.reference } },
+  );
+  fireEvent.click(
+    await screen.findByRole("option", { name: /Required outcome/ }),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Link ticket" }));
+  expect(await screen.findByRole("button", { name: removeLabel })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: removeLabel }));
+  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+  expect(await screen.findByRole("button", { name: removeLabel })).toBeTruthy();
+});
+
+test("empty Ticket evidence adds, removes, and restores through Undo", async () => {
+  const current = bulkTicket(1, { title: "Evidence outcome" });
+  let items: import("@/lib/api/client").Evidence[] = [];
+  const writes = new Map<string, import("@/lib/api/client").Evidence>();
+  let replyLost = false;
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args?: {
+        input?: import("@/lib/api/client").EvidenceInput;
+        requestId?: string;
+      },
+    ) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "list_evidence") return items;
+      if (command === "add_evidence") {
+        const key = args?.requestId ?? "";
+        const known = writes.get(key);
+        if (known) return known;
+        const item: import("@/lib/api/client").Evidence = {
+          id: crypto.randomUUID(),
+          kind: "pull_request",
+          name: "Review",
+          value: "example/app#42",
+          editing_agent: null,
+          created_at: "2026-11-16T00:00:00Z",
+          updated_at: "2026-11-16T00:00:00Z",
+          ...args?.input,
+        };
+        writes.set(key, item);
+        items = [...items, item];
+        if (writes.size === 2 && !replyLost) {
+          replyLost = true;
+          throw {
+            code: "failed",
+            message: "The restoration reply was lost. Try again.",
+          };
+        }
+        return item;
+      }
+      if (command === "delete_evidence") {
+        items = [];
+        return;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Evidence outcome/ }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
+  const dialog = await screen.findByRole("dialog", { name: "Add evidence" });
+  fireEvent.change(within(dialog).getByLabelText("Name"), {
+    target: { value: "Review" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("URL, reference, or path"), {
+    target: { value: "example/app#42" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add evidence" }));
+  const actions = await screen.findByRole("button", {
+    name: "Actions for Review",
+  });
+  fireEvent.keyDown(actions, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Delete evidence" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await screen.findByRole("button", { name: "Actions for Review" });
+  expect(
+    screen.getAllByRole("button", { name: "Actions for Review" }),
+  ).toHaveLength(1);
+});
+
+test("empty Ticket Files adds an existing file and detaches with Undo", async () => {
+  const current = bulkTicket(1, { title: "File outcome" });
+  const file = {
+    id: "file-one",
+    display_name: "review.txt",
+    original_filename: "review.txt",
+    size_bytes: 12,
+    kind: "local_snapshot",
+    locator: "review.txt",
+  };
+  let attached = false;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { present?: boolean }) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "ticket_attachments") return attached ? [file] : [];
+      if (command === "search_attachments")
+        return [
+          {
+            attachment: file,
+            related: false,
+            usage: {
+              eligible: true,
+              legacy_drafts_pending: false,
+              protections: [],
+            },
+          },
+        ];
+      if (command === "inspect_attachment") return file;
+      if (command === "set_ticket_attachment") {
+        attached = Boolean(args?.present);
+        return;
+      }
+      if (command === "attachment_preview")
+        return {
+          attachment: file,
+          status: "unsupported",
+          media_type: null,
+          message: null,
+          can_open: true,
+          usage: {
+            total: attached ? 1 : 0,
+            legacy_drafts_pending: false,
+            entries: [],
+          },
+        };
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /File outcome/ }));
+  fireEvent.keyDown(await screen.findByRole("button", { name: "File" }), {
+    key: "Enter",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "File…" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Existing files" }));
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: "Select review.txt" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
+  fireEvent.click(await screen.findByRole("button", { name: "review.txt" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Detach from ticket" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+  expect(
+    await screen.findByRole("button", { name: "review.txt" }),
+  ).toBeTruthy();
+});
+
+test("Linked shows a blocking subticket once and the scrolled title reuses its header", async () => {
+  const current = bulkTicket(1, { title: "A long outcome to keep in view" });
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "contextual_relationships") {
+      const item = {
+        reference: "T-KQ2",
+        title: { text: "The shared prerequisite" },
+        status: "Todo",
+        trashed: false,
+        unresolved: true,
+      };
+      return {
+        relationships: {
+          parent: null,
+          children: { items: [item], next_offset: null },
+          children_progress: { total: 1, done: 0 },
+          prerequisites: { items: [item], next_offset: null },
+          blocking: { items: [], next_offset: null },
+          related: { items: [], next_offset: null },
+          discovered_while: { items: [], next_offset: null },
+          discoveries: { items: [], next_offset: null },
+          duplicate_of: null,
+          duplicates: { items: [], next_offset: null },
+        },
+      };
+    }
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /A long outcome/ }),
+  );
+  expect(await screen.findByRole("heading", { name: "Linked 1" })).toBeTruthy();
+  expect(
+    screen.getAllByRole("button", { name: "The shared prerequisite" }),
+  ).toHaveLength(1);
+  expect(screen.getByText("Todo · blocks this")).toBeTruthy();
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Actions for linked T-KQ2" }),
+    { key: "Enter" },
+  );
+  expect(
+    await screen.findByRole("menuitem", { name: "Remove subticket" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "Remove blocker" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Remove blocker" }), {
+    key: "Escape",
+  });
+  const reference = screen.getByRole("heading", { name: current.reference });
+  const header = reference.closest("header");
+  if (!header) throw new Error("Ticket header is missing");
+  const scroller = document.querySelector(".detail-scroll");
+  if (!scroller) throw new Error("Ticket scroller is missing");
+  const title = document.querySelector<HTMLElement>(
+    ".detail-content:not([hidden]) .editor-title",
+  );
+  if (!title) throw new Error("Ticket title is missing");
+  const box = title.getBoundingClientRect();
+  vi.spyOn(title, "getBoundingClientRect").mockImplementation(() => ({
+    ...box,
+    bottom: 100 - scroller.scrollTop,
+  }));
+  fireEvent.scroll(scroller, { target: { scrollTop: 300 } });
+  expect(
+    within(header).getByText(/A long outcome to keep in view/).textContent,
+  ).toBe(`· ${current.title}`);
+  expect(reference.closest("header")).toBe(header);
+  fireEvent.scroll(scroller, { target: { scrollTop: 0 } });
+  expect(
+    within(header).queryByText(/A long outcome to keep in view/),
+  ).toBeNull();
+});
+
+test("an empty Ticket folds Activity and R opens its existing composer without losing its draft", async () => {
+  const current = bulkTicket(99, { title: "Quiet outcome" });
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Quiet outcome/ }));
+  await screen.findByRole("button", { name: "File" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull(),
+  );
+  expect(
+    screen.getAllByRole("group", { name: "Add to this ticket" }),
+  ).toHaveLength(1);
+  fireEvent.keyDown(document.body, { key: "r" });
+  expect(await screen.findByRole("heading", { name: "Activity" })).toBeTruthy();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  const brief = screen.getByRole("textbox", { name: "New update source" });
+  fireEvent.change(brief, { target: { value: "A retained update draft" } });
+  fireEvent.keyDown(brief, { key: "Escape" });
+  expect(
+    screen.getByRole("textbox", { name: "New update source" }),
+  ).toHaveProperty("value", "A retained update draft");
+});

@@ -182,7 +182,9 @@ export function Activity({
   sourceName,
   latestNoteId,
   onChanged,
+  foldEmpty = false,
 }: {
+  foldEmpty?: boolean;
   sourceName?: string | undefined;
   latestNoteId?: string | undefined;
   onChanged?: () => Promise<void>;
@@ -819,7 +821,21 @@ export function Activity({
     </form>
   );
   return (
-    <section className="activity" aria-label="Activity">
+    <section
+      className="activity"
+      aria-label="Activity"
+      hidden={
+        foldEmpty &&
+        !loading &&
+        notes.length === 0 &&
+        history.length === 0 &&
+        !composing &&
+        !edit &&
+        !error &&
+        !loadError &&
+        !targetMissing
+      }
+    >
       {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
       <SectionHeader
         title="Activity"

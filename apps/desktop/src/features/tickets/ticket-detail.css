@@ -226,3 +226,15 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
+
+.ticket-header-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-connected:empty,
+.detail-connected:not(:has(> :not([hidden]))) {
+  display: none;
+}

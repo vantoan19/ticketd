@@ -94,6 +94,15 @@ function renderDetails(item: Ticket = ticket) {
 }
 
 test("all property chips stay above the description and linked context stays below it", async () => {
+  children = [
+    {
+      reference: "T-KQ5",
+      title: { text: "Part one" },
+      status: "Todo",
+      trashed: false,
+      unresolved: true,
+    },
+  ];
   renderDetails({ ...ticket, status: "In progress" });
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
   expect(
@@ -102,7 +111,7 @@ test("all property chips stay above the description and linked context stays bel
   expect(
     within(bar).getByRole("button", { name: "Project: No project" }),
   ).toBeTruthy();
-  const linked = await screen.findByRole("heading", { name: "Relationships" });
+  const linked = await screen.findByRole("heading", { name: "Linked 1" });
   expect(bar.contains(linked)).toBe(false);
   expect(
     screen.getByText("A description to read.").compareDocumentPosition(linked) &
@@ -113,7 +122,7 @@ test("all property chips stay above the description and linked context stays bel
   ).toBeNull();
 });
 
-test("the reading column runs title, state, description, then subtickets, and keeps the rail apart", async () => {
+test("the reading column runs title, state, description, then Linked, and keeps properties above it", async () => {
   children = [
     {
       reference: "T-KQ5",
@@ -124,7 +133,7 @@ test("the reading column runs title, state, description, then subtickets, and ke
     },
   ];
   renderDetails();
-  const subtickets = await screen.findByRole("heading", { name: "Subtickets" });
+  const subtickets = await screen.findByRole("heading", { name: "Linked 1" });
   const title = screen.getByRole("textbox", { name: "Title" });
   const state = document.querySelector(".ticket-state-line")!;
   const description = screen.getByText("Description");
@@ -194,7 +203,7 @@ test("Latest update appears only for In progress and In review tickets", async (
   const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
-  await screen.findByRole("button", { name: "Add relationship" });
+  await screen.findByRole("button", { name: "Link a ticket" });
   expect(
     within(rail).queryByRole("heading", { name: "Latest update" }),
   ).toBeNull();
@@ -258,11 +267,12 @@ test("an empty ticket folds Subtickets and Evidence into one quiet add row (DB-3
   const row = await screen.findByRole("group", {
     name: "Add to this ticket",
   });
+  await within(row).findByRole("button", { name: "File" });
   expect(
     within(row)
       .getAllByRole("button")
       .map((button) => button.textContent),
-  ).toEqual(["Subticket", "Evidence", "Relationship"]);
+  ).toEqual(["Subticket", "Link", "Evidence", "File"]);
   // No empty sections stand in a stack under the description.
   expect(screen.queryByRole("heading", { name: "Subtickets" })).toBeNull();
   expect(screen.queryByRole("heading", { name: /^Evidence/ })).toBeNull();

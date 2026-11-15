@@ -1,3 +1,4 @@
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { useState } from "react";
 import { File } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ export function AttachmentDialogs({
   onSelected: (file: Attachment | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const statusLine = useStatusLine();
   const { error, setError, changed } = state;
   async function detach(file: Attachment) {
     setBusy(true);
@@ -75,6 +77,19 @@ export function AttachmentDialogs({
       );
       onSelected(null);
       changed();
+      const restoreId = crypto.randomUUID();
+      statusLine.show({
+        message: `Detached ${file.display_name}`,
+        undo: async () => {
+          await attachments.setTicket(
+            ticket.reference,
+            file.id,
+            true,
+            restoreId,
+          );
+          changed();
+        },
+      });
     } catch (reason) {
       setError(describeFailure(reason, "detach the file"));
     } finally {

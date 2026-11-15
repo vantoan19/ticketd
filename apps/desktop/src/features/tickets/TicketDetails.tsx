@@ -83,6 +83,9 @@ export function TicketDetails({
     }
   }, [selected]);
   const [boundary, setBoundary] = useState<HTMLElement | null>(null);
+  const [scrolledReference, setScrolledReference] = useState<string | null>(
+    null,
+  );
   // A ticket's graph is the one graph view, opened on its dependencies.
   const openGraph = useContext(ContextGraphNavigation);
   const showGraph = (reference: string | null) => {
@@ -108,6 +111,7 @@ export function TicketDetails({
               <TicketHeader
                 selected={selected}
                 ticket={ticket}
+                scrolled={selected !== null && scrolledReference === selected}
                 expanded={expanded}
                 onExpand={onExpand}
                 onReturn={onReturn}
@@ -122,6 +126,20 @@ export function TicketDetails({
               />
               <div
                 className="detail-scroll"
+                onScroll={(event) => {
+                  const scroller = event.currentTarget;
+                  const title = scroller.querySelector<HTMLElement>(
+                    ".detail-content:not([hidden]) .editor-title, .detail-content:not([hidden]) .detail-title",
+                  );
+                  const titleBottom = title
+                    ? title.getBoundingClientRect().bottom -
+                      scroller.getBoundingClientRect().top +
+                      scroller.scrollTop
+                    : 0;
+                  setScrolledReference(
+                    scroller.scrollTop > titleBottom ? selected : null,
+                  );
+                }}
                 data-agent-loading={agentLoading || undefined}
               >
                 {agentLoading && (
