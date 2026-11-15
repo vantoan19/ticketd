@@ -14,9 +14,11 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { FileText, Layers } from "lucide-react";
-import { GRAPH_ZOOM } from "@/components/ui/graph-zoom";
+import { graphMotionDuration, GRAPH_ZOOM } from "@/components/ui/graph-zoom";
 import {
   GraphCanvas,
+  AvailabilityMark,
+  GraphIsland,
   GraphLegend,
   GraphNodeCard,
   ZoomControls,
@@ -60,7 +62,7 @@ function fitOptions(width: number): FitViewOptions {
       bottom: "56px",
       left: `${Math.round(24 * scale)}px`,
     },
-    duration: 200,
+    duration: graphMotionDuration(),
     minZoom: MIN_FIT_ZOOM,
     maxZoom: MAX_FIT_ZOOM,
   };
@@ -73,6 +75,8 @@ type CardData = {
   kind: string;
   status: string;
   selected: boolean;
+  availability?: string;
+  variant?: "workspace" | "chip";
 };
 
 // Position's values are these strings.
@@ -108,18 +112,66 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
         }
         reference={data.ref}
         meta={data.caption}
+        trailing={
+          data.availability ? (
+            <AvailabilityMark availability={data.availability} />
+          ) : undefined
+        }
         title={data.title}
+        {...(data.variant && { variant: data.variant })}
         selected={data.selected}
         aria-pressed={data.selected}
       />
     </>
   );
 }
-const NODE_TYPES = { card: CardNode };
+export type WorkspaceIsland = {
+  id: string;
+  title: string;
+  caption: string;
+  icon?: ReactNode;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+function IslandNode({
+  data,
+}: NodeProps<
+  Node<{
+    title: string;
+    caption: string;
+    icon?: ReactNode;
+    onSelect: () => void;
+  }>
+>) {
+  return (
+    <>
+      {SIDES.map((side) => (
+        <span key={side}>
+          <Handle id={`in-${side}`} type="target" position={side as Position} />
+          <Handle
+            id={`out-${side}`}
+            type="source"
+            position={side as Position}
+          />
+        </span>
+      ))}
+      <GraphIsland
+        title={data.title}
+        caption={data.caption}
+        icon={data.icon}
+        onSelect={data.onSelect}
+      />
+    </>
+  );
+}
+const NODE_TYPES = { card: CardNode, island: IslandNode };
 const EDGE_TYPES = { routed: RoutedEdge };
 
 export function ContextGraphCanvas({
   nodes,
+  islands,
   edges,
   selected,
   positions,
@@ -144,7 +196,10 @@ export function ContextGraphCanvas({
     caption?: string;
     kind?: string;
     status?: string;
+    availability?: string;
+    variant?: "workspace" | "chip";
   }[];
+  islands?: WorkspaceIsland[];
   edges: Edge[];
   selected: string | null;
   positions: Record<string, Point>;
@@ -191,6 +246,7 @@ export function ContextGraphCanvas({
   });
   const generation = useRef(0);
   useEffect(() => {
+    if (islands) return;
     const request = JSON.parse(topology) as {
       nodes: string[];
       edges: { source: string; target: string; label: string }[];
@@ -237,7 +293,7 @@ export function ContextGraphCanvas({
       currentGeneration.current++;
       worker.terminate();
     };
-  }, [topology]);
+  }, [topology, islands]);
   const instance = useRef<ReactFlowInstance | null>(null);
   const settleTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(settleTimer.current), []);
@@ -248,7 +304,7 @@ export function ContextGraphCanvas({
   useEffect(() => {
     onFittedRef.current = onFitted;
   }, [onFitted]);
-  const placed = nodes.some((node) => positions[node.id]);
+  const placed = nodes.some((node) => positions[node.id]) || !!islands?.length;
   const [ready, setReady] = useState(false);
   // The canvas stays hidden until its first fit is applied, so the map is never
   // seen at the starting zoom and then moved.
@@ -289,7 +345,10 @@ export function ContextGraphCanvas({
         void instance.current.setCenter(
           target.x + CARD_WIDTH / 2,
           target.y + CARD_HEIGHT / 2,
-          { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
+          {
+            zoom: centerZoom(instance.current.getZoom()),
+            duration: graphMotionDuration(),
+          },
         );
         setFitting(false);
         setShown(true);
@@ -316,10 +375,10 @@ export function ContextGraphCanvas({
         // The pane can still be settling (toolbar, side panel) on open; fit once
         // more so a card is never left cut at the edge.
         window.clearTimeout(settleTimer.current);
-        settleTimer.current = window.setTimeout(
-          () => void instance.current?.fitView({ ...options, duration: 0 }),
-          400,
-        );
+        settleTimer.current = window.setTimeout(() => {
+          if (autoFitted.current)
+            void instance.current?.fitView({ ...options, duration: 0 });
+        }, 400);
       }
       onFittedRef.current?.();
     };
@@ -400,7 +459,9 @@ export function ContextGraphCanvas({
       next.y !== viewportRef.current.y ||
       next.zoom !== viewportRef.current.zoom
     )
-      void instance.current.setViewport(next, { duration: 200 });
+      void instance.current.setViewport(next, {
+        duration: graphMotionDuration(),
+      });
   }, [positions, nodes, fit, centerOn, ready]);
   const [size, setSize] = useState({ width: 0, height: 0 });
   // Fit again when the panel is resized, so the map never stays clipped.
@@ -473,6 +534,15 @@ export function ContextGraphCanvas({
           height: Math.max(CARD_HEIGHT, sizes[node.id]?.height ?? 0),
         };
     }
+    for (const island of islands ?? []) {
+      if (island.caption)
+        cards[island.id] = {
+          x: island.x + 16,
+          y: island.y + 12,
+          width: 216,
+          height: 20,
+        };
+    }
     const routes = routeAll(
       cards,
       edges.map((edge) => ({
@@ -490,14 +560,34 @@ export function ContextGraphCanvas({
         selected !== edge.target && {
           label: undefined,
         }),
-      ...(routes[edge.id] && {
-        data: { ...edge.data, route: routes[edge.id] },
-      }),
+      data: {
+        ...edge.data,
+        ...(routes[edge.id] && { route: routes[edge.id] }),
+        ...(islands && {
+          workspace: true,
+          hot: selected === edge.source || selected === edge.target,
+        }),
+      },
     }));
-  }, [edges, nodes, positions, sizes, selected]);
+  }, [edges, nodes, positions, sizes, selected, islands]);
   const flowNodes = useMemo<Node[]>(
-    () =>
-      nodes
+    () => [
+      ...(islands ?? []).map((island) => ({
+        id: island.id,
+        type: "island",
+        position: { x: island.x, y: island.y },
+        style: { width: island.width, height: island.height },
+        measured: { width: island.width, height: island.height },
+        data: {
+          title: island.title,
+          caption: island.caption,
+          icon: island.icon,
+          onSelect: () => onSelect(island.id),
+        },
+        selectable: false,
+        zIndex: -1,
+      })),
+      ...nodes
         .filter((node) => positions[node.id])
         .map((node) => {
           // React Flow hides a card until it is measured, and it only measures
@@ -516,14 +606,30 @@ export function ContextGraphCanvas({
               kind: node.kind ?? "ticket",
               status: node.status ?? "",
               selected: node.id === selected,
+              availability: node.availability ?? "",
+              ...(node.variant && { variant: node.variant }),
             },
             ariaLabel: node.label,
-            style: { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
+            style: {
+              width: node.variant ? 216 : CARD_WIDTH,
+              minHeight:
+                node.variant === "chip" ? 28 : node.variant ? 60 : CARD_HEIGHT,
+            },
             selected: node.id === selected,
-            ...(measured?.width ? { measured } : {}),
+            ...(measured?.width
+              ? { measured }
+              : node.variant
+                ? {
+                    measured: {
+                      width: 216,
+                      height: node.variant === "chip" ? 28 : 60,
+                    },
+                  }
+                : {}),
           };
         }),
-    [nodes, positions, selected, sizes],
+    ],
+    [nodes, positions, selected, sizes, islands, onSelect],
   );
   const kindByLabel = Object.fromEntries(
     Object.entries(edgeLineLabels).map(([kind, label]) => [label, kind]),
@@ -544,15 +650,18 @@ export function ContextGraphCanvas({
     <GraphCanvas
       ref={container}
       label="Connections canvas"
+      data-variant={islands ? "workspace" : undefined}
       // Opacity, not visibility: React Flow marks each measured card
       // `visibility: visible`, which would show cards through a hidden
       // canvas while the edges, grid and zoom control are still waiting.
       data-pending={
-        shown || restored || (!nodes.length && !loading) ? undefined : ""
+        shown || restored || (!nodes.length && !islands?.length && !loading)
+          ? undefined
+          : ""
       }
       legend={<GraphLegend items={legend} />}
       zoom={
-        nodes.length > 0 && (
+        (nodes.length > 0 || !!islands?.length) && (
           <ZoomControls
             zoom={viewport.zoom}
             onZoomOut={() => stepZoom(1 / ZOOM_STEP)}
@@ -578,7 +687,9 @@ export function ContextGraphCanvas({
         proOptions={{ hideAttribution: true }}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
-        onNodeClick={(_, node) => onSelect(node.id)}
+        onNodeClick={(_, node) => {
+          if (node.type !== "island") onSelect(node.id);
+        }}
         onInit={(value) => {
           instance.current = value;
           setReady(true);
@@ -595,7 +706,11 @@ export function ContextGraphCanvas({
         nodesFocusable={false}
         edgesFocusable={false}
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={islands ? 20 : 16}
+          size={1}
+        />
       </ReactFlow>
     </GraphCanvas>
   );

@@ -1,4 +1,7 @@
-import { ContextGraphNavigation } from "@/features/documents/navigation";
+import {
+  workspaceGraphCommand,
+  ContextGraphNavigation,
+} from "@/features/documents/navigation";
 import { useLinkedChats, useChatFeature } from "@/features/chats/use-chats";
 import { statusLabel } from "@/features/chats/model";
 import { ReminderDateTime } from "@/features/tickets/ReminderDateTime";
@@ -74,6 +77,7 @@ const targets = [
 
 export function CommandPalette({
   currentPlan = null,
+  workspaceGraphActive = false,
   create,
   createDisabledReason,
   open,
@@ -90,6 +94,7 @@ export function CommandPalette({
   refresh,
 }: {
   currentPlan?: string | null;
+  workspaceGraphActive?: boolean;
   create: (kind: "ticket" | "capture" | "chat" | "plan") => void;
   createDisabledReason: string | null;
   initialTicket: Ticket | null;
@@ -491,6 +496,43 @@ export function CommandPalette({
                       </span>
                     </CommandItem>
                   ))}
+                </CommandGroup>
+              )}
+              {!scope && workspaceGraphActive && (
+                <CommandGroup heading="Workspace graph">
+                  {(
+                    [
+                      {
+                        id: "workspace-graph-filter",
+                        label: "Filter the Workspace graph",
+                        command: "filter",
+                      },
+                      {
+                        id: "workspace-graph-view",
+                        label: "Switch Graph / List",
+                        command: "view",
+                      },
+                    ] as const
+                  )
+                    .filter((item) =>
+                      item.label
+                        .toLowerCase()
+                        .includes(filter.trim().toLowerCase()),
+                    )
+                    .map((item) => (
+                      <CommandItem
+                        key={item.id}
+                        value={item.id}
+                        onSelect={() =>
+                          run(() => workspaceGraphCommand(item.command))
+                        }
+                      >
+                        <span className="flex-1">{item.label}</span>
+                        <CommandShortcut>
+                          <KeyChords keys={shortcut(item.id).keys} />
+                        </CommandShortcut>
+                      </CommandItem>
+                    ))}
                 </CommandGroup>
               )}
               {!scope &&

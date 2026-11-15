@@ -3,17 +3,26 @@ import {
   type WorkspaceGraph,
   type WorkspaceGraphRequest,
 } from "@/lib/api/client";
-import { plansClient } from "@/lib/api/plans";
+import { plansClient, type PlanCounts } from "@/lib/api/plans";
 import { allPlanMembers } from "./plan-members";
-/** Hydrate authoritative Plan identities, never a recent workspace page. */
-export async function planWorkspaceGraph(
-  id: string,
-  request: WorkspaceGraphRequest,
-): Promise<WorkspaceGraph> {
+export type PlanIslandGraph = WorkspaceGraph & {
+  planCounts: Record<string, PlanCounts>;
+  availability: Record<string, string | null>;
+};
+async function planSource(id: string) {
   const [members, view] = await Promise.all([
     allPlanMembers(id),
     plansClient.show(id),
   ]);
+  return { members, view };
+}
+/** Hydrate authoritative Plan identities, never a recent workspace page. */
+export async function planWorkspaceGraph(
+  id: string,
+  request: WorkspaceGraphRequest,
+  source?: Awaited<ReturnType<typeof planSource>>,
+): Promise<PlanIslandGraph> {
+  const { members, view } = source ?? (await planSource(id));
   const ids = [
     id,
     ...members.map((ticket) => ticket.id),
@@ -62,6 +71,37 @@ export async function planWorkspaceGraph(
     omitted ||= page.omitted;
     page.omitted_groups.forEach((group) => omittedGroups.add(group));
   }
+  // The Plan identity is already authoritative in show_plan, including when a
+  // search matches its members rather than its title.
+  if (
+    nodes.size ||
+    ((!request.kind || request.kind === "plan") && wanted.has(id))
+  )
+    nodes.set(id, {
+      id,
+      kind: "plan",
+      label: view.plan.name,
+      state: view.plan.archived ? "Archived" : "Active",
+      trashed: false,
+      activity_detail: false,
+    });
+  const expected = members.filter(
+    (ticket) =>
+      (!request.kind || request.kind === "ticket") && wanted.has(ticket.id),
+  );
+  const expectedDocuments = view.documents.filter(
+    (document) =>
+      !document.trashed &&
+      (!request.kind || request.kind === "document") &&
+      wanted.has(document.id),
+  );
+  if (
+    expected.some((ticket) => !nodes.has(ticket.id)) ||
+    expectedDocuments.some((document) => !nodes.has(document.id))
+  )
+    throw new Error(
+      "Some Plan members could not be loaded. Retry to load the complete island.",
+    );
   // These complete relationships are already present in the Plan/member reads;
   // join them independently of graph page boundaries or per-group limits.
   const idOf = new Map(members.map((ticket) => [ticket.reference, ticket.id]));
@@ -119,6 +159,10 @@ export async function planWorkspaceGraph(
     omittedGroups.add("Plan connections across batches");
   }
   return {
+    planCounts: { [id]: view.counts },
+    availability: Object.fromEntries(
+      members.map((ticket) => [ticket.id, ticket.availability]),
+    ),
     nodes: [...nodes.values()],
     edges: [...edges.values()],
     omitted,
@@ -126,5 +170,76 @@ export async function planWorkspaceGraph(
     next_cursor: null,
     total: nodes.size,
     node_tags: tags,
+  };
+}
+
+/** Add complete Plan islands to the existing workspace page, retaining its limits. */
+export async function workspacePlanIslands(
+  request: WorkspaceGraphRequest,
+): Promise<PlanIslandGraph> {
+  const [page, plans] = await Promise.all([
+    client.workspaceGraph(request),
+    client.listPlans(),
+  ]);
+  const sources = await Promise.all(plans.map((plan) => planSource(plan.id)));
+  const islands = await Promise.all(
+    plans.map((plan, index) =>
+      planWorkspaceGraph(plan.id, request, sources[index]),
+    ),
+  );
+  const nodes = new Map(page.nodes.map((node) => [node.id, node]));
+  const edges = new Map(
+    page.edges.map((edge) => [
+      `${edge.source}:${edge.kind}:${edge.target}`,
+      edge,
+    ]),
+  );
+  const groups = new Set(page.omitted_groups);
+  const tags = { ...page.node_tags };
+  for (const island of islands) {
+    island.nodes.forEach((node) => nodes.set(node.id, node));
+    island.edges.forEach((edge) =>
+      edges.set(`${edge.source}:${edge.kind}:${edge.target}`, edge),
+    );
+    island.omitted_groups.forEach((group) => groups.add(group));
+    Object.assign(tags, island.node_tags);
+  }
+  // Member prerequisites also include blockers in other Plans.
+  const referenceIds = new Map(
+    page.nodes
+      .filter((node) => node.ticket_reference)
+      .map((node) => [node.ticket_reference, node.id]),
+  );
+  for (const source of sources)
+    for (const ticket of source.members)
+      referenceIds.set(ticket.reference, ticket.id);
+  if (!request.relationship || request.relationship === "blocks")
+    for (const source of sources)
+      for (const ticket of source.members)
+        for (const blocker of ticket.prerequisites) {
+          const id = referenceIds.get(blocker.reference);
+          if (id && nodes.has(id) && nodes.has(ticket.id))
+            edges.set(`${id}:blocks:${ticket.id}`, {
+              source: id,
+              target: ticket.id,
+              kind: "blocks",
+              explanation: null,
+            });
+        }
+  return {
+    ...page,
+    availability: Object.assign(
+      {},
+      ...islands.map((island) => island.availability),
+    ),
+    planCounts: Object.assign(
+      {},
+      ...islands.map((island) => island.planCounts),
+    ),
+    nodes: [...nodes.values()],
+    edges: [...edges.values()],
+    node_tags: tags,
+    omitted: page.omitted || islands.some((island) => island.omitted),
+    omitted_groups: [...groups],
   };
 }

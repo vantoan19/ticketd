@@ -25,3 +25,11 @@ export const ContextGraphNavigation = createContext<
     ) => void)
   | null
 >(null);
+
+/** Commands from the palette target the mounted, active Workspace graph. */
+export const WORKSPACE_GRAPH_COMMAND = "ticketd:workspace-graph-command";
+export function workspaceGraphCommand(command: "filter" | "view") {
+  window.dispatchEvent(
+    new CustomEvent(WORKSPACE_GRAPH_COMMAND, { detail: command }),
+  );
+}
