@@ -248,7 +248,15 @@ impl Connection {
             let (thread, turn) = super::unattended_params(unattended, &request.working_directory);
             merge(&mut params, thread);
             let config = self.effective_config(&cwd).await;
-            params["config"] = super::personal_tools_off(config.as_ref());
+            let mut overrides = super::personal_tools_off(config.as_ref());
+            merge(&mut overrides, super::switch_overrides(&unattended.tools));
+            params["config"] = overrides;
+            // A resumed thread keeps its environments: the request has no field for them.
+            if matches!(request.session, SessionStart::New)
+                && super::has_no_environment(&unattended.tools)
+            {
+                params["environments"] = json!([]);
+            }
             self.state().session.turn_overrides = Some(turn);
             if let Some(cli) = &request.ticketd_cli {
                 // ticketd's own tool is how the agent reaches its tickets: Codex's

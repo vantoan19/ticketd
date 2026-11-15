@@ -918,7 +918,6 @@ fn reader_that_tests() -> crate::Unattended {
             use_web: false,
         },
         turn_limit: 40,
-        ticketd_folders: Vec::new(),
     }
 }
 

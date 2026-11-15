@@ -4,8 +4,9 @@
 //! the adapter passes only the working directory, so the approval policy and sandbox
 //! are theirs too; it overrides the model or effort only when the person chose one in
 //! the Chat, from that Chat's next turn. For an unattended session (an Automation
-//! run) it turns approvals off, limits writes to the step's folder and the
-//! Workspace data folder, and starts none of the person's MCP servers, plugins or
+//! run) it turns approvals off, maps the agent's switches to Codex's shell and
+//! sandbox (writes only in the step's folder, or none), gives the agent ticketd's
+//! own tool for its tickets, and starts none of the person's MCP servers, plugins or
 //! apps. A Chat taken over from a run resumes with the person's approvals and
 //! sandbox again. It never reads credentials, grants full access or chooses
 //! how the user is billed.
@@ -29,6 +30,7 @@ use crate::{
     Harness, HarnessAdapter, HarnessOptions, Inspection, OpenRequest, OpenedRuntime, Problem,
     ProblemKind, ProviderDetail, Unattended,
 };
+use ticketd_core::AutomationAgentTools;
 
 use discovery::{LaunchEnvironment, Os};
 use runtime::Options;
@@ -65,38 +67,60 @@ impl CodexAdapter {
 
 /// What `thread/start` and every `turn/start` are told for an unattended session:
 /// no approvals given (Codex may ask, and the session declines at once: with the
-/// policy "never" Codex reports a patch it rejects as nothing at all, 4B1), and
-/// Codex's own sandbox. Codex reads files and runs commands
-/// inside the sandbox whatever the switches say, and a read-only sandbox would stop
-/// the ticketd CLI recording the agent's result, so "read files", "edit files",
-/// "run commands" and the list of allowed commands do not apply here. The sandbox
-/// always lets the agent write to the step's folder (`working_directory`) and the
-/// folders the ticketd CLI writes to, and nowhere else: not the temporary folders
-/// Codex would add by itself. Only "use the web" is the agent's own: nothing reaches
-/// the network unless it is on. It is never full access.
+/// policy "never" Codex reports a patch it rejects as nothing at all, 4B1), and the
+/// sandbox the switches ask for, never full access. "Edit files" off is a read-only
+/// sandbox; on, the agent may write in the step's folder (`working_directory`) and
+/// nowhere else, not even the temporary folders Codex would add by itself. The
+/// Workspace data folder is not writable: the agent records its result through
+/// ticketd's own tool, which does not go through the sandbox. "Use the web" opens the
+/// network, which is closed otherwise. "Run commands" and "Read files" are not sandbox
+/// settings: see `switch_overrides`.
 pub(super) fn unattended_params(
     unattended: &Unattended,
     working_directory: &Path,
 ) -> (Value, Value) {
-    let roots: Vec<_> = std::iter::once(working_directory)
-        .chain(unattended.ticketd_folders.iter().map(PathBuf::as_path))
-        .map(Path::to_string_lossy)
-        .collect();
-    let mut thread = json!({"approvalPolicy": "on-request", "sandbox": "workspace-write"});
+    let tools = &unattended.tools;
+    let mut thread = json!({
+        "approvalPolicy": "on-request",
+        "sandbox": if tools.edit_files { "workspace-write" } else { "read-only" },
+    });
     if let Some(model) = &unattended.model {
         thread["model"] = json!(model);
     }
-    let turn = json!({
-        "approvalPolicy": "on-request",
-        "sandboxPolicy": {
+    let policy = if tools.edit_files {
+        json!({
             "type": "workspaceWrite",
-            "networkAccess": unattended.tools.use_web,
-            "writableRoots": roots,
+            "networkAccess": tools.use_web,
+            "writableRoots": [working_directory.to_string_lossy()],
             "excludeTmpdirEnvVar": true,
             "excludeSlashTmp": true,
-        },
-    });
+        })
+    } else {
+        json!({"type": "readOnly", "networkAccess": tools.use_web})
+    };
+    let turn = json!({"approvalPolicy": "on-request", "sandboxPolicy": policy});
     (thread, turn)
+}
+
+/// The `config` overrides that carry the "Run commands" switch. Codex has no read
+/// tool: it reads files through its shell, so "Run commands" off removes the shell
+/// and with it the agent's reading (what Codex itself loads, such as AGENTS.md, still
+/// loads). Its image viewer, which reads any image file, goes with it. With "Run
+/// commands" on the agent may run any command inside the sandbox: Codex has no list
+/// of allowed commands, and no setting here limits what it reads.
+pub(super) fn switch_overrides(tools: &AutomationAgentTools) -> Value {
+    let mut overrides = json!({"features.shell_tool": tools.run_commands});
+    if !tools.run_commands {
+        overrides["features.view_image"] = json!(false);
+    }
+    overrides
+}
+
+/// Whether the agent gets no Codex environment at all (no shell, and no `apply_patch`
+/// to write files): neither "Run commands" nor "Edit files" is on. Only ticketd's own
+/// tool is left. `thread/start.environments` is how Codex says so.
+pub(super) fn has_no_environment(tools: &AutomationAgentTools) -> bool {
+    !tools.run_commands && !tools.edit_files
 }
 
 /// The `config` overrides of an unattended thread: none of the person's own MCP

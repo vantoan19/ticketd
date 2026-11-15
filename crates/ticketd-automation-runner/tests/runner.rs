@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ticketd_automation_runner::{Runner, TicketdCli, stop_and_turn_off};
+use ticketd_automation_runner::{Runner, stop_and_turn_off};
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
@@ -132,10 +132,7 @@ impl Fixture {
             vec![Arc::new(fake.clone()) as Arc<dyn HarnessAdapter>],
         )
         .unwrap();
-        let cli = TicketdCli {
-            folders: vec![dir.path().to_owned()],
-        };
-        let runner = Runner::new(opener(&path), host.clone(), cli, Arc::new(|_| Ok(()))).unwrap();
+        let runner = Runner::new(opener(&path), host.clone(), Arc::new(|_| Ok(()))).unwrap();
         Self {
             _dir: dir,
             path,
@@ -308,11 +305,11 @@ async fn tagging_a_ticket_runs_the_agent_as_a_chat_owned_by_the_run() {
 }
 
 /// What each harness's adapter is handed for an agent with "Edit files" off. The
-/// adapters turn it into harness options (their own tests check those): Codex makes
-/// the step's folder and the Workspace data folder its only writable places, and
-/// Claude Code an allowlist that always holds the ticketd CLI.
+/// adapters turn it into harness options (their own tests check those): the step's
+/// folder as the working directory and the ticketd CLI, which Codex runs as its own
+/// tool and Claude Code puts on its allowlist.
 #[tokio::test(start_paused = true)]
-async fn either_harness_is_told_the_steps_folder_the_cli_and_the_workspace_data_folder() {
+async fn either_harness_is_told_the_steps_folder_and_the_cli() {
     for harness in [AgentHarness::Codex, AgentHarness::ClaudeCode] {
         let f = Fixture::on(harness);
         f.agent_working().await;
@@ -322,7 +319,6 @@ async fn either_harness_is_told_the_steps_folder_the_cli_and_the_workspace_data_
         let unattended = open.unattended.unwrap();
         assert!(!unattended.tools.edit_files);
         assert_eq!(open.ticketd_cli, ticketd_chat_host::cli::executable());
-        assert_eq!(unattended.ticketd_folders, [f.path.parent().unwrap()]);
         assert_eq!(unattended.turn_limit, 12);
     }
 }
@@ -576,13 +572,7 @@ async fn a_run_left_running_when_ticketd_closed_needs_attention_at_the_next_star
 
     // A new process: a new host and runner over the same Workspace.
     let host = ChatHost::new(opener(&f.path), Vec::new()).unwrap();
-    Runner::new(
-        opener(&f.path),
-        host,
-        TicketdCli::default(),
-        Arc::new(|_| Ok(())),
-    )
-    .unwrap();
+    Runner::new(opener(&f.path), host, Arc::new(|_| Ok(()))).unwrap();
 
     assert_eq!(
         f.needs_attention(),
@@ -995,13 +985,7 @@ async fn a_run_whose_record_cannot_be_kept_is_ended_at_the_next_pass_that_can() 
         }
         Workspace::open(&path)
     });
-    let runner = Runner::new(
-        flaky,
-        f.host.clone(),
-        TicketdCli::default(),
-        Arc::new(|_| Ok(())),
-    )
-    .unwrap();
+    let runner = Runner::new(flaky, f.host.clone(), Arc::new(|_| Ok(()))).unwrap();
     f.tag("Fix login");
     runner.tick().unwrap();
     settle().await;
