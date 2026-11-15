@@ -67,11 +67,12 @@ export function TicketWorkspaceView({
   const inboxMode = Boolean(inbox);
   // Entering or leaving the Inbox starts without an open ticket: the detail
   // beside it belongs to the list it was opened from.
-  const [wasInbox, setWasInbox] = useState(inboxMode);
-  if (wasInbox !== inboxMode) {
-    setWasInbox(inboxMode);
+  const wasInbox = useRef(inboxMode);
+  useLayoutEffect(() => {
+    if (wasInbox.current === inboxMode) return;
+    wasInbox.current = inboxMode;
     if (selected) setSelected(null);
-  }
+  }, [inboxMode, selected, setSelected]);
   const board = workspace.layout === "board" && !inboxMode;
   // This view is hidden, not unmounted, when another view opens. Leaving counts as
   // navigating, so a followed mention is not still highlighted on return.

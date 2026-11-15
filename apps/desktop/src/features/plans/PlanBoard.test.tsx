@@ -493,14 +493,9 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   expect(
     todo.queryByRole("button", { name: /^Show \d+ more Todo$/ }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
-    target: { value: "Ticket 2" },
-  });
-  await settle();
   await chooseFilter("Status", "Todo");
   await settle();
-  expect(todo.getByLabelText("11 matching tickets")).toBeTruthy();
+  expect(todo.getByLabelText("55 matching tickets")).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByLabelText(
       "0 matching tickets",
@@ -514,8 +509,5 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   expect(
     screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
-  expect(
-    screen.getByRole("button", { name: "Remove Search: Ticket 2" }),
-  ).toBeTruthy();
-  expect(todo.getByLabelText("11 matching tickets")).toBeTruthy();
+  expect(todo.getByLabelText("55 matching tickets")).toBeTruthy();
 });

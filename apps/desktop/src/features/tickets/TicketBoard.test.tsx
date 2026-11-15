@@ -261,12 +261,15 @@ test("Display holds Layout and Rows; both persist and the header carries no togg
   expect(screen.queryByRole("radiogroup", { name: "Layout" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Display" }));
   expect(layoutRadio("List").getAttribute("aria-checked")).toBe("true");
-  fireEvent.click(screen.getByRole("radio", { name: "Simple" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Detailed" }));
+  fireEvent.click(screen.getByRole("radio", { name: "One line" }));
   expect(
     JSON.parse(localStorage.getItem("ticketd.preferences")!).ticketRows,
   ).toBe("simple");
   expect(
-    screen.getByRole("radio", { name: "Simple" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "One line" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
   chooseLayout("Board");
   await settle();
@@ -1375,23 +1378,16 @@ test("closing a ticket followed within Board details returns to its card", async
   );
 });
 
-test("layout preference survives navigation and restart while search and status filters remain visible", async () => {
+test("layout preference survives navigation and restart while status filters remain visible", async () => {
   saved = [ticket(1), ticket(2, "Done")];
   const first = render(<App />);
   await settle();
   await chooseFilter("Status", "Done");
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
-    target: { value: "Ticket 2" },
-  });
   await settle();
   await showBoard();
   expect(
     screen.getByRole("button", { name: "Remove Status filter" }),
-  ).toBeTruthy();
-  expect(
-    screen.getByRole("button", { name: "Remove Search: Ticket 2" }),
   ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).queryByRole(

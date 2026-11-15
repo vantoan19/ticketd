@@ -5,6 +5,10 @@ import { StatusDot } from "@/components/ui/status-dot";
 
 const alertVariants = cva("ui-notice", {
   variants: {
+    presentation: {
+      inline: "",
+      floating: "ui-notice-floating",
+    },
     tone: {
       neutral: "",
       attention: "",
@@ -20,6 +24,7 @@ const alertVariants = cva("ui-notice", {
     },
   },
   defaultVariants: {
+    presentation: "inline",
     tone: "neutral",
     size: "default",
     flat: false,
@@ -38,13 +43,15 @@ const ToneContext = React.createContext<Tone>("neutral");
  * surface that already has the ring (the Chat's tray, a popover): no fill,
  * ring or radius, and an error's sentence stays muted, only its title in the
  * error colour. It is `role="alert"` unless the caller passes another role,
- * such as `status` for a calm update.
+ * such as `status` for a calm update. `presentation="floating"` takes the
+ * place of a floating action bar and wraps its full failure explanation.
  */
 function Alert({
   className,
   tone = "neutral",
   size = "default",
   flat = false,
+  presentation = "inline",
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
   return (
@@ -53,7 +60,10 @@ function Alert({
         data-slot="alert"
         data-tone={tone}
         role="alert"
-        className={cn(alertVariants({ tone, size, flat }), className)}
+        className={cn(
+          alertVariants({ tone, size, flat, presentation }),
+          className,
+        )}
         {...props}
       />
     </ToneContext>
