@@ -188,7 +188,7 @@ test("Copy path puts the workspace path on the clipboard", async () => {
   );
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(info.path));
-  expect(await screen.findByText("Path copied.")).toBeTruthy();
+  expect(await screen.findByText("Copied")).toBeTruthy();
 });
 
 test("Show in the file manager reveals the workspace file", async () => {

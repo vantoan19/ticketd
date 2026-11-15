@@ -1,25 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  Copy,
-  Database,
-  FileText,
-  FolderOpen,
-  Monitor,
-  Terminal,
-} from "lucide-react";
+import { Database, FileText, Monitor, Terminal } from "lucide-react";
 import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
-import { FailureState } from "@/components/ui/failure-alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
+import { CopyButton } from "@/components/ui/copy-button";
+import { RevealButton } from "@/components/ui/reveal-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PathText } from "@/components/ui/path-text";
-import { fileManagerName } from "@/lib/platform";
-import { writeClipboard } from "@/lib/clipboard";
-import { revealFile } from "@/lib/reveal";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
@@ -120,18 +110,8 @@ function Figure({ name }: { name: string }) {
 }
 
 function Loaded({ info }: { info: WorkspaceInfo }) {
-  const [message, setMessage] = useState("");
-  const manager = fileManagerName();
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const { folder, name } = splitFile(info.path);
-  async function copyPath() {
-    const failure = await writeClipboard(info.path);
-    setMessage(
-      failure === null ? "Path copied." : `Couldn't copy the path: ${failure}.`,
-    );
-  }
-  async function reveal() {
-    setMessage((await revealFile(info.path)) ?? "");
-  }
   const facts = [
     ["Tickets", String(info.tickets)],
     ["Documents", String(info.documents)],
@@ -160,24 +140,14 @@ function Loaded({ info }: { info: WorkspaceInfo }) {
             }
             trailing={
               <>
-                <IconButton label="Copy path" onClick={() => void copyPath()}>
-                  <Copy aria-hidden="true" />
-                </IconButton>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void reveal()}
-                >
-                  <FolderOpen aria-hidden="true" />
-                  Show in {manager}
-                </Button>
+                <CopyButton text={info.path} label="Copy path" />
+                <RevealButton path={info.path} onFailure={setFailure} />
               </>
             }
           />
-          {message && (
+          {failure && (
             <SettingsListFooter>
-              <span role="status">{message}</span>
+              <FailureAlert size="compact" failure={failure} />
             </SettingsListFooter>
           )}
         </SettingsList>

@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureState } from "@/components/ui/failure-alert";
+import { PathText } from "@/components/ui/path-text";
 import { Skeleton } from "@/components/ui/skeleton";
+import { HarnessMark } from "@/features/chats/HarnessMark";
 import type { StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { agentSkillsClient, type AgentSkill } from "@/lib/api/agent-skills";
@@ -27,7 +29,10 @@ type Status = { label: string; tone: StatusDotTone };
 
 const INSTALLED: Status = { label: "Installed", tone: "positive" };
 const UPDATE: Status = { label: "Update available", tone: "attention" };
-const NOT_INSTALLED: Status = { label: "Not installed", tone: "neutral" };
+/** A detected agent without the skill needs setup: the nav's dot says the same. */
+const NOT_INSTALLED: Status = { label: "Not installed", tone: "attention" };
+/** Nothing to install for: no supported agent was found. */
+const NOTHING_FOUND: Status = { label: "Not installed", tone: "neutral" };
 const ATTENTION: Status = { label: "Needs attention", tone: "attention" };
 
 /** Why a copy is left alone, shown under its row. */
@@ -55,7 +60,7 @@ function rowStatus(agent: AgentSkill): Status | null {
     case "not_installed":
       return agent.detected ? NOT_INSTALLED : null;
     case null:
-      return { label: "Could not check", tone: "neutral" };
+      return { label: "Couldn't check", tone: "neutral" };
     default:
       return ATTENTION;
   }
@@ -65,20 +70,10 @@ function overall(agents: AgentSkill[]): Status {
   if (agents.some((agent) => rowStatus(agent) === ATTENTION || !agent.state))
     return ATTENTION;
   if (agents.some((agent) => agent.state === "update_available")) return UPDATE;
+  if (agents.some((agent) => agent.state === "not_installed" && agent.detected))
+    return NOT_INSTALLED;
   if (agents.some((agent) => agent.state === "installed")) return INSTALLED;
-  return NOT_INSTALLED;
-}
-
-/** Two letters for an agent's tile: "Claude Code" is CC, "Codex" is CO. */
-function initials(name: string) {
-  const words = name.split(" ");
-  return (
-    words.length > 1
-      ? words.map((word) => word.charAt(0)).join("")
-      : name.slice(0, 2)
-  )
-    .slice(0, 2)
-    .toUpperCase();
+  return NOTHING_FOUND;
 }
 
 /** The one sentence under the skill's status. */
@@ -96,7 +91,7 @@ function summary(agents: AgentSkill[], status: Status) {
     case ATTENTION:
       return "At least one copy needs a look. ticketd leaves a copy alone when it was edited or was not written by ticketd.";
     default:
-      return "Not installed for any agent yet. One click installs it for every supported agent found here.";
+      return `Not installed for ${names(detected.filter(pending))} yet. One click installs it for every supported agent found here.`;
   }
 }
 
@@ -253,6 +248,7 @@ export function AgentSkillsCard({
                   todo.length > 0 ? (
                     <Button
                       type="button"
+                      size="sm"
                       disabled={busy}
                       onClick={() => void run(todo, false)}
                     >
@@ -312,89 +308,96 @@ export function AgentSkillsCard({
               />
             </SettingsList>
           ) : (
-            <SettingsList role="list" aria-label="Agents">
-              {agents.map((agent) => {
-                const row = rowStatus(agent);
-                const conflict = agent.state
-                  ? CONFLICT[agent.state]
-                  : undefined;
-                const replaceable =
-                  agent.state === "edited" || agent.state === "other";
-                const failure =
-                  failures[agent.id] ??
-                  (agent.error
-                    ? describeFailure(
-                        agent.error,
-                        `read the skill for ${agent.name}`,
-                      )
-                    : null);
-                return (
-                  <SettingsRow
-                    key={agent.id}
-                    role="listitem"
-                    leading={
-                      <SettingsRowTile>
-                        <span className="text-xs leading-4 font-medium">
-                          {initials(agent.name)}
+            <SettingsList>
+              <div role="list" aria-label="Agents">
+                {agents.map((agent) => {
+                  const row = rowStatus(agent);
+                  const conflict = agent.state
+                    ? CONFLICT[agent.state]
+                    : undefined;
+                  const replaceable =
+                    agent.state === "edited" || agent.state === "other";
+                  const failure =
+                    failures[agent.id] ??
+                    (agent.error
+                      ? describeFailure(
+                          agent.error,
+                          `read the skill for ${agent.name}`,
+                        )
+                      : null);
+                  return (
+                    <SettingsRow
+                      key={agent.id}
+                      role="listitem"
+                      leading={
+                        // The same official marks Chat uses for these agents.
+                        <SettingsRowTile>
+                          <HarnessMark
+                            harness={agent.id}
+                            name={agent.name}
+                            decorative
+                          />
+                        </SettingsRowTile>
+                      }
+                      title={agent.name}
+                      description={
+                        <span className="agent-skill-path">
+                          <PathText path={agent.path} layout="inline" />
                         </span>
-                      </SettingsRowTile>
-                    }
-                    title={agent.name}
-                    description={
-                      <span className="font-mono">{agent.path}</span>
-                    }
-                    trailing={
-                      <span className="flex flex-col items-end gap-1">
-                        {row ? (
-                          <StatusLabel tone={row.tone} size="caption">
-                            {row.label}
-                          </StatusLabel>
-                        ) : (
-                          <span className="text-xs leading-4 text-muted-foreground">
-                            Not found on this computer
-                          </span>
-                        )}
-                        {conflict && replaceable && (
-                          <Button
-                            type="button"
-                            variant="link"
-                            size="xs"
-                            aria-label={`Replace for ${agent.name}`}
-                            disabled={busy}
-                            onClick={() => setReviewing(agent)}
-                          >
-                            Replace…
-                          </Button>
-                        )}
-                      </span>
-                    }
-                  >
-                    {conflict && (
-                      <p className="text-xs leading-4 text-muted-foreground">
-                        {conflict}
-                      </p>
-                    )}
-                    {failure && (
-                      <FailureState size="inline" failure={failure} />
-                    )}
-                  </SettingsRow>
-                );
-              })}
+                      }
+                      trailing={
+                        <span className="flex flex-col items-end gap-1">
+                          {row ? (
+                            <StatusLabel tone={row.tone} size="caption">
+                              {row.label}
+                            </StatusLabel>
+                          ) : (
+                            <span className="text-xs leading-4 text-muted-foreground">
+                              Not found on this computer
+                            </span>
+                          )}
+                          {conflict && replaceable && (
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="xs"
+                              aria-label={`Replace for ${agent.name}`}
+                              disabled={busy}
+                              onClick={() => setReviewing(agent)}
+                            >
+                              Replace…
+                            </Button>
+                          )}
+                        </span>
+                      }
+                    >
+                      {conflict && (
+                        <p className="text-xs leading-4 text-muted-foreground">
+                          {conflict}
+                        </p>
+                      )}
+                      {failure && (
+                        <FailureState size="inline" failure={failure} />
+                      )}
+                    </SettingsRow>
+                  );
+                })}
+              </div>
+              <SettingsListFooter>
+                Agents call ticketd through the command line, so it needs to be
+                installed too.{" "}
+                <SettingsLink onClick={() => openPage("command-line")}>
+                  Check the command line
+                </SettingsLink>
+              </SettingsListFooter>
             </SettingsList>
           )}
-          <p className="mt-3 text-xs leading-4 text-muted-foreground">
-            Agents call ticketd through the command line, so it needs to be
-            installed too.{" "}
-            <SettingsLink onClick={() => openPage("command-line")}>
-              Check the command line
-            </SettingsLink>
-          </p>
         </SettingsSection>
       )}
       <DialogShell
         open={reviewing !== null}
         onOpenChange={(open) => !open && setReviewing(null)}
-        title={`Replace the ${reviewing?.name ?? ""} skill`}
+        title={`Replace the ${reviewing?.name ?? ""} skill?`}
         description="ticketd will install its own skill in this folder. The current SKILL.md is saved beside it first, so nothing is lost."
         size="md"
         primaryLabel="Replace"
@@ -402,10 +405,12 @@ export function AgentSkillsCard({
         busy={busy}
         onSubmit={() => reviewing && void run([reviewing], true)}
       >
-        <p className="flex min-h-10 items-center gap-2 rounded-(--radius) bg-(--recessed) px-3 font-mono text-(length:--text-code) leading-5">
-          <span className="font-sans text-muted-foreground">Folder</span>
-          <code className="min-w-0 break-all">{reviewing?.path}</code>
-        </p>
+        {reviewing && (
+          <div className="agent-skill-folder">
+            <span className="agent-skill-folder-label">Folder</span>
+            <PathText path={reviewing.path} />
+          </div>
+        )}
       </DialogShell>
     </>
   );

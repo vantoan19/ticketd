@@ -1,13 +1,12 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useEffect, useRef, useState } from "react";
-import { Check, Cloud, HardDrive } from "lucide-react";
+import { Cloud, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { StatusLabel } from "@/components/ui/status-label";
 import {
   attachments,
   type AttachmentUploadDestination,
@@ -267,32 +266,27 @@ function UploadDestinationSettings() {
       >
         <ChoiceTile
           value="local"
-          title="Local workspace"
-          icon={<HardDrive size={18} />}
-          description="Files are stored beside the workspace on this computer."
+          title="On this computer"
+          icon={<HardDrive />}
+          description="Files are stored beside the workspace."
         >
+          {/* Facts in words; status colour never decorates an icon. */}
           <span className="attachments-facts">
-            <span>
-              <Check size={12} aria-hidden="true" />
-              Available offline
-            </span>
-            <span>
-              <Check size={12} aria-hidden="true" />
-              Included in backups
-            </span>
+            Available offline · Included in backups
           </span>
         </ChoiceTile>
         <ChoiceTile
           value="google_drive"
           title="Google Drive"
-          icon={<Cloud size={18} />}
+          icon={<Cloud />}
           description="Uploads a separate copy to a folder in your Drive."
           disabled={driveUnavailable}
         >
+          {/* The reason in the tile's muted caption, below its own title. */}
           {driveUnavailable && (
-            <StatusLabel tone="neutral" size="caption">
-              Connect Google Drive to choose this
-            </StatusLabel>
+            <span className="attachments-facts">
+              Connect Google Drive to choose this.
+            </span>
           )}
         </ChoiceTile>
       </ChoiceTiles>
@@ -332,11 +326,10 @@ function UploadDestinationSettings() {
           </SettingsList>
         </div>
       )}
-      {busy && (
-        <p role="status" className="attachments-note">
-          Updating upload destination…
-        </p>
-      )}
+      {/* The tiles say it by turning unavailable; nothing pushes the page. */}
+      <p role="status" className="sr-only">
+        {busy ? "Updating upload destination…" : ""}
+      </p>
       {failure && (
         <div className="attachments-folder">
           <FailureAlert
@@ -348,10 +341,13 @@ function UploadDestinationSettings() {
           />
         </div>
       )}
-      <p className="attachments-note">
-        Drive failures never switch storage automatically. Sharing stays
-        unchanged; removing an attachment keeps its file in Drive.
-      </p>
+      {/* Only about Drive, so only once Drive is in play. */}
+      {(destination?.kind === "google_drive" || configured === true) && (
+        <p className="attachments-note">
+          Drive failures never switch storage automatically. Sharing stays
+          unchanged; removing an attachment keeps its file in Drive.
+        </p>
+      )}
     </SettingsSection>
   );
 }

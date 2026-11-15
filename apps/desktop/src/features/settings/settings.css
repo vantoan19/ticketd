@@ -161,6 +161,33 @@
 .command-part {
   white-space: nowrap;
 }
+/* Agent skills: the skill folder as one PathText line; the Replace review's folder. */
+.agent-skill-path {
+  display: flex;
+  min-width: 0;
+}
+.agent-skill-folder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.agent-skill-folder-label {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+
+/* Mono values in the details are 13px code, like every other mono value. */
+.cli-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+.cli-path {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+}
 
 .settings-actions {
   display: flex;

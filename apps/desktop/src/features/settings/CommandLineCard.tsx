@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { CommandBlock } from "@/components/ui/command-block";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import { PathText } from "@/components/ui/path-text";
+import type { StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { Step, Steps } from "@/components/ui/steps";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -80,12 +81,11 @@ function problems(status: CliStatus): ReactNode[] {
   if (!status.on_path && status.path !== null)
     found.push(
       <>
-        Found at <code className={mono}>{status.path}</code>, but that folder
-        isn&apos;t on your PATH, so agents and terminals can&apos;t run{" "}
-        <code className={mono}>ticketd</code> by name. Move it to a folder on
-        your PATH, such as{" "}
-        <code className={mono}>{status.suggested_directory}</code> after adding
-        that folder to PATH, then check again.
+        It was found, but that folder isn&apos;t on your PATH, so agents and
+        terminals can&apos;t run <code className={mono}>ticketd</code> by name.
+        Move it to a folder on your PATH, such as{" "}
+        <code className={mono}>{status.suggested_directory}</code>, then check
+        again.
       </>,
     );
   if (status.version === null)
@@ -105,16 +105,11 @@ function problems(status: CliStatus): ReactNode[] {
   return found;
 }
 
-/** The terminal tile; the dot says "needs attention" or "ready" beside the words. */
-function StatusTile({ tone }: { tone: StatusDotTone }) {
+/** The terminal tile: plain; the status is the StatusLabel beside it. */
+function StatusTile() {
   return (
     <SettingsRowTile>
-      <span className="relative flex">
-        <Terminal size={20} />
-        <span className="absolute -top-0.5 -right-0.5 flex rounded-full ring-2 ring-(--surface)">
-          <StatusDot tone={tone} size={10} />
-        </span>
-      </span>
+      <Terminal />
     </SettingsRowTile>
   );
 }
@@ -143,9 +138,9 @@ function StatusRows({
   if (check.phase === "failed")
     return (
       <SettingsRow
-        leading={<StatusTile tone="neutral" />}
-        title="Could not check"
-        description="ticketd could not look for the command-line tool. Choose Check again to retry."
+        leading={<StatusTile />}
+        title={<StatusLabel tone="neutral">Couldn't check</StatusLabel>}
+        description="ticketd couldn't look for the command-line tool. Choose Check again to retry."
       />
     );
   const { status } = check;
@@ -153,8 +148,8 @@ function StatusRows({
     return (
       <>
         <SettingsRow
-          leading={<StatusTile tone="attention" />}
-          title="Not found"
+          leading={<StatusTile />}
+          title={<StatusLabel tone="attention">Not found</StatusLabel>}
           description="ticketd is not on your PATH or in the usual install folders."
         />
         <SettingsRow variant="stacked">
@@ -189,13 +184,15 @@ function StatusRows({
   return (
     <>
       <SettingsRow
-        leading={<StatusTile tone={tone} />}
+        leading={<StatusTile />}
         title={
-          issues.length === 0
-            ? "Installed"
-            : status.on_path
-              ? "Installed, needs attention"
-              : "Found, but not on your PATH"
+          <StatusLabel tone={tone}>
+            {issues.length === 0
+              ? "Installed"
+              : status.on_path
+                ? "Installed, needs attention"
+                : "Found, but not on your PATH"}
+          </StatusLabel>
         }
         description={
           issues.length === 0 ? (
@@ -221,7 +218,7 @@ function StatusRows({
       <dl className="cli-details">
         <dt>Version</dt>
         <dd>
-          <span className={mono}>{status.version ?? "Unknown"}</span>
+          <span className="cli-code">{status.version ?? "Unknown"}</span>
           {status.version_matches && (
             <span className="text-xs leading-4 text-muted-foreground">
               matches this app
@@ -235,9 +232,13 @@ function StatusRows({
         </dd>
         <dt>Path</dt>
         <dd>
-          <span className={`${mono} break-all`}>
-            {status.path ?? "Unknown"}
-          </span>
+          {status.path ? (
+            <span className="cli-path">
+              <PathText path={status.path} layout="inline" />
+            </span>
+          ) : (
+            "Unknown"
+          )}
         </dd>
         <dt>Workspace</dt>
         <dd>
