@@ -8,8 +8,9 @@ import { Tooltip } from "@/components/ui/tooltip";
  * focus returned by a closing menu or dialog). It also works as the child of a
  * menu or popover trigger (`asChild`). `shortcut`, when given, follows the
  * label in the tooltip as Kbd chips ("New ticket  C"); pair it with
- * `aria-keyshortcuts` for assistive technology. `tooltipSide` overrides the
- * region's side (TooltipSide): bottom in headers, right in the sidebar.
+ * `aria-keyshortcuts` for assistive technology. The label opens below the
+ * button, or on the region's side (TooltipSide: right in the sidebar);
+ * `tooltipSide` overrides both, for an icon button inside a row (top).
  */
 function IconButton({
   label,
@@ -27,6 +28,8 @@ function IconButton({
   return (
     <Tooltip
       content={label}
+      // Icon buttons live in headers and toolbars, whose labels open below.
+      fallbackSide="bottom"
       {...(shortcut !== undefined && { shortcut })}
       {...(tooltipSide && { side: tooltipSide })}
     >

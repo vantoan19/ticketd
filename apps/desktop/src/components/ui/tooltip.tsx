@@ -11,7 +11,7 @@ const DELAY_MS = 400;
 const SKIP_DELAY_MS = 300;
 
 const ProviderMounted = React.createContext(false);
-const DefaultSide = React.createContext<Side>("top");
+const DefaultSide = React.createContext<Side | undefined>(undefined);
 
 /**
  * The app-level tooltip provider: 400ms before the first label, then 300ms in
@@ -121,10 +121,13 @@ function Tooltip({
   children,
   disabled = false,
   overflowOnly = false,
+  fallbackSide = "top",
 }: {
   content: React.ReactNode;
   shortcut?: string | string[];
   side?: Side;
+  /** The side outside any TooltipSide region: top for inline items. */
+  fallbackSide?: Side;
   align?: "start" | "center" | "end";
   children: React.ReactElement;
   /** Keeps the label closed (for example while the control is being dragged). */
@@ -190,7 +193,7 @@ function Tooltip({
       >
         {children}
       </TooltipPrimitive.Trigger>
-      <TooltipContent side={side ?? regionSide} align={align}>
+      <TooltipContent side={side ?? regionSide ?? fallbackSide} align={align}>
         {content}
         {keys.map((key) => (
           <Kbd key={key} variant="inverted">
