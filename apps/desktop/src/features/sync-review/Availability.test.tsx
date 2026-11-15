@@ -95,14 +95,14 @@ afterEach(() => {
 test("the library's Storage column says what is on this desktop and offers Download", async () => {
   render(<AttachmentLibrary onPreview={() => {}} />);
   expect(
-    await screen.findByRole("cell", { name: "Not downloaded" }),
+    await screen.findByRole("cell", { name: "In Google Drive" }),
   ).toBeTruthy();
   expect(
     screen
       .getByRole("progressbar", { name: "Downloading design.pdf" })
       .getAttribute("aria-valuenow"),
   ).toBe("40");
-  expect(screen.getByRole("cell", { name: "Local snapshot" })).toBeTruthy();
+  expect(screen.getByRole("cell", { name: "On this computer" })).toBeTruthy();
   expect(
     screen.queryByRole("button", { name: "Download design.pdf" }),
   ).toBeNull();
@@ -111,7 +111,7 @@ test("the library's Storage column says what is on this desktop and offers Downl
   );
   await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
   await screen.findByRole("progressbar", { name: "Downloading recording.mp4" });
-  expect(screen.queryByRole("cell", { name: "Not downloaded" })).toBeNull();
+  expect(screen.queryByRole("cell", { name: "In Google Drive" })).toBeNull();
 });
 
 test("a ticket's attached files say whether they are downloaded", async () => {
@@ -122,20 +122,20 @@ test("a ticket's attached files say whether they are downloaded", async () => {
       refresh={async () => {}}
     />,
   );
-  expect(await screen.findByText("193 B · Not downloaded")).toBeTruthy();
+  expect(await screen.findByText("193 B · In Google Drive")).toBeTruthy();
   expect(screen.getByText("193 B · Downloading…")).toBeTruthy();
-  expect(screen.getByText("193 B · Local snapshot")).toBeTruthy();
+  expect(screen.getByText("193 B · On this computer")).toBeTruthy();
 });
 
 test("the preview of a file that is not downloaded offers Download in place of the file", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
   expect(
-    await screen.findByRole("heading", { name: "Not downloaded" }),
+    await screen.findByRole("heading", { name: "In Google Drive" }),
   ).toBeTruthy();
   expect(screen.getByText("This file is in your Google Drive.").role).toBe(
     "status",
   );
-  expect(screen.getByText("Not downloaded · 193 B")).toBeTruthy();
+  expect(screen.getByText("In Google Drive · 193 B")).toBeTruthy();
   expect(
     screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
       .disabled,
@@ -191,10 +191,10 @@ test("availability that cannot be read again keeps what was last known", async (
     </WorkspaceChangeProvider>
   );
   const { rerender } = render(view(0));
-  await screen.findByText("193 B · Not downloaded");
+  await screen.findByText("193 B · In Google Drive");
   vi.mocked(syncReview.availability).mockRejectedValue(new Error("busy"));
   rerender(view(1));
   await waitFor(() => expect(syncReview.availability).toHaveBeenCalledTimes(2));
   await act(() => new Promise<void>((done) => setTimeout(done)));
-  expect(screen.getByText("193 B · Not downloaded")).toBeTruthy();
+  expect(screen.getByText("193 B · In Google Drive")).toBeTruthy();
 });

@@ -179,7 +179,11 @@ function describe(status: SyncStatus, now: number): Line {
   }
 }
 
-/** The Drive line in the sidebar footer; it opens a popover with the state and its one action. */
+/**
+ * The Drive line in the sidebar footer: one target. It opens a popover with
+ * the state and its action (Review, Reconnect, Retry, Sync now); no second
+ * button beside the line does a related thing (set SR-08).
+ */
 export function SyncStatusLine() {
   const now = useNow();
   const { status, apply, openSettings, openReview } = useSyncStatus();
@@ -296,7 +300,7 @@ export function SyncStatusLine() {
                   onClick={() => void run(syncApi.syncNow, "sync")}
                 >
                   <RefreshCw aria-hidden="true" />
-                  {selfMending ? "Try now" : "Sync now"}
+                  Sync now
                 </Button>
               )}
               <Button
@@ -313,18 +317,6 @@ export function SyncStatusLine() {
           </div>
         </PopoverContent>
       </Popover>
-      {review && corrective ? (
-        <Button variant="ghost" size="sm" onClick={reviewNow}>
-          Review
-        </Button>
-      ) : (
-        corrective &&
-        !selfMending && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={recover}>
-            {corrective}
-          </Button>
-        )
-      )}
     </div>
   );
 }

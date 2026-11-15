@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { revealFile } from "@/lib/reveal";
+import { workspaceClient } from "@/lib/api/workspace";
 import { syncApi, type SyncSetupOptions } from "@/lib/sync-api";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
@@ -39,7 +39,9 @@ vi.mock("@/lib/sync-api", async (original) => ({
     flushOnExit: vi.fn(),
   },
 }));
-vi.mock("@/lib/reveal", () => ({ revealFile: vi.fn() }));
+vi.mock("@/lib/api/workspace", () => ({
+  workspaceClient: { reveal: vi.fn() },
+}));
 const api = vi.mocked(syncApi);
 /** The api as shipped, over the mocked bridge. */
 const real = (
@@ -200,7 +202,20 @@ test("downloading an existing Workspace asks once before replacing this one", as
   const dialog = await screen.findByRole("dialog", {
     name: "Replace this Workspace?",
   });
+  // The consequence comes first, the safety net in the note slot, and the
+  // one way through is destructive, named for the result.
+  const [consequence] = within(dialog).getAllByRole("note");
+  expect(consequence?.textContent).toContain(
+    "This replaces everything in this Workspace on this computer",
+  );
   expect(dialog.textContent).toContain("A safety backup is saved first.");
+  expect(
+    within(dialog)
+      .getByRole("button", { name: "Replace Workspace" })
+      .getAttribute("data-variant"),
+  ).toBe("destructive");
+  // Cancel holds focus, so Enter never replaces by accident.
+  expect(document.activeElement?.textContent).toBe("Cancel");
   expect(dialog.textContent).toContain(
     "42 tickets, 9 Documents, 12 Attachments",
   );
@@ -209,7 +224,7 @@ test("downloading an existing Workspace asks once before replacing this one", as
   );
   expect(api.downloadWorkspace).not.toHaveBeenCalled();
   fireEvent.click(
-    within(dialog).getByRole("button", { name: "Download and replace" }),
+    within(dialog).getByRole("button", { name: "Replace Workspace" }),
   );
   await waitFor(() =>
     expect(api.downloadWorkspace).toHaveBeenCalledWith("folder-1"),
@@ -218,12 +233,10 @@ test("downloading an existing Workspace asks once before replacing this one", as
     await screen.findByRole("heading", { name: "This desktop" }),
   ).toBeTruthy();
   // What was replaced can be found again.
-  expect(screen.getByLabelText("Safety backup file").textContent).toBe(
-    "workspace.sqlite3.safety-1.sqlite3",
-  );
-  vi.mocked(revealFile).mockResolvedValue(null);
+  expect(screen.getByText("workspace.sqlite3.safety-1.sqlite3")).toBeTruthy();
+  vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
   fireEvent.click(screen.getByRole("button", { name: /^Show in / }));
-  expect(revealFile).toHaveBeenCalledWith(
+  expect(workspaceClient.reveal).toHaveBeenCalledWith(
     "C:\\ticketd\\workspace.sqlite3.safety-1.sqlite3",
   );
 });
@@ -256,7 +269,7 @@ test("a download that skipped an unreadable Drive file says so on the replaced c
   );
   fireEvent.click(screen.getByRole("button", { name: "Download…" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Download and replace" }),
+    await screen.findByRole("button", { name: "Replace Workspace" }),
   );
   expect(
     await screen.findByText(
@@ -323,6 +336,18 @@ test("the desktop name is saved when the field is left", async () => {
       attachment_download: "automatic",
     }),
   );
+});
+
+test("a saved name says Saved under its field, not at the foot of the page", async () => {
+  api.status.mockResolvedValue(syncStatus());
+  api.setSettings.mockResolvedValue(syncSettings({ desktop_name: "Studio" }));
+  show();
+  const name = await screen.findByLabelText<HTMLInputElement>("Name");
+  await waitFor(() => expect(name.value).toBe("Laptop"));
+  fireEvent.change(name, { target: { value: "Studio" } });
+  fireEvent.blur(name);
+  const field = name.closest(".sync-field");
+  await waitFor(() => expect(field?.textContent).toContain("Saved"));
 });
 
 test("a check interval under 30 seconds is refused without saving", async () => {

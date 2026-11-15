@@ -1,12 +1,20 @@
 import { SyncSettings } from "@/features/sync/SyncSettings";
+import { useSyncStatus } from "@/features/sync/sync-status";
 import { sectionMeta } from "@/features/settings/settings-sections";
-import { SettingsPage } from "@/features/settings/layout/SettingsPage";
+import {
+  AppliesRightAway,
+  SettingsPage,
+} from "@/features/settings/layout/SettingsPage";
 
 export function GoogleDrivePage() {
+  const { status } = useSyncStatus();
+  // Once syncing, the desktop's name and options save as they change.
+  const settled = status?.connection === "connected" && !status.first_sync;
   return (
     <SettingsPage
       {...sectionMeta("google-drive")}
       lede="Keep this workspace in sync between your desktops through a folder in your own Google Drive."
+      {...(settled && { endSlot: <AppliesRightAway /> })}
     >
       <SyncSettings />
     </SettingsPage>

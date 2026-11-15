@@ -55,6 +55,24 @@ test("Escape closes the suggestion list", () => {
   expect(list("Repositories")).toBeNull();
 });
 
+test("suggestions float in a portal, so no page bar clips them, and ArrowDown reaches them", () => {
+  form();
+  fireEvent.focus(input("Repositories"));
+  const panel = list("Repositories");
+  expect(panel).not.toBeNull();
+  expect(input("Repositories").closest(".source-form")?.contains(panel)).toBe(
+    false,
+  );
+  // Focus stays in the field until the person moves into the list.
+  expect(document.activeElement).not.toBe(
+    screen.getByRole("button", { name: "Add One" }),
+  );
+  fireEvent.keyDown(input("Repositories"), { key: "ArrowDown" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Add One" }),
+  );
+});
+
 test("choosing a value closes the list", () => {
   const onChange = form();
   fireEvent.focus(input("Repositories"));

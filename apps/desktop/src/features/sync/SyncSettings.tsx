@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Cloud,
-  Download,
-  ExternalLink,
-  FolderOpen,
-  Upload,
-} from "lucide-react";
+import { Cloud, Download, ExternalLink, Upload } from "lucide-react";
 import {
   Alert,
   AlertActions,
@@ -17,11 +11,12 @@ import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
+import { PathText } from "@/components/ui/path-text";
 import { Progress } from "@/components/ui/progress";
 import { Reference } from "@/components/ui/reference";
+import { RevealButton } from "@/components/ui/reveal-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
-import { Step, Steps } from "@/components/ui/steps";
 import {
   SettingsList,
   SettingsListFooter,
@@ -29,7 +24,6 @@ import {
   SettingsRowTile,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
-import { lineFailure } from "@/features/settings/settings-format";
 import { ago } from "@/features/tickets/ticket-source";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
@@ -37,8 +31,6 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { fileManagerName } from "@/lib/platform";
-import { revealFile } from "@/lib/reveal";
 import {
   SYNC_MIN_POLL_SECS,
   syncApi,
@@ -126,7 +118,11 @@ function ConnectedAs({
 
 const TRACK = ["Connect", "Choose a workspace", "First sync", "In sync"];
 
-/** The four stages of setup; the page shows the one this Workspace is at. */
+/**
+ * The four stages of setup as one horizontal row of steps: numbered, a check
+ * once done, the current one in primary. No status colour: the words say
+ * where setup is (set ST-31).
+ */
 function Track({ status }: { status: SyncStatus | null }) {
   const at = !status
     ? -1
@@ -140,15 +136,20 @@ function Track({ status }: { status: SyncStatus | null }) {
   const synced = status?.connection === "connected" && !status.first_sync;
   return (
     <ol className="sync-track" aria-label="Sync setup">
-      {TRACK.map((label, index) => (
-        <li
-          key={label}
-          data-state={index < at || synced ? "done" : index === at ? "now" : ""}
-          aria-current={index === at ? "step" : undefined}
-        >
-          {label}
-        </li>
-      ))}
+      {TRACK.map((label, index) => {
+        const state =
+          index < at || synced ? "done" : index === at ? "now" : undefined;
+        return (
+          <li
+            key={label}
+            data-state={state}
+            aria-current={index === at ? "step" : undefined}
+          >
+            <span className="sync-track-label">{label}</span>
+            {index < at && <span className="sr-only">, done</span>}
+          </li>
+        );
+      })}
     </ol>
   );
 }
@@ -234,10 +235,10 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
       <Alert role="status">
         <AlertTitle>This Workspace was replaced</AlertTitle>
         <AlertDescription>
-          A safety backup of the Workspace this desktop had before is kept as
-          <code aria-label="Safety backup file">
-            {safetyBackup.split(/[\\/]/).pop()}
-          </code>
+          A safety backup of the Workspace this desktop had before is kept.
+          <span className="sync-safety-path">
+            <PathText path={safetyBackup} />
+          </span>
           {skipped > 0 && (
             <span>
               {skipped === 1
@@ -248,18 +249,7 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
           )}
         </AlertDescription>
         <AlertActions>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              void revealFile(safetyBackup).then((failed) =>
-                setFailure(failed ? lineFailure(failed) : null),
-              )
-            }
-          >
-            <FolderOpen aria-hidden="true" />
-            Show in {fileManagerName()}
-          </Button>
+          <RevealButton path={safetyBackup} onFailure={setFailure} />
         </AlertActions>
         <Failure>{failure}</Failure>
       </Alert>
@@ -281,11 +271,14 @@ function Connect() {
             }
             title={
               <span role="status">
-                <StatusLabel tone={busy ? "attention" : "neutral"}>
-                  {busy
-                    ? "Waiting for sign-in in your browser…"
-                    : "Not connected"}
-                </StatusLabel>
+                {/* Waiting is not a state yet: words without a dot. */}
+                {busy ? (
+                  <span className="sync-waiting">
+                    Waiting for sign-in in your browser…
+                  </span>
+                ) : (
+                  <StatusLabel tone="neutral">Not connected</StatusLabel>
+                )}
               </span>
             }
             description="Sign-in opens in your browser. ticketd only sees the files it creates."
@@ -305,24 +298,21 @@ function Connect() {
         </SettingsList>
         <Failure>{failure}</Failure>
       </div>
+      {/* The track above numbers the stages; these rows only explain them. */}
       <SettingsSection title="How sync works">
         <SettingsList>
-          <SettingsRow variant="top">
-            <Steps>
-              <Step
-                title="Connect your Google account"
-                description="You sign in with Google in your browser, then come back here."
-              />
-              <Step
-                title="Choose a workspace"
-                description="Upload this one to a new folder, or download one your other desktop already put in Drive."
-              />
-              <Step
-                title="Keep working"
-                description="Your own changes upload right after each save. Each desktop checks Drive for the others’ changes."
-              />
-            </Steps>
-          </SettingsRow>
+          <SettingsRow
+            title="Connect your Google account"
+            description="You sign in with Google in your browser, then come back here."
+          />
+          <SettingsRow
+            title="Choose a workspace"
+            description="Upload this one to a new folder, or download one your other desktop already put in Drive."
+          />
+          <SettingsRow
+            title="Keep working"
+            description="Your own changes upload right after each save. Each desktop checks Drive for the others’ changes."
+          />
         </SettingsList>
       </SettingsSection>
       <div className="sync-block">
@@ -504,12 +494,17 @@ function Choose({
         </dl>
       </DialogShell>
       {options && download && (
+        // Replacing local data is destructive, reviewed like a restore: the
+        // consequence first, then what changes, the safety net in the note
+        // slot, and a primary named for the result (set BK-10).
         <DialogShell
           open={confirming}
           onOpenChange={setConfirming}
           title="Replace this Workspace?"
-          description="The Workspace from Drive replaces the one on this desktop. A safety backup is saved first."
-          primaryLabel="Download and replace"
+          description={`Downloads “${download.folder_name}” from Drive.`}
+          primaryLabel="Replace Workspace"
+          primaryVariant="destructive"
+          footerNote="A safety backup is saved first."
           blockedReason={null}
           size="md"
           onSubmit={() => {
@@ -523,6 +518,15 @@ function Choose({
             }, "replace this Workspace");
           }}
         >
+          <Alert tone="attention" role="note">
+            <AlertTitle>
+              This replaces everything in this Workspace on this computer
+            </AlertTitle>
+            <AlertDescription>
+              The Workspace from Drive takes its place. What is here now is kept
+              only in the safety backup.
+            </AlertDescription>
+          </Alert>
           <dl className="sync-summary">
             <dt>From Drive</dt>
             <dd>{contents(download.counts)}</dd>
@@ -548,10 +552,9 @@ function FirstSync({
     <div className="sync-block">
       <SettingsList>
         <SettingsRow
-          variant="top"
           leading={
             <SettingsRowTile>
-              <Icon size={20} />
+              <Icon />
             </SettingsRowTile>
           }
           title={
@@ -562,17 +565,18 @@ function FirstSync({
             </span>
           }
           description={status.account}
-          trailing={null}
-        >
-          <div className="sync-progress">
-            {/* Until the files are counted there is no share to show. */}
-            <Progress
-              aria-label={upload ? "First upload" : "First download"}
-              value={progress.total ? progress.done : null}
-              max={Math.max(progress.total, 1)}
-            />
-          </div>
-        </SettingsRow>
+          // The 64px bar beside the words that count it (set SR-09). Until
+          // the files are counted there is no share to show.
+          trailing={
+            progress.total ? (
+              <Progress
+                aria-label={upload ? "First upload" : "First download"}
+                value={progress.done}
+                max={Math.max(progress.total, 1)}
+              />
+            ) : null
+          }
+        />
         <SettingsListFooter>
           {upload
             ? "You can keep working. Everything is already saved on this computer."
@@ -718,23 +722,61 @@ function Disconnect({ folder }: { folder: string | undefined }) {
   );
 }
 
+/** A save-on-blur field's caption: being saved, just saved, or why not. */
+type FieldNote =
+  | { kind: "saving" }
+  | { kind: "saved" }
+  | { kind: "invalid"; text: string }
+  | null;
+
+/**
+ * The control and its one caption line under it, reserved so nothing moves:
+ * "Saving…", "Saved" for two seconds, or the field's own error (set ST-32).
+ */
+function SavedField({
+  id,
+  note,
+  children,
+}: {
+  id: string;
+  note: FieldNote;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="sync-field">
+      <div className="sync-field-control">{children}</div>
+      {note?.kind === "invalid" ? (
+        <FieldError id={`${id}-error`}>{note.text}</FieldError>
+      ) : (
+        <p className="sync-field-note" role="status">
+          {note?.kind === "saving" ? "Saving…" : note ? "Saved" : ""}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** This desktop's name, and the options: both save as soon as they change. */
 function DesktopSettings() {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [name, setName] = useState("");
   const [seconds, setSeconds] = useState("");
-  const [failure, setFailureText] = useState<
-    FailureDescription | string | null
-  >(null);
-  // The message belongs to the section whose control caused it.
-  const [failedName, setFailedName] = useState(false);
-  const setFailure = (
-    text: FailureDescription | string | null,
-    name = false,
-  ) => {
-    setFailureText(text);
-    setFailedName(name);
-  };
+  // A command that failed: said under the section of the control that ran it.
+  const [failure, setFailure] = useState<{
+    failure: FailureDescription;
+    section: "desktop" | "options";
+  } | null>(null);
+  const [notes, setNotes] = useState<{
+    name: FieldNote;
+    interval: FieldNote;
+  }>({ name: null, interval: null });
+  const note = (field: "name" | "interval", value: FieldNote) =>
+    setNotes((current) => ({ ...current, [field]: value }));
+  const fade = useRef<Partial<Record<"name" | "interval", number>>>({});
+  useEffect(
+    () => () => Object.values(fade.current).forEach(window.clearTimeout),
+    [],
+  );
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let current = true;
@@ -748,16 +790,26 @@ function DesktopSettings() {
       })
       .catch((reason: unknown) => {
         if (current)
-          setFailure(describeFailure(reason, "read the sync settings"));
+          setFailure({
+            failure: describeFailure(reason, "read the sync settings"),
+            section: "desktop",
+          });
       });
     return () => {
       current = false;
     };
   }, []);
-  async function save(change: Partial<SyncSettingsChange>) {
+  async function save(
+    change: Partial<SyncSettingsChange>,
+    field: "name" | "interval" | null,
+  ) {
     if (!saved) return;
     setSaving(true);
     setFailure(null);
+    if (field) {
+      window.clearTimeout(fade.current[field]);
+      note(field, { kind: "saving" });
+    }
     try {
       const next = await syncApi.setSettings({
         desktop_name: saved.desktop_name,
@@ -768,39 +820,60 @@ function DesktopSettings() {
       setSaved(next);
       setName(next.desktop_name);
       setSeconds(String(next.poll_interval_secs));
+      if (field) {
+        note(field, { kind: "saved" });
+        fade.current[field] = window.setTimeout(() => note(field, null), 2000);
+      }
     } catch (reason) {
-      setFailure(describeFailure(reason, "save the sync settings"));
+      if (field) note(field, null);
+      setFailure({
+        failure: describeFailure(reason, "save the sync settings"),
+        section: field === "name" ? "desktop" : "options",
+      });
     } finally {
       setSaving(false);
     }
   }
   function saveName() {
     const next = name.trim();
-    if (!saved || next === saved.desktop_name) return;
-    if (!next) {
-      setFailure("Enter a name for this desktop.", true);
+    if (!saved || next === saved.desktop_name) {
+      // The value in force is back: any refusal is over.
+      if (notes.name?.kind === "invalid") note("name", null);
       return;
     }
-    void save({ desktop_name: next });
+    if (!next) {
+      note("name", { kind: "invalid", text: "Enter a name for this desktop." });
+      return;
+    }
+    void save({ desktop_name: next }, "name");
   }
   function saveInterval() {
     const next = Number(seconds);
-    if (!saved || next === saved.poll_interval_secs) return;
-    if (!Number.isInteger(next) || next < SYNC_MIN_POLL_SECS) {
-      setFailure(`Enter ${SYNC_MIN_POLL_SECS} seconds or more.`);
+    if (!saved || next === saved.poll_interval_secs) {
+      if (notes.interval?.kind === "invalid") note("interval", null);
       return;
     }
-    void save({ poll_interval_secs: next });
+    if (!Number.isInteger(next) || next < SYNC_MIN_POLL_SECS) {
+      note("interval", {
+        kind: "invalid",
+        text: `Enter ${SYNC_MIN_POLL_SECS} seconds or more.`,
+      });
+      return;
+    }
+    void save({ poll_interval_secs: next }, "interval");
   }
   const blurOnEnter = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") event.currentTarget.blur();
   };
   const disabled = !saved || saving;
+  const invalid = (field: "name" | "interval") =>
+    notes[field]?.kind === "invalid";
   return (
     <>
       <SettingsSection title="This desktop">
         <SettingsList>
           <SettingsRow
+            variant="top"
             title={<Label htmlFor="sync-name">Name</Label>}
             description={
               <>
@@ -810,46 +883,57 @@ function DesktopSettings() {
               </>
             }
             trailing={
-              <Input
-                id="sync-name"
-                className="w-60"
-                value={name}
-                disabled={disabled}
-                onChange={(event) => setName(event.target.value)}
-                onBlur={saveName}
-                onKeyDown={blurOnEnter}
-              />
+              <SavedField id="sync-name" note={notes.name}>
+                <Input
+                  id="sync-name"
+                  className="w-60"
+                  value={name}
+                  disabled={disabled}
+                  aria-invalid={invalid("name") || undefined}
+                  aria-describedby={
+                    invalid("name") ? "sync-name-error" : undefined
+                  }
+                  onChange={(event) => setName(event.target.value)}
+                  onBlur={saveName}
+                  onKeyDown={blurOnEnter}
+                />
+              </SavedField>
             }
           />
         </SettingsList>
-        <Failure>{failedName ? failure : null}</Failure>
+        {failure?.section === "desktop" && <Failure>{failure.failure}</Failure>}
       </SettingsSection>
       <SettingsSection title="Options">
         <SettingsList>
           <SettingsRow
+            variant="top"
             title={
               <Label htmlFor="sync-interval">Check for changes every</Label>
             }
             description={`Minimum ${SYNC_MIN_POLL_SECS} seconds. Your own changes upload right after each save.`}
             trailing={
-              <>
+              <SavedField id="sync-interval" note={notes.interval}>
+                {/* Text with a numeric keyboard: no spinner inside the field. */}
                 <Input
                   id="sync-interval"
                   className="w-24 text-right"
-                  type="number"
-                  min={SYNC_MIN_POLL_SECS}
-                  step={1}
+                  inputMode="numeric"
                   value={seconds}
                   disabled={disabled}
-                  aria-describedby="sync-interval-unit"
+                  aria-invalid={invalid("interval") || undefined}
+                  aria-describedby={
+                    invalid("interval")
+                      ? "sync-interval-unit sync-interval-error"
+                      : "sync-interval-unit"
+                  }
                   onChange={(event) => setSeconds(event.target.value)}
                   onBlur={saveInterval}
                   onKeyDown={blurOnEnter}
                 />
-                <span id="sync-interval-unit" className="settings-hint">
+                <span id="sync-interval-unit" className="sync-field-unit">
                   seconds
                 </span>
-              </>
+              </SavedField>
             }
           />
           <SettingsRow
@@ -862,9 +946,13 @@ function DesktopSettings() {
               value={saved?.attachment_download ?? ""}
               disabled={disabled}
               onValueChange={(value) =>
-                void save({
-                  attachment_download: value as Settings["attachment_download"],
-                })
+                void save(
+                  {
+                    attachment_download:
+                      value as Settings["attachment_download"],
+                  },
+                  null,
+                )
               }
             >
               <ChoiceTile
@@ -880,12 +968,7 @@ function DesktopSettings() {
             </ChoiceTiles>
           </SettingsRow>
         </SettingsList>
-        {saving && (
-          <p role="status" className="sync-status-line">
-            Saving…
-          </p>
-        )}
-        <Failure>{failedName ? null : failure}</Failure>
+        {failure?.section === "options" && <Failure>{failure.failure}</Failure>}
       </SettingsSection>
     </>
   );
