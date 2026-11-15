@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   useDefaultLayout,
   useGroupRef,
@@ -40,14 +46,29 @@ export function TicketWorkspaceView({
   hidden,
   inboxTarget,
   onCreate,
+  inbox,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
   hidden: boolean;
   inboxTarget: { reference: string; id: string; key: number } | null;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
+  /**
+   * The Inbox, when it is the view: it takes the list pane's place and opens
+   * entries in the detail pane beside it, a triage split (S6).
+   */
+  inbox?: ReactNode;
 }) {
   const { selected, setSelected, clearMention } = workspace;
+  const inboxMode = Boolean(inbox);
+  // Entering or leaving the Inbox starts without an open ticket: the detail
+  // beside it belongs to the list it was opened from.
+  const [wasInbox, setWasInbox] = useState(inboxMode);
+  if (wasInbox !== inboxMode) {
+    setWasInbox(inboxMode);
+    if (selected) setSelected(null);
+  }
+  const board = workspace.layout === "board" && !inboxMode;
   // This view is hidden, not unmounted, when another view opens. Leaving counts as
   // navigating, so a followed mention is not still highlighted on return.
   useEffect(() => {
@@ -152,8 +173,34 @@ export function TicketWorkspaceView({
   });
   // On the board an open card is a peek over its right side; the columns keep
   // their width (S5). Narrow windows stack as before; Expand takes the page.
-  const peek =
-    workspace.layout === "board" && selected !== null && !narrow && !expanded;
+  const peek = board && selected !== null && !narrow && !expanded;
+  // Escape closes the peek, unless a field, menu or dialog inside it has it.
+  const peekState = useRef({ peek, selected });
+  useEffect(() => {
+    peekState.current = { peek, selected };
+  });
+  useEffect(() => {
+    if (!peek) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        !(target instanceof HTMLElement) ||
+        !target.closest("#detail") ||
+        target.isContentEditable ||
+        target.closest(
+          "input, textarea, select, [role=combobox], [role=menu], [role=dialog]",
+        )
+      )
+        return;
+      event.preventDefault();
+      focusPane.current = { reference: peekState.current.selected };
+      setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [peek, setSelected]);
   const [previousNarrow, setPreviousNarrow] = useState(narrow);
   if (previousNarrow !== narrow) {
     setPreviousNarrow(narrow);
@@ -182,7 +229,7 @@ export function TicketWorkspaceView({
         hidden={hidden}
         data-plan={scopedPlan ? "" : undefined}
       >
-        {scopedPlan && (
+        {scopedPlan && !inboxMode && (
           <PlanHeader
             key={scopedPlan.id}
             plan={scopedPlan}
@@ -192,7 +239,7 @@ export function TicketWorkspaceView({
             onModeChange={setPlanMode}
           />
         )}
-        {dependenciesOpen && (
+        {dependenciesOpen && !inboxMode && (
           <PlanDependencies
             id={scopedPlan.id}
             revision={workspace.revision}
@@ -216,7 +263,7 @@ export function TicketWorkspaceView({
             "ticket-workspace",
             expanded && "expanded",
             narrowDetail && "narrow-detail",
-            workspace.layout === "board" && "board-layout",
+            board && "board-layout",
             !selected && "unselected",
           )}
           data-peek={peek || undefined}
@@ -237,7 +284,7 @@ export function TicketWorkspaceView({
                 meta,
               );
           }}
-          hidden={hidden || Boolean(dependenciesOpen)}
+          hidden={hidden || Boolean(dependenciesOpen && !inboxMode)}
         >
           <ResizablePanel
             id="list"
@@ -245,29 +292,31 @@ export function TicketWorkspaceView({
             minSize={360}
             defaultSize={384}
           >
-            <TicketListPane
-              workspace={workspace}
-              bulk={bulk}
-              listRef={listRef}
-              planState={planState}
-              onCreate={onCreate}
-              onOpen={(reference) => {
-                if (workspace.layout === "board")
-                  boardScrollLeft.current =
-                    listRef.current?.querySelector(".ticket-board")
-                      ?.scrollLeft ?? 0;
-                setShowDependencies(false);
-                setSelected(reference);
-                setNarrowDetail(true);
-                if (narrow) focusPane.current = "detail";
-                // The Open tickets preference: a ticket opened from the list may
-                // take the full width. Narrow windows already show it that way.
-                else if (openTickets === "expanded") {
-                  setExpanded(true);
-                  focusPane.current = "detail";
-                }
-              }}
-            />
+            {inbox ?? (
+              <TicketListPane
+                workspace={workspace}
+                bulk={bulk}
+                listRef={listRef}
+                planState={planState}
+                onCreate={onCreate}
+                onOpen={(reference) => {
+                  if (workspace.layout === "board")
+                    boardScrollLeft.current =
+                      listRef.current?.querySelector(".ticket-board")
+                        ?.scrollLeft ?? 0;
+                  setShowDependencies(false);
+                  setSelected(reference);
+                  setNarrowDetail(true);
+                  if (narrow) focusPane.current = "detail";
+                  // The Open tickets preference: a ticket opened from the list may
+                  // take the full width. Narrow windows already show it that way.
+                  else if (openTickets === "expanded") {
+                    setExpanded(true);
+                    focusPane.current = "detail";
+                  }
+                }}
+              />
+            )}
           </ResizablePanel>
           <ResizableHandle
             className="split-handle"
@@ -281,45 +330,25 @@ export function TicketWorkspaceView({
             // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.
             style={DETAIL_PANEL_STYLE}
           >
-            {/* Escape closes the peek, unless a field, menu or dialog has it. */}
-            <div
-              className="contents"
-              onKeyDown={(event) => {
-                if (!peek || event.key !== "Escape" || event.defaultPrevented)
-                  return;
-                const target = event.target as HTMLElement;
-                if (
-                  target.isContentEditable ||
-                  target.closest(
-                    "input, textarea, select, [role=combobox], [role=menu], [role=dialog]",
-                  )
-                )
-                  return;
-                event.preventDefault();
-                focusPane.current = { reference: selected };
-                setSelected(null);
+            <TicketDetailPane
+              workspace={workspace}
+              {...(inboxMode && { context: "inbox" as const })}
+              expanded={expanded}
+              inboxTarget={inboxTarget}
+              onExpand={() => {
+                setExpanded(true);
+                focusPane.current = "detail";
               }}
-            >
-              <TicketDetailPane
-                workspace={workspace}
-                expanded={expanded}
-                inboxTarget={inboxTarget}
-                onExpand={() => {
-                  setExpanded(true);
-                  focusPane.current = "detail";
-                }}
-                onReturn={() => {
-                  setExpanded(false);
-                  setNarrowDetail(false);
-                  focusPane.current = { reference: selected };
-                }}
-                onSelect={(value, mention) => {
-                  if (value === null)
-                    focusPane.current = { reference: selected };
-                  setSelected(value, mention);
-                }}
-              />
-            </div>
+              onReturn={() => {
+                setExpanded(false);
+                setNarrowDetail(false);
+                focusPane.current = { reference: selected };
+              }}
+              onSelect={(value, mention) => {
+                if (value === null) focusPane.current = { reference: selected };
+                setSelected(value, mention);
+              }}
+            />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>

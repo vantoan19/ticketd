@@ -96,6 +96,18 @@ export const SHORTCUTS = [
     label: "Select every listed ticket",
   },
   {
+    id: "inbox-mark",
+    keys: [["E"]],
+    scope: "Lists",
+    label: "Mark the focused Inbox entry read or unread",
+  },
+  {
+    id: "inbox-snooze",
+    keys: [["H"]],
+    scope: "Lists",
+    label: "Snooze the focused Inbox reminder",
+  },
+  {
     id: "list-clear-selection",
     keys: [["Esc"]],
     scope: "Lists",

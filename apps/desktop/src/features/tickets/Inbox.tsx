@@ -1,33 +1,38 @@
 import { emptyCopy } from "@/lib/empty-copy";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlarmClock,
   Check,
-  Eye,
   Circle,
+  Clock,
+  Eye,
   FileWarning,
   GitCompare,
+  Inbox as InboxIcon,
   Link2,
   MessageSquare,
-  Bell,
-  Inbox as InboxIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
+import { Pager } from "@/components/ui/pager";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
+import { Tooltip } from "@/components/ui/tooltip";
+import { compactAgo, formatDateTime, formatTime } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
 import { inboxClient } from "@/lib/api/inbox";
 import { StatusIcon } from "./StatusIcon";
 import {
   entryNoun,
-  entryTime,
   groupEntries,
   snoozeChoices,
   snoozeInstant,
@@ -89,54 +94,158 @@ function EntryIcon({ entry }: { entry: Entry }) {
   );
 }
 
+/** Snooze is a menu whose rows say when the reminder comes back (list I-03). */
 function Snooze({
   entry,
   snooze,
+  openRequest,
 }: {
   entry: Entry;
   snooze: (choice: SnoozeChoice) => Promise<void>;
+  /** Bumped by H on the row, to open the menu from the keyboard. */
+  openRequest: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [seen, setSeen] = useState(openRequest);
+  if (seen !== openRequest) {
+    setSeen(openRequest);
+    setOpen(true);
+  }
+  const now = new Date();
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Snooze reminder for ${entry.reference}`}
-          title="Snooze"
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <IconButton
+          label={`Snooze reminder for ${entry.reference}`}
+          tooltipSide="top"
+          aria-keyshortcuts="H"
         >
-          <Bell />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="inbox-snooze">
+          <Clock />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" aria-label="Snooze until">
         {snoozeChoices.map((choice) => (
-          <Button
+          <DropdownMenuItem
             key={choice.value}
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setOpen(false);
-              void snooze(choice.value);
-            }}
+            onSelect={() => void snooze(choice.value)}
           >
+            <Clock aria-hidden="true" />
             {choice.label}
-          </Button>
+            <span className="inbox-snooze-time">
+              {formatTime(new Date(snoozeInstant(choice.value, now)))}
+            </span>
+          </DropdownMenuItem>
         ))}
-      </PopoverContent>
-    </Popover>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-/** A conflict or a notice from sync, drawn as any other Inbox entry. */
+/**
+ * One Inbox row, in the ticket row's anatomy (S6): unread dot, kind icon,
+ * mono Reference and title; the summary on line two; the relative time at
+ * the end, with the exact time in its tooltip. Actions overlay the time on
+ * hover or focus. E marks the focused row read or unread; H snoozes it.
+ */
+function InboxRow({
+  reference,
+  title,
+  summary,
+  icon,
+  read,
+  timestamp,
+  current,
+  markLabel,
+  onOpen,
+  onMark,
+  snooze,
+}: {
+  reference: string | null;
+  title: string;
+  summary: string;
+  icon: React.ReactNode;
+  read: boolean;
+  timestamp: string;
+  current: boolean;
+  markLabel: string;
+  onOpen: () => void;
+  onMark: () => void;
+  snooze?: (openRequest: number) => React.ReactNode;
+}) {
+  const now = useNow();
+  const [snoozeRequest, setSnoozeRequest] = useState(0);
+  return (
+    <li
+      className="inbox-entry"
+      data-read={read}
+      aria-current={current || undefined}
+    >
+      <span className="inbox-dot">
+        {!read && <StatusDot tone="unread" size={8} />}
+      </span>
+      <button
+        type="button"
+        className="inbox-ticket"
+        aria-keyshortcuts={snooze ? "E H" : "E"}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.metaKey || event.ctrlKey || event.altKey) return;
+          if (event.key === "e" || event.key === "E") {
+            event.preventDefault();
+            onMark();
+          } else if (snooze && (event.key === "h" || event.key === "H")) {
+            event.preventDefault();
+            setSnoozeRequest((value) => value + 1);
+          } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            // ↑/↓ move between rows, as in every list.
+            event.preventDefault();
+            const rows = [
+              ...(event.currentTarget
+                .closest(".inbox-body")
+                ?.querySelectorAll<HTMLElement>(".inbox-ticket") ?? []),
+            ];
+            const index = rows.indexOf(event.currentTarget);
+            rows[index + (event.key === "ArrowDown" ? 1 : -1)]?.focus();
+          }
+        }}
+      >
+        <span className="inbox-title-line">
+          <span className="inbox-icon">{icon}</span>
+          {reference && <Reference>{reference}</Reference>}
+          <span className="inbox-title">{title}</span>
+          {!read && <span className="sr-only">Unread</span>}
+        </span>
+        <span className="inbox-summary">{summary}</span>
+      </button>
+      <span className="inbox-trailing">
+        <Tooltip content={formatDateTime(timestamp)} side="top">
+          <time dateTime={timestamp} tabIndex={-1}>
+            {compactAgo(timestamp, now) ?? timestamp}
+          </time>
+        </Tooltip>
+        <span className="inbox-actions">
+          {snooze?.(snoozeRequest)}
+          <IconButton
+            label={markLabel}
+            tooltipSide="top"
+            aria-keyshortcuts="E"
+            onClick={onMark}
+          >
+            {read ? <Circle /> : <Check />}
+          </IconButton>
+        </span>
+      </span>
+    </li>
+  );
+}
+
+/** A conflict or a notice from sync, drawn as any other Inbox row. */
 function SyncRow({
   entry,
-  time,
   mark,
   open,
 }: {
   entry: SyncEntry;
-  time: string;
   mark: (read: boolean) => void;
   open: () => void;
 }) {
@@ -147,56 +256,41 @@ function SyncRow({
         ? FileWarning
         : Link2;
   return (
-    <li className="inbox-entry" data-read={entry.read}>
-      {entry.read ? (
-        <span className="inbox-dot" aria-hidden="true" />
-      ) : (
-        <span className="inbox-dot">
-          <StatusDot tone="unread" />
-        </span>
-      )}
-      <span className="inbox-icon">
-        <Icon aria-hidden="true" />
-      </span>
-      <button
-        className="inbox-ticket"
-        onClick={() => {
-          if (!entry.read) mark(true);
-          open();
-        }}
-      >
-        <span className="inbox-title-line">
-          {entry.reference && <Reference>{entry.reference}</Reference>}
-          <span className="inbox-title">{entry.title}</span>
-          {!entry.read && <span className="sr-only">Unread</span>}
-        </span>
-        <span className="inbox-summary">{entry.summary}</span>
-      </button>
-      <time dateTime={entry.timestamp}>{time}</time>
-      <span className="inbox-actions">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Mark ${entry.reference ?? "Drive file"} ${entry.conflict ? "review" : "notice"} ${entry.read ? "unread" : "read"}`}
-          title={entry.read ? "Mark unread" : "Mark read"}
-          onClick={() => mark(!entry.read)}
-        >
-          {entry.read ? <Circle /> : <Check />}
-        </Button>
-      </span>
-    </li>
+    <InboxRow
+      reference={entry.reference}
+      title={entry.title}
+      summary={entry.summary}
+      icon={<Icon aria-hidden="true" />}
+      read={entry.read}
+      timestamp={entry.timestamp}
+      current={false}
+      markLabel={`Mark ${entry.reference ?? "Drive file"} ${entry.conflict ? "review" : "notice"} ${entry.read ? "unread" : "read"}`}
+      onOpen={() => {
+        if (!entry.read) mark(true);
+        open();
+      }}
+      onMark={() => mark(!entry.read)}
+    />
   );
 }
 
+/**
+ * The Inbox (DESIGN.md section 9, S6): the list half of a triage split. An
+ * entry opens its ticket in the detail pane beside it, so several can be
+ * read in a row without leaving the Inbox.
+ */
 export function Inbox({
   revision,
   select,
   onBrowse,
+  selected = null,
 }: {
   revision: number;
   select: (reference: string, noteId?: string) => void;
   /** Opens the ticket list, where tickets can be followed. */
   onBrowse: () => void;
+  /** The ticket open beside the Inbox. */
+  selected?: string | null;
 }) {
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [pages, setPages] = useState(1);
@@ -212,23 +306,37 @@ export function Inbox({
   const sync = useSyncEntries(revision);
   const [reviewing, setReviewing] = useState<ConflictSummary | null>(null);
   const reload = () => setTick((value) => value + 1);
+  // Loading while the last finished read is not the one asked for now.
+  const readKey = JSON.stringify([
+    filter,
+    pages,
+    revision,
+    tick,
+    changeVersion,
+  ]);
+  const [readDone, setReadDone] = useState("");
+  const loading = readDone !== readKey;
   useEffect(() => {
     let active = true;
-    void fetchEntries(filter, pages).then(
-      (result) => {
-        if (!active) return;
-        setEntries(result.entries);
-        setMore(result.more);
-        setLoadError(null);
-      },
-      (e: unknown) => {
-        if (active) setLoadError(describeFailure(e, "load the Inbox"));
-      },
-    );
+    void fetchEntries(filter, pages)
+      .then(
+        (result) => {
+          if (!active) return;
+          setEntries(result.entries);
+          setMore(result.more);
+          setLoadError(null);
+        },
+        (e: unknown) => {
+          if (active) setLoadError(describeFailure(e, "load the Inbox"));
+        },
+      )
+      .finally(() => {
+        if (active) setReadDone(readKey);
+      });
     return () => {
       active = false;
     };
-  }, [filter, pages, revision, tick, changeVersion]);
+  }, [filter, pages, revision, tick, changeVersion, readKey]);
   async function mark(ids: number[], read: boolean) {
     try {
       for (let start = 0; start < ids.length; start += MARK_BATCH)
@@ -270,27 +378,40 @@ export function Inbox({
   const syncShown = sync.entries.filter((e) => filter === "all" || !e.read);
   const unreadShown = entries.filter((e) => !e.read);
   const unreadSync = syncShown.filter((e) => !e.read).map((e) => e.id);
+  const unreadCount = unreadShown.length + unreadSync.length;
   const groups = groupEntries(mergeByTime(entries, syncShown), new Date());
+  const empty = entries.length + syncShown.length === 0 && !error && !loading;
+  // "Show 50 more": the first new row takes focus when the button had it.
+  const arriving = useRef<number | null>(null);
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const from = arriving.current;
+    if (from === null || entries.length <= from) return;
+    arriving.current = null;
+    body.current?.querySelectorAll<HTMLElement>(".inbox-ticket")[from]?.focus();
+  }, [entries.length]);
   return (
     <div className="inbox">
       <PaneHeader
         title="Inbox"
         actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={unreadShown.length + unreadSync.length === 0}
-            onClick={() => {
-              void mark(
-                unreadShown.map((e) => e.id),
-                true,
-              );
-              void markSync(unreadSync, true);
-            }}
-          >
-            <Check />
-            Mark shown as read
-          </Button>
+          // Only while something shown is unread (list I-07).
+          unreadCount > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void mark(
+                  unreadShown.map((e) => e.id),
+                  true,
+                );
+                void markSync(unreadSync, true);
+              }}
+            >
+              <Check />
+              Mark shown as read
+            </Button>
+          )
         }
       >
         <SegmentedControl
@@ -304,7 +425,7 @@ export function Inbox({
           ]}
         />
       </PaneHeader>
-      <div className="inbox-body">
+      <div className="inbox-body" ref={body}>
         {error && (
           <FailureAlert
             size="compact"
@@ -322,7 +443,6 @@ export function Inbox({
                     <SyncRow
                       key={e.id}
                       entry={e}
-                      time={entryTime(e.timestamp, group)}
                       mark={(read) => void markSync([e.id], read)}
                       open={() => {
                         if (e.conflict) setReviewing(e.conflict);
@@ -332,63 +452,70 @@ export function Inbox({
                   );
                 const noun = entryNoun(e);
                 return (
-                  <li key={e.id} className="inbox-entry" data-read={e.read}>
-                    {e.read ? (
-                      <span className="inbox-dot" aria-hidden="true" />
-                    ) : (
-                      <span className="inbox-dot">
-                        <StatusDot tone="unread" />
-                      </span>
-                    )}
-                    <span className="inbox-icon">
-                      <EntryIcon entry={e} />
-                    </span>
-                    <button
-                      className="inbox-ticket"
-                      onClick={() => {
-                        if (!e.read) void mark([e.id], true);
-                        // A deleted update still opens with its id, so the ticket says it is gone.
-                        if (e.kind === "activity")
-                          select(e.reference, e.from_value);
-                        else select(e.reference);
-                      }}
-                    >
-                      <span className="inbox-title-line">
-                        <Reference>{e.reference}</Reference>
-                        <span className="inbox-title">{e.title}</span>
-                        {!e.read && <span className="sr-only">Unread</span>}
-                      </span>
-                      <span className="inbox-summary">{summarize(e)}</span>
-                    </button>
-                    <time dateTime={e.timestamp}>
-                      {entryTime(e.timestamp, group)}
-                    </time>
-                    <span className="inbox-actions">
-                      {e.kind === "reminder" && (
+                  <InboxRow
+                    key={e.id}
+                    reference={e.reference}
+                    title={e.title}
+                    summary={summarize(e)}
+                    icon={<EntryIcon entry={e} />}
+                    read={e.read}
+                    timestamp={e.timestamp}
+                    current={selected === e.reference}
+                    markLabel={`Mark ${e.reference} ${noun} ${e.read ? "unread" : "read"}`}
+                    onOpen={() => {
+                      if (!e.read) void mark([e.id], true);
+                      // A deleted update still opens with its id, so the ticket says it is gone.
+                      if (e.kind === "activity")
+                        select(e.reference, e.from_value);
+                      else select(e.reference);
+                    }}
+                    onMark={() => void mark([e.id], !e.read)}
+                    {...(e.kind === "reminder" && {
+                      snooze: (request: number) => (
                         <Snooze
                           entry={e}
+                          openRequest={request}
                           snooze={(choice) => snooze(e, choice)}
                         />
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Mark ${e.reference} ${noun} ${e.read ? "unread" : "read"}`}
-                        title={e.read ? "Mark unread" : "Mark read"}
-                        onClick={() => void mark([e.id], !e.read)}
-                      >
-                        {e.read ? <Circle /> : <Check />}
-                      </Button>
-                    </span>
-                  </li>
+                      ),
+                    })}
+                  />
                 );
               })}
             </ul>
           </section>
         ))}
-        {entries.length + syncShown.length === 0 &&
-          filter === "all" &&
-          !error && (
+        {more && (
+          <Pager
+            noun="Inbox entries"
+            loading={loading}
+            onMore={() => {
+              arriving.current = document.activeElement?.closest(
+                '[data-slot="pager"]',
+              )
+                ? entries.length
+                : null;
+              setPages(pages + 1);
+            }}
+          />
+        )}
+        {empty &&
+          (filter === "unread" ? (
+            <EmptyState
+              icon={<Check />}
+              title={emptyCopy("inbox-unread").title}
+              description={emptyCopy("inbox-unread").sentence}
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changeFilter("all")}
+                >
+                  Show all
+                </Button>
+              }
+            />
+          ) : (
             <EmptyState
               icon={<InboxIcon />}
               title={emptyCopy("inbox-all").title}
@@ -400,41 +527,18 @@ export function Inbox({
               }
               footnote={
                 <>
-                  <Bell aria-hidden="true" />
+                  <Eye aria-hidden="true" />
                   Follow and Remind me live in each ticket’s Attention section.
                 </>
               }
             />
-          )}
-        {more && (
-          <div className="inbox-more">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setPages(pages + 1)}
-            >
-              Load older
-            </Button>
-          </div>
-        )}
-        {filter === "unread" && !more && !error && (
-          <p className="inbox-note">
-            That’s everything unread. Read changes stay under All.
-          </p>
-        )}
+          ))}
         {reviewing && (
           <ConflictReview
             conflict={reviewing}
             onClose={() => setReviewing(null)}
             onResolved={sync.reload}
           />
-        )}
-        {entries.length > 0 && (
-          <p className="inbox-footer">
-            <Bell aria-hidden="true" />
-            Follow or unfollow a ticket from its Attention section; reminders
-            live there too.
-          </p>
         )}
       </div>
     </div>
