@@ -181,7 +181,7 @@
   --dur-settle: 160ms;
   --dur-arrival: 1200ms;
   --dur-loading-delay: 300ms;
-  --dur-spin: 1000ms;
+  --dur-spin: 900ms;
   --dur-instant: 0ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
