@@ -21,10 +21,18 @@ function glyph(status: string): LucideIcon {
         fill="none"
         {...props}
       >
+        {/* Always present: returning to Todo must sweep the old fill away too. */}
+        <circle
+          className="status-glyph-sweep-disc"
+          cx="8"
+          cy="8"
+          r={status === "Done" ? 7 : 3.75}
+          fill="currentColor"
+        />
         {status === "Done" ? (
           <>
             <circle
-              className="status-glyph-disc"
+              className="status-glyph-disc status-glyph-static"
               cx="8"
               cy="8"
               r="7"
@@ -49,25 +57,16 @@ function glyph(status: string): LucideIcon {
               stroke="currentColor"
               strokeWidth="1.5"
             />
-            {(status === "In progress" || status === "In review") && (
-              <circle
-                className="status-glyph-sweep-disc"
-                cx="8"
-                cy="8"
-                r="3.75"
-                fill="currentColor"
-              />
-            )}
             {status === "In progress" && (
               <path
-                className="status-glyph-pie"
+                className="status-glyph-pie status-glyph-static"
                 fill="currentColor"
                 d="M8 4.25a3.75 3.75 0 0 1 0 7.5z"
               />
             )}
             {status === "In review" && (
               <path
-                className="status-glyph-pie"
+                className="status-glyph-pie status-glyph-static"
                 fill="currentColor"
                 d="M8 4.25a3.75 3.75 0 1 1-3.75 3.75H8z"
               />

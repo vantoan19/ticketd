@@ -76,7 +76,7 @@ export function useBoardStatus(workspace: {
         '[aria-label="Ticket status board"]',
       );
       const trigger = board?.querySelector<HTMLElement>(
-        `[aria-label="Change status of ${reference}"]`,
+        `[data-board-status-reference="${reference}"]`,
       );
       const active = document.activeElement;
       if (
@@ -172,7 +172,7 @@ export function useBoardStatus(workspace: {
     }
     attempts.current.delete(reference);
     returnFocus.current = document.querySelector<HTMLElement>(
-      `button[aria-label="Change status of ${reference}"]`,
+      `button[data-board-status-reference="${reference}"]`,
     );
     lock(reference, true);
     clearNotice();

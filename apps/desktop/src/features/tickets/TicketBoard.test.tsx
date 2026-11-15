@@ -246,7 +246,7 @@ async function showBoard() {
 }
 async function chooseStatus(reference: string, status: string) {
   const trigger = screen.getByRole("button", {
-    name: `Change status of ${reference}`,
+    name: new RegExp(`^Change status of ${reference}, current status:`),
   });
   trigger.focus();
   fireEvent.keyDown(trigger, { key: "Enter" });
@@ -551,7 +551,9 @@ test("a pending dragged ticket cannot be dragged again or changed through its me
   expect(screen.queryByText("Drop to change status to Done.")).toBeNull();
   releasePointer(1000);
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   ).toHaveProperty("disabled", true);
   expect(
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
@@ -624,13 +626,19 @@ test("choosing the saved status does not write, and a pending card cannot submit
   await chooseStatus("T-KQ1", "Done");
   expect(screen.getByText("Saving…")).toBeTruthy();
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   ).toHaveProperty("disabled", true);
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ2" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ2, current status:/,
+    }),
   ).toHaveProperty("disabled", false);
   fireEvent.keyDown(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
     { key: "Enter" },
   );
   await settle();
@@ -644,7 +652,9 @@ test("choosing the saved status does not write, and a pending card cannot submit
   await settle(20);
   expect(screen.queryByText("Saving…")).toBeNull();
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   );
 });
 
@@ -768,7 +778,9 @@ test("card menus honor core status choices, source closure exceptions and retain
   await settle();
   await showBoard();
   fireEvent.keyDown(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
     { key: "Enter" },
   );
   await settle();
@@ -814,7 +826,9 @@ test("ownership changes during a card save reconcile the saved state and permitt
     ),
   ).toBeTruthy();
   fireEvent.keyDown(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
     { key: "Enter" },
   );
   await settle();
@@ -860,7 +874,9 @@ test("Duplicate uses the existing review and canceling either duplicate flow pre
   await settle(20);
   expect(saved[0]?.status).toBe("Todo");
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   );
   saved[0] = { ...ticket(1, "Duplicate"), duplicate_of: "T-KQ2" };
   change++;
@@ -994,7 +1010,9 @@ test("a duplicate save stays protected until its reviewed request finishes", asy
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByText("Moved T-KQ1 to Duplicate")).toBeTruthy();
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   );
 });
 
@@ -1012,7 +1030,9 @@ test("switching layouts preserves a pending card request and its protection", as
   await settle();
   await showBoard();
   expect(
-    screen.getByRole("button", { name: "Change status of T-KQ1" }),
+    screen.getByRole("button", {
+      name: /^Change status of T-KQ1, current status:/,
+    }),
   ).toHaveProperty("disabled", true);
   expect(screen.getByText("Saving…")).toBeTruthy();
   await act(async () => {
@@ -1090,7 +1110,9 @@ test("a card status action changes only that ticket and leaves the selected deta
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Keep my draft" },
   });
-  const action = screen.getByRole("button", { name: "Change status of T-KQ1" });
+  const action = screen.getByRole("button", {
+    name: /^Change status of T-KQ1, current status:/,
+  });
   fireEvent.keyDown(action, { key: "Enter" });
   await settle();
   fireEvent.click(screen.getByRole("menuitemradio", { name: "In progress" }));
@@ -1530,4 +1552,31 @@ test("a board card says Needs review in place of its readiness", async () => {
   // Ready is the Todo column's norm, so a card flags only Blocked.
   expect(card("T-KQ3")?.textContent).not.toContain("Ready");
   expect(card("T-KQ3")?.textContent).not.toContain("Needs review");
+});
+
+test("board cards and their status actions announce the current status once", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  expect(
+    screen.getByRole("button", { name: "T-KQ2 In review Ticket 2" }),
+  ).toBeTruthy();
+  const trigger = screen.getByRole("button", {
+    name: "Change status of T-KQ2, current status: In review",
+  });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await settle();
+  expect(screen.getByRole("menuitemradio", { name: "In review" })).toBeTruthy();
+  expect(within(screen.getByRole("menu")).queryByRole("img")).toBeNull();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Done" }));
+  await settle(20);
+  expect(
+    screen.getByRole("button", { name: "T-KQ2 Done Ticket 2" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", {
+      name: "Change status of T-KQ2, current status: Done",
+    }),
+  ).toBeTruthy();
 });

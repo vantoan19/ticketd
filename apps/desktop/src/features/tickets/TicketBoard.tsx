@@ -446,8 +446,9 @@ function BoardCard({
         onClick={onClick}
       >
         <span className="board-card-top">
-          <StatusIcon status={ticket.status} decorative />
-          <Reference>{ticket.reference}</Reference>
+          <StatusIcon status={ticket.status} size={14} decorative />
+          <Reference>{ticket.reference}</Reference>{" "}
+          <span className="sr-only">{ticket.status}</span>{" "}
           <SourcePill ticket={ticket} />
           {pending && (
             <span className="board-card-pending" role="status">
@@ -455,7 +456,7 @@ function BoardCard({
               Saving…
             </span>
           )}
-        </span>
+        </span>{" "}
         <Tooltip content={ticket.title} overflowOnly>
           <span className="board-card-title">{ticket.title}</span>
         </Tooltip>
@@ -493,11 +494,12 @@ function BoardCard({
           <DropdownMenuTrigger asChild disabled={ticket.trashed || pending}>
             <IconButton
               variant="outline"
-              label={`Change status of ${ticket.reference}`}
+              data-board-status-reference={ticket.reference}
+              label={`Change status of ${ticket.reference}, current status: ${ticket.status}`}
               tooltipSide="top"
               disabled={ticket.trashed || pending}
             >
-              <StatusIcon status={ticket.status} decorative />
+              <StatusIcon status={ticket.status} size={14} decorative />
             </IconButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
