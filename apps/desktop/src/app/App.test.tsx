@@ -7867,3 +7867,64 @@ test("Inbox palette actions share selected-entry read, reminder and Activity han
     screen.getByRole("textbox", { name: "New update rich text" }).textContent,
   ).toContain("Your reminder is due");
 });
+
+test("Inbox loading announces its read without guessing urgency, then retains entries if refreshing fails", async () => {
+  let finish: ((value: unknown) => void) | undefined;
+  const pending = new Promise((resolve) => {
+    finish = resolve;
+  });
+  let failRefresh = false;
+  const due = "2020-01-01T00:00:00Z";
+  bridge.invoke.mockImplementation((command: string, args) => {
+    if (command === "inbox") {
+      if (failRefresh) throw new Error("temporary inbox read failure");
+      return pending;
+    }
+    if (command === "reminder") return due;
+    return bridgeDefault(command, args);
+  });
+  vi.useFakeTimers();
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+  expect(screen.getByRole("status", { name: "Loading Inbox" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: /Needs you/ })).toBeNull();
+  expect(screen.queryByText("You're all caught up")).toBeNull();
+  await act(async () =>
+    finish?.([
+      {
+        id: 1,
+        reference: "T-KQ1",
+        title: "Retained reminder",
+        kind: "reminder",
+        from_value: "",
+        to_value: due,
+        timestamp: due,
+        read: false,
+        editing_agent: null,
+      },
+    ]),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", {
+    name: /T-KQ1.*Retained reminder.*Your reminder/,
+  });
+  expect(screen.getByRole("heading", { name: /Needs you/ })).toBeTruthy();
+  expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
+  failRefresh = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByText(/Couldn't load the Inbox/)).toBeTruthy();
+  expect(
+    screen.getByRole("button", {
+      name: /T-KQ1.*Retained reminder.*Your reminder/,
+    }),
+  ).toBe(row);
+  expect(screen.queryByText("You're all caught up")).toBeNull();
+  expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
+});
