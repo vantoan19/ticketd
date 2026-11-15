@@ -6208,6 +6208,161 @@ test("first run creates through the shared dialog and gives way to the ticket li
   ).toBeNull();
 });
 
+test("first-run Install skill settles successful reads and keeps Settings navigation responsive", async () => {
+  let reads = 0;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      // Stop a regressed effect loop at the bridge boundary, rather than hanging
+      // the runner. Every answer before the cap is a valid successful read.
+      if (command === "agent_skills") {
+        if (++reads > 8) throw new Error("Agent skill checks did not settle");
+        return [];
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const guide = await screen.findByRole("region", {
+    name: "Your workspace is ready",
+  });
+  fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
+  await act(async () => {});
+  expect(reads).toBeLessThanOrEqual(6);
+  expect(
+    screen.getByText("No supported agent was found on this computer"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
+  expect(
+    await screen.findByRole("region", { name: "Your workspace is ready" }),
+  ).toBeTruthy();
+});
+
+test("Settings Agent skills settles reads and refreshes its setup dot after install and Check again", async () => {
+  let reads = 0;
+  let installed = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "agent_skills") {
+        if (++reads > 12) throw new Error("Agent skill checks did not settle");
+        return [
+          {
+            id: "claude",
+            name: "Claude Code",
+            path: "/fake/skills",
+            detected: true,
+            state: installed ? "installed" : "not_installed",
+            error: null,
+          },
+        ];
+      }
+      if (command === "install_agent_skill") {
+        installed = true;
+        return { backup: null };
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  const nav = within(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  );
+  fireEvent.click(nav.getByRole("button", { name: /^Agent skills/ }));
+  await act(async () => {});
+  expect(reads).toBeLessThanOrEqual(6);
+  const skillNav = () =>
+    within(nav.getByRole("button", { name: /^Agent skills/ }));
+  expect(skillNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Install for Claude Code" }),
+  );
+  await act(async () => {});
+  expect(screen.getByText("Done for Claude Code.")).toBeTruthy();
+  expect(skillNav().queryByRole("img", { name: "Needs setup" })).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.filter(
+      ([command]) => command === "install_agent_skill",
+    ),
+  ).toEqual([["install_agent_skill", { agent: "claude", replace: false }]]);
+
+  installed = false;
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  await act(async () => {});
+  expect(
+    screen.getByRole("button", { name: "Install for Claude Code" }),
+  ).toBeTruthy();
+  expect(skillNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
+  expect(reads).toBeLessThanOrEqual(10);
+  fireEvent.click(nav.getByRole("button", { name: "Appearance" }));
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+});
+
+test("Settings Command line settles successful checks and Check again updates the setup dot", async () => {
+  let reads = 0;
+  let installed = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "check_cli") {
+        if (++reads > 12) throw new Error("Command-line checks did not settle");
+        return installed
+          ? {
+              found: true,
+              on_path: true,
+              path: "/fake/bin/ticketd",
+              version: "0.1.0",
+              version_matches: true,
+              workspace_path: "/fake/workspace.sqlite3",
+              workspace_matches: true,
+              app_version: "0.1.0",
+              app_workspace_path: "/fake/workspace.sqlite3",
+              suggested_directory: "~/.local/bin",
+            }
+          : bridgeDefault(command, args);
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  const nav = within(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  );
+  fireEvent.click(nav.getByRole("button", { name: /^Command line/ }));
+  await act(async () => {});
+  expect(reads).toBeLessThanOrEqual(5);
+  expect(screen.getByText("Not found")).toBeTruthy();
+  const cliNav = () =>
+    within(nav.getByRole("button", { name: /^Command line/ }));
+  expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
+
+  installed = true;
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  await act(async () => {});
+  expect(
+    screen.getByText("It matches this app and uses this workspace."),
+  ).toBeTruthy();
+  expect(cliNav().queryByRole("img", { name: "Needs setup" })).toBeNull();
+  installed = false;
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  await act(async () => {});
+  expect(screen.getByText("Not found")).toBeTruthy();
+  expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
+  expect(reads).toBeLessThanOrEqual(9);
+  fireEvent.click(nav.getByRole("button", { name: "Appearance" }));
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+});
+
 test("first run reads completed steps and opens the exact existing Settings sections", async () => {
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {

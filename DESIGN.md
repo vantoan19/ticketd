@@ -617,6 +617,10 @@ The list lives in `settings-sections.ts`; a section is added there with its page
 - **Search:** a labelled input, a status line, and results grouped by section as link rows with the match highlighted (semibold with an underline, not color alone). With no query it shows only the input and its status line; a query with no match shows an unboxed empty state that offers shortcuts to common sections, and the status line is then spoken only. Results come from one registry beside the section list, with one entry per setting; a test keeps every entry pointing at a real section.
 - **Restore, replace and disconnect:** restoring a workspace backup always goes through a review on DialogShell lg titled "Replace this workspace?": first an attention notice that it replaces everything including follows, reminders and inbox state, then this workspace beside the backup at 14/20 (differing values at 500), the chosen file, and attachment details behind one disclosure. The footer note says a safety backup comes first; the only destructive control is "Replace workspace" ("Replacing…" while it runs). A file that cannot be restored shows why at the top, hides the destructive button and makes "Choose another file…" the primary. Google Drive's download replaces the workspace too and uses the same grammar with a destructive primary. Replacing an agent skill, disconnecting Google Drive, switching its account and turning Chat off ask first in a dialog that names what changes. Never use a browser confirmation.
 
+Agent skills and Command line check when their page opens and when Check again is
+chosen; skill installation also reads the resulting state. These checks refresh
+the nav's setup dot, whose update never starts another page check.
+
 ## 11. Design system and shared components
 
 ticketd's interface is assembled from one design system: the tokens in `apps/desktop/src/styles.css`, the bundled Geist fonts, and the shared React components in `apps/desktop/src/components/ui`, which are shadcn/ui copies restyled with the tokens. A web client can reuse them by building the same source; a separate package earns its place only once a second app imports the components.
