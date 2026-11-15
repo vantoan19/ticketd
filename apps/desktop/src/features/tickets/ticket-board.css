@@ -334,3 +334,10 @@
     flex: 1 1 0 !important;
   }
 }
+
+/* Card status glyphs keep the 14px specimen size inside shared buttons. */
+.board-card .status-glyph,
+.board-card-status .status-glyph {
+  width: 14px;
+  height: 14px;
+}
