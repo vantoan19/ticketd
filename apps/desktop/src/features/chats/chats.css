@@ -4,17 +4,22 @@
 .chats-workspace #chat-detail {
   min-width: 0;
 }
-/* One pane at a time below 840px and in Expanded. The panes stay mounted and
-   are hidden instead (DESIGN §5). !important: the panel library sets flex and
-   size inline on each panel, which only !important beats. */
-.chats-workspace[data-single] [data-slot="resizable-handle"],
+/* One pane at a time below 840px and in Expanded. Both panes stay mounted
+   (DESIGN §5). The panel library sets display and flex inline, so the hidden
+   pane leaves the flex row by position, not display, and the shown one, alone
+   in the row, takes its width. Hidden by visibility, it also leaves the tab
+   order and keeps its scroll position, which display: none would reset. */
+.chats-workspace {
+  position: relative;
+}
+.chats-workspace[data-single] [data-slot="resizable-handle"] {
+  display: none;
+}
 .chats-workspace[data-single="list"] #chat-detail,
 .chats-workspace[data-single="detail"] #chat-list {
-  display: none !important;
-}
-.chats-workspace[data-single="list"] #chat-list,
-.chats-workspace[data-single="detail"] #chat-detail {
-  flex: 1 1 0 !important;
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
 }
 .chat-pane {
   container: ticket-detail / inline-size;

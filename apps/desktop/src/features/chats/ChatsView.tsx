@@ -444,22 +444,25 @@ export function ChatsView({
   // an open Chat and the list's scroll survive a mode change.
   return (
     <div ref={workspaceRef} className="plan-workspace">
-      <ResizablePanelGroup
-        orientation="horizontal"
-        // The handle is hidden in single mode; left enabled, the panel library
-        // would still claim presses near it.
-        disabled={single}
+      <div
         className="ticket-workspace chats-workspace"
         data-single={single ? (open ? "detail" : "list") : undefined}
       >
-        <ResizablePanel id="chat-list" minSize={360} defaultSize={384}>
-          {listPane}
-        </ResizablePanel>
-        <ResizableHandle aria-label="Resize Chat list" />
-        <ResizablePanel id="chat-detail" minSize={480} style={PANEL_STYLE}>
-          {detailPane}
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        <ResizablePanelGroup
+          orientation="horizontal"
+          // The handle is hidden in single mode; left enabled, the panel
+          // library would still claim presses near it.
+          disabled={single}
+        >
+          <ResizablePanel id="chat-list" minSize={360} defaultSize={384}>
+            {listPane}
+          </ResizablePanel>
+          <ResizableHandle aria-label="Resize Chat list" />
+          <ResizablePanel id="chat-detail" minSize={480} style={PANEL_STYLE}>
+            {detailPane}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
     </div>
   );
 }
