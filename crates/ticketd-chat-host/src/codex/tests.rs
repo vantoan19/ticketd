@@ -1160,24 +1160,31 @@ fn an_unattended_session_declines_every_approval_request_at_once() {
 }
 
 /// L5: an unattended thread starts none of the person's MCP servers (named from
-/// their configuration), plugins or apps.
+/// their configuration), plugins or apps, and runs none of their hooks, notify
+/// program, project instructions, memories, sub-agents, computer or browser use, or
+/// skills that Codex lets a thread switch off.
 #[test]
-fn an_unattended_thread_turns_off_each_of_the_persons_mcp_servers_plugins_and_apps() {
+fn an_unattended_thread_turns_off_what_codex_lets_it_of_the_persons_setup() {
+    let always = json!({
+        "features.plugins": false,
+        "features.apps": false,
+        "features.hooks": false,
+        "features.memories": false,
+        "features.multi_agent": false,
+        "features.computer_use": false,
+        "features.browser_use": false,
+        "notify": [],
+        "project_doc_max_bytes": 0,
+        "skills.bundled.enabled": false,
+        "skills.include_instructions": false,
+    });
     let config =
         json!({"mcp_servers": {"docs": {"command": "docs-mcp"}, "web": {"url": "https://x"}}});
-    assert_eq!(
-        super::personal_tools_off(Some(&config)),
-        json!({
-            "features.plugins": false,
-            "features.apps": false,
-            "mcp_servers.docs.enabled": false,
-            "mcp_servers.web.enabled": false,
-        })
-    );
-    assert_eq!(
-        super::personal_tools_off(None),
-        json!({"features.plugins": false, "features.apps": false})
-    );
+    let mut with_servers = always.clone();
+    with_servers["mcp_servers.docs.enabled"] = json!(false);
+    with_servers["mcp_servers.web.enabled"] = json!(false);
+    assert_eq!(super::personal_tools_off(Some(&config)), with_servers);
+    assert_eq!(super::personal_tools_off(None), always);
 }
 
 /// L2: a Chat taken over from a run resumes with the person's own approval policy
