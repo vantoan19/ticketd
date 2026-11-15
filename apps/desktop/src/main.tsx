@@ -11,7 +11,7 @@ import { keepWebviewInStep } from "@/lib/webview-scale";
 const root = document.getElementById("root");
 if (root === null) throw new Error("Missing application root");
 
-applyStoredTheme();
+void applyStoredTheme();
 keepWebviewInStep();
 const applicationRoot = createRoot(root);
 if (import.meta.env.DEV && window.location.hash === "#plate-prototype") {

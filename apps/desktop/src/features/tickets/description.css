@@ -85,7 +85,7 @@
 /* The followed passage flashes once, as any arrival does (detA TT-04). */
 .description-document [data-mention-target] {
   border-radius: var(--radius);
-  animation: arrival-flash 1.2s ease-out 0.2s both;
+  animation: arrival-flash var(--dur-arrival) var(--ease-out) var(--dur-3) both;
 }
 .description-document [data-mention-target]:focus {
   outline: none;

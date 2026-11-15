@@ -53,7 +53,7 @@
   top: 4px;
   right: 8px;
   opacity: 0;
-  transition: opacity 100ms ease-out;
+  transition: opacity var(--dur-exit) var(--ease-out);
 }
 /* Keyboard focus shows it (Right Arrow reaches it); a click that leaves focus
    on the open row does not, so the open row keeps its time (CH-05). */
@@ -337,17 +337,17 @@
   height: 40px;
   overflow: hidden;
   transition:
-    height 120ms ease-out,
-    opacity 120ms ease-out;
+    height var(--dur-lift) var(--ease-out),
+    opacity var(--dur-lift) var(--ease-out);
 }
 .chat-jump:not([data-shown]) {
   height: 0;
   opacity: 0;
   visibility: hidden;
   transition:
-    height 120ms ease-out,
-    opacity 120ms ease-out,
-    visibility 0s linear 120ms;
+    height var(--dur-lift) var(--ease-out),
+    opacity var(--dur-lift) var(--ease-out),
+    visibility var(--dur-instant) linear var(--dur-lift);
 }
 .chat-new-marker {
   display: inline-flex;
@@ -379,7 +379,7 @@
    while it moves. */
 .chat-dock-slot {
   flex: none;
-  transition: height 150ms ease-out;
+  transition: height var(--dur-2) var(--ease-out);
 }
 /* While it glides the slot is clipped from the top: the bottom of the card,
    where its buttons are, shows from the first frame (LIVE2-3). The clip
@@ -569,7 +569,7 @@ button.chat-steps:hover {
    own (MOTION-8). */
 .chat-step-verb {
   display: inline-block;
-  transition: min-width 160ms ease-out;
+  transition: min-width var(--dur-settle) var(--ease-out);
 }
 @media (prefers-reduced-motion: reduce) {
   .chat-step-verb {
@@ -613,7 +613,7 @@ button.chat-steps:hover {
 /* The turn row: muted, its chevron after the text and always shown. */
 /* A fold row that appears as a turn ends here fades in; history doesn't. */
 .chat-fold[data-fresh] {
-  animation: chat-fade-in 120ms ease-out;
+  animation: chat-fade-in var(--dur-lift) var(--ease-out);
 }
 @keyframes chat-fade-in {
   from {
@@ -1925,7 +1925,7 @@ button.chat-file-name:focus-visible {
   line-height: var(--text-ui-line);
 }
 .chat-spin {
-  animation: chat-spin 1s linear infinite;
+  animation: chat-spin var(--dur-spin) linear infinite;
 }
 @keyframes chat-spin {
   to {

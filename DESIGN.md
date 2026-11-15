@@ -10,7 +10,7 @@ Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](
 
 The visual reference is the third-party [Vercel design language analysis by design-bites](https://github.com/educlopez/design-bites/blob/main/design-mds/vercel.com/DESIGN.md). Use its published numeric values for the light palette, type scale, control sizes, spacing scale, radii, focus treatment, and elevation. It is a third-party observation rather than an official Vercel specification. The tables below distinguish those source values from ticketd-specific layout assignments and dark-theme extensions.
 
-Use a Linear-style issue workspace with the Vercel palette and components. Ticketd needs its own application composition: a persistent workspace, a scan-friendly ticket list, a readable document, and reliable editing feedback. Map the reference roles onto these application surfaces without inventing replacement token values. Ticketd uses an explicit compact application heading of 24px/32px with weight 600 and -0.6px tracking. This is a ticketd density adaptation, not a value copied from the reference. The 48px display role remains available for genuine display content and is not applied to every ticket. Workspace pane widths and responsive transitions are ticketd layout decisions. Vercel branding does not belong in this workspace. Use the reference’s shadow boundaries and spacing-led grouping.
+Use a Linear-style issue workspace with the Vercel palette and components. Ticketd needs its own application composition: a persistent workspace, a scan-friendly ticket list, a readable document, and reliable editing feedback. Map the reference roles onto these application surfaces without inventing replacement token values. Ticketd uses an explicit compact application heading of 24px/32px with weight 600 and -0.6px tracking. This is a ticketd density adaptation, not a value copied from the reference. The 32/40 display role is reserved for expanded titles and first run. Workspace pane widths and responsive transitions are ticketd layout decisions. Vercel branding does not belong in this workspace. Use the reference’s shadow boundaries and spacing-led grouping.
 
 The workspace structure also borrows interaction patterns that Linear, GitHub Issues, and Orca share: a ticket list grouped by status, a labeled property rail beside the document, an external issue’s description shown as a read-only source card, and its comments and events on one connected timeline. Borrow these structures, not those products’ styling or branding.
 
@@ -121,24 +121,40 @@ Each dot color keeps one meaning across every view:
 
 Transient and settled states, such as Refreshing GitHub… or Closed on GitHub, use words without a dot.
 
+### Next-generation surface roles
+
+| Token             | Light     | Dark      |
+| ----------------- | --------- | --------- |
+| `--card`          | `#FFFFFF` | `#1F1F1F` |
+| `--card-hover`    | `#FBFBFB` | `#242424` |
+| `--well`          | `#F5F5F5` | `#1B1B1B` |
+| `--track`         | `#E8E8E8` | `#2E2E2E` |
+| `--faint`         | `#8F8F8F` | `#5C5C5C` |
+| `--seg-done`      | `#171717` | `#EDEDED` |
+| `--seg-review`    | `#707070` | `#8F8F8F` |
+| `--seg-progress`  | `#B8B8B8` | `#4F4F4F` |
+| `--primary-hover` | `#383838` | `#D4D4D4` |
+
+Faint is decorative only, never necessary text. Dark layers rise from panel through well to card and popover. Light wells sink below white cards. Segment colours describe Plan progress. Existing hover, dark popover, tooltip and destructive values stay as specified above. A blocking theme bootstrap reads the stored choice before module loading. The native window starts hidden and shows after its theme and window/webview background requests finish, including startup recovery. An independent native watchdog reveals a still-hidden window after five seconds if module loading or native painting stalls. The first successful frontend reveal cancels the watchdog, so later actions to hide the app are respected. When no application has rendered, it shows “Couldn’t start ticketd” with a quit-and-reopen step on its own theme-matched canvas, independent of application CSS.
+
 ## 3. Typography
 
 Bundle Geist Sans and Geist Mono locally. Use the reference’s actual 400, 500, and 600 weights; include a real medium face before using 500. Do not synthesize 550, 650, or 700. Sans handles the interface and prose; Mono handles code, references, paths, and identifiers. Enable standard ligatures for prose, and preserve exact identifier legibility.
 
 ### Reference scale and ticketd assignments
 
-| Reference role      | Size | Weight | Line height | Tracking  | Ticketd assignment                                       |
-| ------------------- | ---- | ------ | ----------- | --------- | -------------------------------------------------------- |
-| Display heading     | 48px | 600    | 48px        | `-2.28px` | Reserved for display content; not ordinary ticket chrome |
-| Section title       | 32px | 600    | 40px        | `-1.28px` | Reserved for spacious standalone views                   |
-| Subsection heading  | 14px | 500    | 20px        | `-0.28px` | Activity, evidence, relationships, list heading          |
-| Tertiary heading    | 14px | 400    | 20px        | Normal    | Supporting section labels                                |
-| Body / inline link  | 16px | 400    | Normal      | Normal    | Long-form standalone reading                             |
-| Button              | 14px | 400    | 14px        | Normal    | Button and compact action labels                         |
-| Label               | 14px | 400    | 20px        | Normal    | Field and property labels, navigation                    |
-| Caption             | 12px | 400    | 16px        | Normal    | Dates, hints, counts, supporting metadata                |
-| Code / preformatted | 13px | 500    | 20px        | Normal    | Code, references, paths, commit identifiers              |
+| Role           | Size / line | Weight   | Tracking | Token / use                                                                 |
+| -------------- | ----------- | -------- | -------- | --------------------------------------------------------------------------- |
+| Display        | 32 / 40     | 600      | -1.1px   | `--text-section`, `--text-section-line`; expanded titles, first run         |
+| Document title | 28 / 36     | 600      | -0.84px  | `--text-doc-title`, `--text-doc-title-line`; split Ticket and triage titles |
+| Title          | 24 / 32     | 600      | -0.6px   | `--text-title`, `--text-title-line`; management and dialog titles           |
+| Reading        | 16 / 26     | 400      | Normal   | `--text-reading`, `--text-reading-line`; long-form readers                  |
+| Document       | 15 / 24     | 400      | Normal   | `--text-doc`, `--text-doc-line`; split-pane prose                           |
+| Interface      | 14 / 20     | 400, 500 | Normal   | `--text-ui`, `--text-ui-line`; controls and navigation                      |
+| Code           | 13 / 20     | 400 mono | Normal   | `--text-code`; references, paths, commands                                  |
+| Caption        | 12 / 16     | 400      | Normal   | `--text-caption`, `--text-caption-line`; metadata and keyboard chips        |
 
+These next-generation roles are available to each surface as it is updated. Adding a role does not resize existing prose or titles. Keyboard chips always use caption size, including inside tooltips and buttons. Nothing is smaller than 12px. Display and document-title tracking use `--text-section-tracking` and `--text-doc-title-tracking`.
 Use the source’s form tokens for shared inputs: 14px/20px default and 16px/24px large. Its observed native input size is 13.3px; ticketd’s themed form controls use the explicit 14px form token rather than relying on browser-native metrics. Root text size is 16px, so the reference’s `.875rem` form size resolves to 14px. The root stays 16px for rem maths, but `body`, dialogs, sheets, popovers and menus set the 14/20 working role, so text that no class sizes never renders at 16px; the 16px reading role is opt-in. Prose (paragraphs, captions, ledes, empty-state sentences) wraps with `text-wrap-style: pretty` and headings with `balance`, so blocks do not end in one-word lines.
 
 Do not shrink the entire workspace to a 13px root or scale down type to fit an extra pane. Choose the appropriate existing role instead: captions are 12px, navigation, ticket rows, descriptions, and updates are 14px/20px in the working panes. Semibold is reserved for display/section-title emphasis; small section headings use the real medium weight.
@@ -179,7 +195,7 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Large control                          | 48px   | Deliberately prominent actions / coarse-pointer forms |
 | Default radius `--radius`              | 6px    | Inputs, buttons, small controls                       |
 | Segment radius `--radius-segment`      | 4px    | Segments, keys and other small inner shapes           |
-| Marketing radius                       | 8px    | Reserved; not a replacement control radius            |
+| Content radius `--radius-card`         | 8px    | Content cards, rows and code blocks                   |
 | Elevated panel radius `--radius-panel` | 12px   | Content panel, cards, menus, dialogs, sheets          |
 | Pill radius `--radius-pill`            | 9999px | Tags or compact badges only                           |
 | Header height                          | 48px   | List pane header and detail pane header               |
@@ -188,11 +204,11 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Standard content width                 | 1200px | Management content maximum                            |
 | Wide content width                     | 1400px | Wide content views where useful                       |
 
-Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. The reserved 8px maps to `--radius` and 10px to `--radius-panel`, whichever is nearer. Control outlines drawn at `#00000024` use `--shadow-border-base` (8% in light, 14% in dark), which is a lighter outline in light than the literal was. A dialog keeps its ring from `--shadow-modal` and has no border of its own. A placeholder is text and uses `--disabled-foreground`; `--control-boundary` is for outlines and empty tracks. Hairlines at `#0000000f` use `--group-hairline` (`#0000000D` in light, `#FFFFFF14` in dark), and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
+Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. Content corners at 8px use `--radius-card`; 10px maps to `--radius-panel`. Control outlines drawn at `#00000024` use `--shadow-border-base` (8% in light, 14% in dark), which is a lighter outline in light than the literal was. A dialog keeps its ring from `--shadow-modal` and has no border of its own. A placeholder is text and uses `--disabled-foreground`; `--control-boundary` is for outlines and empty tracks. Hairlines at `#0000000f` use `--group-hairline` (`#0000000D` in light, `#FFFFFF14` in dark), and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
 
 Pane widths and row columns are ticketd geometry, defined below. The application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/content-panel shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
 
-Lucide icons remain 16px inside ordinary controls, with consistent stroke weight. Icon-only actions have accessible names and hover/focus tooltips. A 16px icon sits inside a 32px or larger hit area.
+Lucide icons remain 16px inside ordinary controls, with consistent stroke weight. Icon-only actions have accessible names and hover/focus tooltips. Header icons have a 28px hit area; other controls retain their specified sizes, with a 44px minimum for coarse pointers.
 
 ### Tooltip
 
@@ -229,6 +245,18 @@ Overlay surfaces: menus, selects, listboxes and command lists use `--popover` wi
 The document plane, ticket rows, and inline sections remain flat. Floating menus and dialogs use their corresponding elevation. Overlays always have an explicit opaque background and foreground, including when rendered through a portal.
 
 Focus keeps the reference's look but is drawn with `outline`, never `box-shadow`, so it never shares a property with a control's edge or an overlay's elevation: `outline: 2px solid var(--ring)` at a 2px offset on free-standing controls, at −2px on rows inside lists and scrollers (where an outer ring would be clipped or cover the neighbors), and the 1px `--input-focus` outline on text fields. Focus is independent of hover and selection, and uses system-visible outlines under forced colors. After a pointer interaction the modality reset clears `outline` only, so a menu or button focused by script after a click keeps its shadow. Focus moved by script to a container or heading (a pane, a menu or dialog frame, a title after a bulk change, a mention target) never shows a ring. A guard test rejects focus drawn with `box-shadow`, a pointer reset that touches `box-shadow`, `inset var(--focus-ring)`, and any rule that removes an overlay's shadow.
+
+### Next-generation foundation sizing and elevation
+
+Lucide icons use `--icon-stroke: 1.75` everywhere. Header controls use `--header-control-height: 28px`, inside the existing pane header geometry; coarse pointers retain a 44px minimum. Existing control and panel radii stay 6px and 12px; `--radius-card: 8px` is available for content cards, rows and code blocks.
+
+| Shadow token         | Light                                                                       | Dark                                                                         |
+| -------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `--shadow-panel`     | `0 0 0 1px #00000012, 0 1px 3px #0000000A`                                  | `0 0 0 1px #FFFFFF17`                                                        |
+| `--shadow-card`      | `0 0 0 1px #0000000F, 0 1px 2px #0000000D`                                  | `0 0 0 1px #FFFFFF12, 0 1px 2px #00000066`                                   |
+| `--shadow-card-lift` | `0 0 0 1px #00000014, 0 12px 28px -8px #00000033, 0 4px 8px -4px #0000001A` | `0 0 0 1px #FFFFFF24, 0 16px 32px -8px #000000B3, 0 4px 10px -4px #00000080` |
+
+The content panel uses `--shadow-panel`. Menu, modal and tooltip shadows retain their existing values.
 
 ## 5. Workspace layout
 
@@ -699,7 +727,9 @@ One cause is reported once, at the place it concerns, in plain words. The core s
 - **Workspace band.** Workspace-level state only (read-only, locked, unreadable, disk full, unsaved drafts not protected) is one 40px band inside the top edge of the content panel: `--recessed` with a bottom hairline, an attention dot, one sentence (“This workspace is read-only. Changes can’t be saved.”), Details, and Retry. There is at most one; it stays until Retry succeeds. The one lasting workspace notice that is not a failure, the legacy-draft review, uses the same band with a neutral dot and its one action ("All desktop profiles reviewed"), and gives way while a failure band shows. Nothing else repeats the cause: editors add no notice of their own, and editing controls rest disabled with the reason.
 - **Startup.** When the workspace cannot be opened, the window shows a recovery screen in the app’s theme (the native title bar included): one 520px column 120px from the top with the wordmark, an alert IconTile, “ticketd can’t open this workspace” at 24/32, the plain cause, the workspace file as PathText on `--surface` with Copy path and Show in Finder, Retry, and Details on its own line. Restore from a backup and Choose another workspace are not offered there: a restore needs a readable workspace for its safety copy, and the workspace location is fixed.
 
-Buttons and links change color/background without scale, translation, or opacity animation. Overlay motion uses the reference’s 200ms popover / 300ms modal duration, scale from 0.96, and `cubic-bezier(.175, .885, .32, 1.1)` easing. Avoid animated row reordering and decorative loading loops. Honor reduced-motion preferences with immediate state changes. Motion is never required to understand completion or selection.
+Buttons and links change color/background without scale, translation, or opacity animation. All CSS motion durations and delays use tokens. `--dur-1` is 80ms for press and colour feedback, `--dur-2` 140ms for reveals and status lines, `--dur-3` 180ms for menus and popovers, and `--dur-4` 240ms for dialogs and glyph sweeps. Entry uses `--ease-out` (`cubic-bezier(.16, 1, .3, 1)`), exit uses `--ease-in` (`cubic-bezier(.4, 0, 1, 1)`), and glyph sweeps use `--ease-in-out` (`cubic-bezier(.65, 0, .35, 1)`). The existing `--motion-swift` is reserved for the Done check.
+
+The interaction timings retain distinct tokens: `--dur-exit` 100ms for exit, `--dur-lift` 120ms for lifting and short reveals, `--dur-settle` 160ms for card settle, `--dur-arrival` 1200ms for an arrival highlight, `--dur-loading-delay` 300ms for skeletons, `--dur-spin` 900ms for a spinner revolution, and `--dur-instant` 0ms. These follow the next-generation motion contract, including the spinner’s 0.9s linear rotation. Tailwind transition and spinner defaults use these tokens too. Reduced motion zeroes every duration and delay, including in theme previews, disables animations, and leaves spinners as static rings. Motion never conveys completion or selection by itself.
 
 Keyboard access must cover navigation, row selection/opening, resizing, property changes, editing, overlay dismissal, and return to the list. Preserve distinct focus and selection. Announce save errors and meaningful async results without repeatedly announcing background polling. Use landmark regions and a logical heading sequence. Do not assign a visual heading level solely to obtain a font size.
 

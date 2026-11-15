@@ -60,6 +60,12 @@ describe("type scale", () => {
       "--text-ui: 14px",
       "--text-code: 13px",
       "--text-reading: 16px",
+      "--text-reading-line: 26px",
+      "--text-doc: 15px",
+      "--text-doc-line: 24px",
+      "--text-doc-title: 28px",
+      "--text-doc-title-line: 36px",
+      "--text-section-line: 40px",
       "--text-title: 24px",
       "--text-section: 32px",
     ]) {

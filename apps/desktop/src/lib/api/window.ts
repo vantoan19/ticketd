@@ -1,10 +1,18 @@
 import { invoke } from "@/lib/api/bridge-failure";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /** Set once the app decided to close, so the close guard lets the next request through. */
 let quitting = false;
 
 export const windowClient = {
+  /** The desktop starts hidden so its stored theme is painted before showing. */
+  async show() {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    const win = getCurrentWindow();
+    await win.show();
+    await win.emitTo({ kind: "App" }, "ticketd://startup-revealed");
+  },
   /**
    * Holds the window open when the person closes it and calls `handler`, which
    * ends with `quit`. Returns how to stop guarding. Outside the desktop shell
@@ -65,7 +73,7 @@ export const windowClient = {
    */
   async setBackgroundColor(color: string) {
     try {
-      await getCurrentWindow().setBackgroundColor(color);
+      await getCurrentWebviewWindow().setBackgroundColor(color);
     } catch {
       // No native window, or the platform ignores the request.
     }
