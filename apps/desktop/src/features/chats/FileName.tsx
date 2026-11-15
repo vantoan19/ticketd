@@ -1,6 +1,7 @@
 import { useContext, useState } from "react";
 import { ChatError } from "@/features/chats/client";
 import { ChatFilesContext } from "@/features/chats/files";
+import { Tooltip } from "@/components/ui/tooltip";
 
 /** How many characters of a name always show, so its extension survives. */
 const TAIL = 12;
@@ -31,16 +32,16 @@ export function FileName({
   );
   if (!open || gone)
     return (
-      <code className="chat-file-name" title={path}>
-        {text}
-      </code>
+      <Tooltip content={path}>
+        <code className="chat-file-name">{text}</code>
+      </Tooltip>
     );
   return (
+    <Tooltip content={path}>
     <button
       type="button"
       className="chat-file-name"
       aria-label={`Open ${path}`}
-      title={path}
       onClick={() =>
         void open(path).then(
           () => onFailed(""),
@@ -58,5 +59,6 @@ export function FileName({
     >
       {text}
     </button>
+    </Tooltip>
   );
 }

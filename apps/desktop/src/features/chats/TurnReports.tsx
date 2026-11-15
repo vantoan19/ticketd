@@ -21,6 +21,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useCopy } from "@/components/ui/use-copy";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import type { ChangedFile, PlanStep, ItemOf } from "@/features/chats/client";
@@ -299,11 +300,11 @@ function FileRow({
           <div className="chat-file-main">{words}</div>
         ) : (
           // A plain row, not a Button: the whole file row is the target.
+          <Tooltip content={file.path}>
           <button
             type="button"
             className="chat-file-main"
             aria-label={fileLabel(file)}
-            title={file.path}
             onClick={() =>
               void onOpen(file.open_path).then(
                 () => setFailure(""),
@@ -316,6 +317,7 @@ function FileRow({
           >
             {words}
           </button>
+          </Tooltip>
         )}
         <span className="chat-file-copy">
           <IconButton

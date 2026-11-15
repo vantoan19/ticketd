@@ -29,19 +29,24 @@ const props = {
   onChange: async () => {},
 };
 
-function openMenu(name: string) {
-  fireEvent.pointerDown(screen.getByRole("button", { name }), {
-    button: 0,
-    ctrlKey: false,
-  });
+/** Hovers an element and returns the text of the tooltip it opens. */
+async function hoverTooltip(element: HTMLElement) {
+  fireEvent.pointerMove(element);
+  const text = (await screen.findByRole("tooltip")).textContent;
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+  return text;
 }
 
-test("shows checkouts home-relative on one line with the full path on hover", () => {
+test("shows checkouts home-relative on one line with the full path on hover", async () => {
   render(<Projects {...props} />);
   const list = screen.getByRole("list", { name: "Checkouts of Original" });
-  const path = within(list).getByTitle("/Users/me/src/old");
-  expect(path.textContent).toBe("~/src/old");
-  expect(within(list).getByTitle("/other/checkout")).toBeTruthy();
+  const [first, second] = Array.from(
+    list.querySelectorAll<HTMLElement>(".path-text"),
+  );
+  expect(first!.textContent).toBe("~/src/old");
+  expect(await hoverTooltip(first!)).toBe("/Users/me/src/old");
+  expect(await hoverTooltip(second!)).toBe("/other/checkout");
 });
 
 test("labels the project's own path as the first checkout, not the alphabetically first", () => {
@@ -144,11 +149,13 @@ test("cancelling the folder picker keeps Create project disabled", async () => {
   );
 });
 
-test("renames a project from its menu and shows a save failure in the dialog", async () => {
+test("renames a project from its card and shows a save failure in the dialog", async () => {
   vi.spyOn(client, "editProject").mockRejectedValue("Name already used");
   render(<Projects {...props} />);
-  openMenu("Actions for Original");
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Rename/ }));
+  // One action is a direct button, never a one-item menu (plans PR-04).
+  fireEvent.click(
+    screen.getByRole("button", { name: "Rename project Original" }),
+  );
   const dialog = await screen.findByRole("dialog", { name: "Rename project" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Save name" }));
   expect(await within(dialog).findByText("Name already used")).toBeTruthy();
@@ -181,8 +188,11 @@ test("registers a checkout by choosing a folder", async () => {
 test("removing a checkout asks first and says tickets are unchanged", async () => {
   const remove = vi.spyOn(client, "removeCheckout").mockResolvedValue(project);
   render(<Projects {...props} />);
-  openMenu("Actions for checkout /other/checkout");
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Remove/ }));
+  const ask = () =>
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove checkout /other/checkout" }),
+    );
+  ask();
   expect(remove).not.toHaveBeenCalled();
   const confirm = screen.getByRole("group", {
     name: "Remove checkout /other/checkout",
@@ -190,8 +200,7 @@ test("removing a checkout asks first and says tickets are unchanged", async () =
   expect(within(confirm).getByText(/tickets are unchanged/)).toBeTruthy();
   fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
   expect(remove).not.toHaveBeenCalled();
-  openMenu("Actions for checkout /other/checkout");
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Remove/ }));
+  ask();
   fireEvent.click(
     within(
       screen.getByRole("group", { name: "Remove checkout /other/checkout" }),
@@ -232,5 +241,5 @@ test("a long checkout path keeps all its text for the middle to truncate", () =>
   const long =
     "/private/tmp/claude-501/-Users-me-Projects/8b654d0c-8f7d/repo-api";
   render(<Projects {...props} projects={[{ ...project, paths: [long] }]} />);
-  expect(screen.getByTitle(long).textContent).toBe(long);
+  expect(document.querySelector(".path-text")!.textContent).toBe(long);
 });

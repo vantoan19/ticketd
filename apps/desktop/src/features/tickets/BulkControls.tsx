@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -282,13 +283,17 @@ export function BulkControls({
           className="bulk-message bulk-error"
           role="alert"
         >
-          <span
-            className="bulk-error-text"
-            data-open={showDetails || undefined}
-            title={showDetails ? undefined : failure.message}
+          <Tooltip
+            content={showDetails ? null : failure.message}
+            overflowOnly
           >
-            {failure.message}
-          </span>
+            <span
+              className="bulk-error-text"
+              data-open={showDetails || undefined}
+            >
+              {failure.message}
+            </span>
+          </Tooltip>
           <Button
             variant="ghost"
             size="sm"

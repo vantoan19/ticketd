@@ -640,11 +640,9 @@ function PermissionPicker({
             ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <p
-          className="chat-pick-note"
-          title={`Your ${harness} settings are unchanged.`}
-        >
-          This Chat only
+        {/* The whole explanation is visible: a menu note cannot take focus. */}
+        <p className="chat-pick-note">
+          This Chat only. Your {harness} settings are unchanged.
         </p>
       </DropdownMenuContent>
     </DropdownMenu>

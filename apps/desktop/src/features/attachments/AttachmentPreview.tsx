@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Download, ExternalLink, File, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -392,9 +393,9 @@ export function AttachmentPreview({
                           {formatDateTime(file.added_at)}
                         </time>
                       ) : (
-                        <span title="No registration date was recorded">
-                          Unknown
-                        </span>
+                        <Tooltip content="No registration date was recorded">
+                          <span tabIndex={0}>Unknown</span>
+                        </Tooltip>
                       )}
                     </dd>
                     {external ? (

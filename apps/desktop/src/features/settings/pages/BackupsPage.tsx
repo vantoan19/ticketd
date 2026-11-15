@@ -10,6 +10,7 @@ import {
 import { client } from "@/lib/api/client";
 import { workspaceClient, type BackupRecord } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
@@ -163,9 +164,9 @@ function LastBackupRow({
         <span className="backups-last-path">
           <code className="backups-file">{name}</code>
           {folder && (
-            <span className="backups-last-folder" title={folder}>
-              {` · in ${folder}`}
-            </span>
+            <Tooltip content={folder} overflowOnly>
+              <span className="backups-last-folder">{` · in ${folder}`}</span>
+            </Tooltip>
           )}
         </span>
       }

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { cn } from "cn";
 import { workspaceClient } from "@/lib/api/workspace";
+import { Tooltip } from "@/components/ui/tooltip";
 
 /**
  * A link to the issue at its source, opened in the default browser. A webview
@@ -26,9 +27,9 @@ export function SourceLink({
     <>
       {/* A real link (its address shows on hover and focus); the app opens it
           in the default browser because a webview cannot follow it itself. */}
+      <Tooltip content={title}>
       <a
         href={url}
-        title={title}
         className={cn("source-link", className)}
         onClick={(event) => {
           event.preventDefault();
@@ -44,6 +45,7 @@ export function SourceLink({
           <ExternalLink className="source-link-icon" aria-hidden="true" />
         )}
       </a>
+      </Tooltip>
       {error && <small role="alert">{error}</small>}
     </>
   );

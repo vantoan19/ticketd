@@ -1,22 +1,18 @@
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useEffect, useState } from "react";
 import {
   Check,
   Copy,
   Folder,
   FolderOpen,
-  MoreHorizontal,
+  Pencil,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Item } from "@/components/ui/item";
 import { DialogShell } from "@/components/ui/dialog-shell";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
@@ -162,18 +158,14 @@ function CheckoutRow({
       >
         <FolderOpen aria-hidden />
       </IconButton>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <IconButton type="button" label={`Actions for checkout ${path}`}>
-            <MoreHorizontal aria-hidden />
-          </IconButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem variant="destructive" onSelect={onAsk}>
-            Remove checkout…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/* One action is a direct button, never a one-item menu. */}
+      <IconButton
+        type="button"
+        label={`Remove checkout ${path}`}
+        onClick={onAsk}
+      >
+        <Trash2 aria-hidden />
+      </IconButton>
     </Item>
   );
 }
@@ -210,11 +202,8 @@ function FolderPicker({
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
         />
-        <span
-          className="folder-path"
-          data-empty={!path}
-          title={path || undefined}
-        >
+        {/* PathText carries the full path in its own tooltip. */}
+        <span className="folder-path" data-empty={!path}>
           {path ? <PathText path={path} /> : "No folder chosen"}
         </span>
         <Button type="button" variant="outline" size="sm" onClick={choose}>
@@ -443,25 +432,13 @@ export function Projects({
                           Open tickets
                         </Button>
                       )}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <IconButton
-                            type="button"
-                            label={`Actions for ${item.name}`}
-                          >
-                            <MoreHorizontal aria-hidden />
-                          </IconButton>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              open({ kind: "rename", id: item.id })
-                            }
-                          >
-                            Rename project…
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <IconButton
+                        type="button"
+                        label={`Rename project ${item.name}`}
+                        onClick={() => open({ kind: "rename", id: item.id })}
+                      >
+                        <Pencil aria-hidden />
+                      </IconButton>
                     </div>
                   </CardHeader>
                   <CardBody asChild>
@@ -518,7 +495,9 @@ export function Projects({
                   <CardFooter asChild>
                     <div className="project-card-footer">
                       <span>Project ID</span>
-                      <code title={item.id}>{truncateId(item.id)}</code>
+                      <Tooltip content={item.id}>
+                        <code tabIndex={0}>{truncateId(item.id)}</code>
+                      </Tooltip>
                       <CopyIcon
                         label={`Copy project ID of ${item.name}`}
                         text={item.id}
@@ -554,7 +533,6 @@ export function Projects({
         onOpenChange={(next) => !next && setDialog(null)}
         title="New project"
         description="Start from the repository folder on this computer."
-        width={573}
         primaryLabel="Create project"
         blockedReason={
           saving
@@ -595,7 +573,6 @@ export function Projects({
         open={!!renaming}
         onOpenChange={(next) => !next && setDialog(null)}
         title="Rename project"
-        width={573}
         description="Its identity stays the same, and so do its tickets."
         primaryLabel="Save name"
         blockedReason={
@@ -627,7 +604,6 @@ export function Projects({
         open={!!checkoutProject}
         onOpenChange={(next) => !next && setDialog(null)}
         title="Register checkout"
-        width={573}
         description={`Another folder where ${checkoutProject?.name ?? "this project"} lives on this computer.`}
         primaryLabel="Register checkout"
         blockedReason={

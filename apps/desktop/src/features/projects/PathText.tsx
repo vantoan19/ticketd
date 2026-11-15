@@ -3,22 +3,25 @@ import {
   splitPathMiddle,
   withoutVerbatim,
 } from "@/features/projects/paths";
+import { Tooltip } from "@/components/ui/tooltip";
 import "./projects.css";
 
 /** A path on one line: "/private/…/8b654d0c/repo-api", with the full path on hover. */
 export function PathText({ path }: { path: string }) {
   const { lead, middle, tail } = splitPathMiddle(homeRelative(path));
   return (
-    <span className="path-text" title={withoutVerbatim(path)}>
-      {lead && <span className="path-lead">{lead}</span>}
-      {middle && (
-        // Right-to-left puts the ellipsis at the start of the shrinking part;
-        // the inner span keeps the characters in reading order.
-        <span className="path-middle">
-          <bdo dir="ltr">{middle}</bdo>
-        </span>
-      )}
-      <span className="path-tail">{tail}</span>
-    </span>
+    <Tooltip content={withoutVerbatim(path)}>
+      <span className="path-text">
+        {lead && <span className="path-lead">{lead}</span>}
+        {middle && (
+          // Right-to-left puts the ellipsis at the start of the shrinking part;
+          // the inner span keeps the characters in reading order.
+          <span className="path-middle">
+            <bdo dir="ltr">{middle}</bdo>
+          </span>
+        )}
+        <span className="path-tail">{tail}</span>
+      </span>
+    </Tooltip>
   );
 }

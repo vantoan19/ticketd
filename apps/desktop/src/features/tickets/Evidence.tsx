@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip } from "@/components/ui/tooltip";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -214,7 +215,8 @@ export function Evidence({
             <div className="evidence-item-heading">
               <span className="evidence-item-title">
                 <strong>{item.name}</strong>
-                <span className="evidence-item-meta" title={item.updated_at}>
+                {/* The exact time is already the visible text. */}
+                <span className="evidence-item-meta">
                   {typeNames[item.kind]} · {formatDateTime(item.updated_at)}
                   {item.editing_agent && ` · ${item.editing_agent}`}
                 </span>
@@ -294,13 +296,16 @@ export function Evidence({
                 )}
               </span>
             </div>
-            <p
-              className="evidence-item-value"
-              data-kind={item.kind === "verification" ? "text" : "code"}
-              title={item.kind === "commit" ? item.value : undefined}
-            >
-              {item.kind === "commit" ? shortCommit(item.value) : item.value}
-            </p>
+            {/* A short commit shows the full hash in its tooltip. */}
+            <Tooltip content={item.kind === "commit" ? item.value : null}>
+              <p
+                className="evidence-item-value"
+                data-kind={item.kind === "verification" ? "text" : "code"}
+                {...(item.kind === "commit" && { tabIndex: 0 })}
+              >
+                {item.kind === "commit" ? shortCommit(item.value) : item.value}
+              </p>
+            </Tooltip>
           </li>
         ))}
       </ol>

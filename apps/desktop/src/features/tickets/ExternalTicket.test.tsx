@@ -135,7 +135,7 @@ test("an open external ticket offers only local progress and says progress stays
   ).toBeTruthy();
 });
 
-test("a long source identity keeps its number separate and exposes the complete issue address", () => {
+test("a long source identity keeps its number separate and exposes the complete issue address", async () => {
   bridge.invoke.mockResolvedValue([]);
   const place = "a-long-organization/a-long-repository";
   properties(
@@ -145,7 +145,11 @@ test("a long source identity keeps its number separate and exposes the complete 
   );
   const rail = screen.getByRole("region", { name: "Source" });
   const link = within(rail).getByRole("link", { name: `${place}#12345` });
-  expect(link.title).toBe(`${place}#12345`);
+  fireEvent.pointerMove(link);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    `${place}#12345`,
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
   expect(within(link).getByText("#12345").textContent).toBe("#12345");
   expect(link.getAttribute("href")).toBe(
     "https://github.com/acme/api/issues/98",

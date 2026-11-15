@@ -92,6 +92,7 @@ import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
@@ -261,11 +262,11 @@ function Element(props: PlateElementProps) {
       {element.type === "a" &&
         String(element.url).startsWith("ticketd://attachment/") && (
           <span contentEditable={false}>
+            <Tooltip content="Preview attachment">
             <button
               type="button"
               className="attachment-inline-preview"
               aria-label={`Preview attachment: ${NodeApi.string(element)}`}
-              title="Preview attachment"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 const before = writeMarkdown(editor.children);
@@ -290,6 +291,7 @@ function Element(props: PlateElementProps) {
             >
               <Eye aria-hidden="true" />
             </button>
+            </Tooltip>
             {preview && (
               <AttachmentPreview
                 target={{ uri: preview.uri }}

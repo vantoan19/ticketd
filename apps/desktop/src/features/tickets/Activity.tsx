@@ -1,4 +1,5 @@
 import { SectionHeader } from "@/components/ui/section-header";
+import { Tooltip } from "@/components/ui/tooltip";
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "./DocumentPicker";
 import { hasVisibleText } from "./brief-text";
@@ -1008,12 +1009,11 @@ export function Activity({
                     <strong>{item.note.editing_agent ?? "You"}</strong>
                     <span>
                       update ·{" "}
-                      <time
-                        dateTime={item.note.reported_at}
-                        title={formatDateTime(item.note.reported_at)}
-                      >
-                        {relativeDateTime(item.note.reported_at, now)}
-                      </time>
+                      <Tooltip content={formatDateTime(item.note.reported_at)}>
+                        <time dateTime={item.note.reported_at} tabIndex={0}>
+                          {relativeDateTime(item.note.reported_at, now)}
+                        </time>
+                      </Tooltip>
                     </span>
                   </span>
                 }
@@ -1134,12 +1134,11 @@ export function Activity({
                 meta={
                   <>
                     ·{" "}
-                    <time
-                      dateTime={item.entry.timestamp}
-                      title={formatDateTime(item.entry.timestamp)}
-                    >
-                      {relativeDateTime(item.entry.timestamp, now)}
-                    </time>
+                    <Tooltip content={formatDateTime(item.entry.timestamp)}>
+                      <time dateTime={item.entry.timestamp} tabIndex={0}>
+                        {relativeDateTime(item.entry.timestamp, now)}
+                      </time>
+                    </Tooltip>
                     {item.entry.editing_agent && (
                       <>
                         {" "}

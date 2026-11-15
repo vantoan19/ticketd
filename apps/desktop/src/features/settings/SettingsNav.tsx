@@ -1,5 +1,6 @@
 import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
+import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { modifierKeyLabel } from "@/lib/platform";
 import {
@@ -93,14 +94,15 @@ export function SettingsNav({
                         <item.icon size={16} aria-hidden="true" />
                         <span className="settings-nav-label">{item.label}</span>
                         {dot && (
-                          <span
-                            role="img"
-                            aria-label={dot.label}
-                            title={dot.label}
-                            className="settings-nav-dot"
-                          >
-                            <StatusDot tone={dot.tone} />
-                          </span>
+                          <Tooltip content={dot.label} side="right">
+                            <span
+                              role="img"
+                              aria-label={dot.label}
+                              className="settings-nav-dot"
+                            >
+                              <StatusDot tone={dot.tone} />
+                            </span>
+                          </Tooltip>
                         )}
                       </button>
                     </li>

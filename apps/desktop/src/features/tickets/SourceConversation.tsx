@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip } from "@/components/ui/tooltip";
 import { CommentRow, EventRow, Timeline } from "@/components/ui/timeline";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState } from "react";
@@ -156,12 +157,11 @@ export function SourceConversation({
                 header={
                   <span>
                     <strong>{entry.author}</strong> commented on {name} ·{" "}
-                    <time
-                      dateTime={entry.created_at}
-                      title={formatDateTime(entry.created_at)}
-                    >
-                      {relativeDateTime(entry.created_at, now)}
-                    </time>
+                    <Tooltip content={formatDateTime(entry.created_at)}>
+                      <time dateTime={entry.created_at} tabIndex={0}>
+                        {relativeDateTime(entry.created_at, now)}
+                      </time>
+                    </Tooltip>
                     {entry.edited_at && (
                       <>
                         {" "}
@@ -217,12 +217,11 @@ function SourceEvent({
     <EventRow
       icon={icon}
       meta={
-        <time
-          dateTime={entry.created_at}
-          title={formatDateTime(entry.created_at)}
-        >
-          {relativeDateTime(entry.created_at, now)}
-        </time>
+        <Tooltip content={formatDateTime(entry.created_at)}>
+          <time dateTime={entry.created_at} tabIndex={0}>
+            {relativeDateTime(entry.created_at, now)}
+          </time>
+        </Tooltip>
       }
     >
       <strong>{entry.actor ?? "Someone"}</strong>

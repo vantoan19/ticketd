@@ -625,7 +625,12 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Folder reset-email, missing").textContent).toBe("reset-email");
   // The path reads like the folder popover's: one line, not a code block.
   const notice = screen.getByRole("alert");
-  expect(within(notice).getByTitle("~/ticketd/chats/reset-email")).toBeTruthy();
+  const path = notice.querySelector<HTMLElement>(".path-text")!;
+  fireEvent.pointerMove(path);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    "~/ticketd/chats/reset-email",
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
   expect(notice.querySelector("code")).toBeNull();
   expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
   client.nextFolder = "~/code/emails";
@@ -2221,7 +2226,7 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   expect(button(picker)).toBeTruthy();
 
   openMenu("Permissions: Accept edits");
-  expect(await screen.findByText("This Chat only")).toBeTruthy();
+  expect(await screen.findByText(/^This Chat only\./)).toBeTruthy();
   expect(
     screen.queryByRole("menuitemradio", { name: /Full access/ }),
   ).toBeNull();

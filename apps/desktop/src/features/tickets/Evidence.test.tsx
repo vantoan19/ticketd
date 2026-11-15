@@ -250,7 +250,8 @@ test("a full commit hash is shown short, with the whole value on hover", async (
     />,
   );
   const value = await screen.findByText("0123456789");
-  expect(value.getAttribute("title")).toBe(full);
+  fireEvent.pointerMove(value);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(full);
 });
 
 test("Add evidence stays disabled with its reason until name and evidence are filled", () => {

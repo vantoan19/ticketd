@@ -160,7 +160,11 @@ test("needs review: the line counts the tickets and Review opens them", async ()
   expect(trigger.getAttribute("aria-label")).toBe(
     "1 ticket needs review, Synced 1 min ago",
   );
-  expect(screen.getByTitle("1 ticket needs review")).toBeTruthy();
+  fireEvent.pointerMove(within(trigger).getByText("1 needs review"));
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    "1 ticket needs review",
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
   const dialog = await popover();
   expect(within(dialog).getByText("1 ticket needs review")).toBeTruthy();
   expect(dialog.textContent).toContain("Changed on two desktops");

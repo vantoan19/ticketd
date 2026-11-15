@@ -41,6 +41,18 @@ export default tseslint.config(
       "shadcn/no-arbitrary-values": "error",
       "shadcn/no-restyle": ["error", { allow: ["layout"] }],
       "shadcn/require-static-classes": "error",
+      // DESIGN.md section 4: native title tooltips are drawn by the OS in the
+      // wrong theme and never reach the keyboard. Component props named
+      // `title` (DialogShell, EmptyState) are unaffected.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "JSXOpeningElement[name.type='JSXIdentifier'][name.name=/^[a-z]/] > JSXAttribute[name.name='title']",
+          message:
+            "Use Tooltip from components/ui/tooltip (or IconButton's label) instead of a native title attribute.",
+        },
+      ],
     },
   },
 );

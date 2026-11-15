@@ -7,6 +7,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Item } from "@/components/ui/item";
 import {
   Popover,
@@ -228,9 +229,11 @@ export function SyncStatusLine() {
           >
             <span className="sidebar-source-label">
               {line.tone && <StatusDot tone={line.tone} size={10} />}
-              <span className="sync-line-text" title={line.full ?? line.label}>
-                {line.label}
-              </span>
+              {/* The full wording when the label is short for it, else the
+                  label itself once it is cut. */}
+              <Tooltip content={line.full ?? line.label} overflowOnly={!line.full}>
+                <span className="sync-line-text">{line.label}</span>
+              </Tooltip>
             </span>
             <small className="sync-line-text">{line.detail}</small>
           </button>
