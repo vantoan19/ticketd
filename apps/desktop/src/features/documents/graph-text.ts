@@ -155,7 +155,11 @@ export function describeEdge(
   }
 }
 
-/** React Flow edges that show direction and relationship, one per connection. */
+/**
+ * React Flow edges, one per connection, each named on the line. Only "blocks"
+ * has an arrowhead (the legend's "arrow = waits"); every other line is named by
+ * its label, so an arrow there would claim a direction the legend denies.
+ */
 export function flowEdges(edges: GraphEdge[]): Edge[] {
   return edges.map((edge, index) => ({
     id: `${index}`,
@@ -164,10 +168,12 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
     label: edgeLineLabels[edge.kind] ?? edge.kind,
     animated: false,
     // currentColor follows the themed .react-flow__edges color.
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: edgeStyle(edge.kind).color,
-    },
+    ...(edge.kind === "blocks" && {
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: edgeStyle(edge.kind).color,
+      },
+    }),
     // Drawn by RoutedEdge, which bends each line around the cards in its way.
     type: "routed",
     style: {

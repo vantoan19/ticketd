@@ -99,7 +99,11 @@ afterEach(() => {
 test("the legend has its own row beside the canvas, one zoom and Fit control stays on it, and Fit never clips", () => {
   const view = render(
     <ContextGraphCanvas
-      edges={[]}
+      edges={[
+        { id: "0", source: "a", target: "b", label: "blocks" },
+        { id: "1", source: "a", target: "c", label: "related" },
+        { id: "2", source: "a", target: "d", label: "attached" },
+      ]}
       selected={null}
       positions={{}}
       onPositions={vi.fn()}
@@ -115,6 +119,12 @@ test("the legend has its own row beside the canvas, one zoom and Fit control sta
   const legend = view.getByRole("list", { name: "Legend" });
   expect(canvas.contains(legend)).toBe(false);
   expect(canvas.parentElement?.contains(legend)).toBe(true);
+  // It lists only the kinds drawn, by the names on their lines.
+  expect(
+    within(legend)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["blocks (arrow = waits)", "related", "attached"]);
   const zoom = within(canvas).getByRole("group", { name: "Zoom" });
   expect(zoom.textContent).toContain("50%");
   fireEvent.click(within(zoom).getByRole("button", { name: "Zoom in" }));

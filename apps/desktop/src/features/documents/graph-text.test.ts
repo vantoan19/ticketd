@@ -221,6 +221,14 @@ test("every edge is labeled on the line and nodes have no all-caps type prefix",
     "in Plan",
     "spec of",
   ]);
+  // Only "blocks" carries an arrowhead, as the legend says ("arrow = waits").
+  expect(edges.map((edge) => Boolean(edge.markerEnd))).toEqual([
+    true,
+    false,
+    false,
+    false,
+    false,
+  ]);
   expect(
     cardParts({
       id: "t",
