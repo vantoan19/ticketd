@@ -436,16 +436,20 @@ export function GraphIsland({
 }) {
   return (
     <div className="ui-graph-island" data-unplanned={!caption || undefined}>
-      <button type="button" onClick={onSelect}>
-        {icon}
-        {title}
-        {caption && (
-          <>
-            <span>·</span>
-            <span>{caption}</span>
-          </>
-        )}
-      </button>
+      {caption ? (
+        <button type="button" onClick={onSelect}>
+          {icon}
+          {title}
+          {caption && (
+            <>
+              <span>·</span>
+              <span>{caption}</span>
+            </>
+          )}
+        </button>
+      ) : (
+        <span className="ui-graph-island-label">{title}</span>
+      )}
     </div>
   );
 }
