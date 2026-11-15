@@ -1,4 +1,3 @@
-import { useNarrowPane } from "./useNarrowPane";
 import { useNow } from "@/lib/use-now";
 import { useRef, useState, type ReactNode } from "react";
 import {
@@ -96,8 +95,7 @@ export function TicketList({
   /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
   simple?: boolean;
 }) {
-  const listElement = useRef<HTMLUListElement>(null);
-  const narrow = useNarrowPane(listElement, 481);
+  const navigator = selected !== null;
   const attention = useInboxAttention();
   const ticketChats = new Map<string, ChatSummary>();
   for (const chat of attention?.chats ?? []) {
@@ -160,7 +158,7 @@ export function TicketList({
   const canSelect = selectable && !selectionDisabled;
   if (sticky.tickets.length === 0 && empty) return empty;
   return (
-    <ul ref={listElement} className="ticket-rows">
+    <ul className="ticket-rows">
       {entries.map((entry) => {
         if ("header" in entry) {
           const { status, count, tickets: shown } = entry.header;
@@ -214,7 +212,7 @@ export function TicketList({
         return (
           <Item
             key={ticket.id}
-            variant={selected || narrow ? "navigator" : "ledger"}
+            variant={navigator ? "navigator" : "ledger"}
             asChild
           >
             <li
@@ -354,7 +352,7 @@ export function TicketList({
                     </span>
                   </Tooltip>
                 )}
-                <Reference>{ticket.reference}</Reference>
+                {!navigator && <Reference>{ticket.reference}</Reference>}
 
                 <span className="ticket-title-lane">
                   <Tooltip content={ticket.title} overflowOnly>
@@ -366,6 +364,7 @@ export function TicketList({
                   ticket={ticket}
                   scope={scope}
                   simple={simple}
+                  navigator={navigator}
                   needsReview={needsReview.has(ticket.id)}
                   chat={ticketChats.get(ticket.reference)}
                   reminder={attention?.reminders.get(ticket.reference)}
@@ -413,11 +412,12 @@ function ContextIcon({ kind }: { kind: RowContextKind | "unlinked" }) {
   return kind === "plan" ? <Layers {...props} /> : <Folder {...props} />;
 }
 
-/** Ledger lanes stay in the same order for both row densities. */
+/** Each mode renders only its own caption or lanes, with shared state labels. */
 function RowDetails({
   ticket,
   scope,
   simple,
+  navigator,
   needsReview,
   chat,
   reminder,
@@ -425,6 +425,7 @@ function RowDetails({
   ticket: Ticket;
   scope: RowScope;
   simple: boolean;
+  navigator: boolean;
   needsReview: boolean;
   chat: ChatSummary | undefined;
   reminder: string | null | undefined;
@@ -459,82 +460,82 @@ function RowDetails({
                   : "";
   return (
     <>
-      <span className="ticket-navigator-caption">
-        <Reference>{ticket.reference}</Reference>
-        <span>·</span>
-        {label === "Working" && chat ? (
-          <HarnessMark
-            harness={chat.harness_id}
-            name={chat.harness_name}
-            decorative
-          />
-        ) : (!label || label === "Ready for review") && harness ? (
-          <HarnessMark
-            harness={harness}
-            name={update?.editing_agent ?? harness}
-            decorative
-          />
-        ) : null}
-        <span>
-          {label ||
-            (update
-              ? `${update.editing_agent ?? "You"} · ${progressBrief(update.brief.text)}`
-              : contextLabel)}
+      {navigator ? (
+        <span className="ticket-navigator-caption">
+          <Reference>{ticket.reference}</Reference>
+          <span>·</span>
+          {label === "Working" && chat ? (
+            <HarnessMark harness={chat.harness_id} name={chat.harness_name} />
+          ) : (!label || label === "Ready for review") && harness ? (
+            <HarnessMark
+              harness={harness}
+              name={update?.editing_agent ?? harness}
+            />
+          ) : null}
+          <span aria-label={label || undefined}>
+            {label ||
+              (update
+                ? `${update.editing_agent ?? "You"} · ${progressBrief(update.brief.text)}`
+                : contextLabel)}
+          </span>
         </span>
-      </span>
-      <span className="ticket-row-state" aria-label={label || undefined}>
-        {label && (
-          <Tooltip content={label}>
-            <span
-              className={`ticket-row-state-content ${label === "Working" ? "text-foreground" : label === "Approval needed" || state.kind === "blocked" ? "text-status-blocked" : ""}`}
-            >
-              {label === "Working" && chat ? (
-                <HarnessMark
-                  harness={chat.harness_id}
-                  name={chat.harness_name}
-                />
-              ) : label === "Ready for review" ? (
-                harness ? (
-                  <HarnessMark
-                    harness={harness}
-                    name={update?.editing_agent ?? ""}
-                  />
-                ) : (
-                  <Bot size={12} aria-hidden="true" />
-                )
-              ) : label === "Reminder due" ? (
-                <AlarmClock size={12} aria-hidden="true" />
-              ) : label === duplicate?.label &&
-                duplicate?.kind === "duplicate" &&
-                !needsReview &&
-                !unavailable ? (
-                <StatusIcon status="Duplicate" size={12} decorative />
-              ) : (
-                <StatusDot tone="attention" size={6} />
-              )}
-              <span className="ticket-row-state-label">{label}</span>
-              {label === "Working" && (
-                <LoaderCircle
-                  size={12}
-                  className="chat-spin"
-                  aria-hidden="true"
-                />
-              )}
-            </span>
-          </Tooltip>
-        )}
-      </span>
-      <span className="ticket-row-tags-lane">
-        <RowTags tags={ticket.tags} ledger />
-      </span>
-      <span className="ticket-row-context" data-kind={context?.kind}>
-        {contextLabel && (
-          <>
-            <ContextIcon kind={context?.kind ?? "unlinked"} />
-            <span className="ticket-row-context-label">{contextLabel}</span>
-          </>
-        )}
-      </span>
+      ) : (
+        <>
+          <span className="ticket-row-state" aria-label={label || undefined}>
+            {label && (
+              <Tooltip content={label}>
+                <span
+                  className={`ticket-row-state-content ${label === "Working" ? "text-foreground" : label === "Approval needed" || state.kind === "blocked" ? "text-status-blocked" : ""}`}
+                >
+                  {label === "Working" && chat ? (
+                    <HarnessMark
+                      harness={chat.harness_id}
+                      name={chat.harness_name}
+                    />
+                  ) : label === "Ready for review" ? (
+                    harness ? (
+                      <HarnessMark
+                        harness={harness}
+                        name={update?.editing_agent ?? ""}
+                      />
+                    ) : (
+                      <Bot size={12} aria-hidden="true" />
+                    )
+                  ) : label === "Reminder due" ? (
+                    <AlarmClock size={12} aria-hidden="true" />
+                  ) : label === duplicate?.label &&
+                    duplicate?.kind === "duplicate" &&
+                    !needsReview &&
+                    !unavailable ? (
+                    <StatusIcon status="Duplicate" size={12} decorative />
+                  ) : (
+                    <StatusDot tone="attention" size={6} />
+                  )}
+                  <span className="ticket-row-state-label">{label}</span>
+                  {label === "Working" && (
+                    <LoaderCircle
+                      size={12}
+                      className="chat-spin"
+                      aria-hidden="true"
+                    />
+                  )}
+                </span>
+              </Tooltip>
+            )}
+          </span>
+          <span className="ticket-row-tags-lane">
+            <RowTags tags={ticket.tags} ledger />
+          </span>
+          <span className="ticket-row-context" data-kind={context?.kind}>
+            {contextLabel && (
+              <>
+                <ContextIcon kind={context?.kind ?? "unlinked"} />
+                <span className="ticket-row-context-label">{contextLabel}</span>
+              </>
+            )}
+          </span>
+        </>
+      )}
       <span className="ticket-row-time">
         {ticket.updated_at ? (
           <Tooltip content={formatDateTime(ticket.updated_at)}>
@@ -553,7 +554,7 @@ function RowDetails({
           <span aria-label="Update time unknown">—</span>
         )}
       </span>
-      {!simple && (
+      {!navigator && !simple && (
         <span className="ticket-row-update">
           {update?.editing_agent ? (
             <>

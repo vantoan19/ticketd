@@ -392,10 +392,10 @@ test("an externally owned description is a read-only source card without editing
     screen.getByText("Open on GitHub").closest(".ticket-state-line")
       ?.textContent,
   ).toContain("#98");
-  // The detail header and the rail's Source section both link to the issue.
-  expect(screen.getAllByRole("link", { name: /acme.*api.*#98/ })).toHaveLength(
-    2,
-  );
+  // The document's source state line replaces the old duplicate rail link.
+  expect(
+    screen.getByRole("link", { name: /acme.*api.*#98/ }).getAttribute("href"),
+  ).toBe("https://github.com/acme/api/issues/98");
   expect(
     screen.getByText(/Only in ticketd · never sent to GitHub/),
   ).toBeTruthy();
