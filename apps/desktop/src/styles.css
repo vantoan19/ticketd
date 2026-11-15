@@ -101,8 +101,16 @@
   --window-close-foreground: #ffffff;
   --error-surface: #fef2f2;
   --error-foreground: #991b1b;
+  /* Menus, popovers, selects and command lists. Dialogs and sheets stay on
+     --surface (they sit over a scrim); in dark, floating overlays lift one
+     step above the panel so they never share its fill. */
   --popover: var(--surface);
   --popover-foreground: var(--foreground);
+  /* Hover on selectable rows and cards: quieter than the --accent selection. */
+  --hover: #f7f7f7;
+  /* The tooltip chip: dark in both themes. */
+  --tooltip: #171717;
+  --tooltip-foreground: #fff;
   --radius: 6px;
   --radius-segment: 4px;
   --radius-panel: 12px;
@@ -161,9 +169,12 @@
   color-scheme: dark;
   --background: #0a0a0a;
   --surface: #171717;
+  --popover: #1f1f1f;
+  --hover: #1f1f1f;
+  --tooltip: #2e2e2e;
+  --tooltip-foreground: #ededed;
   --link-foreground: #52aeff;
   --recessed: #1a1a1a;
-  --code-block: #171717;
   --foreground: #ededed;
   --muted-foreground: #a1a1a1;
   --disabled-foreground: #8a8a8a;
@@ -184,8 +195,25 @@
   --control-boundary: #6b6b6b;
   --error-surface: #2b1414;
   --error-foreground: #fecaca;
-  --destructive: #fecaca;
+  /* Destructive labels on neutral surfaces: 6.2:1 on #171717, 5.6:1 on the
+     #1f1f1f popover. Text on --error-surface keeps --error-foreground. */
+  --destructive: #ff6166;
   --shadow-border-base: 0 0 0 1px #ffffff24;
+  /* The reference's black-alpha drop layers vanish on #0a0a0a and #171717, so
+     dark overlays carry deeper ones. The 14% ring comes from
+     --shadow-border-base (and gives the dark tooltip chip its edge). */
+  --shadow-tooltip:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    var(--shadow-background-border);
+  --shadow-menu:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    var(--shadow-background-border);
+  --shadow-large:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    var(--shadow-background-border);
+  --shadow-modal:
+    var(--shadow-border-base), 0 1px 2px #0000004d, 0 8px 24px -6px #00000080,
+    0 24px 48px -12px #000000a6, var(--shadow-background-border);
   --status-ready: #45a557;
   --status-checked: #45a557;
   --status-blocked: #ff990a;
@@ -504,11 +532,13 @@
   background: var(--recessed);
 }
 .ui-popover,
-.ui-menu,
-.ui-dialog {
+.ui-menu {
   color: var(--popover-foreground);
   background: var(--popover);
   border: 0;
+  border-radius: var(--radius-panel);
+}
+.ui-dialog {
   border-radius: var(--radius-panel);
 }
 .ui-popover {
@@ -522,8 +552,8 @@
 }
 .ui-dialog,
 .ui-sheet {
-  color: var(--popover-foreground);
-  background: var(--popover);
+  color: var(--foreground);
+  background: var(--surface);
   border: 0;
   box-shadow: var(--shadow-modal);
 }
@@ -1823,7 +1853,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 /* One monochrome block: the language caption and the icon copy button share a
    32px row above the code (no second tone, no syntax colors). */
 .markdown-code-block {
-  background: var(--code-block, var(--recessed));
+  background: var(--recessed);
 }
 .markdown-code-block pre {
   padding: 0 12px 12px;

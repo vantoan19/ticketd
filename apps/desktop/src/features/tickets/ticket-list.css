@@ -146,8 +146,8 @@
   gap: 4px;
   width: 100%;
   padding: 0;
-  color: var(--popover-foreground);
-  background: var(--popover);
+  color: var(--foreground);
+  background: var(--surface);
   box-shadow: 0 -1px 0 0 var(--border);
 }
 .bulk-controls {

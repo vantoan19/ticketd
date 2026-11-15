@@ -22,7 +22,7 @@
   padding-top: 24px;
   padding-bottom: 8px;
   padding-inline: 24px 64px;
-  background: var(--popover);
+  background: var(--surface);
   z-index: 2;
 }
 .publication-dialog .ui-dialog-header-close {
@@ -255,7 +255,7 @@
 .publication-dialog [data-slot="dialog-footer"]:not(.publication-footer) {
   position: sticky;
   bottom: -24px;
-  background: var(--popover);
+  background: var(--surface);
   padding-block: 8px;
 }
 

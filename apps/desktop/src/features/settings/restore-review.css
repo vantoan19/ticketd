@@ -119,8 +119,8 @@
   overflow-y: auto;
   /* Edge shadows appear only while there is more to scroll to. */
   background:
-    linear-gradient(var(--popover) 30%, transparent) top / 100% 24px local,
-    linear-gradient(transparent, var(--popover) 70%) bottom / 100% 24px local,
+    linear-gradient(var(--surface) 30%, transparent) top / 100% 24px local,
+    linear-gradient(transparent, var(--surface) 70%) bottom / 100% 24px local,
     linear-gradient(var(--header-boundary), transparent) top / 100% 8px scroll,
     linear-gradient(transparent, var(--header-boundary)) bottom / 100% 8px
       scroll;
@@ -135,7 +135,7 @@
   height: 24px;
   margin-top: -16px;
   pointer-events: none;
-  background: linear-gradient(transparent, var(--popover));
+  background: linear-gradient(transparent, var(--surface));
 }
 /* The ring sits inside the box: the dialog clips anything outside it. */
 .restore-body:focus-visible {

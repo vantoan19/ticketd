@@ -663,7 +663,7 @@ button.chat-steps:hover {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius);
-  background: var(--code-block, var(--recessed));
+  background: var(--recessed);
   box-shadow: var(--shadow-border-base);
 }
 .chat-output-view {
@@ -944,12 +944,6 @@ button.chat-file-name:focus-visible,
 }
 .chat-pick-note {
   padding: 6px 8px;
-}
-/* The Permissions menu wears the picker's popover surface: its edge and shadow
-   set it apart from the New Chat heading it overlaps (LIVE2-5). */
-[data-slot="dropdown-menu-content"]:has(> .chat-pick-note) {
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-large);
 }
 /* The one picker for harness, model and effort (#368): harness tabs, then the
    chosen harness's models, then its efforts in one row. */

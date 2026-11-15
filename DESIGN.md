@@ -41,21 +41,23 @@ Visual simplicity must not erase useful information. Existing prerequisites, dup
 
 These values come directly from the linked reference. The semantic names map them to ticketd; do not substitute approximate grays or another blue.
 
-| Role / token                                  | Reference value       | Ticketd use                                 |
-| --------------------------------------------- | --------------------- | ------------------------------------------- |
-| Canvas / `--background`                       | `#FAFAFA`             | Workspace canvas and navigation             |
-| Elevated / `--surface`, `--popover`           | `#FFFFFF`             | Content panel, menus, dialogs               |
-| Recessed / `--recessed`                       | `#F2F2F2`             | Quiet control surfaces and placeholders     |
-| Primary text / `--foreground`                 | `#171717`             | Titles, authored content, active values     |
-| Secondary text / `--muted-foreground`         | `#4D4D4D`             | Navigation, labels, readable captions       |
-| Decorative/disabled / `--disabled-foreground` | `#8F8F8F`             | Inactive decoration and disabled states     |
-| Hover / `--accent`                            | `#EBEBEB`             | Navigation and row hover/selection          |
-| Interactive / `--interactive`, `--ring`       | `#0072F5`             | Focus, link decoration, interactive accents |
-| Input focus / `--input-focus`                 | `#005FCC`             | Input focus outline                         |
-| Boundary / `--shadow-border-base`             | `0 0 0 1px #00000014` | Shadow-based surface boundary               |
-| Header boundary / `--header-boundary`         | `0 1px 0 0 #0000001A` | Pane header separator                       |
+| Role / token                                  | Reference value       | Ticketd use                                  |
+| --------------------------------------------- | --------------------- | -------------------------------------------- |
+| Canvas / `--background`                       | `#FAFAFA`             | Workspace canvas and navigation              |
+| Elevated / `--surface`, `--popover`           | `#FFFFFF`             | Content panel, menus, dialogs                |
+| Row hover / `--hover`                         | `#F7F7F7`             | Hover on selectable rows and cards           |
+| Recessed / `--recessed`                       | `#F2F2F2`             | Quiet control surfaces and placeholders      |
+| Primary text / `--foreground`                 | `#171717`             | Titles, authored content, active values      |
+| Secondary text / `--muted-foreground`         | `#4D4D4D`             | Navigation, labels, readable captions        |
+| Decorative/disabled / `--disabled-foreground` | `#6B6B6B`             | Disabled labels and placeholders             |
+| Selection / `--accent`                        | `#EBEBEB`             | Selection, current navigation, control hover |
+| Tooltip / `--tooltip`, `--tooltip-foreground` | `#171717` / `#FFFFFF` | The tooltip chip                             |
+| Interactive / `--interactive`, `--ring`       | `#0072F5`             | Focus, link decoration, interactive accents  |
+| Input focus / `--input-focus`                 | `#005FCC`             | Input focus outline                          |
+| Boundary / `--shadow-border-base`             | `0 0 0 1px #00000014` | Shadow-based surface boundary                |
+| Header boundary / `--header-boundary`         | `0 1px 0 0 #0000001A` | Pane header separator                        |
 
-`--muted` and `--secondary` are shadcn aliases of `--recessed`, `--secondary-foreground` of `--muted-foreground`, and `--popover` of `--surface`; new code uses the semantic names. Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
+`--muted` and `--secondary` are shadcn aliases of `--recessed` and `--secondary-foreground` of `--muted-foreground`; new code uses the semantic names. `--popover` is `--surface` in light and one step above it in dark, so menus, popovers, selects and command lists never share the panel's fill; dialogs and sheets stay on `--surface` over their scrim. Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute; disabled labels use `#6B6B6B` (5.3:1 on white) because they stay readable without opacity dimming. Tooltips are one small dark chip in both themes. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
 
 Primary actions invert the existing primary/elevated pair: `#171717` fill and `#FFFFFF` text. Ghost actions begin transparent with secondary text and promote to primary text on `#EBEBEB` hover. Standard prose links may retain primary text with an underline, as in the reference’s standard-link treatment; use the blue token for focus and link decoration. Never reduce contrast merely to make all links blue. Source links use the accessible text-link role `--link-foreground`: `#005FCC` in light and `#52AEFF` in dark; focus and decorative interactive accents keep their existing tokens. Recessed notices and footer bands retain a shadow boundary when their fill alone is too close to the surrounding surface.
 
@@ -68,17 +70,21 @@ The linked reference does not specify a dark palette or complete error callouts.
 | Role                  | Dark extension        |
 | --------------------- | --------------------- |
 | Canvas                | `#0A0A0A`             |
-| Elevated / popover    | `#171717`             |
+| Elevated              | `#171717`             |
+| Popover               | `#1F1F1F`             |
 | Recessed              | `#1A1A1A`             |
+| Row hover             | `#1F1F1F`             |
 | Primary text          | `#EDEDED`             |
 | Secondary text        | `#A1A1A1`             |
-| Disabled decoration   | `#737373`             |
-| Hover / selection     | `#262626`             |
+| Disabled              | `#8A8A8A`             |
+| Selection             | `#262626`             |
+| Tooltip               | `#2E2E2E` / `#EDEDED` |
+| Destructive label     | `#FF6166`             |
 | Shadow boundary       | `0 0 0 1px #FFFFFF24` |
 | Focus and interactive | `#0072F5`             |
 | Input focus           | `#005FCC`             |
 
-Errors use local `error-surface` / `error-foreground` pairs: `#FEF2F2` / `#991B1B` in light and `#2B1414` / `#FECACA` in dark. Destructive labels use the corresponding error foreground. These roles exist for readable failure explanations, not status decoration.
+Errors use local `error-surface` / `error-foreground` pairs: `#FEF2F2` / `#991B1B` in light and `#2B1414` / `#FECACA` in dark. Destructive labels on neutral surfaces (menu items, destructive buttons) use `--destructive`: `#991B1B` in light and `#FF6166` in dark (6.2:1 on `#171717`, 5.6:1 on the popover), because `#FECACA` reads as white there; text on `--error-surface` keeps `--error-foreground`. These roles exist for readable failure explanations, not status decoration.
 
 The theme preference is System, Light, or Dark, chosen in Settings. System is the default and follows the operating system preference live; Light and Dark override it. Theme changes apply immediately without reloading. Sidebar and portaled surfaces use the same semantic roles. Every overlay has an opaque surface; never depend on a parent pane’s background.
 
@@ -180,7 +186,7 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Standard content width                 | 1200px | Management content maximum                            |
 | Wide content width                     | 1400px | Wide content views where useful                       |
 
-Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. The reserved 8px maps to `--radius` and 10px to `--radius-panel`, whichever is nearer. Control outlines drawn at `#00000024` use `--shadow-border-base` (8% in light, 14% in dark), which is a lighter outline in light than the literal was. A dialog keeps its ring from `--shadow-modal` and has no border of its own. A placeholder is text and uses `--disabled-foreground`; `--control-boundary` is for outlines and empty tracks. Hairlines at `#0000000f` use `--group-hairline`, and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
+Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. The reserved 8px maps to `--radius` and 10px to `--radius-panel`, whichever is nearer. Control outlines drawn at `#00000024` use `--shadow-border-base` (8% in light, 14% in dark), which is a lighter outline in light than the literal was. A dialog keeps its ring from `--shadow-modal` and has no border of its own. A placeholder is text and uses `--disabled-foreground`; `--control-boundary` is for outlines and empty tracks. Hairlines at `#0000000f` use `--group-hairline` (`#0000000D` in light, `#FFFFFF14` in dark), and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
 
 Pane widths and row columns are ticketd geometry, defined below. The application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/content-panel shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
 
@@ -206,7 +212,9 @@ Use the source’s light-theme definitions, composed with the theme’s boundary
 | Input focus      | `1px` outline in `#005FCC`                                                               |
 | Modal backdrop   | `var(--ds-background-200)` at `0.8` opacity                                              |
 
-For light theme, map `--ds-background-100` to elevated white and `--ds-background-200` to canvas `#FAFAFA`. Dark equivalents use the explicit dark surfaces above. Dark elevation preserves these dimensions and uses the dark boundary role; tune visibility through the documented theme mapping rather than changing the light reference values.
+For light theme, map `--ds-background-100` to elevated white and `--ds-background-200` to canvas `#FAFAFA`. Dark equivalents use the explicit dark surfaces above. Dark elevation preserves these dimensions and uses the dark boundary role; tune visibility through the documented theme mapping rather than changing the light reference values. The reference's black-alpha drop layers vanish on `#0A0A0A` and `#171717`, so in dark the menu, large and tooltip elevations use `0 1px 2px #0000004D, 0 8px 24px -6px #00000080` after the 14% ring, and the modal adds `0 24px 48px -12px #000000A6`.
+
+Overlay surfaces: menus, selects, listboxes and command lists use `--popover` with the menu elevation; popovers holding a form use `--popover` with the large elevation; dialogs and sheets use `--surface` with the modal elevation over the 80% canvas scrim. No rule may remove an overlay's shadow.
 
 The document plane, ticket rows, and inline sections remain flat. Floating menus and dialogs use their corresponding elevation. Overlays always have an explicit opaque background and foreground, including when rendered through a portal.
 
