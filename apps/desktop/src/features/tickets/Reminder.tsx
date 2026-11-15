@@ -7,12 +7,27 @@ import {
   PopoverTitle,
   PopoverDescription,
 } from "@/components/ui/popover";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/api/bridge-failure";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FieldError } from "@/components/ui/field";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { formatDateTime } from "@/lib/format";
 import { reminderSummary } from "@/features/tickets/reminder-summary";
+
+/**
+ * Whether the field holds a whole date and time yet. While a year is still being
+ * typed the field reports years such as 0006; that is unfinished, not invalid.
+ */
+function complete(value: string): boolean {
+  const match = /^(\d{4})-\d{2}-\d{2}T\d{2}:\d{2}$/.exec(value);
+  return match !== null && Number(match[1]) >= 1000;
+}
 
 // A local clock time may be skipped or occur twice during a time-zone transition.
 function localInstants(value: string): Date[] {
@@ -60,7 +75,15 @@ export function Reminder({
   const [draft, setDraft] = useState("");
   const [occurrence, setOccurrence] = useState("");
   const options = localInstants(draft);
-  const [error, setError] = useState("");
+  // A whole date and time that does not exist here: the clock skips it.
+  const skipped = complete(draft) && options.length === 0;
+  // Reading and changing the reminder fail separately: a failed read names
+  // the trigger, a failed change shows under the buttons until the next try.
+  const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [reads, setReads] = useState(0);
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
   const busy = useRef(false);
@@ -75,15 +98,19 @@ export function Reminder({
       .then((value) => {
         if (value !== null && typeof value !== "string")
           throw new Error("Invalid reminder");
-        if (active) setDue(value);
+        if (active) {
+          setDue(value);
+          setLoadFailure(null);
+        }
       })
-      .catch((e: unknown) => {
-        if (active) setError(String(e));
+      .catch((reason: unknown) => {
+        if (active)
+          setLoadFailure(describeFailure(reason, "load the reminder"));
       });
     return () => {
       active = false;
     };
-  }, [reference, revision]);
+  }, [reference, revision, reads]);
   async function save(
     key: string,
     makeDue: () => string | null,
@@ -112,18 +139,38 @@ export function Reminder({
         throw new Error("Invalid reminder");
       setDue(value);
       attempt.current = null;
-      setError("");
+      setError(null);
+      setLoadFailure(null);
+      // The time was used; nothing typed is left to explain.
+      setDraft("");
+      setOccurrence("");
       // Dismissing is final: nothing is left to change, so the popover goes.
       if (closeAfter) setOpen(false);
-    } catch (e) {
-      setError(String(e));
+    } catch (reason) {
+      setError(
+        describeFailure(
+          reason,
+          key === "dismiss"
+            ? "dismiss the reminder"
+            : key === "snooze-hour"
+              ? "snooze the reminder"
+              : "set the reminder",
+        ),
+      );
     } finally {
       busy.current = false;
       setPending(false);
     }
   }
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // A failure belongs to the attempt that made it, not the next visit.
+        if (!next) setError(null);
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           variant={variant}
@@ -133,12 +180,18 @@ export function Reminder({
               ? reminderSummary(due) === "Reminder due"
                 ? "Manage reminder, due"
                 : `Manage reminder, scheduled ${reminderSummary(due)}`
-              : "Manage reminder"
+              : loadFailure
+                ? "Manage reminder, unavailable"
+                : "Manage reminder"
           }
         >
           <Bell data-icon="inline-start" />
           <span className="reminder-label">
-            {due ? reminderSummary(due) : "Remind me…"}
+            {due
+              ? reminderSummary(due)
+              : loadFailure
+                ? "Reminder unavailable"
+                : "Remind me…"}
           </span>
         </Button>
       </PopoverTrigger>
@@ -163,17 +216,18 @@ export function Reminder({
           type="datetime-local"
           disabled={pending}
           value={draft}
+          aria-invalid={skipped || undefined}
+          aria-describedby={skipped ? "reminder-time-error" : undefined}
           onChange={(e) => {
             setDraft(e.target.value);
             setOccurrence("");
           }}
         />
         <p className="text-muted-foreground text-xs">Your local time zone.</p>
-        {draft && options.length === 0 && (
-          <p role="alert">
-            This local time is invalid or skipped by a clock change. Choose
-            another time.
-          </p>
+        {skipped && (
+          <FieldError id="reminder-time-error">
+            The clock skips this time here. Choose another time.
+          </FieldError>
         )}
         {options.length > 1 && (
           <label>
@@ -230,7 +284,14 @@ export function Reminder({
             </Button>
           </>
         )}
-        {error && <p role="alert">{error}</p>}
+        {loadFailure && !due && (
+          <FailureAlert
+            size="compact"
+            failure={loadFailure}
+            onRetry={() => setReads((value) => value + 1)}
+          />
+        )}
+        {error && <FailureAlert size="compact" failure={error} />}
       </PopoverContent>
     </Popover>
   );
