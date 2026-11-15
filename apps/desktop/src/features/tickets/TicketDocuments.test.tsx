@@ -122,3 +122,27 @@ test("a Document mentioned only by an update says so and opens that update", asy
   expect(open).toHaveBeenCalledWith("a1");
   expect(screen.queryByRole("button", { name: /Edit description/ })).toBeNull();
 });
+
+test("a failed read says so with Retry instead of reading as no Documents", async () => {
+  let readable = false;
+  vi.mocked(invoke).mockImplementation((command) => {
+    if (command !== "document_context_links") return Promise.resolve(null);
+    return readable
+      ? Promise.resolve([[link("d1", "Linked", true)], []])
+      : Promise.reject({ code: "failed", message: "disk I/O error" });
+  });
+  render(
+    <TicketDocuments
+      ticket={ticket}
+      revision={0}
+      refresh={() => Promise.resolve()}
+    />,
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't load Documents",
+  );
+  readable = true;
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText("Linked")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});

@@ -3,6 +3,11 @@ import { FileText, Pencil, Plus, X } from "lucide-react";
 import { documents, type DocumentSummary } from "@/features/documents/api";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { Button } from "@/components/ui/button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Item } from "@/components/ui/item";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -36,7 +41,11 @@ export function TicketDocuments({
   const openDocument = useContext(DocumentNavigation);
   const [links, setLinks] = useState<DocumentLink[]>([]);
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  // A failed read says so in place of the list, with Retry; it never reads as empty.
+  const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
+    null,
+  );
   // Trashing or restoring a Document elsewhere does not change this ticket, so
   // coming back to the window checks again as well as a new workspace revision.
   const [visits, setVisits] = useState(0);
@@ -66,20 +75,28 @@ export function TicketDocuments({
             (a, b) => sourceRank(a) - sourceRank(b),
           ),
         );
+        setLoadFailure(null);
       })
-      .catch(() => {});
+      .catch((reason: unknown) => {
+        if (current) setLoadFailure(describeFailure(reason, "load Documents"));
+      });
     return () => {
       current = false;
     };
   }, [ticket.id, ticket.body, revision, visits]);
   async function change(id: string, present: boolean) {
-    setError("");
+    setError(null);
     try {
       await documents.setTicketDocument(ticket.reference, id, present);
       setVisits((value) => value + 1);
       await refresh();
     } catch (reason) {
-      setError(String(reason));
+      setError(
+        describeFailure(
+          reason,
+          present ? "attach the Document" : "unlink the Document",
+        ),
+      );
     }
   }
   async function add(picked: DocumentSummary) {
@@ -148,7 +165,14 @@ export function TicketDocuments({
             </Item>
           ))}
         </ul>
-        {error && <p role="alert">{error}</p>}
+        {loadFailure && (
+          <FailureState
+            size="inline"
+            failure={loadFailure}
+            onRetry={() => setVisits((value) => value + 1)}
+          />
+        )}
+        {error && <FailureAlert size="compact" failure={error} />}
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <Button
