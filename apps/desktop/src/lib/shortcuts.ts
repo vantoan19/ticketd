@@ -263,12 +263,6 @@ export const SHORTCUTS = [
     label: "Edit the description",
   },
   {
-    id: "create-expand",
-    keys: [],
-    scope: "Dialogs and menus",
-    label: "Expand the New ticket draft",
-  },
-  {
     id: "create-submit",
     keys: [["Mod", "Enter"]],
     scope: "Ticket",
@@ -365,6 +359,12 @@ export const SHORTCUTS = [
     keys: [["Mod", "Z"]],
     scope: "Chat",
     label: "Take back a suggestion you just chose",
+  },
+  {
+    id: "create-expand",
+    keys: [],
+    scope: "Dialogs and menus",
+    label: "Expand the New ticket draft",
   },
   {
     id: "palette-drill",
