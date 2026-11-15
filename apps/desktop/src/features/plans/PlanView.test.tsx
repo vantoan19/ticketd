@@ -405,6 +405,14 @@ test("one header across both panes holds the view switch and More opens the list
   await chooseAction("Filter and display");
   expect(await screen.findByRole("button", { name: "Filters" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Display" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "Plan list options" }), {
+    key: "Escape",
+  });
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Plan actions" }),
+    ),
+  );
   expect(list.querySelector('[data-slot="pane-header"]')).toBeNull();
 });
 

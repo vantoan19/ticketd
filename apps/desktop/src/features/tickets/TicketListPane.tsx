@@ -647,8 +647,8 @@ function filterPropsOf(w: TicketWorkspace) {
 }
 
 /**
- * Search, Filters and Display for a Plan's list and board. They sit in the
- * Plan's header, which spans both panes, instead of a second list header.
+ * Filters and Display for a Plan's list and board, reached through the
+ * Plan header's More menu instead of a second list header.
  */
 export function PlanListControls({
   workspace,

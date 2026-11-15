@@ -69,7 +69,7 @@ export function PlanHeader({
   state: PlanViewState;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
-  /** Search, Filters and Display for the Plan's list and board. */
+  /** Filter and Display controls, reached through More. */
   controls?: ReactNode;
 }) {
   const { view, loadError, reload, pending, adding, setAdding } = state;
@@ -321,7 +321,14 @@ export function PlanHeader({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <PopoverContent align="end" aria-label="Plan list options">
+                <PopoverContent
+                  align="end"
+                  aria-label="Plan list options"
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    actionsButton.current?.focus();
+                  }}
+                >
                   <div className="plan-list-options">{controls}</div>
                 </PopoverContent>
               </Popover>
