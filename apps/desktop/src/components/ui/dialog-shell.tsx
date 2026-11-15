@@ -146,6 +146,11 @@ export function DialogShell({
         size={size}
         variant="flush"
         showCloseButton={false}
+        // Escape that confirms an IME candidate belongs to the field, not the dialog.
+        onEscapeKeyDown={(event) => {
+          if (event.isComposing || event.keyCode === 229)
+            event.preventDefault();
+        }}
         {...(returnFocus && { returnFocus })}
         {...(focus !== "first" && {
           onOpenAutoFocus: (event: Event) => {

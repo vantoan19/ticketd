@@ -253,13 +253,11 @@ export function TicketFilters(p: Props) {
                       }
                       options={[
                         { value: "__any", label: "Any Plan" },
-                        // Archived Plans come last (list F-06).
-                        ...[
-                          ...p.plans.filter((item) => !item.archived),
-                          ...p.plans.filter((item) => item.archived),
-                        ].map((item) => ({
+                        // Archived Plans come last under their own label (list F-06).
+                        ...p.plans.map((item) => ({
                           value: item.id,
-                          label: `${item.name}${item.archived ? " (archived)" : ""}`,
+                          label: item.name,
+                          ...(item.archived && { group: "Archived" }),
                         })),
                       ]}
                     />

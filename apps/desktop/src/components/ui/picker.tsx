@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectSeparator,
   SelectTrigger,
   SelectValue,
@@ -16,6 +18,8 @@ export type PickerOption<T extends string> = {
   icon?: ReactNode;
   /** The clearing choice ("No project"): drawn last, after a separator. */
   clear?: boolean;
+  /** A labelled group drawn after the ungrouped options ("Archived"). */
+  group?: string;
 };
 
 /**
@@ -54,7 +58,10 @@ export function Picker<T extends string>({
       {o.label}
     </SelectItem>
   );
-  const choices = options.filter((o) => !o.clear);
+  const choices = options.filter((o) => !o.clear && !o.group);
+  const groups = [
+    ...new Set(options.flatMap((o) => (o.group && !o.clear ? [o.group] : []))),
+  ];
   const clearing = options.filter((o) => o.clear);
   const select = (
     <Select
@@ -75,6 +82,13 @@ export function Picker<T extends string>({
       </SelectTrigger>
       <SelectContent>
         {choices.map(item)}
+        {groups.map((group) => (
+          <SelectGroup key={group}>
+            <SelectSeparator />
+            <SelectLabel>{group}</SelectLabel>
+            {options.filter((o) => o.group === group && !o.clear).map(item)}
+          </SelectGroup>
+        ))}
         {clearing.length > 0 && <SelectSeparator />}
         {clearing.map(item)}
       </SelectContent>

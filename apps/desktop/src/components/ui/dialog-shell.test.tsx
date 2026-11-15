@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { DialogShell } from "@/components/ui/dialog-shell";
 
@@ -29,6 +35,29 @@ test("a destructive confirm opens on Cancel and takes one of the three sizes", (
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Cancel" }),
   );
+});
+
+test("Escape that confirms an IME candidate does not close the dialog", () => {
+  const onOpenChange = vi.fn();
+  render(
+    <DialogShell
+      open
+      onOpenChange={onOpenChange}
+      title="Add tag"
+      primaryLabel="Add tag"
+      blockedReason={null}
+      onSubmit={vi.fn()}
+    >
+      <input aria-label="Tag" />
+    </DialogShell>,
+  );
+  fireEvent.keyDown(screen.getByRole("textbox"), {
+    key: "Escape",
+    isComposing: true,
+  });
+  expect(onOpenChange).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
 test("a failed submit keeps the dialog open with the error above the footer", () => {
