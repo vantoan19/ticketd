@@ -107,7 +107,7 @@ test("shows an editing agent only when one was recorded and words history as sen
   await screen.findByText("Status Todo → In progress");
   expect(screen.queryByText(/Only in ticketd/)).toBeNull();
   // The agent names its update; an agentless one is the person's own.
-  expect(screen.getAllByText(/^update ·/)).toHaveLength(2);
+  expect(screen.getAllByRole("article")).toHaveLength(2);
   expect(screen.getAllByText("You")).toHaveLength(1);
   expect(screen.queryByText(/status:/)).toBeNull();
 });
@@ -136,13 +136,7 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
   expect(
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Half-written finding");
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Draft actions" }), {
-    button: 0,
-    ctrlKey: false,
-  });
-  fireEvent.click(
-    await screen.findByRole("menuitem", { name: "Discard draft" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
   cleanup();
   render(<Activity {...props} reference="T-KQ21" />);
@@ -165,7 +159,7 @@ test("Activity puts the composer before labelled notes and quiet relative histor
     />,
   );
   const body = await screen.findByText("Body");
-  expect(screen.getByRole("heading", { name: "Activity" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: /^Activity/ })).toBeTruthy();
   expect(
     screen.getByText("Only in ticketd · never sent to GitHub"),
   ).toBeTruthy();
@@ -253,4 +247,63 @@ test("changes made together share one row, and Updates hides the rows", async ()
   fireEvent.click(screen.getByRole("radio", { name: "Updates" }));
   expect(screen.queryByText(/Added evidence/)).toBeNull();
   expect(screen.getByText("Body")).toBeTruthy();
+});
+
+test("says no updates, not no activity, when the Updates filter hides only history (DB-21)", async () => {
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "activity_feed"
+      ? [
+          {
+            type: "automatic",
+            id: 1,
+            event: {
+              kind: "status",
+              from_value: "Todo",
+              to_value: "In progress",
+              timestamp: "2026-10-31T11:00:00Z",
+              editing_agent: null,
+            },
+          },
+        ]
+      : [],
+  );
+  render(<Activity {...props} reference="T-KQ60" />);
+  await screen.findByText("Status Todo → In progress");
+  fireEvent.click(screen.getByRole("radio", { name: "Updates" }));
+  expect(screen.getByText("No updates yet.")).toBeTruthy();
+  expect(screen.queryByText(/No updates or recorded changes/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show all activity" }));
+  expect(await screen.findByText("Status Todo → In progress")).toBeTruthy();
+});
+
+test("offers only what can be added instead of a disabled button with a hidden reason (DB-07)", async () => {
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "show_document"
+      ? {
+          id: "doc-1",
+          title: "Investigation",
+          body: "",
+          created_at: "2026-01-01",
+          updated_at: "2026-01-01",
+          trashed: false,
+        }
+      : [],
+  );
+  localStorage.setItem(
+    "ticketd:activity-draft:T-KQ61",
+    JSON.stringify({ brief: "Brief", details: null, support: "doc-1" }),
+  );
+  render(<Activity {...props} reference="T-KQ61" />);
+  expect(await screen.findByText("Investigation")).toBeTruthy();
+  // With a Document attached, details can't be added: the + is gone, not disabled.
+  expect(
+    screen.queryByRole("button", { name: "Add details or a Document" }),
+  ).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Remove attached Document" }),
+  );
+  expect(
+    screen.getByRole("button", { name: "Add details or a Document" }),
+  ).toHaveProperty("disabled", false);
+  localStorage.clear();
 });

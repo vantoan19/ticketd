@@ -20,16 +20,20 @@ function Timeline({ className, ...props }: React.ComponentProps<"ol">) {
 /**
  * One recorded change on a `Timeline`: a 28px badge carrying the change's icon,
  * the sentence as children, then who and when as `meta` in the caption size.
+ * `time`, when given, sits in a right-aligned trailing column that never
+ * wraps, so a long sentence never leaves its time on a line of its own.
  */
 function EventRow({
   icon: Icon,
   meta,
+  time,
   className,
   children,
   ...props
 }: Omit<React.ComponentProps<"li">, "children"> & {
   icon: LucideIcon;
   meta?: React.ReactNode;
+  time?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -45,6 +49,7 @@ function EventRow({
         {children}
         {meta && <span className="ui-event-row-meta">{meta}</span>}
       </span>
+      {time && <span className="ui-event-row-time">{time}</span>}
     </li>
   );
 }

@@ -1,6 +1,8 @@
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useLayoutEffect, useRef, useState } from "react";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { Follow } from "@/features/tickets/Inbox";
@@ -66,6 +68,53 @@ export function TicketPage({
   const now = useNow();
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(ticket, revision, refresh, active);
+  // A new ticket is calm: empty Subtickets and Evidence fold into one quiet
+  // row of adds under the description, and appear once they have content.
+  const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
+  const [evidenceRequest, setEvidenceRequest] = useState(0);
+  const noSubtickets = work.current?.links?.children_progress.total === 0;
+  const noRelationships =
+    Boolean(work.current?.links) && work.rows.length === 0;
+  const addRow = active &&
+    !ticket.trashed &&
+    (noSubtickets || evidenceCount === 0 || noRelationships) && (
+      <div
+        className="ticket-add-row"
+        role="group"
+        aria-label="Add to this ticket"
+      >
+        {noSubtickets && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => work.openLink("subticket")}
+          >
+            <Plus aria-hidden="true" />
+            Subticket
+          </Button>
+        )}
+        {evidenceCount === 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setEvidenceRequest((count) => count + 1)}
+          >
+            <Plus aria-hidden="true" />
+            Evidence
+          </Button>
+        )}
+        {noRelationships && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => work.openLink("related")}
+          >
+            <Plus aria-hidden="true" />
+            Relationship
+          </Button>
+        )}
+      </div>
+    );
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts it at the top: document, rail, detail.
   const page = useRef<HTMLDivElement>(null);
@@ -210,26 +259,27 @@ export function TicketPage({
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
   // Folded, the rail's controls sit under the title in rail order.
+  const chips = narrow && (
+    <TicketProperties
+      layout="chips"
+      chats={chats}
+      ticket={ticket}
+      active={active}
+      revision={revision}
+      projects={projects}
+      plans={plans}
+      onSaved={updateTicket}
+      refresh={refresh}
+      onOpenTicket={select}
+      onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
+    >
+      {attention}
+    </TicketProperties>
+  );
   const stateAndChips = (
     <>
       {stateLine}
-      {narrow && (
-        <TicketProperties
-          layout="chips"
-          chats={chats}
-          ticket={ticket}
-          active={active}
-          revision={revision}
-          projects={projects}
-          plans={plans}
-          onSaved={updateTicket}
-          refresh={refresh}
-          onOpenTicket={select}
-          onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-        >
-          {attention}
-        </TicketProperties>
-      )}
+      {chips}
     </>
   );
   return (
@@ -291,11 +341,13 @@ export function TicketPage({
             select={select}
             revision={revision}
             mention={mention}
+            stateLine={stateLine}
           >
-            {stateAndChips}
+            {chips}
           </TicketEditor>
         )}
-        {active && !ticket.trashed && (
+        {addRow}
+        {active && !ticket.trashed && !noSubtickets && (
           <Subtickets work={work} select={select} external={Boolean(source)} />
         )}
         {active && (
@@ -304,6 +356,9 @@ export function TicketPage({
             revision={revision}
             trashed={ticket.trashed}
             refresh={refresh}
+            folded
+            addRequest={evidenceRequest}
+            onCount={setEvidenceCount}
           />
         )}
         {narrow && (

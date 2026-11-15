@@ -269,19 +269,22 @@ test("Edit is a real button with its shortcut, and E starts editing", async () =
   ).toBeTruthy();
 });
 
-test("Subtickets and Evidence own their add actions even when empty", async () => {
+test("an empty ticket folds Subtickets and Evidence into one quiet add row (DB-30)", async () => {
   renderDetails();
-  const subtickets = (
-    await screen.findByRole("heading", { name: "Subtickets" })
-  ).closest("section")!;
+  const row = await screen.findByRole("group", {
+    name: "Add to this ticket",
+  });
   expect(
-    within(subtickets).getByRole("button", { name: "Add subticket" }),
-  ).toBeTruthy();
-  const evidence = screen.getByRole("heading", { name: /^Evidence/ });
+    within(row)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Subticket", "Evidence", "Relationship"]);
+  // No empty sections stand in a stack under the description.
+  expect(screen.queryByRole("heading", { name: "Subtickets" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: /^Evidence/ })).toBeNull();
+  fireEvent.click(within(row).getByRole("button", { name: "Evidence" }));
   expect(
-    within(evidence.closest("section")!).getByRole("button", {
-      name: "Add evidence",
-    }),
+    await screen.findByRole("dialog", { name: "Add evidence" }),
   ).toBeTruthy();
 });
 
