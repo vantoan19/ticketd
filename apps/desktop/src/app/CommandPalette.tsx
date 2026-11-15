@@ -137,6 +137,7 @@ export function CommandPalette({
   };
   const drill = (next: TicketCommandScope) => {
     setCustom(false);
+    setHighlight(undefined);
     setScope(next);
     setQuery("");
   };
@@ -155,6 +156,7 @@ export function CommandPalette({
     }
     void actions.apply(value);
   }
+  const [highlight, setHighlight] = useState<string | undefined>();
   const navigated = useRef(false);
   const search = useTicketSearch(
     query,
@@ -182,6 +184,7 @@ export function CommandPalette({
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             navigated.current = false;
+            setHighlight(undefined);
             setQuery("");
             setScope(initialScope);
             setCustom(false);
@@ -211,6 +214,14 @@ export function CommandPalette({
             variant="palette"
             label="Search tickets and destinations"
             shouldFilter={false}
+            {...(scope && {
+              value:
+                highlight ??
+                (actions.options.find((option) => option.selected)?.value ||
+                  actions.options[0]?.value ||
+                  "none"),
+            })}
+            onValueChange={setHighlight}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing || event.repeat || custom)
                 return;

@@ -71,17 +71,18 @@ export function FollowToggle({
   );
   if (variant === "strip")
     return (
-      <>
+      <span className="ticket-follow-slot">
         <IconButton
           label={following ? "Following" : "Follow"}
+          aria-label="Follow"
           aria-pressed={following}
           disabled={pending}
           onClick={() => void toggle()}
         >
           <Icon aria-hidden="true" />
         </IconButton>
-        {failure}
-      </>
+        <span className="ticket-follow-feedback">{failure}</span>
+      </span>
     );
   return (
     <>

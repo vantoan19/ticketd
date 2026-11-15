@@ -53,7 +53,7 @@ it("the split switches on the content panel's width, not the window's", () => {
   ])
     expect(read(file)).not.toMatch(/1071/);
   expect(read("styles.css")).toMatch(
-    /@container plan-workspace [(]max-width: 839px[)]/,
+    /@container plan-workspace [(]max-width: 879px[)]/,
   );
 });
 

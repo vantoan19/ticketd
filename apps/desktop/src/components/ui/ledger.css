@@ -155,3 +155,46 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+
+/* Ticket navigator: the same list identity and keyboard model at 52px. */
+.ui-item-navigator {
+  border-radius: var(--radius-card);
+}
+.ui-item-navigator:hover,
+.ui-item-navigator:focus-within {
+  background: var(--hover);
+}
+.ui-item-navigator:has(.ticket-row[aria-pressed="true"]) {
+  background: var(--accent);
+}
+.ui-item-navigator .ticket-row {
+  border-radius: var(--radius-card);
+}
+.ui-item-navigator:has(.ticket-row:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.ui-item-navigator .ticket-navigator-caption,
+.ui-item-navigator .ticket-row-time,
+.ui-item-navigator .ticket-navigator-caption [data-slot="reference"] {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}
+
+.latest-update-line {
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--well);
+  color: var(--foreground);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.latest-update-line:hover {
+  background: var(--accent);
+}
+.latest-update-line:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

@@ -1,3 +1,5 @@
+import { Tooltip } from "@/components/ui/tooltip";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
@@ -135,6 +137,7 @@ export function TicketEditor({
 }) {
   const recovery = useDraftRecovery();
   const recoveryOwner = `ticket:${ticket.id}`;
+  const blockedReason = editingBlockedReason(useWorkspaceState());
   const [restored] = useState(() =>
     restore(
       ticket,
@@ -232,7 +235,7 @@ export function TicketEditor({
       const detail = (
         event as CustomEvent<{ reference: string; documentId?: string }>
       ).detail;
-      if (detail.reference === reference) {
+      if (detail.reference === reference && !blockedReason) {
         setBodyCaret(detail.documentId);
         setBodyMode("editing");
         setBodyFocus((count) => count + 1);
@@ -240,7 +243,7 @@ export function TicketEditor({
     };
     window.addEventListener("ticketd:edit-description", edit);
     return () => window.removeEventListener("ticketd:edit-description", edit);
-  }, [reference]);
+  }, [reference, blockedReason]);
   const editButton = useRef<HTMLButtonElement>(null);
   // E edits the description of the ticket in view, unless typing or another dialog has focus.
   useEffect(() => {
@@ -359,7 +362,13 @@ export function TicketEditor({
   }
 
   useEffect(() => {
-    if (!unsent || externalChange || inFlight.current || state === "failed")
+    if (
+      blockedReason ||
+      !unsent ||
+      externalChange ||
+      inFlight.current ||
+      state === "failed"
+    )
       return;
     const delay = immediate.current ? 0 : 500;
     const timer = window.setTimeout(() => {
@@ -440,6 +449,7 @@ export function TicketEditor({
     return () => window.clearTimeout(timer);
     // `saving` re-arms the save a conflict choice made while another was still in flight.
   }, [
+    blockedReason,
     draft,
     saved,
     unsent,
@@ -601,6 +611,7 @@ export function TicketEditor({
         <textarea
           ref={titleRef}
           aria-label="Title"
+          disabled={Boolean(blockedReason)}
           rows={1}
           value={draft.title}
           aria-invalid={titleInvalid || undefined}
@@ -618,6 +629,7 @@ export function TicketEditor({
         </div>
       )}
       {titleConflict && !bodyConflict && notice}
+      {children}
       {/* One 32px row: the state line and Edit · E, or, while editing, the
           session row. Its height never changes, so the text never moves. */}
       <div className="ticket-state-row" data-session={editingBody || undefined}>
@@ -642,22 +654,24 @@ export function TicketEditor({
           </Button>
         ) : (
           draft.body && (
-            <Button
-              ref={editButton}
-              variant="ghost"
-              size="sm"
-              type="button"
-              aria-label="Edit description"
-              aria-keyshortcuts="E"
-              onClick={() => setBodyMode("editing")}
-            >
-              Edit
-              <Kbd aria-hidden="true">E</Kbd>
-            </Button>
+            <Tooltip content={blockedReason ?? "Edit description (E)"}>
+              <Button
+                disabled={Boolean(blockedReason)}
+                ref={editButton}
+                variant="ghost"
+                size="sm"
+                type="button"
+                aria-label="Edit description"
+                aria-keyshortcuts="E"
+                onClick={() => setBodyMode("editing")}
+              >
+                Edit
+                <Kbd aria-hidden="true">E</Kbd>
+              </Button>
+            </Tooltip>
           )
         )}
       </div>
-      {children}
       <div
         className="editor-body"
         ref={bodyRef}
@@ -729,14 +743,15 @@ export function TicketEditor({
               >
                 <MarkdownDocument
                   source={rendered}
-                  onChange={(body) =>
-                    edit({
-                      ...draft,
-                      body: draft.body.startsWith("\uFEFF")
-                        ? `\uFEFF${body}`
-                        : body,
-                    })
-                  }
+                  {...(!blockedReason && {
+                    onChange: (body: string) =>
+                      edit({
+                        ...draft,
+                        body: draft.body.startsWith("\uFEFF")
+                          ? `\uFEFF${body}`
+                          : body,
+                      }),
+                  })}
                   select={select}
                   revision={revision}
                   mention={mark}
@@ -745,15 +760,18 @@ export function TicketEditor({
             </div>
           ) : (
             // One quiet line that becomes the editor in place (detA DS-06).
-            <button
-              type="button"
-              ref={editButton}
-              className="description-add"
-              aria-keyshortcuts="E"
-              onClick={() => setBodyMode("editing")}
-            >
-              Add a description…
-            </button>
+            <Tooltip content={blockedReason ?? "Edit description (E)"}>
+              <button
+                disabled={Boolean(blockedReason)}
+                type="button"
+                ref={editButton}
+                className="description-add"
+                aria-keyshortcuts="E"
+                onClick={() => setBodyMode("editing")}
+              >
+                Add a description…
+              </button>
+            </Tooltip>
           ))}
       </div>
       {state === "failed" && error && (

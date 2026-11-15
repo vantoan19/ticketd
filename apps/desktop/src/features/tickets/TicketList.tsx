@@ -1,3 +1,4 @@
+import { useNarrowPane } from "./useNarrowPane";
 import { useNow } from "@/lib/use-now";
 import { useRef, useState, type ReactNode } from "react";
 import { Cloud, CornerDownRight, Folder, Layers, Plus } from "lucide-react";
@@ -76,6 +77,8 @@ export function TicketList({
   /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
   simple?: boolean;
 }) {
+  const listElement = useRef<HTMLUListElement>(null);
+  const narrow = useNarrowPane(listElement, 481);
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
@@ -118,7 +121,7 @@ export function TicketList({
   };
   const canSelect = selectable && !selectionDisabled;
   return (
-    <ul className="ticket-rows">
+    <ul ref={listElement} className="ticket-rows">
       {entries.map((entry) => {
         if ("header" in entry) {
           const { status, count, tickets: shown } = entry.header;
@@ -170,7 +173,11 @@ export function TicketList({
         const { ticket } = entry;
         const index = ordered.indexOf(ticket);
         return (
-          <Item key={ticket.id} variant="ledger" asChild>
+          <Item
+            key={ticket.id}
+            variant={selected || narrow ? "navigator" : "ledger"}
+            asChild
+          >
             <li>
               {!selectable && (
                 // Keeps rows aligned with lists that have a selection column.
@@ -255,7 +262,9 @@ export function TicketList({
                   ) {
                     event.preventDefault();
                     const down = event.key === "ArrowDown" || event.key === "j";
-                    focusRow(ordered[index + (down ? 1 : -1)]);
+                    const next = ordered[index + (down ? 1 : -1)];
+                    focusRow(next);
+                    if (selected && next) onOpen(next.reference);
                   } else if (event.key === "Home" || event.key === "End") {
                     event.preventDefault();
                     focusRow(
@@ -299,6 +308,7 @@ export function TicketList({
                   </Tooltip>
                 )}
                 <Reference>{ticket.reference}</Reference>
+
                 <span className="ticket-title-lane">
                   <Tooltip content={ticket.title} overflowOnly>
                     <span className="ticket-title">{ticket.title}</span>
@@ -385,6 +395,16 @@ function RowDetails({
   const update = ticket.progress_summary;
   return (
     <>
+      <span className="ticket-navigator-caption">
+        <Reference>{ticket.reference}</Reference>
+        <span>·</span>
+        <span>
+          {label ||
+            (update
+              ? `${update.editing_agent ?? "You"} · ${progressBrief(update.brief.text)}`
+              : contextLabel)}
+        </span>
+      </span>
       <span className="ticket-row-state" aria-label={label || undefined}>
         {label && (
           <Tooltip content={label}>

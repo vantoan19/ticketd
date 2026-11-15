@@ -1,3 +1,4 @@
+import { TicketCommandContext } from "@/lib/ticket-command-actions";
 import { localInstants, localValue } from "./reminder-time";
 import { ReminderDateTime } from "./ReminderDateTime";
 import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
@@ -11,7 +12,7 @@ import {
   PopoverDescription,
 } from "@/components/ui/popover";
 import { invoke } from "@/lib/api/bridge-failure";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ChoiceList } from "@/components/ui/choice-list";
@@ -40,6 +41,7 @@ export function Reminder({
   revision: number;
   variant?: "rail" | "strip";
 }) {
+  const openCommand = useContext(TicketCommandContext);
   const [due, setDue] = useState<string | null>(null);
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState("");
@@ -150,6 +152,17 @@ export function Reminder({
     setOccurrence("");
   }
   const presets = reminderPresets(now);
+  if (variant === "strip" && openCommand)
+    return (
+      <IconButton
+        label={due ? reminderSummary(due) : "Remind me"}
+        shortcut={shortcutLabel("ticket-reminder")}
+        aria-keyshortcuts={ariaKeyShortcuts("ticket-reminder")}
+        onClick={() => openCommand("Reminder", reference)}
+      >
+        <Bell />
+      </IconButton>
+    );
   return (
     <Popover
       open={open}

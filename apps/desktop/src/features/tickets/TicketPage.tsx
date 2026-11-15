@@ -1,3 +1,12 @@
+import { useContext } from "react";
+import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { TicketCommandContext } from "@/lib/ticket-command-actions";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -38,11 +47,11 @@ import type { Plan } from "@/lib/api/plans";
 
 type NoteTarget = { id: string; key: number };
 
-/** One ticket's reading column and its property rail. */
+/** The ticket document with its wrapping properties and linked context. */
 export function TicketPage({
   ticket,
   active,
-  narrow = false,
+
   outsideResults = false,
   projects,
   plans,
@@ -58,8 +67,6 @@ export function TicketPage({
   ticket: Ticket;
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
-  /** Too narrow for the rail: it folds into a property strip under the title. */
-  narrow?: boolean;
   /** The ticket is not among the list's current results. */
   outsideResults?: boolean;
   projects: Project[];
@@ -75,6 +82,7 @@ export function TicketPage({
   onMention: (target: MentionTarget) => void;
 }) {
   const now = useNow();
+  const openCommand = useContext(TicketCommandContext);
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(ticket, revision, refresh, active);
   const sourcesConfigured = useSourcesConfigured();
@@ -128,7 +136,7 @@ export function TicketPage({
     );
   const ticketRuns = useTicketRuns(ticket.reference, active);
   // Pages stay mounted while hidden and the shared scrollers keep their
-  // offset, so showing a ticket starts it at the top: document, rail, detail.
+  // offset, so showing a ticket starts its document at the top.
   const page = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const content = page.current;
@@ -137,7 +145,6 @@ export function TicketPage({
       content.parentElement,
       content,
       content.querySelector(".detail-document"),
-      content.querySelector(":scope > .ticket-properties"),
     ]) {
       if (node) node.scrollTop = 0;
     }
@@ -255,16 +262,15 @@ export function TicketPage({
         projects.find((project) => project.id === ticket.project_id)?.path ??
         null
       }
-      chip={narrow}
+      chip
     />
   );
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
-  // Folded, the rail's values sit under the title as one strip, in rail
-  // order; the state line is the editor's own row above it.
-  const strip = narrow && (
+  // One property strip for every document width.
+  const strip = (
     <TicketProperties
       layout="strip"
       chats={chats}
@@ -278,7 +284,53 @@ export function TicketPage({
       refresh={refresh}
       onOpenTicket={select}
       onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-    />
+    >
+      {active && !ticket.trashed && (
+        <>
+          {work.rows.some(
+            (row) => row.kind === "blocked_by" && row.unresolved,
+          ) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => work.openLink("blocked_by")}
+            >
+              <Plus aria-hidden="true" />
+              Blocked by{" "}
+              {work.rows
+                .filter((row) => row.kind === "blocked_by" && row.unresolved)
+                .map((row) => row.reference)
+                .join(", ")}
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton label="Add ticket property">
+                <Plus />
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {openCommand && (
+                <DropdownMenuItem
+                  onSelect={() => openCommand("Reminder", ticket.reference)}
+                >
+                  Reminder
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onSelect={() => work.openLink("blocked_by")}>
+                Blocked by
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => work.openLink("parent")}>
+                Parent
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => work.openLink("related")}>
+                Link
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      )}
+    </TicketProperties>
   );
   return (
     <div
@@ -324,8 +376,8 @@ export function TicketPage({
             ) : (
               <h3 className="detail-title">{ticket.title}</h3>
             )}
-            {stateLine}
             {strip}
+            {stateLine}
             <div className="editor-body">
               {source && contentLocked ? (
                 <SourceDescription
@@ -379,7 +431,7 @@ export function TicketPage({
             onCount={setEvidenceCount}
           />
         )}
-        {narrow && (
+        {
           <RailPlacement value="column">
             <div className="detail-connected">
               {runs}
@@ -387,7 +439,7 @@ export function TicketPage({
               {files}
             </div>
           </RailPlacement>
-        )}
+        }
         {active && (
           <Backlinks
             ticketId={ticket.id}
@@ -424,25 +476,6 @@ export function TicketPage({
           onChanged={refresh}
         />
       </div>
-      {!narrow && (
-        <TicketProperties
-          ticket={ticket}
-          chats={chats}
-          attention={attentionFor("rail")}
-          active={active}
-          revision={revision}
-          projects={projects}
-          plans={plans}
-          onSaved={updateTicket}
-          refresh={refresh}
-          onOpenTicket={select}
-          onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-        >
-          {runs}
-          {relationships}
-          {files}
-        </TicketProperties>
-      )}
     </div>
   );
 }
