@@ -906,34 +906,72 @@ fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
             use_web,
         },
         turn_limit: 40,
-        ticketd_folders: vec![PathBuf::from("/data/ticketd")],
     }
 }
 
-/// Codex cannot run read-only and still let the ticketd CLI record a result, so the
-/// "Edit files" switch does not change the sandbox: it is always the step's folder
-/// and the Workspace data folder, and nothing wider.
+fn agent(
+    read_files: bool,
+    edit_files: bool,
+    run_commands: bool,
+    use_web: bool,
+) -> crate::Unattended {
+    let mut agent = unattended(edit_files, use_web);
+    agent.tools.read_files = read_files;
+    agent.tools.run_commands = run_commands;
+    agent
+}
+
+/// Edit off is a read-only sandbox, Edit on writes only in the step's folder (the
+/// ticketd tool needs no other), Run off removes Codex's shell, and with neither Edit
+/// nor Run the agent has no environment at all: only ticketd's tool. "Read files"
+/// changes nothing here: Codex reads through its shell, which only Run switches.
 #[test]
-fn an_unattended_sandbox_writes_to_the_steps_folder_and_the_workspace_data_folder_only() {
-    for (edit_files, use_web) in [(false, false), (false, true), (true, false), (true, true)] {
-        let (thread, turn) =
-            super::unattended_params(&unattended(edit_files, use_web), Path::new("/work/chat-1"));
+fn the_switches_become_codex_sandbox_shell_and_environment_settings() {
+    for (edit_files, run_commands, use_web) in [
+        (false, false, false),
+        (false, true, true),
+        (true, false, false),
+        (true, true, true),
+    ] {
+        let reading = |read_files| agent(read_files, edit_files, run_commands, use_web);
+        assert_eq!(
+            super::unattended_params(&reading(true), Path::new("/work/chat-1")),
+            super::unattended_params(&reading(false), Path::new("/work/chat-1")),
+            "reading is not a Codex setting"
+        );
+        let (thread, turn) = super::unattended_params(&reading(true), Path::new("/work/chat-1"));
+        let policy = if edit_files {
+            json!({
+                "type": "workspaceWrite",
+                "networkAccess": use_web,
+                "writableRoots": ["/work/chat-1"],
+                "excludeTmpdirEnvVar": true,
+                "excludeSlashTmp": true,
+            })
+        } else {
+            json!({"type": "readOnly", "networkAccess": use_web})
+        };
         assert_eq!(
             thread,
-            json!({"approvalPolicy": "on-request", "sandbox": "workspace-write", "model": "gpt-test"})
+            json!({
+                "approvalPolicy": "on-request",
+                "sandbox": if edit_files { "workspace-write" } else { "read-only" },
+                "model": "gpt-test",
+            })
         );
         assert_eq!(
             turn,
-            json!({
-                "approvalPolicy": "on-request",
-                "sandboxPolicy": {
-                    "type": "workspaceWrite",
-                    "networkAccess": use_web,
-                    "writableRoots": ["/work/chat-1", "/data/ticketd"],
-                    "excludeTmpdirEnvVar": true,
-                    "excludeSlashTmp": true,
-                },
-            })
+            json!({"approvalPolicy": "on-request", "sandboxPolicy": policy})
+        );
+        let overrides = super::switch_overrides(&reading(true).tools);
+        assert_eq!(overrides["features.shell_tool"], json!(run_commands));
+        assert_eq!(
+            overrides.get("features.view_image"),
+            (!run_commands).then_some(&json!(false))
+        );
+        assert_eq!(
+            super::has_no_environment(&reading(true).tools),
+            !edit_files && !run_commands
         );
     }
 }
@@ -986,6 +1024,95 @@ async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
         settings: StartSettings::default(),
     };
     tokio::join!(open_over(io, &request, options()), peer.play()).0
+}
+
+/// An unattended thread with the ticketd CLI opts into the experimental API, declares
+/// ticketd's own tool and tells the agent to use it. The tool refuses what could leave
+/// the run's Workspace or the step, and any other tool or thread.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_thread_declares_ticketds_own_tool_and_answers_only_it() {
+    let (mut peer, _opened) =
+        open_with_ticketd_tool(fixture!("unattended_ticket_tool"), unattended(true, false)).await;
+
+    // Every call in the rest of the script is answered as it is written.
+    peer.play().await;
+    peer.assert_nothing_written().await;
+}
+
+/// With neither Run commands nor Edit files on, the agent has no shell, a read-only
+/// sandbox and no Codex environment at all: only ticketd's tool is left.
+#[tokio::test(start_paused = true)]
+async fn an_agent_with_run_and_edit_off_gets_no_shell_and_no_environment() {
+    let (_peer, _opened) = open_with_ticketd_tool(
+        fixture!("unattended_no_environment"),
+        agent(true, false, false, false),
+    )
+    .await;
+}
+
+/// Opens an unattended thread for `agent` with the ticketd CLI over a fixture that
+/// holds `$CONFIG`, `$SPEC` and `$INSTRUCTIONS` where ticketd fills in what it sends.
+async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Peer, OpenedRuntime) {
+    let mut config = super::personal_tools_off(None);
+    let switches = super::switch_overrides(&agent.tools);
+    config
+        .as_object_mut()
+        .unwrap()
+        .extend(switches.as_object().unwrap().clone());
+    let script = fixture
+        .replace("$CONFIG", &config.to_string())
+        .replace("$SPEC", &super::ticket_tool::spec().to_string())
+        .replace(
+            "$INSTRUCTIONS",
+            &json!(super::ticket_tool::INSTRUCTIONS).to_string(),
+        );
+    let (mut peer, io) = pipes();
+    peer.load(&script);
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(agent),
+        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    (peer, opened.expect("the thread opens"))
+}
+
+/// The agent's ticketd tool call shows as the command it asked for, with its output.
+#[test]
+fn a_ticketd_tool_call_shows_as_the_command_with_its_output() {
+    let mut session = Session::default();
+    let item = json!({"type": "dynamicToolCall", "id": "item_3", "tool": "ticketd", "namespace": null,
+        "arguments": {"arguments": ["show", "T-1"]}, "status": "completed", "success": true,
+        "contentItems": [{"type": "inputText", "text": "T-1 Fix it"}]});
+    let params = json!({"turnId": "turn_1", "item": item});
+    match session.notification("item/completed", &params).as_slice() {
+        [
+            EventKind::ToolUpdated {
+                title,
+                output,
+                status,
+                ..
+            },
+        ] => {
+            assert_eq!(title, "ticketd show T-1");
+            assert_eq!(output.as_deref(), Some("T-1 Fix it"));
+            assert_eq!(*status, crate::ToolStatus::Succeeded);
+        }
+        other => panic!("one tool update, got {other:?}"),
+    }
+}
+
+/// A person's Chat, taken over or not, declares no tool and opts into nothing.
+#[tokio::test(start_paused = true)]
+async fn a_persons_chat_declares_no_tool_and_stays_off_the_experimental_api() {
+    let (_peer, opened) = open_with(fixture!("handshake"), SessionStart::New).await;
+    // The handshake fixture asks for no capabilities, so it fails if any were sent.
+    assert!(opened.is_ok());
 }
 
 /// On Windows an unattended run asks Codex whether its sandbox can start, and a
@@ -1269,6 +1396,28 @@ async fn a_taken_over_thread_is_resumed_with_its_configuration_read_first() {
         notice.as_deref(),
         Some("Model gpt-test, approval policy on-request, sandbox workspaceWrite")
     );
+}
+
+/// The thread of a run keeps the ticketd tool Codex was given, so the Chat the person
+/// took over still answers it, without declaring anything on resume.
+#[tokio::test(start_paused = true)]
+async fn a_taken_over_chat_still_answers_the_ticketd_tool() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_taken_over_tool"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("thr_1")),
+        unattended: None,
+        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        taken_over: true,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let _opened = opened.expect("the thread resumes");
+    peer.play().await;
+    peer.assert_nothing_written().await;
 }
 
 #[tokio::test(start_paused = true)]

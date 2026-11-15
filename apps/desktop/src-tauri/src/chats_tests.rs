@@ -287,7 +287,6 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
             model: None,
             tools: ticketd_core::AutomationAgentTools::default(),
             turn_limit: 5,
-            ticketd_folders: Vec::new(),
         };
         let _ = host
             .run_unattended(&run_chat.id, "go", unattended, Duration::from_secs(600))
@@ -2124,13 +2123,13 @@ fn an_incompatible_harness_says_what_was_found_and_needed_once() {
         Inspection::Incompatible {
             executable: PathBuf::from("/opt/bin/codex"),
             version: Some("codex-cli 0.150.0".to_owned()),
-            requirement: "Codex 0.162.1 or newer".to_owned(),
+            requirement: "Codex 0.163.0 or newer".to_owned(),
         },
     );
     assert_eq!(status.status, HarnessState::Incompatible);
     assert_eq!(
         status.message.as_deref(),
-        Some("Found Codex 0.150.0 at `/opt/bin/codex`. ticketd needs Codex 0.162.1 or newer.")
+        Some("Found Codex 0.150.0 at `/opt/bin/codex`. ticketd needs Codex 0.163.0 or newer.")
     );
     assert_eq!(status.path.as_deref(), Some("/opt/bin/codex"));
     assert_eq!(status.version.as_deref(), Some("0.150.0"));

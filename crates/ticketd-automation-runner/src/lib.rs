@@ -9,7 +9,7 @@
 mod first_message;
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -46,14 +46,6 @@ enum Ran {
     AgentStopped(StopCause),
 }
 
-/// What an agent needs kept open so it can always run the ticketd CLI, whatever
-/// else it may do. The host puts the CLI itself on the agent's `PATH`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TicketdCli {
-    /// The folders it writes to: the one holding the Workspace.
-    pub folders: Vec<PathBuf>,
-}
-
 /// Shows a desktop notification, or says why it could not. The host supplies it: the
 /// runner knows what to say, not how a desktop shows it.
 pub type Notifier = Arc<dyn Fn(AutomationNotification) -> Result<(), String> + Send + Sync>;
@@ -66,7 +58,6 @@ pub struct Runner {
 struct Inner {
     open_workspace: WorkspaceOpener,
     host: ChatHost,
-    cli: TicketdCli,
     notifier: Notifier,
     /// The runs this runner is executing. A run that is Running in the Workspace
     /// and not here has nothing behind it.
@@ -88,7 +79,6 @@ impl Runner {
     pub fn new(
         open_workspace: WorkspaceOpener,
         host: ChatHost,
-        cli: TicketdCli,
         notifier: Notifier,
     ) -> Result<Self, Error> {
         open_workspace()?.end_running_automation_runs(&[], RESTARTED)?;
@@ -96,7 +86,6 @@ impl Runner {
             inner: Arc::new(Inner {
                 open_workspace,
                 host,
-                cli,
                 notifier,
                 going: Mutex::new(HashSet::new()),
             }),
@@ -307,7 +296,6 @@ impl Runner {
             model: settings.model.clone(),
             tools: settings.tools.clone(),
             turn_limit: settings.turn_limit,
-            ticketd_folders: self.inner.cli.folders.clone(),
         };
         let time_limit = Duration::from_secs(u64::from(settings.time_limit_minutes) * 60);
         let message = first_message(&settings.instructions, run);

@@ -25,19 +25,23 @@ const agent = (patch: Partial<AutomationAgent>): AutomationAgent => ({
   ...patch,
 });
 
-test("a Codex agent's reach is what its sandbox always allows, whatever switches are stored", () => {
-  expect(agentReach(agent({ harness: "codex" }))).toBe(
-    "Codex. Can read files, edit files, and run any command, and use the ticketd command line.",
-  );
-  expect(
+test("a Codex agent reads by running commands and never has a list of them", () => {
+  const codex = (tools: Partial<ReturnType<typeof agent>["tools"]>) =>
     agentReach(
-      agent({
-        harness: "codex",
-        tools: { ...agent({}).tools, read_files: false, use_web: true },
-      }),
-    ),
-  ).toBe(
-    "Codex. Can read files, edit files, run any command, and use the web, and use the ticketd command line.",
+      agent({ harness: "codex", tools: { ...agent({}).tools, ...tools } }),
+    );
+  // Read files alone gives Codex nothing to read with.
+  expect(codex({ read_files: true })).toBe(
+    "Codex. Can only use the ticketd command line.",
+  );
+  expect(codex({ edit_files: true })).toBe(
+    "Codex. Can edit files, and use the ticketd command line.",
+  );
+  expect(codex({ run_commands: true, use_web: true })).toBe(
+    "Codex. Can read files, run any command, and use the web, and use the ticketd command line.",
+  );
+  expect(codex({ run_commands: true, edit_files: true })).toBe(
+    "Codex. Can read files, edit files, and run any command, and use the ticketd command line.",
   );
 });
 

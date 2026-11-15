@@ -4,7 +4,7 @@
 //! their callers, notifications and harness requests become events. Commands only
 //! write; they never read the protocol stream themselves.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -29,6 +29,7 @@ use super::discovery;
 use super::mapping::{Call, Session, rejection_reason, unknown};
 use super::report::{self, Overrides};
 use super::rpc::{self, Frame, MAX_FRAME_BYTES, Pending, Reply, Resolved, RpcError, StderrTail};
+use super::ticket_tool::{self, TicketTool};
 
 /// How long a loss waits to learn the exit code before reporting without one.
 const EXIT_OBSERVATION: Duration = Duration::from_secs(2);
@@ -70,6 +71,8 @@ struct Connection {
     child: AsyncMutex<Box<dyn ChildProcess>>,
     stderr: StderrTail,
     options: Options,
+    /// Set for an unattended session that has the ticketd CLI: answers its tool calls.
+    ticket_tool: OnceLock<TicketTool>,
 }
 
 enum WriteFailure {
@@ -104,6 +107,7 @@ impl Connection {
             child: AsyncMutex::new(io.child),
             stderr: StderrTail::default(),
             options,
+            ticket_tool: OnceLock::new(),
         });
         if let Some(stderr) = io.stderr {
             tokio::spawn(connection.stderr.clone().drain(stderr));
@@ -174,17 +178,20 @@ impl Connection {
     }
 
     /// `initialize`, then the `initialized` notification the protocol requires.
-    /// Returns the platform Codex reports it runs on.
-    async fn initialize(&self) -> Result<Option<String>, Problem> {
+    /// Returns the platform Codex reports it runs on. `experimental` opts into the
+    /// experimental API, which declaring a tool on the thread needs; a person's Chat
+    /// and the probes do not use it.
+    async fn initialize(&self, experimental: bool) -> Result<Option<String>, Problem> {
         let client = json!({
             "name": "ticketd",
             "title": "ticketd",
             "version": self.options.client_version,
         });
-        match self
-            .request("initialize", json!({"clientInfo": client}))
-            .await
-        {
+        let mut params = json!({"clientInfo": client});
+        if experimental {
+            params["capabilities"] = json!({"experimentalApi": true});
+        }
+        match self.request("initialize", params).await {
             CallOutcome::Reply(reply) => {
                 let platform = reply["platformOs"].as_str().map(str::to_owned);
                 self.write_checked(|_| Ok((json!({"method": "initialized"}), ())))
@@ -219,7 +226,7 @@ impl Connection {
     }
 
     async fn open_thread(&self, request: &OpenRequest) -> Result<Capabilities, Problem> {
-        let platform = self.initialize().await?;
+        let platform = self.initialize(request.unattended.is_some()).await?;
         if request.unattended.is_some()
             && platform.as_deref() == Some("windows")
             && let Some(problem) = self.windows_sandbox_problem().await
@@ -241,11 +248,41 @@ impl Connection {
             let (thread, turn) = super::unattended_params(unattended, &request.working_directory);
             merge(&mut params, thread);
             let config = self.effective_config(&cwd).await;
-            params["config"] = super::personal_tools_off(config.as_ref());
+            let mut overrides = super::personal_tools_off(config.as_ref());
+            merge(&mut overrides, super::switch_overrides(&unattended.tools));
+            params["config"] = overrides;
+            // A resumed thread keeps its environments: the request has no field for them.
+            if matches!(request.session, SessionStart::New)
+                && super::has_no_environment(&unattended.tools)
+            {
+                params["environments"] = json!([]);
+            }
             self.state().session.turn_overrides = Some(turn);
+            if request.ticketd_cli.is_some() {
+                // ticketd's own tool is how the agent reaches its tickets: Codex's
+                // shell may be off and its sandbox read-only.
+                // A resumed thread keeps the tool it was started with.
+                if matches!(request.session, SessionStart::New) {
+                    params["dynamicTools"] = json!([ticket_tool::spec()]);
+                }
+                params["developerInstructions"] = json!(ticket_tool::INSTRUCTIONS);
+            }
         } else if request.taken_over {
             let config = self.effective_config(&cwd).await;
             merge(&mut params, super::own_approvals(config.as_ref()));
+        }
+        // A Chat taken over from a run resumes a thread that was started with the
+        // tool, which Codex may still offer its model: answer it, as the person's
+        // own Chat (no run).
+        if let Some(cli) = &request.ticketd_cli
+            && (request.unattended.is_some() || request.taken_over)
+        {
+            let _ = self.ticket_tool.set(TicketTool {
+                cli: cli.clone(),
+                working_directory: request.working_directory.clone(),
+                chat_id: request.chat_id.clone(),
+                run_id: request.unattended.as_ref().map(|run| run.run_id.clone()),
+            });
         }
         let result = match self.call(method, |_| Ok((params, Call::OpenThread))).await {
             CallOutcome::Reply(result) => result,
@@ -335,6 +372,9 @@ impl Connection {
     async fn read(self: Arc<Self>, stdout: Reader, events: mpsc::Sender<RuntimeEvent>) {
         let mut stdout = BufReader::new(stdout);
         while let Ok(Some(frame)) = rpc::read_frame(&mut stdout, MAX_FRAME_BYTES).await {
+            let Some(frame) = self.answer_tool_call(frame) else {
+                continue;
+            };
             let (kinds, reply) = self.apply(frame);
             if let Some(reply) = reply {
                 // Written from its own task so a full input pipe cannot stall reading.
@@ -371,6 +411,33 @@ impl Connection {
             diagnostics: self.stderr.readable(),
         };
         let _ = events.send(self.event(lost)).await;
+    }
+
+    /// Answers a call of ticketd's own tool from its own task, so a slow command does
+    /// not stall the reader. Returns any other frame for `apply`.
+    fn answer_tool_call(self: &Arc<Self>, frame: Frame) -> Option<Frame> {
+        let Frame::Request { id, method, params } = &frame else {
+            return Some(frame);
+        };
+        if method != ticket_tool::CALL_METHOD || self.ticket_tool.get().is_none() {
+            return Some(frame);
+        }
+        let ours = self.state().session.thread() == params["threadId"].as_str();
+        let called =
+            params["tool"].as_str() == Some(ticket_tool::NAME) && params["namespace"].is_null();
+        let (id, input) = (id.clone(), params["arguments"].clone());
+        let connection = Arc::clone(self);
+        tokio::spawn(async move {
+            let reply = match (ours, called, connection.ticket_tool.get()) {
+                (true, true, Some(tool)) => json!({"id": id, "result": tool.run(&input).await}),
+                _ => json!({"id": id, "error": {
+                    "code": -32601,
+                    "message": "ticketd offers only its own `ticketd` tool on this thread",
+                }}),
+            };
+            let _ = connection.write_checked(|_| Ok((reply, ()))).await;
+        });
+        None
     }
 
     fn event(&self, kind: EventKind) -> RuntimeEvent {
@@ -510,7 +577,7 @@ pub(super) async fn open_over(
 pub(super) async fn probe_login(io: Io, options: Options) -> LoginState {
     let (connection, _events) = Connection::start(io, RuntimeGeneration(0), options);
     let read = async {
-        match connection.initialize().await {
+        match connection.initialize(false).await {
             Ok(_) => match connection
                 .request("account/read", json!({"refreshToken": false}))
                 .await
@@ -542,7 +609,7 @@ pub(super) async fn probe_options(io: Io, options: Options) -> Result<HarnessOpt
 
 async fn list_options(connection: &Connection) -> Result<HarnessOptions, String> {
     connection
-        .initialize()
+        .initialize(false)
         .await
         .map_err(|problem| problem.message)?;
     let models = list_all(connection, "model/list").await?;

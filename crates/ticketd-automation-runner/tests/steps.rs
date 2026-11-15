@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ticketd_automation_runner::{Notifier, Runner, TicketdCli};
+use ticketd_automation_runner::{Notifier, Runner};
 use ticketd_chat_host::{ChatHost, WorkspaceOpener};
 use ticketd_core::{
     AutomationDefinition, AutomationNotification, AutomationRun, AutomationRunStatus,
@@ -78,7 +78,7 @@ impl Fixture {
             Ok(())
         });
         let host = ChatHost::new(opener(&path), Vec::new()).unwrap();
-        let runner = Runner::new(opener(&path), host, TicketdCli::default(), notifier).unwrap();
+        let runner = Runner::new(opener(&path), host, notifier).unwrap();
         Self {
             _dir: dir,
             path,

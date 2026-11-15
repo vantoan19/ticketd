@@ -162,41 +162,21 @@ export function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
-type Tools = AutomationAgent["tools"];
-
-/**
- * The switches Codex does not follow. It reads files and runs any command inside
- * its own sandbox, and that sandbox always lets it write in the step's folder, so
- * with Codex these are on whatever is stored. The agent keeps its own choices
- * for Claude Code.
- */
-export const FIXED_ON_FOR_CODEX: ReadonlySet<keyof Tools> = new Set([
-  "read_files",
-  "edit_files",
-  "run_commands",
-]);
-
 /** What an agent may do, in a sentence: its reach, shown where it is used. */
 export function agentReach(agent: AutomationAgent): string {
-  const tools: Tools =
-    agent.harness === "codex"
-      ? // FIXED_ON_FOR_CODEX, and its commands are not limited to a list.
-        {
-          ...agent.tools,
-          read_files: true,
-          edit_files: true,
-          run_commands: true,
-          any_command: true,
-        }
-      : agent.tools;
+  const tools = agent.tools;
+  // Codex has no read tool and no list of commands: it reads by running commands, and
+  // with Run commands on it runs any.
+  const codex = agent.harness === "codex";
   const commands = tools.allowed_commands.length;
   const may = [
-    // Editing lets it read too: Claude Code changes only a file it has read.
-    (tools.read_files || tools.edit_files) && "read files",
+    // Editing lets Claude Code read too: it changes only a file it has read.
+    (codex ? tools.run_commands : tools.read_files || tools.edit_files) &&
+      "read files",
     tools.edit_files && "edit files",
     // "Any command" is said outright; an empty list allows none.
     tools.run_commands &&
-      (tools.any_command
+      (codex || tools.any_command
         ? "run any command"
         : commands > 0 &&
           `run ${commands} ${commands === 1 ? "command" : "commands"}`),

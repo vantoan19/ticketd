@@ -319,22 +319,29 @@ by name only: every Chat's harness process has the CLI's folder first on its
 `PATH`, and the Chat's context tells the agent to run `ticketd` by that name.
 Codex runs with approval policy `on-request`, and ticketd declines every approval
 request at once (with `never`, Codex reports a patch its policy rejects as no item at all, so
-the step could not fail), and a
-`workspaceWrite` sandbox whose only writable places are the step's folder and the
-folder holding the Workspace, with no network unless the web is allowed, and with
-the person's MCP servers, plugins and apps turned off. Codex still reads the
-person's own `AGENTS.md` files and lists their skills: its app-server has no
-setting that leaves them out, and the agent editor says so. A command Codex could not
+the step could not fail), with no network unless the web is allowed, and with
+the person's MCP servers, plugins and apps turned off. The switches map as follows. "Edit
+files" off is a `readOnly` sandbox; on, a `workspaceWrite` sandbox whose only writable place
+is the step's folder. "Run commands" off sets `features.shell_tool=false` (and turns the image
+viewer off), which also ends the agent's reading, because Codex has no read tool and reads
+through its shell; with it on the agent runs any command inside the sandbox, as Codex has no
+list of allowed commands. With both off, the thread starts with `environments: []`, so
+`apply_patch` goes too. "Read files" is not a Codex setting, and no read limit is applied: it
+can read any file the person can when Run commands is on. The agent reaches its tickets through
+ticketd's own tool: the thread declares one dynamic tool, `ticketd`, over the experimental app-server API,
+and ticketd answers its `item/tool/call` requests by running the bundled CLI in its own process
+with the arguments as an array, the step's folder as working directory and the run's identity, so
+the Codex sandbox does not apply to it and a read-only agent can still record its result. `restore-workspace`
+and `skills install` are refused. Codex still reads the
+person's own global `AGENTS.md` and lists their skills in `~/.agents/skills`, and their "always
+allow" rules apply when Run commands is on: its app-server has no
+setting that leaves them out, and the agent editor says so. Codex 0.163.0 or newer is required:
+0.162.x cannot start its Windows sandbox while another Codex process holds a runtime file. A command Codex could not
 start fails the step: the agent could not do its work. So does a tool Codex declined and a
 file change it declined or failed to write, with a reason naming the file. A Chat taken over from a
 run resumes its Codex thread with the person's own approval policy and sandbox
 from their Codex configuration (`on-request` and `read-only` when it sets none). Codex
-reads files and runs commands inside that sandbox whatever the switches say (its
-`workspaceWrite` policy limits writes, not reads, so it can read any file the
-person can) and
-has no turn limit to set, so the agent editor shows those as fixed for Codex; a
-read-only sandbox would stop the ticketd CLI recording the agent's result, so
-"Edit files" does not apply to Codex either. `ChatHost::run_unattended` sends the first
+has no turn limit to set, so the agent editor shows it as not applied for Codex. `ChatHost::run_unattended` sends the first
 message, stops a turn still going at the agent's time limit, reports how the turn
 ended (finished, turn limit, time limit, tool denied, crashed, or another failure)
 and closes the harness process. An unattended harness that asks for approval

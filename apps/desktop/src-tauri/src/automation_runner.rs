@@ -2,13 +2,12 @@
 //! seconds. Everything a pass does lives in `ticketd-automation-runner`; this only
 //! decides when one may happen.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
-use ticketd_automation_runner::{Notifier, Runner, TicketdCli};
+use ticketd_automation_runner::{Notifier, Runner};
 use ticketd_chat_host::ChatHost;
 
 use crate::chats::Chats;
@@ -51,33 +50,13 @@ pub fn open_on_click(app: &AppHandle) {
 /// nothing new in the event log, one reads each cursor and writes nothing.
 const TICK: Duration = Duration::from_secs(5);
 
-/// Which folder the ticketd CLI writes to, so an agent can always run it.
-fn ticketd_cli() -> TicketdCli {
-    let workspace = crate::open_workspace()
-        .and_then(|workspace| workspace.workspace_info())
-        .map(|info| PathBuf::from(info.path))
-        .ok();
-    TicketdCli {
-        folders: workspace
-            .as_deref()
-            .and_then(|path| path.parent())
-            .map(|folder| vec![folder.to_owned()])
-            .unwrap_or_default(),
-    }
-}
-
 /// One pass, creating the runner the first time there is a host to run agents on.
 /// Blocking.
 fn pass(runner: Option<Runner>, host: ChatHost, app: &AppHandle) -> Option<Runner> {
     let runner = match runner {
         Some(runner) => runner,
         None => {
-            let built = Runner::new(
-                Arc::new(crate::open_workspace),
-                host,
-                ticketd_cli(),
-                notifier(app.clone()),
-            );
+            let built = Runner::new(Arc::new(crate::open_workspace), host, notifier(app.clone()));
             match built {
                 Ok(runner) => runner,
                 Err(error) => {

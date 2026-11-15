@@ -26,7 +26,6 @@ import {
   type AutomationAgent,
   type AutomationAgentSettings,
 } from "@/features/automations/client";
-import { FIXED_ON_FOR_CODEX } from "@/features/automations/automation-text";
 import {
   harnessStanding,
   useHarnessStatus,
@@ -99,6 +98,15 @@ const TOOLS: {
     description: "Search and fetch pages",
   },
 ];
+
+/** What a switch means with Codex, which has no read tool and no list of commands. */
+const CODEX_DESCRIPTIONS: Partial<
+  Record<(typeof TOOLS)[number]["key"], string>
+> = {
+  read_files: "Codex reads by running commands: needs Run commands",
+  edit_files: "Only in the step’s folder",
+  run_commands: "Any command; Codex cannot keep it to a list",
+};
 
 /** The largest limits the core accepts (`automation_agents.rs`), offered as each field's range. */
 const MOST_TURNS = 500;
@@ -435,17 +443,17 @@ export function AgentForm({
             <span className="agent-label">Allowed tools</span>
             <SettingsList>
               {TOOLS.map(({ key, title: tool, description }) => {
-                const fixed = codex && FIXED_ON_FOR_CODEX.has(key);
                 return (
                   <ToolRow
                     key={key}
                     title={tool}
-                    description={fixed ? "Always on with Codex" : description}
+                    description={
+                      (codex && CODEX_DESCRIPTIONS[key]) || description
+                    }
                     control={
                       <Switch
                         aria-label={tool}
-                        disabled={fixed}
-                        checked={fixed || draft.tools[key]}
+                        checked={draft.tools[key]}
                         onCheckedChange={(on) => changeTools({ [key]: on })}
                       />
                     }
@@ -498,15 +506,17 @@ export function AgentForm({
             </SettingsList>
             {codex ? (
               <p className="agent-hint">
-                Codex applies its own sandbox: it can read any file you can read
-                on this computer, runs any command, and writes only in the
-                step’s folder and your ticketd data. The Read, Edit and Run
-                switches do not apply; your choices are kept for Claude Code.
-                For a run, ticketd switches off your Codex hooks, notify
-                program, project AGENTS.md, memories, sub-agents, computer and
-                browser use, and bundled skills. It cannot switch off your Codex
-                rules, your global AGENTS.md or the skills in ~/.agents/skills.
-                Your “always allow” rules apply only when Run commands is on.
+                Codex reads files by running commands. With Run commands off it
+                cannot read files, even with Read files on, and it cannot change
+                a file unless Edit files is on. With Run commands on it runs any
+                command, because Codex has no list of allowed commands, and it
+                can read any file you can read on this computer. Edit files lets
+                it write only in the step’s folder. For a run, ticketd switches
+                off your Codex hooks, notify program, project AGENTS.md,
+                memories, sub-agents, computer and browser use, and bundled
+                skills. Your own Codex setup still applies: your global
+                AGENTS.md, the skills in ~/.agents/skills and, with Run commands
+                on, your “always allow” rules.
               </p>
             ) : (
               <p className="agent-hint">

@@ -1,0 +1,8 @@
+{"note":"A thread for an agent with Run commands and Edit files off: a read-only sandbox, no shell and no environment, so only ticketd's own tool is left. Hand-built from the codex-cli 0.162.1 and 0.169.0 experimental schemas (ThreadStartParams.environments); the behaviour was checked live on 0.162.1 with the scripts in the probe folder. The test fills in the config, tool and instructions."}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"},"capabilities":{"experimentalApi":true}}}}
+{"server":{"id":1,"result":{"userAgent":"ticketd/0.163.0 (Linux; x86_64)","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"linux"}}}
+{"client":{"method":"initialized"}}
+{"client":{"id":2,"method":"config/read","params":{"cwd":"/work/chat-1"}}}
+{"server":{"id":2,"result":{"config":{"model":"gpt-test","approval_policy":null,"sandbox_mode":null},"origins":{},"layers":null}}}
+{"client":{"id":3,"method":"thread/start","params":{"cwd":"/work/chat-1","approvalPolicy":"on-request","sandbox":"read-only","model":"gpt-test","config":$CONFIG,"dynamicTools":[$SPEC],"developerInstructions":$INSTRUCTIONS,"environments":[]}}}
+{"server":{"id":3,"result":{"thread":{"id":"thr_1","sessionId":"thr_1","cliVersion":"0.163.0","preview":"","ephemeral":false,"modelProvider":"openai","createdAt":1730910000,"updatedAt":1730910000,"cwd":"/work/chat-1","projectId":null,"source":"appServer","status":{"type":"idle"},"turns":[]},"model":"gpt-test","modelProvider":"openai","approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly"},"cwd":"/work/chat-1","instructionSources":[]}}}

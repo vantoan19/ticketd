@@ -165,15 +165,13 @@ pub struct Unattended {
     pub run_id: String,
     /// `None` is the harness's default model.
     pub model: Option<String>,
-    /// The agent's switches as saved. Codex honours only `use_web`: its sandbox
-    /// decides the rest.
+    /// The agent's switches as saved. Codex has no command list (`any_command` and
+    /// `allowed_commands`: with `run_commands` it runs any), and no read switch of its
+    /// own: its shell does the reading.
     pub tools: ticketd_core::AutomationAgentTools,
     /// How many turns the agent may take, where the harness can cap them. Codex
     /// cannot.
     pub turn_limit: u32,
-    /// Folders the ticketd CLI writes to. A harness that sandboxes writes must always
-    /// keep them writable, whatever `tools` says, or the always-allowed CLI fails.
-    pub ticketd_folders: Vec<PathBuf>,
 }
 
 /// Settings a new session opens with, as chosen in New Chat. `None` leaves the
