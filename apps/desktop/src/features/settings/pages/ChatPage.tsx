@@ -14,7 +14,7 @@ export function ChatPage() {
   return (
     <SettingsPage
       {...sectionMeta("chat")}
-      titleAccessory={<Badge size="sm">Experimental</Badge>}
+      titleAccessory={<Badge variant="experimental">Experimental</Badge>}
       lede="Work with Claude Code or Codex from ticketd, using the copy installed on this computer."
       endSlot={<AppliesRightAway />}
     >

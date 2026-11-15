@@ -356,7 +356,8 @@ function AppContent() {
     navigation,
   } = workspace;
   const goTo = (target: GoTo) => {
-    if (target === "chats" && !chat.enabled) return;
+    if ((target === "chats" || target === "automations") && !chat.enabled)
+      return;
     if (target === "all" || target === "ready" || target === "trash") {
       scope(target);
       setView("tickets");
@@ -384,6 +385,19 @@ function AppContent() {
     setPaletteScope(scope);
     setPaletteOpen(true);
   }
+  function openTicketUpdate() {
+    const composer = document.querySelector<HTMLElement>(
+      '.detail-content:not([hidden]) [aria-label="Write an update"]',
+    );
+    const idle = composer?.querySelector<HTMLButtonElement>(
+      ".activity-composer-idle",
+    );
+    if (idle) idle.click();
+    else
+      composer
+        ?.querySelector<HTMLElement>('[role="textbox"], textarea')
+        ?.focus();
+  }
   useCommandKeys(
     () => openPalette(),
     goTo,
@@ -407,11 +421,7 @@ function AppContent() {
         view === "tickets" &&
         workspace.selected === reference
       ) {
-        document
-          .querySelector<HTMLButtonElement>(
-            '[aria-label="Write an update"] .activity-composer-idle',
-          )
-          ?.click();
+        openTicketUpdate();
         return true;
       }
       return false;
@@ -553,6 +563,16 @@ function AppContent() {
                           onCreated={(id) => scope("all", "all", id)}
                         />
                         <CommandPalette
+                          writeUpdate={
+                            view === "tickets" &&
+                            workspace.selected === paletteReference &&
+                            editingBlockedReason(workspaceProblem) === null
+                              ? openTicketUpdate
+                              : null
+                          }
+                          memoryTickets={workspace.tickets}
+                          readyCount={counts?.ready ?? null}
+                          automationCount={counts?.runs_needing_you ?? null}
                           {...{
                             attachmentCommands:
                               view === "attachments" && graphOrigin === null

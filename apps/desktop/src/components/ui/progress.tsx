@@ -31,4 +31,19 @@ function Progress({
   );
 }
 
-export { Progress };
+/** A labelled key for a segment in a multi-status progress bar. */
+function ProgressKey({
+  segment,
+  children,
+}: {
+  segment: "done" | "review" | "progress" | "todo";
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="ui-progress-key">
+      <i data-segment={segment} aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+export { Progress, ProgressKey };

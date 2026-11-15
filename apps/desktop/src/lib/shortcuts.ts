@@ -38,6 +38,13 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
 
 export const SHORTCUTS = [
   {
+    id: "go-automations",
+    keys: [],
+    scope: "Everywhere",
+    label: "Go to Automations",
+    note: "Available in the command palette while Chat is enabled.",
+  },
+  {
     id: "command-palette",
     keys: [["Mod", "K"]],
     scope: "Everywhere",

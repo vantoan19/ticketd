@@ -196,21 +196,10 @@ button.plan-purpose:focus-visible {
   gap: 14px;
   min-height: 184px;
   padding: 20px 20px 16px;
-  border-radius: var(--radius-panel);
-  background: var(--card);
-  box-shadow: var(--shadow-card);
-}
-.plan-card:has(.plan-card-open:hover) {
-  background: var(--hover);
 }
 .plan-card-open {
   position: absolute;
   inset: 0;
-  border-radius: inherit;
-}
-.plan-card-open:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .plan-card-heading {
   display: flex;
@@ -225,75 +214,74 @@ button.plan-purpose:focus-visible {
 .plan-card-title {
   display: flex;
   align-items: baseline;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
   gap: 8px;
 }
 .plan-index-name {
-  font-size: var(--text-reading);
-  line-height: var(--text-doc-line);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.plan-card[data-archived] .plan-index-name {
-  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .plan-card-description p {
-  color: var(--muted-foreground);
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-card-ring-slot {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+.plan-card-progress-slot {
+  display: grid;
+  gap: 14px;
+}
+.plan-card-footer {
+  display: grid;
+  gap: 4px;
+}
+.plan-card-failure {
+  position: absolute;
+  bottom: 0;
+  left: 20px;
+  right: 20px;
+  height: 16px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .plan-card-summary {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.plan-card-summary strong {
-  font-weight: 500;
+  flex: none;
+  width: 128px;
+  min-height: 36px;
 }
 .plan-card-summary time {
   position: relative;
   pointer-events: auto;
 }
-.plan-card-caption,
-.plan-card-legend {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
 .plan-card-legend {
   display: flex;
-  flex-wrap: wrap;
   gap: 6px 16px;
-  pointer-events: none;
+  height: 16px;
+  overflow-x: auto;
+  pointer-events: auto;
 }
-.plan-card-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.plan-card-legend i {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-segment);
-  background: var(--track);
-}
-.plan-card-legend [data-segment="done"] {
-  background: var(--seg-done);
-}
-.plan-card-legend [data-segment="review"] {
-  background: var(--seg-review);
-}
-.plan-card-legend [data-segment="progress"] {
-  background: var(--seg-progress);
+.plan-card-legend > span {
+  flex: none;
 }
 .plan-card-next {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 32px;
-  border-top: 1px solid var(--group-hairline);
-  padding-top: 14px;
+  min-height: 43px;
+  padding: 14px 0 0;
   pointer-events: none;
 }
 .plan-card-next > .plan-card-caption:first-child {
@@ -317,8 +305,6 @@ button.plan-purpose:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .plan-card-spec {
   margin-left: auto;
@@ -338,16 +324,38 @@ button.plan-purpose:focus-visible {
   }
 }
 @media (max-width: 640px) {
+  .plan-card {
+    padding-bottom: 32px;
+  }
   .plan-card-heading {
     flex-wrap: wrap;
   }
+  .plan-card-description p {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    height: 40px;
+  }
+  .plan-card-legend {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(2, 16px);
+    height: 38px;
+  }
   .plan-card-summary {
     flex-basis: 100%;
+    min-height: 20px;
     flex-direction: row;
     justify-content: space-between;
   }
   .plan-card-next {
+    min-height: 73px;
     flex-wrap: wrap;
+  }
+  .plan-card-failure {
+    height: 32px;
+    white-space: normal;
   }
   .plan-card-spec {
     max-width: 100%;
@@ -365,4 +373,15 @@ button.plan-purpose:focus-visible {
   flex: 1;
   min-height: 0;
   padding: 48px 24px;
+}
+
+.plan-card-title > .plan-card-caption {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-card-progress-slot[data-unavailable] {
+  visibility: hidden;
 }

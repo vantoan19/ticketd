@@ -153,7 +153,7 @@ export function SettingsNav({
                         <item.icon size={16} aria-hidden="true" />
                         <span className="settings-nav-label">{item.label}</span>
                         {item.id === "chat" && (
-                          <Badge size="sm">Experimental</Badge>
+                          <Badge variant="experimental">Experimental</Badge>
                         )}
                         {dot && (
                           <Tooltip content={dot.label} side="right">

@@ -1,3 +1,4 @@
+import { TicketCommandPicker } from "./TicketCommandPicker";
 import { TicketAgentStrip } from "./TicketAgent";
 import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
 import {
@@ -653,48 +654,84 @@ export function TicketProperties({
       >
         {openCommand ? (
           <>
-            <RailRow
-              disabled={disabled}
-              icon={<StatusIcon status={ticket.status} decorative />}
-              aria-label={`Status: ${ticket.status}`}
-              onClick={() => openCommand("Status", ticket.reference)}
-              aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
-              title={`Change status (${shortcutLabel("ticket-status")})`}
-            >
-              {ticket.status}
-            </RailRow>
-            <RailRow
-              disabled={disabled}
-              muted={!ticket.project_id}
-              icon={<Folder />}
-              aria-label={`Project: ${projectName}`}
-              onClick={() => openCommand("Project", ticket.reference)}
-              aria-keyshortcuts={ariaKeyShortcuts("ticket-project")}
-              title={`Change project (${shortcutLabel("ticket-project")})`}
-            >
-              {projectName}
-            </RailRow>
-            <RailRow
-              disabled={disabled}
-              muted={!ticket.plan_id}
-              icon={<Layers />}
-              aria-label={`Plan: ${planName}`}
-              onClick={() => openCommand("Plan", ticket.reference)}
-              aria-keyshortcuts={ariaKeyShortcuts("ticket-plan")}
-              title={`Move to Plan (${shortcutLabel("ticket-plan")})`}
-            >
-              {planName}
-            </RailRow>
-            <RailRow
-              disabled={disabled}
-              muted={!ticket.tags.length}
-              aria-label={`Tags: ${ticket.tags.join(", ") || "No tags"}`}
-              onClick={() => openCommand("Tags", ticket.reference)}
-              aria-keyshortcuts={ariaKeyShortcuts("ticket-tags")}
-              title={`Edit tags (${shortcutLabel("ticket-tags")})`}
-            >
-              {pills || "No tags"}
-            </RailRow>
+            <TicketCommandPicker
+              ticket={ticket}
+              projects={projects}
+              plans={plans}
+              refresh={refresh}
+              scope="Status"
+              trigger={
+                <RailRow
+                  disabled={disabled}
+                  icon={<StatusIcon status={ticket.status} decorative />}
+                  aria-label={`Status: ${ticket.status}`}
+
+                  aria-keyshortcuts={ariaKeyShortcuts("ticket-status")}
+                  title={`Change status (${shortcutLabel("ticket-status")})`}
+                >
+                  {ticket.status}
+                </RailRow>
+              }
+            />
+            <TicketCommandPicker
+              ticket={ticket}
+              projects={projects}
+              plans={plans}
+              refresh={refresh}
+              scope="Project"
+              trigger={
+                <RailRow
+                  disabled={disabled}
+                  muted={!ticket.project_id}
+                  icon={<Folder />}
+                  aria-label={`Project: ${projectName}`}
+
+                  aria-keyshortcuts={ariaKeyShortcuts("ticket-project")}
+                  title={`Change project (${shortcutLabel("ticket-project")})`}
+                >
+                  {projectName}
+                </RailRow>
+              }
+            />
+            <TicketCommandPicker
+              ticket={ticket}
+              projects={projects}
+              plans={plans}
+              refresh={refresh}
+              scope="Plan"
+              trigger={
+                <RailRow
+                  disabled={disabled}
+                  muted={!ticket.plan_id}
+                  icon={<Layers />}
+                  aria-label={`Plan: ${planName}`}
+
+                  aria-keyshortcuts={ariaKeyShortcuts("ticket-plan")}
+                  title={`Move to Plan (${shortcutLabel("ticket-plan")})`}
+                >
+                  {planName}
+                </RailRow>
+              }
+            />
+            <TicketCommandPicker
+              ticket={ticket}
+              projects={projects}
+              plans={plans}
+              refresh={refresh}
+              scope="Tags"
+              trigger={
+                <RailRow
+                  disabled={disabled}
+                  muted={!ticket.tags.length}
+                  aria-label={`Tags: ${ticket.tags.join(", ") || "No tags"}`}
+
+                  aria-keyshortcuts={ariaKeyShortcuts("ticket-tags")}
+                  title={`Edit tags (${shortcutLabel("ticket-tags")})`}
+                >
+                  {pills || "No tags"}
+                </RailRow>
+              }
+            />
           </>
         ) : (
           <>
