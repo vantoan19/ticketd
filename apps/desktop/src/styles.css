@@ -285,13 +285,14 @@
     font-variant-ligatures: none;
     font-feature-settings: normal;
   }
-  button:focus-visible,
-  summary:focus-visible,
-  a:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
+  /* Keyboard focus is an outline (DESIGN.md section 4), never a box-shadow,
+     so it cannot erase a control's edge or an overlay's elevation. Rows inside
+     scrollers draw it inset; text fields draw the 1px input focus below. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
-  input:not([type="checkbox"]),
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
   select,
   textarea {
     min-width: 0;
@@ -304,11 +305,16 @@
     line-height: 20px;
     padding: 8px 12px;
   }
-  input:not([type="checkbox"]),
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
   select {
     height: 40px;
   }
-  input:focus-visible,
+  input:not(
+      [type="checkbox"],
+      [type="radio"],
+      [type="range"],
+      [type="file"]
+    ):focus-visible,
   textarea:focus-visible,
   select:focus-visible {
     outline: 1px solid var(--input-focus);
@@ -333,15 +339,13 @@
   line-height: 14px;
 }
 .ui-button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .ui-navigation-button:focus-visible {
   /* Navigation rows touch their scroll container's edges and each other.
      Keep focus inside the row so clipping and selected neighbors cannot hide it. */
-  outline: 2px solid var(--ring);
   outline-offset: -2px;
-  box-shadow: none;
 }
 .ui-button-primary {
   color: var(--primary-foreground);
@@ -484,8 +488,8 @@
   box-shadow: inset 0 0 0 1px var(--border);
 }
 .ui-select:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .ui-input::placeholder {
   color: var(--muted-foreground);
@@ -563,9 +567,6 @@ body:has([data-slot="dialog-overlay"])
 .ui-select[data-variant="ghost"]:hover {
   background: var(--accent);
   color: var(--foreground);
-}
-.ui-select[data-variant="ghost"]:focus-visible {
-  box-shadow: var(--focus-ring);
 }
 .ui-section-title {
   font-size: var(--text-title);
@@ -819,8 +820,8 @@ body:has([data-slot="dialog-overlay"])
   align-items: center;
 }
 .ui-badge:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .ui-badge svg {
   width: 12px;
@@ -1044,8 +1045,8 @@ html[data-window-bar] {
 }
 .skip-link:focus {
   transform: none;
-  outline: none;
-  box-shadow: var(--shadow-menu), var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .sidebar {
   width: 224px;
@@ -1116,9 +1117,8 @@ html[data-window-bar] {
   text-underline-offset: 2px;
 }
 .sidebar-source-line:focus-visible {
-  border-radius: var(--radius-segment);
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .brand {
   display: flex;
@@ -1636,11 +1636,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .ticket-workspace.expanded #detail {
   flex: 1 1 0 !important;
 }
-#detail-heading:focus-visible,
-#tickets-heading:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 4px;
-}
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -2009,11 +2004,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   box-shadow: none;
   outline-offset: 0;
 }
-#detail-heading:focus-visible {
-  outline: none;
-  border-radius: var(--radius);
-  box-shadow: var(--focus-ring);
-}
 .pagination {
   padding: 12px 8px;
 }
@@ -2075,7 +2065,10 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 }
 
 /* After a pointer interaction controls show no focus ring (see
-   useInputModality); text fields keep their outline so typing stays visible. */
+   useInputModality); text fields keep their outline so typing stays visible.
+   Focus is drawn with outline only, so this clears outline and nothing else:
+   a menu, select or outline button focused by script after a click keeps its
+   box-shadow edge and elevation (shell SH-01). */
 html[data-input="pointer"]
   :is(
     button,
@@ -2092,22 +2085,33 @@ html[data-input="pointer"]
   ):focus-visible,
 html[data-input="pointer"] .ticket-rows li:has(.ticket-row:focus-visible),
 html[data-input="pointer"] .sidebar-nav button:focus-visible {
-  box-shadow: none;
   outline: none;
 }
-/* A dialog opened by a click autofocuses its first control. When that is a
-   Picker the rule above would strip its only edge, so it keeps the outline. */
-html[data-input="pointer"]
-  .ui-select.ui-picker:focus-visible:where(
-    :not([aria-invalid="true"], :disabled)
+/* Focus moved by script to a container or heading (a pane, a menu or dialog
+   frame, the list title after a bulk change, a mention target) never rings:
+   nobody pressed a key to put it there. Controls with tabindex -1 (roving
+   rows, tabs, menu items) still ring when the keyboard reaches them. */
+[tabindex="-1"]:focus:not(
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="link"],
+    [role="tab"],
+    [role="radio"],
+    [role="checkbox"],
+    [role="switch"],
+    [role="option"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="treeitem"],
+    [role="gridcell"]
   ) {
-  box-shadow: inset var(--shadow-border-base);
-}
-html[data-theme="dark"][data-input="pointer"]
-  .ui-select.ui-picker:focus-visible:where(
-    :not([aria-invalid="true"], :disabled)
-  ) {
-  box-shadow: inset 0 0 0 1px var(--control-boundary);
+  outline: none;
 }
 .rail-trash-note {
   display: flex;

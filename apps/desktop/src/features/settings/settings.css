@@ -54,8 +54,8 @@
 .settings-back:focus-visible,
 .settings-search-entry:focus-visible,
 .settings-nav li button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .settings-nav svg {
   flex: none;
@@ -155,8 +155,8 @@
   background: var(--accent);
 }
 .upload-destination-choice:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .upload-destination-choice:disabled {
   opacity: 0.6;

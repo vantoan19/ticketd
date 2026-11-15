@@ -60,8 +60,8 @@
   background: var(--recessed);
 }
 .settings-search-result:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .settings-search-result > svg {
   flex: none;

@@ -202,13 +202,15 @@ Use the source’s light-theme definitions, composed with the theme’s boundary
 | Menu             | Border plus `0 1px 1px #00000005, 0 4px 8px -4px #0000000A, 0 16px 24px -8px #0000000F`  |
 | Modal            | Border plus `0 1px 1px #00000005, 0 8px 16px -4px #0000000A, 0 24px 32px -8px #0000000F` |
 | Tooltip          | Border plus `0 1px 1px #00000005, 0 4px 8px #0000000A`                                   |
-| Focus            | `0 0 0 2px var(--ds-background-100), 0 0 0 4px #0072F5`                                  |
+| Focus            | `0 0 0 2px var(--ds-background-100), 0 0 0 4px #0072F5`, drawn as an outline (below)     |
 | Input focus      | `1px` outline in `#005FCC`                                                               |
 | Modal backdrop   | `var(--ds-background-200)` at `0.8` opacity                                              |
 
 For light theme, map `--ds-background-100` to elevated white and `--ds-background-200` to canvas `#FAFAFA`. Dark equivalents use the explicit dark surfaces above. Dark elevation preserves these dimensions and uses the dark boundary role; tune visibility through the documented theme mapping rather than changing the light reference values.
 
-The document plane, ticket rows, and inline sections remain flat. Floating menus and dialogs use their corresponding elevation. Focus is independent of hover and selection, and uses system-visible outlines under forced colors. Overlays always have an explicit opaque background and foreground, including when rendered through a portal.
+The document plane, ticket rows, and inline sections remain flat. Floating menus and dialogs use their corresponding elevation. Overlays always have an explicit opaque background and foreground, including when rendered through a portal.
+
+Focus keeps the reference's look but is drawn with `outline`, never `box-shadow`, so it never shares a property with a control's edge or an overlay's elevation: `outline: 2px solid var(--ring)` at a 2px offset on free-standing controls, at −2px on rows inside lists and scrollers (where an outer ring would be clipped or cover the neighbors), and the 1px `--input-focus` outline on text fields. Focus is independent of hover and selection, and uses system-visible outlines under forced colors. After a pointer interaction the modality reset clears `outline` only, so a menu or button focused by script after a click keeps its shadow. Focus moved by script to a container or heading (a pane, a menu or dialog frame, a title after a bulk change, a mention target) never shows a ring. A guard test rejects focus drawn with `box-shadow`, a pointer reset that touches `box-shadow`, `inset var(--focus-ring)`, and any rule that removes an overlay's shadow.
 
 ## 5. Workspace layout
 
@@ -534,7 +536,7 @@ Compose a control before inventing another. Inputs, buttons, menus, fields, noti
 | -------------- | --------------------------------------------------------------------------------------------- |
 | Rest           | Clear label, semantic surface and foreground, stable dimensions                               |
 | Hover          | Subtle neutral fill or border change; no translation or scaling                               |
-| Keyboard focus | Visible ring independent of hover and selection                                               |
+| Keyboard focus | Visible outline ring independent of hover and selection (section 4)                           |
 | Pressed/open   | Persistent selected treatment and semantic expanded/pressed state                             |
 | Disabled       | Native disabled semantics, no activation, readable label; explain a non-obvious restriction   |
 | Pending        | Preserve width, show progress text/icon, block duplicate submission, retain the draft         |

@@ -232,8 +232,8 @@
   background: transparent;
 }
 .plan-index-list li > button:first-child:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .plan-add-search {
   display: flex;

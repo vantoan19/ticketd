@@ -51,7 +51,7 @@ export function SegmentedControl<T extends string>({
           disabled={option.disabled ?? false}
           title={option.title}
           className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-sm px-2.5 text-sm text-secondary-foreground outline-none focus-visible:shadow-(--focus-ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0",
+            "inline-flex h-7 items-center gap-1.5 rounded-sm px-2.5 text-sm text-secondary-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-(--ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0",
             compact && "h-6 px-2 text-xs",
           )}
         >

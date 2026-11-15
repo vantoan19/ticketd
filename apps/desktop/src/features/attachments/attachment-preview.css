@@ -11,8 +11,8 @@
   height: 13px;
 }
 .attachment-inline-preview:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 /* The flush dialog's frame: header, scrolling body and footer. */
 .attachment-preview-frame {

@@ -65,8 +65,8 @@
   color: var(--disabled-foreground);
 }
 .about-link-row:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 @media (max-width: 639px) {

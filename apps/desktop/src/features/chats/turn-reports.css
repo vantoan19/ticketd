@@ -120,8 +120,8 @@
   color: var(--foreground);
 }
 .chat-plan-pill:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-plan-pill > svg {
   flex: none;
@@ -181,8 +181,8 @@ button.chat-file-main:hover {
   background: var(--accent);
 }
 button.chat-file-main:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-file-main > svg {
   flex: none;

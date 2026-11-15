@@ -65,8 +65,8 @@
   background: var(--accent);
 }
 .chat-row:focus-visible {
-  outline: none;
-  box-shadow: inset var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .chat-row-mark {
   display: inline-flex;
@@ -442,8 +442,8 @@
   font-size: var(--text-ui);
 }
 .chat-tile:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-tile .attachment-thumbnail {
   border-radius: var(--radius);
@@ -532,8 +532,8 @@ button.chat-steps:hover {
 }
 .chat-steps:focus-visible,
 .chat-fold:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-row-icon {
   display: inline-flex;
@@ -672,8 +672,8 @@ button.chat-steps:hover {
   overflow: auto;
 }
 .chat-output-view:focus-visible {
-  outline: none;
-  box-shadow: inset var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .chat-output pre {
   margin: 0;
@@ -762,8 +762,8 @@ button.chat-file-name:hover {
 }
 button.chat-file-name:focus-visible,
 .chat-record-link:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-step-alert {
   margin: 0 0 4px 24px;
@@ -998,8 +998,8 @@ button.chat-file-name:focus-visible,
   color: var(--foreground);
 }
 .chat-picker-harness:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-picker-harness[aria-selected="true"] {
   background: var(--surface);
@@ -1079,8 +1079,8 @@ button.chat-file-name:focus-visible,
   background: var(--accent);
 }
 .chat-picker-model:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .chat-picker-model:disabled {
   color: var(--disabled-foreground);
@@ -1277,8 +1277,8 @@ button.chat-file-name:focus-visible,
   border-color: var(--foreground);
 }
 .chat-option:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-request-command {
   white-space: pre-wrap;
@@ -1539,8 +1539,8 @@ button.chat-file-name:focus-visible,
   color: var(--foreground);
 }
 .chat-chip button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-chip svg {
   flex: none;
@@ -1956,8 +1956,8 @@ button.chat-file-name:focus-visible,
   color: var(--muted-foreground);
 }
 .chat-suggestion:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .chat-suggestion-words {
   flex: 1;

@@ -105,10 +105,10 @@
 .ticket-row-tags [data-slot="badge"] {
   margin-block: -1px;
 }
+/* The focused row's ring is drawn on its full-width band (the li below). */
 .ticket-list .ticket-row:focus-visible {
   position: relative;
   outline: none;
-  box-shadow: var(--focus-ring);
 }
 .ticket-rows input[type="checkbox"] {
   flex: none;
@@ -419,10 +419,8 @@
   line-height: 16px;
 }
 .ticket-rows li:has(.ticket-row:focus-visible) {
-  box-shadow: var(--focus-ring);
-}
-.ticket-list .ticket-row:focus-visible {
-  box-shadow: none;
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 .ticket-row-contextual {

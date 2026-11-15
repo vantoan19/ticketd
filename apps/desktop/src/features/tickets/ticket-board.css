@@ -85,8 +85,8 @@
   background: var(--accent);
 }
 .ui-button.board-card:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .board-card-top {
   display: flex;

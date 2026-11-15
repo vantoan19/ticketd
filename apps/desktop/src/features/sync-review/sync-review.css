@@ -145,8 +145,8 @@
   background: var(--accent);
 }
 .sync-version:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .sync-version small {
   font-size: var(--text-caption);
