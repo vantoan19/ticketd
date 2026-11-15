@@ -19,6 +19,8 @@ class ResizeObserverStub {
 window.ResizeObserver = ResizeObserverStub;
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+// The Document picker's list (cmdk) scrolls the highlighted row into view.
+Element.prototype.scrollIntoView ??= () => {};
 vi.mock("@tauri-apps/api/core", () => bridge);
 
 test("adds context, designates a spec, and opens its source", async () => {
@@ -68,10 +70,13 @@ test("adds context, designates a spec, and opens its source", async () => {
   );
   expect(screen.queryByText("Primary spec")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add context" }));
-  fireEvent.change(screen.getByLabelText("Search Documents by title"), {
-    target: { value: "Prop" },
-  });
-  fireEvent.click(await screen.findByRole("button", { name: "Proposal" }));
+  fireEvent.change(
+    screen.getByLabelText("Search Documents by title or reference"),
+    {
+      target: { value: "Prop" },
+    },
+  );
+  fireEvent.click(await screen.findByRole("option", { name: /Proposal/ }));
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith(
       "set_plan_document",
@@ -215,9 +220,13 @@ test("Escape closes the Add context popover", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Add context" }));
-  const search = await screen.findByLabelText("Search Documents by title");
+  const search = await screen.findByLabelText(
+    "Search Documents by title or reference",
+  );
   fireEvent.keyDown(search, { key: "Escape" });
   await waitFor(() =>
-    expect(screen.queryByLabelText("Search Documents by title")).toBeNull(),
+    expect(
+      screen.queryByLabelText("Search Documents by title or reference"),
+    ).toBeNull(),
   );
 });

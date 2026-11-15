@@ -38,27 +38,6 @@
   list-style: none;
   padding: 0;
 }
-.document-dialog {
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  max-height: calc(100dvh - 16px);
-  overflow: auto;
-  background: var(--background);
-  color: var(--foreground);
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-modal);
-  padding: 24px;
-}
-.document-dialog footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.document-dialog .editor-mode {
-  flex-wrap: wrap;
-}
 
 .document-workspace {
   display: grid;
@@ -77,11 +56,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-.document-dialog .document-main > header {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
 }
 .document-main > header h1 {
   margin: 0;
@@ -102,13 +76,6 @@
   align-items: center;
   gap: 4px;
   margin-left: auto;
-}
-.document-close {
-  min-width: 32px;
-  min-height: 32px;
-  width: 32px;
-  height: 32px;
-  flex: none;
 }
 .document-main > .document-mode {
   display: flex;
@@ -143,13 +110,6 @@
   align-items: center;
   flex-wrap: wrap;
 }
-.document-dialog .document-main > footer {
-  justify-content: flex-end;
-}
-.document-dialog .document-main > footer .document-status {
-  margin-right: auto;
-  margin-left: 0;
-}
 .document-save-error {
   display: flex;
   flex-wrap: wrap;
@@ -167,9 +127,6 @@
 .document-save-error pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.document-dialog #document-title {
-  font-size: var(--text-ui);
 }
 .document-rail {
   display: flex;

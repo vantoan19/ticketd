@@ -1,14 +1,7 @@
 import { useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 
 export function RenameAttachment({
@@ -44,46 +37,36 @@ export function RenameAttachment({
     }
   }
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
+      size="sm"
+      title="Rename attachment"
+      description="Change the display name used in the attachment browser."
+      primaryLabel="Save name"
+      blockedReason={
+        busy ? "Saving…" : name.trim() ? null : "Enter a display name."
+      }
+      busy={busy}
+      error={error || undefined}
+      onSubmit={() => void save()}
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rename attachment</DialogTitle>
-          <DialogDescription>
-            Change the display name used in the attachment browser.
-          </DialogDescription>
-        </DialogHeader>
-        <Label htmlFor="attachment-display-name">Display name</Label>
-        <Input
-          id="attachment-display-name"
-          value={name}
-          disabled={busy}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && name.trim() && !busy) void save();
-          }}
-        />
-        <p className="attachment-hint">
-          Original filename: {file.original_filename}
-        </p>
-        <p className="attachment-hint">
-          Existing link text stays exactly as authored. Renaming does not change
-          the original filename, file bytes, or identity.
-        </p>
-        {error && <p role="alert">{error}</p>}
-        <div className="attachment-actions">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button disabled={busy || !name.trim()} onClick={() => void save()}>
-            Save name
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+      <Label htmlFor="attachment-display-name">Display name</Label>
+      <Input
+        id="attachment-display-name"
+        value={name}
+        disabled={busy}
+        onChange={(event) => setName(event.target.value)}
+      />
+      <p className="attachment-hint">
+        Original filename: {file.original_filename}
+      </p>
+      <p className="attachment-hint">
+        Existing link text stays exactly as authored. Renaming does not change
+        the original filename, file bytes, or identity.
+      </p>
+    </DialogShell>
   );
 }

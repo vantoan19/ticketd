@@ -24,6 +24,7 @@ import {
   type AttachmentUploadDestination,
 } from "@/lib/api/attachments";
 import "@/features/tickets/ticket-attachments.css";
+import "./attachment-library.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
 import { UploadRecovery, type UploadRecord } from "./upload-recovery";
 import { ExistingAttachments } from "./ExistingAttachments";
@@ -443,10 +444,7 @@ export function AttachmentPicker({
   const existingInsertion = insertion.current;
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent
-        ref={dropTarget}
-        className="sm:max-w-170 max-h-dvh overflow-y-auto"
-      >
+      <DialogContent ref={dropTarget} size="md">
         <DialogHeader>
           <DialogTitle>
             {purpose === "store" ? "Add files" : "Attach file"}

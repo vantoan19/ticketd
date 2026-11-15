@@ -246,7 +246,7 @@ export function ComposerField({
                           linked.id === record.id,
                       ),
                   ),
-                  "Recently updated",
+                  "Recent",
                 ),
               ]
             : recordOptions(
@@ -375,6 +375,12 @@ export function ComposerField({
           // Inserting never sends.
           event.preventDefault();
           pick(option);
+          return;
+        }
+        // While the menu is open Enter never sends, even with no row yet
+        // (still searching, or nothing matches): chat CH-46.
+        if (event.key === "Enter") {
+          event.preventDefault();
           return;
         }
       }

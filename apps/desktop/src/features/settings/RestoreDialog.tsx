@@ -1,20 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Copy,
-  Database,
-  FolderOpen,
-  RotateCcw,
-  ShieldCheck,
-  Terminal,
-} from "lucide-react";
+import { Copy, Database, ShieldCheck, Terminal } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { client } from "@/lib/api/client";
@@ -46,6 +35,8 @@ type Phase =
     };
 
 const UNCHANGED = "Your workspace hasn't changed.";
+const LAST_CHANGE =
+  "The latest ticket history, Activity, Document, or evidence change. Some other edits are not dated.";
 
 function formatWhen(timestamp: string | null) {
   return timestamp ? formatDateTime(timestamp) : "No changes yet";
@@ -141,11 +132,12 @@ function Comparison({
       </thead>
       <tbody>
         <tr>
-          <th
-            scope="row"
-            title="The latest ticket history, Activity, Document, or evidence change. Some other edits are not dated."
-          >
-            Last recorded change
+          <th scope="row">
+            <Tooltip content={LAST_CHANGE}>
+              <span tabIndex={0} aria-description={LAST_CHANGE}>
+                Last recorded change
+              </span>
+            </Tooltip>
           </th>
           <td>{formatWhen(current.last_change)}</td>
           <td>{formatWhen(backup.last_change)}</td>
@@ -265,274 +257,235 @@ export function RestoreDialog({
   const { folder, name } = splitPath(file);
   const manager = fileManagerName();
 
+  // A file that cannot be restored offers the way forward, not a dead button.
+  const invalid = phase.name === "unreadable" || issue !== null;
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open && phase.name !== "restoring") onClose();
+        if (!open) onClose();
       }}
+      size="lg"
+      busy={phase.name === "restoring"}
+      title="Restore from backup"
+      description={
+        done
+          ? "The workspace now matches the backup."
+          : "Check what this backup contains. Nothing changes until you confirm."
+      }
+      {...(done
+        ? {
+            primaryLabel: `Show in ${manager}`,
+            cancelLabel: "Done",
+            showClose: false,
+            blockedReason: null,
+            footerNote: "To undo, restore the safety backup from Settings.",
+            onSubmit: () => void reveal(phase.safetyPath),
+          }
+        : invalid
+          ? {
+              primaryLabel: "Choose another…",
+              blockedReason: null,
+              footerNote: "Choose a backup saved by this version or earlier.",
+              onSubmit: () => void chooseAnother(),
+            }
+          : {
+              primaryLabel: "Replace workspace with backup",
+              primaryVariant: "destructive" as const,
+              blockedReason:
+                phase.name === "checking"
+                  ? "Checking the backup…"
+                  : phase.name === "restoring"
+                    ? "Restoring…"
+                    : null,
+              onSubmit: () => inspection && void replace(inspection),
+            })}
+      {...(failure && { error: failure })}
     >
-      <DialogContent
-        className="restore-dialog sm:max-w-160"
-        showCloseButton={phase.name !== "restoring"}
-        // Land on the dialog, not the scroll region, so no ring shows on open.
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          if (event.target instanceof HTMLElement) event.target.focus();
-        }}
-        onInteractOutside={(event) => event.preventDefault()}
+      {/* Focusable so End, Page Down and the arrow keys scroll the review; focus is otherwise on the buttons outside it. */}
+      <div
+        className="restore-body"
+        role="region"
+        aria-label="Backup review"
+        tabIndex={0}
       >
-        <div className="restore-head">
-          <DialogTitle>Restore from backup</DialogTitle>
-          <DialogDescription>
-            {done
-              ? "The workspace now matches the backup."
-              : "Check what this backup contains. Nothing changes until you confirm."}
-          </DialogDescription>
-        </div>
-
-        {/* Focusable so End, Page Down and the arrow keys scroll the review; focus is otherwise on the buttons outside it. */}
-        <div
-          className="restore-body"
-          role="region"
-          aria-label="Backup review"
-          tabIndex={0}
-        >
-          <div className="restore-file">
-            <span className="restore-file-tile" aria-hidden="true">
-              <Database />
-            </span>
-            <span className="restore-file-text">
-              <code aria-label="Chosen backup file">{name}</code>
-              <span>
-                <span aria-label="Backup folder" title={folder}>
-                  {folder}
+        <div className="restore-file">
+          <span className="restore-file-tile" aria-hidden="true">
+            <Database />
+          </span>
+          <span className="restore-file-text">
+            <code aria-label="Chosen backup file">{name}</code>
+            <span>
+              <Tooltip content={folder} overflowOnly>
+                <span aria-label="Backup folder">{folder}</span>
+              </Tooltip>
+              {valid && (
+                <span className="restore-file-check">
+                  {" · "}
+                  <StatusLabel tone="checked" size="caption">
+                    Integrity checked · format version {valid.format_version}
+                  </StatusLabel>
                 </span>
-                {valid && (
-                  <span className="restore-file-check">
-                    {" · "}
-                    <StatusLabel tone="checked" size="caption">
-                      Integrity checked · format version {valid.format_version}
-                    </StatusLabel>
-                  </span>
-                )}
-              </span>
-            </span>
-            {!done && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => void chooseAnother()}
-              >
-                Choose another…
-              </Button>
-            )}
-          </div>
-
-          {phase.name === "checking" && (
-            <p role="status" className="restore-muted">
-              Checking the backup…
-            </p>
-          )}
-
-          {phase.name === "unreadable" && (
-            <Alert tone="error">
-              <AlertTitle>This file could not be read.</AlertTitle>
-              <AlertDescription>
-                {phase.reason} {UNCHANGED}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {issue && (
-            <Alert tone="error">
-              <AlertTitle>{issue.title}</AlertTitle>
-              <AlertDescription>
-                {issue.detail} {UNCHANGED}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {valid && inspection && (
-            <>
-              <Comparison current={inspection.current} backup={valid.summary} />
-              <p>
-                {differences(inspection.current, valid.summary)} Restoring
-                replaces everything in this workspace, including follows,
-                reminders and inbox state.
-                {inspection.attachment_content &&
-                  " Local attachment bytes in the backup are complete."}
-              </p>
-              {inspection.attachment_content && (
-                <div
-                  className="restore-attachments"
-                  aria-label="Attachment completeness"
-                >
-                  <p>
-                    {inspection.attachment_content.local_snapshots} local{" "}
-                    {inspection.attachment_content.local_snapshots === 1
-                      ? "snapshot"
-                      : "snapshots"}
-                    ; {inspection.attachment_content.retained_files} retained{" "}
-                    {inspection.attachment_content.retained_files === 1
-                      ? "file"
-                      : "files"}
-                    ,{" "}
-                    {inspection.attachment_content.retained_bytes.toLocaleString()}{" "}
-                    bytes. Includes unused files, files in Trash, and retained
-                    quarantine.
-                  </p>
-                  <p>
-                    {inspection.attachment_content.remote_references} remote{" "}
-                    {inspection.attachment_content.remote_references === 1
-                      ? "reference"
-                      : "references"}
-                    : links and metadata only. Remote file bytes and account
-                    credentials are not backed up.
-                  </p>
-                  {inspection.attachment_content.remote_references > 0 && (
-                    <p>
-                      Restoring does not verify Drive access. If unavailable,
-                      connect the appropriate account and select the file again
-                      in the attachment picker's Google Drive tab. Last-known
-                      names and references are preserved.
-                    </p>
-                  )}
-                </div>
               )}
-            </>
-          )}
-
-          {phase.name === "done" &&
-            phase.inspection.check.status === "valid" && (
-              <div role="status" className="restore-done">
-                <p className="restore-checked">
-                  <StatusDot tone="checked" />
-                  <span>
-                    <strong>Workspace restored.</strong>{" "}
-                    <span className="restore-muted">
-                      You're now working from the backup:{" "}
-                      {phase.inspection.check.summary.tickets} tickets,{" "}
-                      {phase.inspection.check.summary.activities} activities.
-                    </span>
-                  </span>
-                </p>
-                <div className="restore-notes">
-                  <p>
-                    <strong>Safety backup of the previous workspace</strong>
-                  </p>
-                  <code aria-label="Safety backup path">
-                    {phase.safetyPath}
-                  </code>
-                  <div className="restore-actions">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void copy(phase.safetyPath)}
-                    >
-                      <Copy aria-hidden="true" />
-                      Copy path
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void reveal(phase.safetyPath)}
-                    >
-                      <FolderOpen aria-hidden="true" />
-                      Show in {manager}
-                    </Button>
-                  </div>
-                </div>
-                {phase.warning && (
-                  <Alert tone="attention" size="compact">
-                    <AlertDescription>{phase.warning}</AlertDescription>
-                  </Alert>
-                )}
-                {phase.reloadFailure ? (
-                  <Alert tone="error" size="compact">
-                    <AlertDescription>{phase.reloadFailure}</AlertDescription>
-                  </Alert>
-                ) : (
-                  <p className="restore-muted">
-                    Open tickets and views were reloaded from the restored
-                    workspace.
-                  </p>
-                )}
-                <p role="status" className="restore-muted">
-                  {copied}
-                </p>
-              </div>
-            )}
-
-          {failure && (
-            <Alert tone="error" size="compact">
-              <AlertDescription>{failure}</AlertDescription>
-            </Alert>
+            </span>
+          </span>
+          {!done && !invalid && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void chooseAnother()}
+            >
+              Choose another…
+            </Button>
           )}
         </div>
 
-        {valid && (
-          <div className="restore-pinned">
-            <div className="restore-pin">
-              <ShieldCheck aria-hidden="true" />
-              <span>
-                <strong>A safety backup comes first</strong>
-                <span>Restore that safety backup to undo.</span>
-              </span>
-            </div>
-            <div className="restore-pin">
-              <Terminal aria-hidden="true" />
-              <span>
-                <strong>Pause ticketd CLI commands</strong>
-                <span>
-                  Agents should stop recording while the restore runs.
-                </span>
-              </span>
-            </div>
-          </div>
+        {phase.name === "checking" && (
+          <p role="status" className="restore-muted">
+            Checking the backup…
+          </p>
         )}
 
-        <div className="restore-footer">
-          <span className="restore-muted">
-            {done
-              ? "To undo, restore the safety backup from Settings."
-              : valid
-                ? ""
-                : "Choose a backup saved by this version or earlier."}
-          </span>
-          {done ? (
-            <Button type="button" onClick={onClose}>
-              Done
-            </Button>
-          ) : (
-            <span className="restore-actions">
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={phase.name === "restoring"}
-                onClick={onClose}
+        {phase.name === "unreadable" && (
+          <Alert tone="error">
+            <AlertTitle>This file could not be read.</AlertTitle>
+            <AlertDescription>
+              {phase.reason} {UNCHANGED}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {issue && (
+          <Alert tone="error">
+            <AlertTitle>{issue.title}</AlertTitle>
+            <AlertDescription>
+              {issue.detail} {UNCHANGED}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {valid && inspection && (
+          <>
+            <Comparison current={inspection.current} backup={valid.summary} />
+            <p>
+              {differences(inspection.current, valid.summary)} Restoring
+              replaces everything in this workspace, including follows,
+              reminders and inbox state.
+              {inspection.attachment_content &&
+                " Local attachment bytes in the backup are complete."}
+            </p>
+            {inspection.attachment_content && (
+              <div
+                className="restore-attachments"
+                aria-label="Attachment completeness"
               >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={!valid || phase.name === "restoring"}
-                onClick={() => inspection && void replace(inspection)}
-              >
-                <RotateCcw aria-hidden="true" />
-                {phase.name === "restoring"
-                  ? "Restoring…"
-                  : "Replace workspace with backup"}
-              </Button>
+                <p>
+                  {inspection.attachment_content.local_snapshots} local{" "}
+                  {inspection.attachment_content.local_snapshots === 1
+                    ? "snapshot"
+                    : "snapshots"}
+                  ; {inspection.attachment_content.retained_files} retained{" "}
+                  {inspection.attachment_content.retained_files === 1
+                    ? "file"
+                    : "files"}
+                  ,{" "}
+                  {inspection.attachment_content.retained_bytes.toLocaleString()}{" "}
+                  bytes. Includes unused files, files in Trash, and retained
+                  quarantine.
+                </p>
+                <p>
+                  {inspection.attachment_content.remote_references} remote{" "}
+                  {inspection.attachment_content.remote_references === 1
+                    ? "reference"
+                    : "references"}
+                  : links and metadata only. Remote file bytes and account
+                  credentials are not backed up.
+                </p>
+                {inspection.attachment_content.remote_references > 0 && (
+                  <p>
+                    Restoring does not verify Drive access. If unavailable,
+                    connect the appropriate account and select the file again in
+                    the attachment picker's Google Drive tab. Last-known names
+                    and references are preserved.
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {phase.name === "done" && phase.inspection.check.status === "valid" && (
+          <div role="status" className="restore-done">
+            <p className="restore-checked">
+              <StatusDot tone="checked" />
+              <span>
+                <strong>Workspace restored.</strong>{" "}
+                <span className="restore-muted">
+                  You're now working from the backup:{" "}
+                  {phase.inspection.check.summary.tickets} tickets,{" "}
+                  {phase.inspection.check.summary.activities} activities.
+                </span>
+              </span>
+            </p>
+            <div className="restore-notes">
+              <p>
+                <strong>Safety backup of the previous workspace</strong>
+              </p>
+              <code aria-label="Safety backup path">{phase.safetyPath}</code>
+              <div className="restore-actions">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void copy(phase.safetyPath)}
+                >
+                  <Copy aria-hidden="true" />
+                  Copy path
+                </Button>
+              </div>
+            </div>
+            {phase.warning && (
+              <Alert tone="attention" size="compact">
+                <AlertDescription>{phase.warning}</AlertDescription>
+              </Alert>
+            )}
+            {phase.reloadFailure ? (
+              <Alert tone="error" size="compact">
+                <AlertDescription>{phase.reloadFailure}</AlertDescription>
+              </Alert>
+            ) : (
+              <p className="restore-muted">
+                Open tickets and views were reloaded from the restored
+                workspace.
+              </p>
+            )}
+            <p role="status" className="restore-muted">
+              {copied}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {valid && (
+        <div className="restore-pinned">
+          <div className="restore-pin">
+            <ShieldCheck aria-hidden="true" />
+            <span>
+              <strong>A safety backup comes first</strong>
+              <span>Restore that safety backup to undo.</span>
             </span>
-          )}
+          </div>
+          <div className="restore-pin">
+            <Terminal aria-hidden="true" />
+            <span>
+              <strong>Pause ticketd CLI commands</strong>
+              <span>Agents should stop recording while the restore runs.</span>
+            </span>
+          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      )}
+    </DialogShell>
   );
 }

@@ -1434,10 +1434,12 @@ test("records are linked by title and unlinked from their chip", async () => {
   expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull();
   await linkFromMenu();
   fireEvent.change(
-    await screen.findByLabelText("Search tickets, Documents and Projects"),
+    await screen.findByLabelText(
+      "Search tickets, Documents and Projects by title or reference",
+    ),
     { target: { value: "wait" } },
   );
-  fireEvent.click(await screen.findByRole("button", { name: /T-14/ }));
+  fireEvent.click(await screen.findByRole("option", { name: /T-14/ }));
   const links = within(
     await screen.findByRole("group", { name: "Linked records" }),
   );
@@ -1777,10 +1779,12 @@ test("a Project is linked like a ticket or Document and has no page to open", as
   await open(one({ id: "c1", title: "Limiter" }));
   await linkFromMenu();
   fireEvent.change(
-    await screen.findByLabelText("Search tickets, Documents and Projects"),
+    await screen.findByLabelText(
+      "Search tickets, Documents and Projects by title or reference",
+    ),
     { target: { value: "store" } },
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Storefront/ }));
   const links = within(
     await screen.findByRole("group", { name: "Linked records" }),
   );
@@ -1846,11 +1850,13 @@ test("an incompatible harness notice keeps the full stop with the path", async (
 test("the link picker lists recent records before a name is typed", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   await linkFromMenu();
-  const recent = await screen.findByRole("list", { name: "Recent" });
+  const recent = await screen.findByRole("group", { name: "Recent" });
   expect(
-    within(recent).getByRole("button", { name: "Storefront" }),
+    within(recent).getByRole("option", { name: /Storefront/ }),
   ).toBeTruthy();
-  expect(screen.queryByText("Type part of a name to find it.")).toBeNull();
+  expect(
+    screen.queryByText("Type part of a name or a reference to find it."),
+  ).toBeNull();
 });
 
 test("New Chat picks harness, model and effort in one composer picker and starts with them", async () => {
@@ -2066,8 +2072,8 @@ test("linking a Project with a folder in New Chat starts the Chat there", async 
   expect(button("Folder: Scratch folder")).toBeTruthy();
   fireEvent.click(button("Link a ticket, Document or Project"));
   // Recent records show before anything is typed.
-  expect(await screen.findByRole("list", { name: "Recent" })).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  expect(await screen.findByRole("group", { name: "Recent" })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("option", { name: /Storefront/ }));
   expect(
     await screen.findByRole("button", { name: "Folder: /work/storefront" }),
   ).toBeTruthy();

@@ -11,7 +11,6 @@ import {
   Network,
   Pin,
   SquarePen,
-  X,
 } from "lucide-react";
 import { client } from "@/lib/api/client";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
@@ -28,7 +27,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
@@ -54,33 +54,47 @@ import { useConflicts } from "@/features/sync-review/use-conflicts";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useRecordSyncState } from "@/features/sync/record-sync";
 
+/**
+ * A Document reads in the workspace; a new thought is captured in the one
+ * dialog (DialogShell md). Its footer holds the save state in the note slot
+ * and Done; a failed save shows above the footer and never traps the dialog.
+ */
 function DocumentSurface({
   capture,
   onClose,
+  onDismiss,
+  blockedReason,
+  note,
+  error,
   children,
 }: {
   capture: boolean;
+  /** Done: save, then close. */
   onClose: () => void;
+  /** Cancel, the X and Escape: close (after a failed save, at once). */
+  onDismiss: () => void;
+  blockedReason: string | null;
+  note: ReactNode;
+  error: ReactNode;
   children: ReactNode;
 }) {
   if (!capture)
     return <article className="document-workspace">{children}</article>;
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) onDismiss();
       }}
+      title="Capture a thought"
+      primaryLabel="Done"
+      blockedReason={blockedReason}
+      footerNote={note}
+      error={error}
+      onSubmit={onClose}
     >
-      <DialogContent
-        // Centered like every other dialog, not a side sheet.
-        className="document-dialog sm:max-w-xl"
-        showCloseButton={false}
-        onOpenAutoFocus={(event) => event.preventDefault()}
-      >
-        {children}
-      </DialogContent>
-    </Dialog>
+      {children}
+    </DialogShell>
   );
 }
 function DocumentDate({ value }: { value: string }) {
@@ -88,14 +102,21 @@ function DocumentDate({ value }: { value: string }) {
   return Number.isNaN(date.getTime()) ? (
     value
   ) : (
-    <time dateTime={value} title={value}>
-      {date.toDateString() === new Date().toDateString()
-        ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
-        : date.toLocaleString(undefined, {
-            dateStyle: "medium",
-            timeStyle: "short",
-          })}
-    </time>
+    <Tooltip
+      content={date.toLocaleString(undefined, {
+        dateStyle: "full",
+        timeStyle: "long",
+      })}
+    >
+      <time dateTime={value} tabIndex={0}>
+        {date.toDateString() === new Date().toDateString()
+          ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
+          : date.toLocaleString(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+      </time>
+    </Tooltip>
   );
 }
 type Snapshot = { title: string; body: string; suggestion: string | null };
@@ -672,9 +693,9 @@ export function DocumentEditor({
   const titleInput = (
     <Input
       id="document-title"
-      aria-label={capture ? "Optional title" : "Title"}
+      aria-label="Title"
       className={capture ? undefined : "document-title-input"}
-      placeholder={capture ? "Add a title (optional)" : "Title"}
+      placeholder={capture ? "e.g. Retry policy for uploads" : "Title"}
       readOnly={locked}
       value={title || (head ? heading : "")}
       onChange={(event) => {
@@ -686,7 +707,9 @@ export function DocumentEditor({
   const titleField = (
     <FieldGroup>
       <Field>
-        <FieldLabel htmlFor="document-title">Optional title</FieldLabel>
+        <FieldLabel htmlFor="document-title">
+          Title <small>Optional</small>
+        </FieldLabel>
         {titleInput}
       </Field>
     </FieldGroup>
@@ -802,7 +825,36 @@ export function DocumentEditor({
   const updatedAt = savedDocument?.updated_at ?? initial?.updated_at ?? "";
   const createdAt = savedDocument?.created_at ?? initial?.created_at ?? "";
   return (
-    <DocumentSurface capture={capture} onClose={requestClose}>
+    <DocumentSurface
+      capture={capture}
+      onClose={requestClose}
+      onDismiss={() => {
+        // A failed save must not trap the dialog: the draft stays on this
+        // device and comes back with the next capture (plans DR-08, set ER-05).
+        if (capture && failed) close.current();
+        else requestClose();
+      }}
+      blockedReason={body.trim() ? null : "Write a thought to finish."}
+      note={body.trim() && !failed ? statusLine : null}
+      error={
+        capture &&
+        failed && (
+          <span className="document-save-error">
+            We couldn’t save your changes. Your draft is still here, and closing
+            keeps it on this device.
+            <Button type="button" variant="outline" size="sm" onClick={retry}>
+              Retry
+            </Button>
+            {failureDetail && (
+              <details>
+                <summary>Details</summary>
+                <pre>{failureDetail}</pre>
+              </details>
+            )}
+          </span>
+        )
+      }
+    >
       {initial && (
         <header className="document-bar">
           <Button
@@ -889,22 +941,6 @@ export function DocumentEditor({
       )}
       <div className="document-main">
         {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
-        {!initial && (
-          <header>
-            <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">
-              Capture a thought
-            </DialogTitle>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="document-close"
-              aria-label="Close and return"
-              onClick={requestClose}
-            >
-              <X aria-hidden="true" />
-            </Button>
-          </header>
-        )}
         {trashed && (
           <Alert role="status" size="compact">
             <AlertDescription>In Trash</AlertDescription>
@@ -1095,29 +1131,6 @@ export function DocumentEditor({
           </p>
         )}
         {capture && titleField}
-        {!initial && saveError}
-        {capture && (
-          <footer>
-            {body.trim() ? (
-              statusLine
-            ) : (
-              <span
-                role="status"
-                id="capture-blocked"
-                className="document-status"
-              >
-                Write a thought to finish
-              </span>
-            )}
-            <Button
-              disabled={!body.trim()}
-              {...(!body.trim() && { "aria-describedby": "capture-blocked" })}
-              onClick={requestClose}
-            >
-              Done
-            </Button>
-          </footer>
-        )}
       </div>
       {initial && (
         <aside className="document-rail" aria-label="Document details">
@@ -1396,9 +1409,9 @@ function ConnectedLabel({ item }: { item: Connection }) {
       ) : (
         <FileText aria-hidden="true" />
       )}
-      <span className="connected-label" title={shown}>
-        {shown}
-      </span>
+      <Tooltip content={shown} overflowOnly>
+        <span className="connected-label">{shown}</span>
+      </Tooltip>
       {loading && <Skeleton aria-hidden="true" className="h-3 w-24 shrink-0" />}
     </>
   );

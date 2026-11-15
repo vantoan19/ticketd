@@ -237,7 +237,7 @@ export function AttachmentPreview({
         if (!open) close();
       }}
     >
-      <DialogContent variant="flush" className="sm:max-w-280">
+      <DialogContent variant="flush" size="viewer">
         <div className="attachment-preview-frame">
           <div className="attachment-preview-header">
             <div className="attachment-preview-heading">

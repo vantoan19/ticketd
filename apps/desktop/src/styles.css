@@ -1957,10 +1957,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   max-width: 100%;
   height: auto;
 }
-.mermaid-expanded {
-  width: calc(100vw - 48px);
-  max-width: none;
-}
 .mermaid-expanded .mermaid-viewer {
   max-height: 70vh;
 }
