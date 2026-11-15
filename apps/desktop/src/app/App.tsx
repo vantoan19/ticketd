@@ -520,7 +520,7 @@ function AppContent() {
                         Skip to content
                       </a>
                       <WindowBar />
-                      <StatusLineRegion>
+                      <StatusLineRegion host={{ current: contentPanel }}>
                         <CommandPalette
                           initialTicket={
                             workspace.details[paletteReference ?? ""] ??
