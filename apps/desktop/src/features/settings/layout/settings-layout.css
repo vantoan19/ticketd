@@ -38,6 +38,7 @@
   color: var(--disabled-foreground);
 }
 .settings-panel-bar li[aria-current="page"] {
+  font-weight: 500;
   color: var(--foreground);
 }
 .settings-panel-bar-end {
@@ -55,12 +56,14 @@
   gap: 6px;
 }
 
-/* The scroll container around the open page. */
+/* The scroll container around the open page. Focus-driven scrolls stop
+   below the 48px sticky panel bar instead of under it. */
 .settings-page {
   flex: 1;
   min-height: 0;
   width: 100%;
   overflow-y: auto;
+  scroll-padding-top: 48px;
 }
 
 /* Page column and header. */
@@ -75,18 +78,6 @@
   display: flex;
   align-items: flex-start;
   gap: 16px;
-}
-.settings-page-icon {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-panel);
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
-  color: var(--foreground);
 }
 .settings-page-heading {
   min-width: 0;
@@ -205,18 +196,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.settings-list-row-tile {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-panel);
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
-  color: var(--foreground);
 }
 .settings-list-footer {
   display: flex;

@@ -59,7 +59,7 @@ test("a disabled tile cannot be chosen", () => {
   expect((tile("Full width") as HTMLButtonElement).disabled).toBe(true);
 });
 
-test("a plain tile can lead with an icon tile, the radio sitting at the end of that row", () => {
+test("a plain tile can lead with an icon tile, and the radio still leads the title row", () => {
   render(
     <ChoiceTiles aria-label="Where" value="a" onValueChange={() => {}}>
       <ChoiceTile
@@ -75,7 +75,9 @@ test("a plain tile can lead with an icon tile, the radio sitting at the end of t
   const icon = local.querySelector('[data-slot="choice-tile-icon"]');
   const radio = local.querySelector('[data-slot="choice-tile-radio"]');
   expect(icon?.contains(screen.getByTestId("icon"))).toBe(true);
-  expect(icon?.parentElement).toBe(radio?.parentElement);
+  // P11: the radio sits before the title, never at the far end of the icon row.
+  expect(radio?.nextElementSibling?.textContent).toContain("Local");
+  expect(icon?.parentElement).not.toBe(radio?.parentElement);
   expect(local.getAttribute("aria-checked")).toBe("true");
   expect(tile("Remote").querySelector('[data-slot="choice-tile-icon"]')).toBe(
     null,

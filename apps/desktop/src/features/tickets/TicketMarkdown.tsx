@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { client } from "@/lib/api/client";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { RecordLink } from "@/components/ui/record-link";
 import { references } from "./ticket-references";
 
 export function TicketReference({
@@ -28,17 +29,13 @@ export function TicketReference({
       active = false;
     };
   }, [reference, revision]);
+  // A reference opens its ticket; one that cannot be found is plain (P15).
   return target ? (
-    <button
-      type="button"
-      className="underline context-link"
-      onClick={() => select(reference)}
-    >
-      {reference}
-      {target.trashed ? " (trashed)" : ""}
-    </button>
+    <RecordLink reference={reference} onClick={() => select(reference)}>
+      {target.trashed ? "(in Trash)" : null}
+    </RecordLink>
   ) : (
-    <>{reference}</>
+    <RecordLink reference={reference} gone />
   );
 }
 

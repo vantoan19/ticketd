@@ -47,14 +47,21 @@
   z-index: 20;
   display: flex;
   flex-direction: column;
-  /* As wide as the composer, so it never sits off to one side (LIVE-20). */
-  width: calc(100% + 16px);
+  /* The menu surface (P3): at most 420px, from the composer's start edge
+     (CH-46), so it no longer spans a wide composer. */
+  width: min(420px, calc(100% + 16px));
   max-height: 320px;
   overflow-y: auto;
   padding: 4px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   background: var(--popover);
   box-shadow: var(--shadow-menu);
+}
+/* New Chat's composer sits near the pane's top: its menu opens below the box,
+   over the chips and suggestions, never over the heading. */
+.chat-new .chat-menu {
+  top: calc(100% + 12px);
+  bottom: auto;
 }
 /* Rows keep their 32px when the list is longer than the menu: it scrolls. */
 .chat-menu > * {
@@ -262,9 +269,12 @@ blockquote.chat-quote {
 .chat-records > svg {
   flex: none;
 }
+/* The 4px under the line keeps the links' underline inside the clip. */
 .chat-records-items {
-  overflow: hidden;
   min-width: 0;
+  margin-bottom: -4px;
+  padding-bottom: 4px;
+  overflow: hidden;
   white-space: nowrap;
 }
 .chat-records-ref {
@@ -284,11 +294,6 @@ blockquote.chat-quote {
 .chat-records-ref:hover {
   color: var(--interactive);
 }
-/* A Document is named in sans; only references are mono. */
-.chat-records-name {
-  font-family: inherit;
-  font-size: inherit;
-}
 .chat-records-more {
   display: inline-flex;
   flex: none;
@@ -299,7 +304,7 @@ blockquote.chat-quote {
   font-size: inherit;
   text-decoration: none;
 }
-/* Add to chat: one ghost button at the selection's end. */
+/* Add to chat: one ghost button above the selection (selection-bar.ts). */
 /* ⌘L with nothing selected: a short line at the foot of the window. */
 .add-to-chat-hint {
   position: fixed;
@@ -322,6 +327,10 @@ blockquote.chat-quote {
   border-radius: var(--radius);
   background: var(--popover);
   box-shadow: var(--shadow-menu);
+}
+/* The open menu takes the bar's place; the button stays as its anchor. */
+.add-to-chat-bar[data-open] {
+  visibility: hidden;
 }
 @media (prefers-reduced-motion: reduce) {
   .add-to-chat-bar {

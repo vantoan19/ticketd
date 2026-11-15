@@ -1,214 +1,55 @@
-.dependency-graph-view {
-  container-type: inline-size;
+/* Ticket dependency graph (tgraph-): layout only; the look is the graph kit. */
+.tgraph-body {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 100%;
-  padding: 12px 24px 24px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
-.graph-header {
-  display: flex;
+.tgraph-body[data-state] {
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  padding: 24px;
 }
-.graph-header h2 {
-  font-size: var(--text-ui);
-  font-weight: 600;
-  line-height: 20px;
+.tgraph-hint {
+  flex: 1;
 }
-.graph-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+.tgraph-list {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 16px 24px;
+  overflow-y: auto;
+}
+.tgraph-list ul,
+.tgraph-rows {
+  margin: 0;
   padding: 0;
   list-style: none;
+}
+.tgraph-list .ui-graph-row {
+  margin: 0;
+}
+.tgraph-more {
+  align-self: flex-start;
+}
+.tgraph-loading,
+.tgraph-note {
+  margin: 0;
   color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.graph-legend li {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.graph-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 16px;
-  flex: 1;
-  min-height: 420px;
-}
-@container (max-width: 720px) {
-  .graph-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 420px auto;
-  }
-}
-.graph-canvas {
-  min-height: 420px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-border-base);
-  overflow: hidden;
-}
-.graph-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-menu);
-}
-.graph-zoom {
-  min-width: 40px;
-  text-align: center;
-  font-size: var(--text-caption);
-  font-variant-numeric: tabular-nums;
-}
-.dependency-graph-view .react-flow__node {
-  width: 224px;
-}
-.dependency-graph-view .react-flow__handle {
-  opacity: 0;
-  pointer-events: none;
-}
-.dependency-graph-view .react-flow__edge-path {
-  stroke: var(--muted-foreground);
-  stroke-width: 1.5;
-}
-.dependency-graph-view .react-flow__arrowhead * {
-  stroke: var(--muted-foreground);
-  fill: var(--muted-foreground);
-}
-.graph-node {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 224px;
-  height: 76px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  color: var(--foreground);
-  text-align: left;
-  cursor: pointer;
-  /* React Flow disables pointer events on nodes without handlers. */
-  pointer-events: auto;
-}
-.graph-node:hover {
-  background: var(--muted);
-}
-/* Selection is a solid ring; keyboard focus is the offset focus ring. */
-.graph-node[data-selected] {
-  box-shadow: 0 0 0 2px var(--foreground);
-}
-.graph-node:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 3px;
-}
-.graph-node-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.graph-node-reference {
-  font-family: var(--font-mono);
-  font-weight: 500;
-}
-.graph-node-status {
-  color: var(--muted-foreground);
-}
-.graph-node-origin {
-  margin-left: auto;
-  padding: 0 6px;
-  border-radius: var(--radius-pill);
-  background: var(--muted);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.graph-node-title {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
+/* Below 640px of pane the panel moves under the canvas at a fixed share. */
+@container (max-width: 640px) {
+  .tgraph-body:not([data-state]) {
+    flex-direction: column;
+  }
+  .tgraph-body .ui-graph-panel {
+    width: auto;
+    height: 40%;
+    box-shadow: inset 0 1px 0 var(--border);
+  }
 }
-.graph-availability {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.graph-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 12px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-border-base);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
-.graph-panel h3 {
-  font-size: var(--text-ui);
-  font-weight: 600;
-  line-height: 20px;
-}
-.graph-panel h4 {
-  margin-top: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  font-weight: 500;
-}
-.graph-panel ul {
-  padding: 0;
-  list-style: none;
-}
-.graph-panel-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
-.graph-panel-facts {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 12px;
-}
-.graph-panel-facts dt {
-  color: var(--muted-foreground);
-}
-.graph-panel-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-.graph-none {
-  color: var(--muted-foreground);
-}
-.graph-node[data-boundary] {
-  box-shadow: none;
-  border: 1.5px dashed var(--muted-foreground);
-}
-.graph-node[data-boundary][data-selected] {
-  box-shadow: 0 0 0 2px var(--foreground);
-}
-.graph-node-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-caption);
-  line-height: 16px;
+.tgraph-back {
+  align-self: flex-start;
+  margin: -8px 0 -8px -8px;
 }

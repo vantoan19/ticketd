@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { IconButton } from "@/components/ui/icon-button";
 
@@ -11,14 +18,19 @@ window.ResizeObserver = class {
 
 afterEach(cleanup);
 
+/** Focus as the Tab key moves it: the keydown comes first. */
+function tabTo(element: HTMLElement) {
+  fireEvent.keyDown(document.body, { key: "Tab" });
+  act(() => element.focus());
+}
+
 test("an icon-only button is named by its label and explains itself on keyboard focus", async () => {
   render(
     <IconButton label="Refresh">
       <svg aria-hidden="true" />
     </IconButton>,
   );
-  const button = screen.getByRole("button", { name: "Refresh" });
-  button.focus();
+  tabTo(screen.getByRole("button", { name: "Refresh" }));
   expect((await screen.findByRole("tooltip")).textContent).toBe("Refresh");
 });
 
@@ -29,17 +41,19 @@ test("the label closes when a dialog opens over the button and stays closed when
     </IconButton>,
   );
   const button = screen.getByRole("button", { name: "Ticket actions" });
-  button.focus();
+  tabTo(button);
   await screen.findByRole("tooltip");
   const dialog = document.createElement("div");
   dialog.setAttribute("role", "dialog");
   document.body.append(dialog);
   await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
-  button.blur();
-  button.focus();
+  dialog.remove();
+  // The dialog closed with Enter and returned focus to its opener.
+  act(() => button.blur());
+  fireEvent.keyDown(document.body, { key: "Enter" });
+  act(() => button.focus());
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(screen.queryByRole("tooltip")).toBeNull();
-  dialog.remove();
 });
 
 test("a shortcut shows in the tooltip after the label and stays out of the name", async () => {
@@ -48,7 +62,8 @@ test("a shortcut shows in the tooltip after the label and stays out of the name"
       <svg aria-hidden="true" />
     </IconButton>,
   );
-  const button = screen.getByRole("button", { name: "Stop" });
-  button.focus();
-  expect((await screen.findByRole("tooltip")).textContent).toBe("Stop · Esc");
+  tabTo(screen.getByRole("button", { name: "Stop" }));
+  const tooltip = await screen.findByRole("tooltip");
+  expect(tooltip.textContent).toBe("StopEsc");
+  expect(tooltip.querySelector("kbd")?.textContent).toBe("Esc");
 });

@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
-  AlertCircle,
   Layers,
-  Plus,
   RefreshCw,
   SearchX,
   Ticket as TicketIcon,
@@ -10,14 +8,30 @@ import {
   X,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Kbd } from "@/components/ui/kbd";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
+import { FailureDetails, FailureState } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
+import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
-import type { PlanViewState } from "@/features/plans/usePlanView";
+import { PaneHeader } from "@/components/ui/list-header";
+import { StatusLineRegion } from "@/components/ui/status-line";
+import { emptyCopy } from "@/lib/empty-copy";
+import { noun, ofTotal } from "@/lib/format";
+import {
+  usePlanAction,
+  type PlanViewState,
+} from "@/features/plans/usePlanView";
 import { plansClient } from "@/lib/api/plans";
-import { planSummary } from "@/features/plans/plan-summary";
+import { allowRemoval } from "@/lib/removal-guard";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
+import {
+  useFiltersMenu,
+  type FiltersMenuState,
+} from "@/features/tickets/filters-menu";
 import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketBoard } from "./TicketBoard";
@@ -31,14 +45,29 @@ import {
   type TicketWorkspace,
 } from "@/features/tickets/useTicketWorkspace";
 
-/** The list header, filters, bulk editing, result states, and pagination. */
-export function TicketListPane({
+type Props = Parameters<typeof TicketListBody>[0];
+
+/**
+ * The list header, filters, bulk editing, result states, and pagination. The
+ * pane has its own status line for outcomes such as "Removed T-1 from Q3 ·
+ * Undo".
+ */
+export function TicketListPane(props: Props) {
+  return (
+    <StatusLineRegion host={props.listRef}>
+      <TicketListBody {...props} />
+    </StatusLineRegion>
+  );
+}
+
+function TicketListBody({
   workspace,
   bulk,
   listRef,
   planState,
   onOpen,
   onCreate,
+  filtersMenu: sharedFiltersMenu,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
@@ -46,6 +75,8 @@ export function TicketListPane({
   planState: PlanViewState;
   onOpen: (reference: string) => void;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
+  /** The Plan header's Filters menu, which the chip row shares. */
+  filtersMenu?: FiltersMenuState;
 }) {
   const { ticketRows } = usePreferences();
   const {
@@ -54,18 +85,15 @@ export function TicketListPane({
     filter,
     query,
     setQuery,
-    offset,
-    setOffset,
+    pages,
+    resetPaging,
+    showMore,
+    matchingReferences,
     plan,
-    setPlan,
     status,
-    setStatus,
     tags,
-    setTags,
     availability,
-    setAvailability,
     family,
-    setFamily,
     source,
     setSource,
     sourceCounts,
@@ -85,21 +113,17 @@ export function TicketListPane({
     navigation,
     clearFilters,
     queryError,
+    listFailure,
     refreshFailed,
   } = workspace;
-  // An Plan scope shows the Plan's own header instead of a plain title.
+  // A Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
-  const [removed, setRemoved] = useState<{
-    reference: string;
-    plan: string;
-    name: string;
-  } | null>(null);
-  // The Undo offer is short-lived: it must not linger after the ticket is re-added.
-  useEffect(() => {
-    if (!removed) return;
-    const timer = window.setTimeout(() => setRemoved(null), 10_000);
-    return () => window.clearTimeout(timer);
-  }, [removed]);
+  const planAction = usePlanAction(planState);
+  const lastRemoval = useRef(0);
+  // The header's Filters menu and the chip row under it share one menu; in a
+  // Plan scope the menu sits in the Plan header, which passes its state in.
+  const ownFiltersMenu = useFiltersMenu();
+  const filtersMenu = sharedFiltersMenu ?? ownFiltersMenu;
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
   // An archived Plan is read-only: no new tickets into it, no removing from it.
@@ -114,6 +138,20 @@ export function TicketListPane({
   const filterCount =
     [plan, status, availability, family].filter(Boolean).length +
     tags.split(",").filter((tag) => tag.trim()).length;
+  // Chrome rule (P9): Search, Filters and Display act on nothing in an empty
+  // workspace or an empty Trash. A narrower view that is empty keeps them,
+  // since its tickets may only be elsewhere in the workspace.
+  const bare =
+    !loading &&
+    !queryError &&
+    !refreshFailed &&
+    total === 0 &&
+    tickets.length === 0 &&
+    !filtered &&
+    (trash ||
+      (navigation.kind === "all" &&
+        navigation.project === "all" &&
+        !navigation.plan));
   const visibleTickets = tickets.filter(
     (item) =>
       filter === "all" ||
@@ -121,11 +159,16 @@ export function TicketListPane({
         ? item.project_id === null
         : item.project_id === filter),
   );
-  // A selection belongs to the page it was made on. Moving to another page,
-  // scope, search or filter drops it, so the bar never acts on tickets that are
-  // no longer listed.
+  const visibleTicketsRef = useRef(visibleTickets);
+  useEffect(() => {
+    visibleTicketsRef.current = visibleTickets;
+  });
+  // A selection belongs to the view it was made in. Another scope, search,
+  // filter or layout drops it, so the bar never acts on tickets that are no
+  // longer listed; the board has no bar, so a selection never waits hidden
+  // there (list B-08). Showing more keeps it.
   const viewKey = JSON.stringify([
-    offset,
+    workspace.layout,
     filter,
     query,
     plan,
@@ -138,30 +181,34 @@ export function TicketListPane({
     navigation,
   ]);
   const previousView = useRef(viewKey);
-  // Pressing Previous or Next can disable that very button (the first or last
-  // page). Focus then moves to the other button, or to the list, never to the
-  // document root.
-  const previousButton = useRef<HTMLButtonElement>(null);
-  const nextButton = useRef<HTMLButtonElement>(null);
-  const paged = useRef<"previous" | "next" | null>(null);
+  // "Show 50 more" (P17): the next rows arrive where the button was. For a
+  // moment a click there is ignored, so a double click never opens a ticket
+  // that slid under the pointer, and keyboard focus moves to the first new
+  // row (list BD-09).
+  const arriving = useRef<{ from: number; focused: boolean } | null>(null);
+  const guardUntil = useRef(0);
+  const shownCount = visibleTickets.length;
   useEffect(() => {
-    const which = paged.current;
-    if (!which || loading) return;
-    const own = which === "previous" ? previousButton : nextButton;
-    const other = which === "previous" ? nextButton : previousButton;
-    if (!own.current?.disabled) return;
-    paged.current = null;
-    (other.current && !other.current.disabled
-      ? other.current
-      : listRef.current
-    )?.focus();
-  });
+    const pending = arriving.current;
+    if (!pending || shownCount <= pending.from) return;
+    arriving.current = null;
+    guardUntil.current = Date.now() + 400;
+    const first = visibleTicketsRef.current[pending.from];
+    if (pending.focused && first)
+      listRef.current
+        ?.querySelector<HTMLElement>(
+          `[data-ticket-reference="${first.reference}"]`,
+        )
+        ?.focus();
+  }, [shownCount, listRef]);
   const { clearSelection } = bulk;
   useEffect(() => {
     if (previousView.current === viewKey) return;
     previousView.current = viewKey;
     clearSelection();
   }, [viewKey, clearSelection]);
+  // Failures and confirmations stay mounted so the bar can post them to the
+  // status line; the bar itself shows only while tickets are selected.
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
@@ -171,27 +218,123 @@ export function TicketListPane({
       : navigation.kind === "progress"
         ? "Tickets someone is working on right now."
         : null;
-  const filterProps = {
-    query,
-    setQuery,
-    plan,
-    setPlan,
-    status,
-    setStatus,
-    tags,
-    setTags,
-    availability,
-    setAvailability,
-    family,
-    setFamily,
-    plans,
-    setOffset,
-    navigation,
-    clearFilters,
-    scopeName,
-    total,
-    scopeTotal,
-  };
+  const filterProps = { ...filterPropsOf(workspace), menu: filtersMenu };
+  // What an empty list or board says (P9): one state for the whole view.
+  const emptyView = trash ? (
+    <EmptyState icon={<Trash2 />} {...copyProps(emptyCopy("tickets-trash"))} />
+  ) : filtered ? (
+    <EmptyState
+      icon={<SearchX />}
+      {...copyProps(
+        emptyCopy(
+          query
+            ? filterCount
+              ? "tickets-search-filtered"
+              : "tickets-search"
+            : "tickets-filters",
+          { query, name: scopeName, filters: filterCount },
+        ),
+      )}
+      action={
+        query || filterCount > 0 ? (
+          <>
+            {query && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setQuery("");
+                  resetPaging();
+                }}
+              >
+                Clear search
+              </Button>
+            )}
+            {filterCount > 0 && (
+              <Button variant="outline" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </>
+        ) : undefined
+      }
+    />
+  ) : planScope ? (
+    <EmptyState
+      icon={<Layers />}
+      {...copyProps(
+        emptyCopy(addDisabled ? "plan-archived" : "plan-empty", {
+          name: scopedPlan?.name ?? scopeName,
+        }),
+      )}
+      action={
+        addDisabled ? undefined : (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => planState.setAdding(true)}
+            >
+              Add to Plan…
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(event) => onCreate(event.currentTarget)}
+            >
+              New ticket
+            </Button>
+          </>
+        )
+      }
+    />
+  ) : navigation.kind === "ready" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-ready"))}
+    />
+  ) : navigation.kind === "progress" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-progress"))}
+    />
+  ) : navigation.project === "unlinked" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-no-project"))}
+    />
+  ) : navigation.project !== "all" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-project", { name: scopeName }))}
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={(event) => onCreate(event.currentTarget)}
+        >
+          New ticket
+        </Button>
+      }
+    />
+  ) : (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-first-run"))}
+      action={
+        <Button
+          size="sm"
+          aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
+          onClick={(event) => onCreate(event.currentTarget)}
+        >
+          New ticket
+          <Kbd tone="inverted" aria-hidden="true">
+            {shortcutLabel("new-ticket")}
+          </Kbd>
+        </Button>
+      }
+    />
+  );
   return (
     <section
       className="ticket-list"
@@ -199,82 +342,62 @@ export function TicketListPane({
       tabIndex={-1}
       aria-labelledby="tickets-heading"
     >
-      {scopedPlan ? (
-        <div className="plan-list-toolbar">
-          {planState.view && (
-            <span className="plan-list-summary">
-              {planSummary(planState.view.members, projects)}
-            </span>
-          )}
-          <span className="plan-list-spacer" />
-          <TicketFilters part="controls" labeledFilter {...filterProps} />
-          <DisplayMenu onError={workspace.setError} rowsOnly />
-        </div>
-      ) : (
-        <div className="list-header">
-          <h1 id="tickets-heading" tabIndex={-1} title={scopeName}>
-            {scopeName}
-          </h1>
-          <p>
-            {filtered && scopeTotal !== undefined
-              ? `${total} of ${scopeTotal}`
-              : total}
-            {!(filtered && scopeTotal !== undefined) && (
-              <span className="sr-only">
-                {" "}
-                {total === 1 ? "ticket" : "tickets"}
-              </span>
-            )}
-          </p>
-          <IconButton
-            className="list-refresh"
-            label="Refresh"
-            disabled={sourceRefresh.running}
-            onClick={() =>
-              void (configuredSources.length > 0
-                ? refreshSources()
-                : refresh({ reportFailure: true }))
-            }
-          >
-            <RefreshCw />
-          </IconButton>
-          {!trash && (
-            <TicketFilters part="controls" labeledFilter {...filterProps} />
-          )}
-          <DisplayMenu
-            onError={workspace.setError}
-            rowsOnly={trash || Boolean(navigation.plan)}
-          />
-          {configuredSources.length > 0 && (
-            <SourceRefresh
-              providers={configuredSources}
-              state={sourceRefresh}
-              tickets={tickets}
-            />
-          )}
-        </div>
-      )}
-      {singleStatusNote && (
-        <p className="list-description">{singleStatusNote}</p>
-      )}
-      {removed && removed.plan === planScope && (
-        <p className="plan-undo" role="status">
-          Removed {removed.reference} from {removed.name}.{" "}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={planState.pending}
-            onClick={() =>
-              void planState
-                .run(() =>
-                  plansClient.setMember(removed.reference, removed.plan),
-                )
-                .then(() => setRemoved(null))
-            }
-          >
-            Undo
-          </Button>
-        </p>
+      {/* A Plan's own header, above both panes, holds its controls. */}
+      {!scopedPlan && (
+        <PaneHeader
+          title={scopeName}
+          titleId="tickets-heading"
+          caption={singleStatusNote}
+          count={
+            // First run (S20): the title alone over an empty workspace.
+            !bare && (
+              <Count>
+                {filtered && scopeTotal != null
+                  ? ofTotal(total, scopeTotal)
+                  : total}
+                {!(filtered && scopeTotal != null) && (
+                  <span className="sr-only"> {noun(total, "ticket")}</span>
+                )}
+              </Count>
+            )
+          }
+          actions={
+            <>
+              {configuredSources.length > 0 && (
+                <SourceRefresh
+                  providers={configuredSources}
+                  state={sourceRefresh}
+                  tickets={tickets}
+                />
+              )}
+              {/* Refresh keeps its slot while there is anything to refresh,
+                  so the header never shifts (P10); over an empty workspace
+                  with no source it would act on nothing (S20). */}
+              {!(bare && !selected && configuredSources.length === 0) && (
+                <IconButton
+                  label="Refresh"
+                  disabled={sourceRefresh.running}
+                  onClick={() =>
+                    void (configuredSources.length > 0
+                      ? refreshSources()
+                      : refresh({ reportFailure: true }))
+                  }
+                >
+                  <RefreshCw />
+                </IconButton>
+              )}
+              {!trash && !bare && (
+                <TicketFilters part="controls" {...filterProps} />
+              )}
+              {!bare && (
+                <DisplayMenu
+                  onError={workspace.setError}
+                  rowsOnly={trash || Boolean(navigation.plan)}
+                />
+              )}
+            </>
+          }
+        />
       )}
       {
         <>
@@ -291,7 +414,7 @@ export function TicketListPane({
           {!trash && <TicketFilters part="chips" {...filterProps} />}
 
           {refreshFailed && !queryError && (
-            <p role="status" className="refresh-failed">
+            <div role="status" className="refresh-failed">
               Can’t refresh. Showing the last{" "}
               {workspace.layout === "board" ? "board" : "list"}.{" "}
               <Button
@@ -301,11 +424,19 @@ export function TicketListPane({
               >
                 Retry
               </Button>
-            </p>
+              {workspace.listFailure && (
+                <FailureDetails small details={workspace.listFailure.details} />
+              )}
+            </div>
           )}
           {workspace.layout === "board" ? (
             <TicketBoard
               workspace={workspace}
+              empty={
+                !loading && !queryError && tickets.length === 0
+                  ? emptyView
+                  : null
+              }
               onOpen={onOpen}
               {...(!addDisabled &&
                 !trash && {
@@ -316,140 +447,23 @@ export function TicketListPane({
           ) : (
             <div className="ticket-scroll">
               {queryError ? (
-                <EmptyState
-                  role="alert"
-                  icon={<AlertCircle />}
-                  title="Could not load tickets"
-                  description="Try refreshing the current view."
-                  action={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refresh({ reportFailure: true })}
-                    >
-                      Retry
-                    </Button>
+                <FailureState
+                  failure={
+                    listFailure ?? {
+                      code: "failed",
+                      title: "Couldn't load tickets",
+                      sentence:
+                        "ticketd couldn't read the list. Nothing changed.",
+                      action: "retry",
+                      details: "",
+                    }
                   }
+                  onRetry={() => void refresh({ reportFailure: true })}
                 />
               ) : loading && tickets.length === 0 ? (
                 <TicketRowsSkeleton />
               ) : tickets.length === 0 ? (
-                trash ? (
-                  <EmptyState
-                    icon={<Trash2 />}
-                    title="Trash is empty"
-                    description="Trashed tickets wait here until you restore them."
-                  />
-                ) : filtered ? (
-                  <EmptyState
-                    icon={<SearchX />}
-                    title={
-                      query
-                        ? `No tickets match “${query}”`
-                        : "No matching tickets"
-                    }
-                    description={
-                      query
-                        ? `Searched titles, descriptions and updates in ${scopeName}${
-                            filterCount
-                              ? `, with ${filterCount} ${filterCount === 1 ? "filter" : "filters"} on`
-                              : ""
-                          }.`
-                        : "Nothing matches the current filters."
-                    }
-                    action={
-                      query ||
-                      tags ||
-                      status ||
-                      availability ||
-                      family ||
-                      plan ? (
-                        <>
-                          {query && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setQuery("");
-                                setOffset(0);
-                              }}
-                            >
-                              Clear search
-                            </Button>
-                          )}
-                          {(tags ||
-                            status ||
-                            availability ||
-                            family ||
-                            plan) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={clearFilters}
-                            >
-                              Clear filters
-                            </Button>
-                          )}
-                        </>
-                      ) : undefined
-                    }
-                  />
-                ) : planScope ? (
-                  <EmptyState
-                    icon={<Layers />}
-                    title="No tickets in this Plan"
-                    description="Start with a new ticket, or bring in existing ones."
-                    action={
-                      <>
-                        <Button
-                          size="sm"
-                          onClick={(event) => onCreate(event.currentTarget)}
-                        >
-                          <Plus data-icon="inline-start" /> Create ticket
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => planState.setAdding(true)}
-                        >
-                          Add existing tickets
-                        </Button>
-                      </>
-                    }
-                  />
-                ) : navigation.project !== "all" ||
-                  navigation.plan ||
-                  navigation.kind !== "all" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    title="No tickets in this scope"
-                    description="Create a ticket or choose another view."
-                    action={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(event) => onCreate(event.currentTarget)}
-                      >
-                        Create ticket
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    title="Your workspace is ready"
-                    description="Create your first ticket to start keeping track of work."
-                    action={
-                      <Button
-                        size="sm"
-                        onClick={(event) => onCreate(event.currentTarget)}
-                      >
-                        <Plus data-icon="inline-start" /> Create your first
-                        ticket
-                      </Button>
-                    }
-                  />
-                )
+                emptyView
               ) : (
                 <>
                   {showBulk && bulk.selection.length > 0 && (
@@ -502,72 +516,62 @@ export function TicketListPane({
                     selectionDisabled={bulk.pending}
                     bulkSelection={bulk.selection}
                     onToggle={bulk.toggle}
-                    onOpen={onOpen}
+                    onSelectMany={bulk.selectAll}
+                    onOpen={(reference) => {
+                      if (Date.now() < guardUntil.current) return;
+                      onOpen(reference);
+                    }}
                     {...(scopedPlan &&
                       planWritable && {
                         rowAction: (ticket: Ticket) => (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
+                          <IconButton
                             disabled={planState.pending}
-                            aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
-                            title="Remove from Plan"
-                            onClick={() =>
-                              void planState
-                                .run(() =>
-                                  plansClient.setMember(ticket.reference, null),
-                                )
-                                .then((done) => {
-                                  if (done)
-                                    setRemoved({
-                                      reference: ticket.reference,
-                                      plan: scopedPlan.id,
-                                      name: scopedPlan.name,
-                                    });
-                                })
-                            }
+                            label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                            onClick={() => {
+                              // A second click lands on the row that moved up:
+                              // ignore clicks for 400ms after a removal (P7).
+                              if (!allowRemoval(lastRemoval)) return;
+                              const { reference } = ticket;
+                              const { id, name } = scopedPlan;
+                              void planAction(
+                                () => plansClient.setMember(reference, null),
+                                `remove ${reference} from ${name}`,
+                                {
+                                  message: `Removed ${reference} from ${name}`,
+                                  undo: () =>
+                                    planState.apply(() =>
+                                      plansClient.setMember(reference, id),
+                                    ),
+                                },
+                              );
+                            }}
                           >
                             <X />
-                          </Button>
+                          </IconButton>
                         ),
                       })}
                   />
                 </>
               )}
               {!trash &&
-                workspace.layout === "list" &&
-                (offset > 0 || total > PAGE_SIZE) && (
-                  <div className="pagination">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      ref={previousButton}
-                      disabled={offset === 0}
-                      onClick={() => {
-                        paged.current = "previous";
-                        setOffset(Math.max(0, offset - PAGE_SIZE));
-                      }}
-                    >
-                      Previous
-                    </Button>
-                    <span>
-                      {" "}
-                      Showing {offset + 1}–{offset + tickets.length} of{" "}
-                      {total}{" "}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      ref={nextButton}
-                      disabled={offset + tickets.length >= total}
-                      onClick={() => {
-                        paged.current = "next";
-                        setOffset(offset + PAGE_SIZE);
-                      }}
-                    >
-                      Next
-                    </Button>
-                  </div>
+                !queryError &&
+                tickets.length > 0 &&
+                tickets.length < total && (
+                  <Pager
+                    more={Math.min(PAGE_SIZE, total - tickets.length)}
+                    noun="tickets"
+                    loading={loading && pages * PAGE_SIZE > tickets.length}
+                    onMore={() => {
+                      arriving.current = {
+                        from: visibleTickets.length,
+                        focused:
+                          document.activeElement?.closest(
+                            '[data-slot="pager"]',
+                          ) != null,
+                      };
+                      showMore();
+                    }}
+                  />
                 )}
             </div>
           )}
@@ -582,10 +586,67 @@ export function TicketListPane({
         <BulkControls
           bulk={bulk}
           visible={visibleTickets}
+          total={total}
+          matchingReferences={matchingReferences}
           projects={projects}
           plans={plans}
         />
       )}
     </section>
+  );
+}
+
+/** An empty state's title and sentence from the copy registry. */
+function copyProps(copy: { title: string; sentence: string }) {
+  return { title: copy.title, description: copy.sentence };
+}
+
+/** The props the Filters controls and chips share, from the workspace. */
+function filterPropsOf(w: TicketWorkspace) {
+  return {
+    query: w.query,
+    setQuery: w.setQuery,
+    plan: w.plan,
+    setPlan: w.setPlan,
+    status: w.status,
+    setStatus: w.setStatus,
+    tags: w.tags,
+    setTags: w.setTags,
+    availability: w.availability,
+    setAvailability: w.setAvailability,
+    family: w.family,
+    setFamily: w.setFamily,
+    plans: w.plans,
+    resetPaging: w.resetPaging,
+    navigation: w.navigation,
+    clearFilters: w.clearFilters,
+    scopeName: w.scopeName,
+    total: w.total,
+    scopeTotal: w.scopeTotal,
+    counts: w.counts,
+  };
+}
+
+/**
+ * Search, Filters and Display for a Plan's list and board. They sit in the
+ * Plan's header, which spans both panes, instead of a second list header.
+ */
+export function PlanListControls({
+  workspace,
+  filtersMenu,
+}: {
+  workspace: TicketWorkspace;
+  /** Shared with the list's chip row, so a chip reopens this menu. */
+  filtersMenu: FiltersMenuState;
+}) {
+  return (
+    <>
+      <TicketFilters
+        part="controls"
+        {...filterPropsOf(workspace)}
+        menu={filtersMenu}
+      />
+      <DisplayMenu onError={workspace.setError} rowsOnly />
+    </>
   );
 }

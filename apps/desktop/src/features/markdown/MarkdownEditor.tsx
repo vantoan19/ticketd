@@ -12,9 +12,15 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
-import { syntaxTree } from "@codemirror/language";
+import {
+  HighlightStyle,
+  syntaxHighlighting,
+  syntaxTree,
+} from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView, keymap } from "@codemirror/view";
 import { RangeApi, TextApi, NodeApi, type Value } from "platejs";
@@ -78,7 +84,6 @@ import {
 } from "@/features/attachments/AttachmentPreview";
 import {
   useDraftRecovery,
-  useClaimRecoveryNotice,
   useDraftRecoveryError,
 } from "@/lib/draft-recovery-context";
 import {
@@ -87,21 +92,21 @@ import {
   type CaptureSource,
 } from "@/lib/api/attachments";
 import { useNativeFileDrop } from "@/features/attachments/use-native-file-drop";
+import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
+import type { MarkdownExportSource } from "@/lib/api/portable-export";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+import { Disclosure } from "@/components/ui/disclosure";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
@@ -110,10 +115,12 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { writeClipboard } from "@/lib/clipboard";
 import {
   Bold as BoldIcon,
   Code,
@@ -121,14 +128,26 @@ import {
   Link,
   List,
   ListChecks,
+  ListOrdered,
   MoreHorizontal,
   FileCode2,
   Paperclip,
   Eye,
+  Heading1,
+  Heading2,
+  Heading3,
+  Pilcrow,
+  Quote,
+  SquareCode,
+  Minus,
+  Table,
+  Workflow,
+  Strikethrough,
 } from "lucide-react";
-import { CopySourceButton } from "./CopySourceButton";
-import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
+import type { LucideIcon } from "lucide-react";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { BlockHeader } from "./BlockHeader";
+import { EditorImage } from "./InlineImage";
 import {
   checklistRule,
   closeCodeFence,
@@ -136,7 +155,7 @@ import {
   openFenceRule,
 } from "./input-rules";
 import { linkPluginOptions } from "./link-options";
-import { insertions, slashChoices, slashMayOpen } from "./slash-menu";
+import { slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
@@ -144,10 +163,34 @@ const AttachmentProtection = createContext<(uri: string) => Promise<void>>(
   async () => {},
 );
 
+// Source colours come from the --syntax-* tokens, so light and dark each get their
+// own palette (CodeMirror's default style is light only). Headings are not underlined:
+// only links look like links.
+const sourceHighlight = HighlightStyle.define([
+  { tag: tags.heading, color: "var(--syntax-title)", fontWeight: "600" },
+  { tag: tags.strong, fontWeight: "600" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
+  { tag: [tags.link, tags.url], color: "var(--link-foreground)" },
+  { tag: tags.labelName, color: "var(--syntax-keyword)" },
+  { tag: [tags.monospace, tags.string], color: "var(--syntax-string)" },
+  { tag: [tags.escape, tags.character], color: "var(--syntax-number)" },
+  {
+    tag: [
+      tags.processingInstruction,
+      tags.comment,
+      tags.contentSeparator,
+      tags.quote,
+    ],
+    color: "var(--syntax-comment)",
+  },
+]);
+
 // Source mode keeps what is typed: Enter inserts a plain newline, so list markers are not
 // doubled and a closing fence never inherits indentation.
 const sourceExtensions = [
   markdown({ addKeymap: false }),
+  syntaxHighlighting(sourceHighlight),
   EditorView.lineWrapping,
   Prec.highest(
     keymap.of([
@@ -163,6 +206,35 @@ const sourceExtensions = [
       },
     ]),
   ),
+];
+
+/** The icon each block in the slash menu wears (P3: every row has one). */
+const blockIcons: Record<string, LucideIcon> = {
+  p: Pilcrow,
+  h1: Heading1,
+  h2: Heading2,
+  h3: Heading3,
+  ul: List,
+  ol: ListOrdered,
+  task: ListChecks,
+  blockquote: Quote,
+  code_block: SquareCode,
+  hr: Minus,
+  table: Table,
+  mermaid: Workflow,
+};
+
+const CODE_LANGUAGES = [
+  "typescript",
+  "javascript",
+  "json",
+  "rust",
+  "python",
+  "bash",
+  "sql",
+  "html",
+  "css",
+  "markdown",
 ];
 
 function Leaf(props: PlateLeafProps) {
@@ -198,7 +270,6 @@ function Element(props: PlateElementProps) {
     ol: "ol",
     li: "li",
     lic: "div",
-    code_block: "pre",
     code_line: "div",
     tr: "tr",
     td: "td",
@@ -206,6 +277,7 @@ function Element(props: PlateElementProps) {
     hr: "div",
     a: "a",
     br: "span",
+    img: "span",
   } as const;
   const tag = tags[element.type as keyof typeof tags] ?? "div";
   if (element.type === "table")
@@ -223,6 +295,19 @@ function Element(props: PlateElementProps) {
         {children}
       </PlateElement>
     );
+  if (element.type === "img")
+    // One unit of the text: the picture (or its label), never editable inside.
+    return (
+      <PlateElement {...props} as="span" className="editor-image">
+        <span contentEditable={false}>
+          <EditorImage
+            url={String(element.url ?? "")}
+            alt={String(element.alt ?? "")}
+          />
+        </span>
+        {children}
+      </PlateElement>
+    );
   return (
     <PlateElement
       {...props}
@@ -234,7 +319,6 @@ function Element(props: PlateElementProps) {
               href: /^(https?:|mailto:|\/|#)/i.test(String(element.url))
                 ? String(element.url)
                 : undefined,
-              title: String(element.title ?? ""),
               onClick: (event: MouseEvent) => event.preventDefault(),
             }
           : {}),
@@ -261,35 +345,36 @@ function Element(props: PlateElementProps) {
       {element.type === "a" &&
         String(element.url).startsWith("ticketd://attachment/") && (
           <span contentEditable={false}>
-            <button
-              type="button"
-              className="attachment-inline-preview"
-              aria-label={`Preview attachment: ${NodeApi.string(element)}`}
-              title="Preview attachment"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                const before = writeMarkdown(editor.children);
-                setPreview({
-                  uri: String(element.url),
-                  replace:
-                    readOnly || !path
-                      ? undefined
-                      : async (file, _requestId, signal) => {
-                          const uri = await attachments.uri(file.id);
-                          signal.throwIfAborted();
-                          await protectAttachment(uri);
-                          signal.throwIfAborted();
-                          if (writeMarkdown(editor.children) !== before)
-                            throw new Error(
-                              "The content changed while choosing a replacement. Close the preview and select the reference again.",
-                            );
-                          editor.tf.setNodes({ url: uri }, { at: path });
-                        },
-                });
-              }}
-            >
-              <Eye aria-hidden="true" />
-            </button>
+            <Tooltip content="Preview attachment">
+              <button
+                type="button"
+                className="attachment-inline-preview"
+                aria-label={`Preview attachment: ${NodeApi.string(element)}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  const before = writeMarkdown(editor.children);
+                  setPreview({
+                    uri: String(element.url),
+                    replace:
+                      readOnly || !path
+                        ? undefined
+                        : async (file, _requestId, signal) => {
+                            const uri = await attachments.uri(file.id);
+                            signal.throwIfAborted();
+                            await protectAttachment(uri);
+                            signal.throwIfAborted();
+                            if (writeMarkdown(editor.children) !== before)
+                              throw new Error(
+                                "The content changed while choosing a replacement. Close the preview and select the reference again.",
+                              );
+                            editor.tf.setNodes({ url: uri }, { at: path });
+                          },
+                  });
+                }}
+              >
+                <Eye aria-hidden="true" />
+              </button>
+            </Tooltip>
             {preview && (
               <AttachmentPreview
                 target={{ uri: preview.uri }}
@@ -303,30 +388,22 @@ function Element(props: PlateElementProps) {
   );
 }
 
+/**
+ * A code block in the editor: the same BlockHeader as reading, its language
+ * field always in the header, so the code never moves when the caret enters
+ * (detA MK-08).
+ */
 function CodeFence(props: PlateElementProps) {
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
   const languageId = useId();
-  // The language field is an editing tool: it shows only while the caret is in this block.
-  const editing = useEditorSelector(
-    (current) => {
-      const at = current.selection?.anchor.path[0];
-      const path = current.api.findPath(props.element);
-      return at !== undefined && path !== undefined && path[0] === at;
-    },
-    [props.element],
-  );
   return (
-    <PlateElement {...props} as="div">
-      <FieldGroup
-        contentEditable={false}
-        className="code-language"
-        data-editing={editing}
-      >
-        <Field orientation="horizontal">
-          <FieldLabel htmlFor={languageId}>Code language</FieldLabel>
-          <Input
-            id={languageId}
+    <PlateElement {...props} as="div" className="markdown-code-block">
+      <BlockHeader
+        label={
+          <input
+            aria-label="Code language"
+            className="code-language"
             list={`${languageId}-languages`}
             value={String(props.element.lang ?? "")}
             placeholder="Plain text"
@@ -340,52 +417,35 @@ function CodeFence(props: PlateElementProps) {
                 editor.tf.setNodes({ lang }, { at: path });
             }}
           />
-          <datalist id={`${languageId}-languages`}>
-            {[
-              "typescript",
-              "javascript",
-              "json",
-              "rust",
-              "python",
-              "bash",
-              "sql",
-              "html",
-              "css",
-              "markdown",
-            ].map((lang) => (
-              <option key={lang} value={lang} />
-            ))}
-          </datalist>
-        </Field>
-      </FieldGroup>
+        }
+      />
+      <datalist id={`${languageId}-languages`}>
+        {CODE_LANGUAGES.map((lang) => (
+          <option key={lang} value={lang} />
+        ))}
+      </datalist>
       <pre>{props.children}</pre>
     </PlateElement>
   );
 }
 
+/** A Mermaid block keeps its preview while editing; its source opens beneath. */
 function Diagram(props: PlateElementProps) {
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
   const source = String(props.element.source ?? "");
+  const labels = diagramLabels(source);
   return (
     <PlateElement {...props}>
       <div contentEditable={false} className="diagram-editor">
         <MermaidDiagram source={source} />
-        <details>
-          <summary>
-            <Code aria-hidden="true" />
-            <span className="diagram-summary-label">
-              Mermaid diagram
-              {diagramLabels(source) && ` · ${diagramLabels(source)}`}
-            </span>
-            <span className="diagram-summary-action">Edit source</span>
-            <span className="sr-only">Diagram source</span>
-          </summary>
+        <Disclosure label={labels ? `Source · ${labels}` : "Source"}>
           <CodeMirror
             value={source}
             readOnly={readOnly}
             editable={!readOnly}
             aria-label="Mermaid source"
+            theme="none"
             extensions={sourceExtensions}
             onChange={(next) => {
               const path = editor.api.findPath(props.element);
@@ -393,7 +453,7 @@ function Diagram(props: PlateElementProps) {
                 editor.tf.setNodes({ source: next }, { at: path });
             }}
           />
-        </details>
+        </Disclosure>
       </div>
       {props.children}
     </PlateElement>
@@ -468,262 +528,407 @@ function insert(editor: PlateEditor, type: string) {
   );
 }
 
-function Toolbar({
-  visible,
-  floating,
-  onAttach,
-  children,
+/** A heading toggles back to a paragraph, so one button both makes and undoes it. */
+function toggleHeading(editor: PlateEditor) {
+  insert(editor, editor.api.some({ match: { type: "h2" } }) ? "p" : "h2");
+}
+
+/** Where the caret is on screen, for an overlay that opens at it. */
+function caretRect(): DOMRect | null {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  const rect =
+    typeof range.getBoundingClientRect === "function"
+      ? range.getBoundingClientRect()
+      : null;
+  if (rect && (rect.width || rect.height)) return rect;
+  // An empty block has no text to measure: use the block itself.
+  const node = range.startContainer;
+  const element =
+    node instanceof globalThis.Element ? node : node.parentElement;
+  return element?.getBoundingClientRect() ?? null;
+}
+
+const keepFocus = (event: MouseEvent) => event.preventDefault();
+
+/**
+ * The link form: pick a Document by title, or type an address. Enter applies;
+ * a collapsed selection gets the Document's heading as its text.
+ */
+function LinkForm({ onDone }: { onDone: () => void }) {
+  const editor = useEditorRef();
+  const [url, setUrl] = useState("");
+  const urlId = useId();
+  return (
+    <div className="editor-link-form">
+      <DocumentPicker
+        autoFocus
+        onPick={(picked) => {
+          const collapsed = !editor.selection || editor.api.isCollapsed();
+          upsertLink(editor, {
+            url: `ticketd://document/${picked.id}`,
+            ...(collapsed ? { text: picked.heading } : {}),
+          });
+          onDone();
+          editor.tf.focus();
+        }}
+      />
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const target = url.trim();
+          if (!/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(target)) return;
+          const collapsed = !editor.selection || editor.api.isCollapsed();
+          const documentId = /^ticketd:\/\/document\/([^/?#\s]+)$/i.exec(
+            target,
+          )?.[1];
+          // A typed Document link reads as the Document's heading, not its raw URL.
+          void (async () => {
+            let text: string | undefined;
+            if (collapsed && documentId)
+              text = await documents
+                .show(documentId)
+                .then((doc) => doc.heading)
+                .catch(() => undefined);
+            upsertLink(editor, { url: target, ...(text ? { text } : {}) });
+            setUrl("");
+            onDone();
+            editor.tf.focus();
+          })();
+        }}
+      >
+        <Field>
+          <FieldLabel htmlFor={urlId}>Or link an address</FieldLabel>
+          <Input
+            id={urlId}
+            placeholder="e.g. https://example.com"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+          />
+        </Field>
+      </form>
+    </div>
+  );
+}
+
+/** Link as an icon button that opens the link form under it. */
+function LinkButton({
+  open,
+  onOpenChange,
 }: {
-  visible: boolean;
-  floating: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <IconButton
+          type="button"
+          label="Link"
+          shortcut="⌘K"
+          onMouseDown={keepFocus}
+        >
+          <Link />
+        </IconButton>
+      </PopoverTrigger>
+      <PopoverContent align="start" aria-label="Link">
+        <LinkForm onDone={() => onOpenChange(false)} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * The formatting part of the session row (P16): the essentials as icon
+ * buttons with tooltips, and the rest in "…" with their keys. Insertions live
+ * in the slash menu only.
+ */
+function SessionFormatting({
+  onAttach,
+  more,
+  onMenuOpenChange,
+}: {
   onAttach: () => void;
-  /** The editor's copy/export/source actions: the last item of the toolbar row. */
-  children?: ReactNode;
+  /** The "…" menu opened or closed (Export reads the selection then). */
+  onMenuOpenChange: (open: boolean) => void;
+  /** Copy Markdown and Export: the last group of "…". */
+  more: ReactNode;
 }) {
   const editor = useEditorRef();
-  const selected = useEditorSelector(
+  const [linkOpen, setLinkOpen] = useState(false);
+  const inTable = useEditorSelector(
+    (current) => current.api.some({ match: { type: "table" } }),
+    [],
+  );
+  const mark = (key: string) => () => {
+    editor.tf.toggleMark(key);
+    editor.tf.focus();
+  };
+  return (
+    <span className="editor-formatting" role="toolbar" aria-label="Formatting">
+      <IconButton
+        type="button"
+        label="Bold"
+        shortcut="⌘B"
+        onMouseDown={keepFocus}
+        onClick={mark("bold")}
+      >
+        <BoldIcon />
+      </IconButton>
+      <IconButton
+        type="button"
+        label="Italic"
+        shortcut="⌘I"
+        onMouseDown={keepFocus}
+        onClick={mark("italic")}
+      >
+        <ItalicIcon />
+      </IconButton>
+      <IconButton
+        type="button"
+        label="Bullet list"
+        onMouseDown={keepFocus}
+        onClick={() => insert(editor, "ul")}
+      >
+        <List />
+      </IconButton>
+      <IconButton
+        type="button"
+        label="Checklist"
+        onMouseDown={keepFocus}
+        onClick={() => insert(editor, "task")}
+      >
+        <ListChecks />
+      </IconButton>
+      <LinkButton open={linkOpen} onOpenChange={setLinkOpen} />
+      <IconButton
+        type="button"
+        label="Insert attachment"
+        onMouseDown={keepFocus}
+        onClick={onAttach}
+      >
+        <Paperclip />
+      </IconButton>
+      <DropdownMenu onOpenChange={onMenuOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <IconButton
+            type="button"
+            label="More formatting"
+            onMouseDown={keepFocus}
+          >
+            <MoreHorizontal />
+          </IconButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuGroup>
+            <DropdownMenuItem onSelect={() => toggleHeading(editor)}>
+              <Heading2 aria-hidden="true" />
+              Heading
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={mark("code")}>
+              <Code aria-hidden="true" />
+              Inline code
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={mark("strikethrough")}>
+              <Strikethrough aria-hidden="true" />
+              Strikethrough
+              <DropdownMenuShortcut>⌘⇧X</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => moveBlock(editor, -1)}>
+              Move block up
+              <DropdownMenuShortcut>⌥↑</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => moveBlock(editor, 1)}>
+              Move block down
+              <DropdownMenuShortcut>⌥↓</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          {inTable && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={() => insertTableRow(editor)}>
+                  Add row
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => insertTableColumn(editor)}>
+                  Add column
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => deleteRow(editor)}>
+                  Delete row
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => deleteColumn(editor)}>
+                  Delete column
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </>
+          )}
+          <DropdownMenuSeparator />
+          {more}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
+  );
+}
+
+/**
+ * Formatting for a quick composer (Activity, Capture, New ticket): a small bar
+ * over the selected text, never a docked toolbar. It opens only while text is
+ * selected in the focused editor and never takes focus from it.
+ */
+function SelectionBubble({ focused }: { focused: boolean }) {
+  const editor = useEditorRef();
+  const [linkOpen, setLinkOpen] = useState(false);
+  const expanded = useEditorSelector(
     (current) => !!current.selection && !current.api.isCollapsed(),
     [],
   );
-  const [url, setUrl] = useState("");
-  const [linkOpen, setLinkOpen] = useState(false);
-  const keepFocus = (event: MouseEvent) => event.preventDefault();
-  const essentials = [
-    [
-      "Bold",
-      <BoldIcon key="b" />,
-      () => {
-        editor.tf.toggleMark("bold");
-        editor.tf.focus();
-      },
-    ],
-    [
-      "Italic",
-      <ItalicIcon key="i" />,
-      () => {
-        editor.tf.toggleMark("italic");
-        editor.tf.focus();
-      },
-    ],
-  ] as const;
-  const listButtons = [
-    ["Bullet list", <List key="l" />, "ul"],
-    ["Checklist", <ListChecks key="c" />, "task"],
-  ] as const;
+  const selection = useEditorSelector((current) => current.selection, []);
+  // Measured when the popper asks, so it always sits on the current selection.
+  const last = useRef<DOMRect | null>(null);
+  const anchor = useRef({
+    getBoundingClientRect: () => {
+      const rect = caretRect();
+      if (rect) last.current = rect;
+      return last.current ?? new DOMRect();
+    },
+  });
+  const open = (focused && expanded) || linkOpen;
+  // A new selection places the bar afresh.
+  const placement = selection
+    ? `${selection.anchor.path.join(".")}:${selection.anchor.offset}-${selection.focus.path.join(".")}:${selection.focus.offset}`
+    : "";
+  const mark = (key: string) => () => {
+    editor.tf.toggleMark(key);
+    editor.tf.focus();
+  };
   return (
-    // Never `hidden`: a collapsed toolbar would move everything below it, so a first click
-    // on Post/Done/Retry (which blurs the editor) would land on the wrong element. A toolbar that
-    // appears only on focus floats above the frame instead of holding an empty band inside it.
-    <div
-      className="rich-toolbar"
-      data-floating={floating || undefined}
-      data-visible={visible}
-    >
-      <div
-        className="rich-toolbar-tools"
-        aria-hidden={!visible}
-        inert={!visible}
-        role="toolbar"
-        aria-label={selected ? "Selection formatting" : "Document formatting"}
+    <Popover open={open}>
+      <PopoverAnchor virtualRef={anchor} />
+      <PopoverContent
+        key={linkOpen ? "link" : placement}
+        variant="bar"
+        side="top"
+        align="center"
+        sideOffset={8}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => event.preventDefault()}
       >
-        {essentials.map(([title, icon, run]) => (
-          <Button
-            key={title}
+        <span
+          role="toolbar"
+          aria-label="Selection formatting"
+          className="editor-bubble"
+        >
+          <IconButton
             type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label={title}
-            title={title}
+            label="Bold"
+            shortcut="⌘B"
+            tooltipSide="top"
             onMouseDown={keepFocus}
-            onClick={run}
+            onClick={mark("bold")}
           >
-            {icon}
-          </Button>
-        ))}
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Insert attachment"
-          title="Insert attachment"
-          onMouseDown={keepFocus}
-          onClick={onAttach}
-        >
-          <Paperclip />
-        </Button>
-        <Popover
-          open={linkOpen}
-          onOpenChange={(open) => {
-            setLinkOpen(open);
-            if (open) setUrl("");
-          }}
-        >
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Link"
-              title="Link"
-              onMouseDown={keepFocus}
-            >
-              <Link />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" sideOffset={6} collisionPadding={12}>
-            <p className="mb-2 text-xs text-muted-foreground">
-              Link a Document
-            </p>
-            <DocumentPicker
-              autoFocus
-              onPick={(picked) => {
-                const collapsed = !editor.selection || editor.api.isCollapsed();
-                upsertLink(editor, {
-                  url: `ticketd://document/${picked.id}`,
-                  ...(collapsed ? { text: picked.heading } : {}),
-                });
-                setLinkOpen(false);
-                editor.tf.focus();
-              }}
-            />
-            <form
-              className="mt-3 flex flex-col gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                const target = url.trim();
-                if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(target)) {
-                  const collapsed =
-                    !editor.selection || editor.api.isCollapsed();
-                  const documentId =
-                    /^ticketd:\/\/document\/([^/?#\s]+)$/i.exec(target)?.[1];
-                  // A typed Document link reads as the Document's heading, not its raw URL.
-                  void (async () => {
-                    let text: string | undefined;
-                    if (collapsed && documentId)
-                      text = await documents
-                        .show(documentId)
-                        .then((doc) => doc.heading)
-                        .catch(() => undefined);
-                    upsertLink(editor, {
-                      url: target,
-                      ...(text ? { text } : {}),
-                    });
-                    setUrl("");
-                    setLinkOpen(false);
-                    editor.tf.focus();
-                  })();
-                }
-              }}
-            >
-              <label htmlFor="rich-link-url">Link URL</label>
-              <Input
-                id="rich-link-url"
-                placeholder="https://… or ticketd://…"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-              />
-              <Button type="submit">Apply link</Button>
-            </form>
-          </PopoverContent>
-        </Popover>
-        {listButtons.map(([title, icon, type]) => (
-          <Button
-            key={type}
+            <BoldIcon />
+          </IconButton>
+          <IconButton
             type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label={title}
-            title={title}
+            label="Italic"
+            shortcut="⌘I"
+            tooltipSide="top"
             onMouseDown={keepFocus}
-            onClick={() => insert(editor, type)}
+            onClick={mark("italic")}
           >
-            {icon}
-          </Button>
-        ))}
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Inline code"
-          title="Inline code"
-          onMouseDown={keepFocus}
-          onClick={() => {
-            editor.tf.toggleMark("code");
-            editor.tf.focus();
-          }}
-        >
-          <Code />
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="More formatting"
-              title="More formatting"
-              onMouseDown={keepFocus}
-            >
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-80">
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                onSelect={() => {
-                  editor.tf.toggleMark("strikethrough");
-                  editor.tf.focus();
-                }}
-              >
-                Strikethrough
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.undo()}>
-                Undo
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.redo()}>
-                Redo
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => moveBlock(editor, -1)}>
-                Move block up
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => moveBlock(editor, 1)}>
-                Move block down
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Insert</DropdownMenuLabel>
-              {insertions.map(([type, title]) => (
-                <DropdownMenuItem
+            <ItalicIcon />
+          </IconButton>
+          <IconButton
+            type="button"
+            label="Strikethrough"
+            tooltipSide="top"
+            onMouseDown={keepFocus}
+            onClick={mark("strikethrough")}
+          >
+            <Strikethrough />
+          </IconButton>
+          <IconButton
+            type="button"
+            label="Inline code"
+            tooltipSide="top"
+            onMouseDown={keepFocus}
+            onClick={mark("code")}
+          >
+            <Code />
+          </IconButton>
+          <LinkButton open={linkOpen} onOpenChange={setLinkOpen} />
+        </span>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** The slash menu, opened at the caret: every block with its icon. */
+function SlashMenu({
+  id,
+  anchor,
+  choices,
+  index,
+  onChoose,
+  onClose,
+}: {
+  id: string;
+  anchor: DOMRect | null;
+  choices: ReturnType<typeof slashChoices>;
+  index: number;
+  onChoose: (type: string) => void;
+  onClose: () => void;
+}) {
+  const virtual = useMemo(
+    () => ({
+      current: { getBoundingClientRect: () => anchor ?? new DOMRect() },
+    }),
+    [anchor],
+  );
+  return (
+    <Popover
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <PopoverAnchor virtualRef={virtual} />
+      <PopoverContent
+        variant="list"
+        side="bottom"
+        align="start"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
+        <div id={id} role="listbox" aria-label="Insert block">
+          {choices.length ? (
+            choices.map(([type, title], position) => {
+              const Icon = blockIcons[type] ?? Pilcrow;
+              return (
+                <div
                   key={type}
-                  onSelect={() => insert(editor, type)}
+                  id={`${id}-${type}`}
+                  role="option"
+                  aria-selected={position === index}
+                  className="slash-option"
+                  onMouseDown={keepFocus}
+                  onClick={() => onChoose(type)}
                 >
+                  <Icon aria-hidden="true" />
                   {title}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Table</DropdownMenuLabel>
-              <DropdownMenuItem onSelect={() => insertTableRow(editor)}>
-                Add row
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => insertTableColumn(editor)}>
-                Add column
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => deleteRow(editor)}>
-                Delete row
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => deleteColumn(editor)}>
-                Delete column
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      {children}
-    </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="slash-empty" role="presentation">
+              No matching blocks
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -767,6 +972,10 @@ const richPlugins = [
     node: { isElement: true, isVoid: true, component: Diagram },
   }),
   createPlatePlugin({
+    key: "img",
+    node: { isElement: true, isInline: true, isVoid: true },
+  }),
+  createPlatePlugin({
     key: "br",
     node: { isElement: true, isInline: true, isVoid: true },
   }),
@@ -786,19 +995,23 @@ export interface MarkdownEditorProps {
   focusLink?: string;
   /** With a focus request, start an empty paragraph below a trailing quote so typing lands outside it. */
   paragraphAfterQuote?: boolean;
-  /** Keep the formatting toolbar shown while the editor is idle, so a dialog never holds an empty band. */
-  persistentToolbar?: boolean;
+  /**
+   * `session`: a document being edited in place (description, Document). Its
+   * formatting row goes into `chromeHost`, the 32px session row its page
+   * reserves, so nothing is inserted above the text and nothing toggles with
+   * focus. `compact` (quick composers): no toolbar; formatting is the
+   * selection bubble and slash, and only Insert attachment and the source
+   * switch show, in `chromeHost` (the composer's bottom row) or under the text.
+   */
+  chrome?: "session" | "compact";
+  /** Where the editor's controls render; see `chrome`. */
+  chromeHost?: HTMLElement | null;
+  /** Escape with nothing open inside the editor: finish editing. */
+  onEscape?: () => void;
   /** Recovery owner to explain independent Undo protection in attachment usage. */
   recoveryOwner?: string;
   /** Current ticket context ranks related files; it never changes reference ownership. */
   attachmentTicketReference?: string | null | undefined;
-}
-
-let pointerDown = false;
-if (typeof document !== "undefined") {
-  document.addEventListener("pointerdown", () => (pointerDown = true), true);
-  for (const type of ["pointerup", "pointercancel"])
-    document.addEventListener(type, () => (pointerDown = false), true);
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -812,17 +1025,17 @@ export function MarkdownEditor({
   focusRequest = 0,
   focusLink,
   paragraphAfterQuote = false,
-  persistentToolbar = false,
+  chrome = "compact",
+  chromeHost,
+  onEscape,
   recoveryOwner = label,
   attachmentTicketReference = null,
 }: MarkdownEditorProps) {
   const recovery = useDraftRecovery();
+  // The workspace band reports a failure to protect drafts once for the whole
+  // window; the editor only stops saying its content is protected.
   const recoveryError = useDraftRecoveryError();
-  const claimRecoveryNotice = useClaimRecoveryNotice();
-  useEffect(
-    () => (recoveryError ? claimRecoveryNotice() : undefined),
-    [recoveryError, claimRecoveryNotice],
-  );
+  const statusLine = useStatusLine();
   const [historyOwner] = useState(
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
@@ -850,9 +1063,8 @@ export function MarkdownEditor({
     },
     [recovery, historyOwner],
   );
-  // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
-  // so it stays keyboard reachable) and while one of its menus holds focus.
-  const [active, setActive] = useState(false);
+  // Whether the rich text has focus: the selection bubble shows only then.
+  const [focused, setFocused] = useState(false);
   const [assessed, setAssessed] = useState<{
     source: string;
     document: Pick<ReturnType<typeof readMarkdown>, "value" | "reasons">;
@@ -864,13 +1076,13 @@ export function MarkdownEditor({
   }
   const [sourceMode, setSourceMode] = useState(false);
   const [slash, setSlash] = useState(false);
+  const [slashAnchor, setSlashAnchor] = useState<DOMRect | null>(null);
   const editorId = useId();
   const slashMenuId = `${editorId}-slash-menu`;
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashQuery, setSlashQuery] = useState("");
-  const source = sourceMode || document.reasons.length > 0;
-  // In the rich editor the copy and source buttons share the toolbar row instead of adding one.
-  const inlineMode = !source && !readOnly;
+  const forced = document.reasons.length > 0;
+  const source = sourceMode || forced;
   const container = useRef<HTMLElement>(null);
   const sourceEditor = useRef<ReactCodeMirrorRef>(null);
   const sourceEditorExtensions = useMemo(
@@ -925,6 +1137,7 @@ export function MarkdownEditor({
       code_line: Element,
       hr: Element,
       br: Element,
+      img: Element,
       bold: Leaf,
       italic: Leaf,
       code: Leaf,
@@ -1171,6 +1384,15 @@ export function MarkdownEditor({
       moveBlock(editor, event.key === "ArrowUp" ? -1 : 1);
       return;
     }
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      event.shiftKey &&
+      event.key.toLowerCase() === "x"
+    ) {
+      event.preventDefault();
+      editor.tf.toggleMark("strikethrough");
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey && closeCodeFence(editor)) {
       event.preventDefault();
       event.stopPropagation();
@@ -1192,17 +1414,26 @@ export function MarkdownEditor({
     ) {
       const before = textBeforeCaret(editor);
       if (before !== null && slashMayOpen(before)) {
+        // The menu opens at the caret, where "/" was typed (detA MK-05).
+        setSlashAnchor(caretRect());
         setSlash(true);
         setSlashIndex(0);
         setSlashQuery("");
       }
       return;
     }
-    if (!slash) return;
+    if (!slash) {
+      if (event.key === "Escape" && onEscape) {
+        event.preventDefault();
+        event.stopPropagation();
+        onEscape();
+      }
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      setSlash(false);
+      closeSlash();
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       event.stopPropagation();
@@ -1227,10 +1458,11 @@ export function MarkdownEditor({
         setSlashIndex(0);
       }
     } else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
-      const next = slashQuery + event.key;
-      if (/\s/.test(event.key) || slashChoices(next).length === 0) closeSlash();
+      // A query that matches nothing keeps the menu open on "No matching
+      // blocks"; a space means the "/" was text after all.
+      if (/\s/.test(event.key)) closeSlash();
       else {
-        setSlashQuery(next);
+        setSlashQuery(slashQuery + event.key);
         setSlashIndex(0);
       }
     } else if (
@@ -1240,90 +1472,135 @@ export function MarkdownEditor({
     )
       closeSlash();
   }
-  const actionGroup = (
-    <div
-      className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
-      data-persistent={persistentToolbar || undefined}
-    >
-      <CopySourceButton
-        compact
-        source={value}
-        label={`Copy ${label} Markdown`}
-      />
-      <ExportMarkdownButton
-        compact
-        source={() => {
-          const selection = sourceEditor.current?.view?.state.selection.main;
-          if (source && selection && !selection.empty)
-            return {
-              kind: "selection",
-              body: value.slice(selection.from, selection.to),
-              context: value,
-            };
-          const nativeSelection = window.getSelection();
-          const rich =
-            !source &&
-            nativeSelection &&
-            container.current?.contains(nativeSelection.anchorNode)
-              ? editor.api.toSlateRange(nativeSelection, {
-                  exactMatch: false,
-                  suppressThrow: true,
-                })
-              : editor.selection;
-          const selected =
-            !source && rich && !RangeApi.isCollapsed(rich)
-              ? writeMarkdown(editor.api.fragment(rich))
-              : value;
-          return { kind: "markdown", body: selected };
-        }}
-      />
-      {source && !readOnly && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Insert attachment"
-          title="Insert attachment"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={beginAttachment}
-        >
-          <Paperclip />
-        </Button>
-      )}
-      <Button
-        disabled={document.reasons.length > 0}
-        type="button"
-        variant="ghost"
-        size={inlineMode ? "icon-sm" : "sm"}
-        aria-pressed={source}
-        {...(inlineMode
-          ? {
-              "aria-label": "Edit Markdown source",
-              title: "Edit Markdown source",
-            }
-          : {})}
-        onClick={() => {
-          setSourceMode((current) => !current);
-          closeSlash();
-        }}
-      >
-        {document.reasons.length > 0 ? (
-          "Markdown source required"
-        ) : source ? (
-          "Use rich editor"
-        ) : inlineMode ? (
-          <FileCode2 />
-        ) : (
-          "Edit Markdown source"
-        )}
-      </Button>
-    </div>
+  // Exporting starts from the "…" menu; its result dialog lives here.
+  // What Export takes: the selection when the "…" menu opened, before the
+  // menu took focus, else the whole text.
+  const exportSnapshot = useRef<MarkdownExportSource | null>(null);
+  const exportSource = (): MarkdownExportSource => {
+    const selection = sourceEditor.current?.view?.state.selection.main;
+    if (source && selection && !selection.empty)
+      return {
+        kind: "selection",
+        body: value.slice(selection.from, selection.to),
+        context: value,
+      };
+    const nativeSelection = window.getSelection();
+    const rich =
+      !source &&
+      nativeSelection &&
+      container.current?.contains(nativeSelection.anchorNode)
+        ? editor.api.toSlateRange(nativeSelection, {
+            exactMatch: false,
+            suppressThrow: true,
+          })
+        : editor.selection;
+    const selected =
+      !source && rich && !RangeApi.isCollapsed(rich)
+        ? writeMarkdown(editor.api.fragment(rich))
+        : value;
+    return { kind: "markdown", body: selected };
+  };
+  const captureExport = (open: boolean) => {
+    exportSnapshot.current = open ? exportSource() : exportSnapshot.current;
+  };
+  const markdownExport = useMarkdownExport(
+    () => exportSnapshot.current ?? exportSource(),
   );
+  const moreItems = (
+    <DropdownMenuGroup>
+      <DropdownMenuItem
+        onSelect={() =>
+          void writeClipboard(value).then((failure) =>
+            statusLine.show(
+              failure === null
+                ? { message: "Copied Markdown" }
+                : { tone: "error", message: "Couldn't copy the Markdown" },
+            ),
+          )
+        }
+      >
+        Copy Markdown
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={markdownExport.busy}
+        onSelect={() => void markdownExport.run()}
+      >
+        Export Markdown with files…
+      </DropdownMenuItem>
+    </DropdownMenuGroup>
+  );
+  // Why the rich editor can't hold this text: one caption, never a notice
+  // that pushes the text down (detA DS-03, plans DR-01).
+  const reason = forced && (
+    <span className="editor-caption" role="note">
+      Source editing · has {document.reasons.join(", ")}
+    </span>
+  );
+  const sourceToggle = !forced && (
+    <IconButton
+      type="button"
+      label={source ? "Use rich editor" : "Edit Markdown source"}
+      aria-pressed={source}
+      onMouseDown={keepFocus}
+      onClick={() => {
+        setSourceMode((current) => !current);
+        closeSlash();
+      }}
+    >
+      <FileCode2 />
+    </IconButton>
+  );
+  const attach = !readOnly && (
+    <IconButton
+      type="button"
+      label="Insert attachment"
+      onMouseDown={keepFocus}
+      onClick={beginAttachment}
+    >
+      <Paperclip />
+    </IconButton>
+  );
+  /** The editor's controls, in the host's reserved row or under the text. */
+  function controls(formatting: ReactNode | null) {
+    const row = (
+      <span
+        className="editor-controls"
+        data-chrome={chrome}
+        data-hosted={chromeHost ? "" : undefined}
+      >
+        {reason}
+        {chrome === "session"
+          ? (formatting ?? (
+              <>
+                {attach}
+                <DropdownMenu onOpenChange={captureExport}>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton
+                      type="button"
+                      label="More formatting"
+                      onMouseDown={keepFocus}
+                    >
+                      <MoreHorizontal />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {moreItems}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ))
+          : attach}
+        {sourceToggle}
+      </span>
+    );
+    return chromeHost ? createPortal(row, chromeHost) : row;
+  }
 
   return (
     <section
       ref={container}
       className="markdown-editor"
+      data-chrome={chrome}
       aria-label={label}
       onPasteCapture={(event) => {
         if (readOnly) return;
@@ -1353,45 +1630,30 @@ export function MarkdownEditor({
           y: event.clientY,
         });
       }}
-      onFocus={() => setActive(true)}
-      onBlur={(event) => {
-        closeSlash();
-        const next = event.relatedTarget;
-        if (
-          next instanceof Element &&
-          (event.currentTarget.contains(next) ||
-            next.closest(
-              "[data-slot=popover-content], [data-slot=dropdown-menu-content]",
-            ))
+      onFocus={(event) =>
+        setFocused(
+          event.target instanceof HTMLElement &&
+            event.target.classList.contains("rich-document"),
         )
-          return;
-        // The toolbar docks in the frame, so hiding it moves everything below. A press elsewhere
-        // (Post, Done) blurs on pointer down; collapse only after the pointer is released so the
-        // click still lands on the control that was pressed.
-        if (pointerDown) {
-          globalThis.document.addEventListener(
-            "pointerup",
-            () => setTimeout(() => setActive(false), 0),
-            { once: true },
-          );
-          return;
+      }
+      onBlur={() => {
+        setFocused(false);
+        closeSlash();
+      }}
+      onKeyDown={(event) => {
+        // Escape in the source editor finishes too, as in the rich text.
+        if (
+          event.key === "Escape" &&
+          onEscape &&
+          source &&
+          !event.defaultPrevented
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          onEscape();
         }
-        setActive(false);
       }}
     >
-      {recoveryError && (
-        <Alert tone="error">
-          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
-          <AlertDescription>
-            Keep this window open. {recoveryError}
-          </AlertDescription>
-          <AlertActions>
-            <Button type="button" onClick={recovery.retry}>
-              Retry draft recovery
-            </Button>
-          </AlertActions>
-        </Alert>
-      )}
       {recovery.active &&
         protectedValue === value &&
         !recoveryError &&
@@ -1399,43 +1661,37 @@ export function MarkdownEditor({
           <p
             role="status"
             aria-label="Attachment draft protection"
-            className="text-xs text-muted-foreground"
+            className="sr-only"
           >
-            Draft protected
-            <span className="sr-only">
-              . Workspace attachments stay protected through Undo.
-            </span>
+            Draft protected. Workspace attachments stay protected through Undo.
           </p>
         )}
-      {!inlineMode && actionGroup}
-      {document.reasons.length > 0 && (
-        <Alert>
-          <AlertTitle>Markdown source preserves this document</AlertTitle>
-          <AlertDescription>{document.reasons.join(" ")}</AlertDescription>
-        </Alert>
-      )}
       {source ? (
-        <CodeMirror
-          ref={sourceEditor}
-          value={value}
-          autoFocus={autoFocus}
-          readOnly={readOnly}
-          editable={!readOnly}
-          aria-label={`${label} source`}
-          extensions={sourceEditorExtensions}
-          onChange={(next) => {
-            if (!readOnly && next !== value) {
-              emitted.current = next;
-              synchronizing.current = true;
-              const parsed = readMarkdown(next);
-              setAssessed({ source: next, document: parsed });
-              previousMarkdown.current = writeMarkdown(parsed.value);
-              editor.tf.setValue(parsed.value);
-              synchronizing.current = false;
-              onChange(next);
-            }
-          }}
-        />
+        <>
+          {controls(null)}
+          <CodeMirror
+            ref={sourceEditor}
+            value={value}
+            autoFocus={autoFocus}
+            readOnly={readOnly}
+            editable={!readOnly}
+            aria-label={`${label} source`}
+            theme="none"
+            extensions={sourceEditorExtensions}
+            onChange={(next) => {
+              if (!readOnly && next !== value) {
+                emitted.current = next;
+                synchronizing.current = true;
+                const parsed = readMarkdown(next);
+                setAssessed({ source: next, document: parsed });
+                previousMarkdown.current = writeMarkdown(parsed.value);
+                editor.tf.setValue(parsed.value);
+                synchronizing.current = false;
+                onChange(next);
+              }
+            }}
+          />
+        </>
       ) : (
         <Plate
           editor={editor}
@@ -1466,15 +1722,15 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && (
-            <Toolbar
-              visible={active || persistentToolbar}
-              floating={!persistentToolbar}
-              onAttach={beginAttachment}
-            >
-              {actionGroup}
-            </Toolbar>
-          )}
+          {chrome === "session" &&
+            !readOnly &&
+            controls(
+              <SessionFormatting
+                onAttach={beginAttachment}
+                more={moreItems}
+                onMenuOpenChange={captureExport}
+              />,
+            )}
           <AttachmentProtection.Provider value={protectAttachment}>
             <PlateContent
               readOnly={readOnly}
@@ -1591,33 +1847,19 @@ export function MarkdownEditor({
               }}
             />
           </AttachmentProtection.Provider>
+          {!readOnly && chrome === "compact" && (
+            <SelectionBubble focused={focused} />
+          )}
+          {(chrome === "compact" || readOnly) && controls(null)}
           {slash && !readOnly && (
-            <div
+            <SlashMenu
               id={slashMenuId}
-              className="slash-menu"
-              role="listbox"
-              aria-label="Insert block"
-            >
-              {choices.length ? (
-                choices.map(([type, title], index) => (
-                  <Button
-                    key={type}
-                    id={`${slashMenuId}-${type}`}
-                    type="button"
-                    role="option"
-                    aria-selected={index === slashIndex}
-                    variant={index === slashIndex ? "secondary" : "ghost"}
-                    size="sm"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => choose(type)}
-                  >
-                    {title}
-                  </Button>
-                ))
-              ) : (
-                <p>No matching blocks</p>
-              )}
-            </div>
+              anchor={slashAnchor}
+              choices={choices}
+              index={slashIndex}
+              onChoose={choose}
+              onClose={closeSlash}
+            />
           )}
         </Plate>
       )}
@@ -1633,7 +1875,12 @@ export function MarkdownEditor({
           onPick={insertAttachment}
         />
       )}
-      {dropFailure && <p role="alert">{dropFailure}</p>}
+      {markdownExport.element}
+      {dropFailure && (
+        <Alert tone="error" size="compact" role="alert">
+          <AlertDescription>{dropFailure}</AlertDescription>
+        </Alert>
+      )}
     </section>
   );
 }

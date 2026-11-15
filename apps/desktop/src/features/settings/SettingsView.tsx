@@ -1,5 +1,5 @@
 import { modifierKeyLabel } from "@/lib/platform";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { useSources } from "@/features/settings/sources/use-sources";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
@@ -54,6 +54,12 @@ export function SettingsView({
   // page, so source pages (the only ones kept mounted) start over afterwards.
   const [restores, setRestores] = useState(0);
   const { entries: sources } = useSources();
+  // Every page shares one scroll container, so a page would otherwise open at
+  // the scroll offset the previous one was left at. Before paint: no jump.
+  const scroller = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (scroller.current) scroller.current.scrollTop = 0;
+  }, [selected]);
   // ⌘F and Ctrl+F search the settings, not the page, while Settings is open.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -67,7 +73,7 @@ export function SettingsView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onSelect]);
   return (
-    <div className="settings-page">
+    <div ref={scroller} className="settings-page">
       {selected === "appearance" && <AppearancePage />}
       {selected === "attention" && <AttentionPage onOpenInbox={onOpenInbox} />}
       {selected === "location" && <LocationPage />}

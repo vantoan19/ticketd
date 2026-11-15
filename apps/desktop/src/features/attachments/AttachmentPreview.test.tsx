@@ -51,16 +51,14 @@ test("purged Undo references retain their name with unavailable bytes and delibe
         },
   );
   render(<AttachmentPreview target={{ id: file.id }} onClose={() => {}} />);
-  expect(
-    await screen.findByRole("heading", { name: "File permanently purged" }),
-  ).toBeTruthy();
+  expect(await screen.findByText("Deleted permanently")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Screenshot" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Restore file" })).toBeNull();
   expect(screen.getByRole("button", { name: "Export file" })).toHaveProperty(
     "disabled",
     true,
   );
-  expect(screen.getByText(/older complete backup/)).toBeTruthy();
+  expect(screen.getByText(/older backup/)).toBeTruthy();
   expect(
     screen.queryByText("Quarantined · Restore this file to reuse it."),
   ).toBeNull();
@@ -171,13 +169,20 @@ test("preview exposes Added, same-identity rename and a reusable workspace link"
       screen.getByText("Added").nextElementSibling?.querySelector("time")
         ?.dateTime,
     ).toBe("2026-11-04T10:00:00Z");
-    fireEvent.click(screen.getByRole("button", { name: "Reuse attachment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
         "<ticketd://attachment/workspace/file-1>",
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "More actions" }),
+      {
+        button: 0,
+        ctrlKey: false,
+      },
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename…" }));
     const name = await screen.findByRole("textbox", { name: "Display name" });
     fireEvent.change(name, { target: { value: "Renamed screenshot" } });
     fireEvent.click(screen.getByRole("button", { name: "Save name" }));
@@ -290,7 +295,9 @@ test("uploaded copies show changed and unavailable observations with last-known 
   await screen.findByRole("heading", {
     name: "This copy has changed in Drive",
   });
-  expect(screen.getAllByText(/Uploaded copy/).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText(/Uploaded copy/)).length).toBeGreaterThan(
+    0,
+  );
   expect(screen.getByRole("button", { name: "Open in Drive" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
   status = "unavailable";
@@ -343,7 +350,8 @@ test("Drive access refresh updates displayed metadata while preserving the autho
   });
   render(<AttachmentPreview target={{ id: remote.id }} onClose={() => {}} />);
   await screen.findByText("Current source in Google Drive");
-  await screen.findByText("Google Drive · External reference · 8 B");
+  await screen.findByText("Google Drive · External reference");
+  await screen.findByText("8 B");
   expect(
     screen.getByRole("heading", { name: "My authored title" }),
   ).toBeTruthy();
@@ -425,7 +433,7 @@ test("usage distinguishes persisted context, recoverable trash and Undo alongsid
   await screen.findByRole("heading", { name: "Used in 3" });
   expect(screen.getByText("T-KQ1 · Checkout failure")).toBeTruthy();
   expect(screen.getByText("Incident analysis")).toBeTruthy();
-  expect(screen.getByText(/Document · Trash/)).toBeTruthy();
+  expect(screen.getByText(/Document · In Trash/)).toBeTruthy();
   expect(screen.getByText("Undo history")).toBeTruthy();
 });
 
@@ -454,7 +462,7 @@ test("a failed image retains metadata and explicit actions, with retry instead o
     "attachment-media://localhost/workspace/file-1",
   );
   fireEvent.error(image);
-  expect(await screen.findByText("Preview unavailable")).toBeTruthy();
+  expect(await screen.findByText("Couldn't show this png image")).toBeTruthy();
   expect(screen.getByText("screen.png")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Export file" })).toBeTruthy();
   expect(invoke).not.toHaveBeenCalledWith("open_attachment", expect.anything());

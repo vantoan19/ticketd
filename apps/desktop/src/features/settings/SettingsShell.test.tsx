@@ -216,6 +216,26 @@ test("choosing a section opens only its page and moves focus to its title", asyn
   ).toBe("WorkspaceBackups");
 });
 
+test("the Needs setup dot is read at startup, so Settings opens with it already shown", async () => {
+  vi.mocked(cliClient.check).mockResolvedValue({ ...installed, found: false });
+  const view = render(
+    <SettingsStateProvider active={false}>{null}</SettingsStateProvider>,
+  );
+  await act(async () => {});
+  expect(cliClient.check).toHaveBeenCalledTimes(1);
+  // Opening reads again; the dot stays while that reading is still out.
+  vi.mocked(cliClient.check).mockReturnValue(new Promise(() => {}));
+  view.rerender(
+    <SettingsStateProvider active>
+      <SettingsNav onBack={() => {}} />
+    </SettingsStateProvider>,
+  );
+  expect(cliClient.check).toHaveBeenCalledTimes(2);
+  expect(
+    within(navItem("Command line")).getByRole("img", { name: "Needs setup" }),
+  ).toBeTruthy();
+});
+
 test("Command line and Agent skills carry a Needs setup dot until they are set up", async () => {
   vi.mocked(cliClient.check).mockResolvedValue({ ...installed, found: false });
   vi.mocked(agentSkillsClient.list).mockResolvedValue([
@@ -244,12 +264,37 @@ test("a set-up command line shows no dot", async () => {
   expect(within(navItem("Command line")).queryByRole("img")).toBeNull();
 });
 
-test("a source with a saved configuration shows an On dot under Connections", async () => {
+test("a source with a saved configuration shows a Connected dot under Connections", async () => {
   vi.mocked(sourcesClient.list).mockResolvedValue([github(true)]);
   render(<Settings />);
   await act(async () => {});
   expect(
-    within(navItem("GitHub")).getByRole("img", { name: "On" }),
+    within(navItem("GitHub")).getByRole("img", { name: "Connected" }),
+  ).toBeTruthy();
+});
+
+test("below 768px the nav is a sheet opened from the page name in the panel bar", async () => {
+  vi.spyOn(window, "matchMedia").mockImplementation(
+    (query: string) =>
+      ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList,
+  );
+  render(<Settings />);
+  await act(async () => {});
+  // No strip of chips above the page: the nav waits in the sheet.
+  expect(screen.queryByRole("complementary", { name: "Settings" })).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Appearance, Settings sections/ }),
+  );
+  const sheet = await screen.findByRole("dialog", { name: "Settings" });
+  fireEvent.click(within(sheet).getByRole("button", { name: /^Backups/ }));
+  expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: /^Backups, Settings sections/ }),
   ).toBeTruthy();
 });
 

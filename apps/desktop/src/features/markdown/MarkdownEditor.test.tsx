@@ -171,7 +171,7 @@ describe("Markdown draft editor", () => {
     expect(slashChoices("ist")).toEqual([]);
     expect(slashChoices("").length).toBeGreaterThan(5);
   });
-  it("closes the slash menu on a non-matching key, whitespace and blur, and resets it", () => {
+  it("keeps the slash menu open on a non-matching query and closes it on whitespace and blur (MK-05)", () => {
     render(<MarkdownEditor value="" onChange={vi.fn()} />);
     const editable = screen.getByRole("textbox", {
       name: "Markdown document rich text",
@@ -186,8 +186,8 @@ describe("Markdown draft editor", () => {
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "t" });
     expect(screen.getByRole("listbox")).toBeTruthy();
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "z" });
-    expect(screen.queryByRole("listbox")).toBeNull();
-    open();
+    // No match keeps the menu, saying so, instead of silently closing it.
+    expect(screen.getByText("No matching blocks")).toBeTruthy();
     fireEvent.keyDown(screen.getByRole("combobox"), { key: " " });
     expect(screen.queryByRole("listbox")).toBeNull();
     open();
@@ -355,97 +355,68 @@ describe("Markdown draft editor", () => {
   });
 });
 
-describe("Formatting toolbar", () => {
-  it("shows only while the editor has focus and offers an icon-only copy button", () => {
-    render(<MarkdownEditor value="text" onChange={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
-    expect(screen.queryByText(/^Copy .* Markdown$/)).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Copy Markdown document Markdown" }),
-    ).toBeTruthy();
-    const editable = screen.getByRole("textbox", {
-      name: "Markdown document rich text",
-    });
-    fireEvent.focus(editable);
-    expect(screen.getByRole("button", { name: "Bold" })).toBeTruthy();
-    fireEvent.blur(editable);
-    expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
-  });
-  it("keeps editor focus on pointer down for the Link button", () => {
-    render(<MarkdownEditor value="" onChange={vi.fn()} />);
-    fireEvent.focus(
-      screen.getByRole("textbox", { name: "Markdown document rich text" }),
-    );
-    const down = createEvent.mouseDown(
-      screen.getByRole("button", { name: "Link" }),
-    );
-    fireEvent(screen.getByRole("button", { name: "Link" }), down);
-    expect(down.defaultPrevented).toBe(true);
-  });
-});
-
-describe("Toolbar layout and links", () => {
-  it("keeps the toolbar in layout when blurred so a first click lands", () => {
+describe("Editor chrome", () => {
+  it("keeps a quick composer's controls in one place and shows no toolbar on focus (DS-02)", () => {
     const { container } = render(
       <MarkdownEditor value="text" onChange={vi.fn()} />,
     );
     const editable = screen.getByRole("textbox", {
       name: "Markdown document rich text",
     });
+    const controls = container.querySelector(".editor-controls");
+    const names = () =>
+      within(controls as HTMLElement)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"));
+    expect(names()).toEqual(["Insert attachment", "Edit Markdown source"]);
     fireEvent.focus(editable);
-    const toolbar = container.querySelector(".rich-toolbar");
-    expect(toolbar?.getAttribute("data-visible")).toBe("true");
+    expect(container.querySelector(".editor-controls")).toBe(controls);
+    expect(names()).toEqual(["Insert attachment", "Edit Markdown source"]);
+    expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
     fireEvent.blur(editable);
-    expect(container.querySelector(".rich-toolbar")).toBe(toolbar);
-    expect(toolbar?.hasAttribute("hidden")).toBe(false);
-    expect(toolbar?.getAttribute("data-visible")).toBe("false");
-    expect(
-      toolbar?.querySelector(".rich-toolbar-tools")?.hasAttribute("inert"),
-    ).toBe(true);
+    expect(container.querySelector(".editor-controls")).toBe(controls);
   });
-  it("makes the copy and source actions the toolbar row's last item, not an overlay", () => {
+  it("puts an editing session's formatting into the row its page reserves (P16)", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
     const { container } = render(
-      <MarkdownEditor value="text" onChange={vi.fn()} />,
+      <MarkdownEditor
+        value="text"
+        onChange={vi.fn()}
+        chrome="session"
+        chromeHost={host}
+      />,
     );
-    const row = container.querySelector(".rich-toolbar");
-    expect(row?.lastElementChild?.classList.contains("editor-mode")).toBe(true);
-    expect(row?.firstElementChild?.getAttribute("role")).toBe("toolbar");
-  });
-  it("floats a focus-only toolbar above the frame but keeps a persistent one in it (L6)", () => {
-    const idle = render(<MarkdownEditor value="text" onChange={vi.fn()} />);
-    expect(
-      idle.container
-        .querySelector(".rich-toolbar")
-        ?.hasAttribute("data-floating"),
-    ).toBe(true);
-    idle.unmount();
-    const kept = render(
-      <MarkdownEditor value="text" onChange={vi.fn()} persistentToolbar />,
-    );
-    expect(
-      kept.container
-        .querySelector(".rich-toolbar")
-        ?.hasAttribute("data-floating"),
-    ).toBe(false);
-  });
-  it("offers one row of essentials and keeps the rest in More", () => {
-    render(<MarkdownEditor value="text" onChange={vi.fn()} />);
-    fireEvent.focus(
-      screen.getByRole("textbox", { name: "Markdown document rich text" }),
-    );
-    const names = within(screen.getByRole("toolbar"))
+    // Nothing is inserted above the text: the row lives in the host.
+    expect(container.querySelector(".editor-controls")).toBeNull();
+    const names = within(host)
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
     expect(names).toEqual([
       "Bold",
       "Italic",
-      "Insert attachment",
-      "Link",
       "Bullet list",
       "Checklist",
-      "Inline code",
+      "Link",
+      "Insert attachment",
       "More formatting",
+      "Edit Markdown source",
     ]);
+    const down = createEvent.mouseDown(
+      within(host).getByRole("button", { name: "Link" }),
+    );
+    fireEvent(within(host).getByRole("button", { name: "Link" }), down);
+    expect(down.defaultPrevented).toBe(true);
+    host.remove();
+  });
+  it("says in one caption why source editing is needed (DS-03)", () => {
+    render(<MarkdownEditor value="<aside>raw</aside>" onChange={vi.fn()} />);
+    expect(screen.getByRole("note").textContent).toBe(
+      "Source editing · has raw HTML",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Edit Markdown source" }),
+    ).toBeNull();
   });
   it("shows the placeholder only while the editor is empty (K10)", async () => {
     const Harness = () => {

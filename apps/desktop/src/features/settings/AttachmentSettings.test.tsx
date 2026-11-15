@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -115,13 +116,40 @@ test("a limit that is not positive is refused beside the field and nothing is sa
   await waitFor(() => expect(input.value).toBe("100"));
   typeLimit(input, "0");
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toBe("Enter a positive upload limit in MiB.");
+  expect(alert.textContent).toBe("Enter a size above 0 MiB.");
   expect(input.getAttribute("aria-invalid")).toBe("true");
   expect(invoke).not.toHaveBeenCalledWith(
     "set_attachment_upload_limit",
     expect.anything(),
   );
   expect(screen.queryByText("Saved")).toBeNull();
+});
+
+test("entering the saved value again clears the refusal, and Saved goes after a moment", async () => {
+  answer();
+  render(<AttachmentSettings />);
+  const input = await limit();
+  await waitFor(() => expect(input.value).toBe("100"));
+  typeLimit(input, "0");
+  await screen.findByRole("alert");
+  expect(input.getAttribute("aria-describedby")).toContain(
+    "attachment-upload-limit-error",
+  );
+  typeLimit(input, "100");
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(input.getAttribute("aria-invalid")).toBeNull();
+  vi.useFakeTimers();
+  try {
+    typeLimit(input, "25");
+    await act(async () => {});
+    expect(screen.getByText("Saved")).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.queryByText("Saved")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("a failed save keeps what was typed and shows the reason without Saved", async () => {
@@ -131,7 +159,7 @@ test("a failed save keeps what was typed and shows the reason without Saved", as
   await waitFor(() => expect(input.value).toBe("100"));
   typeLimit(input, "30");
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not save the upload limit",
+    "Couldn't save the upload limit",
   );
   expect(screen.getByRole("alert").textContent).toContain(
     "Workspace is read-only",
@@ -143,11 +171,9 @@ test("a failed save keeps what was typed and shows the reason without Saved", as
 test("the local tile lists what local storage gives", async () => {
   answer();
   render(<AttachmentSettings />);
-  const local = await screen.findByRole("radio", { name: /Local workspace/ });
+  const local = await screen.findByRole("radio", { name: /On this computer/ });
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
-  expect(local.textContent).toContain(
-    "Files are stored beside the workspace on this computer.",
-  );
+  expect(local.textContent).toContain("Files are stored beside the workspace.");
   expect(local.textContent).toContain("Available offline");
   expect(local.textContent).toContain("Included in backups");
 });
@@ -188,7 +214,7 @@ test("Drive stays selectable and shows no setup link when it is configured", asy
 test("choosing Drive picks a writable folder, shows the folder row, and a failed change keeps it", async () => {
   answer();
   render(<AttachmentSettings />);
-  const local = await screen.findByRole("radio", { name: /Local workspace/ });
+  const local = await screen.findByRole("radio", { name: /On this computer/ });
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
   fireEvent.click(screen.getByRole("radio", { name: /Google Drive/ }));
   await screen.findByText("Team files");
@@ -201,7 +227,7 @@ test("choosing Drive picks a writable folder, shows the folder row, and a failed
   });
   fireEvent.click(screen.getByRole("button", { name: "Change folder…" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Upload destination unchanged",
+    "Couldn't change the upload destination",
   );
   expect(screen.getByText("Team files")).toBeTruthy();
   expect(
@@ -211,15 +237,15 @@ test("choosing Drive picks a writable folder, shows the folder row, and a failed
   ).toBe("checked");
 });
 
-test("an unreadable destination offers Retry destination and the footnote stays", async () => {
+test("an unreadable destination offers Retry and the footnote stays", async () => {
   answer({ attachment_upload_destination: new Error("offline") });
   render(<AttachmentSettings />);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not read the upload destination",
+    "Couldn't read the upload destination",
   );
   answer();
-  fireEvent.click(screen.getByRole("button", { name: "Retry destination" }));
-  const local = await screen.findByRole("radio", { name: /Local workspace/ });
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  const local = await screen.findByRole("radio", { name: /On this computer/ });
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
   expect(screen.queryByRole("alert")).toBeNull();
   expect(

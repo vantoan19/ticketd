@@ -1,8 +1,7 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import { FileText, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverAnchor,
@@ -15,6 +14,7 @@ import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { useChatClient, type LinkedRecord } from "@/features/chats/client";
+import { RecordPicker, type PickRecord } from "@/features/tickets/RecordPicker";
 
 /** The icon, reference and title of a linked ticket, Document or Project. */
 export function RecordLabel({ record }: { record: LinkedRecord }) {
@@ -97,14 +97,28 @@ export function RecordChip({
   );
 }
 
-/** Finds a ticket, Document or Project by name to link; never asks for an ID. */
+const key = (record: { kind: string; id: string }) =>
+  `${record.kind}:${record.id}`;
+
+/**
+ * Finds a ticket, Document or Project by name or reference to link; never
+ * asks for an ID. The RecordPicker in a list popover: recent records under
+ * "Recent" before anything is typed, an exact reference first.
+ */
 export function LinkPicker({
   linked,
   onPick,
   withLabel = false,
   open: openFromOutside,
   onOpenChange,
+  anchorClassName,
 }: {
+  /**
+   * Opened from elsewhere, where the picker is anchored: the Chat header
+   * passes a box over the whole header, so the picker opens under it at its
+   * end and never covers Expand or Close (CH-09).
+   */
+  anchorClassName?: string;
   linked: LinkedRecord[];
   onPick: (record: LinkedRecord) => void;
   /** New Chat shows the word beside the plus. */
@@ -122,42 +136,16 @@ export function LinkPicker({
   const open = openFromOutside ?? ownOpen;
   const setOpen = (next: boolean) =>
     controlled ? onOpenChange?.(next) : setOwnOpen(next);
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<LinkedRecord[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    // Opened with nothing typed, the host lists recent records (LIVE-12).
-    if (!open) return;
-    let current = true;
-    client.searchRecords(query).then(
-      (found) => {
-        if (!current) return;
-        setResults(found);
-        setError("");
-      },
-      (reason: unknown) => current && setError(String(reason)),
-    );
-    return () => {
-      current = false;
-    };
-  }, [client, open, query]);
-  const typed = query.trim() !== "";
-  const shown = results.filter(
-    (record) =>
-      !linked.some(
-        (known) => known.kind === record.kind && known.id === record.id,
-      ),
-  );
+  const found = useRef(new Map<string, LinkedRecord>());
+  // Results that exist but are all linked already: not the same as no match.
+  const [allLinked, setAllLinked] = useState(false);
+  const exclude = linked.map(key);
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setQuery("");
-      }}
-    >
+    <Popover open={open} onOpenChange={setOpen}>
       {controlled ? (
-        <PopoverAnchor />
+        <PopoverAnchor asChild>
+          <span className={anchorClassName} />
+        </PopoverAnchor>
       ) : (
         <PopoverTrigger asChild>
           {withLabel ? (
@@ -176,57 +164,53 @@ export function LinkPicker({
         </PopoverTrigger>
       )}
       <PopoverContent
-        align="start"
-        className="w-80"
+        align={controlled ? "end" : "start"}
+        variant="list"
         aria-label="Link a ticket, Document or Project"
       >
-        <div className="flex flex-col gap-2">
-          <Input
-            className="h-8"
-            aria-label="Search tickets, Documents and Projects"
-            placeholder="Search tickets, Documents and Projects"
-            value={query}
-            autoFocus
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          {error && (
-            <p className="chat-fine" role="alert">
-              Search failed: {error}
-            </p>
-          )}
-          {!typed && shown.length > 0 && (
-            <p className="chat-picker-label">Recent</p>
-          )}
-          <ul
-            className="chat-pick-results"
-            aria-label={typed ? "Results" : "Recent"}
-          >
-            {shown.map((record) => (
-              <li key={`${record.kind}:${record.id}`}>
-                {/* A result row in the list, not a Button variant. */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onPick(record);
-                    setOpen(false);
-                    setQuery("");
-                  }}
-                >
-                  <RecordLabel record={record} />
-                </button>
-              </li>
-            ))}
-          </ul>
-          {!error && shown.length === 0 && (
-            <p className="chat-fine">
-              {!typed
-                ? "Type part of a name to find it."
-                : results.length > 0
-                  ? "Everything with that name is already linked."
-                  : "No ticket, Document or Project has that in its name."}
-            </p>
-          )}
-        </div>
+        <RecordPicker
+          things="tickets, Documents and Projects"
+          exclude={exclude}
+          search={async (query) => {
+            // The client puts a typed ticket reference first (chat CH-47).
+            const records = await client.searchRecords(query);
+            for (const record of records)
+              found.current.set(key(record), record);
+            setAllLinked(
+              records.length > 0 &&
+                records.every((record) => exclude.includes(key(record))),
+            );
+            return [
+              {
+                ...(!query && { heading: "Recent" }),
+                records: records.map((record): PickRecord =>
+                  record.kind === "ticket"
+                    ? { ...record, key: key(record) }
+                    : {
+                        kind: record.kind,
+                        key: key(record),
+                        title: record.title,
+                      },
+                ),
+              },
+            ];
+          }}
+          onPick={(picked) => {
+            const record = found.current.get(picked.key);
+            if (!record) return;
+            onPick(record);
+            setOpen(false);
+          }}
+          empty={(query) =>
+            allLinked
+              ? query
+                ? "Everything with that name is already linked."
+                : "Everything recent is already linked."
+              : query
+                ? "No ticket, Document or Project has that in its name."
+                : "Type part of a name or a reference to find it."
+          }
+        />
       </PopoverContent>
     </Popover>
   );

@@ -1,13 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Upload } from "lucide-react";
+import { RailRow } from "./RailSection";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   Select,
   SelectContent,
@@ -68,27 +63,22 @@ export function LocalPublication({
         />
       </>
     );
-  // The origin and what to do about it read as one sentence with an inline action.
-  const lead = "Created in ticketd.";
-  if (!preview) return <small className="rail-note">{lead}</small>;
+  // Nothing to publish to: the Source section says only "Local".
+  if (!target || !preview) return null;
   if (
     preview.eligibility.kind === "eligible" ||
     preview.eligibility.reason === "internal_attachments"
   )
     return (
       <>
-        <small className="rail-note">
-          {lead}{" "}
-          <Button
-            variant="link"
-            size="sm"
-            className="rail-publish-link"
-            onClick={() => setPublishing(true)}
-          >
-            Publish to {preview.provider_name}…
-          </Button>
-        </small>
-        {publishing && target && (
+        <RailRow
+          icon={<Upload aria-hidden="true" />}
+          muted
+          onClick={() => setPublishing(true)}
+        >
+          Publish to {preview.provider_name}…
+        </RailRow>
+        {publishing && (
           <PublishDialog
             ticket={ticket}
             provider={target.provider}
@@ -98,27 +88,18 @@ export function LocalPublication({
         )}
       </>
     );
-  // The core states why, and what to do about it; the rail only shows it.
-  return (
-    <small className="rail-note">
-      {lead}{" "}
-      {preview.eligibility.reason === "source_not_connected" ? (
-        <>
-          <Button
-            variant="link"
-            size="sm"
-            className="rail-publish-link"
-            onClick={activity.openSettings}
-          >
-            Connect {preview.provider_name}
-          </Button>{" "}
-          to publish it.
-        </>
-      ) : (
-        publicationReason(preview)
-      )}
-    </small>
-  );
+  // The core states why; the rail shows one short reason, and the way out
+  // when it is a connection.
+  if (preview.eligibility.reason === "source_not_connected")
+    return (
+      <small className="rail-note">
+        <Button variant="link" size="inline" onClick={activity.openSettings}>
+          Connect {preview.provider_name}
+        </Button>{" "}
+        to publish it.
+      </small>
+    );
+  return <small className="rail-note">{publicationReason(preview)}</small>;
 }
 
 /** The warning at the top of a ticket whose publication outcome is not known. */
@@ -215,7 +196,7 @@ export function PublishDialog({
   const [destination, setDestination] = useState<string | undefined>();
   const [error, setError] = useState("");
   const [reloads, setReloads] = useState(0);
-  const reviewDescription = useRef(false);
+  const descriptionTarget = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -296,236 +277,206 @@ export function PublishDialog({
   }
 
   const name = preview?.provider_name ?? providerName(provider);
+  const blocked = phase.kind === "blocked";
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(next) => {
-        if (!next && !publishing) onOpenChange(false);
+        if (!next) onOpenChange(false);
+      }}
+      size="lg"
+      busy={publishing}
+      title={
+        blocked
+          ? "Resolve attachment links before publishing"
+          : `Publish ${ticket.reference} to ${name}`
+      }
+      description={`Creates an ordinary open issue. Afterwards ${name} owns the title and description, and they become read-only here.`}
+      cancelLabel={phase.kind === "unresolved" ? "Close" : "Cancel"}
+      primaryLabel={
+        blocked
+          ? "Review description"
+          : publishing
+            ? "Publishing…"
+            : "Publish issue"
+      }
+      blockedReason={
+        blocked
+          ? null
+          : publishing
+            ? `Publishing to ${name}…`
+            : phase.kind === "unresolved"
+              ? "It can’t be published again until the outcome is known."
+              : phase.kind === "unavailable"
+                ? "Publishing is unavailable."
+                : phase.kind === "loading" || !preview
+                  ? "Preparing preview…"
+                  : chosen
+                    ? null
+                    : "Choose a repository."
+      }
+      footerNote="Nothing is sent until you publish."
+      // Review description returns to the ticket's description, not the menu.
+      returnFocus={descriptionTarget}
+      {...(blocked && {
+        footerLeading: (
+          <ExportMarkdownButton
+            source={{ kind: "ticket", reference: ticket.reference }}
+            label="Export with files"
+          />
+        ),
+      })}
+      {...(error && {
+        error: /[.!?]$/.test(error) ? error : `${error}.`,
+      })}
+      onSubmit={() => {
+        if (blocked) {
+          descriptionTarget.current =
+            document
+              .getElementById(`body-${ticket.id}`)
+              ?.closest<HTMLElement>('[role="group"]') ?? null;
+          onOpenChange(false);
+        } else if (phase.kind === "ready" && chosen) void publish();
       }}
     >
-      <DialogContent
-        className="publication-dialog publish-dialog"
-        showCloseButton={false}
-        onCloseAutoFocus={(event) => {
-          if (!reviewDescription.current) return;
-          const description = document
-            .getElementById(`body-${ticket.id}`)
-            ?.closest<HTMLElement>('[role="group"]');
-          if (description) {
-            event.preventDefault();
-            description.focus();
-            description.scrollIntoView({ block: "center" });
-          }
-        }}
-      >
-        <DialogHeader showCloseButton>
-          <DialogTitle>
-            {phase.kind === "blocked" ? (
-              "Resolve attachment links before publishing"
-            ) : (
-              <>
-                Publish{" "}
-                <span className="publication-reference">
-                  {ticket.reference}
-                </span>{" "}
-                to {name}
-              </>
-            )}
-          </DialogTitle>
-          <DialogDescription>
-            Creates an ordinary open issue. Afterwards {name} owns the title and
-            description, and they become read-only here.
-          </DialogDescription>
-        </DialogHeader>
-        {phase.kind === "loading" && <p role="status">Preparing preview…</p>}
-        {phase.kind === "blocked" && (
-          <div className="publication-preview">
-            <p className="publication-error" role="alert">
-              {phase.message}
-            </p>
-            <ul
-              className="publication-attachment-links"
-              aria-label="Workspace-only attachment links"
-            >
-              {phase.preview.internal_attachments.map((link) => (
-                <li key={link.uri}>
-                  <AttachmentLink uri={link.uri}>
-                    {link.display_name ?? link.uri}
-                  </AttachmentLink>
-                  <small className="publication-detail">
-                    Internal link in ticket description · Select to inspect
-                  </small>
-                </li>
-              ))}
-            </ul>
-            <p className="publication-detail">
-              Direct local attachment associations stay with this ticket in
-              ticketd. They are not automatically sent to {name}.
-            </p>
-          </div>
-        )}
-        {phase.kind === "unavailable" && (
+      {phase.kind === "loading" && <p role="status">Preparing preview…</p>}
+      {phase.kind === "blocked" && (
+        <div className="publication-preview">
           <p className="publication-error" role="alert">
             {phase.message}
           </p>
-        )}
-        {phase.kind === "unresolved" && (
-          <div className="publication-error" role="alert">
-            <p>
-              <strong>The outcome is not known.</strong> {phase.message}
-            </p>
-            <p>
-              {ticket.reference} stays local and cannot be published again until
-              this is resolved. Check {name} before doing anything by hand.
-            </p>
-          </div>
-        )}
-        {preview && phase.kind !== "blocked" && (
-          <div className="publication-preview">
-            <div className="publication-field">
-              <span className="publication-label" id="publication-destination">
-                Repository
-              </span>
-              {preview.destinations.length > 0 ? (
-                <Select
-                  value={chosen}
-                  onValueChange={(value) => {
-                    setDestination(value);
-                    setPhase({ kind: "loading", preview });
-                    setError("");
-                  }}
-                  disabled={publishing || preview.destinations.length === 1}
-                >
-                  <SelectTrigger
-                    className="publication-repository"
-                    readOnly={preview.destinations.length === 1}
-                    aria-labelledby="publication-destination"
-                  >
-                    <SelectValue placeholder="Choose a repository" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {preview.destinations.map((item) => (
-                        <SelectItem key={item} value={item}>
-                          {item}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              ) : (
-                <span aria-labelledby="publication-destination">
-                  {chosen || "No destination configured"}
-                </span>
-              )}
-            </div>
-            <section className="publication-field" aria-label="Issue preview">
-              <h3>Issue preview</h3>
-              <div className="publication-issue-card">
-                <h4>{preview.title}</h4>
-                <div
-                  className="markdown-preview"
-                  aria-label="Description as it will be sent"
-                >
-                  <MarkdownDocument
-                    source={preview.body || "No description."}
-                  />
-                </div>
-              </div>
-              <p className="publication-detail">
-                Sent exactly as shown. No ticketd labels, fields or comments are
-                added.
-              </p>
-            </section>
-            <section className="publication-field">
-              <h3>Stays in ticketd</h3>
-              <ul className="publication-local-list">
-                <li>
-                  {preview.local?.attachments ?? 0} directly attached files stay
-                  with this ticket and are not automatically published.
-                </li>
-                <li>
-                  Reference{" "}
-                  <span className="source-number">{ticket.reference}</span> and
-                  status {ticket.status}
-                </li>
-                <li>
-                  {preview.local
-                    ? `${preview.local.activities} ${preview.local.activities === 1 ? "activity" : "activities"}, `
-                    : "Notes, "}
-                  Plan, tags and relationships — never sent to GitHub
-                </li>
-                {(preview.local?.subtickets.length
-                  ? preview.local.subtickets
-                  : ticket.children.map((child) => child.reference)
-                ).length > 0 ? (
-                  (
-                    preview.local?.subtickets ??
-                    ticket.children.map((child) => child.reference)
-                  ).map((reference) => (
-                    <li key={reference}>
-                      Subticket{" "}
-                      <span className="source-number">{reference}</span> stays
-                      local unless you publish it separately
-                    </li>
-                  ))
-                ) : (
-                  <li>
-                    Subtickets stay local unless you publish them separately.
-                  </li>
-                )}
-              </ul>
-            </section>
-          </div>
-        )}
-        {error && (
-          <p className="publication-error" role="alert">
-            {/[.!?]$/.test(error) ? error : `${error}.`}
-          </p>
-        )}
-        {publishing && <p role="status">Publishing to {name}…</p>}
-        <DialogFooter className="publication-footer">
-          <p className="publication-detail">
-            Nothing is sent until you publish.
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={publishing}
-            onClick={() => onOpenChange(false)}
+          <ul
+            className="publication-attachment-links"
+            aria-label="Workspace-only attachment links"
           >
-            {phase.kind === "unresolved" ? "Close" : "Cancel"}
-          </Button>
-          {phase.kind === "blocked" && (
-            <ExportMarkdownButton
-              source={{ kind: "ticket", reference: ticket.reference }}
-              label="Export with files"
-            />
-          )}
-          {phase.kind === "blocked" && (
-            <Button
-              size="sm"
-              onClick={() => {
-                reviewDescription.current = true;
-                onOpenChange(false);
-              }}
-            >
-              Review description
-            </Button>
-          )}
-          {phase.kind !== "unresolved" && phase.kind !== "blocked" && (
-            <Button
-              size="sm"
-              disabled={
-                phase.kind !== "ready" || !preview || publishing || !chosen
-              }
-              onClick={() => void publish()}
-            >
-              {publishing ? "Publishing…" : "Publish issue"}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            {phase.preview.internal_attachments.map((link) => (
+              <li key={link.uri}>
+                <AttachmentLink uri={link.uri}>
+                  {link.display_name ?? link.uri}
+                </AttachmentLink>
+                <small className="publication-detail">
+                  Internal link in ticket description · Select to inspect
+                </small>
+              </li>
+            ))}
+          </ul>
+          <p className="publication-detail">
+            Direct local attachment associations stay with this ticket in
+            ticketd. They are not automatically sent to {name}.
+          </p>
+        </div>
+      )}
+      {phase.kind === "unavailable" && (
+        <p className="publication-error" role="alert">
+          {phase.message}
+        </p>
+      )}
+      {phase.kind === "unresolved" && (
+        <div className="publication-error" role="alert">
+          <p>
+            <strong>The outcome is not known.</strong> {phase.message}
+          </p>
+          <p>
+            {ticket.reference} stays local and cannot be published again until
+            this is resolved. Check {name} before doing anything by hand.
+          </p>
+        </div>
+      )}
+      {preview && phase.kind !== "blocked" && (
+        <div className="publication-preview">
+          <div className="publication-field">
+            <span className="publication-label" id="publication-destination">
+              Repository
+            </span>
+            {preview.destinations.length > 0 ? (
+              <Select
+                value={chosen}
+                onValueChange={(value) => {
+                  setDestination(value);
+                  setPhase({ kind: "loading", preview });
+                  setError("");
+                }}
+                disabled={publishing || preview.destinations.length === 1}
+              >
+                <SelectTrigger
+                  className="publication-repository"
+                  readOnly={preview.destinations.length === 1}
+                  aria-labelledby="publication-destination"
+                >
+                  <SelectValue placeholder="Choose a repository" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {preview.destinations.map((item) => (
+                      <SelectItem key={item} value={item}>
+                        {item}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            ) : (
+              <span aria-labelledby="publication-destination">
+                {chosen || "No destination configured"}
+              </span>
+            )}
+          </div>
+          <section className="publication-field" aria-label="Issue preview">
+            <h3>Issue preview</h3>
+            <div className="publication-issue-card">
+              <h4>{preview.title}</h4>
+              <div
+                className="markdown-preview"
+                aria-label="Description as it will be sent"
+              >
+                <MarkdownDocument source={preview.body || "No description."} />
+              </div>
+            </div>
+            <p className="publication-detail">
+              Sent exactly as shown. No ticketd labels, fields or comments are
+              added.
+            </p>
+          </section>
+          <section className="publication-field">
+            <h3>Stays in ticketd</h3>
+            <ul className="publication-local-list">
+              <li>
+                {preview.local?.attachments ?? 0} directly attached files stay
+                with this ticket and are not automatically published.
+              </li>
+              <li>
+                Reference{" "}
+                <span className="source-number">{ticket.reference}</span> and
+                status {ticket.status}
+              </li>
+              <li>
+                {preview.local
+                  ? `${preview.local.activities} ${preview.local.activities === 1 ? "activity" : "activities"}, `
+                  : "Notes, "}
+                Plan, tags and relationships — never sent to GitHub
+              </li>
+              {(preview.local?.subtickets.length
+                ? preview.local.subtickets
+                : ticket.children.map((child) => child.reference)
+              ).length > 0 ? (
+                (
+                  preview.local?.subtickets ??
+                  ticket.children.map((child) => child.reference)
+                ).map((reference) => (
+                  <li key={reference}>
+                    Subticket <span className="source-number">{reference}</span>{" "}
+                    stays local unless you publish it separately
+                  </li>
+                ))
+              ) : (
+                <li>
+                  Subtickets stay local unless you publish them separately.
+                </li>
+              )}
+            </ul>
+          </section>
+        </div>
+      )}
+    </DialogShell>
   );
 }

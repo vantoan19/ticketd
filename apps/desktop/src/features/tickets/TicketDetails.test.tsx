@@ -35,7 +35,7 @@ test("relationship navigation replaces the reference and focuses it outside the 
 test("side by side, the document and the rail are separate bounded scrollers", () => {
   const css = readFileSync("src/styles.css", "utf8");
   const start = css.indexOf(
-    "@container ticket-detail (min-width: 652px) {\n  /* Side",
+    "@container ticket-detail (min-width: 760px) {\n  /* Side",
   );
   const block = css.slice(start, css.indexOf("\n}\n", start));
   expect(block).toMatch(
@@ -83,11 +83,19 @@ test("trashed ticket descriptions remain readable without editing controls", () 
     screen.getByRole("heading", { name: "Archived context" }),
   ).toBeTruthy();
   expect(screen.getByRole("link", { name: "Reference" })).toBeTruthy();
-  expect(screen.getByRole("checkbox")).toHaveProperty("disabled", true);
+  // A read-only checklist box is a drawn glyph, not a disabled control.
+  expect(screen.getByRole("img", { name: "Not done" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
   expect(
     screen.queryByRole("textbox", { name: "Description rich text" }),
   ).toBeNull();
+  // One notice holds the state and the way back; the header has no Restore.
+  const notice = screen.getByText("In Trash. Relationships are kept.");
+  expect(
+    notice.closest('[data-slot="alert"]')?.querySelector("button")?.textContent,
+  ).toBe("Restore");
+  const header = document.querySelector(".detail-header") as HTMLElement;
+  expect(header.querySelector("button")?.textContent).not.toBe("Restore");
 });
 
 test("the full-width view marks the reading column and drops the repeated heading", () => {

@@ -34,7 +34,13 @@ export function Composer({
   onArrowUpFromEmpty,
   inputRef,
   autoFocus = false,
+  framed = true,
 }: {
+  /**
+   * Draws its own ring. In a Chat the composer is the last part of the tray,
+   * which draws the one ring for the notice, the dock and the box (CH-22).
+   */
+  framed?: boolean;
   placeholder: string;
   /** Computed from the text the composer reports through `onText`. */
   controls: (text: string) => ComposerControls;
@@ -94,6 +100,7 @@ export function Composer({
   return (
     <form
       className="chat-composer"
+      data-bare={framed ? undefined : ""}
       onSubmit={(event) => {
         event.preventDefault();
         if (state.enabled) submit(primary);

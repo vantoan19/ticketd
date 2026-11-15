@@ -17,11 +17,48 @@ import { client } from "@/lib/api/client";
 vi.mock("@xyflow/react", () => ({
   ReactFlow: () => <div>Canvas</div>,
   Background: () => null,
+  BackgroundVariant: { Dots: "dots" },
   Controls: () => null,
   MarkerType: { ArrowClosed: "arrowclosed" },
 }));
 vi.mock("@/lib/api/client", () => ({
   client: { contextGraphExpanded: vi.fn() },
+}));
+vi.mock("@/features/tickets/DependencyGraph", () => ({
+  DependencyView: ({
+    reference,
+    onCenter,
+  }: {
+    reference: string;
+    onCenter: (reference: string) => void;
+  }) => (
+    <div>
+      Dependencies of {reference}
+      <button onClick={() => onCenter("T-KQ9")}>Center on T-KQ9</button>
+    </div>
+  ),
+}));
+vi.mock("./ContextGraphCanvas", () => ({
+  // Each card as a button, and the canvas's caption.
+  ContextGraphCanvas: ({
+    nodes,
+    onSelect,
+    footnote,
+  }: {
+    nodes: { id: string; title?: string; label: string }[];
+    onSelect: (id: string) => void;
+    footnote?: import("react").ReactNode;
+  }) => (
+    <div>
+      Canvas
+      {nodes.map((node) => (
+        <button key={node.id} onClick={() => onSelect(node.id)}>
+          {node.title ?? node.label}
+        </button>
+      ))}
+      <p>{footnote}</p>
+    </div>
+  ),
 }));
 
 test("previews a connection and focuses it only on request", async () => {
@@ -64,9 +101,11 @@ test("previews a connection and focuses it only on request", async () => {
   const open = vi.fn();
   render(<ContextGraph origin="T-KQ1" onBack={vi.fn()} onOpen={open} />);
   fireEvent.click(await screen.findByRole("button", { name: "Discovery" }));
-  expect(screen.getByText("Read this", { exact: false })).toBeTruthy();
+  // The panel names the connection from the item's side, with its passage.
+  expect(screen.getByRole("heading", { name: "Mentioned by 1" })).toBeTruthy();
+  expect(screen.getByText("“Read this”")).toBeTruthy();
   expect(client.contextGraphExpanded).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenCalledWith(
       "two",
@@ -118,10 +157,10 @@ test("drops an expansion whose item is no longer shown", async () => {
       expanded.includes("two") ? graph([first]) : graph([first, second]),
     );
   render(<ContextGraph origin="one" onBack={vi.fn()} onOpen={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Second" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "T-KQ2 · Second" }),
+    screen.getByRole("button", { name: "Show its connections here" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
       "one",
@@ -198,14 +237,16 @@ test("expanding a map that grows past the list-first size keeps the map", async 
     );
   render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
   fireEvent.click(await screen.findByRole("button", { name: "T-KQn1 · Item" }));
-  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show its connections here" }),
+  );
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenCalledTimes(2),
   );
   await screen.findByRole("radio", { name: "Graph", checked: true });
 });
 
-test("one 48px toolbar, with Open item in the panel beside the map", async () => {
+test("one graph header, with Open in the panel beside the map", async () => {
   const node = (id: string, kind: "ticket" | "document", label: string) => ({
     id,
     kind,
@@ -235,19 +276,19 @@ test("one 48px toolbar, with Open item in the panel beside the map", async () =>
   const { container } = render(
     <ContextGraph origin="T-KQ1" onBack={vi.fn()} onOpen={open} />,
   );
-  const header = (await screen.findByRole("heading", { name: "Context graph" }))
+  const header = (await screen.findByRole("heading", { name: "Graph" }))
     .parentElement!;
-  expect(header.textContent).toContain("2 items · 1 relationship");
-  expect(screen.queryByText(/Centered on/)).toBeNull();
-  expect(screen.queryByRole("button", { name: /Show (list|map)/ })).toBeNull();
-  expect(screen.queryByText("Include update details")).toBeNull();
-  const aside = container.querySelector(".context-graph-preview")!;
-  fireEvent.click(within(aside as HTMLElement).getByText("Open item"));
+  expect(header.textContent).toContain("T-KQ1 · First · 2 items");
+  // Graph and List are always there; Dependencies waits for a ticket reference.
+  expect(screen.getByRole("radio", { name: "List" })).toBeTruthy();
+  expect(
+    (screen.getByRole("radio", { name: "Dependencies" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(container.querySelector("[data-slot=graph-panel]")).toBeTruthy();
+  const aside = screen.getByRole("complementary", { name: "Selected item" });
+  fireEvent.click(within(aside).getByRole("button", { name: "Open T-KQ1" }));
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "one" }));
-  // The legend has its own row beside the canvas, never over it.
-  const canvas = screen.getByText("Canvas").parentElement!;
-  expect(canvas.querySelector(".graph-legend")).toBeNull();
-  expect(container.querySelector(".graph-legend")).toBeTruthy();
 });
 
 test("marks a trashed item in the Connected items list", async () => {
@@ -283,7 +324,76 @@ test("marks a trashed item in the Connected items list", async () => {
     max_work: 800,
   });
   render(<ContextGraph origin="T-KQ1" onBack={vi.fn()} onOpen={vi.fn()} />);
+  // On the map, and in the List.
   expect(
     await screen.findByRole("button", { name: "Old notes (Trash)" }),
   ).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  expect(
+    within(screen.getByRole("region", { name: "Mentions" })).getByRole(
+      "button",
+      { name: "Old notes (Trash)" },
+    ),
+  ).toBeTruthy();
+});
+
+test("a ticket's graph opens on its dependencies; All connections is one click away", async () => {
+  vi.mocked(client.contextGraphExpanded).mockResolvedValue({
+    center: "one",
+    nodes: [
+      {
+        id: "one",
+        kind: "ticket",
+        label: "T-KQ1 · First",
+        ticket_reference: "T-KQ1",
+        state: "Todo",
+        trashed: false,
+        activity_detail: false,
+      },
+      {
+        id: "two",
+        kind: "document",
+        label: "Notes",
+        state: null,
+        trashed: false,
+        activity_detail: false,
+      },
+    ],
+    edges: [
+      { source: "one", target: "two", kind: "mention", explanation: null },
+    ],
+    omitted: false,
+    omitted_groups: [],
+    continuations: [],
+    hidden_details: false,
+    max_nodes: 50,
+    max_edges: 300,
+    max_work: 800,
+  });
+  render(
+    <ContextGraph
+      origin="T-KQ1"
+      dependencies
+      onBack={vi.fn()}
+      onOpen={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText("Dependencies of T-KQ1")).toBeTruthy();
+  expect(
+    screen.getByRole("radio", { name: "Dependencies", checked: true }),
+  ).toBeTruthy();
+  // Centring on a blocker keeps the way back to the ticket.
+  fireEvent.click(screen.getByRole("button", { name: "Center on T-KQ9" }));
+  await waitFor(() =>
+    expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
+      "T-KQ9",
+      false,
+      [],
+      [],
+    ),
+  );
+  expect(screen.getByRole("button", { name: "Back to T-KQ1" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "All connections" }));
+  expect(await screen.findByText("Canvas")).toBeTruthy();
+  expect(screen.queryByText(/Dependencies of/)).toBeNull();
 });

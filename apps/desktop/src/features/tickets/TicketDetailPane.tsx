@@ -1,8 +1,12 @@
+import { StatusLineRegion } from "@/components/ui/status-line";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
-/** The selected ticket's detail, with a note when it is outside the results. */
+/**
+ * The selected ticket's detail, with a note when it is outside the results,
+ * and the detail pane's own status line.
+ */
 export function TicketDetailPane({
   workspace,
   expanded,
@@ -10,8 +14,11 @@ export function TicketDetailPane({
   onExpand,
   onReturn,
   onSelect,
+  context = "list",
 }: {
   workspace: TicketWorkspace;
+  /** Opened from the Inbox: no list position, no "outside the results". */
+  context?: "list" | "inbox";
   expanded: boolean;
   inboxTarget: { reference: string; id: string; key: number } | null;
   onExpand: () => void;
@@ -42,9 +49,10 @@ export function TicketDetailPane({
       ? workspace.board.columns.some((column) => column.loading)
       : loading;
   return (
-    <>
+    <StatusLineRegion>
       <TicketDetails
         outsideResults={Boolean(
+          context === "list" &&
           selected &&
           !resultLoading &&
           !queryError &&
@@ -63,9 +71,14 @@ export function TicketDetailPane({
         revision={revision}
         refresh={refresh}
         updateTicket={updateTicket}
-        position={workspace.layout === "board" ? null : position}
+        position={
+          workspace.layout === "board" || context === "inbox" ? null : position
+        }
         onAdjacent={openAdjacent}
+        failure={workspace.detailFailure}
+        onRetry={workspace.retryDetail}
+        returnLabel={context === "inbox" ? "Inbox" : workspace.scopeName}
       />
-    </>
+    </StatusLineRegion>
   );
 }

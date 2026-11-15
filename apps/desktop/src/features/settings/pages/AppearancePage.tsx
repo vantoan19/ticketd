@@ -7,6 +7,7 @@ import {
   type OpenTicketsPreference,
 } from "@/lib/preferences";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import {
   AppliesRightAway,
@@ -146,9 +147,27 @@ export function AppearancePage() {
   const dark = useDarkTheme();
   const resolved: Resolved = dark ? "dark" : "light";
   const systemDark = useSystemDark();
-  const [failure, setFailure] = useState("");
-  const report = (saved: boolean, what: string) =>
-    setFailure(saved ? "" : `Could not save ${what}.`);
+  // A choice that was not saved, shown under the group it belongs to.
+  const [failure, setFailure] = useState<{
+    group: "theme" | "open";
+    what: string;
+  } | null>(null);
+  const report = (saved: boolean, group: "theme" | "open", what: string) =>
+    setFailure(saved ? null : { group, what });
+  const failed = (group: "theme" | "open") =>
+    failure?.group === group && (
+      <FailureAlert
+        size="compact"
+        className="mt-3"
+        failure={{
+          code: "failed",
+          title: `Couldn't save ${failure.what}`,
+          sentence: "The previous choice stays.",
+          action: null,
+          details: "",
+        }}
+      />
+    );
   return (
     <SettingsPage
       {...sectionMeta("appearance")}
@@ -166,6 +185,7 @@ export function AppearancePage() {
           onValueChange={(value) =>
             report(
               setPreference("theme", value as "system" | Resolved),
+              "theme",
               "the theme",
             )
           }
@@ -195,6 +215,7 @@ export function AppearancePage() {
             preview={<ThemeMini theme="dark" />}
           />
         </ChoiceTiles>
+        {failed("theme")}
       </SettingsSection>
       <SettingsSection
         title="Open tickets"
@@ -206,6 +227,7 @@ export function AppearancePage() {
           onValueChange={(value) =>
             report(
               setPreference("openTickets", value as OpenTicketsPreference),
+              "open",
               "the Open tickets choice",
             )
           }
@@ -223,11 +245,7 @@ export function AppearancePage() {
             preview={<OpenMini kind="expanded" theme={resolved} />}
           />
         </ChoiceTiles>
-        {failure && (
-          <p role="alert" className="settings-failure appearance-failure">
-            {failure}
-          </p>
-        )}
+        {failed("open")}
       </SettingsSection>
     </SettingsPage>
   );

@@ -1,21 +1,9 @@
 import { useNow } from "@/lib/use-now";
-import { useRef, type ReactNode } from "react";
-import {
-  Cloud,
-  Copy,
-  CornerDownRight,
-  Folder,
-  Layers,
-  Plus,
-} from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
+import { Cloud, CornerDownRight, Folder, Layers, Plus } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
 import { RowTags } from "./RowTags";
 import { ago, externalSource } from "./ticket-source";
@@ -42,6 +30,7 @@ export function TicketList({
   onOpen,
   bulkSelection,
   onToggle,
+  onSelectMany,
   selectable,
   selectionDisabled = false,
   scope,
@@ -56,6 +45,11 @@ export function TicketList({
   onOpen: (reference: string) => void;
   bulkSelection: string[];
   onToggle: (reference: string) => void;
+  /**
+   * Adds several tickets to the selection: a Shift-click or Shift+↑/↓ range
+   * from the last one toggled, or Mod+A for every listed ticket.
+   */
+  onSelectMany?: (references: string[]) => void;
   selectable: boolean;
   selectionDisabled?: boolean;
   scope: RowScope;
@@ -86,6 +80,9 @@ export function TicketList({
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
   );
   const rows = useRef(new Map<string, HTMLButtonElement>());
+  // The list is one Tab stop (roving tabindex, list R-08): the row last
+  // focused, else the open ticket, else the first row.
+  const [focusedRow, setFocusedRow] = useState<string | null>(null);
   // Groups and rows share one list so a row that changes group keeps its
   // element and the list keeps its scroll position.
   const entries: (
@@ -100,134 +97,225 @@ export function TicketList({
   const ordered = entries.flatMap((entry) =>
     "ticket" in entry ? [entry.ticket] : [],
   );
+  const tabStop =
+    ordered.find((ticket) => ticket.id === focusedRow)?.id ??
+    ordered.find((ticket) => ticket.reference === selected)?.id ??
+    ordered[0]?.id;
+  const focusRow = (ticket: Ticket | undefined) => {
+    if (ticket) rows.current.get(ticket.id)?.focus();
+  };
+  // Where a Shift range starts: the ticket last toggled by itself.
+  const anchor = useRef<string | null>(null);
+  // A Shift-click already applied its range; its change event must not toggle.
+  const ranged = useRef(false);
+  const range = (to: Ticket) => {
+    const from = ordered.findIndex((item) => item.reference === anchor.current);
+    const end = ordered.indexOf(to);
+    if (from < 0 || end < 0) return [to.reference];
+    const [low, high] = from < end ? [from, end] : [end, from];
+    return ordered.slice(low, high + 1).map((item) => item.reference);
+  };
+  const canSelect = selectable && !selectionDisabled;
   return (
-    <TooltipProvider delayDuration={400}>
-      <ul className="ticket-rows">
-        {entries.map((entry) => {
-          if ("header" in entry) {
-            const { status, count, tickets: shown } = entry.header;
-            return (
-              <li
-                key={`group-${status}`}
-                className="ticket-group-header"
-                data-status={status}
-              >
-                <StatusIcon status={status} decorative />
-                <h2>{status}</h2>
-                <Count>
-                  {shown.length < count ? `${shown.length} of ${count}` : count}
-                  <span className="sr-only">
-                    {" "}
-                    {count === 1 ? "ticket" : "tickets"}
-                  </span>
-                </Count>
-                {grouping?.onAdd && (
+    <ul className="ticket-rows">
+      {entries.map((entry) => {
+        if ("header" in entry) {
+          const { status, count, tickets: shown } = entry.header;
+          // Ready is summarised here, not repeated on every row (list R-10);
+          // only a whole group can say how many are ready.
+          const ready =
+            status === "Todo" && shown.length === count
+              ? shown.filter((ticket) => readiness(ticket).kind === "ready")
+                  .length
+              : 0;
+          return (
+            <li
+              key={`group-${status}`}
+              className="ticket-group-header"
+              data-status={status}
+            >
+              <StatusIcon status={status} decorative />
+              <h2>{status}</h2>
+              {/* Always the group's total, never the part shown (list R-09). */}
+              <Count>
+                {count}
+                <span className="sr-only">
+                  {" "}
+                  {count === 1 ? "ticket" : "tickets"}
+                </span>
+              </Count>
+              {ready > 0 && (
+                <span className="ticket-group-meta">· {ready} ready</span>
+              )}
+              {grouping?.onAdd && (
+                // Revealed on header hover or focus; it stays in the tab order.
+                <span className="ticket-group-add">
                   <IconButton
-                    className="ticket-group-add"
-                    // Every group offers the same action; the Duplicate group's
-                    // opens the review that names the canonical ticket.
-                    label={`Add ${status} ticket`}
+                    // The Duplicate group's action names what it opens (R-03).
+                    label={
+                      status === "Duplicate"
+                        ? "Mark a ticket as duplicate…"
+                        : `Add ${status} ticket`
+                    }
                     onClick={(event) =>
                       grouping.onAdd?.(status, event.currentTarget)
                     }
                   >
                     <Plus aria-hidden="true" />
                   </IconButton>
-                )}
-              </li>
-            );
-          }
-          const { ticket } = entry;
-          const index = ordered.indexOf(ticket);
-          return (
-            <li key={ticket.id}>
-              {!selectable && (
-                // Keeps rows aligned with lists that have a selection column.
-                <span className="ticket-select" aria-hidden="true" />
-              )}
-              {selectable && (
-                <label className="ticket-select">
-                  <input
-                    type="checkbox"
-                    tabIndex={-1}
-                    aria-label={`Select ${ticket.reference}`}
-                    checked={bulkSelection.includes(ticket.reference)}
-                    disabled={selectionDisabled}
-                    onChange={() => onToggle(ticket.reference)}
-                  />
-                </label>
-              )}
-              <button
-                ref={(node) => {
-                  if (node) rows.current.set(ticket.id, node);
-                  else rows.current.delete(ticket.id);
-                }}
-                type="button"
-                className="ticket-row"
-                data-ticket-reference={ticket.reference}
-                data-rows={simple ? "simple" : undefined}
-                aria-pressed={ticket.reference === selected}
-                onClick={() => onOpen(ticket.reference)}
-                onFocus={(event) =>
-                  event.currentTarget.scrollIntoView?.({ block: "nearest" })
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                    event.preventDefault();
-                    const next =
-                      ordered[index + (event.key === "ArrowDown" ? 1 : -1)];
-                    if (next) rows.current.get(next.id)?.focus();
-                  } else if (event.key === "Enter") {
-                    event.preventDefault();
-                    onOpen(ticket.reference);
-                  } else if (
-                    event.key === " " &&
-                    selectable &&
-                    !selectionDisabled
-                  ) {
-                    // Space selects for bulk actions; Enter opens.
-                    event.preventDefault();
-                    onToggle(ticket.reference);
-                  }
-                }}
-                onKeyUp={(event) => {
-                  // Stop the native Space-click that would open the ticket.
-                  if (event.key === " " && selectable && !selectionDisabled)
-                    event.preventDefault();
-                }}
-                aria-keyshortcuts={selectable ? "Space Enter" : undefined}
-              >
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="ticket-row-status">
-                      <StatusIcon status={ticket.status} />
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>{ticket.status}</TooltipContent>
-                </Tooltip>
-                <Reference>{ticket.reference}</Reference>
-                <span className="ticket-title" title={ticket.title}>
-                  {ticket.title}
                 </span>
-                <SourcePill ticket={ticket} />
-                <RowDetails
-                  ticket={ticket}
-                  scope={scope}
-                  grouped={grouping !== undefined}
-                  singleStatus={singleStatus}
-                  readyView={readyView}
-                  simple={simple}
-                  needsReview={needsReview.has(ticket.id)}
-                />
-              </button>
-              {rowAction && (
-                <span className="ticket-row-action">{rowAction(ticket)}</span>
               )}
             </li>
           );
-        })}
-      </ul>
-    </TooltipProvider>
+        }
+        const { ticket } = entry;
+        const index = ordered.indexOf(ticket);
+        return (
+          <li key={ticket.id}>
+            {!selectable && (
+              // Keeps rows aligned with lists that have a selection column.
+              <span className="ticket-select" aria-hidden="true" />
+            )}
+            {selectable && (
+              <label className="ticket-select">
+                <input
+                  type="checkbox"
+                  tabIndex={-1}
+                  aria-label={`Select ${ticket.reference}`}
+                  checked={bulkSelection.includes(ticket.reference)}
+                  disabled={selectionDisabled}
+                  onClick={(event) => {
+                    // Shift-click selects the range from the last ticket toggled.
+                    if (event.shiftKey && anchor.current && onSelectMany) {
+                      event.preventDefault();
+                      ranged.current = true;
+                      window.setTimeout(() => (ranged.current = false), 0);
+                      onSelectMany(range(ticket));
+                    }
+                  }}
+                  onChange={() => {
+                    if (ranged.current) {
+                      ranged.current = false;
+                      return;
+                    }
+                    anchor.current = ticket.reference;
+                    onToggle(ticket.reference);
+                  }}
+                />
+              </label>
+            )}
+            <button
+              ref={(node) => {
+                if (node) rows.current.set(ticket.id, node);
+                else rows.current.delete(ticket.id);
+              }}
+              type="button"
+              className="ticket-row"
+              data-ticket-reference={ticket.reference}
+              data-rows={simple ? "simple" : undefined}
+              aria-pressed={ticket.reference === selected}
+              tabIndex={ticket.id === tabStop ? 0 : -1}
+              onClick={() => onOpen(ticket.reference)}
+              onFocus={(event) => {
+                setFocusedRow(ticket.id);
+                event.currentTarget.scrollIntoView?.({ block: "nearest" });
+              }}
+              onKeyDown={(event) => {
+                const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+                if (
+                  canSelect &&
+                  onSelectMany &&
+                  event.shiftKey &&
+                  (event.key === "ArrowDown" || event.key === "ArrowUp")
+                ) {
+                  // Shift+↑/↓ extends the selection as focus moves.
+                  event.preventDefault();
+                  const next =
+                    ordered[index + (event.key === "ArrowDown" ? 1 : -1)];
+                  if (!next) return;
+                  anchor.current ??= ticket.reference;
+                  onSelectMany(range(next));
+                  focusRow(next);
+                } else if (
+                  canSelect &&
+                  onSelectMany &&
+                  (event.metaKey || event.ctrlKey) &&
+                  !event.altKey &&
+                  event.key.toLowerCase() === "a"
+                ) {
+                  // Mod+A selects every listed ticket.
+                  event.preventDefault();
+                  onSelectMany(ordered.map((item) => item.reference));
+                } else if (
+                  event.key === "ArrowDown" ||
+                  event.key === "ArrowUp" ||
+                  (plain && (event.key === "j" || event.key === "k"))
+                ) {
+                  event.preventDefault();
+                  const down = event.key === "ArrowDown" || event.key === "j";
+                  focusRow(ordered[index + (down ? 1 : -1)]);
+                } else if (event.key === "Home" || event.key === "End") {
+                  event.preventDefault();
+                  focusRow(event.key === "Home" ? ordered[0] : ordered.at(-1));
+                } else if (event.key === "Enter") {
+                  event.preventDefault();
+                  onOpen(ticket.reference);
+                } else if (
+                  event.key === " " &&
+                  selectable &&
+                  !selectionDisabled
+                ) {
+                  // Space selects for bulk actions; Enter opens.
+                  event.preventDefault();
+                  anchor.current = ticket.reference;
+                  onToggle(ticket.reference);
+                }
+              }}
+              onKeyUp={(event) => {
+                // Stop the native Space-click that would open the ticket.
+                if (event.key === " " && selectable && !selectionDisabled)
+                  event.preventDefault();
+              }}
+              aria-keyshortcuts={
+                selectable
+                  ? "Space Enter Shift+ArrowDown Shift+ArrowUp Meta+A Control+A"
+                  : undefined
+              }
+            >
+              {grouping && !singleStatus ? (
+                // The group header already names the status (list R-02).
+                <span className="ticket-row-status">
+                  <StatusIcon status={ticket.status} />
+                </span>
+              ) : (
+                <Tooltip content={ticket.status}>
+                  <span className="ticket-row-status">
+                    <StatusIcon status={ticket.status} />
+                  </span>
+                </Tooltip>
+              )}
+              <Reference>{ticket.reference}</Reference>
+              <Tooltip content={ticket.title} overflowOnly>
+                <span className="ticket-title">{ticket.title}</span>
+              </Tooltip>
+              <SourcePill ticket={ticket} />
+              <RowDetails
+                ticket={ticket}
+                scope={scope}
+                grouped={grouping !== undefined}
+                singleStatus={singleStatus}
+                readyView={readyView}
+                simple={simple}
+                needsReview={needsReview.has(ticket.id)}
+              />
+            </button>
+            {rowAction && (
+              <span className="ticket-row-action">{rowAction(ticket)}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -236,24 +324,27 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
   const source = externalSource(ticket);
   if (!source) return null;
   return (
-    <Badge
-      variant="source"
-      // Raised: the pill keeps its fill when the row is hovered or selected.
-      tone="raised"
-      title={`Owned by ${source.provider_name}: ${source.display}`}
-    >
-      <span className="sr-only">
-        Owned by {source.provider_name}, {source.number}
-      </span>
-      <Cloud aria-hidden="true" />
-      <span aria-hidden="true">{source.number}</span>
-    </Badge>
+    <Tooltip content={`Owned by ${source.provider_name}: ${source.display}`}>
+      <Badge
+        variant="source"
+        // Raised: the pill keeps its fill when the row is hovered or selected.
+        tone="raised"
+      >
+        <span className="sr-only">
+          Owned by {source.provider_name}, {source.number}
+        </span>
+        <Cloud aria-hidden="true" />
+        <span aria-hidden="true">{source.number}</span>
+      </Badge>
+    </Tooltip>
   );
 }
 
 function ContextIcon({ kind }: { kind: RowContextKind }) {
   const props = { "aria-hidden": true } as const;
-  if (kind === "duplicate") return <Copy {...props} />;
+  // The Duplicate status glyph, never a copy icon (list R-06).
+  if (kind === "duplicate")
+    return <StatusIcon status="Duplicate" size={12} decorative />;
   if (kind === "subticket") return <CornerDownRight {...props} />;
   return kind === "plan" ? <Layers {...props} /> : <Folder {...props} />;
 }
@@ -283,9 +374,10 @@ function RowDetails({
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   const showState =
     // The Ready view already says Ready, and a status view says its status;
-    // Blocked is still news, and so is Ready inside a filtered Todo list.
+    // Blocked is still news. In a grouped list the Todo header summarises
+    // Ready ("Todo 51 · 50 ready"), so only Blocked is flagged (list R-10).
     state.kind === "blocked" ||
-    (state.kind === "ready" && !readyView) ||
+    (state.kind === "ready" && !readyView && !grouped) ||
     (state.kind === "status" &&
       !singleStatus &&
       !grouped &&
@@ -294,7 +386,7 @@ function RowDetails({
     ? "attention"
     : state.kind === "blocked"
       ? "blocked"
-      : state.kind === "ready" && !readyView
+      : state.kind === "ready" && !readyView && !grouped
         ? "ready"
         : null;
   return (
@@ -312,15 +404,18 @@ function RowDetails({
           // unavailable. A dot never stands alone, so the words are its name and
           // its tooltip. The Ready view omits the per-row Ready dot.
           simpleTone && (
-            <span
-              className="ticket-row-state"
-              title={unavailable ? "Source unavailable" : readinessLabel(state)}
+            <Tooltip
+              content={
+                unavailable ? "Source unavailable" : readinessLabel(state)
+              }
             >
-              <StatusDot tone={simpleTone} size={10} />
-              <span className="sr-only">
-                {unavailable ? "Source unavailable" : readinessLabel(state)}
+              <span className="ticket-row-state">
+                <StatusDot tone={simpleTone} size={10} />
+                <span className="sr-only">
+                  {unavailable ? "Source unavailable" : readinessLabel(state)}
+                </span>
               </span>
-            </span>
+            </Tooltip>
           )
         ) : unavailable ? (
           // The source cannot be read: say so in place of Ready or Blocked, which
@@ -337,19 +432,19 @@ function RowDetails({
               {state.kind !== "status" && (
                 <StatusDot tone={state.kind} size={10} />
               )}
-              <span
-                className="ticket-row-state-label"
-                title={readinessLabel(state)}
-              >
-                {readinessShortLabel(state) === readinessLabel(state) ? (
-                  readinessLabel(state)
-                ) : (
-                  <>
+              {readinessShortLabel(state) === readinessLabel(state) ? (
+                <span className="ticket-row-state-label">
+                  {readinessLabel(state)}
+                </span>
+              ) : (
+                // The short word is cut from the full one, which the tooltip shows.
+                <Tooltip content={readinessLabel(state)}>
+                  <span className="ticket-row-state-label">
                     <span aria-hidden="true">{readinessShortLabel(state)}</span>
                     <span className="sr-only">{readinessLabel(state)}</span>
-                  </>
-                )}
-              </span>
+                  </span>
+                </Tooltip>
+              )}
             </span>
           )
         )}
@@ -363,16 +458,20 @@ function RowDetails({
       </span>
       <span className="ticket-row-time">
         {ticket.updated_at ? (
-          <time
-            dateTime={ticket.updated_at}
-            title={formatDateTime(ticket.updated_at)}
-          >
-            <span className="sr-only">
-              {ticket.trashed ? "Trashed" : "Updated"}{" "}
-              {ago(ticket.updated_at, now)}
-            </span>
-            <span aria-hidden="true">{compactAgo(ticket.updated_at, now)}</span>
-          </time>
+          // Inside the row's button, so the exact time shows on hover only.
+          <Tooltip content={formatDateTime(ticket.updated_at)}>
+            <time dateTime={ticket.updated_at}>
+              <span className="sr-only">
+                {ticket.trashed ? "Trashed" : "Updated"}{" "}
+                {ago(ticket.updated_at, now)}
+              </span>
+              <span aria-hidden="true">
+                {/* A trashed row says so (list R-07). */}
+                {ticket.trashed ? "Trashed " : ""}
+                {compactAgo(ticket.updated_at, now)}
+              </span>
+            </time>
+          </Tooltip>
         ) : (
           "Update time unknown"
         )}

@@ -23,7 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconButton } from "@/components/ui/icon-button";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -429,7 +430,7 @@ export function AutomationsView({
 
   const listPane = (
     <section className="ticket-list chat-pane" aria-label={TAB_NAMES[tab].list}>
-      <ListHeader
+      <PaneHeader
         hideTitle
         title={TAB_NAMES[tab].title}
         actions={
@@ -477,7 +478,7 @@ export function AutomationsView({
             },
           ]}
         />
-      </ListHeader>
+      </PaneHeader>
       {error && (
         <p className="chat-list-empty" role="alert">
           {error}
@@ -526,12 +527,14 @@ export function AutomationsView({
                     <span className="chat-row-mark">
                       <Workflow size={14} aria-hidden />
                     </span>
-                    <span
-                      className="chat-row-title"
-                      title={automation.name.trim() || "New Automation"}
+                    <Tooltip
+                      overflowOnly
+                      content={automation.name.trim() || "New Automation"}
                     >
-                      {automation.name.trim() || "New Automation"}
-                    </span>
+                      <span className="chat-row-title">
+                        {automation.name.trim() || "New Automation"}
+                      </span>
+                    </Tooltip>
                     <span className="chat-row-time">
                       {latest && chatTime(latest.created_at)}
                     </span>
@@ -562,12 +565,14 @@ export function AutomationsView({
                   <span className="chat-row-mark">
                     <Bot size={14} aria-hidden />
                   </span>
-                  <span
-                    className="chat-row-title"
-                    title={agent.name.trim() || "New agent"}
+                  <Tooltip
+                    overflowOnly
+                    content={agent.name.trim() || "New agent"}
                   >
-                    {agent.name.trim() || "New agent"}
-                  </span>
+                    <span className="chat-row-title">
+                      {agent.name.trim() || "New agent"}
+                    </span>
+                  </Tooltip>
                   <span className="chat-row-time" />
                   <span className="chat-row-sub">
                     <span>{HARNESS_NAMES[agent.harness]}</span>

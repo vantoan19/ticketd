@@ -1,24 +1,50 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
+  BackgroundVariant,
   Handle,
   MarkerType,
-  Panel,
   Position,
   useReactFlow,
   useStore,
+  useStoreApi,
   type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { ArrowLeft, Maximize, Minus, Plus } from "lucide-react";
+import { ArrowLeft, Network } from "lucide-react";
 import "@xyflow/react/dist/style.css";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
-import { StatusDot } from "@/components/ui/status-dot";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FailureState } from "@/components/ui/failure-alert";
+import { GRAPH_ZOOM } from "@/components/ui/graph-zoom";
+import {
+  AvailabilityMark,
+  GraphCanvas,
+  GraphLegend,
+  GraphNodeCard,
+  GraphPanel,
+  GraphPanelActions,
+  GraphPanelHead,
+  GraphPanelSection,
+  GraphRow,
+  ZoomControls,
+  type LegendMark,
+} from "@/components/ui/graph-kit";
+import { Reference } from "@/components/ui/reference";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   NODE_HEIGHT,
@@ -43,136 +69,115 @@ import "./dependency-graph.css";
 
 type NodeData = {
   ticket: GraphTicket;
-  origin: boolean;
   selected: boolean;
-  project?: string | undefined;
   onSelect: (reference: string) => void;
 };
 
-function AvailabilityMark({ availability }: { availability: string | null }) {
-  if (availability !== "Ready" && availability !== "Blocked") return null;
-  return (
-    <span className="graph-availability">
-      <StatusDot tone={availability === "Ready" ? "ready" : "blocked"} />
-      {availability}
-    </span>
-  );
+/** "Todo", or "Todo · In Trash": the status word a card and a row show. */
+function statusMeta(ticket: { status: string; trashed?: boolean }) {
+  return ticket.trashed ? `${ticket.status} · In Trash` : ticket.status;
 }
 
 function TicketNode({ data }: NodeProps<Node<NodeData>>) {
-  const { ticket, origin, selected, project, onSelect } = data;
+  const { ticket, selected, onSelect } = data;
   return (
     <>
       <Handle type="target" position={Position.Top} isConnectable={false} />
-      <button
-        type="button"
-        className="graph-node"
-        data-selected={selected || undefined}
-        data-origin={origin || undefined}
-        data-boundary={ticket.boundary || undefined}
+      <GraphNodeCard
+        icon={<StatusIcon status={ticket.status} size={14} decorative />}
+        reference={ticket.reference}
+        meta={statusMeta(ticket)}
+        trailing={<AvailabilityMark availability={ticket.availability} />}
+        title={ticket.title}
+        selected={selected}
+        outside={ticket.boundary ?? false}
+        aria-label={[
+          `${ticket.reference} ${ticket.title}`,
+          statusMeta(ticket),
+          ticket.availability,
+        ]
+          .filter(Boolean)
+          .join(", ")}
         aria-pressed={selected}
         onClick={() => onSelect(ticket.reference)}
-      >
-        <span className="graph-node-line">
-          <StatusIcon status={ticket.status} size={14} decorative />
-          <span className="graph-node-reference">{ticket.reference}</span>{" "}
-          <span className="graph-node-status">{ticket.status}</span>{" "}
-          {ticket.trashed && <span className="graph-node-status">Trashed</span>}{" "}
-          {origin && <span className="graph-node-origin">Opened from</span>}
-          {ticket.boundary && (
-            <span className="graph-node-status">Outside Plan</span>
-          )}
-        </span>{" "}
-        <span className="graph-node-title">{ticket.title}</span>{" "}
-        <span className="graph-node-foot">
-          <AvailabilityMark availability={ticket.availability} />
-          {project && <span className="graph-node-status">{project}</span>}
-        </span>
-      </button>
+      />
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </>
   );
 }
 const nodeTypes = { ticket: TicketNode };
-/** Smallest zoom that still reads; the graph opens no smaller than this. */
-const READABLE_ZOOM = 0.7;
-/** Fit may zoom out this far so the whole graph is always visible. */
-const OVERVIEW_ZOOM = 0.2;
 
-function Toolbar({
+/** A small closed arrow in the edge colour: only "blocks" has one. */
+const ARROW = {
+  type: MarkerType.ArrowClosed,
+  width: 22,
+  height: 22,
+  color: "var(--muted-foreground)",
+} as const;
+
+/** Cards wholly or partly outside the view, so a dense graph never silently hides some. */
+function notInView(
+  positions: Map<string, { x: number; y: number }>,
+  [panX, panY, zoom]: [number, number, number],
+  width: number,
+  height: number,
+) {
+  if (!width || !height) return 0;
+  let count = 0;
+  for (const at of positions.values()) {
+    const left = at.x * zoom + panX;
+    const top = at.y * zoom + panY;
+    if (
+      left < -0.5 ||
+      top < -0.5 ||
+      left + NODE_WIDTH * zoom > width + 0.5 ||
+      top + NODE_HEIGHT * zoom > height + 0.5
+    )
+      count++;
+  }
+  return count;
+}
+
+function Zoom({
   positions,
 }: {
   positions: Map<string, { x: number; y: number }>;
 }) {
-  const { zoomIn, zoomOut, setViewport } = useReactFlow();
+  const { zoomIn, zoomOut, zoomTo, setViewport } = useReactFlow();
   const width = useStore((state) => state.width);
   const height = useStore((state) => state.height);
-  const [panX, panY, zoom] = useStore((state) => state.transform);
-  // Tickets wholly outside the view, so a dense graph never silently hides some.
-  let offscreen = 0;
-  if (width && height)
-    for (const at of positions.values()) {
-      const left = at.x * zoom + panX;
-      const top = at.y * zoom + panY;
-      if (
-        left + NODE_WIDTH * zoom < 0 ||
-        left > width ||
-        top + NODE_HEIGHT * zoom < 0 ||
-        top > height
-      )
-        offscreen++;
-    }
+  const transform = useStore((state) => state.transform);
   return (
-    <Panel position="top-left" className="graph-toolbar">
-      <IconButton label="Zoom out" onClick={() => void zoomOut()}>
-        <Minus />
-      </IconButton>
-      <span className="graph-zoom" role="status" aria-label="Zoom level">
-        {Math.round(zoom * 100)}%
-      </span>
-      <IconButton label="Zoom in" onClick={() => void zoomIn()}>
-        <Plus />
-      </IconButton>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => {
-          const bounds = boundsOf(positions, positions.keys());
-          if (bounds)
-            void setViewport(
-              fitViewport(
-                bounds,
-                { width, height },
-                { minZoom: OVERVIEW_ZOOM, maxZoom: 1 },
-              ),
-            );
-        }}
-      >
-        <Maximize aria-hidden="true" />
-        Fit
-      </Button>
-      {offscreen > 0 && (
-        <span className="graph-zoom" role="status">
-          {offscreen} {offscreen === 1 ? "ticket" : "tickets"} off-screen
-        </span>
-      )}
-    </Panel>
+    <ZoomControls
+      zoom={transform[2]}
+      onZoomOut={() => void zoomOut()}
+      onZoomIn={() => void zoomIn()}
+      onReset={() => void zoomTo(1)}
+      onFit={() => {
+        const bounds = boundsOf(positions, positions.keys());
+        if (bounds)
+          void setViewport(
+            fitViewport(
+              bounds,
+              { width, height },
+              { minZoom: GRAPH_ZOOM.fit, maxZoom: 1 },
+            ),
+          );
+      }}
+      notInView={notInView(positions, transform, width, height)}
+    />
   );
 }
 
-/** Sets the opening view once the canvas has a size. */
+/** Sets the opening view once the canvas has a size: 100%, around the focus ticket. */
 function OpenView({
   graph,
   positions,
-  origin,
-  selected,
-  readable,
+  focus,
 }: {
   graph: Graph;
   positions: Map<string, { x: number; y: number }>;
-  origin: string;
-  selected: string | null;
-  readable: boolean;
+  focus: string | null;
 }) {
   const { setViewport } = useReactFlow();
   const width = useStore((state) => state.width);
@@ -181,54 +186,92 @@ function OpenView({
   useEffect(() => {
     if (opened.current || !width || !height) return;
     opened.current = true;
-    const view = readable
-      ? openViewport(
-          graph,
-          positions,
-          selected ?? origin,
-          { width, height },
-          READABLE_ZOOM,
-        )
-      : (() => {
-          const bounds = boundsOf(positions, positions.keys());
-          return bounds
-            ? fitViewport(
-                bounds,
-                { width, height },
-                { minZoom: OVERVIEW_ZOOM, maxZoom: 1 },
-              )
-            : null;
-        })();
+    const view = openViewport(
+      graph,
+      positions,
+      focus,
+      { width, height },
+      GRAPH_ZOOM.fit,
+    );
     if (view) void setViewport(view);
-  }, [
-    graph,
-    positions,
-    origin,
-    selected,
-    readable,
-    width,
-    height,
-    setViewport,
-  ]);
+  }, [graph, positions, focus, width, height, setViewport]);
   return null;
 }
 
+/** Brings a ticket selected from a list into view; one already in view stays put. */
+function FollowSelection({
+  positions,
+  selected,
+}: {
+  positions: Map<string, { x: number; y: number }>;
+  selected: string | null;
+}) {
+  const { setCenter } = useReactFlow();
+  const store = useStoreApi();
+  const width = useStore((state) => state.width);
+  const height = useStore((state) => state.height);
+  const previous = useRef(selected);
+  useEffect(() => {
+    if (previous.current === selected) return;
+    previous.current = selected;
+    const at = selected ? positions.get(selected) : undefined;
+    if (!at || !width || !height) return;
+    const [x, y, zoom] = store.getState().transform;
+    const left = at.x * zoom + x;
+    const top = at.y * zoom + y;
+    const inside =
+      left >= 0 &&
+      top >= 0 &&
+      left + NODE_WIDTH * zoom <= width &&
+      top + NODE_HEIGHT * zoom <= height;
+    if (!inside)
+      void setCenter(at.x + NODE_WIDTH / 2, at.y + NODE_HEIGHT / 2, {
+        zoom,
+        duration: 200,
+      });
+  }, [selected, positions, width, height, setCenter, store]);
+  return null;
+}
+
+/** What the legend lists: only the marks this graph shows. */
+function legendItems(graph: Graph, outsideLabel: string) {
+  const items: { mark: LegendMark; label: string }[] = [];
+  if (graph.edges.length) items.push({ mark: "blocks", label: "blocks" });
+  if (graph.nodes.some((node) => node.availability === "Ready"))
+    items.push({ mark: "ready", label: "Ready" });
+  if (graph.nodes.some((node) => node.availability === "Blocked"))
+    items.push({ mark: "blocked", label: "Blocked" });
+  if (graph.nodes.some((node) => node.boundary))
+    items.push({ mark: "outside", label: outsideLabel });
+  return items;
+}
+
+/**
+ * A dependency graph drawn with the graph kit: blockers above the tickets
+ * they block, one arrow per "blocks", the legend top-right and the zoom
+ * control bottom-left. It opens at 100% around `focus` and pans from there.
+ */
 export function Canvas({
   graph,
-  origin,
+  focus,
   selected,
   onSelect,
-  projects,
-  readable = false,
+  label,
+  outsideLabel = "outside",
+  notice,
+  footnote,
 }: {
   graph: Graph;
-  origin: string;
+  /** The ticket the view opens around (the centre, or the first selected). */
+  focus: string | null;
   selected: string | null;
   onSelect: (reference: string) => void;
-  /** When given, each node names its project. */
-  projects?: Project[];
-  /** Keep text legible: large graphs scroll instead of shrinking past it. */
-  readable?: boolean;
+  label: string;
+  /** How the legend names a dashed card ("outside this Plan"). */
+  outsideLabel?: string;
+  /** An empty state centred in the canvas. */
+  notice?: ReactNode;
+  footnote?: ReactNode;
 }) {
   // Positions depend only on which tickets and edges exist, so a refresh that
   // returns the same graph keeps the layout (and its identity) as it was.
@@ -260,14 +303,11 @@ export function Canvas({
         height: NODE_HEIGHT,
         data: {
           ticket,
-          origin: ticket.reference === origin,
           selected: ticket.reference === selected,
-          project: projects?.find((item) => item.id === ticket.project_id)
-            ?.name,
           onSelect,
         },
       })),
-    [graph, positions, origin, selected, onSelect, projects],
+    [graph, positions, selected, onSelect],
   );
   const edges: Edge[] = useMemo(
     () =>
@@ -278,119 +318,145 @@ export function Canvas({
         // Each edge keeps its own curve; a stepped route would merge the edges of
         // a hub into one shared bus.
         type: "default",
-        // The marker's arrow is a quarter of its box, so the box is large.
-        markerEnd: { type: MarkerType.ArrowClosed, width: 40, height: 40 },
+        markerEnd: ARROW,
       })),
     [graph],
   );
   return (
     <ReactFlowProvider key={shape}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        minZoom={OVERVIEW_ZOOM}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        nodesFocusable={false}
-        edgesFocusable={false}
-        elementsSelectable={false}
-        zoomOnDoubleClick={false}
-        proOptions={{ hideAttribution: true }}
+      <GraphCanvas
+        label={label}
+        legend={<GraphLegend items={legendItems(graph, outsideLabel)} />}
+        zoom={<Zoom positions={positions} />}
+        notice={notice}
+        footnote={footnote}
       >
-        <Background />
-        <OpenView
-          graph={graph}
-          positions={positions}
-          origin={origin}
-          selected={selected}
-          readable={readable}
-        />
-        <Toolbar positions={positions} />
-      </ReactFlow>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          minZoom={GRAPH_ZOOM.min}
+          maxZoom={GRAPH_ZOOM.max}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          nodesFocusable={false}
+          edgesFocusable={false}
+          elementsSelectable={false}
+          zoomOnDoubleClick={false}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+          <OpenView graph={graph} positions={positions} focus={focus} />
+          <FollowSelection positions={positions} selected={selected} />
+        </ReactFlow>
+      </GraphCanvas>
     </ReactFlowProvider>
   );
 }
 
-function Legend() {
-  return (
-    <ul className="graph-legend" aria-label="Legend">
-      <li>Arrows point to the work that waits.</li>
-      <li>
-        A Todo ticket is Ready once every ticket with an arrow into it is Done.
-      </li>
-      <li>In review, Canceled and Duplicate tickets still block.</li>
-      <li>
-        <StatusDot tone="ready" /> Ready
-      </li>
-      <li>
-        <StatusDot tone="blocked" /> Blocked
-      </li>
-    </ul>
-  );
-}
+type Linked = { reference: string; title: string; status?: string };
 
-function TicketList({
+/**
+ * One relationship list in the panel. A row selects its ticket when the graph
+ * draws it, and otherwise centres the graph on it (or opens it).
+ */
+function LinkedRows({
   tickets,
-  placeholder = "None",
-  projectOf,
+  nodes,
+  onRow,
+  rowAction,
 }: {
-  tickets: { reference: string; title: string; status?: string }[] | null;
-  /** Names the project a ticket belongs to, when it is known. */
-  projectOf?: (reference: string) => string | undefined;
-  /** Shown when there are none, or while they are still loading. */
-  placeholder?: string;
+  tickets: Linked[];
+  nodes: GraphTicket[];
+  onRow: (reference: string) => void;
+  rowAction?: ((reference: string) => ReactNode) | undefined;
 }) {
-  if (!tickets?.length) return <p className="graph-none">{placeholder}</p>;
   return (
-    <ul>
-      {byReference(tickets).map((ticket) => (
-        <li key={ticket.reference}>
-          {ticket.status && (
-            <StatusIcon status={ticket.status} size={14} decorative />
-          )}{" "}
-          <span className="graph-node-reference">{ticket.reference}</span>{" "}
-          {ticket.title}
-          {projectOf?.(ticket.reference) && (
-            <span className="graph-none"> · {projectOf(ticket.reference)}</span>
-          )}
-        </li>
-      ))}
+    <ul className="tgraph-rows">
+      {byReference(tickets).map((ticket) => {
+        const drawn = nodes.find((node) => node.reference === ticket.reference);
+        const status = drawn?.status ?? ticket.status;
+        return (
+          <li key={ticket.reference}>
+            <GraphRow
+              icon={
+                status ? (
+                  <StatusIcon status={status} size={16} decorative />
+                ) : (
+                  <span />
+                )
+              }
+              reference={ticket.reference}
+              caption={drawn?.availability ?? status ?? ""}
+              title={ticket.title}
+              onClick={() => onRow(ticket.reference)}
+              trailing={rowAction?.(ticket.reference)}
+            />
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
+/**
+ * The selected ticket in the graph kit's side panel: its status, title and
+ * place (Plan, project), what blocks it and what it blocks, then "Open {ref}"
+ * and "Center here". The lists come from the core, so links the bounded graph
+ * leaves out still show. A failed load says so and offers Retry.
+ */
 export function SelectionPanel({
   ticket,
-  origin,
+  nodes,
+  version,
+  center,
   projects,
   plans,
   onOpen,
-  onBack,
+  onSelect,
   onCenter,
-  nodes,
-  version,
+  blockerAction,
+  addBlocker,
+  note,
+  onBack,
+  backLabel,
 }: {
   ticket: GraphTicket;
-  /** The drawn tickets, used to name the project of each listed ticket. */
-  nodes?: GraphTicket[];
+  /** The drawn tickets; a listed ticket that is drawn is selected, not left. */
+  nodes: GraphTicket[];
   /** Changes whenever the graph reloads, so the lists never show an older answer. */
   version?: unknown;
-  origin: string;
+  /** The graph's centre: Center here is left out for it. */
+  center?: string | undefined;
   projects: Project[];
-  /** Without Plans the panel leaves out the Plan line. */
+  /** Without Plans the caption leaves out the Plan. */
   plans?: Plan[];
   onOpen: (reference: string) => void;
-  /** With neither back nor center the panel is compact: facts and Open only. */
-  onBack?: () => void;
-  onCenter?: (reference: string) => void;
+  onSelect: (reference: string) => void;
+  onCenter?: ((reference: string) => void) | undefined;
+  /** A hover action for each "Blocked by" row (Remove). */
+  blockerAction?: ((reference: string) => ReactNode) | undefined;
+  /** After the "Blocked by" rows ("Add blocker…"), given the loaded ticket. */
+  addBlocker?: ((detail: Ticket) => ReactNode) | undefined;
+  /** A caption under the lists ("Read-only while archived"). */
+  note?: string | undefined;
+  /** A way back to what the panel showed before (the Plan's tickets). */
+  onBack?: (() => void) | undefined;
+  backLabel?: string;
 }) {
   const [loaded, setLoaded] = useState<{
     ticket: Ticket;
     blocks: Relationships["blocking"];
   } | null>(null);
-  // The drawn graph is bounded, so a ticket at its edge has links that are not
-  // drawn. The panel lists the ticket's own links from the core instead.
+  // A failure belongs to the ticket it was for; selecting another leaves it.
+  const [failed, setFailed] = useState<{
+    reference: string;
+    failure: FailureDescription;
+  } | null>(null);
+  const failure =
+    failed?.reference === ticket.reference ? failed.failure : null;
+  const [attempt, setAttempt] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => {
     let active = true;
     void Promise.all([
@@ -398,186 +464,325 @@ export function SelectionPanel({
       client.contextualRelationships(ticket.reference, 0),
     ]).then(
       ([value, links]) => {
-        if (active) setLoaded({ ticket: value, blocks: links.blocking });
+        if (!active) return;
+        setLoaded({ ticket: value, blocks: links.blocking });
+        setFailed(null);
       },
-      () => {},
+      (reason: unknown) => {
+        if (active)
+          setFailed({
+            reference: ticket.reference,
+            failure: describeFailure(
+              reason,
+              `load what blocks ${ticket.reference}`,
+            ),
+          });
+      },
     );
     return () => {
       active = false;
     };
-  }, [ticket.reference, version]);
+  }, [ticket.reference, version, attempt]);
   const ready = loaded?.ticket.reference === ticket.reference ? loaded : null;
   const detail = ready?.ticket ?? null;
-  const blockedBy = detail?.prerequisites ?? null;
-  const blocks = ready?.blocks.items.map((item) => ({
-    reference: item.reference,
-    title: item.title.text,
-    status: item.status,
-  }));
-  const project = projects.find((item) => item.id === detail?.project_id);
-  const plan = plans?.find((item) => item.id === detail?.plan_id);
-  const placeholder = detail ? "None" : "Loading…";
-  const projectOf = (reference: string) =>
-    projects.find(
-      (item) =>
-        item.id ===
-        nodes?.find((node) => node.reference === reference)?.project_id,
-    )?.name;
+  const blockedBy = detail?.prerequisites ?? [];
+  const blocks =
+    ready?.blocks.items.map((item) => ({
+      reference: item.reference,
+      title: item.title.text,
+      status: item.status,
+    })) ?? [];
+  const more = ready?.blocks.next_offset ?? null;
+  const showMore = async () => {
+    if (more === null || !ready) return;
+    setLoadingMore(true);
+    try {
+      const page = await client.contextualRelationships(ticket.reference, more);
+      setLoaded((previous) =>
+        previous && previous.ticket.reference === ticket.reference
+          ? {
+              ...previous,
+              blocks: {
+                items: [...previous.blocks.items, ...page.blocking.items],
+                next_offset: page.blocking.next_offset,
+              },
+            }
+          : previous,
+      );
+    } catch (reason: unknown) {
+      setFailed({
+        reference: ticket.reference,
+        failure: describeFailure(
+          reason,
+          `load what ${ticket.reference} blocks`,
+        ),
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+  const plan = plans?.find((item) => item.id === detail?.plan_id)?.name;
+  const project = projects.find((item) => item.id === detail?.project_id)?.name;
+  const caption = [statusMeta(ticket), plan, project]
+    .filter(Boolean)
+    .join(" · ");
+  const onRow = (reference: string) => {
+    if (nodes.some((node) => node.reference === reference)) onSelect(reference);
+    else if (onCenter) onCenter(reference);
+    else onOpen(reference);
+  };
+  const firstBlocker = blockedBy.find((item) =>
+    nodes.some(
+      (node) =>
+        node.reference === item.reference &&
+        node.status !== "Done" &&
+        node.availability !== null,
+    ),
+  );
   return (
-    <aside className="graph-panel" aria-label="Selected ticket">
-      <p className="graph-panel-status">
-        <StatusIcon status={ticket.status} size={14} decorative />
-        {ticket.status}
-        {ticket.trashed && " · Trashed"}
-      </p>
-      <h3>
-        <span className="graph-node-reference">{ticket.reference}</span>{" "}
-        {ticket.title}
-      </h3>
-      <AvailabilityMark availability={ticket.availability} />
-      <h4>Blocked by</h4>
-      <TicketList
-        tickets={blockedBy}
-        placeholder={detail ? "None" : "Loading…"}
-        projectOf={projectOf}
-      />
-      <h4>Blocks</h4>
-      <TicketList
-        tickets={blocks ?? null}
-        placeholder={ready ? "None" : "Loading…"}
-        projectOf={projectOf}
-      />
-      {ready?.blocks.next_offset != null && (
-        <p className="graph-none">More tickets wait on this one.</p>
+    <GraphPanel
+      label="Selected ticket"
+      footer={
+        <GraphPanelActions
+          openLabel={`Open ${ticket.reference}`}
+          onOpen={() => onOpen(ticket.reference)}
+          {...(onCenter &&
+            ticket.reference !== center && {
+              onCenter: () => onCenter(ticket.reference),
+            })}
+        />
+      }
+    >
+      {onBack && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-my-2 -ml-2 self-start"
+          onClick={onBack}
+        >
+          <ArrowLeft aria-hidden="true" />
+          {backLabel ?? "Back"}
+        </Button>
       )}
-      <dl className="graph-panel-facts">
-        <dt>Project</dt>
-        <dd>{project?.name ?? placeholder}</dd>
-        {plans && (
-          <>
-            <dt>Plan</dt>
-            <dd>{plan?.name ?? placeholder}</dd>
-          </>
-        )}
-      </dl>
-      <div className="graph-panel-actions">
-        {onCenter && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onCenter(ticket.reference)}
-          >
-            Center graph on {ticket.reference}
-          </Button>
-        )}
-        {ticket.reference !== origin && (
-          <Button size="sm" onClick={() => onOpen(ticket.reference)}>
-            Open {ticket.reference}
-          </Button>
-        )}
-        {onBack && (
-          <Button variant="outline" size="sm" onClick={onBack}>
-            Back to original ticket
-          </Button>
-        )}
-      </div>
-    </aside>
+      <GraphPanelHead
+        icon={<StatusIcon status={ticket.status} size={14} decorative />}
+        eyebrow={<Reference>{ticket.reference}</Reference>}
+        title={ticket.title}
+        caption={caption}
+      />
+      <AvailabilityMark availability={ticket.availability}>
+        {ticket.availability === "Blocked" && firstBlocker
+          ? `Blocked by ${firstBlocker.reference}`
+          : undefined}
+      </AvailabilityMark>
+      {failure ? (
+        <FailureState
+          size="inline"
+          failure={failure}
+          onRetry={() => {
+            setFailed(null);
+            setAttempt((value) => value + 1);
+          }}
+        />
+      ) : !ready ? (
+        <p className="tgraph-loading" role="status">
+          Loading…
+        </p>
+      ) : (
+        <>
+          <GraphPanelSection title="Blocked by" count={blockedBy.length}>
+            {blockedBy.length > 0 ? (
+              <LinkedRows
+                tickets={blockedBy}
+                nodes={nodes}
+                onRow={onRow}
+                rowAction={blockerAction}
+              />
+            ) : (
+              <p>Nothing blocks {ticket.reference}.</p>
+            )}
+            {detail && addBlocker?.(detail)}
+          </GraphPanelSection>
+          <GraphPanelSection title="Blocks" count={blocks.length}>
+            {blocks.length > 0 ? (
+              <LinkedRows tickets={blocks} nodes={nodes} onRow={onRow} />
+            ) : (
+              <p>Nothing waits on {ticket.reference}.</p>
+            )}
+            {more !== null && (
+              <Button
+                variant="link"
+                size="sm"
+                className="self-start"
+                disabled={loadingMore}
+                onClick={() => void showMore()}
+              >
+                Show more
+              </Button>
+            )}
+          </GraphPanelSection>
+          {note && <p className="tgraph-note">{note}</p>}
+        </>
+      )}
+    </GraphPanel>
   );
 }
 
-/** The dependency graph of one ticket, shown as a view of its own. */
-export default function DependencyGraph({
+/** The tickets of a dependency graph as rows, blockers first: the List view. */
+function TicketRows({
+  graph,
+  selected,
+  onSelect,
+}: {
+  graph: Graph;
+  selected: string | null;
+  onSelect: (reference: string) => void;
+}) {
+  return (
+    <div className="tgraph-list">
+      <ul aria-label="Tickets">
+        {byReference(graph.nodes).map((ticket) => (
+          <li key={ticket.reference}>
+            <GraphRow
+              icon={<StatusIcon status={ticket.status} size={16} decorative />}
+              reference={ticket.reference}
+              caption={[statusMeta(ticket), ticket.availability]
+                .filter(Boolean)
+                .join(" · ")}
+              title={ticket.title}
+              current={ticket.reference === selected}
+              onClick={() => onSelect(ticket.reference)}
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * A ticket's dependencies inside the graph shell: the bounded graph of tickets
+ * joined to `reference` by "blocks", as a canvas or a list, with the selection
+ * panel at the right. The ticket itself starts selected.
+ */
+export function DependencyView({
   reference,
   revision,
   projects,
   plans,
-  onBack,
+  view,
   onOpen,
+  onCenter,
+  onCount,
 }: {
   reference: string;
   revision: number;
   projects: Project[];
   plans: Plan[];
-  onBack: () => void;
+  view: "graph" | "list";
   onOpen: (reference: string) => void;
+  /** Centre the graph on another ticket (the shell keeps the way back). */
+  onCenter: (reference: string) => void;
+  /** Reports how many tickets are drawn, for the header count. */
+  onCount?: (count: number | null) => void;
 }) {
   const [graph, setGraph] = useState<Graph | null>(null);
-  const [center, setCenter] = useState(reference);
-  const [error, setError] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => heading.current?.focus(), []);
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [selected, setSelected] = useState<string | null>(reference);
+  const count = useRef(onCount);
+  useEffect(() => {
+    count.current = onCount;
+  }, [onCount]);
   useEffect(() => {
     let active = true;
-    void client.dependencyGraph(center).then(
+    void client.dependencyGraph(reference).then(
       (value) => {
-        if (active) {
-          setGraph(value);
-          setError("");
-        }
+        if (!active) return;
+        setGraph(value);
+        setError(null);
+        count.current?.(value.nodes.length);
+        setSelected((previous) =>
+          previous && value.nodes.some((node) => node.reference === previous)
+            ? previous
+            : reference,
+        );
       },
       (reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active) setError(describeFailure(reason, "load the dependencies"));
       },
     );
     return () => {
       active = false;
     };
-  }, [center, revision]);
-  const notice = graph ? scopeNotice(graph, center) : null;
-  const selectedTicket = graph?.nodes.find(
-    (node) => node.reference === selected,
-  );
+  }, [reference, revision, attempt]);
+  useEffect(() => () => count.current?.(null), []);
+  const select = useCallback((value: string) => setSelected(value), []);
+  if (error)
+    return (
+      <div className="tgraph-body" data-state="failed">
+        <FailureState
+          failure={error}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      </div>
+    );
+  if (!graph)
+    return (
+      <div className="tgraph-body" data-state="loading">
+        <EmptyState
+          size="hint"
+          role="status"
+          title="Loading dependencies…"
+          className="flex-1"
+        />
+      </div>
+    );
+  const ticket =
+    graph.nodes.find((node) => node.reference === selected) ??
+    graph.nodes.find((node) => node.reference === reference);
+  const limited = scopeNotice(graph, reference);
+  const alone = graph.edges.length === 0;
   return (
-    <section className="dependency-graph-view" aria-label="Dependency graph">
-      <header className="graph-header">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" />
-          Back to {reference}
-        </Button>
-        <h2 ref={heading} tabIndex={-1}>
-          Dependency graph
-        </h2>
-      </header>
-      <Legend />
-      {notice && (
-        <Alert role="status" size="compact">
-          <AlertDescription>{notice}</AlertDescription>
-        </Alert>
-      )}
-      {error && <p role="alert">Graph failed: {error}</p>}
-      {!graph && !error && <p role="status">Loading graph…</p>}
-      {graph && (
-        <div className="graph-body">
-          <div className="graph-canvas">
-            <Canvas
-              graph={graph}
-              origin={center}
-              selected={selected}
-              onSelect={setSelected}
+    <div className="tgraph-body">
+      {view === "graph" && alone ? (
+        // One card and nothing to connect it to: say so in the canvas instead.
+        <GraphCanvas
+          label={`Dependencies of ${reference}`}
+          notice={
+            <EmptyState
+              anchor="center"
+              icon={<Network />}
+              title="No blockers or dependents"
+              description={`Nothing blocks ${reference} and nothing waits on it.`}
             />
-          </div>
-          {selectedTicket ? (
-            <SelectionPanel
-              ticket={selectedTicket}
-              origin={reference}
-              projects={projects}
-              plans={plans}
-              nodes={graph.nodes}
-              version={graph}
-              onOpen={onOpen}
-              onBack={onBack}
-              onCenter={setCenter}
-            />
-          ) : (
-            <aside className="graph-panel" aria-label="Selected ticket">
-              <p className="graph-none">
-                Select a ticket to see what it blocks and what blocks it.
-              </p>
-            </aside>
-          )}
-        </div>
+          }
+        />
+      ) : view === "graph" ? (
+        <Canvas
+          graph={graph}
+          focus={reference}
+          selected={selected}
+          onSelect={select}
+          label={`Dependencies of ${reference}`}
+          footnote={limited}
+        />
+      ) : (
+        <TicketRows graph={graph} selected={selected} onSelect={select} />
       )}
-    </section>
+      {ticket && (
+        <SelectionPanel
+          ticket={ticket}
+          nodes={graph.nodes}
+          version={graph}
+          center={reference}
+          projects={projects}
+          plans={plans}
+          onOpen={onOpen}
+          onSelect={select}
+          onCenter={onCenter}
+        />
+      )}
+    </div>
   );
 }

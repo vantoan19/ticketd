@@ -135,7 +135,7 @@ test("an open external ticket offers only local progress and says progress stays
   ).toBeTruthy();
 });
 
-test("a long source identity keeps its number separate and exposes the complete issue address", () => {
+test("a long source identity keeps its number separate and exposes the complete issue address", async () => {
   bridge.invoke.mockResolvedValue([]);
   const place = "a-long-organization/a-long-repository";
   properties(
@@ -145,7 +145,11 @@ test("a long source identity keeps its number separate and exposes the complete 
   );
   const rail = screen.getByRole("region", { name: "Source" });
   const link = within(rail).getByRole("link", { name: `${place}#12345` });
-  expect(link.title).toBe(`${place}#12345`);
+  fireEvent.pointerMove(link);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    `${place}#12345`,
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
   expect(within(link).getByText("#12345").textContent).toBe("#12345");
   expect(link.getAttribute("href")).toBe(
     "https://github.com/acme/api/issues/98",
@@ -265,7 +269,7 @@ test("a resolved canonical issue opens its local ticket, and a loop is not follo
       onOpenTicket={onOpen}
     />,
   );
-  expect(screen.getByText("Duplicate of T-KQ9 (acme/api#7)")).toBeTruthy();
+  expect(screen.getByText(/^Duplicate of T-KQ9 \(acme\/api#7\)/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Open T-KQ9" }));
   expect(onOpen).toHaveBeenCalledWith("T-KQ9");
   const rows = (target: object) =>
@@ -354,9 +358,8 @@ test("a failed refresh keeps the content and says the last attempt failed", asyn
   );
   expect(screen.getByText(/The last refresh failed/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-  expect(await screen.findByRole("alert")).toHaveProperty(
-    "textContent",
-    "Could not refresh: GitHub is down. Saved content is unchanged.",
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't refresh T-KQ1. GitHub is down. Saved content is unchanged.",
   );
 });
 
@@ -477,7 +480,9 @@ test("a row shows the owner's pill and a local row shows none", () => {
       }}
     />,
   );
-  const pills = screen.getAllByTitle(/Owned by GitHub/);
+  const pills = [
+    ...document.querySelectorAll('[data-slot="badge"][data-variant="source"]'),
+  ] as HTMLElement[];
   expect(pills).toHaveLength(1);
   // Read once: the visible words are hidden from assistive technology and the
   // screen-reader text says the same thing in one sentence.
@@ -534,8 +539,28 @@ test("source wording: location, state and freshness", () => {
 });
 
 test("a local child explains its independent ownership when its parent belongs to GitHub", async () => {
+  // GitHub is set up, so the rail has a Source section saying "Local".
+  const github = {
+    connector: {
+      provider: "github",
+      name: "GitHub",
+      contract_version: 1,
+      capabilities: [],
+      schema: { fields: [] },
+    },
+    saved: {
+      provider: "github",
+      config: {},
+      account: "octo",
+      saved_at: "2026-01-01T00:00:00Z",
+    },
+  };
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "show_ticket" ? ticket({ reference: "T-KQ2" }) : [],
+    command === "show_ticket"
+      ? ticket({ reference: "T-KQ2" })
+      : command === "list_sources"
+        ? [github]
+        : [],
   );
   properties(
     ticket({
@@ -543,7 +568,7 @@ test("a local child explains its independent ownership when its parent belongs t
       parent: { reference: "T-KQ2", title: "Parent", trashed: false },
     }),
   );
-  expect(screen.getByText(/^Created in ticketd\./)).toBeTruthy();
+  expect(await screen.findByText("Local")).toBeTruthy();
   expect(
     await screen.findByText(
       /belongs to GitHub; this ticket stays local unless you publish it on its own/,

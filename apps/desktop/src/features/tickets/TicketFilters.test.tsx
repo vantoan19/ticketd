@@ -1,108 +1,119 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import type { ComponentProps } from "react";
 import { TicketFilters } from "./TicketFilters";
-import { FilterDockContext } from "./filter-dock";
 
-test("the Filters panel reports its open state to the workspace that docks it", () => {
-  const setOpen = vi.fn();
-  render(
-    <FilterDockContext.Provider
-      value={{ open: false, setOpen, anchor: { current: document.body } }}
-    >
-      <TicketFilters
-        query=""
-        setQuery={vi.fn()}
-        plan=""
-        setPlan={vi.fn()}
-        status=""
-        setStatus={vi.fn()}
-        tags=""
-        setTags={vi.fn()}
-        availability=""
-        setAvailability={vi.fn()}
-        family=""
-        setFamily={vi.fn()}
-        plans={[]}
-        setOffset={vi.fn()}
-        navigation={{ kind: "all", project: "all", plan: "" }}
-        clearFilters={vi.fn()}
-        scopeName="All tickets"
-        total={7}
-        scopeTotal={null}
-      />
-    </FilterDockContext.Provider>,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  expect(setOpen).toHaveBeenCalledWith(true);
-});
+vi.mock("@/lib/api/client", () => ({
+  client: { searchTags: vi.fn(async () => ["bug", "ui"]) },
+}));
 
 afterEach(cleanup);
+
+function props(
+  overrides: Partial<ComponentProps<typeof TicketFilters>> = {},
+): ComponentProps<typeof TicketFilters> {
+  return {
+    query: "",
+    setQuery: vi.fn(),
+    plan: "",
+    setPlan: vi.fn(),
+    status: "",
+    setStatus: vi.fn(),
+    tags: "",
+    setTags: vi.fn(),
+    availability: "",
+    setAvailability: vi.fn(),
+    family: "",
+    setFamily: vi.fn(),
+    plans: [],
+    resetPaging: vi.fn(),
+    navigation: { kind: "all", project: "all", plan: "" },
+    clearFilters: vi.fn(),
+    scopeName: "All tickets",
+    total: 7,
+    scopeTotal: null,
+    ...overrides,
+  };
+}
+
 test("Search and Filters start as named icon buttons and search opens on demand", () => {
   const setQuery = vi.fn();
-  render(
-    <TicketFilters
-      query=""
-      setQuery={setQuery}
-      plan=""
-      setPlan={vi.fn()}
-      status=""
-      setStatus={vi.fn()}
-      tags=""
-      setTags={vi.fn()}
-      availability=""
-      setAvailability={vi.fn()}
-      family=""
-      setFamily={vi.fn()}
-      plans={[]}
-      setOffset={vi.fn()}
-      navigation={{ kind: "all", project: "all", plan: "" }}
-      clearFilters={vi.fn()}
-      scopeName="All tickets"
-      total={7}
-      scopeTotal={null}
-    />,
-  );
-  expect(screen.queryByRole("textbox", { name: "Search tickets" })).toBeNull();
+  render(<TicketFilters part="controls" {...props({ setQuery })} />);
+  expect(
+    screen.queryByRole("searchbox", { name: "Search tickets" }),
+  ).toBeNull();
   expect(screen.getByRole("button", { name: "Filters" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "cache" },
   });
   expect(setQuery).toHaveBeenCalledWith("cache");
   expect(screen.getByRole("search")).toBeTruthy();
-  expect(screen.queryByLabelText("Active filters")).toBeNull();
 });
 
-test("an active search shows as a removable chip", () => {
-  const setQuery = vi.fn();
-  render(
-    <TicketFilters
-      part="chips"
-      query="capture"
-      setQuery={setQuery}
-      plan=""
-      setPlan={vi.fn()}
-      status=""
-      setStatus={vi.fn()}
-      tags=""
-      setTags={vi.fn()}
-      availability=""
-      setAvailability={vi.fn()}
-      family=""
-      setFamily={vi.fn()}
-      plans={[]}
-      setOffset={vi.fn()}
-      navigation={{ kind: "all", project: "all", plan: "" }}
-      clearFilters={vi.fn()}
-      scopeName="All tickets"
-      total={1}
-      scopeTotal={7}
-    />,
-  );
+test("Filters opens as a menu with focus on its first dimension, never on a clear action (list F-02)", async () => {
+  const p = props();
+  render(<TicketFilters part="controls" {...p} />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "Filters" }), {
+    key: "Enter",
+  });
+  await act(async () => {});
+  const menu = screen.getByRole("menu", { name: /^Filters/ });
+  expect(menu).toBeTruthy();
+  expect(document.activeElement?.textContent).toContain("Status");
+  // Enter on the focused row opens its submenu; nothing is cleared.
+  fireEvent.keyDown(document.activeElement!, { key: "Enter" });
+  await act(async () => {});
+  expect(p.clearFilters).not.toHaveBeenCalled();
+  expect(p.setQuery).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: /In review/ }));
+  expect(p.setStatus).toHaveBeenCalledWith("In review");
+});
+
+test("tags check in their submenu and stay one chip for the dimension", async () => {
+  const setTags = vi.fn();
+  render(<TicketFilters part="controls" {...props({ setTags })} />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "Filters" }), {
+    key: "Enter",
+  });
+  await act(async () => {});
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: /Tags/ }), {
+    key: "ArrowRight",
+  });
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "ui" }));
+  expect(setTags).toHaveBeenCalledWith("ui");
+  cleanup();
+
+  render(<TicketFilters part="chips" {...props({ tags: "bug, ui" })} />);
+  const chips = screen.getByLabelText("Active filters");
+  expect(chips.textContent).toContain("Tagsbug, ui");
+  expect(
+    screen.getAllByRole("button", { name: /^Remove Tags filter$/ }),
+  ).toHaveLength(1);
+});
+
+test("Clear filters clears the filters only; the search keeps its own chip (list F-09)", () => {
+  const p = props({ query: "capture", status: "Todo" });
+  render(<TicketFilters part="chips" {...p} />);
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(p.clearFilters).toHaveBeenCalled();
+  expect(p.setQuery).not.toHaveBeenCalled();
   fireEvent.click(
     screen.getByRole("button", { name: "Remove Search: capture" }),
   );
-  expect(setQuery).toHaveBeenCalledWith("");
-  expect(screen.getByRole("button", { name: "Clear filters" })).toBeTruthy();
+  expect(p.setQuery).toHaveBeenCalledWith("");
+});
+
+test("a search alone offers no Clear filters", () => {
+  render(<TicketFilters part="chips" {...props({ query: "capture" })} />);
+  expect(screen.getByLabelText("Active filters")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
 });

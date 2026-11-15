@@ -1,5 +1,5 @@
 import { Columns3, List, SlidersHorizontal } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { PaneHeaderButton } from "@/components/ui/list-header";
 import {
   Popover,
   PopoverContent,
@@ -26,10 +26,7 @@ export function DisplayMenu({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm">
-          <SlidersHorizontal data-icon="inline-start" />
-          Display
-        </Button>
+        <PaneHeaderButton icon={<SlidersHorizontal />} label="Display" />
       </PopoverTrigger>
       <PopoverContent align="end" aria-label="Display">
         <PopoverTitle>Display</PopoverTitle>
@@ -44,7 +41,7 @@ export function DisplayMenu({
                 onValueChange={(value) => {
                   if (!setPreference("ticketLayout", value))
                     onError(
-                      "Could not remember ticket layout. Check local storage and try again.",
+                      "Couldn't remember the ticket layout. This window can't store preferences right now.",
                     );
                 }}
                 options={[
@@ -62,7 +59,7 @@ export function DisplayMenu({
             onValueChange={(value) => {
               if (!setPreference("ticketRows", value))
                 onError(
-                  "Could not remember row style. Check local storage and try again.",
+                  "Couldn't remember the row style. This window can't store preferences right now.",
                 );
             }}
             options={[

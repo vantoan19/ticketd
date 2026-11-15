@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import "./description.css";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { chatSource } from "@/features/chats/quotes";
@@ -10,8 +11,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { FieldError } from "@/components/ui/field";
+import { toFailure } from "@/lib/api/bridge-failure";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { Kbd } from "@/components/ui/kbd";
 import { client, type Ticket } from "@/lib/api/client";
 import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
@@ -105,6 +112,7 @@ function restore(
 export function TicketEditor({
   ticket,
   onSaved,
+  stateLine,
   children,
   select,
   revision,
@@ -112,6 +120,13 @@ export function TicketEditor({
 }: {
   ticket: Ticket;
   onSaved: (ticket: Ticket) => void;
+  /**
+   * The ticket's state line ("Updated 5 h ago"). It shares one 32px row with
+   * the save state and Edit · E; while the description is edited that row is
+   * the session row (save state, formatting, Done), so nothing moves (P16).
+   */
+  stateLine?: ReactNode;
+  /** Under the state row: the folded property strip. */
   children?: ReactNode;
   select?: (reference: string) => void;
   revision?: number;
@@ -156,6 +171,8 @@ export function TicketEditor({
   }, [draft.title]);
   const [saved, setSaved] = useState<Content>(restored.saved);
   const [confirmSaved, setConfirmSaved] = useState(false);
+  // After "Use saved text", what the save state says instead of "saved".
+  const [adopted, setAdopted] = useState<string | null>(null);
   // Keep the unsaved text on this device, and write it once more as the page goes away.
   const ticketId = ticket.id;
   const latest = useRef({ draft, saved });
@@ -190,8 +207,16 @@ export function TicketEditor({
   const [state, setState] = useState<"idle" | "saved" | "pending" | "failed">(
     "idle",
   );
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const [retry, setRetry] = useState(0);
+  // "Saved" says so for 3s, then the state line's time is enough (P6).
+  useEffect(() => {
+    if (state !== "saved") return;
+    const timer = window.setTimeout(() => setState("idle"), 3000);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+  // The session row's middle, where the editor puts its formatting.
+  const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   // "Keep my draft" saves at once instead of waiting out the typing delay.
   const immediate = useRef(false);
   const [bodyFocus, setBodyFocus] = useState(0);
@@ -223,7 +248,8 @@ export function TicketEditor({
       if (event.key !== "e" || event.metaKey || event.ctrlKey || event.altKey)
         return;
       const button = editButton.current;
-      if (!button || button.closest("[hidden]")) return;
+      // A hidden page, or one the dependency graph covers, is not in view.
+      if (!button || button.closest("[hidden], [data-graph]")) return;
       const target = event.target;
       if (
         target instanceof Element &&
@@ -307,6 +333,10 @@ export function TicketEditor({
   }, [shown]);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
   const titleDirty = draft.title !== saved.title;
+  // A ticket always has a title: an empty one is never sent (the core would
+  // refuse it), the last saved title stays, and the field says why.
+  const titleInvalid = titleDirty && draft.title.trim() === "";
+  const unsent = (titleDirty && !titleInvalid) || draft.body !== saved.body;
   const bodyDirty = draft.body !== saved.body;
   const externalChange =
     (titleDirty && ticket.title !== saved.title) ||
@@ -329,7 +359,7 @@ export function TicketEditor({
   }
 
   useEffect(() => {
-    if (!dirty || externalChange || inFlight.current || state === "failed")
+    if (!unsent || externalChange || inFlight.current || state === "failed")
       return;
     const delay = immediate.current ? 0 : 500;
     const timer = window.setTimeout(() => {
@@ -338,7 +368,8 @@ export function TicketEditor({
       setSaving(true);
       setState("pending");
       const patch: { title?: string; body?: string } = {};
-      if (draft.title !== saved.title) patch.title = draft.title;
+      if (draft.title !== saved.title && !titleInvalid)
+        patch.title = draft.title;
       if (draft.body !== saved.body) patch.body = draft.body;
       setSavedField(
         patch.title !== undefined && patch.body !== undefined
@@ -360,15 +391,18 @@ export function TicketEditor({
         .then((result) => {
           setSaved({ title: result.title, body: result.body });
           setDraft((current) => ({
-            title: current.title === draft.title ? result.title : current.title,
+            title:
+              patch.title !== undefined && current.title === draft.title
+                ? result.title
+                : current.title,
             body: current.body === draft.body ? result.body : current.body,
           }));
           onSaved(result);
-          setError("");
+          setError(null);
           setState("saved");
         })
         .catch(async (reason: unknown) => {
-          if (String(reason).includes("changed elsewhere")) {
+          if (toFailure(reason).kind === "conflict") {
             try {
               const latest = await client.showTicket(ticket.reference);
               // The parent adopts the stored ticket, so the notice below compares
@@ -386,7 +420,16 @@ export function TicketEditor({
               /* Fall through to the ordinary failure. */
             }
           }
-          setError(String(reason));
+          setError(
+            describeFailure(
+              reason,
+              patch.title !== undefined && patch.body !== undefined
+                ? "save the title and description"
+                : patch.title !== undefined
+                  ? "save the title"
+                  : "save the description",
+            ),
+          );
           setState("failed");
         })
         .finally(() => {
@@ -399,7 +442,8 @@ export function TicketEditor({
   }, [
     draft,
     saved,
-    dirty,
+    unsent,
+    titleInvalid,
     externalChange,
     ticket.reference,
     onSaved,
@@ -409,11 +453,32 @@ export function TicketEditor({
     recovery,
   ]);
 
+  /**
+   * "Use saved text": only the field in conflict takes the saved text; a
+   * draft in the other field stays and keeps saving. Nothing was saved, so
+   * the save state says which saved text is now in use.
+   */
   function adoptSaved() {
-    setDraft({ title: ticket.title, body: ticket.body });
-    setSaved({ title: ticket.title, body: ticket.body });
+    const next = {
+      title: titleConflict ? ticket.title : draft.title,
+      body: bodyConflict ? ticket.body : draft.body,
+    };
+    const base = {
+      title: titleConflict ? ticket.title : saved.title,
+      body: bodyConflict ? ticket.body : saved.body,
+    };
+    setDraft(next);
+    setSaved(base);
     setConfirmSaved(false);
-    setState("saved");
+    const stillDirty = next.title !== base.title || next.body !== base.body;
+    setAdopted(
+      titleConflict && bodyConflict
+        ? "Using the saved title and description"
+        : titleConflict
+          ? "Using the saved title"
+          : "Using the saved description",
+    );
+    setState(stillDirty ? "pending" : "idle");
     focusEditor();
   }
   /** After a conflict choice the notice goes away; the caret returns to the text in conflict. */
@@ -432,58 +497,55 @@ export function TicketEditor({
     ? ` by ${ticket.source.provider_name}`
     : "";
   const notice = conflict && (
-    <div role="status" className="editor-conflict">
-      <p>
+    <Alert
+      tone="attention"
+      size="compact"
+      role="status"
+      className="editor-conflict"
+    >
+      <AlertDescription>
         {titleConflict && bodyConflict
           ? "The saved title and description"
           : titleConflict
             ? "The saved title"
             : "The saved description"}{" "}
-        changed elsewhere{changedBy} while you were editing. Your unsaved draft
-        is kept until you choose.
-      </p>
-      {titleConflict && (
-        <p>
-          Saved title: <strong>{ticket.title}</strong>
-        </p>
-      )}
-      {confirmSaved ? (
-        <div className="editor-conflict-actions">
-          <span>Discard your unsaved draft?</span>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => adoptSaved()}
-            autoFocus
-          >
-            Discard draft
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            onClick={() => {
-              setConfirmSaved(false);
-              focusEditor();
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      ) : (
-        <>
-          <div className="editor-conflict-actions">
+        changed elsewhere{changedBy} while you were editing.
+        {titleConflict && (
+          <>
+            {" "}
+            Saved: <strong>{ticket.title}</strong>
+          </>
+        )}
+      </AlertDescription>
+      <AlertActions>
+        {confirmSaved ? (
+          <>
+            <span className="editor-conflict-question">
+              Discard your draft?
+            </span>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               type="button"
-              onClick={() =>
-                draftHasText ? setConfirmSaved(true) : adoptSaved()
-              }
+              onClick={() => {
+                setConfirmSaved(false);
+                focusEditor();
+              }}
             >
-              Use saved text
+              Cancel
             </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              type="button"
+              onClick={() => adoptSaved()}
+              autoFocus
+            >
+              Discard draft
+            </Button>
+          </>
+        ) : (
+          <>
             <Button
               variant="outline"
               size="sm"
@@ -497,22 +559,43 @@ export function TicketEditor({
             >
               Keep my draft
             </Button>
-          </div>
-          <p className="editor-conflict-help">
-            Use saved text discards your draft. Keep my draft replaces the saved
-            text with it.
-          </p>
-        </>
-      )}
-    </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() =>
+                draftHasText ? setConfirmSaved(true) : adoptSaved()
+              }
+            >
+              Use saved text
+            </Button>
+          </>
+        )}
+      </AlertActions>
+    </Alert>
   );
   function edit(next: Content) {
     setDraft(next);
+    setAdopted(null);
     setState("pending");
   }
+  function finishEditing() {
+    setBodyMode("reading");
+    window.requestAnimationFrame(() => editButton.current?.focus());
+  }
+  const saveState = saving
+    ? "Saving…"
+    : conflict
+      ? "Unsaved — choose a version"
+      : unsent && state !== "failed"
+        ? "Pending save"
+        : state === "failed"
+          ? `${savedField} not saved`
+          : state === "saved"
+            ? `${savedField} saved`
+            : (adopted ?? "");
   return (
     <div className="ticket-editor">
-      {titleConflict && !bodyConflict && notice}
       <label className="editor-title">
         <span className="sr-only">Title</span>
         <textarea
@@ -520,9 +603,60 @@ export function TicketEditor({
           aria-label="Title"
           rows={1}
           value={draft.title}
+          aria-invalid={titleInvalid || undefined}
+          aria-describedby={
+            titleInvalid ? `title-error-${ticket.id}` : undefined
+          }
           onChange={(event) => edit({ ...draft, title: event.target.value })}
         />
       </label>
+      {titleInvalid && (
+        <div className="editor-title-error">
+          <FieldError id={`title-error-${ticket.id}`}>
+            A ticket needs a title.
+          </FieldError>
+        </div>
+      )}
+      {titleConflict && !bodyConflict && notice}
+      {/* One 32px row: the state line and Edit · E, or, while editing, the
+          session row. Its height never changes, so the text never moves. */}
+      <div className="ticket-state-row" data-session={editingBody || undefined}>
+        {editingBody ? (
+          <span ref={setSessionHost} className="ticket-session-tools" />
+        ) : (
+          <span className="ticket-state-text">{stateLine}</span>
+        )}
+        <span role="status" className="editor-save-state">
+          {saveState}
+        </span>
+        {editingBody ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            aria-label="Done editing"
+            onClick={finishEditing}
+          >
+            Done
+            <Kbd aria-hidden="true">Esc</Kbd>
+          </Button>
+        ) : (
+          draft.body && (
+            <Button
+              ref={editButton}
+              variant="ghost"
+              size="sm"
+              type="button"
+              aria-label="Edit description"
+              aria-keyshortcuts="E"
+              onClick={() => setBodyMode("editing")}
+            >
+              Edit
+              <Kbd aria-hidden="true">E</Kbd>
+            </Button>
+          )
+        )}
+      </div>
       {children}
       <div
         className="editor-body"
@@ -540,22 +674,9 @@ export function TicketEditor({
           className="sr-only"
         />
         {bodyConflict && notice}
-        <div className="description-heading">
-          <span id={`body-${ticket.id}`}>Description</span>
-          {editingBody ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={() => {
-                setBodyMode("reading");
-                window.requestAnimationFrame(() => editButton.current?.focus());
-              }}
-            >
-              Done editing
-            </Button>
-          ) : null}
-        </div>
+        <span id={`body-${ticket.id}`} className="sr-only">
+          Description
+        </span>
         {bodyConflict && (
           <div className="conflict-block">
             <p className="conflict-block-label">Saved text</p>
@@ -585,6 +706,10 @@ export function TicketEditor({
               attachmentTicketReference={ticket.reference}
               onChange={(body) => edit({ ...draft, body })}
               label="Description"
+              placeholder="Add a description — type / for blocks"
+              chrome="session"
+              chromeHost={editingBody ? sessionHost : null}
+              onEscape={finishEditing}
               autoFocus={editingBody}
               focusRequest={bodyFocus}
               {...(bodyCaret ? { focusLink: bodyCaret } : {})}
@@ -594,20 +719,6 @@ export function TicketEditor({
         {!editingBody &&
           (draft.body ? (
             <div className="description-reading">
-              <Button
-                ref={editButton}
-                variant="outline"
-                size="sm"
-                type="button"
-                className="description-edit"
-                aria-label="Edit description"
-                aria-keyshortcuts="E"
-                onClick={() => setBodyMode("editing")}
-              >
-                <Pencil data-icon="inline-start" aria-hidden="true" />
-                Edit
-                <Kbd aria-hidden="true">E</Kbd>
-              </Button>
               <div
                 ref={documentRef}
                 className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
@@ -633,55 +744,28 @@ export function TicketEditor({
               </div>
             </div>
           ) : (
-            <EmptyState
-              size="inline"
-              plain
-              description="No description yet."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  ref={editButton}
-                  onClick={() => setBodyMode("editing")}
-                >
-                  Add a description…
-                </Button>
-              }
-            />
+            // One quiet line that becomes the editor in place (detA DS-06).
+            <button
+              type="button"
+              ref={editButton}
+              className="description-add"
+              aria-keyshortcuts="E"
+              onClick={() => setBodyMode("editing")}
+            >
+              Add a description…
+            </button>
           ))}
       </div>
-      <p role="status" className="editor-save-state">
-        {saving
-          ? "Saving…"
-          : conflict
-            ? "Unsaved — choose a version"
-            : dirty && state !== "failed"
-              ? "Pending save"
-              : state === "failed"
-                ? `${savedField} not saved`
-                : state === "saved"
-                  ? `${savedField} saved`
-                  : ""}
-      </p>
-      {state === "failed" && (
-        <div role="alert" className="document-save-error ticket-save-error">
-          <p>Couldn&apos;t save your changes. Your draft is still here.</p>
-          <Button
-            size="sm"
-            onClick={() => {
+      {state === "failed" && error && (
+        <div className="ticket-save-error">
+          <FailureAlert
+            size="compact"
+            failure={error}
+            onRetry={() => {
               setState("pending");
               setRetry((value) => value + 1);
             }}
-          >
-            Retry
-          </Button>
-          {error && (
-            <details>
-              <summary>Details</summary>
-              <pre>{error}</pre>
-            </details>
-          )}
+          />
         </div>
       )}
     </div>

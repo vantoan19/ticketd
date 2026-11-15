@@ -79,28 +79,28 @@ test("the last backup shows its file, folder and Checked, and can be revealed", 
   const name = await screen.findByText("ticketd-backup-2026-11-01.sqlite3");
   const row = name.closest(".settings-list-row") as HTMLElement;
   expect(within(row).getByText("Checked")).toBeTruthy();
-  expect(row.textContent).toContain("/Users/me/Backups");
+  // The shared PathText: the name, then its folder; the full path is in a
+  // Tooltip, not a title.
+  expect(row.querySelector(".ui-path-folder")?.textContent).toBe("~/Backups");
   fireEvent.click(within(row).getByRole("button", { name: /^Show in / }));
   await waitFor(() =>
     expect(workspaceClient.reveal).toHaveBeenCalledWith(last.path),
   );
 });
 
-test("a failed read is its own state with Try again, not No backups yet", async () => {
+test("a failed read is its own state with Retry, not No backups yet", async () => {
   vi.mocked(workspaceClient.lastBackup).mockRejectedValueOnce(
     new Error("locked"),
   );
   renderPage();
   const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("Could not read the last backup");
-  expect(alert.textContent).toContain(
-    "This does not affect the backups themselves. Try again, or back up now.",
-  );
+  expect(alert.textContent).toContain("Couldn't load the last backup");
+  expect(alert.textContent).toContain("The backups themselves are fine.");
   expect(screen.queryByText("No backups yet")).toBeNull();
   // Backing up still works without the status.
   expect((backUpButton() as HTMLButtonElement).disabled).toBe(false);
   vi.mocked(workspaceClient.lastBackup).mockResolvedValue(last);
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(
     await screen.findByText("ticketd-backup-2026-11-01.sqlite3"),
   ).toBeTruthy();
@@ -117,10 +117,9 @@ test("Back up now shows the backing-up row, then the new last backup and a saved
   renderPage();
   await screen.findByText("No backups yet");
   fireEvent.click(backUpButton());
+  // The button keeps its place and says it; the row's sentence says what runs.
   expect(
-    await screen.findByText("Backing up…", {
-      selector: ".settings-list-row-title",
-    }),
+    await screen.findByRole("button", { name: "Backing up…" }),
   ).toBeTruthy();
   expect(
     screen.getByText(
@@ -143,6 +142,31 @@ test("Back up now shows the backing-up row, then the new last backup and a saved
   expect(client.backupWorkspace).toHaveBeenCalledWith(last.path);
 });
 
+test("the row says Backing up only once the save sheet returns a path", async () => {
+  let choose: (path: string | null) => void = () => {};
+  vi.mocked(workspaceClient.chooseSavePath).mockReturnValue(
+    new Promise((done) => {
+      choose = done;
+    }),
+  );
+  renderPage();
+  await screen.findByText("No backups yet");
+  fireEvent.click(backUpButton());
+  await waitFor(() =>
+    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
+  );
+  // The sheet is still asking where to save.
+  expect(screen.queryByText("Backing up…")).toBeNull();
+  expect(screen.getByText("No backups yet")).toBeTruthy();
+  fireEvent.click(backUpButton());
+  expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1);
+  vi.mocked(client.backupWorkspace).mockReturnValue(new Promise(() => {}));
+  choose(last.path);
+  expect(
+    await screen.findByRole("button", { name: "Backing up…" }),
+  ).toBeTruthy();
+});
+
 test("a refused backup is explained in the footer and keeps the previous status", async () => {
   vi.mocked(workspaceClient.lastBackup).mockResolvedValue(last);
   vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue("/tmp/taken");
@@ -150,9 +174,8 @@ test("a refused backup is explained in the footer and keeps the previous status"
   renderPage();
   await screen.findByText("ticketd-backup-2026-11-01.sqlite3");
   fireEvent.click(backUpButton());
-  const failure = await screen.findByText(
-    "The backup was not saved: a file already exists",
-  );
+  const failure = await screen.findByText("A file already exists.");
+  expect(failure.textContent).toContain("Couldn't save the backup.");
   expect(failure.closest(".settings-list-footer")).toBeTruthy();
   expect(screen.getByText("ticketd-backup-2026-11-01.sqlite3")).toBeTruthy();
 });
@@ -212,7 +235,7 @@ test("Choose backup… opens the file chooser, then the review dialog", async ()
   await screen.findByText("No backups yet");
   fireEvent.click(screen.getByRole("button", { name: "Choose backup…" }));
   expect(
-    await screen.findByRole("dialog", { name: "Restore from backup" }),
+    await screen.findByRole("dialog", { name: "Replace this workspace?" }),
   ).toBeTruthy();
   expect(workspaceClient.chooseBackupFile).toHaveBeenCalledWith({
     title: "Choose a ticketd backup",
@@ -226,11 +249,11 @@ test("a failed safety backup read is a message, never a count of 0", async () =>
   renderPage();
   const section = screen.getByRole("region", { name: "Safety backups" });
   const alert = await within(section).findByRole("alert");
-  expect(alert.textContent).toContain("Could not list safety backups");
-  expect(alert.textContent).toContain("no access");
+  expect(alert.textContent).toContain("Couldn't list safety backups");
+  expect(alert.textContent).toContain("No access.");
   expect(within(section).queryByText("No safety backups yet")).toBeNull();
   vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
-  fireEvent.click(within(section).getByRole("button", { name: "Try again" }));
+  fireEvent.click(within(section).getByRole("button", { name: "Retry" }));
   expect(
     await within(section).findByText("No safety backups yet"),
   ).toBeTruthy();
@@ -253,14 +276,12 @@ test("safety backups are rows with kind, date, path and a reveal button", async 
   ]);
   renderPage();
   const section = screen.getByRole("region", { name: "Safety backups" });
-  expect(
-    await within(section).findByText("/w/a.safety-1.sqlite3"),
-  ).toBeTruthy();
+  expect(await within(section).findByText("a.safety-1.sqlite3")).toBeTruthy();
   expect(within(section).getByText("Before a restore")).toBeTruthy();
   expect(within(section).getByText("Before an upgrade")).toBeTruthy();
   fireEvent.click(
     within(section).getByRole("button", {
-      name: /Show \/w\/a\.pre-migration-2\.sqlite3 in /,
+      name: /^Show in .*: \/w\/a\.pre-migration-2\.sqlite3$/,
     }),
   );
   await waitFor(() =>
@@ -268,4 +289,32 @@ test("safety backups are rows with kind, date, path and a reveal button", async 
       "/w/a.pre-migration-2.sqlite3",
     ),
   );
+});
+
+test("Restore… on a safety backup opens the same review for that file", async () => {
+  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([
+    {
+      path: "/w/a.safety-1.sqlite3",
+      kind: "safety",
+      saved_at: "2026-11-01T10:00:00Z",
+      size_bytes: 1,
+    },
+  ]);
+  vi.mocked(workspaceClient.inspectBackup).mockReturnValue(
+    new Promise(() => {}),
+  );
+  renderPage();
+  const section = screen.getByRole("region", { name: "Safety backups" });
+  fireEvent.click(
+    await within(section).findByRole("button", {
+      name: "Restore… /w/a.safety-1.sqlite3",
+    }),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "Replace this workspace?" }),
+  ).toBeTruthy();
+  expect(workspaceClient.inspectBackup).toHaveBeenCalledWith(
+    "/w/a.safety-1.sqlite3",
+  );
+  expect(workspaceClient.chooseBackupFile).not.toHaveBeenCalled();
 });

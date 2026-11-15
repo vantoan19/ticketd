@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
@@ -9,7 +14,7 @@ import { Folder, Layers } from "lucide-react";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { Picker } from "@/components/ui/picker";
 import { Switch } from "@/components/ui/switch";
-import { TokenField } from "@/components/ui/token-field";
+import { TagPicker } from "@/components/ui/tag-picker";
 import { client, type Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
@@ -89,7 +94,10 @@ export function CreateTicketDialog({
       .put("new-ticket", payload, draft?.body ? [draft.body] : [])
       .catch(() => {});
   }, [draft, recovery]);
-  const [error, setError] = useState("");
+  // One failure for the whole dialog, above the footer. A workspace-level
+  // cause is also in the band, so this says only what it means for this ticket.
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const workspaceBlocked = editingBlockedReason(useWorkspaceState());
   const [confirmNewTicket, setConfirmNewTicket] = useState(false);
   const [pending, setPending] = useState(false);
   const [completedCreation, setCompletedCreation] = useState<{
@@ -109,6 +117,12 @@ export function CreateTicketDialog({
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [createMore, setCreateMore] = useState(draft?.createMore ?? false);
   const [announcement, setAnnouncement] = useState("");
+  // "Created T-FV16." stays readable in the footer for a while (list C-06).
+  useEffect(() => {
+    if (!announcement) return;
+    const timer = window.setTimeout(() => setAnnouncement(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [announcement]);
   const titleRef = useRef<HTMLInputElement>(null);
   // The body scrolls inside a viewport-bound dialog, so a failure below the
   // fold would leave "Retry safely" unexplained: bring the notice into view.
@@ -180,7 +194,7 @@ export function CreateTicketDialog({
         !currentDraft.title.trim())
     )
       return;
-    setError("");
+    setError(null);
     lock.current = true;
     setPending(true);
     let submittedCreation = completedCreation;
@@ -239,13 +253,25 @@ export function CreateTicketDialog({
         refocusTitle.current = true;
       } else setDraft(null);
     } catch (reason) {
-      setError(
-        submittedCreation
-          ? `Ticket ${submittedCreation.reference} was created, but its draft could not be cleared: ${String(reason)}`
-          : creationAttempted
-            ? `Could not confirm whether the ticket was created. Retry safely with the same submission: ${String(reason)}`
-            : `Could not save the submission for a safe retry; no ticket was created: ${String(reason)}`,
-      );
+      if (submittedCreation) {
+        const failure = describeFailure(reason, "clear the draft");
+        setError({
+          ...failure,
+          sentence: `${submittedCreation.reference} was created. ${failure.sentence}`,
+        });
+      } else if (creationAttempted) {
+        const failure = describeFailure(reason, "confirm the new ticket");
+        setError({
+          ...failure,
+          sentence: `${failure.sentence} Retry safely: it never creates a second ticket.`,
+        });
+      } else {
+        const failure = describeFailure(reason, "create the ticket");
+        setError({
+          ...failure,
+          sentence: `${failure.sentence} Your draft is kept on this device.`,
+        });
+      }
     } finally {
       lock.current = false;
       setPending(false);
@@ -259,7 +285,7 @@ export function CreateTicketDialog({
     delete next.createMore;
     lock.current = true;
     setPending(true);
-    setError("");
+    setError(null);
     try {
       recovery.retry();
       await recovery.put("new-ticket", next, next.body ? [next.body] : []);
@@ -268,17 +294,16 @@ export function CreateTicketDialog({
       setConfirmNewTicket(false);
       refocusTitle.current = true;
     } catch (reason) {
-      setError(
-        `Could not save the edited draft. The original submission is still available to retry: ${String(reason)}`,
-      );
+      const failure = describeFailure(reason, "save the edited draft");
+      setError({
+        ...failure,
+        sentence: `${failure.sentence} The original submission can still be retried.`,
+      });
     } finally {
       lock.current = false;
       setPending(false);
     }
   }
-  const suggestions = vocabulary
-    .filter((tag) => !draft.tags.includes(tag))
-    .slice(0, 6);
   const hasSubmission = !!draft.requestId;
   const fieldsLocked = pending || hasSubmission || !!completedCreation;
   const primaryLabel = completedCreation
@@ -288,10 +313,15 @@ export function CreateTicketDialog({
       : "Create ticket";
   const blockedReason =
     !hasSubmission && !draft.title.trim()
-      ? "Add a title to create"
+      ? // Right after Create more, the result keeps the slot (list C-06).
+        announcement
+        ? `${announcement}.`
+        : "Add a title to create"
       : pending
         ? "Creating…"
-        : null;
+        : workspaceBlocked && !error
+          ? workspaceBlocked
+          : null;
   return (
     <DialogShell
       open={open}
@@ -311,6 +341,31 @@ export function CreateTicketDialog({
         </label>
       }
       blockedReason={blockedReason}
+      // Results and restored drafts live in the note slot, so nothing is
+      // inserted into the form (list C-05, C-06).
+      footerNote={
+        announcement ? (
+          `${announcement}.`
+        ) : draft.restored ? (
+          <>
+            Draft restored ·{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="inline"
+              aria-label="Discard draft"
+              disabled={fieldsLocked || hasSubmission}
+              onClick={() => {
+                update({ title: "", body: "", restored: false });
+                setEditorGeneration((value) => value + 1);
+                titleRef.current?.focus();
+              }}
+            >
+              Discard
+            </Button>
+          </>
+        ) : undefined
+      }
       onSubmit={() => void submit()}
       returnFocus={triggerRef}
       busy={pending || !!completedCreation}
@@ -376,6 +431,8 @@ export function CreateTicketDialog({
                 label="Description"
                 placeholder="Steps, acceptance criteria, or a checklist"
                 readOnly={fieldsLocked}
+                // The quick-composer chrome: its controls are always in
+                // place, so focusing the field never moves the form (C-04).
                 value={draft.body}
                 onChange={(body) => update({ body })}
               />
@@ -384,24 +441,6 @@ export function CreateTicketDialog({
               </small>
             </div>
           </Field>
-          {draft.restored && (
-            <p className="create-restored" role="status">
-              Draft restored.{" "}
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                disabled={fieldsLocked || hasSubmission}
-                onClick={() => {
-                  update({ title: "", body: "", restored: false });
-                  setEditorGeneration((value) => value + 1);
-                  titleRef.current?.focus();
-                }}
-              >
-                Discard draft
-              </Button>
-            </p>
-          )}
           <div
             className="create-properties"
             role="group"
@@ -417,6 +456,7 @@ export function CreateTicketDialog({
               options={directStatuses.map((status) => ({
                 value: status,
                 label: status,
+                icon: <StatusIcon status={status} size={16} decorative />,
               }))}
             />
             <Picker
@@ -429,8 +469,17 @@ export function CreateTicketDialog({
                 update({ project: project === NONE ? "" : project })
               }
               options={[
-                { value: NONE, label: "No project" },
-                ...projects.map((p) => ({ value: p.id, label: p.name })),
+                ...projects.map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                  icon: <Folder aria-hidden="true" />,
+                })),
+                {
+                  value: NONE,
+                  label: "No project",
+                  icon: <Folder aria-hidden="true" />,
+                  clear: true,
+                },
               ]}
             />
             <Picker
@@ -443,21 +492,30 @@ export function CreateTicketDialog({
                 update({ plan: plan === NONE ? "" : plan })
               }
               options={[
-                { value: NONE, label: "No Plan" },
                 ...plans
                   .filter((e) => !e.archived)
-                  .map((e) => ({ value: e.id, label: e.name })),
+                  .map((e) => ({
+                    value: e.id,
+                    label: e.name,
+                    icon: <Layers aria-hidden="true" />,
+                  })),
+                {
+                  value: NONE,
+                  label: "No Plan",
+                  icon: <Layers aria-hidden="true" />,
+                  clear: true,
+                },
               ]}
             />
           </div>
           <div className="flex flex-col gap-2">
             <span aria-hidden="true">Tags</span>
-            <TokenField
-              label="Add tag"
-              chevron
-              placeholder="Add a tag"
-              suggestions={suggestions}
+            <TagPicker
+              label="Tags"
+              placeholder="Add tags"
+              suggestions={vocabulary}
               values={draft.tags}
+              disabled={fieldsLocked}
               onChange={(tags) =>
                 update({ tags: tags.map((tag) => tag.toLowerCase()) })
               }
@@ -465,9 +523,7 @@ export function CreateTicketDialog({
           </div>
         </fieldset>
         {error && (
-          <Alert tone="error" ref={errorRef}>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+          <FailureAlert ref={errorRef} size="compact" failure={error} />
         )}
         {hasSubmission &&
           !completedCreation &&

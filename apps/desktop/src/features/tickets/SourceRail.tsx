@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
-import { Cloud, LaptopMinimal, RefreshCw } from "lucide-react";
+import { Cloud, LaptopMinimal, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   Popover,
   PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { StatusDot } from "@/components/ui/status-dot";
 import { client, type Ticket } from "@/lib/api/client";
 import { LocalPublication } from "./PublishToSource";
-import { RailSection } from "./RailSection";
+import { RailRow, RailSection } from "./RailSection";
 import { SourceLink } from "./SourceLink";
-import { TakeOwnership } from "./TakeOwnership";
 import { useSourceActivity } from "./source-activity";
 import { externalSource, freshness } from "./ticket-source";
 import { useNow } from "@/lib/use-now";
@@ -104,40 +106,54 @@ export function SourceRail({
               )}
             </small>
           )}
-          <div className="rail-source-actions">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={sync.running}
-              onClick={() => void sync.run()}
-            >
-              <RefreshCw data-icon="inline-start" />
-              {owner.unavailable ? "Retry" : "Refresh"}
-            </Button>
-            {owner.unavailable ? (
-              <TakeOwnership
-                ticket={ticket}
-                refresh={refresh}
+          {/* Unavailable, the notice at the top of the document owns Retry and
+              Take ownership; the rail only says where things stand. */}
+          {!owner.unavailable && !chip && (
+            <>
+              <RailRow
+                icon={<RefreshCw aria-hidden="true" />}
+                muted
+                disabled={sync.running}
+                onClick={() => void sync.run()}
+              >
+                Refresh
+              </RailRow>
+              <RailRow
+                icon={<Settings2 aria-hidden="true" />}
+                muted
+                onClick={activity.openSettings}
+              >
+                Discovery settings
+              </RailRow>
+            </>
+          )}
+          {!owner.unavailable && chip && (
+            <div className="rail-source-actions">
+              <Button
                 variant="ghost"
-              />
-            ) : (
-              <Button variant="link" size="sm" onClick={activity.openSettings}>
-                Discovery
+                size="sm"
+                disabled={sync.running}
+                onClick={() => void sync.run()}
+              >
+                <RefreshCw data-icon="inline-start" />
+                Refresh
               </Button>
-            )}
-          </div>
+              <Button variant="ghost" size="sm" onClick={activity.openSettings}>
+                Discovery settings
+              </Button>
+            </div>
+          )}
           {sync.failure && !sync.running && (
-            <small role="alert">
-              Could not refresh: {sync.failure} Saved content is unchanged.
-            </small>
+            <FailureAlert
+              size="compact"
+              failure={sync.failure}
+              onRetry={() => void sync.run()}
+            />
           )}
         </div>
       ) : ticket.source ? (
         <div className="rail-source">
-          <span
-            className="rail-value"
-            title="Owned in ticketd; the external issue is kept as provenance"
-          >
+          <span className="rail-value">
             <LaptopMinimal aria-hidden="true" />
             Local
           </span>
@@ -153,7 +169,7 @@ export function SourceRail({
         </div>
       ) : (
         <div className="rail-source">
-          <span className="rail-value" title="Created and edited in ticketd">
+          <span className="rail-value">
             <LaptopMinimal aria-hidden="true" />
             Local
           </span>
@@ -168,16 +184,23 @@ export function SourceRail({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" aria-label={`Source: ${name}`}>
-          {owner ? (
-            <Cloud data-icon="inline-start" />
-          ) : (
-            <LaptopMinimal data-icon="inline-start" />
-          )}
-          <span className="truncate">{name}</span>
-        </Button>
+        <RailRow
+          aria-label={`Source: ${name}`}
+          icon={
+            owner ? (
+              <Cloud aria-hidden="true" />
+            ) : (
+              <LaptopMinimal aria-hidden="true" />
+            )
+          }
+        >
+          {name}
+        </RailRow>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72" aria-label="Source">
+        <PopoverHeader>
+          <PopoverTitle>Source</PopoverTitle>
+        </PopoverHeader>
         {body}
       </PopoverContent>
     </Popover>

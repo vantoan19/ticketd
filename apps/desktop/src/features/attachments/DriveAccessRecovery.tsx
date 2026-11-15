@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { File } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   attachments,
   type DriveAccess,
   type DriveConfiguration,
   type DriveCopyInspection,
 } from "@/lib/api/attachments";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { DriveSetupNotice } from "./DriveSetupNotice";
 
 const headings = {
@@ -41,7 +46,7 @@ export function DriveAccessRecovery({
   );
   const [busy, setBusy] = useState(false);
   const [selecting, setSelecting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
   const generation = useRef(0);
   const observation = useRef(0);
   const operation = useRef<string | null>(null);
@@ -61,7 +66,7 @@ export function DriveAccessRecovery({
       })
       .catch((reason: unknown) => {
         if (generation.current === current && observation.current === sequence)
-          setError(String(reason));
+          setError(describeFailure(reason, "check Drive access"));
       });
     void attachments
       .driveConfiguration()
@@ -69,7 +74,8 @@ export function DriveAccessRecovery({
         if (generation.current === current) setConfiguration(value);
       })
       .catch((reason: unknown) => {
-        if (generation.current === current) setError(String(reason));
+        if (generation.current === current)
+          setError(describeFailure(reason, "read the Drive setup"));
       });
     return () => {
       generation.current += 1;
@@ -86,7 +92,7 @@ export function DriveAccessRecovery({
     const sequence = ++observation.current;
     setBusy(true);
     setSelecting(recover);
-    setError("");
+    setError(null);
     const operationId = recover ? crypto.randomUUID() : null;
     operation.current = operationId;
     try {
@@ -98,7 +104,13 @@ export function DriveAccessRecovery({
       setAccess(result);
       if (!result.failure || uploadedCopy) onRefresh();
     } catch (reason) {
-      if (generation.current === current) setError(String(reason));
+      if (generation.current === current)
+        setError(
+          describeFailure(
+            reason,
+            recover ? "authorize the file" : "check Drive access",
+          ),
+        );
     } finally {
       if (generation.current === current) {
         operation.current = null;
@@ -111,11 +123,12 @@ export function DriveAccessRecovery({
   async function requestAccess() {
     const current = generation.current;
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await attachments.open(id);
     } catch (reason) {
-      if (generation.current === current) setError(String(reason));
+      if (generation.current === current)
+        setError(describeFailure(reason, "open the file in Drive"));
     } finally {
       if (generation.current === current) setBusy(false);
     }
@@ -199,7 +212,7 @@ export function DriveAccessRecovery({
                 .cancelDriveSelection(operationId)
                 .catch((reason: unknown) => {
                   if (generation.current === currentGeneration)
-                    setError(String(reason));
+                    setError(describeFailure(reason, "cancel the selection"));
                 });
           }}
         >
@@ -209,7 +222,7 @@ export function DriveAccessRecovery({
       <small className="attachment-hint">
         Last-known details and authored references are preserved.
       </small>
-      {error && <p role="alert">{error}</p>}
+      {error && <FailureAlert size="compact" failure={error} />}
     </div>
   );
 }

@@ -76,9 +76,11 @@ test("replacement changes only the chosen inline occurrence and preserves image 
   const source = `Before [Keep **this**](${oldUri}) and ![Chosen label](${oldUri}) after.`;
   render(<MarkdownDocument source={source} onChange={change} />);
   fireEvent.click(screen.getByRole("button", { name: "Chosen label" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Choose a replacement" }),
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
     await screen.findByRole("radio", { name: "Select Replacement" }),
@@ -99,9 +101,11 @@ test("replacement refuses a changed draft rather than guessing which reference m
   const source = `[Chosen](${oldUri}) and [Other](${oldUri})`;
   const view = render(<MarkdownDocument source={source} onChange={change} />);
   fireEvent.click(screen.getByRole("button", { name: "Chosen" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Choose a replacement" }),
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
   view.rerender(
     <MarkdownDocument source={`${source} changed`} onChange={change} />,
   );
@@ -122,9 +126,11 @@ test("shared reference definitions stay intact when one reference-style use is r
   const source = `Before [Chosen][file] and [Keep][file].\n\n[file]: ${oldUri}\n`;
   render(<MarkdownDocument source={source} onChange={change} />);
   fireEvent.click(screen.getByRole("button", { name: "Chosen" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Choose a replacement" }),
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
     await screen.findByRole("radio", { name: "Select Replacement" }),
@@ -144,9 +150,11 @@ test("a destination-shaped label and an inline title survive selected replacemen
   const source = `[Chosen \\](${oldUri}) label](${oldUri} "keep title")`;
   render(<MarkdownDocument source={source} onChange={change} />);
   fireEvent.click(screen.getByRole("button", { name: /^Chosen/ }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Choose a replacement" }),
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
     await screen.findByRole("radio", { name: "Select Replacement" }),
@@ -175,9 +183,11 @@ test("canceling a pending replacement leaves the original reference intact", asy
   const change = vi.fn();
   render(<MarkdownDocument source={`[Chosen](${oldUri})`} onChange={change} />);
   fireEvent.click(screen.getByRole("button", { name: "Chosen" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Choose a replacement" }),
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
     await screen.findByRole("radio", { name: "Select Replacement" }),

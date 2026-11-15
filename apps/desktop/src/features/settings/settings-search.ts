@@ -230,17 +230,32 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "google-drive",
   },
   {
-    title: "Lists",
+    title: "Everywhere",
     description:
-      "Move between tickets, open the focused ticket and resize the list from the divider.",
-    keywords: "keyboard shortcuts keys hotkeys arrows enter divider resize",
+      "Capture a thought, add selected text to a Chat and search Settings.",
+    keywords:
+      "keyboard shortcuts keys hotkeys capture new chat add settings find",
     section: "keyboard-shortcuts",
   },
   {
-    title: "Creating",
+    title: "Lists",
     description:
-      "Create from the New ticket dialog, and capture a thought from anywhere.",
-    keywords: "keyboard shortcuts keys hotkeys new ticket capture",
+      "Move between tickets, open or select the focused ticket and resize the list from the divider.",
+    keywords:
+      "keyboard shortcuts keys hotkeys arrows enter space select home end divider resize",
+    section: "keyboard-shortcuts",
+  },
+  {
+    title: "Ticket",
+    description: "Edit the description and create from the New ticket dialog.",
+    keywords:
+      "keyboard shortcuts keys hotkeys edit description new ticket create",
+    section: "keyboard-shortcuts",
+  },
+  {
+    title: "Chat",
+    description: "Send, queue, stop and answer requests from the keyboard.",
+    keywords: "keyboard shortcuts keys hotkeys chat send queue stop model",
     section: "keyboard-shortcuts",
   },
   {

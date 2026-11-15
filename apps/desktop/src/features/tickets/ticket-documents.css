@@ -48,8 +48,8 @@
   text-decoration: underline;
 }
 .ticket-documents-source:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .ticket-documents-badge {
   flex: none;
@@ -74,8 +74,8 @@
   color: var(--foreground);
 }
 .ticket-documents-unlink:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .ticket-documents-unlink svg {
   width: 14px;
@@ -105,8 +105,8 @@
 }
 .ticket-documents-item:focus-visible,
 .document-picker-item:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .ticket-documents-item svg,
 .document-picker-item svg {
@@ -140,8 +140,8 @@
   color: var(--foreground);
 }
 .ticket-documents-edit:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* The heading, with where it came from on its own muted line. */

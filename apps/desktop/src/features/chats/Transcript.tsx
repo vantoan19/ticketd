@@ -1,3 +1,4 @@
+import { renderedLines } from "@/components/ui/rendered-lines";
 import {
   Fragment,
   createContext,
@@ -18,7 +19,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
-  Copy,
   Eye,
   FilePlus2,
   FileText,
@@ -36,16 +36,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
-import { Reference } from "@/components/ui/reference";
+import { RecordLink } from "@/components/ui/record-link";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { useCopy } from "@/components/ui/use-copy";
+import { Tooltip } from "@/components/ui/tooltip";
+import { CopyButton } from "@/components/ui/copy-button";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -54,6 +48,7 @@ import {
   type ChatState,
   type RecordChange,
   type Step,
+  type TicketdCall,
   type TranscriptItem,
   type ItemOf,
   type LinkedRecord,
@@ -93,6 +88,7 @@ import { ImageTiles } from "@/features/chats/ImageTiles";
 import { OutputBox } from "@/features/chats/OutputBox";
 import { ReceiptRow } from "@/features/chats/ReceiptRow";
 import { useReading } from "@/features/chats/use-transcript-scroll";
+import { formatTime } from "@/lib/format";
 
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
@@ -121,12 +117,7 @@ const OpeningContext = createContext(false);
 /** "10:44": when your message was sent, as the hover line says it. */
 const sentAt = (stamp: string) => {
   const date = new Date(stamp);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleTimeString(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  return Number.isNaN(date.getTime()) ? "" : formatTime(date);
 };
 
 /**
@@ -150,7 +141,7 @@ function SentMention({
   if (trashed)
     return (
       <>
-        {ticket ? <code className="chat-mono">{text}</code> : text}
+        {ticket ? <RecordLink gone reference={text} /> : text}
         {goneWords("trashed")}
       </>
     );
@@ -160,17 +151,10 @@ function SentMention({
       : record.kind === "document"
         ? openDocument?.(record.id)
         : openProject?.(record.id);
-  return (
-    // Inline text, not a Button: it reads as a link inside the message.
-    <button
-      type="button"
-      className={
-        ticket ? "chat-records-ref" : "chat-records-ref chat-records-name"
-      }
-      onClick={open}
-    >
-      {text}
-    </button>
+  return ticket ? (
+    <RecordLink reference={text} onClick={open} />
+  ) : (
+    <RecordLink onClick={open}>{text}</RecordLink>
   );
 }
 
@@ -208,24 +192,17 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
     opening && item.delivery === "sending"
       ? ""
       : DELIVERY_CAPTION[item.delivery];
-  const { copied, error, copy } = useCopy();
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
   // Measured again whenever the message's width changes: a pane narrowed after
-  // the message was shown clamps it, and then it needs Show more. A clamped box
-  // reports only its four lines as its scroll height in WebKit and Chrome, so the
-  // full height is read with the clamp lifted for the measurement.
+  // the message was shown clamps it, and then it needs Show more. Decided by
+  // rendered lines, not pixels: a mention chip overflows its line by 2px and
+  // made one-line messages offer Show more (CH-31).
   useLayoutEffect(() => {
     const box = text.current;
     if (!box || more) return;
-    const measure = () => {
-      const clamped = box.clientHeight;
-      box.removeAttribute("data-clamped");
-      const full = box.scrollHeight;
-      box.setAttribute("data-clamped", "");
-      setLong(full > clamped + 1);
-    };
+    const measure = () => setLong(renderedLines(box) > 4);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
@@ -258,16 +235,8 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
       {caption && <div className="chat-caption">{caption}</div>}
       <div className="chat-you-actions">
         {time && <span className="chat-fine">{time}</span>}
-        <IconButton
-          label="Copy message"
-          onClick={() => void copy("Message", item.text)}
-        >
-          {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-        </IconButton>
-        <span className="sr-only" role="status">
-          {copied && "Copied"}
-          {error}
-        </span>
+        {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
+        <CopyButton text={item.text} label="Copy message" />
       </div>
     </div>
   );
@@ -284,7 +253,6 @@ function Response({
   readOnly: boolean;
   actions: TranscriptActions;
 }) {
-  const { copied, error, copy } = useCopy();
   return (
     <div className="chat-turn">
       <div className="chat-ai">
@@ -298,12 +266,7 @@ function Response({
       )}
       {item.state === "complete" && (
         <div className="chat-actions">
-          <IconButton
-            label="Copy response"
-            onClick={() => void copy("Response", item.text)}
-          >
-            {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-          </IconButton>
+          <CopyButton text={item.text} label="Copy response" />
           {!readOnly && (
             <Button
               variant="ghost"
@@ -313,10 +276,6 @@ function Response({
               <FilePlus2 aria-hidden /> Save as Document
             </Button>
           )}
-          <span className="chat-fine" role="status">
-            {copied && "Copied"}
-            {error}
-          </span>
         </div>
       )}
     </div>
@@ -350,6 +309,26 @@ const STEP_ICONS: Record<Step["kind"], LucideIcon> = {
   run: Terminal,
   web: Globe,
   other: Wrench,
+};
+
+/**
+ * A command that only calls ticketd reads as what it does, so its icon is
+ * its first verb's, not the terminal's: "Read T-12" takes the eye (CH-29).
+ */
+const TICKETD_ICONS: Record<TicketdCall["verb"], LucideIcon> = {
+  read: Eye,
+  list: Eye,
+  search: Search,
+  create: SquarePlus,
+  add: SquarePlus,
+  change: Pencil,
+  set: Pencil,
+  move: Pencil,
+  restore: Pencil,
+  tag: Pencil,
+  untag: Pencil,
+  post: MessageSquareText,
+  run: Terminal,
 };
 
 /** Whether a step's targets are files that can still be opened. */
@@ -501,7 +480,8 @@ export function StepRow({
   // A row that opens is a button already, so its names cannot be buttons too.
   const files = !detail && opensFiles(step) ? (step.targets ?? []) : [];
   const names = shownNames(files.map((target) => target.text));
-  const Icon = STEP_ICONS[step.kind];
+  const call = step.kind === "run" ? step.ticketd?.[0] : undefined;
+  const Icon = call ? TICKETD_ICONS[call.verb] : STEP_ICONS[step.kind];
   const line = (
     <RowLine
       icon={
@@ -603,16 +583,9 @@ export function StepRow({
   );
   return (
     <>
-      {decision ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>{row}</TooltipTrigger>
-            <TooltipContent side="right">{decision}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        row
-      )}
+      <Tooltip content={decision} side="right">
+        {row}
+      </Tooltip>
       {failure && (
         <p className="chat-fine chat-step-alert" role="alert">
           {failure}
@@ -626,6 +599,14 @@ export function StepRow({
 /** A record the agent changed, as a step row: verb first, the reference in mono. */
 function RecordStep({ change }: { change: RecordChange }) {
   const openDocument = useContext(DocumentNavigation);
+  const openTicket = useContext(TicketNavigation);
+  // A reference that opens is a RecordLink; one that is gone is plain (CH-28).
+  const ticket = (reference: string) =>
+    change.gone || !openTicket ? (
+      <RecordLink gone reference={reference} />
+    ) : (
+      <RecordLink reference={reference} onClick={() => openTicket(reference)} />
+    );
   let icon: ReactNode;
   let words: ReactNode;
   switch (change.kind) {
@@ -633,7 +614,7 @@ function RecordStep({ change }: { change: RecordChange }) {
       icon = <StatusIcon status={change.to} decorative />;
       words = (
         <>
-          Moved <Reference>{change.reference}</Reference>
+          Moved {ticket(change.reference)}
           {goneWords(change.gone)} to {change.to}
         </>
       );
@@ -642,7 +623,7 @@ function RecordStep({ change }: { change: RecordChange }) {
       icon = <MessageSquareText size={16} />;
       words = (
         <>
-          Posted an update on <Reference>{change.reference}</Reference>
+          Posted an update on {ticket(change.reference)}
           {goneWords(change.gone)}
         </>
       );
@@ -654,14 +635,9 @@ function RecordStep({ change }: { change: RecordChange }) {
         <>
           Created the Document{" "}
           {openDocument && !change.gone ? (
-            // Inline text, not a Button: it reads as a link inside the sentence.
-            <button
-              type="button"
-              className="chat-record-link"
-              onClick={() => openDocument(change.document_id)}
-            >
+            <RecordLink onClick={() => openDocument(change.document_id)}>
               {change.title}
-            </button>
+            </RecordLink>
           ) : (
             <>
               {change.title}
@@ -679,6 +655,20 @@ function RecordStep({ change }: { change: RecordChange }) {
   );
 }
 
+/**
+ * "Answered · Fail open", or "Expired · `npm test`": what expired is a
+ * command or path, so it is set in mono as step targets are (CH-30).
+ */
+function ReceiptWords({ item }: { item: ItemOf<"request"> }) {
+  if (item.state !== "expired" || item.request === "question")
+    return receiptLine(item);
+  return (
+    <>
+      Expired · <code className="chat-mono">{item.subject ?? item.title}</code>
+    </>
+  );
+}
+
 /** An answered question or an expired request, in regular weight with no fill. */
 function Receipt({ item }: { item: ItemOf<"request"> }) {
   return (
@@ -688,7 +678,7 @@ function Receipt({ item }: { item: ItemOf<"request"> }) {
           item.state === "expired" ? <Clock size={16} /> : <Check size={16} />
         }
       >
-        {receiptLine(item)}
+        <ReceiptWords item={item} />
       </RowLine>
     </div>
   );
@@ -1096,7 +1086,11 @@ const Item = memo(function Item({
       );
     case "session":
       return (
-        <div className="chat-divider" role="separator">
+        <div
+          className="chat-divider"
+          role="separator"
+          aria-label={`Fresh session · started with ${SESSION_HISTORY[item.history](item.count)}`}
+        >
           Fresh session · started with{" "}
           {SESSION_HISTORY[item.history](item.count)}
         </div>

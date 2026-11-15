@@ -278,7 +278,7 @@ test("the unavailable notice says what failed, since when, that nothing was lost
   });
   // A failed retry does not claim success.
   expect(
-    await within(notice).findByText(/Still unavailable: Network is down\./),
+    await within(notice).findByText(/Still unavailable. Network is down\./),
   ).toBeTruthy();
 });
 
@@ -345,7 +345,8 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
   expect(
     within(section).getByText(/Nothing in ticketd was deleted or completed/),
   ).toBeTruthy();
-  expect(within(section).getByRole("button", { name: "Retry" })).toBeTruthy();
+  // The notice at the top of the document owns Retry; the rail only says so.
+  expect(within(section).queryByRole("button", { name: "Retry" })).toBeNull();
   expect(section.querySelectorAll('[data-slot="status-dot"]')).toHaveLength(1);
   expect(within(section).queryByText(/Edit them there/)).toBeNull();
   rerender(
@@ -541,6 +542,6 @@ test("discovery provenance follows the core's match flag and links to its settin
   expect(
     screen.getByText(/No longer matches discovery. It keeps syncing/),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Discovery" }));
+  fireEvent.click(screen.getByRole("button", { name: "Discovery settings" }));
   expect(openSettings).toHaveBeenCalledOnce();
 });

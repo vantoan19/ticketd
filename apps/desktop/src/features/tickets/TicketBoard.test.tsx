@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { chooseFilter } from "@/test/filters";
 import {
   act,
   cleanup,
@@ -272,63 +273,66 @@ test("Display holds Layout and Rows; both persist and the header carries no togg
   expect(layoutRadio("Board").getAttribute("aria-checked")).toBe("true");
 });
 
-test("Board and List resizing retain independent pane widths without replacing the detail draft", async () => {
+test("an open card peeks over the board, which keeps its width, and the list split survives", async () => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
-  const app = render(<App />);
+  render(<App />);
   await settle();
   fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ }));
   await settle();
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Keep this unsaved draft" },
   });
-  let separator = screen.getByRole("separator", { name: "Resize ticket list" });
-  const size = () => Number(separator.getAttribute("aria-valuenow"));
-  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  const separator = () =>
+    screen.queryByRole("separator", { name: "Resize ticket list" });
+  const size = () => Number(separator()?.getAttribute("aria-valuenow"));
+  fireEvent.keyDown(separator()!, { key: "ArrowRight" });
   await settle();
   const listSize = size();
   await showBoard();
-  expect(size()).toBeCloseTo(44);
-  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  // The open card is a peek over the board: no split to resize (S5).
+  expect(
+    document.querySelector(".ticket-workspace")?.hasAttribute("data-peek"),
+  ).toBe(true);
+  // Escape closes the peek (a first one may close an open tooltip).
+  for (let press = 0; press < 2; press++)
+    fireEvent.keyDown(document.getElementById("detail-heading")!, {
+      key: "Escape",
+    });
   await settle();
-  const boardSize = size();
-  expect(boardSize).toBeGreaterThan(44);
+  expect(
+    document.querySelector(".ticket-workspace")?.hasAttribute("data-peek"),
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ }));
+  await settle();
   chooseLayout("List");
   await settle();
   expect(size()).toBeCloseTo(listSize);
-  await showBoard();
-  expect(size()).toBeCloseTo(boardSize);
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Keep this unsaved draft",
   );
-  app.unmount();
-  render(<App />);
-  await settle();
-  fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ }));
-  await settle();
-  separator = screen.getByRole("separator", { name: "Resize ticket list" });
-  expect(size()).toBeCloseTo(boardSize);
-  chooseLayout("List");
-  await settle();
-  expect(size()).toBeCloseTo(listSize);
 });
 
-test("saved-status feedback can be dismissed and does not return after leaving its filtered scope", async () => {
+test("saved-status feedback is the pane's status line, can be dismissed and does not return", async () => {
   saved = [ticket(1), ticket(3)];
   render(<App />);
   await settle();
   fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
   await settle();
   await showBoard();
+  const board = screen.getByRole("region", { name: "Ticket status board" });
+  const top = board.getBoundingClientRect().top;
   await chooseStatus("T-KQ1", "In progress");
   const message =
-    "T-KQ1 is now In progress. It no longer matches the current filters.";
+    "Moved T-KQ1 to In progress. It no longer matches the filters";
   const notice = screen.getByText(message).closest('[role="status"]')!;
-  expect(
-    within(notice as HTMLElement).getByRole("button", {
-      name: "Dismiss status update",
-    }),
-  ).toBeTruthy();
+  // Nothing is inserted above the columns (list B-04): the line floats.
+  expect(notice.getAttribute("data-slot")).toBe("status-line");
+  expect(board.getBoundingClientRect().top).toBe(top);
+  fireEvent.click(
+    within(notice as HTMLElement).getByRole("button", { name: "Dismiss" }),
+  );
+  expect(screen.queryByText(message)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
   await settle();
   expect(screen.queryByText(message)).toBeNull();
@@ -338,20 +342,17 @@ test("saved-status feedback can be dismissed and does not return after leaving i
   await chooseStatus("T-KQ3", "In review");
   expect(
     screen.getByText(
-      "T-KQ3 is now In review. It no longer matches the current filters.",
+      "Moved T-KQ3 to In review. It no longer matches the filters",
     ),
   ).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Dismiss status update" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(
     screen.queryByText(
-      "T-KQ3 is now In review. It no longer matches the current filters.",
+      "Moved T-KQ3 to In review. It no longer matches the filters",
     ),
   ).toBeNull();
-  expect(document.activeElement).toBe(
-    screen.getByRole("region", { name: "Ticket status board" }),
-  );
+  // Closing the line keeps focus in the pane, never on the page.
+  expect(document.activeElement?.closest(".ticket-list")).toBeTruthy();
 });
 
 function boardGeometry() {
@@ -426,7 +427,7 @@ test("pointer dragging into an empty column saves through the card status action
       screen.getByRole("region", { name: "In progress column" }),
     ).getByText("Ticket 1"),
   ).toBeTruthy();
-  expect(screen.getByText("T-KQ1 is now In progress.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to In progress")).toBeTruthy();
   expect(
     screen.queryByRole("button", { name: "Close ticket details" }),
   ).toBeNull();
@@ -598,15 +599,13 @@ test("a column empty because of Ready filtering accepts a drag and explains the 
   await settle();
   expect(
     screen.getByText(
-      "T-KQ1 is now In progress. It no longer matches the current filters.",
+      "Moved T-KQ1 to In progress. It no longer matches the filters",
     ),
   ).toBeTruthy();
-  expect(
-    within(
-      screen.getByRole("region", { name: "Ticket status board" }),
-    ).queryByText("Ticket 1"),
-  ).toBeNull();
-  expect(screen.getAllByText("No matches")).toHaveLength(6);
+  // Nothing left: one empty state for the view, not six empty columns.
+  const list = document.querySelector<HTMLElement>(".ticket-list")!;
+  expect(within(list).queryByText("Ticket 1")).toBeNull();
+  expect(within(list).getByText("No Ready tickets")).toBeTruthy();
 });
 
 test("choosing the saved status does not write, and a pending card cannot submit another move", async () => {
@@ -623,7 +622,7 @@ test("choosing the saved status does not write, and a pending card cannot submit
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   await chooseStatus("T-KQ1", "Done");
-  expect(screen.getByText("Saving T-KQ1…")).toBeTruthy();
+  expect(screen.getByText("Saving…")).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   ).toHaveProperty("disabled", true);
@@ -643,7 +642,7 @@ test("choosing the saved status does not write, and a pending card cannot submit
     finish?.([saved[0]]);
   });
   await settle(20);
-  expect(screen.queryByText("Saving T-KQ1…")).toBeNull();
+  expect(screen.queryByText("Saving…")).toBeNull();
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   );
@@ -667,7 +666,7 @@ test("a failed save keeps its saved column and retries with the same request ide
       { name: /T-KQ1.*Ticket 1/ },
     ),
   ).toBeTruthy();
-  expect(screen.queryByText("T-KQ1 is now Canceled.")).toBeNull();
+  expect(screen.queryByText("Moved T-KQ1 to Canceled")).toBeNull();
   fail = false;
   fireEvent.click(
     screen.getByRole("button", { name: "Retry status change for T-KQ1" }),
@@ -678,7 +677,7 @@ test("a failed save keeps its saved column and retries with the same request ide
   );
   expect(writes).toHaveLength(2);
   expect(writes[1]?.[1]).toEqual(writes[0]?.[1]);
-  expect(screen.getByText("T-KQ1 is now Canceled.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Canceled")).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Canceled column" })).getByRole(
       "button",
@@ -701,9 +700,7 @@ test("a lost response reconciles applied state and a historical replay never rep
   await settle();
   await showBoard();
   await chooseStatus("T-KQ1", "Done");
-  expect(screen.getByRole("alert").textContent).toContain(
-    "Current saved status: Done",
-  );
+  expect(screen.getByRole("alert").textContent).toContain("It is now Done.");
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
@@ -715,7 +712,7 @@ test("a lost response reconciles applied state and a historical replay never rep
     screen.getByRole("button", { name: "Retry status change for T-KQ1" }),
   );
   await settle();
-  expect(screen.getByText("T-KQ1 is now In review.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to In review")).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "In review column" })).getByRole(
       "button",
@@ -788,9 +785,9 @@ test("card menus honor core status choices, source closure exceptions and retain
   fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   await settle();
   await chooseStatus("T-KQ2", "Canceled");
-  expect(screen.getByText("T-KQ2 is now Canceled.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ2 to Canceled")).toBeTruthy();
   await chooseStatus("T-KQ3", "Done");
-  expect(screen.getByText("T-KQ3 is now Done.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ3 to Done")).toBeTruthy();
 });
 
 test("ownership changes during a card save reconcile the saved state and permitted choices", async () => {
@@ -809,9 +806,7 @@ test("ownership changes during a card save reconcile the saved state and permitt
   await settle();
   await showBoard();
   await chooseStatus("T-KQ1", "In progress");
-  expect(screen.getByRole("alert").textContent).toContain(
-    "Current saved status: Done",
-  );
+  expect(screen.getByRole("alert").textContent).toContain("It is now Done.");
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
@@ -850,7 +845,7 @@ test("a failed pre-save read offers a working retry without writing stale card d
     screen.getByRole("button", { name: "Retry status change for T-KQ1" }),
   );
   await settle();
-  expect(screen.getByText("T-KQ1 is now Done.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Done")).toBeTruthy();
 });
 
 test("Duplicate uses the existing review and canceling either duplicate flow preserves saved relationships", async () => {
@@ -872,7 +867,7 @@ test("Duplicate uses the existing review and canceling either duplicate flow pre
   await settle(2000);
   await chooseStatus("T-KQ1", "Todo");
   expect(
-    screen.getByRole("heading", { name: "Remove the duplicate link?" }),
+    screen.getByRole("heading", { name: "Change the status to Todo?" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Keep duplicate" }));
   await settle(20);
@@ -882,7 +877,7 @@ test("Duplicate uses the existing review and canceling either duplicate flow pre
   fireEvent.click(screen.getByRole("button", { name: "Change status" }));
   await settle();
   expect(saved[0]?.duplicate_of).toBeNull();
-  expect(screen.getByText("T-KQ1 is now Todo.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Todo")).toBeTruthy();
 });
 
 test("a lost duplicate review response reconciles its saved placement before retry", async () => {
@@ -915,7 +910,7 @@ test("a lost duplicate review response reconciles its saved placement before ret
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "Mark duplicate" }));
   await settle();
-  expect(screen.getByText("Duplicate response lost")).toBeTruthy();
+  expect(screen.getByText(/Duplicate response lost\./)).toBeTruthy();
   const todo = screen.getByRole("region", {
     name: "Todo column",
     hidden: true,
@@ -997,7 +992,7 @@ test("a duplicate save stays protected until its reviewed request finishes", asy
   });
   await settle(20);
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.getByText("T-KQ1 is now Duplicate.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Duplicate")).toBeTruthy();
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   );
@@ -1019,13 +1014,13 @@ test("switching layouts preserves a pending card request and its protection", as
   expect(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   ).toHaveProperty("disabled", true);
-  expect(screen.getByText("Saving T-KQ1…")).toBeTruthy();
+  expect(screen.getByText("Saving…")).toBeTruthy();
   await act(async () => {
     saved[0] = ticket(1, "Done");
     finish?.([saved[0]]);
   });
   await settle();
-  expect(screen.getByText("T-KQ1 is now Done.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to Done")).toBeTruthy();
 });
 
 test("a membership response for an old scope cannot announce the wrong filtered outcome", async () => {
@@ -1053,9 +1048,7 @@ test("a membership response for an old scope cannot announce the wrong filtered 
   });
   await settle();
   expect(
-    screen.getByText(
-      "T-KQ1 is now Done. It no longer matches the current filters.",
-    ),
+    screen.getByText("Moved T-KQ1 to Done. It no longer matches the filters"),
   ).toBeTruthy();
 });
 
@@ -1069,14 +1062,12 @@ test("a move out of Ready keeps its filters, announces departure and focuses the
   expect(screen.queryByRole("button", { name: /T-KQ1.*Ticket 1/ })).toBeNull();
   expect(
     screen.getByText(
-      "T-KQ1 is now In progress. It no longer matches the current filters.",
+      "Moved T-KQ1 to In progress. It no longer matches the filters",
     ),
   ).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Ready", level: 1 })).toBeTruthy();
   await settle(20);
-  expect(document.activeElement).toBe(
-    screen.getByRole("region", { name: "Ticket status board" }),
-  );
+  expect(document.activeElement?.closest(".ticket-list")).toBeTruthy();
 });
 
 test("a card status action changes only that ticket and leaves the selected detail draft intact", async () => {
@@ -1119,7 +1110,7 @@ test("a card status action changes only that ticket and leaves the selected deta
     "value",
     "Keep my draft",
   );
-  expect(screen.getByText("T-KQ1 is now In progress.")).toBeTruthy();
+  expect(screen.getByText("Moved T-KQ1 to In progress")).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
     reference: "T-KQ1",
     patch: { status: "In progress" },
@@ -1137,14 +1128,11 @@ test("List is the default and Board keeps all six columns, including empty statu
     within(board)
       .getAllByRole("heading")
       .map((item) => item.textContent),
-  ).toEqual([
-    "Todo",
-    "In progress",
-    "In review",
-    "Done",
-    "Canceled",
-    "Duplicate",
-  ]);
+  ).toEqual(["Todo", "In progress", "In review", "Done"]);
+  // Canceled and Duplicate fold to 40px headers that open them (S5).
+  fireEvent.click(screen.getByRole("button", { name: /^Show Canceled/ }));
+  expect(within(board).getByRole("heading", { name: "Canceled" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Show Duplicate/ })).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).getByRole(
       "button",
@@ -1162,13 +1150,15 @@ test("List is the default and Board keeps all six columns, including empty statu
       "No tickets",
     ),
   ).toBeTruthy();
+  // One muted line; Add lives in the column header (BD-06).
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
-      { name: "Add ticket" },
+      { name: "Add Done ticket" },
     ),
   ).toBeTruthy();
-  expect(screen.getByText("Counts reflect current filters.")).toBeTruthy();
+  // The footer note shows only while filters narrow the columns (BD-04).
+  expect(screen.queryByText("Counts reflect current filters.")).toBeNull();
 });
 
 test("each status loads a bounded page with accurate totals and its own Load more", async () => {
@@ -1183,7 +1173,13 @@ test("each status loads a bounded page with accurate totals and its own Load mor
   const progress = within(
     screen.getByRole("region", { name: "In progress column" }),
   );
-  expect(progress.getByText("50 of 128 loaded")).toBeTruthy();
+  // The total is in the column header; the pager names the next page (P17).
+  expect(progress.getAllByRole("button", { name: /^T-KQ\d+/ })).toHaveLength(
+    50,
+  );
+  expect(
+    progress.getByRole("button", { name: "Show 50 more In progress" }),
+  ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).getByRole(
       "button",
@@ -1197,19 +1193,24 @@ test("each status loads a bounded page with accurate totals and its own Load mor
     ),
   ).toBeTruthy();
   fireEvent.click(
-    progress.getByRole("button", { name: "Load more In progress" }),
+    progress.getByRole("button", { name: /^Show \d+ more In progress$/ }),
   );
   await settle();
-  expect(progress.getByText("100 of 128 loaded")).toBeTruthy();
+  expect(progress.getAllByRole("button", { name: /^T-KQ\d+/ })).toHaveLength(
+    100,
+  );
+  expect(
+    progress.getByRole("button", { name: "Show 28 more In progress" }),
+  ).toBeTruthy();
   fireEvent.click(
-    progress.getByRole("button", { name: "Load more In progress" }),
+    progress.getByRole("button", { name: /^Show \d+ more In progress$/ }),
   );
   await settle();
   expect(progress.getAllByRole("button", { name: /^T-KQ\d+/ })).toHaveLength(
     128,
   );
   expect(
-    progress.queryByRole("button", { name: "Load more In progress" }),
+    progress.queryByRole("button", { name: /^Show \d+ more In progress$/ }),
   ).toBeNull();
 });
 
@@ -1228,7 +1229,7 @@ test("an obsolete Load more response cannot put tickets back into a different sc
           finish = resolve;
         })
       : null;
-  fireEvent.click(screen.getByRole("button", { name: "Load more Todo" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Show \d+ more Todo$/ }));
   await settle();
   expect(finish).toBeTypeOf("function");
   fireEvent.click(screen.getByRole("button", { name: /^In progress/ }));
@@ -1268,7 +1269,7 @@ test("workspace changes reconcile cards, counts and selected detail while a fail
   await settle(2000);
   const todo = within(screen.getByRole("region", { name: "Todo column" }));
   expect(todo.getByRole("button", { name: /T-KQ1.*Ticket 1/ })).toBeTruthy();
-  expect(todo.getByText(/information may be stale/)).toBeTruthy();
+  expect(todo.getByText(/Showing the saved tickets/)).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Updated elsewhere",
@@ -1290,7 +1291,7 @@ test("workspace changes reconcile cards, counts and selected detail while a fail
   expect(
     todo.getByRole("button", { name: /T-KQ1.*Updated elsewhere/ }),
   ).toBeTruthy();
-  expect(todo.queryByText(/information may be stale/)).toBeNull();
+  expect(todo.queryByText(/Showing the saved tickets/)).toBeNull();
 });
 
 test("a card outside the List page opens existing detail, preserves its draft across layouts, and restores focus", async () => {
@@ -1356,23 +1357,16 @@ test("layout preference survives navigation and restart while search and status 
   saved = [ticket(1), ticket(2, "Done")];
   const first = render(<App />);
   await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  await settle();
-  fireEvent.click(screen.getAllByRole("button", { name: "Done" })[0]!);
-  // The panel's Done button closes it; the status chip is also named Done.
-  const panel = screen.getByRole("dialog", { name: "Ticket filters" });
-  fireEvent.click(
-    within(panel).getAllByRole("button", { name: "Done" }).at(-1)!,
-  );
+  await chooseFilter("Status", "Done");
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
     target: { value: "Ticket 2" },
   });
   await settle();
   await showBoard();
   expect(
-    screen.getByRole("button", { name: "Remove Status is Done" }),
+    screen.getByRole("button", { name: "Remove Status filter" }),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Remove Search: Ticket 2" }),
@@ -1475,8 +1469,9 @@ test("cards retain source, project, Plan and core readiness context; project and
   await showBoard();
   const card = screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ });
   expect(within(card).getByText("Blocked by T-KQ4")).toBeTruthy();
-  expect(within(card).getByText("Sample project")).toBeTruthy();
+  // One context item, as on a list row (BD-07): the Plan before the project.
   expect(within(card).getByText("Release plan")).toBeTruthy();
+  expect(within(card).queryByText("Sample project")).toBeNull();
   expect(
     within(screen.getByRole("button", { name: /T-KQ2.*Ticket 2/ })).queryByText(
       "Ready",
@@ -1532,6 +1527,7 @@ test("a board card says Needs review in place of its readiness", async () => {
     document.querySelector(`[data-board-reference="${reference}"]`);
   expect(card("T-KQ1")?.textContent).toContain("Needs review");
   expect(card("T-KQ1")?.textContent).not.toContain("Ready");
-  expect(card("T-KQ3")?.textContent).toContain("Ready");
+  // Ready is the Todo column's norm, so a card flags only Blocked.
+  expect(card("T-KQ3")?.textContent).not.toContain("Ready");
   expect(card("T-KQ3")?.textContent).not.toContain("Needs review");
 });

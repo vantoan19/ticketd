@@ -2,6 +2,7 @@ import * as React from "react";
 import { cn } from "cn";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
+import { useOverlayBoundary } from "@/components/ui/overlay-boundary";
 
 function Select({
   ...props
@@ -69,26 +70,37 @@ function SelectTrigger({
   );
 }
 
+/**
+ * The list of a Select (P3): a popper below its trigger, flipping above only
+ * on collision, 4px away, at least as wide as the trigger, inside the nearest
+ * OverlayBoundary with 16px clearance. It opens with the current value
+ * highlighted. `item-aligned` (the list over its own trigger) is not used.
+ */
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
-  align = "center",
+  position = "popper",
+  align = "start",
+  sideOffset = 4,
   collisionPadding = 16,
+  collisionBoundary,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const boundary = useOverlayBoundary();
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
           "ui-menu relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto",
-          position === "popper" &&
-            "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className,
         )}
         position={position}
         align={align}
+        {...(position === "popper" && {
+          sideOffset,
+          collisionBoundary: collisionBoundary ?? boundary,
+        })}
         collisionPadding={collisionPadding}
         {...props}
       >
@@ -130,7 +142,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className,
       )}
       {...props}

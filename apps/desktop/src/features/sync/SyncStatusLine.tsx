@@ -7,6 +7,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Item } from "@/components/ui/item";
 import {
   Popover,
@@ -19,7 +20,11 @@ import {
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { formatSize } from "@/features/attachments/format-size";
 import { ago } from "@/features/tickets/ticket-source";
-import { toFailure } from "@/lib/api/bridge-failure";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { syncApi, type SyncReviewItem, type SyncStatus } from "@/lib/sync-api";
 import { useNow } from "@/lib/use-now";
 import { recoveryCopy } from "./sync-recovery";
@@ -176,7 +181,11 @@ function describe(status: SyncStatus, now: number): Line {
   }
 }
 
-/** The Drive line in the sidebar footer; it opens a popover with the state and its one action. */
+/**
+ * The Drive line in the sidebar footer: one target. It opens a popover with
+ * the state and its action (Review, Reconnect, Retry, Sync now); no second
+ * button beside the line does a related thing (set SR-08).
+ */
 export function SyncStatusLine() {
   const now = useNow();
   const { status, apply, openSettings, openReview } = useSyncStatus();
@@ -184,7 +193,7 @@ export function SyncStatusLine() {
   const [busy, setBusy] = useState(false);
   // Set at once, where `busy` waits for a render.
   const running = useRef(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   if (!status) return null;
   const line = describe(status, now);
   const recovery = recoveryCopy(status);
@@ -201,15 +210,16 @@ export function SyncStatusLine() {
     setOpen(false);
     openReview();
   };
-  async function run(command: () => Promise<SyncStatus>, failed: string) {
+  /** `action` says what did not happen: "sync". */
+  async function run(command: () => Promise<SyncStatus>, action: string) {
     if (running.current) return;
     running.current = true;
     setBusy(true);
-    setFailure("");
+    setFailure(null);
     try {
       apply(await command());
     } catch (reason) {
-      setFailure(`${failed}: ${toFailure(reason).message}`);
+      setFailure(describeFailure(reason, action));
       // The failure is read in the popover, also when the line's own button caused it.
       setOpen(true);
     } finally {
@@ -218,7 +228,10 @@ export function SyncStatusLine() {
     }
   }
   const recover = () =>
-    void run(syncApi.recover, `${corrective ?? "Retry"} did not work`);
+    void run(
+      syncApi.recover,
+      !corrective || corrective === "Retry" ? "sync" : corrective.toLowerCase(),
+    );
   return (
     <div className="sidebar-source sidebar-sync">
       <Popover open={open} onOpenChange={setOpen}>
@@ -230,9 +243,14 @@ export function SyncStatusLine() {
           >
             <span className="sidebar-source-label">
               {line.tone && <StatusDot tone={line.tone} size={10} />}
-              <span className="sync-line-text" title={line.full ?? line.label}>
-                {line.label}
-              </span>
+              {/* The full wording when the label is short for it, else the
+                  label itself once it is cut. */}
+              <Tooltip
+                content={line.full ?? line.label}
+                overflowOnly={!line.full}
+              >
+                <span className="sync-line-text">{line.label}</span>
+              </Tooltip>
             </span>
             <small className="sync-line-text">{line.detail}</small>
           </button>
@@ -255,11 +273,7 @@ export function SyncStatusLine() {
                 ))}
               </ul>
             )}
-            {failure && (
-              <p role="alert" className="settings-failure">
-                {failure}
-              </p>
-            )}
+            {failure && <FailureAlert size="compact" failure={failure} />}
             <div className="sync-popover-actions">
               {review ? (
                 <>
@@ -285,10 +299,10 @@ export function SyncStatusLine() {
                 <Button
                   size="sm"
                   disabled={busy}
-                  onClick={() => void run(syncApi.syncNow, "Sync did not run")}
+                  onClick={() => void run(syncApi.syncNow, "sync")}
                 >
                   <RefreshCw aria-hidden="true" />
-                  {selfMending ? "Try now" : "Sync now"}
+                  Sync now
                 </Button>
               )}
               <Button
@@ -305,18 +319,6 @@ export function SyncStatusLine() {
           </div>
         </PopoverContent>
       </Popover>
-      {review && corrective ? (
-        <Button variant="ghost" size="sm" onClick={reviewNow}>
-          Review
-        </Button>
-      ) : (
-        corrective &&
-        !selfMending && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={recover}>
-            {corrective}
-          </Button>
-        )
-      )}
     </div>
   );
 }

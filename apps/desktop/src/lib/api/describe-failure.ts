@@ -1,0 +1,149 @@
+import { toFailure, type FailureCode } from "./bridge-failure";
+
+/**
+ * What a failure says to people, decided by its kind: a title naming what did
+ * not happen ("Couldn't archive Docs launch"), one sentence with the plain cause
+ * and what is safe, the next step, and the raw text for "Details" only.
+ */
+export type FailureDescription = {
+  code: FailureCode;
+  /** "Couldn't {verb} {object}", sentence case, no period. */
+  title: string;
+  /** The plain cause and what is safe, ending with a period. */
+  sentence: string;
+  /**
+   * The next step: `retry` only when retrying can succeed; otherwise the fix
+   * the caller offers (`change_limit`, `reconnect`, `reload`, `choose_another`),
+   * or nothing when only time or another place can fix it.
+   */
+  action:
+    "retry" | "change_limit" | "reconnect" | "reload" | "choose_another" | null;
+  /** The raw message, for Details and Copy details. Never shown in the flow. */
+  details: string;
+};
+
+// Prefixes the core and the host put in front of a message; Details keeps them.
+const hostPrefixes = [
+  /^error:\s*/i,
+  /^workspace database error:\s*/i,
+  /^could not access workspace directory:\s*/i,
+  /^attachment:\s*/i,
+  /^drive:\s*/i,
+  /^sync storage:\s*/i,
+  /^storage:\s*/i,
+  /^sync:\s*/i,
+  /^backup or restore failed:\s*/i,
+  /^invalid chat record:\s*/i,
+  /^invalid batch:\s*/i,
+  /^batch operation \d+:\s*/i,
+];
+
+/**
+ * Host or core text made fit to read inside a sentence: trimmed, without
+ * internal prefixes or CLI commands in backticks, capitalized, and ending with
+ * a period, so it never runs into the next sentence.
+ */
+export function sentence(text: string): string {
+  let result = text.trim();
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const prefix of hostPrefixes) {
+      const next = result.replace(prefix, "");
+      if (next !== result) {
+        result = next;
+        changed = true;
+      }
+    }
+  }
+  // "…restore it with `ticketd document restore T-1` first" → "…restore it first".
+  result = result
+    .replace(/\s*(?:,\s*)?(?:\bwith|\bor|\busing|\brun)?\s*`[^`]*`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!result) return "";
+  result = result.charAt(0).toUpperCase() + result.slice(1);
+  return /[.!?…]$/.test(result) ? result : `${result}.`;
+}
+
+function plainCause(code: FailureCode, message: string): string {
+  switch (code) {
+    case "workspace_read_only":
+      return "The workspace is read-only, so nothing changed.";
+    case "workspace_locked":
+      return "Another ticketd operation is using the workspace. Nothing changed.";
+    case "disk_full":
+      return "The disk is full, so nothing changed.";
+    case "workspace_unreadable":
+      return "ticketd can't read the workspace file. Nothing changed.";
+    case "not_found":
+      return "It was deleted or moved.";
+    case "conflict":
+      return "It changed elsewhere since it was loaded. Nothing was overwritten.";
+    case "too_large":
+      return "The file is larger than the upload limit.";
+    case "not_signed_in":
+    case "unauthenticated":
+      return "The account needs to be connected again.";
+    case "offline":
+    case "unavailable":
+      return "ticketd can't reach the service. Check the connection.";
+    case "rate_limited":
+      return "The service asked ticketd to slow down. Wait a moment.";
+    case "forbidden":
+      return "The account isn't allowed to do this.";
+    case "cycle":
+      return `${sentence(message)} Choose another ticket.`;
+    default:
+      return sentence(message) || "Something went wrong.";
+  }
+}
+
+function nextStep(code: FailureCode): FailureDescription["action"] {
+  switch (code) {
+    case "too_large":
+      return "change_limit";
+    case "not_signed_in":
+    case "unauthenticated":
+      return "reconnect";
+    case "conflict":
+    case "review_changed":
+      return "reload";
+    case "cycle":
+    case "not_found":
+      return "choose_another";
+    case "forbidden":
+    case "workspace_unreadable":
+      return null;
+    default:
+      return "retry";
+  }
+}
+
+/**
+ * Describes a failure for people. `action` is what did not happen, as a verb
+ * phrase: "archive Docs launch", "save the title", "load Documents".
+ */
+export function describeFailure(
+  reason: unknown,
+  action: string,
+): FailureDescription {
+  const failure = toFailure(reason);
+  const code = failure.kind;
+  return {
+    code,
+    title: `Couldn't ${action}`,
+    sentence: plainCause(code, failure.message),
+    action: nextStep(code),
+    details: failure.message,
+  };
+}
+
+/**
+ * The same failure as one line, for places that hold a single string (a
+ * tooltip, a status caption, an aria-label): "Couldn't save the title. The
+ * workspace is read-only, so nothing changed."
+ */
+export function failureText(reason: unknown, action: string): string {
+  const { title, sentence } = describeFailure(reason, action);
+  return `${title}. ${sentence}`;
+}

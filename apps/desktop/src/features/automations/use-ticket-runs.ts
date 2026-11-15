@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { failureText } from "@/lib/api/describe-failure";
 import {
   automationsClient,
   type TicketRun,
@@ -27,7 +28,9 @@ export function useTicketRuns(reference: string, active: boolean) {
         // A read that works again takes the earlier failure off the ticket.
         setError("");
       },
-      (reason: unknown) => current && setError(String(reason)),
+      (reason: unknown) =>
+        current &&
+        setError(failureText(reason, "load this ticket's Automation runs")),
     );
     return () => {
       current = false;

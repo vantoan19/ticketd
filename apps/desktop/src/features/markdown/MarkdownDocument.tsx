@@ -19,13 +19,19 @@ import {
 } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
+import { writeClipboard } from "@/lib/clipboard";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import { CopyButton } from "@/components/ui/copy-button";
+import { Check } from "lucide-react";
+import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
+import { BlockHeader } from "./BlockHeader";
 import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
-import { CopySourceButton } from "./CopySourceButton";
 import { TicketReference } from "@/features/tickets/TicketMarkdown";
 import { references } from "@/features/tickets/ticket-references";
 import {
@@ -118,13 +124,7 @@ function DocumentLink({
   if (href?.startsWith("ticketd://plan/")) {
     const id = href.slice("ticketd://plan/".length);
     return openPlan ? (
-      <button
-        type="button"
-        className="context-link"
-        onClick={() => openPlan(id)}
-      >
-        {children}
-      </button>
+      <RecordLink onClick={() => openPlan(id)}>{children}</RecordLink>
     ) : (
       <>{children}</>
     );
@@ -132,14 +132,10 @@ function DocumentLink({
   if (href?.startsWith("ticketd://document/")) {
     const id = href.slice("ticketd://document/".length);
     return openDocument ? (
-      <button
-        type="button"
-        className="context-link"
-        onClick={() => openDocument(id)}
-      >
+      <RecordLink onClick={() => openDocument(id)}>
         {children}
         <TrashedMark id={id} revision={revision} />
-      </button>
+      </RecordLink>
     ) : (
       <>{children}</>
     );
@@ -171,6 +167,15 @@ function DocumentLink({
   );
 }
 
+/** The host a link points at, for "Couldn't open example.com". */
+function linkHost(href: string): string {
+  try {
+    return new URL(href).host || href;
+  } catch {
+    return href;
+  }
+}
+
 /**
  * A link in Markdown, including text written at a source such as GitHub. The app
  * window never navigates: an https link opens in the default browser, and any
@@ -183,26 +188,33 @@ function ExternalLink({
   href: string;
   children?: React.ReactNode;
 }) {
-  const [error, setError] = useState("");
+  // A failure is an outcome, not part of the text: it goes to the pane's
+  // status line instead of being inserted after the link (detA MK, P8).
+  const statusLine = useStatusLine();
   return (
-    <>
-      <a
-        href={href}
-        rel="noreferrer"
-        onClick={(event) => {
-          event.preventDefault();
-          if (!href.startsWith("https://")) return;
-          workspaceClient.openLink(href).then(
-            () => setError(""),
-            (reason: unknown) =>
-              setError(`Could not open the link: ${String(reason)}`),
-          );
-        }}
-      >
-        {children}
-      </a>
-      {error && <small role="alert">{error}</small>}
-    </>
+    <a
+      href={href}
+      rel="noreferrer"
+      onClick={(event) => {
+        event.preventDefault();
+        if (!href.startsWith("https://")) return;
+        workspaceClient.openLink(href).catch(() =>
+          statusLine.show({
+            tone: "error",
+            message: `Couldn't open ${linkHost(href)}`,
+            action: {
+              label: "Copy link",
+              run: async () => {
+                const failure = await writeClipboard(href);
+                if (failure !== null) throw new Error(failure);
+              },
+            },
+          }),
+        );
+      }}
+    >
+      {children}
+    </a>
   );
 }
 
@@ -246,10 +258,9 @@ function CodeBlock({ node }: ExtraProps) {
     return <MermaidDiagram source={content} />;
   return (
     <div className="markdown-code-block">
-      <div className="markdown-block-toolbar">
-        <span>{language || "Code"}</span>
-        <CopySourceButton compact label="Copy code" source={content} />
-      </div>
+      <BlockHeader label={language || "Code"}>
+        <CopyButton label="Copy code" text={content} />
+      </BlockHeader>
       <pre tabIndex={0}>
         <SyntaxCode source={content} language={language} />
       </pre>
@@ -288,6 +299,7 @@ function mentionBlock(tag: string) {
 const components: Components = {
   a: DocumentLink,
   img: AttachmentImage,
+  input: CheckGlyph,
   table: ({ children }) => (
     <div
       className="markdown-table-scroll"
@@ -311,11 +323,34 @@ function AttachmentImage({
 }: { src?: string | undefined; alt?: string | undefined } & ExtraProps) {
   const replacement = useContext(AttachmentReplacement);
   return src?.startsWith("ticketd://attachment/") ? (
-    <AttachmentLink uri={src} onReplace={replacement(node, src)}>
-      {alt || "Attachment"}
-    </AttachmentLink>
+    <InlineAttachmentImage
+      uri={src}
+      alt={alt ?? ""}
+      onReplace={replacement(node, src)}
+    />
   ) : (
     <img src={src} alt={alt ?? ""} />
+  );
+}
+
+/**
+ * A read-only checklist box: a drawn glyph, a tick on the recessed fill when
+ * done and a ring when not, never a disabled-looking control (detA DS-08).
+ */
+function CheckGlyph({
+  type,
+  checked,
+}: { type?: string | undefined; checked?: boolean | undefined } & ExtraProps) {
+  if (type !== "checkbox") return null;
+  return (
+    <span
+      className="markdown-check"
+      data-checked={checked ? "" : undefined}
+      role="img"
+      aria-label={checked ? "Done" : "Not done"}
+    >
+      {checked && <Check aria-hidden="true" />}
+    </span>
   );
 }
 

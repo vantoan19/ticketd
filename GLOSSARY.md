@@ -161,6 +161,26 @@ A bounded view of explicit relationships among tickets, Documents, and Plans. Ac
 **Workspace graph**:
 The Context graph for the whole workspace, opened from the sidebar rather than from one ticket, Document, or Plan. It is bounded and explains any limit in the same way.
 
+**Dependencies (graph)**:
+A ticket's view of the Context graph limited to "blocks": the bounded set of tickets joined to it by blocking dependencies, each marked Ready or Blocked. The interface calls the item-centred Context graph "Graph"; a ticket's Graph opens on its Dependencies.
+
+**Graph relationships**:
+Each relationship has one name, used on the line, in the legend and (capitalised) as the filter, and is read from either end with the role names below.
+
+| Kind       | Name            | From the source | From the target           |
+| ---------- | --------------- | --------------- | ------------------------- |
+| blocks     | blocks          | Blocks          | Blocked by                |
+| subticket  | parent of       | Parent of       | Subticket of              |
+| related    | related         | Related to      | Related to                |
+| discovered | discovered      | Discovered      | Discovered from           |
+| mention    | mentions        | Mentions        | Mentioned by              |
+| attached   | attached        | Has attached    | Attached to               |
+| activity   | update mentions | Update mentions | Mentioned in an update on |
+| support    | update cites    | Update cites    | Cited in an update on     |
+| membership | in Plan         | Contains        | In Plan                   |
+| document   | document of     | Has document    | Document of               |
+| spec       | spec of         | Has spec        | Spec of                   |
+
 **Editing agent**:
 The agent identified as the source of a write when supplied. This is descriptive attribution, not a verified identity or permission; absent attribution does not establish that a human made the change.
 

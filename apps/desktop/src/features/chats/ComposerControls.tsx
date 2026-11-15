@@ -6,7 +6,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Check, ChevronDown, LoaderCircle, Shield } from "lucide-react";
+import { Check, ChevronDown, Clock, LoaderCircle, Shield } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,12 +24,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import type {
   ChatState,
   HarnessOptions,
@@ -92,7 +87,7 @@ export function EffortGlyph({
 
 // ticketd holds a change made during a turn until the turn ends, so whatever the
 // harness's own timing, it applies from the person's next message.
-const NEXT_MESSAGE = "From your next message";
+const NEXT_MESSAGE = "Applies from your next message.";
 /** The segment that leaves effort to the harness when it names no default. */
 const OWN = "";
 /** Rows shown before "More models": the default, the current one, then the harness's order. */
@@ -207,7 +202,13 @@ export function HarnessPicker({
   notice,
   onOpenChange,
   inputRef,
+  held = false,
 }: {
+  /**
+   * A model or effort change waits for the turn to end: a small clock in the
+   * trigger, with what applies next in its tooltip (CH-19).
+   */
+  held?: boolean;
   harnesses: PickerHarness[];
   harnessId: string;
   /** A Chat keeps its harness; New Chat may switch. */
@@ -244,6 +245,17 @@ export function HarnessPicker({
   useEffect(() => onOpenChange?.(open), [open, onOpenChange]);
   const [viewed, setViewed] = useState(harnessId);
   const tabList = useRef<HTMLDivElement>(null);
+  // The current model is in view when the list opens (CH-18).
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() =>
+      body.current
+        ?.querySelector<HTMLElement>('.chat-picker-model[data-state="checked"]')
+        ?.scrollIntoView?.({ block: "nearest" }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [open, viewed]);
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (
@@ -270,14 +282,14 @@ export function HarnessPicker({
     ? (shown.runs_as ?? shortName(shown.label))
     : loading
       ? ""
-      : "Default";
+      : "Default model";
   // A model that takes effort always says which: "Default" when none was chosen.
   const effortLabel =
     efforts.find((option) => option.id === effortId)?.label ??
     (efforts.length > 0 && !effortId ? "Default" : "");
   const name = [
     harness?.name,
-    `model ${modelLabel || "Default"}`,
+    `model ${modelLabel.replace(/ model$/, "") || "Default"}`,
     effortLabel && `effort ${effortLabel}`,
   ]
     .filter(Boolean)
@@ -333,37 +345,51 @@ export function HarnessPicker({
         }
       }}
     >
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-control="model"
-          aria-label={name}
-          aria-keyshortcuts="Meta+Shift+M Control+Shift+M"
-        >
-          <HarnessMark
-            harness={harnessId}
-            name={harness?.name ?? harnessId}
-            dim={harness ? !harness.ready : false}
-            decorative
-          />
-          {modelLabel ? (
-            <span className="chat-control-label">{modelLabel}</span>
-          ) : (
-            <span className="chat-skeleton chat-control-skeleton" aria-hidden />
-          )}
-          {bars && <EffortGlyph {...bars} />}
-          {effortLabel && (
-            <span className="chat-control-effort">{effortLabel}</span>
-          )}
-          {pending ? (
-            <LoaderCircle size={12} className="chat-spin" aria-hidden />
-          ) : (
-            <ChevronDown aria-hidden />
-          )}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip
+        content={
+          held
+            ? `${modelLabel} · ${effortLabel || "Default"} from your next message`
+            : null
+        }
+      >
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-control="model"
+            aria-label={held ? `${name}, from your next message` : name}
+            aria-keyshortcuts="Meta+Shift+M Control+Shift+M"
+          >
+            <HarnessMark
+              harness={harnessId}
+              name={harness?.name ?? harnessId}
+              dim={harness ? !harness.ready : false}
+              decorative
+            />
+            {modelLabel ? (
+              <span className="chat-control-label">{modelLabel}</span>
+            ) : (
+              <span
+                className="chat-skeleton chat-control-skeleton"
+                aria-hidden
+              />
+            )}
+            {bars && <EffortGlyph {...bars} />}
+            {effortLabel && (
+              <span className="chat-control-effort">{effortLabel}</span>
+            )}
+            {held && !pending && (
+              <Clock size={12} className="chat-control-held" aria-hidden />
+            )}
+            {pending ? (
+              <LoaderCircle size={12} className="chat-spin" aria-hidden />
+            ) : (
+              <ChevronDown aria-hidden />
+            )}
+          </Button>
+        </PopoverTrigger>
+      </Tooltip>
       <PopoverContent
         align="start"
         side="top"
@@ -374,7 +400,7 @@ export function HarnessPicker({
           inputRef.current?.focus();
         }}
       >
-        <div className="chat-picker">
+        <div className="chat-picker" data-switch={locked ? undefined : ""}>
           <div
             ref={tabList}
             className="chat-picker-harnesses"
@@ -400,12 +426,12 @@ export function HarnessPicker({
                   dim={!item.ready}
                   decorative
                 />
-                <span>{item.name}</span>
-                {!item.ready && item.word && <small>{item.word}</small>}
+                <span className="chat-picker-harness-name">{item.name}</span>
+                {!item.ready && item.word && <small>· {item.word}</small>}
               </button>
             ))}
           </div>
-          <div className="chat-picker-body" role="tabpanel">
+          <div ref={body} className="chat-picker-body" role="tabpanel">
             {tab && !tab.ready && notice ? (
               notice(tab.id)
             ) : (
@@ -531,23 +557,18 @@ function ReadOnly({
   children: ReactNode;
 }) {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-control="permission"
-            readOnly
-            aria-disabled="true"
-          >
-            {children}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{reason}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip content={reason}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        data-control="permission"
+        readOnly
+        aria-disabled="true"
+      >
+        {children}
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -579,7 +600,10 @@ function PermissionPicker({
   onChange,
   inputRef,
   before = false,
+  held = false,
 }: {
+  /** The change waits for the turn to end: a clock and a tooltip (CH-19). */
+  held?: boolean;
   setting: HarnessSetting;
   value: string | null;
   harness: string;
@@ -608,22 +632,31 @@ function PermissionPicker({
     );
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-control="permission"
-          aria-label={`Permissions: ${label}`}
-        >
-          {face}
-          {changePending(setting) ? (
-            <LoaderCircle size={12} className="chat-spin" aria-hidden />
-          ) : (
-            <ChevronDown aria-hidden />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip content={held ? `${label} from your next message` : null}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-control="permission"
+            aria-label={
+              held
+                ? `Permissions: ${label}, from your next message`
+                : `Permissions: ${label}`
+            }
+          >
+            {face}
+            {held && !changePending(setting) && (
+              <Clock size={12} className="chat-control-held" aria-hidden />
+            )}
+            {changePending(setting) ? (
+              <LoaderCircle size={12} className="chat-spin" aria-hidden />
+            ) : (
+              <ChevronDown aria-hidden />
+            )}
+          </Button>
+        </DropdownMenuTrigger>
+      </Tooltip>
       <DropdownMenuContent
         align="start"
         side="top"
@@ -650,11 +683,9 @@ function PermissionPicker({
             ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <p
-          className="chat-pick-note"
-          title={`Your ${harness} settings are unchanged.`}
-        >
-          This Chat only
+        {/* The whole explanation is visible: a menu note cannot take focus. */}
+        <p className="chat-pick-note">
+          This Chat only. Your {harness} settings are unchanged.
         </p>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -692,8 +723,6 @@ export function ComposerControls({
           reason: `From ${chat.harness.name}'s first message`,
         }
       : null);
-  const held =
-    changeHeld(model) || changeHeld(effort) || changeHeld(permission);
   const tabs = [
     { id: chat.harness.id, name: chat.harness.name, ready: true },
     ...HARNESSES.filter((item) => item.id !== chat.harness.id),
@@ -730,18 +759,64 @@ export function ComposerControls({
         }
         pending={changePending(model) || changePending(effort)}
         note={NEXT_MESSAGE}
+        held={changeHeld(model) || changeHeld(effort)}
         inputRef={inputRef}
       />
-      {held && <span className="chat-control-note">{NEXT_MESSAGE}</span>}
       {permission && permissionId && (
         <PermissionPicker
           setting={permission}
+          held={changeHeld(permission)}
           value={permissionId}
           harness={chat.harness.name}
           onChange={(value) => onChange("permission", value)}
           inputRef={inputRef}
         />
       )}
+    </div>
+  );
+}
+
+/** Past this, a harness check that is still running says so in words (P10). */
+const SLOW_CHECK_MS = 600;
+
+/**
+ * The picker's place while the harnesses are checked: a still skeleton, and
+ * after 600ms the words "Checking harnesses…" beside the 12px spinner. It is
+ * disabled, so it shows no chevron, and its tooltip says why (CH-14).
+ */
+function CheckingHarnesses() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), SLOW_CHECK_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div className="chat-controls" role="group" aria-label="Harness settings">
+      <Tooltip content="Checking which harnesses are installed">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-control="model"
+          aria-disabled="true"
+          aria-label="Checking which harnesses are installed…"
+        >
+          {slow ? (
+            <>
+              <LoaderCircle size={12} className="chat-spin" aria-hidden />
+              <span className="chat-control-label">Checking harnesses…</span>
+            </>
+          ) : (
+            <>
+              <span className="chat-skeleton chat-control-mark" aria-hidden />
+              <span
+                className="chat-skeleton chat-control-skeleton"
+                aria-hidden
+              />
+            </>
+          )}
+        </Button>
+      </Tooltip>
     </div>
   );
 }
@@ -775,23 +850,7 @@ export function NewChatControls({
   onOpenChange?: (open: boolean) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
-  if (!harnessId)
-    return (
-      <div className="chat-controls" role="group" aria-label="Harness settings">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-control="model"
-          disabled
-          aria-label="Checking which harnesses are installed…"
-        >
-          <span className="chat-skeleton chat-control-mark" aria-hidden />
-          <span className="chat-skeleton chat-control-skeleton" aria-hidden />
-          <ChevronDown aria-hidden />
-        </Button>
-      </div>
-    );
+  if (!harnessId) return <CheckingHarnesses />;
   const harness = harnesses.find((item) => item.id === harnessId);
   const name = harness?.name ?? harnessId;
   const permission = options?.permission;

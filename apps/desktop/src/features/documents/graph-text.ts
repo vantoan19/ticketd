@@ -1,24 +1,15 @@
 import { MarkerType, type Edge } from "@xyflow/react";
 import type { ContextGraph } from "@/lib/api/client";
+import { plainText } from "@/lib/plain-text";
 
 type GraphNode = ContextGraph["nodes"][number];
 type GraphEdge = ContextGraph["edges"][number];
 
-export const edgeLabels: Record<string, string> = {
-  blocks: "Blocks",
-  membership: "Plan membership",
-  document: "Plan document",
-  spec: "Primary spec",
-  mention: "Mentions",
-  attached: "Attached",
-  activity: "Update mentions",
-  support: "Update cites",
-  subticket: "Subticket",
-  related: "Related",
-  discovered: "Discovered",
-};
-
-/** Short names written on the line itself; the lists below spell each connection out. */
+/**
+ * The relationship glossary (GLOSSARY.md, "Graph relationships"): each kind
+ * has one name, used on the line, in the legend and (capitalised) as the
+ * filter label; ROLE_LABELS below name it from either end.
+ */
 export const edgeLineLabels: Record<string, string> = {
   blocks: "blocks",
   membership: "in Plan",
@@ -33,13 +24,23 @@ export const edgeLineLabels: Record<string, string> = {
   discovered: "discovered",
 };
 
+/** The same names, capitalised, for filters and group titles. */
+export const edgeLabels: Record<string, string> = Object.fromEntries(
+  Object.entries(edgeLineLabels).map(([kind, name]) => [
+    kind,
+    name.charAt(0).toUpperCase() + name.slice(1),
+  ]),
+);
+
 /**
- * Four line styles, each with its own dash and colour so they differ without
- * relying on either alone: rules (blocks), plan structure, work hierarchy and
- * references.
+ * Four line styles, all in the neutral edge colour, told apart by the line
+ * alone: "blocks" is the one line with an arrowhead (arrow = waits); work
+ * hierarchy is solid, related and Plan structure dashed, references dotted.
+ * `mark` is the graph kit's legend sample.
  */
 export type EdgeStyle = {
   name: string;
+  mark: "blocks" | "line" | "dashed" | "dotted";
   kinds: string[];
   dash: string | undefined;
   width: number;
@@ -47,38 +48,55 @@ export type EdgeStyle = {
 };
 export const edgeStyles: EdgeStyle[] = [
   {
-    name: "blocks (arrow = waits)",
+    name: "blocks",
+    mark: "blocks",
     kinds: ["blocks"],
     dash: undefined,
-    width: 2,
+    width: 1.75,
     color: "currentColor",
   },
   {
-    name: "parent of",
-    kinds: ["subticket", "related", "discovered"],
+    name: "parent of, discovered",
+    mark: "line",
+    kinds: ["subticket", "discovered"],
     dash: undefined,
-    width: 1.5,
+    width: 1.25,
     color: "currentColor",
   },
   {
-    name: "mentions",
+    name: "related, in Plan, document of, spec of",
+    mark: "dashed",
+    kinds: ["related", "membership", "document", "spec"],
+    dash: "4 3",
+    width: 1.25,
+    color: "currentColor",
+  },
+  {
+    name: "mentions, attached, update mentions, update cites",
+    mark: "dotted",
     kinds: ["mention", "attached", "activity", "support"],
-    dash: "2 3",
-    width: 1.5,
-    color: "currentColor",
-  },
-  {
-    name: "in Plan, spec of",
-    kinds: ["membership", "document", "spec"],
-    dash: "6 4",
-    width: 1.5,
+    dash: "1.5 3",
+    width: 1.25,
     color: "currentColor",
   },
 ];
 export function edgeStyle(kind: string): EdgeStyle {
   return (
-    edgeStyles.find((style) => style.kinds.includes(kind)) ?? edgeStyles[2]!
+    edgeStyles.find((style) => style.kinds.includes(kind)) ?? edgeStyles[3]!
   );
+}
+
+/** The legend for these lines: one sample per style shown, naming only the kinds present. */
+export function legendItems(
+  kinds: Iterable<string>,
+): { mark: EdgeStyle["mark"]; label: string }[] {
+  const present = new Set(kinds);
+  return edgeStyles.flatMap((style) => {
+    const names = style.kinds
+      .filter((kind) => present.has(kind))
+      .map((kind) => edgeLineLabels[kind] ?? kind);
+    return names.length ? [{ mark: style.mark, label: names.join(", ") }] : [];
+  });
 }
 
 export const kindNames: Record<GraphNode["kind"], string> = {
@@ -87,15 +105,8 @@ export const kindNames: Record<GraphNode["kind"], string> = {
   plan: "Plan",
 };
 
-/** Passages are stored Markdown; show the link text, not the link. */
-export function plainText(markdown: string): string {
-  return markdown
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/ticketd:\/\/\S+/g, "")
-    .replace(/[`*_>#]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// Passages are stored Markdown; show the link text, not the link.
+export { plainText };
 
 /** Equal ignoring case and punctuation. */
 function sameWords(a: string, b: string): boolean {
@@ -155,19 +166,27 @@ export function describeEdge(
   }
 }
 
-/** React Flow edges that show direction and relationship, one per connection. */
+/**
+ * React Flow edges, one per connection, each named on the line. Only "blocks"
+ * has an arrowhead (the legend's "arrow = waits"); every other line is named by
+ * its label, so an arrow there would claim a direction the legend denies.
+ */
 export function flowEdges(edges: GraphEdge[]): Edge[] {
   return edges.map((edge, index) => ({
     id: `${index}`,
     source: edge.source,
     target: edge.target,
     label: edgeLineLabels[edge.kind] ?? edge.kind,
+    // The relationship, for the legend.
+    data: { kind: edge.kind },
     animated: false,
     // currentColor follows the themed .react-flow__edges color.
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: edgeStyle(edge.kind).color,
-    },
+    ...(edge.kind === "blocks" && {
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: edgeStyle(edge.kind).color,
+      },
+    }),
     // Drawn by RoutedEdge, which bends each line around the cards in its way.
     type: "routed",
     style: {
@@ -196,11 +215,38 @@ export function cardParts(node: GraphNode): {
   };
 }
 
-/** Connections touching a node, one row per relationship between the same pair. */
+/** Each relationship named from either end: [from the source, from the target]. */
+const ROLE_LABELS: Record<string, [outgoing: string, incoming: string]> = {
+  blocks: ["Blocks", "Blocked by"],
+  subticket: ["Parent of", "Subticket of"],
+  related: ["Related to", "Related to"],
+  discovered: ["Discovered", "Discovered from"],
+  mention: ["Mentions", "Mentioned by"],
+  attached: ["Has attached", "Attached to"],
+  activity: ["Update mentions", "Mentioned in an update on"],
+  support: ["Update cites", "Cited in an update on"],
+  membership: ["Contains", "In Plan"],
+  document: ["Has document", "Document of"],
+  spec: ["Has spec", "Spec of"],
+};
+
+/** A relationship named from `nodeId`'s side: T-FV1 is "Blocked by" T-FV14, not "Blocks". */
+function roleLabel(edge: GraphEdge, nodeId: string): string {
+  const pair = ROLE_LABELS[edge.kind] ?? [
+    edgeLabels[edge.kind] ?? edge.kind,
+    edgeLabels[edge.kind] ?? edge.kind,
+  ];
+  return edge.source === nodeId ? pair[0] : pair[1];
+}
+
+/**
+ * Connections touching a node, one row per relationship between the same pair.
+ * `label` names the relationship from this node's side.
+ */
 export function connectionRows(
   nodeId: string,
   graph: Pick<ContextGraph, "nodes" | "edges">,
-): { key: string; kind: string; text: string }[] {
+): { key: string; kind: string; label: string; text: string }[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const rows = new Map<
     string,
@@ -216,24 +262,11 @@ export function connectionRows(
   return [...rows.entries()].map(([key, row]) => ({
     key,
     kind: row.kind,
+    label: roleLabel(row.edge, nodeId),
     text:
       describeEdge(row.edge, byId) + (row.extra ? ` (+${row.extra} more)` : ""),
   }));
 }
-
-const ROLE_LABELS: Record<string, [outgoing: string, incoming: string]> = {
-  blocks: ["Blocks", "Blocked by"],
-  subticket: ["Parent of", "Subticket of"],
-  related: ["Related to", "Related to"],
-  discovered: ["Discovered", "Discovered from"],
-  mention: ["Mentions", "Mentioned by"],
-  attached: ["Has", "Attached to"],
-  activity: ["Update mentions", "Mentioned in an update on"],
-  support: ["Update cites", "Cited in an update on"],
-  membership: ["Contains", "In Plan"],
-  document: ["Has document", "Document of"],
-  spec: ["Has spec", "Spec of"],
-};
 
 /** A node's connections as labelled rows ("Blocked by", "Parent of", "Mentioned by"), each item once. */
 export function labelledConnections(
@@ -247,8 +280,7 @@ export function labelledConnections(
     const outgoing = edge.source === nodeId;
     const other = byId.get(outgoing ? edge.target : edge.source);
     if (!other) continue;
-    const pair = ROLE_LABELS[edge.kind] ?? [edge.kind, edge.kind];
-    const label = outgoing ? pair[0] : pair[1];
+    const label = roleLabel(edge, nodeId);
     const parts = cardParts(other);
     const text = [parts.ref, parts.title].filter(Boolean).join(" ");
     const items = rows.get(label) ?? [];
@@ -340,6 +372,36 @@ export function panToInclude(
     x: shift(rect.x, rect.width, size.width, viewport.x),
     y: shift(rect.y, rect.height, size.height, viewport.y),
   };
+}
+
+/** "Open T-FV1", "Open Plan", "Open Document". */
+export function openLabel(node: GraphNode) {
+  const ref = cardParts(node).ref;
+  return ref ? `Open ${ref}` : `Open ${kindNames[node.kind]}`;
+}
+
+/** An item's status word, for its glyph: "Todo" from "Todo · Ready". */
+export function statusOf(node: { state: string | null }) {
+  return node.state?.split(" · ")[0] ?? "";
+}
+
+/**
+ * Why two items are connected, in the source's words, when an edge between
+ * them carries a passage: "“Read this”". Empty when none does.
+ */
+export function passageBetween(
+  a: string,
+  b: string,
+  graph: Pick<ContextGraph, "edges">,
+): string {
+  const edge = graph.edges.find(
+    (item) =>
+      item.explanation &&
+      ((item.source === a && item.target === b) ||
+        (item.source === b && item.target === a)),
+  );
+  const passage = edge?.explanation ? plainText(edge.explanation) : "";
+  return passage ? `“${passage}”` : "";
 }
 
 /** "Active · Trashed · Update details", skipping whatever does not apply. */

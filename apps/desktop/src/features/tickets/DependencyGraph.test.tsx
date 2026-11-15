@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import DependencyGraph, { SelectionPanel } from "./DependencyGraph";
+import { DependencyView, SelectionPanel } from "./DependencyGraph";
 import type { DependencyGraph as Graph } from "@/lib/api/client";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -118,67 +118,101 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderGraph(onBack = vi.fn(), onOpen = vi.fn()) {
+function renderGraph(onCenter = vi.fn(), onOpen = vi.fn()) {
   render(
-    <DependencyGraph
+    <DependencyView
       reference="T-KQ2"
       revision={0}
       projects={[{ id: "p1", name: "Core", path: "/core", paths: [] }]}
       plans={[]}
-      onBack={onBack}
+      view="graph"
+      onCenter={onCenter}
       onOpen={onOpen}
     />,
   );
-  return { onBack, onOpen };
+  return { onCenter, onOpen };
 }
 
-test("states the arrow direction and keeps a way back to the origin ticket", async () => {
-  const { onBack } = renderGraph();
+test("the legend names only what the graph shows, in one row", async () => {
+  renderGraph();
   await screen.findByRole("button", { name: /^T-KQ3\b/ });
-  expect(screen.getByText("Arrows point to the work that waits.")).toBeTruthy();
+  const legend = screen.getByRole("list", { name: "Legend" });
   expect(
-    screen.getByText(
-      "A Todo ticket is Ready once every ticket with an arrow into it is Done.",
-    ),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back to T-KQ2" }));
-  expect(onBack).toHaveBeenCalled();
+    within(legend)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(["blocks", "Ready", "Blocked"]);
+  // The zoom readout is not announced on every change.
+  const zoom = screen.getByRole("group", { name: "Zoom" });
+  expect(within(zoom).queryByRole("status")).toBeNull();
 });
 
 test("selecting a node shows what it blocks, its project, and Open", async () => {
   const { onOpen } = renderGraph();
   fireEvent.click(await screen.findByRole("button", { name: /^T-KQ3\b/ }));
   const panel = screen.getByRole("complementary", { name: "Selected ticket" });
-  expect(within(panel).getByText("Blocked by")).toBeTruthy();
-  expect(await within(panel).findByText("Core")).toBeTruthy();
+  expect(await within(panel).findByText(/Core/)).toBeTruthy();
   // The panel lists the ticket's own links, including ones the graph omits.
   expect(within(panel).getByText("Offscreen")).toBeTruthy();
-  expect(await within(panel).findByText("Beyond the graph")).toBeTruthy();
+  expect(within(panel).getByText("Beyond the graph")).toBeTruthy();
   fireEvent.click(within(panel).getByRole("button", { name: "Open T-KQ3" }));
   expect(onOpen).toHaveBeenCalledWith("T-KQ3");
 });
 
-test("marks the origin ticket and says when the graph is limited", async () => {
+test("panel rows are buttons: a drawn ticket is selected, another is centred", async () => {
+  const { onCenter } = renderGraph();
+  fireEvent.click(await screen.findByRole("button", { name: /^T-KQ3\b/ }));
+  const panel = screen.getByRole("complementary", { name: "Selected ticket" });
+  fireEvent.click(
+    await within(panel).findByRole("button", { name: /T-KQ40.*Offscreen/ }),
+  );
+  expect(onCenter).toHaveBeenCalledWith("T-KQ40");
+  fireEvent.click(within(panel).getByRole("button", { name: /T-KQ2.*Build/ }));
+  await waitFor(() =>
+    expect(
+      within(
+        screen.getByRole("complementary", { name: "Selected ticket" }),
+      ).getByRole("heading", { name: "Build" }),
+    ).toBeTruthy(),
+  );
+});
+
+test("Center here centres the graph on the selected ticket", async () => {
+  const { onCenter } = renderGraph();
+  fireEvent.click(await screen.findByRole("button", { name: /^T-KQ3\b/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Center here" }));
+  expect(onCenter).toHaveBeenCalledWith("T-KQ3");
+});
+
+test("says how far a limited graph reaches", async () => {
   graph = { ...graph, truncated: true };
   renderGraph();
-  const origin = await screen.findByRole("button", { name: /^T-KQ2\b/ });
-  expect(within(origin).getByText("Opened from")).toBeTruthy();
   expect(
-    screen.getByText(/up to 5 links from T-KQ2 and at most 50 tickets/),
+    await screen.findByText(/up to 5 links from T-KQ2 and at most 50 tickets/),
   ).toBeTruthy();
 });
 
-test("re-centers the graph on the selected ticket", async () => {
-  renderGraph();
-  fireEvent.click(await screen.findByRole("button", { name: /^T-KQ3\b/ }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Center graph on T-KQ3" }),
+test("a panel that could not load says so and retries instead of loading forever", async () => {
+  const base = vi.mocked(invoke).getMockImplementation()!;
+  let fail = true;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "show_ticket" && fail) throw new Error("disk is gone");
+    return base(command, args);
+  });
+  render(
+    <SelectionPanel
+      ticket={graph.nodes[2]!}
+      nodes={graph.nodes}
+      projects={[]}
+      onOpen={() => {}}
+      onSelect={() => {}}
+    />,
   );
-  await waitFor(() =>
-    expect(invoke).toHaveBeenCalledWith("dependency_graph", {
-      reference: "T-KQ3",
-    }),
-  );
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.queryByText("Loading…")).toBeNull();
+  fail = false;
+  fireEvent.click(retry);
+  expect(await screen.findByText("Offscreen")).toBeTruthy();
 });
 
 test("the selection panel reloads its lists when the graph changes", async () => {
@@ -186,10 +220,11 @@ test("the selection panel reloads its lists when the graph changes", async () =>
   const view = render(
     <SelectionPanel
       ticket={ticket}
-      origin=""
+      nodes={graph.nodes}
       projects={[]}
       version={graph}
       onOpen={() => {}}
+      onSelect={() => {}}
     />,
   );
   await screen.findByText("Offscreen");
@@ -199,10 +234,11 @@ test("the selection panel reloads its lists when the graph changes", async () =>
   view.rerender(
     <SelectionPanel
       ticket={ticket}
-      origin=""
+      nodes={graph.nodes}
       projects={[]}
       version={{ ...graph }}
       onOpen={() => {}}
+      onSelect={() => {}}
     />,
   );
   await waitFor(() => expect(shows()).toBe(before + 1));

@@ -1,52 +1,64 @@
-/* The label is spoken, not shown; only "Done editing" stays visible, at the right. */
-.description-heading {
+/* The state row: one 32px line under the title. Reading, it holds the state
+   line, the save state and Edit · E; editing the description, it is the
+   session row (save state, formatting, Done). Its height never changes, so
+   nothing below it moves when editing starts or ends (P16). */
+.ticket-state-row {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
+  gap: 8px;
+  height: 32px;
+  margin-top: 4px;
+  min-width: 0;
 }
-.description-heading > span:first-child {
-  position: absolute;
-  width: 1px;
-  height: 1px;
+.ticket-state-text {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
-  clip-path: inset(50%);
+}
+.ticket-state-row .ticket-state-line {
+  flex-wrap: nowrap;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
+}
+.ticket-session-tools {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  margin-left: -8px;
+}
+.editor-save-state {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.editor-save-state:empty {
+  display: none;
+}
+/* Editing: the save state leads the row, Done ends it. */
+.ticket-state-row[data-session] .editor-save-state {
+  order: -1;
+}
+.ticket-state-row > .ui-button:last-child {
+  flex: none;
+  margin-right: -8px;
 }
 .description-document {
   display: block;
   margin-top: 0;
   min-height: 48px;
   text-align: left;
-}
-.description-document {
   color: var(--foreground);
-  cursor: text;
   line-height: normal;
   overflow-wrap: anywhere;
 }
 .editor-body {
   margin-top: 16px;
-}
-.editor-body .cm-line span {
-  color: inherit;
-}
-.editor-body .cm-editor.cm-focused {
-  outline: 1px solid var(--input-focus);
-  outline-offset: 2px;
-}
-.description-document [data-mention-target] {
-  border-radius: var(--radius);
-  background: var(--accent);
-  color: var(--accent-foreground);
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.mention-missing {
-  margin-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
 }
 .editor-body:focus {
   outline: none;
@@ -54,25 +66,48 @@
 .editor-body:focus-visible {
   outline: 2px solid var(--ring);
 }
-.editor-conflict {
-  margin-top: 16px;
-  padding: 12px;
-  border: 1px solid var(--border);
+/* Editing in place: the frame sits where the reading card sits, 12px
+   outside the text, and reads at the same size, so no line moves (DS-01). */
+.editor-body .markdown-editor[data-chrome="session"] {
+  margin: -4px -12px -12px;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ticket-detail[data-expanded] .editor-body {
+  --text-editor: var(--text-reading);
+  --text-editor-line: 24px;
+}
+.ticket-detail[data-expanded]
+  .editor-body
+  .markdown-editor[data-chrome="session"] {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+/* The followed passage flashes once, as any arrival does (detA TT-04). */
+.description-document [data-mention-target] {
   border-radius: var(--radius);
-  background: var(--muted);
+  animation: arrival-flash 1.2s ease-out 0.2s both;
+}
+.description-document [data-mention-target]:focus {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .description-document [data-mention-target] {
+    animation: none;
+  }
+}
+.mention-missing {
+  margin-top: 8px;
+  color: var(--muted-foreground);
   font-size: var(--text-ui);
   line-height: 20px;
 }
-.editor-conflict-help {
-  margin: 8px 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
+.editor-conflict {
+  margin-top: 16px;
 }
-.editor-conflict-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+.editor-conflict-question {
+  margin-right: auto;
+  font-size: var(--text-ui);
+  line-height: 20px;
 }
 .conflict-block {
   margin-top: 12px;
@@ -83,24 +118,23 @@
   font-weight: 500;
   line-height: 16px;
 }
+/* The draft beside the saved text: a neutral rule, not the focus colour (CO-03). */
 .conflict-draft {
   padding-left: 12px;
-  border-left: 2px solid var(--ring);
+  border-left: 2px solid var(--border);
 }
 
 .ticket-save-error {
-  font-size: var(--text-ui);
-  line-height: 20px;
+  margin-top: 8px;
+}
+.editor-title-error {
+  margin: -4px 0 8px;
 }
 
-/* The Edit button appears over the description's corner on hover or focus. */
-.description-reading {
-  position: relative;
-}
+/* The reading card sits 12px outside the text on every side (frame A/B); the
+   margins cancel the padding so the text does not move. Beside the list the
+   text sits 24px under the state row; expanded it sits 36px under it. */
 .description-reading .description-document {
-  /* The hover card is 12px outside the text on every side (frame A/B); the
-     margins cancel the padding so the text does not move. Beside the list the
-     text sits 24px under the subtitle; expanded it sits 36px under it. */
   margin: -4px -12px -12px;
   padding: 12px;
   min-height: 48px;
@@ -113,47 +147,28 @@
 .ticket-detail[data-expanded] .subtickets {
   margin-top: 44px;
 }
-.description-reading:hover .description-document,
-.description-reading:focus-within .description-document {
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-/* The Edit button sits over the document's top-right corner. A code block that opens the
-   description would put its Copy code button under it, so the block starts below the button. */
-.description-document .markdown-document > .markdown-code-block:first-child {
-  margin-top: 32px;
-}
-.description-edit {
-  position: absolute;
-  top: 8px;
-  /* 6px inside the hover card, which extends 12px past the text (board B). */
-  right: -4px;
-  z-index: 1;
-  opacity: 0;
-}
-/* Compact: icon, "Edit" and the key hint, 28px tall (74px wide). */
-.description-reading .description-edit {
-  height: 28px;
-  gap: 6px;
-  padding: 0 7px;
-  font-size: var(--text-code);
-  line-height: 16px;
-}
-.description-reading .description-edit kbd {
-  min-width: 0;
-  height: auto;
-  padding: 0;
+/* An empty description: one quiet line that becomes the editor in place. */
+.description-add {
+  display: flex;
+  align-items: center;
+  width: calc(100% + 24px);
+  height: 40px;
+  margin: -4px -12px 0;
+  padding: 0 12px;
   border: 0;
-  background: none;
-  box-shadow: none;
-  font-size: inherit;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--disabled-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  text-align: start;
+  cursor: text;
+}
+.description-add:hover {
+  background: var(--hover);
   color: var(--muted-foreground);
 }
-.description-reading:hover .description-edit,
-.description-reading:focus-within .description-edit {
-  opacity: 1;
-}
-@media (hover: none) {
-  .description-edit {
-    opacity: 1;
-  }
+.description-add:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }

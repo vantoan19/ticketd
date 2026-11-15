@@ -31,21 +31,14 @@
 /* The radio group spans both value columns so its choices sit under their heads. */
 .sync-compare-choices {
   grid-column: 2 / -1;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-}
-.sync-compare .upload-destination-choice {
-  align-items: flex-start;
-  width: 100%;
   min-width: 0;
 }
-.sync-compare .upload-destination-choice > span:last-child {
-  flex: 1;
-  min-width: 0;
-}
-.sync-compare .layout-choice-dot {
-  margin-top: 3px;
+/* A value is the tile's title: long text reads at body weight. */
+.sync-compare-choices .sync-body {
+  font-weight: 400;
 }
 .sync-value {
   display: flex;
@@ -140,13 +133,15 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.sync-version:hover,
+.sync-version:hover {
+  background: var(--hover);
+}
 .sync-version[aria-current="true"] {
   background: var(--accent);
 }
 .sync-version:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .sync-version small {
   font-size: var(--text-caption);

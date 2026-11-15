@@ -57,11 +57,11 @@
   box-shadow: inset 0 1px 0 var(--group-hairline);
 }
 .settings-search-result:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .settings-search-result:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .settings-search-result > svg {
   flex: none;
@@ -76,9 +76,9 @@
 .settings-search mark {
   background: transparent;
   color: inherit;
+  /* Semibold with an underline in the text's own colour: no status colour. */
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--status-blocked);
-}
-.settings-search > .settings-list {
-  margin-top: 28px;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-underline-offset: 2px;
 }

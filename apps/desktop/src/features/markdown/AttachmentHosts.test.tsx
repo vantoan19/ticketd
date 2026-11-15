@@ -99,8 +99,11 @@ async function insertInto(label: string) {
   editable.focus();
   fireEvent.focus(editable);
   await waitFor(() => expect(document.activeElement).toBe(editable));
+  // A quick composer keeps the button in its frame; an editing session in
+  // the row its page reserves.
   fireEvent.click(
-    within(editor).getByRole("button", { name: "Insert attachment" }),
+    within(editor).queryByRole("button", { name: "Insert attachment" }) ??
+      screen.getByRole("button", { name: "Insert attachment" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await waitFor(() =>
@@ -153,9 +156,11 @@ test("reader replacement follows description autosave and retains the chosen occ
     <TicketEditor ticket={{ ...ticket, body: original }} onSaved={vi.fn()} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Trace" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Choose a replacement" }),
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
   );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
   expect(invoke).not.toHaveBeenCalledWith("change_ticket", expect.anything());
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(
@@ -241,18 +246,20 @@ test.each(["reader", "rich"])(
       );
     } else
       fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Choose a replacement" }),
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "More actions" }),
+      { button: 0, ctrlKey: false },
     );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Replace…" }));
     fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
     fireEvent.click(
       await screen.findByRole("radio", { name: "Select Replacement" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
     await within(
-      screen.getByRole("dialog", { name: "Attach file" }),
+      screen.getByRole("dialog", { name: "Replace Trace" }),
     ).findByText(/Retention unavailable/);
-    expect(screen.getByRole("dialog", { name: "Attach file" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Replace Trace" })).toBeTruthy();
     expect(invoke).not.toHaveBeenCalledWith("change_ticket", expect.anything());
   },
 );

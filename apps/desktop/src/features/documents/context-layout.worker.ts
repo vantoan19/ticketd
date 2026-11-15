@@ -7,6 +7,10 @@ self.onmessage = (
   try {
     self.postMessage({ id, positions: layoutContextGraph(request) });
   } catch (error) {
-    self.postMessage({ id, error: String(error) });
+    // Internal: the page shows this only under Details.
+    self.postMessage({
+      id,
+      error: error instanceof Error ? error.message : "Layout failed.",
+    });
   }
 };

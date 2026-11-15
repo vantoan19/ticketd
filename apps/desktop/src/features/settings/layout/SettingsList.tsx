@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "cn";
+import { IconTile } from "@/components/ui/icon-tile";
 
 /** A surface of rows divided by hairlines, with an optional `SettingsListFooter`. */
 export function SettingsList({
@@ -76,13 +77,9 @@ export function SettingsRow({
   );
 }
 
-/** A square tile for a row's leading icon (recessed fill, border ring). */
+/** A row's leading icon: the shared IconTile. In a list every row has one or none does. */
 export function SettingsRowTile({ children }: { children: ReactNode }) {
-  return (
-    <span className="settings-list-row-tile" aria-hidden="true">
-      {children}
-    </span>
-  );
+  return <IconTile>{children}</IconTile>;
 }
 
 /** A recessed strip at the foot of a list: status text, with actions at the end. */

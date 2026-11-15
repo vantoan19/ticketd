@@ -12,6 +12,7 @@ import type {
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
+import { formatTime } from "@/lib/format";
 
 /**
  * Applies one change-log entry to the snapshot it follows. Returns "resync"
@@ -956,7 +957,11 @@ export type NoticeAction =
   | "resume";
 
 export type Notice = {
-  tone: "neutral" | "error";
+  /**
+   * `attention` when the problem needs the person (sign-in, an unconfirmed
+   * delivery, a missing folder, a usage limit); `error` for a failure.
+   */
+  tone: "neutral" | "attention" | "error";
   title: string;
   /** Backticks mark a command or path to set in mono. */
   body: string;
@@ -965,13 +970,27 @@ export type Notice = {
   help?: string;
 };
 
+/** A host message as a sentence; a bridge that never answered is "didn't start". */
+function hostWords(message: string, harness: string) {
+  if (/\bstopped during hello\b/i.test(message))
+    return `${harness} didn't start.`;
+  // Backticks stay: they mark a command or path to set in mono.
+  const text = message.trim();
+  if (!text) return "";
+  const capital = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?…]$/.test(capital) ? capital : `${capital}.`;
+}
+
 /**
  * The notice for a problem. The host titles it; the body says what to do.
  * Wording for the states the design drew is the design's; the rest (spec
  * table 21.6) say what was observed as plainly.
  */
 export function problemNotice(problem: Problem, harness: string): Notice {
-  const said = problem.message ? ` ${problem.message}` : "";
+  // Host text is trimmed and ends with a period, so it never runs into the
+  // next sentence; known host failures are said in plain words.
+  const plain = problem.message ? hostWords(problem.message, harness) : "";
+  const said = plain ? ` ${plain}` : "";
   const signIn = problem.command ? `\`${problem.command}\`` : harness;
   // A failure of the last turn can be sent past; only a probe that can tell
   // whether it still holds is worth offering.
@@ -980,34 +999,34 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "not_signed_in":
       if (past)
         return {
-          tone: "neutral",
+          tone: "attention",
           title: problem.title,
           body: `The last turn stopped because ${harness} wasn't signed in. Run ${signIn} in a terminal and sign in, then check again or send your message. ticketd never asks for your password or keys.${said}`,
           actions: problem.command ? ["copy-command", "check"] : ["check"],
         };
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `Run ${signIn} in a terminal and sign in, then check again. ticketd never asks for your password or keys.${said}`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_subscription":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
-        body: `${problem.message ?? `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
+        body: `${plain || `${harness} is signed in with an API key or cloud provider.`} ticketd doesn't change how ${harness} signs in or bills. To use your subscription, run ${signIn} in a terminal, then check again.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "sign_in_unknown":
       return {
         tone: "neutral",
         title: problem.title,
-        body: `${problem.message ?? `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
+        body: `${plain || `${harness} says whether it is signed in when a Chat starts.`} If it isn't, run ${signIn} in a terminal. ticketd never asks for your password or keys.`,
         actions: problem.command ? ["copy-command", "check"] : ["check"],
       };
     case "not_installed":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `ticketd couldn't find ${harness} on this computer. Install it, then ${problem.command ? `run ${signIn} in a terminal and sign in, then ` : ""}check again. What you typed is kept.`,
         actions: problem.command
@@ -1017,38 +1036,39 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       };
     case "incompatible":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
-        body: `${problem.message ?? `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
+        body: `${plain || `ticketd needs a newer ${harness}.`} Update it, then check again. What you typed is kept.`,
         actions: ["help", "check"],
         help: "Update guide",
       };
     case "unavailable":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
-        body: `${problem.message ?? `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
+        body: `${plain || `ticketd's part for ${harness} is missing.`} What you typed is kept.`,
         actions: ["check"],
       };
     case "probe_failed":
       return {
         tone: "neutral",
         title: problem.title,
-        body: `It may still work.${said} Check again before sending.`,
+        body: plain ? `${plain} It may still work.` : "It may still work.",
         actions: ["check"],
       };
     case "usage_limit":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
+        // The fact, then what is safe: two short sentences (CH-36).
         body: [
-          problem.message,
+          plain,
           resetTime(problem.resets_at)
-            ? `It says the limit resets ${resetTime(problem.resets_at)}.`
-            : "It didn't say when the limit resets.",
-          "Your work so far is kept. ticketd won't switch model or billing.",
-          past &&
-            "That is why the last turn stopped; you can send again once the limit has reset.",
+            ? `It resets ${resetTime(problem.resets_at)}.`
+            : "It didn't say when it resets.",
+          past
+            ? "The last turn stopped there; your work so far is kept."
+            : "Your work so far is kept.",
         ]
           .filter(Boolean)
           .join(" "),
@@ -1058,30 +1078,30 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${past ? "The last turn stopped here. " : ""}${sentence(problem.message ?? "Its sandbox failed to start on this computer.")} ticketd won't lower its permissions to continue.`,
+        body: `${past ? "The last turn stopped here. " : ""}${plain || "Its sandbox failed to start on this computer."} ticketd won't lower its permissions to continue.`,
         actions: past ? ["help"] : ["help", "check"],
         help: "Sandbox help",
       };
     case "uncertain_delivery":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         // With a message, a resend the person asked for was not accepted.
-        body: problem.message
-          ? `${problem.message} ticketd still has no confirmation that ${harness} received the first attempt; it may have started work. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`
-          : `ticketd has no confirmation that ${harness} received it. It may have started work. It hasn't been sent again. Sending it again sends only this message; discarding keeps it here, marked as not confirmed.`,
+        body: plain
+          ? `${plain} ${harness} may still have received the first attempt and started work.`
+          : `ticketd has no confirmation that ${harness} received it, so it may have started work. If you don't send it again, it stays here marked as not confirmed.`,
         actions: ["resend", "discard"],
       };
     case "folder_missing":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `${problem.path ? `\`${problem.path}\`` : "The folder"} wasn't found. Nothing was re-run. Put it back and check again, or pick another folder to keep going here.`,
         actions: ["check", "pick-folder"],
       };
     case "history_lost":
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: "You can still read it here. To keep going, resume in a fresh session and choose which history to give it.",
         actions: ["resume"],
@@ -1089,13 +1109,13 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "session_in_use":
       if (past)
         return {
-          tone: "neutral",
+          tone: "attention",
           title: problem.title,
           body: `The last turn stopped because of that. Close it there before you send again.${said}`,
           actions: [],
         };
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `Close it there, then check again. Nothing was sent.${said}`,
         actions: ["check"],
@@ -1103,7 +1123,7 @@ export function problemNotice(problem: Problem, harness: string): Notice {
     case "stop_unconfirmed":
       // Stop stays enabled as the retry, so the notice offers nothing else.
       return {
-        tone: "neutral",
+        tone: "attention",
         title: problem.title,
         body: `${harness} may still be running.`,
         actions: [],
@@ -1112,26 +1132,26 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "error",
         title: problem.title,
-        body: `${sentence(problem.message ?? "It gave no reason.")} What it finished before that is kept; the turn is not complete.`,
+        body: `${plain || "It gave no reason."} What it finished before that is kept; the turn is not complete.`,
         actions: ["check"],
       };
   }
 }
 
-/** "on Nov 12 at 3:00 PM", local time, from seconds since the epoch; "" when there is none. */
+/** A short day such as "Nov 12", in the computer's own locale. */
+const shortDay = (date: Date) =>
+  date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+/**
+ * "on Nov 12 at 3:00 PM" ("at 15:00" on a 24-hour clock): local time in the
+ * computer's own format, as every clock time in the app reads (CH-34), from
+ * seconds since the epoch; "" when there is none.
+ */
 function resetTime(seconds: number | null | undefined): string {
   if (seconds == null) return "";
   const at = new Date(seconds * 1000);
   if (Number.isNaN(at.getTime())) return "";
-  const day = at.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-  const time = at.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `on ${day} at ${time}`;
+  return `on ${shortDay(at)} at ${formatTime(at)}`;
 }
 
 /** "now", "2m", "1h", "Yesterday", "Nov 8": the trailing time of a Chat row. */
@@ -1145,7 +1165,7 @@ export function chatTime(timestamp: string, now = Date.now()): string {
     return `${Math.floor(minutes / 60)}h`;
   if (new Date(now - 86_400_000).toDateString() === then.toDateString())
     return "Yesterday";
-  return then.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return shortDay(then);
 }
 
 /** KiB or MiB to one decimal, as the truncation note states sizes. */

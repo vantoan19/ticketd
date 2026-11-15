@@ -249,4 +249,55 @@ describe("the desktop Chat client", () => {
     const old = createHostChatClient(stubBridge({ chat_create: "c1" }).bridge);
     await expect(old.createChat(input)).rejects.toThrow();
   });
+
+  it("CH-47: finds a typed reference's ticket first, once, and never a trashed one", async () => {
+    const fv1 = {
+      kind: "ticket",
+      id: "t1",
+      reference: "T-FV1",
+      title: "Board columns",
+      status: "Todo",
+    };
+    const other = { kind: "document", id: "d1", title: "T-FV1 notes" };
+    // What show_ticket replies, trimmed to what a link needs.
+    const ticket = {
+      id: "t1",
+      reference: "T-FV1",
+      title: "Board columns",
+      status: "Todo",
+      trashed: false,
+    };
+    const stub = stubBridge({
+      chat_search_records: [other, fv1],
+      show_ticket: ticket,
+    });
+    const client = createHostChatClient(stub.bridge);
+    expect(await client.searchRecords(" t-fv1 ")).toEqual([fv1, other]);
+    expect(stub.invoke).toHaveBeenCalledWith("show_ticket", {
+      reference: "T-FV1",
+    });
+
+    const trashed = stubBridge({
+      chat_search_records: [],
+      show_ticket: { ...ticket, trashed: true },
+    });
+    expect(
+      await createHostChatClient(trashed.bridge).searchRecords("T-FV1"),
+    ).toEqual([]);
+
+    // Not a reference: no lookup; an unknown reference is no failure.
+    const plain = stubBridge({ chat_search_records: [] });
+    await createHostChatClient(plain.bridge).searchRecords("board");
+    expect(plain.invoke).not.toHaveBeenCalledWith(
+      "show_ticket",
+      expect.anything(),
+    );
+    const missing = stubBridge({
+      chat_search_records: [],
+      show_ticket: new Error("No ticket T-ZZ9"),
+    });
+    expect(
+      await createHostChatClient(missing.bridge).searchRecords("T-ZZ9"),
+    ).toEqual([]);
+  });
 });

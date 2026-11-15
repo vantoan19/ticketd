@@ -112,6 +112,26 @@ test("choosing Dark or Full width is stored and exposed as selected", () => {
   });
 });
 
+test("a page opens at its top, not where the previous page was scrolled", () => {
+  const view = render(
+    <SettingsView
+      selected="appearance"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  const scroller = view.container.querySelector(".settings-page")!;
+  scroller.scrollTop = 600;
+  view.rerender(
+    <SettingsView
+      selected="google-drive"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  expect(scroller.scrollTop).toBe(0);
+});
+
 test("Google Drive opens as its own page in the shell", () => {
   render(
     <SettingsView
@@ -134,11 +154,17 @@ test("the Location page shows the path, counts, size, and format version", async
       onOpenInbox={() => {}}
     />,
   );
-  const folder = await screen.findByTitle(
+  await screen.findAllByText("workspace.sqlite3");
+  // The full path is in the PathText tooltip, not a native title.
+  const folder = document.querySelector<HTMLElement>(
+    '[data-slot="path-text"]',
+  )!;
+  expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
+  fireEvent.pointerMove(folder);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
     "/Users/me/Library/Application Support/ticketd",
   );
-  expect(screen.getAllByText("workspace.sqlite3").length).toBeGreaterThan(0);
-  expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
+  fireEvent.keyDown(document.body, { key: "Escape" });
   const text = screen.getByRole("region", { name: "Contents" }).textContent;
   expect(text).toContain("Tickets42");
   expect(text).toContain("Projects3");
@@ -162,7 +188,7 @@ test("Copy path puts the workspace path on the clipboard", async () => {
   );
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(info.path));
-  expect(await screen.findByText("Path copied.")).toBeTruthy();
+  expect(await screen.findByText("Copied")).toBeTruthy();
 });
 
 test("Show in the file manager reveals the workspace file", async () => {
@@ -188,7 +214,7 @@ test("a workspace that cannot be read shows an error instead of counts", async (
       onOpenInbox={() => {}}
     />,
   );
-  expect((await screen.findByRole("alert")).textContent).toContain("locked");
+  expect((await screen.findByRole("alert")).textContent).toContain("Locked.");
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 

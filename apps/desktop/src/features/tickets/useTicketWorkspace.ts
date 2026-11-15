@@ -17,11 +17,34 @@ import {
 } from "@/lib/api/sources";
 import { loadPreferences, usePreferences } from "@/lib/preferences";
 import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import {
   useOnWorkspaceChange,
   useWorkspaceChange,
 } from "@/lib/workspace-change";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
+
+/**
+ * Reads the first `pages` pages of a result, PAGE_SIZE at a time (the core
+ * caps one read at 100), stopping at a short page.
+ */
+async function readPages(filter: FindFilter, pages: number) {
+  const tickets: Ticket[] = [];
+  for (let page = 0; page < pages; page++) {
+    const chunk = await client.findTickets({
+      ...filter,
+      offset: page * PAGE_SIZE,
+      limit: PAGE_SIZE,
+    });
+    tickets.push(...chunk);
+    if (chunk.length < PAGE_SIZE) break;
+  }
+  // A ticket that moved between reads is listed once.
+  return [...new Map(tickets.map((ticket) => [ticket.id, ticket])).values()];
+}
 type RefreshOptions = { reportFailure?: boolean };
 type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
 /**
@@ -60,7 +83,10 @@ export function useTicketWorkspace(
   const listLoaded = useRef(false);
   const lastSnapshot = useRef("");
   const [query, setQuery] = useState("");
-  const [offset, setOffset] = useState(0);
+  // How many pages of PAGE_SIZE the list shows: "Show 50 more" adds one
+  // (P17); every change of scope, search or filter starts again at one.
+  const [pages, setPages] = useState(1);
+  const resetPaging = useCallback(() => setPages(1), []);
   const [plan, setPlan] = useState("");
   const [status, setStatus] = useState("");
   const [tags, setTags] = useState("");
@@ -95,9 +121,8 @@ export function useTicketWorkspace(
   // How many tickets the scope holds without search or filters; null while
   // nothing is narrowing it.
   const [scopeTotal, setScopeTotal] = useState<number | null>(null);
-  // The offset the displayed tickets were read at, for page-edge navigation.
-  const [loadedOffset, setLoadedOffset] = useState(0);
-  const [pendingEdge, setPendingEdge] = useState<"first" | "last" | null>(null);
+  // Next past the last shown ticket loads more and then opens the one after.
+  const [pendingNext, setPendingNext] = useState<number | null>(null);
   const [selected, selectTicket] = useState<string | null>(null);
   const [mention, setMention] = useState<FollowedMention | null>(null);
   // Counts every selection, including of the ticket already open, so each one
@@ -114,7 +139,23 @@ export function useTicketWorkspace(
   );
   const clearMention = useCallback(() => setMention(null), []);
   const [details, setDetails] = useState<Record<string, Ticket>>({});
+  // A local preference (sidebar, display) that could not be saved. It stays
+  // until dismissed: a later list load has nothing to do with it.
   const [error, setError] = useState("");
+  // Why the list could not load, for the list's own failure state. Nothing is
+  // reported window-wide: the pane that failed says so.
+  const [listFailure, setListFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  // Why the open ticket could not be fetched, by reference: its pane says so.
+  const [detailFailures, setDetailFailures] = useState<
+    Record<string, FailureDescription>
+  >({});
+  const [detailAttempt, setDetailAttempt] = useState(0);
+  const retryDetail = useCallback(
+    () => setDetailAttempt((value) => value + 1),
+    [],
+  );
   const [loading, setLoading] = useState(true);
   const [listRevision, setRevision] = useState(0);
   // The list only changes when a listed ticket does, but a Document, Activity or
@@ -152,9 +193,9 @@ export function useTicketWorkspace(
             : { Provider: source },
       order: query ? "Newest" : "Workflow",
       limit: PAGE_SIZE,
-      offset,
+      offset: 0,
     }),
-    [query, filter, plan, status, tags, availability, family, source, offset],
+    [query, filter, plan, status, tags, availability, family, source],
   );
   const board = useTicketBoard(filterArgs, layout === "board", workspaceChange);
   const refreshBoard = board.refresh;
@@ -181,7 +222,7 @@ export function useTicketWorkspace(
           JSON.stringify({ ...filterArgs, order: 0 });
         const result = await Promise.race([
           Promise.all([
-            trash ? client.listTrash() : client.findTickets(filterArgs),
+            trash ? client.listTrash() : readPages(filterArgs, pages),
             client.listProjects(),
             client.listPlans(),
             trash ? Promise.resolve(null) : client.countTickets(filterArgs),
@@ -202,29 +243,16 @@ export function useTicketWorkspace(
           }),
         ]);
         if (request !== generation.current) return;
-        const found = result[3];
-        if (!trash && found && offset > 0 && offset >= found.total) {
-          // The page this view was on no longer exists (its last tickets left the
-          // result): go to the last page that does instead of showing an empty list
-          // under a non-zero total.
-          setOffset(
-            found.total === 0
-              ? 0
-              : Math.floor((found.total - 1) / PAGE_SIZE) * PAGE_SIZE,
-          );
-          return;
-        }
         listLoaded.current = true;
         setPollTick((value) => value + 1);
         setQueryError(false);
         setRefreshFailed(false);
-        setError("");
+        setListFailure(null);
         // The same data again changes nothing, so views are not told to reload.
-        const snapshot = JSON.stringify([trash, offset, result]);
+        const snapshot = JSON.stringify([trash, pages, result]);
         if (snapshot === lastSnapshot.current) return;
         lastSnapshot.current = snapshot;
         setTickets(result[0]);
-        setLoadedOffset(offset);
         setCounts(result[3]);
         setSourceCounts(result[4]);
         setScopeTotal(result[5]?.total ?? null);
@@ -237,17 +265,14 @@ export function useTicketWorkspace(
         if (listLoaded.current) setRefreshFailed(true);
         else setQueryError(true);
         // Polling keeps the saved list quiet; an explicit retry explains its failure.
-        if (!listLoaded.current || options?.reportFailure) {
-          setError(
-            `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
-          );
-        }
+        if (!listLoaded.current || options?.reportFailure)
+          setListFailure(describeFailure(reason, "load tickets"));
       } finally {
         window.clearTimeout(timeout);
         if (request === generation.current) setLoading(false);
       }
     },
-    [trash, offset, scopeKind, scopePlan, filterArgs, layout, refreshBoard],
+    [trash, pages, scopeKind, scopePlan, filterArgs, layout, refreshBoard],
   );
   useEffect(() => {
     let active = true;
@@ -287,11 +312,10 @@ export function useTicketWorkspace(
   // Changes from anywhere (the CLI, an agent, another window) refetch the list
   // quietly; an unchanged workspace costs nothing here.
   useOnWorkspaceChange(() => void refresh());
-  // Previous or Next at the edge of a page moves to the neighboring page and
-  // opens the ticket at its near edge once that page has loaded.
-  if (pendingEdge && loadedOffset === offset) {
-    const target = pendingEdge === "first" ? tickets[0] : tickets.at(-1);
-    setPendingEdge(null);
+  // Next past the last shown ticket opens the next one once it has loaded.
+  if (pendingNext !== null && tickets.length > pendingNext) {
+    const target = tickets[pendingNext];
+    setPendingNext(null);
     if (target) setSelected(target.reference);
   }
   useEffect(() => {
@@ -305,12 +329,22 @@ export function useTicketWorkspace(
             ...previous,
             [ticket.reference]: ticket,
           }));
+          setDetailFailures((previous) => {
+            if (!(selected in previous)) return previous;
+            const rest = { ...previous };
+            delete rest[selected];
+            return rest;
+          });
           setMention((current) => markReady(current, ticket.reference));
         }
       },
       (reason: unknown) => {
         if (!active) return;
-        setError(`Ticket refresh failed: ${String(reason)}`);
+        // The detail pane shows this in place of the ticket, with Retry.
+        setDetailFailures((previous) => ({
+          ...previous,
+          [selected]: describeFailure(reason, `load ${selected}`),
+        }));
         // Reveal against what is cached rather than never.
         setMention((current) => markReady(current, selected));
       },
@@ -318,7 +352,7 @@ export function useTicketWorkspace(
     return () => {
       active = false;
     };
-  }, [selected, revision, selections]);
+  }, [selected, revision, selections, detailAttempt]);
   // Trashing or restoring swaps the ticket's view; a mention does not outlive that.
   const trashed = selected ? details[selected]?.trashed : undefined;
   const [seen, setSeen] = useState<{
@@ -344,7 +378,7 @@ export function useTicketWorkspace(
       setSourceRefresh({
         running: false,
         report: null,
-        error: reason instanceof Error ? reason.message : String(reason),
+        error: describeFailure(reason, "refresh").sentence,
         errorAt: new Date().toISOString(),
       });
     }
@@ -352,7 +386,7 @@ export function useTicketWorkspace(
   }
   function setSource(next: string) {
     setSourceFilter(next);
-    setOffset(0);
+    setPages(1);
   }
   async function create(
     title: string,
@@ -405,27 +439,27 @@ export function useTicketWorkspace(
   const selectedIndex = tickets.findIndex(
     (item) => item.reference === selected,
   );
-  /**
-   * The selected ticket's place in the visible list, across pages. It is read
-   * against the page that is loaded, so it stays put (and the Previous/Next
-   * buttons stay mounted, keeping focus) while the neighboring page loads.
-   */
+  /** The selected ticket's place in the whole result. */
   const position =
-    selectedIndex >= 0
-      ? { index: loadedOffset + selectedIndex + 1, total }
-      : null;
+    selectedIndex >= 0 ? { index: selectedIndex + 1, total } : null;
   function openAdjacent(direction: 1 | -1) {
     if (selectedIndex < 0) return;
     const next = tickets[selectedIndex + direction];
     if (next) {
       setSelected(next.reference);
-    } else if (direction === 1 && offset + tickets.length < total) {
-      setPendingEdge("first");
-      setOffset(offset + PAGE_SIZE);
-    } else if (direction === -1 && offset > 0) {
-      setPendingEdge("last");
-      setOffset(Math.max(0, offset - PAGE_SIZE));
+    } else if (direction === 1 && tickets.length < total) {
+      // The position stays put (and Next keeps focus) while more load.
+      setPendingNext(selectedIndex + 1);
+      setPages((value) => value + 1);
     }
+  }
+  /** Every reference the current search and filters match, across pages. */
+  async function matchingReferences(): Promise<string[]> {
+    const found = await readPages(
+      filterArgs,
+      Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    );
+    return found.map((ticket) => ticket.reference);
   }
   const scopeName =
     navigation.kind === "trash"
@@ -442,15 +476,18 @@ export function useTicketWorkspace(
               : navigation.kind === "progress"
                 ? "In progress"
                 : "All tickets";
+  /**
+   * Clears the filter dimensions back to the view's own scope. The search and
+   * the source tabs are not filters: each clears with its own control (list
+   * F-09).
+   */
   function clearFilters() {
-    setQuery("");
     setPlan(navigation.plan);
     setStatus(navigation.kind === "progress" ? "In progress" : "");
     setAvailability(navigation.kind === "ready" ? "Ready" : "");
     setTags("");
     setFamily("");
-    setSourceFilter("all");
-    setOffset(0);
+    setPages(1);
   }
   function scope(
     next: "all" | "ready" | "progress" | "trash",
@@ -480,7 +517,7 @@ export function useTicketWorkspace(
     setFamily("");
     setSourceFilter("all");
     setQuery("");
-    setOffset(0);
+    setPages(1);
   }
   return {
     layout,
@@ -500,8 +537,10 @@ export function useTicketWorkspace(
     setFilter,
     query,
     setQuery,
-    offset,
-    setOffset,
+    pages,
+    resetPaging,
+    showMore: () => setPages((value) => value + 1),
+    matchingReferences,
     plan,
     setPlan,
     status,
@@ -529,6 +568,9 @@ export function useTicketWorkspace(
     setDetails,
     error,
     setError,
+    listFailure,
+    detailFailure: selected ? (detailFailures[selected] ?? null) : null,
+    retryDetail,
     loading,
     revision,
     refresh,

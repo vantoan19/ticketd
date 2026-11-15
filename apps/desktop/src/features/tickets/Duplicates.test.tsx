@@ -555,11 +555,26 @@ test("a failed evaluate clears the earlier lines and Apply waits for each answer
     message: "database is locked",
   };
   choose("T-KQ1 blocks T-KQ3", "retain");
-  expect(await screen.findByText("database is locked")).toBeTruthy();
+  expect(await screen.findByText(/Database is locked\./)).toBeTruthy();
   expect(screen.queryByText(/becomes Ready/)).toBeNull();
   expect(
     screen.getByText("T-KQ3 keeps waiting on a duplicate ticket"),
   ).toBeTruthy();
+});
+
+test("a reference that names no ticket says so in plain words on the field", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "preview_duplicate_dependencies")
+      throw { code: "not_found", message: "ticket 'T-ZZ99' was not found" };
+    return [];
+  });
+  renderReview(vi.fn(async () => {}));
+  const input = screen.getByLabelText("Canonical ticket reference");
+  fireEvent.change(input, { target: { value: "t-zz99" } });
+  submitReview();
+  expect(await screen.findByText("No ticket T-ZZ99.")).toBeTruthy();
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(screen.queryByText(/was not found/)).toBeNull();
 });
 
 test("Apply is disabled while the answer for the choices is on its way", async () => {

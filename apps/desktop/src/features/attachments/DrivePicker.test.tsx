@@ -55,18 +55,19 @@ test("unconfigured Drive keeps setup details collapsed and local sources usable"
   fireEvent.click(screen.getByRole("radio", { name: "Google Drive" }));
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "Google Drive setup is required before connecting.",
+    "Google Drive isn't set up on this computer.",
   );
-  const instructions = screen.getByText(diagnostic).closest("details");
-  expect(instructions).not.toBeNull();
-  expect(instructions?.open).toBe(false);
-  fireEvent.click(screen.getByText("Setup instructions", { exact: true }));
-  expect(instructions?.open).toBe(true);
+  // A Disclosure, closed until asked for.
+  const instructions = screen.getByRole("button", {
+    name: "Setup instructions",
+  });
+  expect(instructions.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(instructions);
+  expect(instructions.getAttribute("aria-expanded")).toBe("true");
+  // No disabled button: the tab says what is missing instead.
   expect(
-    screen
-      .getByRole("button", { name: "Choose in Google Drive" })
-      .hasAttribute("disabled"),
-  ).toBe(true);
+    screen.queryByRole("button", { name: "Choose in Google Drive" }),
+  ).toBeNull();
   fireEvent.click(screen.getByRole("radio", { name: "Upload" }));
   expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy();
   expect(invoke).not.toHaveBeenCalledWith(
@@ -92,10 +93,10 @@ test("choosing an upload folder shows typed setup guidance collapsed while local
   fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
   expect(await screen.findByRole("status")).toHaveProperty(
     "textContent",
-    "Google Drive setup is required before connecting.",
+    "Google Drive isn't set up on this computer.",
   );
-  const details = screen.getByText(diagnostic).closest("details");
-  expect(details?.open).toBe(false);
+  const details = screen.getByRole("button", { name: "Setup instructions" });
+  expect(details.getAttribute("aria-expanded")).toBe("false");
   expect(
     screen
       .getByRole("button", { name: "Choose files" })
@@ -105,8 +106,8 @@ test("choosing an upload folder shows typed setup guidance collapsed while local
     "select_drive_upload_folder",
     expect.anything(),
   );
-  fireEvent.click(screen.getByText("Setup instructions", { exact: true }));
-  expect(details?.open).toBe(true);
+  fireEvent.click(details);
+  expect(details.getAttribute("aria-expanded")).toBe("true");
   expect(screen.getByText(diagnostic)).toBeTruthy();
 });
 
@@ -126,7 +127,9 @@ test("shared picker selects Drive references without changing local upload desti
   const picked = vi.fn().mockResolvedValue(undefined);
   render(<AttachmentPicker open onOpenChange={vi.fn()} onPick={picked} />);
   fireEvent.click(screen.getByRole("radio", { name: "Google Drive" }));
-  expect(await screen.findByText(/Only files you select/)).toBeTruthy();
+  expect(
+    await screen.findByText(/only the files you choose are shared/),
+  ).toBeTruthy();
   fireEvent.click(
     screen.getByRole("button", { name: "Choose in Google Drive" }),
   );
@@ -227,7 +230,7 @@ test.each(["inline", "library"])(
     }
     expect(await screen.findByText(/Current source content/)).toBeTruthy();
     expect(await screen.findByText("Google Docs")).toBeTruthy();
-    expect(screen.getByText("Size unavailable")).toBeTruthy();
+    expect(screen.getByText("Size unknown")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Export file" })).toBeNull();
     expect(document.querySelector("img,video,audio,iframe,object")).toBeNull();
     if (entry === "library")
@@ -364,7 +367,7 @@ test("reference replacement refuses multiple Drive choices before changing the s
   fireEvent.click(screen.getByRole("button", { name: "Add selected" }));
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",
-    "Choose exactly one file to replace this reference.",
+    "Choose one file. Only one file can replace this reference.",
   );
   expect(picked).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("checkbox", { name: "Second plan" }));

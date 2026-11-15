@@ -6,12 +6,15 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { Activity } from "./Activity";
 import { DocumentNavigation } from "@/features/documents/navigation";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+// The Document picker's list (cmdk) scrolls the highlighted row into view.
+Element.prototype.scrollIntoView ??= () => {};
 vi.mock("@tauri-apps/api/core", () => bridge);
 // Source entry exercises the real controlled editor; jsdom lacks the native
 // selection and layout APIs used by the external CodeMirror widget.
@@ -40,6 +43,7 @@ afterEach(() => {
   bridge.invoke.mockReset();
   localStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 test("preserves a note draft on a failed save and prevents repeated submissions", async () => {
@@ -234,7 +238,7 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
   const note = await screen.findByLabelText("Selected update");
   expect(note.closest("ol")).not.toBeNull();
   fireEvent.click(
-    await screen.findByRole("button", { name: "Load more activity" }),
+    await screen.findByRole("button", { name: "Show more activity" }),
   );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("activity_feed", {
@@ -298,7 +302,10 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
   fireEvent.click(await screen.findByRole("menuitem", { name: "Edit update" }));
   expect(screen.queryByText(/The saved update changed/)).toBeNull();
   fireEvent.click(
-    await screen.findByRole("button", { name: "Edit Markdown source" }),
+    await within(screen.getByRole("form", { name: "Edit update" })).findByRole(
+      "button",
+      { name: "Edit Markdown source" },
+    ),
   );
   fireEvent.change(
     screen.getByRole("textbox", { name: "Edit update source" }),
@@ -442,11 +449,9 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   expect(
     screen.getByRole("textbox", { name: "New update rich text" }).textContent,
   ).toContain("Finding");
-  // The formatting toolbar appears while the editor has focus.
-  fireEvent.focus(
-    screen.getByRole("textbox", { name: "New update rich text" }),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+  // Inserting a file or switching modes never posts.
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
   expect(
     bridge.invoke.mock.calls.filter(
       ([command]) => command === "add_activity_with_details",
@@ -489,7 +494,10 @@ test("preserves new and edited drafts across hidden navigation, external refresh
     screen.getByRole("textbox", { name: "Edit update rich text" }).textContent,
   ).toContain("Original note");
   fireEvent.click(
-    await screen.findByRole("button", { name: "Edit Markdown source" }),
+    await within(screen.getByRole("form", { name: "Edit update" })).findByRole(
+      "button",
+      { name: "Edit Markdown source" },
+    ),
   );
   fireEvent.change(
     screen.getByRole("textbox", { name: "Edit update source" }),
@@ -512,9 +520,7 @@ test("preserves new and edited drafts across hidden navigation, external refresh
     screen.getByRole("textbox", { name: "Edit update source" }),
   ).toHaveProperty("value", "My edited **draft**");
   fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Edit Markdown source" }),
-  );
+  // The composer was never replaced: it still holds the new draft.
   expect(
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Unsubmitted new draft");
@@ -546,7 +552,10 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "Edit update" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Edit Markdown source" }),
+    await within(screen.getByRole("form", { name: "Edit update" })).findByRole(
+      "button",
+      { name: "Edit Markdown source" },
+    ),
   );
   fireEvent.change(
     screen.getByRole("textbox", { name: "Edit update source" }),
@@ -605,7 +614,7 @@ test("reports when a brief cannot be saved locally", async () => {
     target: { value: "Still in the editor" },
   });
   expect(screen.getByRole("alert").textContent).toContain(
-    "Could not save the unpublished update",
+    "Couldn't save the unpublished update",
   );
   expect(
     screen.getByRole("textbox", { name: "New update source" }),
@@ -624,22 +633,30 @@ test("restores unpublished details after remount", async () => {
   };
   const view = render(<Activity {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
-  fireEvent.click(screen.getByRole("button", { name: "Add details" }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Add details or a Document" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Add details" }));
   expect(await screen.findByText("Details")).toBeTruthy();
-  const sourceButtons = await screen.findAllByRole("button", {
-    name: "Edit Markdown source",
-  });
-  fireEvent.click(sourceButtons[1]!);
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "Details" })).getByRole(
+      "button",
+      { name: "Edit Markdown source" },
+    ),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Details source" }), {
     target: { value: "Evidence **draft**" },
   });
   view.unmount();
   render(<Activity {...props} />);
   expect(await screen.findByText("Details")).toBeTruthy();
-  const restoredButtons = await screen.findAllByRole("button", {
-    name: "Edit Markdown source",
-  });
-  fireEvent.click(restoredButtons[1]!);
+  fireEvent.click(
+    within(await screen.findByRole("region", { name: "Details" })).getByRole(
+      "button",
+      { name: "Edit Markdown source" },
+    ),
+  );
   expect(
     screen.getByRole("textbox", { name: "Details source" }),
   ).toHaveProperty("value", "Evidence **draft**");
@@ -744,11 +761,27 @@ test("restores a selected supporting Document after navigation", async () => {
   };
   const view = render(<Activity {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
-  fireEvent.click(screen.getByRole("button", { name: "Attach Document" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Investigation" }));
+  // The Document picker opens in a popover after the composer mounted, which measures its trigger.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Add details or a Document" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Use a Document as details…" }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: /Investigation/ }));
   view.unmount();
   render(<Activity {...props} />);
-  expect(await screen.findByText("Attached: Investigation")).toBeTruthy();
+  // The attached Document is a chip with its own remove button (DB-07).
+  expect(await screen.findByText("Investigation")).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Remove attached Document" }),
   ).toBeTruthy();
@@ -869,9 +902,9 @@ test("restores the whole draft, brief, details and attached Document, from one o
       trashed={false}
     />,
   );
-  expect(await screen.findByText("Attached: Investigation")).toBeTruthy();
+  expect(await screen.findByText("Investigation")).toBeTruthy();
   expect(await screen.findByText("Brief")).toBeTruthy();
-  expect(screen.getByText("Draft kept on this device")).toBeTruthy();
+  expect(screen.getByText("Draft saved")).toBeTruthy();
 });
 
 test("opening the composer puts the caret in the update editor", async () => {

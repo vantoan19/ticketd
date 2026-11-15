@@ -48,7 +48,7 @@
   bottom: -16px;
   padding-block: 8px;
   margin-bottom: -8px;
-  background: var(--popover);
+  background: var(--surface);
   z-index: 1;
   display: flex;
   justify-content: flex-end;

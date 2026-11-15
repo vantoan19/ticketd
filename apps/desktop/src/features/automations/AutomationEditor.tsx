@@ -787,7 +787,7 @@ export function AutomationEditor({
         title="Rename Automation"
         primaryLabel="Rename"
         blockedReason={renaming?.trim() ? null : "Give it a name."}
-        width={480}
+        size="sm"
         onSubmit={() => {
           change({ name: renaming?.trim() ?? "" });
           setRenaming(null);

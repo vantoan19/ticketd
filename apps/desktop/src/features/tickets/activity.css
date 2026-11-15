@@ -9,49 +9,130 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
-/* The update a link points to flashes briefly. */
-.activity [data-slot="timeline"] > li {
-  transition: background-color 600ms ease;
-}
-.activity-entry-target {
-  border-radius: var(--radius-panel);
-  background-color: color-mix(in oklab, var(--ring) 22%, transparent);
-  box-shadow: 0 0 0 6px color-mix(in oklab, var(--ring) 22%, transparent);
-}
-.activity-author,
-.activity-header-end {
+.activity-author {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  white-space: nowrap;
 }
-.activity-header-end {
-  flex: none;
-  gap: 8px;
+.activity-author > :last-child {
+  min-width: 0;
 }
-.activity-compact-composer {
-  align-self: stretch;
-  min-height: 40px;
-  padding: 8px 12px;
-  border: 0;
-  /* Frame: a 1px #DBDBDB edge, a step stronger than the base border. */
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--foreground) 16%, transparent);
-  border-radius: var(--radius);
+/* Who did a recorded change, after its sentence. */
+.activity-agent::before {
+  content: "· ";
+}
+
+/* The update composer: one frame from the first frame (P16). Idle it is a
+   40px field; opened, the editor sits in the same frame with the controls
+   row under it, and the frame grows only downward as the text grows. */
+.activity-composer,
+.activity-edit {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border);
+}
+.activity-composer:focus-within,
+.activity-edit:focus-within {
+  outline: 1px solid var(--input-focus);
+  outline-offset: -1px;
+}
+.activity-composer .markdown-editor,
+.activity-edit .markdown-editor {
+  box-shadow: none;
   background: transparent;
-  color: var(--muted-foreground);
+}
+.activity-composer .markdown-editor:has(.rich-document:focus-visible),
+.activity-edit .markdown-editor:has(.rich-document:focus-visible) {
+  outline: none;
+}
+/* Long drafts scroll inside the frame from 40vh on. */
+.activity-composer .rich-document,
+.activity-edit .rich-document {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.activity-composer-idle {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-panel);
+  background: transparent;
+  color: var(--disabled-foreground);
   font-size: var(--text-ui);
   line-height: 20px;
   text-align: start;
   cursor: text;
 }
-.activity-compact-composer:hover {
-  background: var(--recessed);
+.activity-composer-idle:focus-visible {
+  outline: none;
 }
-.activity-compact-composer:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+.activity-composer:has(.activity-composer-idle:focus-visible) {
+  outline: 1px solid var(--input-focus);
+  outline-offset: -1px;
 }
+/* The bottom row: "Draft saved" · controls · + · Discard · Post ⌘↵. */
+.activity-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 0 6px 6px 12px;
+}
+.activity-caption {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-controls {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+.activity-edit .activity-composer-row {
+  justify-content: flex-end;
+}
+.activity-edit .activity-controls {
+  margin-right: auto;
+}
+.activity-edit {
+  margin-top: 4px;
+}
+.activity-edit > [data-slot="alert"] {
+  margin: 8px 8px 0;
+}
+.activity-details {
+  margin: 0 12px;
+  box-shadow: 0 -1px 0 var(--group-hairline);
+}
+.activity-details-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.activity-details .rich-document {
+  padding-inline: 0;
+}
+.activity-attached {
+  display: flex;
+  padding: 0 12px 4px;
+}
+
 .activity-note {
   margin: 0;
 }
@@ -61,73 +142,49 @@
   font-size: var(--text-reading);
   line-height: 24px;
 }
-.activity-note:not([data-expanded]) {
-  max-height: 20rem;
-  overflow: hidden;
+.ticket-detail[data-expanded] .activity {
+  --text-editor: var(--text-reading);
+  --text-editor-line: 24px;
 }
-.activity-actions {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 4px 8px;
+.activity-details-chip {
+  display: inline-flex;
   align-items: center;
+  gap: 8px;
+  max-width: 100%;
   margin-top: 8px;
 }
-.activity-actions-end {
+
+/* An update's "…" waits in its slot until the row is hovered, focused or
+   open, so the timeline is not a column of identical icons (DB-16). */
+.activity-row-actions {
+  display: inline-flex;
+  visibility: hidden;
+}
+.activity [data-slot="comment-row"]:hover .activity-row-actions,
+.activity [data-slot="comment-row"]:focus-within .activity-row-actions,
+.activity [data-slot="comment-row"][data-open] .activity-row-actions,
+.activity-row-actions:has([data-state="open"]) {
+  visibility: visible;
+}
+@media (hover: none) {
+  .activity-row-actions {
+    visibility: visible;
+  }
+}
+.activity-confirm-title {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+}
+.activity-confirm-text {
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.activity-confirm-actions {
   display: flex;
-  flex: 1 1 auto;
-  align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  min-width: 0;
-  margin-inline-start: auto;
-}
-/* Reasons and status sit on their own lines under the action row. */
-.activity-caption {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 1.4;
-}
-.activity-attached {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: var(--text-ui);
-}
-.activity-attached .activity-muted {
-  flex-basis: 100%;
-}
-.activity-attached svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
-}
-.activity-confirm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-ui);
-}
-.activity-composer {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.activity-details-link {
-  max-width: 100%;
-  justify-content: flex-start;
-  gap: 8px;
-}
-
-/* With Details open the composer is tall; keep Post in reach at the fold. */
-.activity-actions[data-sticky] {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  padding-block: 8px;
-  background: var(--background);
+  margin-top: 16px;
 }

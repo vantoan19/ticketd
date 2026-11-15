@@ -55,6 +55,24 @@ test("Escape closes the suggestion list", () => {
   expect(list("Repositories")).toBeNull();
 });
 
+test("suggestions float in a portal, so no page bar clips them, and ArrowDown reaches them", () => {
+  form();
+  fireEvent.focus(input("Repositories"));
+  const panel = list("Repositories");
+  expect(panel).not.toBeNull();
+  expect(input("Repositories").closest(".source-form")?.contains(panel)).toBe(
+    false,
+  );
+  // Focus stays in the field until the person moves into the list.
+  expect(document.activeElement).not.toBe(
+    screen.getByRole("button", { name: "Add One" }),
+  );
+  fireEvent.keyDown(input("Repositories"), { key: "ArrowDown" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Add One" }),
+  );
+});
+
 test("choosing a value closes the list", () => {
   const onChange = form();
   fireEvent.focus(input("Repositories"));
@@ -100,4 +118,36 @@ test("text typed but not added says what is wrong instead of 'are required'", ()
   expect(alert.textContent).toContain("“not a repo” is not a repository");
   expect(alert.textContent).toContain("owner/name");
   expect(screen.queryByText(/are required/)).toBeNull();
+});
+
+test("Enter refuses a repository that is not owner/name, keeps the text and sends nothing", () => {
+  const repositories: SchemaField = {
+    ...multi("repositories", "Repositories"),
+    allow_custom: true,
+    format: "owner_name",
+  };
+  const onChange = vi.fn();
+  render(
+    <SchemaForm
+      fields={[repositories]}
+      draft={{ repositories: [] }}
+      errors={{}}
+      disabled={false}
+      loadOptions={async () => []}
+      onChange={onChange}
+    />,
+  );
+  const field = input("Repositories") as HTMLInputElement;
+  fireEvent.change(field, { target: { value: "acme billing" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(onChange).not.toHaveBeenCalled();
+  expect(field.value).toBe("acme billing");
+  expect(screen.getByRole("alert").textContent).toBe(
+    "Use owner/name, for example acme/billing-api.",
+  );
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  fireEvent.change(field, { target: { value: "acme/billing" } });
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(onChange).toHaveBeenCalledWith("repositories", ["acme/billing"]);
 });

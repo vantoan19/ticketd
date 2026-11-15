@@ -1,77 +1,99 @@
+/* The Inbox is the list half of a triage split (S6): rows in the ticket
+   row's anatomy, full width of the pane, the detail opening beside it. */
 .inbox {
   display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-.inbox-body {
-  display: flex;
-  min-height: 0;
   flex: 1;
   flex-direction: column;
   width: 100%;
-  max-width: 880px;
-  margin-inline: auto;
-  padding: 8px 24px 48px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.inbox-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 24px;
   overflow-y: auto;
 }
+/* Day groups: the list's 32px recessed band, sticky like status groups. */
 .inbox section h2 {
-  margin: 32px 0 4px;
-  padding: 0 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 16px;
+  background: var(--recessed);
+  box-shadow:
+    0 1px 0 0 var(--group-hairline),
+    0 -1px 0 0 var(--group-hairline);
+  color: var(--foreground);
+  font-size: var(--text-ui);
   font-weight: 500;
-  line-height: 16px;
-  letter-spacing: normal;
-}
-.inbox section + section h2 {
-  margin-top: 24px;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
 }
 .inbox-entries {
-  list-style: none;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 .inbox-entry {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 10px 8px;
-  border-radius: var(--radius);
+  min-width: 0;
+  padding: 0 8px 0 0;
 }
-.inbox-entry:hover,
-.inbox-entry:focus-within {
-  background: var(--recessed);
+.inbox-entry:hover {
+  background: var(--hover);
+}
+.inbox-entry[aria-current="true"] {
+  background: var(--accent);
+}
+.inbox-entry:has(.inbox-ticket:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .inbox-dot {
   display: flex;
   flex: none;
-  width: 8px;
-  margin-top: 6px;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 36px;
+}
+.inbox-ticket {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 0 6px;
+  text-align: left;
+  color: var(--foreground);
+}
+.inbox-ticket:focus-visible {
+  outline: none;
+}
+.inbox-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .inbox-icon {
   display: flex;
   flex: none;
-  margin-top: 2px;
   color: var(--muted-foreground);
 }
 .inbox-icon svg {
   width: 16px;
   height: 16px;
-}
-.inbox-ticket {
-  display: block;
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  text-align: left;
-  color: var(--foreground);
-  border-radius: var(--radius-segment);
-}
-.inbox-title-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
 }
 .inbox-title {
   min-width: 0;
@@ -79,85 +101,63 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Unread: weight 500 and the dot (list I-02). */
 .inbox-entry[data-read="false"] .inbox-title {
-  font-weight: 600;
+  font-weight: 500;
 }
 .inbox-summary {
   display: block;
-  margin-top: 2px;
+  padding-left: 22px;
   overflow: hidden;
   color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.inbox-entry time {
+/* The time sits on the trailing edge; actions overlay it (list I-06). */
+.inbox-trailing {
+  position: relative;
+  display: flex;
   flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 40px;
+  height: 36px;
+  padding-left: 8px;
+}
+.inbox-trailing time {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
-  line-height: 20px;
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
 }
 .inbox-actions {
+  position: absolute;
+  top: 2px;
+  right: 0;
   display: flex;
-  /* Two icon-sm buttons and the gap: a fixed slot keeps the time column aligned. */
-  justify-content: flex-end;
-  width: 66px;
   gap: 2px;
-  margin-block: -4px;
-  opacity: 0;
 }
-.inbox-entry:hover .inbox-actions,
-.inbox-entry:focus-within .inbox-actions,
-.inbox-actions:has([data-state="open"]) {
-  opacity: 1;
-}
-@media (hover: none), (max-width: 760px) {
+@media (hover: hover) and (pointer: fine) {
   .inbox-actions {
+    opacity: 0;
+  }
+  .inbox-entry:hover .inbox-actions,
+  .inbox-entry:focus-within .inbox-actions,
+  .inbox-actions:has([data-state="open"]) {
     opacity: 1;
   }
+  .inbox-entry:hover time,
+  .inbox-entry:focus-within time,
+  .inbox-entry:has(.inbox-actions [data-state="open"]) time {
+    opacity: 0;
+  }
 }
-.inbox-snooze {
-  display: flex;
-  flex-direction: column;
-  width: auto;
-  padding: 4px;
-}
-.inbox-snooze button {
-  justify-content: flex-start;
-}
-.inbox-note {
-  margin: 24px 8px 0;
+.inbox-snooze-time {
+  margin-left: auto;
+  padding-left: 16px;
   color: var(--muted-foreground);
-}
-.inbox-more {
-  display: flex;
-  justify-content: center;
-  margin-top: 16px;
-}
-.inbox-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 40px 0 0;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-  color: var(--muted-foreground);
-}
-.inbox-footer svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
-}
-
-/* Empty Inbox: a lighter 20px glyph and a 13px button, as in board J. */
-.inbox [data-slot="empty-icon"] svg {
-  width: 20px;
-  height: 20px;
-  stroke-width: 1.75;
-  color: var(--muted-foreground);
-  /* 1px high: the glyph sat 1px low in the tile (board J). */
-  transform: translateY(-1px);
-}
-.inbox [data-slot="empty-state"] .ui-button {
-  font-size: var(--text-code);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }

@@ -18,7 +18,10 @@ vi.mock("@/lib/api/workspace", () => ({
   workspaceClient: { chooseSavePath: vi.fn(), reveal: vi.fn() },
 }));
 vi.mock("@/lib/api/client", () => ({ client: { exportWorkspace: vi.fn() } }));
-vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
+// Settings reads the CLI for its nav dot at startup; these pages ignore it.
+vi.mock("@/lib/api/cli", () => ({
+  cliClient: { check: vi.fn(() => new Promise(() => {})) },
+}));
 vi.mock("@/lib/api/agent-skills", () => ({
   agentSkillsClient: { list: vi.fn(async () => []) },
 }));
@@ -54,7 +57,8 @@ test("Export… saves to the chosen file and the footer names it with a way to s
   renderPage();
   expect(screen.queryByText(/Export saved to/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
-  const status = await screen.findByText(/Export saved to/);
+  // A check and the words, then the file as PathText; the full path is spoken.
+  const status = await screen.findByText("Export saved");
   expect(status.textContent).toBe("Export saved to /tmp/out.json");
   expect(workspaceClient.chooseSavePath).toHaveBeenCalledWith(
     expect.objectContaining({ filterName: "JSON", extension: "json" }),
@@ -90,7 +94,7 @@ test("a failed export says why and keeps the button usable", async () => {
   renderPage();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "The export was not saved: disk full",
+    "Couldn't save the export. Disk full.",
   );
   expect(screen.queryByText(/Export saved to/)).toBeNull();
   expect(
@@ -103,7 +107,7 @@ test("a save dialog that cannot open is reported", async () => {
   renderPage();
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not open the save dialog: no window",
+    "Couldn't open the save dialog. No window.",
   );
 });
 
@@ -116,7 +120,7 @@ test("a file manager that cannot show the file is reported", async () => {
       name: `Show in ${fileManagerName()}`,
     }),
   );
-  expect((await screen.findByRole("alert")).textContent).toContain("gone");
+  expect((await screen.findByRole("alert")).textContent).toContain("Gone.");
 });
 
 test("each command can be copied with its placeholders in place", async () => {

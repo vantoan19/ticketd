@@ -1,25 +1,30 @@
+import { EmptyState } from "@/components/ui/empty-state";
+import { emptyCopy } from "@/lib/empty-copy";
 import { useContext, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   BellOff,
-  Check,
   ChevronDown,
+  MessagesSquare,
   SquarePen,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reference } from "@/components/ui/reference";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import type { TicketStart } from "@/features/chats/ticket-chat";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import type { ChatFailureNotice } from "@/features/chats/failure";
 import { Count } from "@/components/ui/count";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { ListHeader } from "@/components/ui/list-header";
+import { PaneHeader } from "@/components/ui/list-header";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -39,27 +44,18 @@ import { chatTime, emphasised } from "@/features/chats/model";
 import { NewChat } from "@/features/chats/NewChat";
 import { useChatFeature, useChatList } from "@/features/chats/use-chats";
 
-const SCOPES: { id: Retention; menu: string; title: string; empty: string }[] =
-  [
-    {
-      id: "active",
-      menu: "Active",
-      title: "Chats",
-      empty: "No Chats yet. Start one with New Chat.",
-    },
-    {
-      id: "archived",
-      menu: "Archived",
-      title: "Archived",
-      empty: "No archived Chats.",
-    },
-    {
-      id: "trashed",
-      menu: "Trash",
-      title: "Trash",
-      empty: "No Chats in Trash.",
-    },
-  ];
+/** The title names the scope once and is its menu's trigger (CH-04). */
+const SCOPES: { id: Retention; title: string }[] = [
+  { id: "active", title: "Chats" },
+  { id: "archived", title: "Archived Chats" },
+  { id: "trashed", title: "Chats in Trash" },
+];
+/** The empty list per scope; New Chat is already in the header (P9). */
+const EMPTY = {
+  active: "chats",
+  archived: "chats-archived",
+  trashed: "chats-trash",
+} as const;
 /** The list pane's 360px plus the detail pane's 480px: below this one pane shows. */
 const STACK_MIN_WIDTH = 840;
 const PANEL_STYLE = {
@@ -139,7 +135,7 @@ function ChatRow({
   tabStop: boolean;
   now: number;
   onOpen: () => void;
-  onResult: (failure: string) => void;
+  onResult: (failure: ChatFailureNotice | null) => void;
 }) {
   const row = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
@@ -155,6 +151,7 @@ function ChatRow({
         ref={row}
         type="button"
         className="chat-row"
+        data-chat-id={chat.id}
         tabIndex={tabStop ? 0 : -1}
         aria-current={active ? "true" : undefined}
         data-attention={strong ? "" : undefined}
@@ -257,7 +254,9 @@ export function ChatsView({
   const takenOver = useTakenOverLine(open?.kind === "chat" ? open.id : null);
   const [expanded, setExpanded] = useState(false);
   const [seenRequest, setSeenRequest] = useState(0);
-  const [failure, setFailure] = useState("");
+  /** Rises when New Chat is asked for: its message box takes focus. */
+  const [newFocus, setNewFocus] = useState(0);
+  const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   // A clicked notification opens its Chat under its own list, title focused.
   const { openRequest, chatRequest } = useChatFeature();
   const [seenOpen, setSeenOpen] = useState(openRequest?.n ?? 0);
@@ -295,6 +294,7 @@ export function ChatsView({
     setSeenRequest(newChatRequest);
     setScope("active");
     setOpen({ kind: "new" });
+    setNewFocus((count) => count + 1);
   }
   const list = useChatList(scope);
   const now = useNow();
@@ -317,70 +317,83 @@ export function ChatsView({
     if (!next) setExpanded(false);
     setOpen(next);
   };
+  // New Chat rests in the empty detail pane (U1): the pencil and the sidebar's
+  // New Chat put the person in its message box rather than mounting it anew.
+  const startNew = () => {
+    show({ kind: "new" });
+    setNewFocus((count) => count + 1);
+  };
+  // Closing a Chat returns focus to its row, as closing a ticket does.
+  const closed = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = closed.current;
+    closed.current = null;
+    if (!id) return;
+    [
+      ...(workspaceRef.current?.querySelectorAll<HTMLElement>(".chat-row") ??
+        []),
+    ]
+      .find((row) => row.dataset.chatId === id)
+      ?.focus();
+  }, [open]);
 
   const listPane = (
     <section className="ticket-list chat-pane" aria-label="Chat list">
-      <ListHeader
+      <PaneHeader
         title={current?.title ?? "Chats"}
-        actions={
-          <>
-            {/* LIVE-18: a labelled filter, not a "⋯" that reads as actions. */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Chats shown: ${current?.menu ?? "Active"}`}
-                >
-                  {current?.menu ?? "Active"}
-                  <ChevronDown aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+        titleControl={(title) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm">
+                <span className="truncate">{title}</span>
+                <ChevronDown aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuRadioGroup
+                value={scope}
+                onValueChange={(next) => {
+                  setScope(next as Retention);
+                  show(null);
+                }}
+              >
                 {SCOPES.map((item) => (
-                  <DropdownMenuItem
-                    key={item.id}
-                    aria-current={item.id === scope ? "true" : undefined}
-                    onSelect={() => {
-                      setScope(item.id);
-                      show(null);
-                    }}
-                  >
-                    {item.menu}
-                    {item.id === scope && (
-                      <Check className="ml-auto" aria-hidden />
-                    )}
-                  </DropdownMenuItem>
+                  <DropdownMenuRadioItem key={item.id} value={item.id}>
+                    {item.title}
+                  </DropdownMenuRadioItem>
                 ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <IconButton label="New Chat" onClick={() => show({ kind: "new" })}>
-              <SquarePen aria-hidden />
-            </IconButton>
-          </>
-        }
-      >
-        {list && (
-          <Count>
-            {list.chats.length}
-            <span className="sr-only"> chats</span>
-          </Count>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
-      </ListHeader>
+        count={
+          list && (
+            <Count>
+              {list.chats.length}
+              <span className="sr-only"> chats</span>
+            </Count>
+          )
+        }
+        actions={
+          <IconButton label="New Chat" onClick={startNew}>
+            <SquarePen aria-hidden />
+          </IconButton>
+        }
+      />
       {failure && (
         <div className="chat-list-alert">
-          <Alert tone="error">
-            <AlertDescription>{failure}</AlertDescription>
-          </Alert>
+          <FailureAlert
+            size="compact"
+            failure={failure.failure}
+            {...(failure.retry && { onRetry: failure.retry })}
+          />
         </div>
       )}
       {list?.error && (
-        <p className="chat-list-empty" role="alert">
-          Could not load Chats: {list.error}
-        </p>
+        <FailureState failure={list.error} onRetry={list.retry} />
       )}
       {list && !list.error && list.chats.length === 0 && (
-        <p className="chat-list-empty">{current?.empty}</p>
+        <ChatListEmpty scope={scope} />
       )}
       <ul className="chat-rows" aria-label="Chats">
         {list?.chats.map((chat, index) => (
@@ -415,11 +428,28 @@ export function ChatsView({
     onClose: () => show(null),
   };
   const detailPane =
-    open?.kind === "new" ? (
-      <NewChat
-        key={open.n ?? 0}
+    open?.kind === "chat" ? (
+      <ChatDetail
+        key={open.id}
+        id={open.id}
+        notice={takenOver}
         {...paneProps}
-        {...(open.start && {
+        onClose={() => {
+          closed.current = open.id;
+          show(null);
+        }}
+        {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
+        focusRequest={Boolean(open.notified)}
+      />
+    ) : (
+      // With nothing open the detail pane is New Chat itself (U1), one
+      // instance, so asking for it keeps what was typed and nothing moves.
+      <NewChat
+        key={open?.n ?? 0}
+        {...paneProps}
+        resting={!open}
+        focusRequest={newFocus}
+        {...(open?.start && {
           start: open.start,
           crumb: <TicketCrumb reference={open.start.ticket.reference} />,
         })}
@@ -428,39 +458,44 @@ export function ChatsView({
           show({ kind: "chat", id });
         }}
       />
-    ) : open ? (
-      <ChatDetail
-        key={open.id}
-        id={open.id}
-        notice={takenOver}
-        {...paneProps}
-        {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
-        focusRequest={Boolean(open.notified)}
-      />
-    ) : (
-      <section className="ticket-detail chat-pane" aria-label="No Chat open">
-        <p className="chat-list-empty">Open a Chat, or start a new one.</p>
-      </section>
     );
+  // One tree at every width and in Expanded (DESIGN §5): the pane that is not
+  // shown is hidden with CSS, so New Chat's links, folder and harness check,
+  // an open Chat and the list's scroll survive a mode change.
   return (
     <div ref={workspaceRef} className="plan-workspace">
-      {single ? (
-        <div className="ticket-workspace chats-workspace">
-          {open ? detailPane : listPane}
-        </div>
-      ) : (
-        <div className="ticket-workspace chats-workspace">
-          <ResizablePanelGroup orientation="horizontal">
-            <ResizablePanel id="chat-list" minSize={360} defaultSize={384}>
-              {listPane}
-            </ResizablePanel>
-            <ResizableHandle aria-label="Resize Chat list" />
-            <ResizablePanel id="chat-detail" minSize={480} style={PANEL_STYLE}>
-              {detailPane}
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </div>
-      )}
+      <div
+        className="ticket-workspace chats-workspace"
+        data-single={single ? (open ? "detail" : "list") : undefined}
+      >
+        <ResizablePanelGroup
+          orientation="horizontal"
+          // The handle is hidden in single mode; left enabled, the panel
+          // library would still claim presses near it.
+          disabled={single}
+        >
+          <ResizablePanel id="chat-list" minSize={360} defaultSize={384}>
+            {listPane}
+          </ResizablePanel>
+          <ResizableHandle aria-label="Resize Chat list" />
+          <ResizablePanel id="chat-detail" minSize={480} style={PANEL_STYLE}>
+            {detailPane}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
     </div>
+  );
+}
+
+function ChatListEmpty({ scope }: { scope: Retention }) {
+  const copy = emptyCopy(EMPTY[scope]);
+  if (scope === "archived")
+    return <EmptyState size="hint" className="my-12" title={copy.title} />;
+  return (
+    <EmptyState
+      icon={scope === "trashed" ? <Trash2 /> : <MessagesSquare />}
+      title={copy.title}
+      description={copy.sentence}
+    />
   );
 }

@@ -1,21 +1,11 @@
 /* Attachments page: layout for the tiles' facts, the folder row, the limit
    control and the small notes. Colors and sizes are tokens from styles.css. */
 .attachments-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
+  display: block;
   margin-top: 4px;
   font-size: var(--text-caption);
   line-height: 16px;
   color: var(--muted-foreground);
-}
-.attachments-facts > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.attachments-facts svg {
-  color: var(--status-ready);
 }
 .attachments-mono {
   font-family: var(--font-mono);
@@ -28,10 +18,6 @@
   font-size: var(--text-caption);
   line-height: 16px;
   color: var(--muted-foreground);
-}
-.attachments-error {
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 .attachments-limit {
   display: flex;

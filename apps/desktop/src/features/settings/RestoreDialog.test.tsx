@@ -90,12 +90,12 @@ async function openReview(onRestore: () => Promise<void> = async () => {}) {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose backup…" }));
-  return screen.findByRole("dialog", { name: "Restore from backup" });
+  return screen.findByRole("dialog", { name: "Replace this workspace?" });
 }
 
 function replaceButton(dialog: HTMLElement) {
   return within(dialog).getByRole("button", {
-    name: "Replace workspace with backup",
+    name: "Replace workspace",
   }) as HTMLButtonElement;
 }
 
@@ -105,7 +105,7 @@ test("the comparison names what will be replaced, current workspace first", asyn
   const headers = within(within(dialog).getByRole("table"))
     .getAllByRole("columnheader")
     .map((cell) => cell.textContent);
-  expect(headers).toEqual(["Replaces", "Current workspace", "This backup"]);
+  expect(headers).toEqual(["This workspace", "Backup"]);
 });
 
 test("restore review reports complete retained local files and remote reference limits", async () => {
@@ -120,28 +120,37 @@ test("restore review reports complete retained local files and remote reference 
     },
   });
   const dialog = await openReview();
-  await within(dialog).findByText(
-    /Local attachment bytes in the backup are complete/,
-  );
-  expect(within(dialog).getByText(/3 retained files/).textContent).toContain(
-    "1,024 bytes",
-  );
-  expect(within(dialog).getByText(/1 remote reference/).textContent).toContain(
-    "metadata only",
+  // Secondary details wait behind one disclosure.
+  fireEvent.click(
+    await within(dialog).findByRole("button", { name: "Attachment details" }),
   );
   expect(
-    within(dialog).getByText(/Restoring does not verify Drive access/)
+    within(dialog).getByText(
+      /Local attachment files in the backup are complete/,
+    ).textContent,
+  ).toContain("1,024 bytes");
+  expect(
+    within(dialog).getByText(/1 file in Google Drive/).textContent,
+  ).toContain("links and their details only");
+  expect(
+    within(dialog).getByText(/Restoring does not check Google Drive access/)
       .textContent,
-  ).toContain("select the file again");
+  ).toContain("choose the file again");
   expect(replaceButton(dialog).disabled).toBe(false);
 });
 
-test("the review scrolls from the keyboard: its body is a focusable region", async () => {
+test("the consequence comes first, before the comparison (set BK-05)", async () => {
   const dialog = await openReview();
   await within(dialog).findByText(/Integrity checked/);
-  const body = within(dialog).getByRole("region", { name: "Backup review" });
-  expect(body.tabIndex).toBe(0);
-  expect(within(body).getByRole("table")).toBeTruthy();
+  const consequence = within(dialog).getByRole("note");
+  expect(consequence.textContent).toContain(
+    "This replaces everything in this workspace",
+  );
+  const table = within(dialog).getByRole("table");
+  expect(
+    consequence.compareDocumentPosition(table) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });
 
 test("cancelling the file picker opens nothing and restores nothing", async () => {
@@ -164,13 +173,10 @@ test("cancelling the file picker opens nothing and restores nothing", async () =
 test("a valid backup shows both sides' counts and what replacing means", async () => {
   const dialog = await openReview();
   expect(await within(dialog).findByText(/Integrity checked/)).toBeTruthy();
-  expect(within(dialog).getByLabelText("Chosen backup file").textContent).toBe(
-    "ticketd-2026-10-31.sqlite3",
-  );
-  expect(within(dialog).getByLabelText("Backup folder").textContent).toBe(
-    "/Users/me/Backups",
-  );
-  expect(dialog.textContent).toContain("Integrity checked · format version 19");
+  expect(
+    within(dialog).getByLabelText("Chosen backup file").textContent,
+  ).toContain("ticketd-2026-10-31.sqlite3");
+  expect(dialog.textContent).toContain("Integrity checked · format 19");
   const row = (name: string) =>
     within(within(dialog).getByRole("row", { name: new RegExp(name) }))
       .getAllByRole("cell")
@@ -186,7 +192,7 @@ test("a valid backup shows both sides' counts and what replacing means", async (
   );
   expect(dialog.textContent).toContain("follows, reminders and inbox state");
   expect(dialog.textContent).toContain("safety backup");
-  expect(dialog.textContent).toContain("Pause ticketd CLI commands");
+  expect(dialog.textContent).toContain("Pause ticketd commands");
   expect(replaceButton(dialog).disabled).toBe(false);
   expect(client.restoreWorkspace).not.toHaveBeenCalled();
 });
@@ -195,12 +201,12 @@ test.each([
   [
     "a newer format",
     { status: "newer_format", backup_version: 21, supported_version: 20 },
-    /newer ticketd \(workspace format 21; this app reads up to 20\)\. Update ticketd/,
+    /newer ticketd.*workspace format 21; this app reads up to 20\. Update ticketd/,
   ],
   [
     "a file that is not a ticketd backup",
     { status: "not_ticketd" },
-    /isn't a ticketd backup/,
+    /Not a ticketd backup/,
   ],
   [
     "missing tables",
@@ -224,7 +230,15 @@ test.each([
     const alert = await within(dialog).findByRole("alert");
     expect(alert.textContent).toMatch(expected);
     expect(alert.textContent).toContain("Your workspace hasn't changed.");
-    expect(replaceButton(dialog).disabled).toBe(true);
+    // No dead destructive button: the way forward is another file (set BK-06).
+    expect(
+      within(dialog).queryByRole("button", {
+        name: "Replace workspace",
+      }),
+    ).toBeNull();
+    expect(
+      within(dialog).getByRole("button", { name: "Choose another file…" }),
+    ).toBeTruthy();
     expect(client.restoreWorkspace).not.toHaveBeenCalled();
   },
 );
@@ -252,9 +266,9 @@ test("Choose another checks the new file and keeps the old one when cancelled", 
     within(dialog).getByRole("button", { name: "Choose another…" }),
   );
   await within(dialog).findByRole("alert");
-  expect(within(dialog).getByLabelText("Chosen backup file").textContent).toBe(
-    "newer.sqlite3",
-  );
+  expect(
+    within(dialog).getByLabelText("Chosen backup file").textContent,
+  ).toContain("newer.sqlite3");
 });
 
 test("Replace workspace shows the safety backup, reloads views, and lists it afterward", async () => {
@@ -276,13 +290,13 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
   const dialog = await openReview(reload);
   await within(dialog).findByText(/Integrity checked/);
   fireEvent.click(replaceButton(dialog));
-  expect(
-    (await within(dialog).findByLabelText("Safety backup path")).textContent,
-  ).toBe(safety);
+  const copy = await within(dialog).findByRole("button", {
+    name: `Copy path ${safety}`,
+  });
   expect(client.restoreWorkspace).toHaveBeenCalledWith(BACKUP);
   expect(reload).toHaveBeenCalledTimes(1);
   expect(dialog.textContent).toContain("121 tickets, 342 activities");
-  fireEvent.click(within(dialog).getByRole("button", { name: "Copy path" }));
+  fireEvent.click(copy);
   await waitFor(() => expect(write).toHaveBeenCalledWith(safety));
   fireEvent.click(within(dialog).getByRole("button", { name: /^Show in / }));
   await waitFor(() =>
@@ -292,7 +306,11 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
   fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
   expect(screen.queryByRole("dialog")).toBeNull();
   const region = await screen.findByRole("region", { name: "Safety backups" });
-  expect(await within(region).findByText(safety)).toBeTruthy();
+  expect(
+    await within(region).findByText(
+      "workspace.sqlite3.safety-3f2c9a1e.sqlite3",
+    ),
+  ).toBeTruthy();
   expect(within(region).getByText("Before a restore")).toBeTruthy();
 });
 
@@ -312,10 +330,10 @@ test("a restore that happened with something unconfirmed is a success with a war
   // The data was replaced: views reload and the safety copy is shown, as for any
   // restore, and the warning is said beside them.
   expect(
-    (await within(dialog).findByLabelText("Safety backup path")).textContent,
-  ).toBe(safety);
+    await within(dialog).findByRole("button", { name: `Copy path ${safety}` }),
+  ).toBeTruthy();
   expect(reload).toHaveBeenCalledTimes(1);
-  expect(dialog.textContent).toContain("Workspace restored.");
+  expect(dialog.textContent).toContain("Workspace restored");
   expect(dialog.textContent).not.toContain("Restore failed");
   expect(within(dialog).getByRole("alert").textContent).toBe(warning);
 });
@@ -329,12 +347,12 @@ test("a failed restore keeps the review open and says so", async () => {
   await within(dialog).findByText(/Integrity checked/);
   fireEvent.click(replaceButton(dialog));
   expect((await within(dialog).findByRole("alert")).textContent).toContain(
-    "workspace is in use",
+    "Workspace is in use.",
   );
   expect(reload).not.toHaveBeenCalled();
 });
 
-test("only the final action is destructive; Cancel is quiet and the notes are pinned", async () => {
+test("only the final action is destructive; Cancel is quiet and the safety note is in the footer", async () => {
   const dialog = await openReview();
   await within(dialog).findByText(/Integrity checked/);
   expect(replaceButton(dialog).className).toContain("ui-button-destructive");
@@ -344,13 +362,9 @@ test("only the final action is destructive; Cancel is quiet and the notes are pi
   expect(
     others.some((button) => button.className.includes("destructive")),
   ).toBe(false);
-  expect(within(dialog).getByText("A safety backup comes first")).toBeTruthy();
-  expect(
-    within(dialog).getByText("Restore that safety backup to undo."),
-  ).toBeTruthy();
   expect(
     within(dialog).getByText(
-      "Agents should stop recording while the restore runs.",
+      "A safety backup of this workspace is saved first. Pause ticketd commands until it finishes.",
     ),
   ).toBeTruthy();
 });
@@ -372,7 +386,11 @@ test("an unreadable file is an error with the unchanged reassurance and no way t
   );
   const dialog = await openReview();
   const alert = await within(dialog).findByRole("alert");
-  expect(alert.textContent).toContain("This file could not be read.");
+  expect(alert.textContent).toContain("Couldn't read this backup");
   expect(alert.textContent).toContain("Your workspace hasn't changed.");
-  expect(replaceButton(dialog).disabled).toBe(true);
+  expect(
+    within(dialog).queryByRole("button", {
+      name: "Replace workspace",
+    }),
+  ).toBeNull();
 });

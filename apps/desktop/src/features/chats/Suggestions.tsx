@@ -54,8 +54,11 @@ export function Suggestions({
   folder,
   linked,
   onChoose,
+  refresh = 0,
 }: {
   folder: string | null;
+  /** Rises when New Chat is asked for again: suggestions are asked again. */
+  refresh?: number;
   /** Tickets already linked to the New Chat; the host leaves them out. */
   linked: string[];
   onChoose: (suggestion: Suggestion) => void;
@@ -65,7 +68,7 @@ export function Suggestions({
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const key = linked.join(" ");
-  const request = `${attempt} ${folder ?? ""} ${key}`;
+  const request = `${attempt + refresh} ${folder ?? ""} ${key}`;
   /** The request that has taken longer than SLOW_MS so far. */
   const [slowFor, setSlowFor] = useState("");
   const slow = slowFor === request;

@@ -1,13 +1,7 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background,
+  BackgroundVariant,
   Handle,
   ReactFlow,
   type Edge,
@@ -20,47 +14,51 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { FileText, Layers } from "lucide-react";
-import { ZoomControl } from "@/components/ui/zoom-control";
+import { GRAPH_ZOOM } from "@/components/ui/graph-zoom";
+import {
+  GraphCanvas,
+  GraphLegend,
+  GraphNodeCard,
+  ZoomControls,
+} from "@/components/ui/graph-kit";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   centerZoom,
   countNotFullyShown,
+  edgeLineLabels,
   isUserMove,
+  legendItems,
   panToInclude,
 } from "./graph-text";
-import { GraphLegend } from "./GraphLegend";
 import { routeAll, type Rect } from "./edge-routing";
 import { RoutedEdge } from "./RoutedEdge";
 import { CARD_HEIGHT, CARD_WIDTH, type Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 
-/** Low enough that a dense neighbourhood fits whole instead of being clipped. */
-const MIN_ZOOM = 0.05;
-const MAX_ZOOM = 2;
+const MIN_ZOOM = GRAPH_ZOOM.min;
+const MAX_ZOOM = GRAPH_ZOOM.max;
 /** One press of the zoom buttons multiplies the zoom by this (React Flow's own step). */
 const ZOOM_STEP = 1.2;
 /** A lone card must not be blown up to fill the view. */
 const MAX_FIT_ZOOM = 1;
-/** Fit never zooms out past this, so card text stays legible; the user pans. */
-const MIN_FIT_ZOOM = 0.5;
+/** Fit never zooms out past 100%, so card text stays legible; the user pans. */
+const MIN_FIT_ZOOM = GRAPH_ZOOM.fit;
 /** The container width at which Fit's margins are their full size. */
 const FULL_MARGIN_WIDTH = 1000;
 
 /**
  * Fit options for a container this wide. Margins shrink with a narrow window so
- * they do not swallow the canvas; the legend has its own row, so nothing needs
- * clearing on the right.
+ * they do not swallow the canvas; top and bottom keep the legend row and the
+ * zoom control clear of the cards.
  */
 function fitOptions(width: number): FitViewOptions {
   const scale = Math.min(1, Math.max(0.4, width / FULL_MARGIN_WIDTH));
   return {
     padding: {
-      top: "32px",
-      // The legend and Not connected cards float over the right edge (200px
-      // wide plus a 16px margin and 16px of air): a fitted card never sits under them.
-      right: `${Math.round(32 * scale) + 232}px`,
-      bottom: "72px",
-      left: `${Math.round(32 * scale)}px`,
+      top: "52px",
+      right: `${Math.round(24 * scale)}px`,
+      bottom: "56px",
+      left: `${Math.round(24 * scale)}px`,
     },
     duration: 200,
     minZoom: MIN_FIT_ZOOM,
@@ -74,15 +72,20 @@ type CardData = {
   caption: string;
   kind: string;
   status: string;
+  selected: boolean;
 };
 
 // Position's values are these strings.
 const SIDES = ["top", "right", "bottom", "left"] as const;
 
-/** A status-neutral card: reference, title and kind beneath. Handles are plumbing. */
+/**
+ * The graph kit's node card: icon, reference and state on line 1, the title
+ * on line 2. The card is a button, so the map is reachable by keyboard; React
+ * Flow's node click selects it. Handles are plumbing.
+ */
 function CardNode({ data }: NodeProps<Node<CardData>>) {
   return (
-    <div className="context-graph-card">
+    <>
       {SIDES.map((side) => (
         <span key={side}>
           <Handle id={`in-${side}`} type="target" position={side as Position} />
@@ -93,25 +96,23 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
           />
         </span>
       ))}
-      <span className="context-graph-card-icon" aria-hidden="true">
-        {data.kind === "plan" ? (
-          <Layers />
-        ) : data.kind === "document" ? (
-          <FileText />
-        ) : (
-          <StatusIcon status={data.status || "Todo"} size={16} decorative />
-        )}
-      </span>
-      <span className="context-graph-card-text">
-        <span className="context-graph-card-title">
-          {data.ref && (
-            <span className="context-graph-card-ref">{data.ref}</span>
-          )}{" "}
-          {data.title}
-        </span>
-        <span className="context-graph-card-caption">{data.caption}</span>
-      </span>
-    </div>
+      <GraphNodeCard
+        icon={
+          data.kind === "plan" ? (
+            <Layers aria-hidden="true" />
+          ) : data.kind === "document" ? (
+            <FileText aria-hidden="true" />
+          ) : (
+            <StatusIcon status={data.status || "Todo"} size={14} decorative />
+          )
+        }
+        reference={data.ref}
+        meta={data.caption}
+        title={data.title}
+        selected={data.selected}
+        aria-pressed={data.selected}
+      />
+    </>
   );
 }
 const NODE_TYPES = { card: CardNode };
@@ -132,7 +133,8 @@ export function ContextGraphCanvas({
   centerId,
   centerOn = null,
   loading = false,
-  overlay,
+  notice,
+  footnote,
 }: {
   nodes: {
     id: string;
@@ -160,8 +162,10 @@ export function ContextGraphCanvas({
   centerOn?: string | null;
   /** The items have not arrived yet: the canvas stays unseen rather than flashing an empty grid. */
   loading?: boolean;
-  /** Cards pinned top-right on the canvas under the legend (Not connected). */
-  overlay?: ReactNode;
+  /** An empty or failed state centred in the canvas. */
+  notice?: ReactNode;
+  /** One caption beside the zoom control ("Showing 7 items · 9 connections"). */
+  footnote?: ReactNode;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
@@ -201,7 +205,9 @@ export function ContextGraphCanvas({
         { type: "module" },
       );
     } catch (reason) {
-      onErrorRef.current(`Graph layout failed: ${String(reason)}`);
+      onErrorRef.current(
+        reason instanceof Error ? reason.message : "The layout worker failed.",
+      );
       return;
     }
     worker.onmessage = (
@@ -212,14 +218,12 @@ export function ContextGraphCanvas({
       }>,
     ) => {
       if (event.data.id !== currentGeneration.current) return;
-      if (event.data.error)
-        onErrorRef.current(`Graph layout failed: ${event.data.error}`);
+      if (event.data.error) onErrorRef.current(event.data.error);
       else if (event.data.positions)
         onPositionsRef.current(event.data.positions);
     };
     worker.onerror = (event) => {
-      if (id === currentGeneration.current)
-        onErrorRef.current(`Graph layout failed: ${event.message}`);
+      if (id === currentGeneration.current) onErrorRef.current(event.message);
     };
     worker.postMessage({
       id,
@@ -322,7 +326,7 @@ export function ContextGraphCanvas({
     frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
   }, [fit, centerOn, placed, ready, positions]);
-  const container = useRef<HTMLDivElement | null>(null);
+  const container = useRef<HTMLElement | null>(null);
   // Steps from the zoom the person sees, so repeated presses always move by one
   // step and never restart from a half-finished animation.
   const stepZoom = (factor: number) => {
@@ -478,10 +482,19 @@ export function ContextGraphCanvas({
         ...(typeof edge.label === "string" ? { label: edge.label } : {}),
       })),
     );
-    return edges.map((edge) =>
-      routes[edge.id] ? { ...edge, data: { route: routes[edge.id] } } : edge,
-    );
-  }, [edges, nodes, positions, sizes]);
+    // A line names itself only beside the selected card, so labels never
+    // pile up over the map; the legend and the panel name the rest.
+    return edges.map((edge) => ({
+      ...edge,
+      ...(selected !== edge.source &&
+        selected !== edge.target && {
+          label: undefined,
+        }),
+      ...(routes[edge.id] && {
+        data: { ...edge.data, route: routes[edge.id] },
+      }),
+    }));
+  }, [edges, nodes, positions, sizes, selected]);
   const flowNodes = useMemo<Node[]>(
     () =>
       nodes
@@ -502,6 +515,7 @@ export function ContextGraphCanvas({
               caption: node.caption ?? "",
               kind: node.kind ?? "ticket",
               status: node.status ?? "",
+              selected: node.id === selected,
             },
             ariaLabel: node.label,
             style: { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
@@ -511,88 +525,78 @@ export function ContextGraphCanvas({
         }),
     [nodes, positions, selected, sizes],
   );
-  // React Flow selects a focused node on Enter or Space without calling
-  // onNodeClick, so the keyboard path reports the selection itself.
-  function selectFromKey(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    const element = (event.target as HTMLElement).closest(".react-flow__node");
-    const id = element?.getAttribute("data-id");
-    if (!id) return;
-    event.preventDefault();
-    onSelect(id);
-  }
+  const kindByLabel = Object.fromEntries(
+    Object.entries(edgeLineLabels).map(([kind, label]) => [label, kind]),
+  );
+  const legend = legendItems(
+    edges.map((edge) => {
+      const kind = (edge.data as { kind?: string } | undefined)?.kind;
+      return kind ?? kindByLabel[String(edge.label ?? "")] ?? "";
+    }),
+  );
+  const fitAll = () => {
+    autoFitted.current = true;
+    void instance.current?.fitView(
+      fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+    );
+  };
   return (
-    <div className="context-graph-stage">
-      <div
-        ref={container}
-        className="context-graph-canvas"
-        aria-label="Connections canvas"
-        // Opacity, not visibility: React Flow marks each measured card
-        // `visibility: visible`, which would show cards through a hidden
-        // canvas while the edges, grid and zoom control are still waiting.
-        data-pending={
-          shown || restored || (!nodes.length && !loading) ? undefined : ""
-        }
-        onKeyDown={selectFromKey}
-      >
-        <div className="context-graph-flow">
-          <ReactFlow
-            nodes={flowNodes}
-            onNodesChange={rememberSizes}
-            edges={shownEdges}
-            minZoom={MIN_ZOOM}
-            maxZoom={MAX_ZOOM}
-            proOptions={{ hideAttribution: true }}
-            nodeTypes={NODE_TYPES}
-            edgeTypes={EDGE_TYPES}
-            onNodeClick={(_, node) => onSelect(node.id)}
-            onInit={(value) => {
-              instance.current = value;
-              setReady(true);
-            }}
-            viewport={viewport}
-            onViewportChange={onViewport}
-            onMoveStart={(event) => {
-              // Only a pointer or wheel move is the person's own: Fit and the
-              // controlled viewport syncing back also start moves, with no DOM event.
-              if (isUserMove(event)) autoFitted.current = false;
-            }}
-            nodesDraggable={false}
-            // The Connected items list is the keyboard path to every card.
-            nodesFocusable={false}
-            edgesFocusable={false}
-          >
-            <Background />
-          </ReactFlow>
-        </div>
-        <div className="context-graph-zoom">
-          <ZoomControl
+    <GraphCanvas
+      ref={container}
+      label="Connections canvas"
+      // Opacity, not visibility: React Flow marks each measured card
+      // `visibility: visible`, which would show cards through a hidden
+      // canvas while the edges, grid and zoom control are still waiting.
+      data-pending={
+        shown || restored || (!nodes.length && !loading) ? undefined : ""
+      }
+      legend={<GraphLegend items={legend} />}
+      zoom={
+        nodes.length > 0 && (
+          <ZoomControls
             zoom={viewport.zoom}
             onZoomOut={() => stepZoom(1 / ZOOM_STEP)}
             onZoomIn={() => stepZoom(ZOOM_STEP)}
-            onFit={() => {
-              autoFitted.current = true;
-              void instance.current?.fitView(
-                fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-              );
+            onReset={() => {
+              autoFitted.current = false;
+              void instance.current?.zoomTo(1, { duration: 0 });
             }}
-          >
-            {notFullyShown > 0 && (
-              <>
-                <span className="zoom-control-rule" aria-hidden="true" />
-                <span role="status">
-                  {notFullyShown} {notFullyShown === 1 ? "item" : "items"} not
-                  fully shown
-                </span>
-              </>
-            )}
-          </ZoomControl>
-        </div>
-      </div>
-      <div className="context-graph-overlay">
-        <GraphLegend />
-        {overlay}
-      </div>
-    </div>
+            onFit={fitAll}
+            notInView={notFullyShown}
+          />
+        )
+      }
+      notice={notice}
+      footnote={footnote}
+    >
+      <ReactFlow
+        nodes={flowNodes}
+        onNodesChange={rememberSizes}
+        edges={shownEdges}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
+        proOptions={{ hideAttribution: true }}
+        nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
+        onNodeClick={(_, node) => onSelect(node.id)}
+        onInit={(value) => {
+          instance.current = value;
+          setReady(true);
+        }}
+        viewport={viewport}
+        onViewportChange={onViewport}
+        onMoveStart={(event) => {
+          // Only a pointer or wheel move is the person's own: Fit and the
+          // controlled viewport syncing back also start moves, with no DOM event.
+          if (isUserMove(event)) autoFitted.current = false;
+        }}
+        nodesDraggable={false}
+        // Each card is a button of its own, so the node wrapper is not a stop.
+        nodesFocusable={false}
+        edgesFocusable={false}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+      </ReactFlow>
+    </GraphCanvas>
   );
 }

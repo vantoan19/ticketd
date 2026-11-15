@@ -228,7 +228,8 @@ test("a failed mark as read says what the host reported", async () => {
       name: /Mark .* unread/,
     }),
   );
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "the Workspace is busy",
+  // The host's words, made a sentence; the raw text waits under Details.
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't mark as unread. The Workspace is busy.",
   );
 });

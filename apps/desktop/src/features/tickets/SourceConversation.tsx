@@ -1,6 +1,12 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip } from "@/components/ui/tooltip";
 import { CommentRow, EventRow, Timeline } from "@/components/ui/timeline";
 import { SectionHeader } from "@/components/ui/section-header";
+import { FailureState } from "@/components/ui/failure-alert";
+import {
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
 import { useEffect, useState } from "react";
 import {
   CircleAlert,
@@ -90,7 +96,8 @@ export function SourceConversation({
 }) {
   const now = useNow();
   const [entries, setEntries] = useState<ConversationEntry[] | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<FailureDescription | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const refreshedAt = source.last_refreshed_at;
   useEffect(() => {
     let active = true;
@@ -99,15 +106,15 @@ export function SourceConversation({
       .then((result) => {
         if (!active) return;
         setEntries(result);
-        setError("");
+        setError(null);
       })
       .catch((reason: unknown) => {
-        if (active) setError(String(reason));
+        if (active) setError(describeFailure(reason, "load the conversation"));
       });
     return () => {
       active = false;
     };
-  }, [reference, revision, refreshedAt]);
+  }, [reference, revision, refreshedAt, attempt]);
   const name = source.provider_name;
   const owned = source.ownership === "external";
   // Provenance only: after takeover there is nothing to show unless it was retrieved.
@@ -133,7 +140,13 @@ export function SourceConversation({
             : "archive · no longer refreshed"}
         </span>
       </SectionHeader>
-      {error && <p role="alert">Could not load the conversation: {error}</p>}
+      {error && (
+        <FailureState
+          size="inline"
+          failure={error}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      )}
       {entries && entries.length === 0 && !error && (
         <EmptyState
           size="inline"
@@ -156,12 +169,11 @@ export function SourceConversation({
                 header={
                   <span>
                     <strong>{entry.author}</strong> commented on {name} ·{" "}
-                    <time
-                      dateTime={entry.created_at}
-                      title={formatDateTime(entry.created_at)}
-                    >
-                      {relativeDateTime(entry.created_at, now)}
-                    </time>
+                    <Tooltip content={formatDateTime(entry.created_at)}>
+                      <time dateTime={entry.created_at} tabIndex={0}>
+                        {relativeDateTime(entry.created_at, now)}
+                      </time>
+                    </Tooltip>
                     {entry.edited_at && (
                       <>
                         {" "}
@@ -217,12 +229,11 @@ function SourceEvent({
     <EventRow
       icon={icon}
       meta={
-        <time
-          dateTime={entry.created_at}
-          title={formatDateTime(entry.created_at)}
-        >
-          {relativeDateTime(entry.created_at, now)}
-        </time>
+        <Tooltip content={formatDateTime(entry.created_at)}>
+          <time dateTime={entry.created_at} tabIndex={0}>
+            {relativeDateTime(entry.created_at, now)}
+          </time>
+        </Tooltip>
       }
     >
       <strong>{entry.actor ?? "Someone"}</strong>

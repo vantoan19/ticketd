@@ -1,26 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  Copy,
-  Database,
-  FileText,
-  FolderOpen,
-  Monitor,
-  Terminal,
-} from "lucide-react";
+import { Database, FileText, Monitor, Terminal } from "lucide-react";
 import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
+  describeFailure,
+  type FailureDescription,
+} from "@/lib/api/describe-failure";
+import { CopyButton } from "@/components/ui/copy-button";
+import { RevealButton } from "@/components/ui/reveal-button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PathText } from "@/features/projects/PathText";
-import { fileManagerName } from "@/lib/platform";
-import { writeClipboard } from "@/lib/clipboard";
-import { revealFile } from "@/lib/reveal";
+import { PathText } from "@/components/ui/path-text";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
@@ -121,18 +110,8 @@ function Figure({ name }: { name: string }) {
 }
 
 function Loaded({ info }: { info: WorkspaceInfo }) {
-  const [message, setMessage] = useState("");
-  const manager = fileManagerName();
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const { folder, name } = splitFile(info.path);
-  async function copyPath() {
-    const failure = await writeClipboard(info.path);
-    setMessage(
-      failure === null ? "Path copied." : `Could not copy the path: ${failure}`,
-    );
-  }
-  async function reveal() {
-    setMessage((await revealFile(info.path)) ?? "");
-  }
   const facts = [
     ["Tickets", String(info.tickets)],
     ["Documents", String(info.documents)],
@@ -155,30 +134,20 @@ function Loaded({ info }: { info: WorkspaceInfo }) {
             description={
               folder && (
                 <span className="location-folder">
-                  <PathText path={folder} />
+                  <PathText path={folder} layout="folder" />
                 </span>
               )
             }
             trailing={
               <>
-                <IconButton label="Copy path" onClick={() => void copyPath()}>
-                  <Copy aria-hidden="true" />
-                </IconButton>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void reveal()}
-                >
-                  <FolderOpen aria-hidden="true" />
-                  Show in {manager}
-                </Button>
+                <CopyButton text={info.path} label="Copy path" />
+                <RevealButton path={info.path} onFailure={setFailure} />
               </>
             }
           />
-          {message && (
+          {failure && (
             <SettingsListFooter>
-              <span role="status">{message}</span>
+              <FailureAlert size="compact" failure={failure} />
             </SettingsListFooter>
           )}
         </SettingsList>
@@ -205,10 +174,10 @@ function Loaded({ info }: { info: WorkspaceInfo }) {
 
 export function LocationPage() {
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => {
-    setFailure("");
+    setFailure(null);
     setAttempt((value) => value + 1);
   }, []);
   useEffect(() => {
@@ -219,7 +188,7 @@ export function LocationPage() {
         if (current) setInfo(value);
       })
       .catch((reason: unknown) => {
-        if (current) setFailure(String(reason));
+        if (current) setFailure(describeFailure(reason, "read the workspace"));
       });
     return () => {
       current = false;
@@ -232,18 +201,14 @@ export function LocationPage() {
     >
       {failure ? (
         <SettingsSection title="Workspace file">
-          <Alert tone="error">
-            <AlertTitle>Could not read the workspace</AlertTitle>
-            <AlertDescription>
-              The path and contents could not be loaded. Reading never changes
-              the workspace. {failure}
-            </AlertDescription>
-            <AlertActions>
-              <Button type="button" variant="outline" size="sm" onClick={retry}>
-                Try again
-              </Button>
-            </AlertActions>
-          </Alert>
+          <FailureState
+            size="inline"
+            failure={{
+              ...failure,
+              sentence: `${failure.sentence} Reading never changes the workspace.`,
+            }}
+            onRetry={retry}
+          />
         </SettingsSection>
       ) : info ? (
         <Loaded info={info} />

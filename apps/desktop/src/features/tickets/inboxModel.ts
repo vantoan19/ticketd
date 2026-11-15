@@ -74,8 +74,8 @@ export function entryTime(timestamp: string, group: DayGroup): string {
 export type SnoozeChoice = "hour" | "tomorrow";
 
 export const snoozeChoices: { value: SnoozeChoice; label: string }[] = [
-  { value: "hour", label: "In one hour" },
-  { value: "tomorrow", label: "Tomorrow morning" },
+  { value: "hour", label: "In 1 hour" },
+  { value: "tomorrow", label: "Tomorrow" },
 ];
 
 /** The instant a snooze choice resolves to; tomorrow morning is 9:00 local time. */

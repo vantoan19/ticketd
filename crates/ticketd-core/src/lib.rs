@@ -29,6 +29,8 @@ pub use duplicates::{
     ReplacementIssue, ReviewMode, WaitingOutcome, WaitingTicket,
 };
 mod evidence;
+mod failure;
+pub use failure::FailureKind;
 mod export;
 mod portable_export;
 pub use portable_export::{
@@ -86,6 +88,7 @@ mod upload_destination;
 mod versions;
 pub use attachment_previews::{
     AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
+    TEXT_EXCERPT_BYTES, TextExcerpt,
 };
 pub use upload_destination::AttachmentUploadDestination;
 pub use versions::{RecordKind, Version, VersionSummary};
@@ -158,6 +161,9 @@ pub enum Error {
     Drive(#[from] drive::DriveError),
     #[error("attachment: {0}")]
     Attachment(String),
+    /// A file is larger than the workspace upload limit, in bytes.
+    #[error("attachment: {}", upload_limit_message(*.limit))]
+    UploadLimit { limit: u64 },
     #[error("ticket '{0}' was changed elsewhere since it was loaded")]
     TicketChanged(String),
     #[error("document '{0}' was changed elsewhere since it was loaded")]
@@ -428,6 +434,17 @@ pub(crate) fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
+}
+
+fn upload_limit_message(limit: u64) -> String {
+    let bound = if limit.is_multiple_of(1_048_576) {
+        format!("{} MiB ({limit} bytes)", limit / 1_048_576)
+    } else {
+        format!("{limit} bytes")
+    };
+    format!(
+        "file exceeds the workspace upload limit of {bound}; change it in Settings > Attachments or `ticketd attachment limit --bytes <bytes>`"
+    )
 }
 
 fn external_status_message(
@@ -1466,6 +1483,12 @@ fn default_path_unchecked() -> Result<std::path::PathBuf, Error> {
     }
     let dirs = ProjectDirs::from("", "", "ticketd").ok_or(Error::NoDataDirectory)?;
     Ok(dirs.data_dir().join("workspace.sqlite3"))
+}
+
+/// Where the default workspace file is, without opening or creating anything, so a
+/// failure to open it can still name the file.
+pub fn default_workspace_path() -> Result<std::path::PathBuf, Error> {
+    default_path_unchecked()
 }
 
 fn default_path() -> Result<std::path::PathBuf, Error> {
