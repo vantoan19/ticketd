@@ -693,8 +693,7 @@ export function WorkspaceGraph({
               </button>
               {connectionRows(node.id, graph).map((row) => (
                 <p key={row.key}>
-                  <strong>{edgeLabels[row.kind] ?? row.kind}</strong> ·{" "}
-                  {row.text}
+                  <strong>{row.label}</strong> · {row.text}
                 </p>
               ))}
               {connectionRows(node.id, graph).length === 0 &&

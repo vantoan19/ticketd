@@ -202,11 +202,38 @@ export function cardParts(node: GraphNode): {
   };
 }
 
-/** Connections touching a node, one row per relationship between the same pair. */
+/** Each relationship named from either end: [from the source, from the target]. */
+const ROLE_LABELS: Record<string, [outgoing: string, incoming: string]> = {
+  blocks: ["Blocks", "Blocked by"],
+  subticket: ["Parent of", "Subticket of"],
+  related: ["Related to", "Related to"],
+  discovered: ["Discovered", "Discovered from"],
+  mention: ["Mentions", "Mentioned by"],
+  attached: ["Has", "Attached to"],
+  activity: ["Update mentions", "Mentioned in an update on"],
+  support: ["Update cites", "Cited in an update on"],
+  membership: ["Contains", "In Plan"],
+  document: ["Has document", "Document of"],
+  spec: ["Has spec", "Spec of"],
+};
+
+/** A relationship named from `nodeId`'s side: T-FV1 is "Blocked by" T-FV14, not "Blocks". */
+function roleLabel(edge: GraphEdge, nodeId: string): string {
+  const pair = ROLE_LABELS[edge.kind] ?? [
+    edgeLabels[edge.kind] ?? edge.kind,
+    edgeLabels[edge.kind] ?? edge.kind,
+  ];
+  return edge.source === nodeId ? pair[0] : pair[1];
+}
+
+/**
+ * Connections touching a node, one row per relationship between the same pair.
+ * `label` names the relationship from this node's side.
+ */
 export function connectionRows(
   nodeId: string,
   graph: Pick<ContextGraph, "nodes" | "edges">,
-): { key: string; kind: string; text: string }[] {
+): { key: string; kind: string; label: string; text: string }[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const rows = new Map<
     string,
@@ -222,24 +249,11 @@ export function connectionRows(
   return [...rows.entries()].map(([key, row]) => ({
     key,
     kind: row.kind,
+    label: roleLabel(row.edge, nodeId),
     text:
       describeEdge(row.edge, byId) + (row.extra ? ` (+${row.extra} more)` : ""),
   }));
 }
-
-const ROLE_LABELS: Record<string, [outgoing: string, incoming: string]> = {
-  blocks: ["Blocks", "Blocked by"],
-  subticket: ["Parent of", "Subticket of"],
-  related: ["Related to", "Related to"],
-  discovered: ["Discovered", "Discovered from"],
-  mention: ["Mentions", "Mentioned by"],
-  attached: ["Has", "Attached to"],
-  activity: ["Update mentions", "Mentioned in an update on"],
-  support: ["Update cites", "Cited in an update on"],
-  membership: ["Contains", "In Plan"],
-  document: ["Has document", "Document of"],
-  spec: ["Has spec", "Spec of"],
-};
 
 /** A node's connections as labelled rows ("Blocked by", "Parent of", "Mentioned by"), each item once. */
 export function labelledConnections(
@@ -253,8 +267,7 @@ export function labelledConnections(
     const outgoing = edge.source === nodeId;
     const other = byId.get(outgoing ? edge.target : edge.source);
     if (!other) continue;
-    const pair = ROLE_LABELS[edge.kind] ?? [edge.kind, edge.kind];
-    const label = outgoing ? pair[0] : pair[1];
+    const label = roleLabel(edge, nodeId);
     const parts = cardParts(other);
     const text = [parts.ref, parts.title].filter(Boolean).join(" ");
     const items = rows.get(label) ?? [];
