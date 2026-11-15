@@ -93,6 +93,12 @@ export const SHORTCUTS = [
     note: "While Settings is open.",
   },
   {
+    id: "board-move",
+    keys: [["↑"], ["↓"], ["←"], ["→"]],
+    scope: "Lists",
+    label: "Move between cards and columns",
+  },
+  {
     id: "list-move",
     keys: [["↑"], ["↓"], ["J"], ["K"]],
     scope: "Lists",
