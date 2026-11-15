@@ -15,12 +15,16 @@ export function RailSection({
   actions,
   children,
   className,
+  count,
+  summary,
 }: {
   label: string;
   /** Icon buttons at the end of the label row, such as Attach. */
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
+  count?: ReactNode;
+  summary?: ReactNode;
 }) {
   const id = useId();
   const placement = use(RailPlacement);
@@ -30,7 +34,14 @@ export function RailSection({
         className={cn("rail-section", "rail-section-column", className)}
         aria-labelledby={id}
       >
-        <SectionHeader title={label} titleId={id} actions={actions} />
+        <SectionHeader
+          title={label}
+          titleId={id}
+          actions={actions}
+          count={count}
+        >
+          {summary}
+        </SectionHeader>
         {children}
       </section>
     );

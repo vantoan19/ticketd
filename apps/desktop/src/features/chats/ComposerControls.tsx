@@ -349,7 +349,7 @@ export function HarnessPicker({
         content={
           held
             ? `${modelLabel} · ${effortLabel || "Default"} from your next message`
-            : null
+            : name
         }
       >
         <PopoverTrigger asChild>
@@ -426,7 +426,9 @@ export function HarnessPicker({
                   dim={!item.ready}
                   decorative
                 />
-                <span className="chat-picker-harness-name">{item.name}</span>
+                <span className="chat-picker-harness-name shrink-0">
+                  {item.name}
+                </span>
                 {!item.ready && item.word && <small>· {item.word}</small>}
               </button>
             ))}

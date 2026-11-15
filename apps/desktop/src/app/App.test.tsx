@@ -378,7 +378,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
+  fireEvent.keyDown(document.body, { key: "r" });
   await act(async () => {
     await vi.dynamicImportSettled();
     await vi.advanceTimersByTimeAsync(0);
@@ -4832,9 +4832,13 @@ test("Workspace graph retries an incomplete island and preserves members and man
     ),
   ).toBeTruthy();
 });
-test.each([true, false])(
-  "ticket agent strip reserves its opening slot and opens the linked Chat (focused: %s)",
-  async (focused) => {
+test.each([
+  [true, "1"],
+  [false, "2"],
+  [true, "3"],
+] as const)(
+  "ticket agent strip and Inbox follow approval answer (focused: %s, choice: %s)",
+  async (focused, choice) => {
     const { notificationClient } = await import("@/lib/api/notifications");
     const nativeNotifications = vi
       .spyOn(notificationClient, "notify")
@@ -4923,12 +4927,16 @@ test.each([true, false])(
           request: "approval",
           title: "wants to run",
           command: "npm test -- board",
-          options: [{ id: "allow", label: "Allow once" }],
+          options: [
+            { id: "allow", label: "Allow once" },
+            { id: "session", label: "Allow for this session" },
+            { id: "deny", label: "Decline" },
+          ],
           state: "pending",
           free_text: false,
         }),
       );
-      const review = await within(strip).findByRole("button", {
+      await within(strip).findByRole("button", {
         name: "Review request",
       });
       expect(
@@ -4941,10 +4949,55 @@ test.each([true, false])(
       // The host owns background gating and delivery; the strip must not send a second notification.
       expect(client.notify).toBe(true);
       expect(nativeNotifications).not.toHaveBeenCalled();
-      fireEvent.click(review);
+      // Inbox projects the same pending request before it is answered.
+      fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+      expect(
+        await screen.findByRole("button", {
+          name: /Approval needed in.*Strip Chat/,
+        }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /All tickets/ }));
+      fireEvent.click(
+        await screen.findByRole("button", { name: /Focused Ticket/ }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Review request" }),
+      );
       expect(
         await screen.findByRole("heading", { name: "Strip Chat" }),
       ).toBeTruthy();
+      const answer = vi.spyOn(client, "answer");
+      const allow = await screen.findByRole("button", { name: "Allow once" });
+      allow.focus();
+      fireEvent.keyDown(allow, { key: choice });
+      await vi.waitFor(() =>
+        expect(answer).toHaveBeenCalledWith("strip-chat", "approval", {
+          option_id:
+            choice === "1" ? "allow" : choice === "2" ? "session" : "deny",
+        }),
+      );
+      expect(
+        await screen.findByRole("button", { name: "Chats, 1 working" }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /^Inbox/ }));
+      await vi.waitFor(() =>
+        expect(
+          screen.queryByRole("button", {
+            name: /Approval needed in.*Strip Chat/,
+          }),
+        ).toBeNull(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /All tickets/ }));
+      fireEvent.click(
+        await screen.findByRole("button", { name: /Focused Ticket/ }),
+      );
+      const resumed = await screen.findByRole("status", {
+        name: "Ticket agent",
+      });
+      expect(within(resumed).getByText(/is working on this/)).toBeTruthy();
+      expect(
+        within(resumed).queryByRole("button", { name: "Review request" }),
+      ).toBeNull();
     } finally {
       focus.mockRestore();
       nativeNotifications.mockRestore();
@@ -5280,4 +5333,625 @@ test("filter checks stay staged until the menu closes, then the bar follows the 
   fireEvent.click(within(bar).getByRole("button", { name: "Clear filters" }));
   await screen.findByRole("button", { name: /Second retained row/ });
   expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
+test("Documents folds local search in its header and navigates one row stop without replacing the reader metadata", async () => {
+  const docs = [
+    {
+      id: "guide",
+      title: "Reader guide",
+      body: "Keep this paragraph.",
+      created_at: "2026-11-01T00:00:00Z",
+      updated_at: "2026-11-01T00:00:00Z",
+      trashed: false,
+    },
+    {
+      id: "spec",
+      title: "Reader spec",
+      body: "The next paragraph.",
+      created_at: "2026-11-02T00:00:00Z",
+      updated_at: "2026-11-02T00:00:00Z",
+      trashed: false,
+    },
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args: { id?: string; query?: string }) => {
+      if (command === "recent_documents" || command === "all_documents")
+        return docs.map((doc) => ({
+          id: doc.id,
+          heading: doc.title,
+          updated_at: doc.updated_at,
+        }));
+      if (command === "search_documents")
+        return docs
+          .filter((doc) => doc.title.includes(args.query ?? ""))
+          .map((doc) => ({
+            id: doc.id,
+            heading: doc.title,
+            updated_at: doc.updated_at,
+          }));
+      if (command === "open_document" || command === "show_document")
+        return docs.find((doc) => doc.id === args.id);
+      if (command === "document_tags") return [];
+      if (command === "document_version")
+        return [docs.find((doc) => doc.id === args.id)?.updated_at, false];
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
+  const first = await screen.findByRole("button", { name: "Reader guide" });
+  const navigator = first.closest(".documents-list-view")!;
+  const header = within(navigator as HTMLElement)
+    .getByRole("heading", { name: "Documents" })
+    .closest("header")!;
+  expect(within(navigator as HTMLElement).queryByRole("searchbox")).toBeNull();
+  fireEvent.click(
+    within(header).getByRole("button", { name: "Search Documents" }),
+  );
+  const search = within(header).getByRole("searchbox", {
+    name: "Search Documents",
+  });
+  fireEvent.change(search, { target: { value: "spec" } });
+  expect(
+    await screen.findByRole("button", { name: "Reader spec" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(search, { key: "Escape" });
+  expect(within(header).queryByRole("searchbox")).toBeNull();
+  const rows = await within(navigator as HTMLElement).findAllByRole("button", {
+    name: /^Reader (guide|spec)$/,
+  });
+  expect(rows.filter((row) => row.tabIndex === 0)).toHaveLength(1);
+  rows[0]!.focus();
+  fireEvent.keyDown(rows[0]!, { key: "j" });
+  expect(document.activeElement).toBe(rows[1]);
+  fireEvent.keyDown(rows[1]!, { key: "Enter" });
+  expect(
+    await screen.findByRole("heading", { name: "Reader spec" }),
+  ).toBeTruthy();
+  expect(
+    within(navigator as HTMLElement)
+      .getByRole("heading", { name: "Documents" })
+      .closest("header"),
+  ).toBe(header);
+  fireEvent.keyDown(rows[1]!, { key: "/" });
+  expect(within(header).getByRole("searchbox")).toBeTruthy();
+  fireEvent.keyDown(within(header).getByRole("searchbox"), {
+    key: "k",
+    ctrlKey: true,
+  });
+  const palette = await screen.findByRole("dialog");
+  expect(within(palette).getByRole("combobox")).toBeTruthy();
+  fireEvent.keyDown(within(palette).getByRole("combobox"), { key: "Escape" });
+  fireEvent.keyDown(within(header).getByRole("searchbox"), { key: "Escape" });
+  const metadata = screen.getByRole("status", {
+    name: "Document sync status",
+  }).parentElement;
+  fireEvent.keyDown(document.body, { key: "e" });
+  expect(
+    await screen.findByRole("group", { name: "Edit controls" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("status", { name: "Document sync status" }).parentElement,
+  ).toBe(metadata);
+  fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
+  rows[1]!.focus();
+  fireEvent.keyDown(rows[1]!, { key: "Escape" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("heading", { name: "Reader spec" })).toBeNull(),
+  );
+  expect(
+    within(navigator as HTMLElement).getByRole("button", {
+      name: "Reader spec",
+    }),
+  ).toBe(rows[1]);
+});
+
+test("Documents keeps pin grouping under keyboard focus, exposes exact times and restores a linked Plan Document", async () => {
+  const timestamp = "2026-11-01T09:30:00Z";
+  let pinned = false;
+  let trashed = true;
+  const stored = () => ({
+    id: "linked-guide",
+    title: "Linked guide",
+    body: "A reusable guide.",
+    created_at: timestamp,
+    updated_at: timestamp,
+    trashed,
+  });
+  const summary = {
+    id: "linked-guide",
+    heading: "Linked guide",
+    updated_at: timestamp,
+  };
+  const other = {
+    id: "other-guide",
+    heading: "Other guide",
+    updated_at: timestamp,
+  };
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args: { id?: string; pinned?: boolean; trashed?: boolean },
+    ) => {
+      if (command === "list_plans")
+        return [{ id: "guide-plan", name: "Guide launch", archived: false }];
+      if (command === "recent_documents")
+        return trashed ? [other] : [other, summary];
+      if (command === "trashed_documents") return trashed ? [summary] : [];
+      if (command === "pinned_documents") return pinned ? [summary] : [];
+      if (command === "set_document_pin") {
+        pinned = args.pinned ?? false;
+        return null;
+      }
+      if (command === "set_document_trashed") {
+        trashed = args.trashed ?? false;
+        return stored();
+      }
+      if (command === "open_document" || command === "show_document")
+        return stored();
+      if (command === "document_version") return [timestamp, trashed];
+      if (command === "document_tags") return [];
+      if (command === "document_context_links" && args.id === summary.id)
+        return [
+          [],
+          [
+            {
+              source_id: "guide-plan",
+              target_id: summary.id,
+              source_kind: "plan",
+              target_kind: "document",
+              passage: "",
+              source_label: "Guide launch",
+              target_label: summary.heading,
+              source_trashed: false,
+              target_trashed: trashed,
+              explicit: true,
+            },
+          ],
+        ];
+      if (command === "show_plan")
+        return {
+          plan: {
+            id: "guide-plan",
+            name: "Guide launch",
+            archived: false,
+            spec_document_id: null,
+          },
+          counts: {
+            todo: 0,
+            in_progress: 0,
+            in_review: 0,
+            done: 0,
+            canceled: 0,
+          },
+          members: [],
+          documents: [{ ...summary, trashed: false }],
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Linked guide" }));
+  expect(
+    await screen.findByRole("heading", { name: "Linked guide" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Edit" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  const reader = screen
+    .getByRole("heading", { name: "Linked guide" })
+    .closest("article")!;
+  const linked = within(reader).getByRole("complementary", {
+    name: "Document details",
+  });
+  expect(within(linked).getByRole("heading", { name: "Linked" })).toBeTruthy();
+  expect(
+    await within(linked).findByRole("button", { name: "Guide launch" }),
+  ).toBeTruthy();
+  fireEvent.click(within(reader).getByRole("button", { name: "Restore" }));
+  await vi.waitFor(() =>
+    expect(screen.getByRole("button", { name: "Edit" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+  const row = await screen.findByRole("button", { name: "Linked guide" });
+  const navigator = row.closest(".documents-list-view") as HTMLElement;
+  const order = () =>
+    within(navigator)
+      .getAllByRole("button", { name: /^(Other|Linked) guide$/ })
+      .map((button) => button.textContent);
+  expect(order()).toEqual(["Other guide", "Linked guide"]);
+  row.focus();
+  fireEvent.keyDown(row, { key: "p" });
+  await vi.waitFor(() =>
+    expect(
+      within(navigator)
+        .getByRole("button", { name: "Unpin Linked guide" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true"),
+  );
+  expect(order()).toEqual(["Other guide", "Linked guide"]);
+  fireEvent.keyDown(row, { key: "ArrowRight" });
+  expect(document.activeElement?.tagName).toBe("TIME");
+  expect(await screen.findByRole("tooltip")).toHaveProperty(
+    "textContent",
+    new Date(timestamp).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }),
+  );
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(document.activeElement).toBe(row);
+  act(() => screen.getByRole("button", { name: "Document actions" }).focus());
+  await vi.waitFor(() =>
+    expect(order()).toEqual(["Linked guide", "Other guide"]),
+  );
+  fireEvent.click(within(linked).getByRole("button", { name: "Guide launch" }));
+  expect(
+    await screen.findByRole("heading", { name: "Guide launch" }),
+  ).toBeTruthy();
+});
+
+test("New Chat exposes its complete current pick before the first message", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { createMockChatClient } = await import("@/features/chats/mock-client");
+  const client = createMockChatClient({ enabled: true });
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(
+    <ChatClientContext value={client}>
+      <App />
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  const trigger = await screen.findByRole("button", {
+    name: "Claude Code, model Opus 5.5, effort Default",
+  });
+  expect(client.created).toHaveLength(0);
+  fireEvent.click(trigger);
+  const tab = await screen.findByRole("tab", { name: "Claude Code" });
+  expect(
+    within(tab).getByText("Claude Code").classList.contains("shrink-0"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("radio", { name: /^Sonnet 5/ }));
+  fireEvent.click(screen.getByRole("radio", { name: "High" }));
+  expect(
+    screen.getByRole("button", {
+      name: "Claude Code, model Sonnet 5, effort High",
+    }),
+  ).toBeTruthy();
+  expect(client.created).toHaveLength(0);
+});
+
+test("a blocker removed and re-added through Linked is visible and can be removed with Undo", async () => {
+  const current = bulkTicket(1, { title: "Waiting outcome" });
+  const blocker = bulkTicket(2, { title: "Required outcome" });
+  let linked = true;
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args?: { reference?: string; prerequisite?: string; dependent?: string },
+    ) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket")
+        return args?.reference === blocker.reference ? blocker : current;
+      if (command === "search_tickets") return [blocker];
+      if (command === "add_dependency" || command === "remove_dependency") {
+        linked = command === "add_dependency";
+        return current;
+      }
+      if (command === "contextual_relationships") {
+        const result = bridgeDefault(command) as {
+          relationships: {
+            prerequisites: { items: unknown[]; next_offset: null };
+          };
+        };
+        result.relationships.prerequisites = {
+          next_offset: null,
+          items: linked
+            ? [
+                {
+                  reference: blocker.reference,
+                  title: { text: blocker.title },
+                  status: "Todo",
+                  trashed: false,
+                  unresolved: true,
+                },
+              ]
+            : [],
+        };
+        return result;
+      }
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Waiting outcome/ }),
+  );
+  const removeLabel = `Remove ${blocker.reference} from Blocked by`;
+  const remove = await screen.findByRole("button", { name: removeLabel });
+  vi.useFakeTimers();
+  fireEvent.click(remove);
+  await act(async () => vi.advanceTimersByTimeAsync(401));
+  vi.useRealTimers();
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: removeLabel })).toBeNull(),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Link a ticket" }));
+  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
+  fireEvent.click(
+    within(dialog).getByRole("combobox", { name: /Relationship/ }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: "is blocked by" }));
+  fireEvent.change(
+    within(dialog).getByRole("combobox", {
+      name: "Ticket",
+    }),
+    { target: { value: blocker.reference } },
+  );
+  fireEvent.click(
+    await screen.findByRole("option", { name: /Required outcome/ }),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Link ticket" }));
+  expect(await screen.findByRole("button", { name: removeLabel })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: removeLabel }));
+  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+  expect(await screen.findByRole("button", { name: removeLabel })).toBeTruthy();
+});
+
+test("empty Ticket evidence adds, removes, and restores through Undo", async () => {
+  const current = bulkTicket(1, { title: "Evidence outcome" });
+  let items: import("@/lib/api/client").Evidence[] = [];
+  const writes = new Map<string, import("@/lib/api/client").Evidence>();
+  let replyLost = false;
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args?: {
+        input?: import("@/lib/api/client").EvidenceInput;
+        requestId?: string;
+      },
+    ) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "list_evidence") return items;
+      if (command === "add_evidence") {
+        const key = args?.requestId ?? "";
+        const known = writes.get(key);
+        if (known) return known;
+        const item: import("@/lib/api/client").Evidence = {
+          id: crypto.randomUUID(),
+          kind: "pull_request",
+          name: "Review",
+          value: "example/app#42",
+          editing_agent: null,
+          created_at: "2026-11-16T00:00:00Z",
+          updated_at: "2026-11-16T00:00:00Z",
+          ...args?.input,
+        };
+        writes.set(key, item);
+        items = [...items, item];
+        if (writes.size === 2 && !replyLost) {
+          replyLost = true;
+          throw {
+            code: "failed",
+            message: "The restoration reply was lost. Try again.",
+          };
+        }
+        return item;
+      }
+      if (command === "delete_evidence") {
+        items = [];
+        return;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Evidence outcome/ }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Evidence" }));
+  const dialog = await screen.findByRole("dialog", { name: "Add evidence" });
+  fireEvent.change(within(dialog).getByLabelText("Name"), {
+    target: { value: "Review" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("URL, reference, or path"), {
+    target: { value: "example/app#42" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add evidence" }));
+  const actions = await screen.findByRole("button", {
+    name: "Actions for Review",
+  });
+  fireEvent.keyDown(actions, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Delete evidence" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await screen.findByRole("button", { name: "Actions for Review" });
+  expect(
+    screen.getAllByRole("button", { name: "Actions for Review" }),
+  ).toHaveLength(1);
+});
+
+test("empty Ticket Files adds an existing file and detaches with Undo", async () => {
+  const current = bulkTicket(1, { title: "File outcome" });
+  const file = {
+    id: "file-one",
+    display_name: "review.txt",
+    original_filename: "review.txt",
+    size_bytes: 12,
+    kind: "local_snapshot",
+    locator: "review.txt",
+  };
+  let attached = false;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { present?: boolean }) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "ticket_attachments") return attached ? [file] : [];
+      if (command === "search_attachments")
+        return [
+          {
+            attachment: file,
+            related: false,
+            usage: {
+              eligible: true,
+              legacy_drafts_pending: false,
+              protections: [],
+            },
+          },
+        ];
+      if (command === "inspect_attachment") return file;
+      if (command === "set_ticket_attachment") {
+        attached = Boolean(args?.present);
+        return;
+      }
+      if (command === "attachment_preview")
+        return {
+          attachment: file,
+          status: "unsupported",
+          media_type: null,
+          message: null,
+          can_open: true,
+          usage: {
+            total: attached ? 1 : 0,
+            legacy_drafts_pending: false,
+            entries: [],
+          },
+        };
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /File outcome/ }));
+  fireEvent.keyDown(await screen.findByRole("button", { name: "File" }), {
+    key: "Enter",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "File…" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Existing files" }));
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: "Select review.txt" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
+  fireEvent.click(await screen.findByRole("button", { name: "review.txt" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Detach from ticket" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+  expect(
+    await screen.findByRole("button", { name: "review.txt" }),
+  ).toBeTruthy();
+});
+
+test("Linked shows a blocking subticket once and the scrolled title reuses its header", async () => {
+  const current = bulkTicket(1, { title: "A long outcome to keep in view" });
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "contextual_relationships") {
+      const item = {
+        reference: "T-KQ2",
+        title: { text: "The shared prerequisite" },
+        status: "Todo",
+        trashed: false,
+        unresolved: true,
+      };
+      return {
+        relationships: {
+          parent: null,
+          children: { items: [item], next_offset: null },
+          children_progress: { total: 1, done: 0 },
+          prerequisites: { items: [item], next_offset: null },
+          blocking: { items: [], next_offset: null },
+          related: { items: [], next_offset: null },
+          discovered_while: { items: [], next_offset: null },
+          discoveries: { items: [], next_offset: null },
+          duplicate_of: null,
+          duplicates: { items: [], next_offset: null },
+        },
+      };
+    }
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /A long outcome/ }),
+  );
+  expect(await screen.findByRole("heading", { name: "Linked 1" })).toBeTruthy();
+  expect(
+    screen.getAllByRole("button", { name: "The shared prerequisite" }),
+  ).toHaveLength(1);
+  expect(screen.getByText("Todo · blocks this")).toBeTruthy();
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Actions for linked T-KQ2" }),
+    { key: "Enter" },
+  );
+  expect(
+    await screen.findByRole("menuitem", { name: "Remove subticket" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "Remove blocker" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Remove blocker" }), {
+    key: "Escape",
+  });
+  const reference = screen.getByRole("heading", { name: current.reference });
+  const header = reference.closest("header");
+  if (!header) throw new Error("Ticket header is missing");
+  const scroller = document.querySelector(".detail-scroll");
+  if (!scroller) throw new Error("Ticket scroller is missing");
+  const title = document.querySelector<HTMLElement>(
+    ".detail-content:not([hidden]) .editor-title",
+  );
+  if (!title) throw new Error("Ticket title is missing");
+  const box = title.getBoundingClientRect();
+  vi.spyOn(title, "getBoundingClientRect").mockImplementation(() => ({
+    ...box,
+    bottom: 100 - scroller.scrollTop,
+  }));
+  fireEvent.scroll(scroller, { target: { scrollTop: 300 } });
+  expect(
+    within(header).getByText(/A long outcome to keep in view/).textContent,
+  ).toBe(`· ${current.title}`);
+  expect(reference.closest("header")).toBe(header);
+  fireEvent.scroll(scroller, { target: { scrollTop: 0 } });
+  expect(
+    within(header).queryByText(/A long outcome to keep in view/),
+  ).toBeNull();
+});
+
+test("an empty Ticket folds Activity and R opens its existing composer without losing its draft", async () => {
+  const current = bulkTicket(99, { title: "Quiet outcome" });
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Quiet outcome/ }));
+  await screen.findByRole("button", { name: "File" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("heading", { name: "Activity" })).toBeNull(),
+  );
+  expect(
+    screen.getAllByRole("group", { name: "Add to this ticket" }),
+  ).toHaveLength(1);
+  fireEvent.keyDown(document.body, { key: "r" });
+  expect(await screen.findByRole("heading", { name: "Activity" })).toBeTruthy();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  const brief = screen.getByRole("textbox", { name: "New update source" });
+  fireEvent.change(brief, { target: { value: "A retained update draft" } });
+  fireEvent.keyDown(brief, { key: "Escape" });
+  expect(
+    screen.getByRole("textbox", { name: "New update source" }),
+  ).toHaveProperty("value", "A retained update draft");
 });

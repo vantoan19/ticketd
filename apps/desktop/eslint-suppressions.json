@@ -42,11 +42,6 @@
       "count": 1
     }
   },
-  "src/features/documents/DocumentEditor.tsx": {
-    "shadcn/no-restyle": {
-      "count": 3
-    }
-  },
   "src/features/markdown/MermaidDiagram.tsx": {
     "shadcn/no-restyle": {
       "count": 1

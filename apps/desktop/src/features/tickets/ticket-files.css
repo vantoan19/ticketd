@@ -75,3 +75,17 @@
     visibility: visible;
   }
 }
+
+.rail-section-column .rail-files {
+  gap: 8px;
+}
+.rail-section-column .rail-file {
+  margin-inline: 0;
+}
+.rail-section-column .rail-file-open {
+  grid-template-columns: 28px minmax(0, 1fr);
+  padding: 7px 8px;
+}
+.rail-section-column .rail-file-open > svg {
+  grid-row: 1 / 3;
+}

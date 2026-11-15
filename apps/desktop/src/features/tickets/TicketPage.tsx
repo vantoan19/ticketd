@@ -20,7 +20,6 @@ import { RailPlacement } from "@/features/tickets/rail-placement";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { TicketFiles } from "@/features/tickets/TicketFiles";
-import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
@@ -90,49 +89,52 @@ export function TicketPage({
   // row of adds under the description, and appear once they have content.
   const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
   const [evidenceRequest, setEvidenceRequest] = useState(0);
+  const [fileAddTarget, setFileAddTarget] = useState<HTMLSpanElement | null>(
+    null,
+  );
   const noSubtickets = work.current?.links?.children_progress.total === 0;
   const noRelationships =
     Boolean(work.current?.links) && work.rows.length === 0;
-  const addRow = active &&
-    !ticket.trashed &&
-    (noSubtickets || evidenceCount === 0 || noRelationships) && (
-      <div
-        className="ticket-add-row"
-        role="group"
-        aria-label="Add to this ticket"
-      >
-        {noSubtickets && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => work.openLink("subticket")}
-          >
-            <Plus aria-hidden="true" />
-            Subticket
-          </Button>
-        )}
-        {evidenceCount === 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setEvidenceRequest((count) => count + 1)}
-          >
-            <Plus aria-hidden="true" />
-            Evidence
-          </Button>
-        )}
-        {noRelationships && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => work.openLink("related")}
-          >
-            <Plus aria-hidden="true" />
-            Relationship
-          </Button>
-        )}
-      </div>
-    );
+  const addRow = active && !ticket.trashed && (
+    <div
+      className="ticket-add-row"
+      role="group"
+      aria-label="Add to this ticket"
+    >
+      {noSubtickets && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => work.openLink("subticket")}
+        >
+          <Plus aria-hidden="true" />
+          Subticket
+        </Button>
+      )}
+      {noRelationships && (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Link a ticket"
+          onClick={() => work.openLink("related")}
+        >
+          <Plus aria-hidden="true" />
+          Link
+        </Button>
+      )}
+      {evidenceCount === 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setEvidenceRequest((count) => count + 1)}
+        >
+          <Plus aria-hidden="true" />
+          Evidence
+        </Button>
+      )}
+      <span ref={setFileAddTarget} />
+    </div>
+  );
   const ticketRuns = useTicketRuns(ticket.reference, active);
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts its document at the top.
@@ -250,10 +252,18 @@ export function TicketPage({
       revision={revision}
       refresh={refresh}
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
+      emptyTarget={fileAddTarget}
     />
   );
   const relationships = active && (
-    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
+    <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} document>
+      <Backlinks
+        ticketId={ticket.id}
+        reference={ticket.reference}
+        revision={revision}
+        select={onMention}
+      />
+    </LinkedWork>
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
   // One property strip for every document width.
@@ -421,9 +431,9 @@ export function TicketPage({
           </TicketEditor>
         )}
         {addRow}
-        {active && !ticket.trashed && !noSubtickets && (
-          <Subtickets work={work} select={select} external={Boolean(source)} />
-        )}
+        <RailPlacement value="column">
+          <div className="detail-connected">{relationships}</div>
+        </RailPlacement>
         {active && (
           <Evidence
             reference={ticket.reference}
@@ -439,19 +449,10 @@ export function TicketPage({
           <RailPlacement value="column">
             <div className="detail-connected">
               {runs}
-              {relationships}
               {files}
             </div>
           </RailPlacement>
         }
-        {active && (
-          <Backlinks
-            ticketId={ticket.id}
-            reference={ticket.reference}
-            revision={revision}
-            select={onMention}
-          />
-        )}
         {active && ticket.source && (
           <SourceConversation
             source={ticket.source}
@@ -475,6 +476,7 @@ export function TicketPage({
           active={active}
           trashed={ticket.trashed}
           select={select}
+          foldEmpty
           latestNoteId={ticket.latest_update?.activity_id}
           sourceName={source?.provider_name}
           onChanged={refresh}

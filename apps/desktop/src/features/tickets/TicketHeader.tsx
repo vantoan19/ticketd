@@ -71,9 +71,11 @@ export function TicketHeader({
   onAdjacent,
   projects = [],
   returnLabel = "All tickets",
+  scrolled = false,
 }: {
   /** The name of the list the ticket was opened from, for the return crumb. */
   returnLabel?: string;
+  scrolled?: boolean;
   /** For the Project folder a Chat about the ticket is offered. */
   projects?: Project[];
   /** The selected ticket's place in the visible list, across pages. */
@@ -195,7 +197,15 @@ export function TicketHeader({
               {selected ?? "Ticket details"}
             </h1>
             {selected && <CopyButton label="Copy reference" text={selected} />}
-            {ticket?.updated_at && (
+            {scrolled && ticket && (
+              <Tooltip content={ticket.title}>
+                <span className="ticket-header-title">
+                  <span aria-hidden="true">· </span>
+                  {ticket.title}
+                </span>
+              </Tooltip>
+            )}
+            {!scrolled && ticket?.updated_at && (
               <span className="ticket-header-updated">
                 <span aria-hidden="true">·</span>
                 <Tooltip content={formatDateTime(ticket.updated_at)}>

@@ -341,8 +341,11 @@ it("opens a trashed Document readably and restores it", async () => {
       .some((s) => s.textContent?.includes("In Trash")),
   ).toBe(true);
   expect(screen.getByText("Preserved")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  expect(screen.getByLabelText("Title")).toHaveProperty("readOnly", true);
+  expect(screen.getByRole("button", { name: "Edit" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(screen.queryByLabelText("Title")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
   await screen.findByRole("button", { name: "Document actions" });
   expect(documents.setTrashed).toHaveBeenCalledWith(
@@ -350,6 +353,7 @@ it("opens a trashed Document readably and restores it", async () => {
     false,
     expect.any(String),
   );
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.getByLabelText("Your thought")).toHaveProperty(
     "value",
     "Preserved",

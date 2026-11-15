@@ -144,12 +144,12 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   );
 });
 
-test("narrow, Relationships and Documents follow the description as a section", async () => {
+test("narrow, empty linked context offers one add row after the description", async () => {
   renderDetails();
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
-  const connected = await screen.findByRole("heading", {
-    name: "Relationships",
+  const connected = await screen.findByRole("group", {
+    name: "Add to this ticket",
   });
   expect(bar.contains(connected)).toBe(false);
   expect(
