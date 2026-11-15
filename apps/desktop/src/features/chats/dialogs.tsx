@@ -43,7 +43,10 @@ export function ResumeDialog({
       label: "The last response",
       hint: "Enough for most follow-ups",
     },
-    { id: "last_messages", label: `The last ${recent} messages` },
+    // With no more messages than that, it is the whole conversation: one choice (CH-42).
+    ...(recent < messageCount
+      ? [{ id: "last_messages" as const, label: `The last ${recent} messages` }]
+      : []),
     {
       id: "all",
       label: "The whole conversation",

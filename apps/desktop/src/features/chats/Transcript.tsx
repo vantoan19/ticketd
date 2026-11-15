@@ -19,7 +19,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
-  Copy,
   Eye,
   FilePlus2,
   FileText,
@@ -37,11 +36,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { RecordLink } from "@/components/ui/record-link";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
-import { useCopy } from "@/components/ui/use-copy";
+import { CopyButton } from "@/components/ui/copy-button";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -193,7 +191,6 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
     opening && item.delivery === "sending"
       ? ""
       : DELIVERY_CAPTION[item.delivery];
-  const { copied, error, copy } = useCopy();
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
@@ -237,16 +234,8 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
       {caption && <div className="chat-caption">{caption}</div>}
       <div className="chat-you-actions">
         {time && <span className="chat-fine">{time}</span>}
-        <IconButton
-          label="Copy message"
-          onClick={() => void copy("Message", item.text)}
-        >
-          {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-        </IconButton>
-        <span className="sr-only" role="status">
-          {copied && "Copied"}
-          {error}
-        </span>
+        {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
+        <CopyButton text={item.text} label="Copy message" />
       </div>
     </div>
   );
@@ -263,7 +252,6 @@ function Response({
   readOnly: boolean;
   actions: TranscriptActions;
 }) {
-  const { copied, error, copy } = useCopy();
   return (
     <div className="chat-turn">
       <div className="chat-ai">
@@ -277,12 +265,7 @@ function Response({
       )}
       {item.state === "complete" && (
         <div className="chat-actions">
-          <IconButton
-            label="Copy response"
-            onClick={() => void copy("Response", item.text)}
-          >
-            {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-          </IconButton>
+          <CopyButton text={item.text} label="Copy response" />
           {!readOnly && (
             <Button
               variant="ghost"
@@ -292,10 +275,6 @@ function Response({
               <FilePlus2 aria-hidden /> Save as Document
             </Button>
           )}
-          <span className="chat-fine" role="status">
-            {copied && "Copied"}
-            {error}
-          </span>
         </div>
       )}
     </div>
@@ -349,11 +328,6 @@ const TICKETD_ICONS: Record<TicketdCall["verb"], LucideIcon> = {
   untag: Pencil,
   post: MessageSquareText,
   run: Terminal,
-};
-
-const stepIcon = (step: Step): LucideIcon => {
-  const call = step.kind === "run" ? step.ticketd?.[0] : undefined;
-  return call ? TICKETD_ICONS[call.verb] : STEP_ICONS[step.kind];
 };
 
 /** Whether a step's targets are files that can still be opened. */
@@ -505,7 +479,8 @@ export function StepRow({
   // A row that opens is a button already, so its names cannot be buttons too.
   const files = !detail && opensFiles(step) ? (step.targets ?? []) : [];
   const names = shownNames(files.map((target) => target.text));
-  const Icon = stepIcon(step);
+  const call = step.kind === "run" ? step.ticketd?.[0] : undefined;
+  const Icon = call ? TICKETD_ICONS[call.verb] : STEP_ICONS[step.kind];
   const line = (
     <RowLine
       icon={
@@ -1102,7 +1077,11 @@ const Item = memo(function Item({
       );
     case "session":
       return (
-        <div className="chat-divider" role="separator">
+        <div
+          className="chat-divider"
+          role="separator"
+          aria-label={`Fresh session · started with ${SESSION_HISTORY[item.history](item.count)}`}
+        >
           Fresh session · started with{" "}
           {SESSION_HISTORY[item.history](item.count)}
         </div>

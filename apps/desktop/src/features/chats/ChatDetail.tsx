@@ -1,4 +1,5 @@
 import {
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -24,6 +25,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
+import { useStatusLine } from "@/components/ui/use-status-line";
+import { DocumentNavigation } from "@/features/documents/navigation";
+import { ofTotal } from "@/lib/format";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import {
   Popover,
@@ -223,9 +227,12 @@ export function ProblemNotice({
  */
 function LinkedRecords({
   chat,
+  scrolled,
   onFailure,
 }: {
   chat: ChatState;
+  /** The transcript is scrolled under the strip: its boundary shows. */
+  scrolled: boolean;
   onFailure: (failure: ChatFailureNotice | null) => void;
 }) {
   const client = useChatClient();
@@ -263,7 +270,7 @@ function LinkedRecords({
     );
   if (links.length === 0) return null;
   return (
-    <div className="chat-linked">
+    <div className="chat-linked" data-scrolled={scrolled ? "" : undefined}>
       <div role="group" aria-label="Linked records">
         <div ref={line} className="chat-linked-line">
           {links.map((record) => (
@@ -314,8 +321,6 @@ const LAYER =
   '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
 /** An Esc this soon after one that closed a layer never stops the turn. */
 const ESC_AFTER_LAYER_MS = 1000;
-/** How long "Saved to Documents." stays, as the Documents Undo note does. */
-const SAVED_NOTE_MS = 10_000;
 
 function Conversation({
   snapshot,
@@ -340,16 +345,12 @@ function Conversation({
     text: string;
     plan?: boolean;
   } | null>(null);
-  /**
-   * Counts saves as a Document; nonzero while the confirmation shows. It clears
-   * on the next send or after a while, so it never goes stale (CH-33).
-   */
-  const [saved, setSaved] = useState(0);
-  useEffect(() => {
-    if (!saved) return;
-    const timer = window.setTimeout(() => setSaved(0), SAVED_NOTE_MS);
-    return () => window.clearTimeout(timer);
-  }, [saved]);
+  // A save as a Document is said in the pane's status line, with Open (CH-33).
+  const statusLine = useStatusLine();
+  const openDocument = useContext(DocumentNavigation);
+  // The strip of linked records shows its boundary once the transcript is
+  // scrolled under it (CH-10).
+  const [scrolled, setScrolled] = useState(false);
   /** A model, effort or permission change asked for here, until the next send. */
   const [asked, setAsked] = useState<AskedChange | null>(null);
   const changeLine = settingLine(reported, asked);
@@ -535,7 +536,6 @@ function Conversation({
     follow();
     setNewFrom(undefined);
     setAsked(null);
-    setSaved(0);
     return action;
   };
   const messageCount = items.filter(isMessage).length;
@@ -566,7 +566,11 @@ function Conversation({
     <OverlayBoundary element={body}>
       <div ref={setBody} className="chat-body" onKeyDown={onPaneKey}>
         {!trashed && !picked && (
-          <LinkedRecords chat={chat} onFailure={setFailure} />
+          <LinkedRecords
+            chat={chat}
+            scrolled={scrolled}
+            onFailure={setFailure}
+          />
         )}
         <div className="chat-reading">
           <ReadingContext value={reading}>
@@ -575,7 +579,10 @@ function Conversation({
               className="chat-scroll"
               tabIndex={0}
               aria-label="Conversation"
-              onScroll={onScroll}
+              onScroll={(event) => {
+                onScroll();
+                setScrolled(event.currentTarget.scrollTop > 0);
+              }}
             >
               <Transcript
                 chat={chat}
@@ -629,15 +636,11 @@ function Conversation({
               {...(failure.retry && { onRetry: failure.retry })}
             />
           )}
-          {saved > 0 && (
-            <p className="chat-fine" role="status">
-              Saved to Documents.
-            </p>
-          )}
           {picked ? (
             <div className="chat-line">
               <span>
-                {picked.size} of {messageCount} messages picked
+                Pick the messages to give the new session ·{" "}
+                {ofTotal(picked.size, messageCount)}
               </span>
               <span className="chat-spacer" />
               <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>
@@ -815,8 +818,20 @@ function Conversation({
             plan={saving.plan ?? false}
             onClose={() => setSaving(null)}
             onSave={async (responseId, title) => {
-              await client.saveAsDocument(id, responseId, title);
-              setSaved((count) => count + 1);
+              const document = await client.saveAsDocument(
+                id,
+                responseId,
+                title,
+              );
+              statusLine.show({
+                message: `Saved “${title}” to Documents`,
+                ...(openDocument && {
+                  action: {
+                    label: "Open",
+                    run: () => openDocument(document, `Back to ${chat.title}`),
+                  },
+                }),
+              });
             }}
           />
         )}

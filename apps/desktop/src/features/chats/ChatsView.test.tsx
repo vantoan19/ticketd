@@ -16,6 +16,7 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
+import { StatusLineRegion } from "@/components/ui/status-line";
 import { ProjectNavigation } from "@/features/documents/navigation";
 import { drafts } from "@/features/chats/drafts";
 import {
@@ -85,7 +86,9 @@ async function open(
     <ProjectNavigation.Provider value={openProject}>
       <ChatClientContext value={client}>
         <ChatProvider>
-          <ChatsView />
+          <StatusLineRegion>
+            <ChatsView />
+          </StatusLineRegion>
         </ChatProvider>
       </ChatClientContext>
     </ProjectNavigation.Provider>,
@@ -712,14 +715,20 @@ test("picking messages turns the transcript into the history picker", async () =
     within(dialog).getByRole("radio", { name: "Let me pick messages…" }),
   );
   fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
-  expect(await screen.findByText("0 of 2 messages picked")).toBeTruthy();
+  expect(
+    await screen.findByText(
+      "Pick the messages to give the new session · 0 of 2",
+    ),
+  ).toBeTruthy();
   expect(button("Resume")).toHaveProperty("disabled", true);
   fireEvent.click(
     screen.getByRole("checkbox", {
       name: "Include the reply: Added the limiter.",
     }),
   );
-  expect(screen.getByText("1 of 2 messages picked")).toBeTruthy();
+  expect(
+    screen.getByText("Pick the messages to give the new session · 1 of 2"),
+  ).toBeTruthy();
   fireEvent.click(button("Resume"));
   expect(
     await screen.findByText("Fresh session · started with 1 picked message"),
@@ -1418,14 +1427,12 @@ test("a response is saved as a Document only when asked", async () => {
   );
   expect(client.savedDocuments).toEqual([]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-  expect(await screen.findByText("Saved to Documents.")).toBeTruthy();
+  // CH-33: said once in the pane's status line, never left above the composer.
+  expect(
+    await screen.findByText("Saved “Login rate limiter” to Documents"),
+  ).toBeTruthy();
   expect(client.savedDocuments).toEqual(["Login rate limiter"]);
-  // CH-33: the confirmation does not stay above the composer; sending clears it.
-  type("Next step");
-  fireEvent.click(button("Send"));
-  await waitFor(() =>
-    expect(screen.queryByText("Saved to Documents.")).toBeNull(),
-  );
+  expect(document.querySelector(".chat-dock .chat-fine")).toBeNull();
 });
 
 /** With no links there is no chip row: the Chat actions menu links one. */

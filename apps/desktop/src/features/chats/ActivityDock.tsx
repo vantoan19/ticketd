@@ -97,6 +97,12 @@ function Request({
       aria-labelledby={titleId}
       {...(request.reason && { "aria-describedby": reasonId })}
       onKeyDown={(event) => {
+        // Esc inside a request goes back to the message box (CH-54).
+        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          onLeave();
+          return;
+        }
         const list = choices(event.currentTarget);
         const at = list.indexOf(event.target as HTMLButtonElement);
         if (at < 0 || event.altKey || event.metaKey || event.ctrlKey) return;

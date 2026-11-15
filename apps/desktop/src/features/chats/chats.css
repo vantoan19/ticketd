@@ -1483,8 +1483,14 @@ button.chat-file-name:focus-visible {
 }
 /* The bottom inset keeps the link button's focus ring off the transcript. */
 .chat-linked {
+  position: relative;
+  z-index: 1;
   flex: none;
   padding: 12px 32px 8px;
+}
+/* Once the transcript is scrolled under the strip, its edge shows (CH-10). */
+.chat-linked[data-scrolled] {
+  box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .chat-linked > div {
   display: flex;
@@ -1639,8 +1645,10 @@ button.chat-file-name:focus-visible {
 .chat-pop-branch > span:not(.chat-pop-branch-name) {
   flex: none;
 }
+/* The branch is one 12px mono line, muted like the path above it (CH-8). */
 .chat-pop-branch-name {
   min-width: 0;
+  font-family: var(--font-mono);
   overflow: hidden;
   direction: rtl;
   text-overflow: ellipsis;
@@ -1721,7 +1729,7 @@ button.chat-file-name:focus-visible {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
-  background: color-mix(in srgb, var(--foreground) 40%, transparent);
+  background: var(--muted-foreground);
 }
 [data-full] > .chat-pop-meter > .chat-pop-meter-fill {
   background: var(--foreground);
@@ -1899,10 +1907,11 @@ button.chat-file-name:focus-visible {
   height: 1px;
   background: var(--border);
 }
+/* One skeleton look: still, on the accent fill, like the shared Skeleton (CH-50). */
 .chat-skel {
   height: 10px;
   border-radius: var(--radius-segment);
-  background: var(--recessed);
+  background: var(--accent);
 }
 .chat-skel-long {
   width: 78%;
