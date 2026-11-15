@@ -216,7 +216,7 @@ export function RecordHistory({
           : "Kept for 30 days. Restoring adds a new version; nothing is lost."
       }
       onSubmit={() => void restore()}
-      width={920}
+      size="lg"
       busy={busy}
     >
       {error && <p role="alert">{error}</p>}

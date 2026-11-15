@@ -148,7 +148,7 @@ export function ConflictReview({
       }
       footerNote="This desktop’s version is used until you save or a newer change arrives."
       onSubmit={() => void save()}
-      width={760}
+      size="lg"
       busy={busy}
       primaryFirst
     >

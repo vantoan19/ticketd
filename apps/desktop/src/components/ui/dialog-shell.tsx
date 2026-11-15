@@ -1,5 +1,6 @@
 import { useId, useRef, type ReactNode, type RefObject } from "react";
 import { XIcon } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -8,19 +9,36 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Kbd } from "@/components/ui/kbd";
 
 /**
- * The centered dialog every flow uses: a 24px title named after the button
- * that opened it, an optional sentence, the form body, and a footer whose
- * primary action stays disabled while `blockedReason` is set. The reason is
- * shown in the footer so a disabled button is never a mystery. Pass
- * `blockedReason={null}` once the form is valid.
+ * The one dialog (DESIGN.md section 11, P5). Anchored at max(48px, 12vh) and
+ * growing downward, so typing, searching or a result never re-centres it.
+ *
+ * - Header: a 24/32 title naming the action and its target (a confirm asks a
+ *   question: "Move T-FV10 to Trash?"), one optional sentence, the close X.
+ * - Body (`children`): 24px inset, scrolls inside; header and footer stay put.
+ * - `error`: the failure. The dialog stays open and shows it as a compact
+ *   error Alert above the footer; clear it when the person retries.
+ * - Footer: a recessed band. `footerLeading` holds one persistent control at
+ *   the left (Create more). At the right, the note slot (the blocked reason
+ *   while `blockedReason` is set, otherwise `footerNote`: "Created T-FV16 ·
+ *   Open", "Nothing changes until you apply."), a ghost Cancel and one 32px
+ *   primary with its key hint. Never X plus a "Done": a dialog with nothing
+ *   to confirm is the wrong surface.
+ *
+ * Sizes: `sm` 480 for confirms, `md` 640 for forms and pickers (default),
+ * `lg` 920 for review and compare. A multi-step flow keeps one size.
+ * Focus starts in the first field; a `destructive` confirm starts on Cancel.
+ * It returns to the opener (or `returnFocus`). Never open a dialog from a
+ * dialog: replace this one's content instead.
  */
 export function DialogShell({
   open,
   onOpenChange,
   title,
   description,
+  size = "md",
   primaryLabel,
   primaryVariant = "default",
   cancelLabel = "Cancel",
@@ -28,12 +46,12 @@ export function DialogShell({
   onSubmit,
   onCancel,
   returnFocus,
-  width = 640,
   footerLeading,
   footerNote,
+  error,
   primaryHint,
   showClose = true,
-  focusPrimary = false,
+  initialFocus,
   primaryFirst = false,
   children,
   busy = false,
@@ -42,41 +60,51 @@ export function DialogShell({
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
+  size?: "sm" | "md" | "lg";
   primaryLabel: string;
   /** `destructive` when confirming stops or removes something. */
   primaryVariant?: "default" | "destructive";
   /** The dismissing button, when Cancel would mislead: Later, Close. */
   cancelLabel?: string;
+  /** Why the primary is unavailable ("Add a title to create."); null once valid. */
   blockedReason: string | null;
   onSubmit: () => void;
   /** Cancel only (not Escape or an outside click): discard the draft. */
   onCancel?: () => void;
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: RefObject<HTMLElement | null>;
-  /** Dialog width in px (board D: 640; Mark duplicate 713, New project 573). */
-  width?: number;
-  /** Footer content at the left edge (for example the Create more switch). */
+  /** One persistent control at the footer's left edge (the Create more switch). */
   footerLeading?: ReactNode;
-  /** A quiet footer line shown while the primary is available. */
-  footerNote?: string;
-  /** A shortcut shown inside the primary button. */
+  /** The note slot while the primary is available: a count, a result, a consequence. */
+  footerNote?: ReactNode;
+  /** The failure of the last submit, shown above the footer; the dialog stays open. */
+  error?: ReactNode;
+  /** The primary's shortcut, shown as a key inside it ("⌘↵"). */
   primaryHint?: string;
   /** The corner Close button; off where the footer holds the only two ways out. */
   showClose?: boolean;
-  /** Opens with focus on the primary button, not the first control. */
-  focusPrimary?: boolean;
+  /**
+   * Where focus starts: the first field (default), the primary, or Cancel
+   * (the default for a destructive confirm).
+   */
+  initialFocus?: "first" | "primary" | "cancel";
   /** Tab reaches the primary button before the dismissing one; both stay where they are drawn. */
   primaryFirst?: boolean;
-  children: ReactNode;
+  children?: ReactNode;
   /** A submitted write is still in flight, so dismissing must wait for its result. */
   busy?: boolean;
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
   const primary = useRef<HTMLButtonElement>(null);
+  const dismiss = useRef<HTMLButtonElement>(null);
+  const focus =
+    initialFocus ?? (primaryVariant === "destructive" ? "cancel" : "first");
+  const note = blockedReason ?? footerNote;
   const cancel = (
     <DialogClose asChild key="cancel">
       <Button
+        ref={dismiss}
         type="button"
         variant="ghost"
         size="sm"
@@ -101,9 +129,9 @@ export function DialogShell({
     >
       {primaryLabel}
       {primaryHint && (
-        <span className="font-mono text-xs" aria-hidden="true">
+        <Kbd variant="inverted" aria-hidden="true">
           {primaryHint}
-        </span>
+        </Kbd>
       )}
     </Button>
   );
@@ -115,14 +143,14 @@ export function DialogShell({
       }}
     >
       <DialogContent
-        className="gap-0 overflow-hidden p-0"
-        style={{ maxWidth: `min(${width}px, calc(100vw - 32px))`, width }}
+        size={size}
+        variant="flush"
         showCloseButton={false}
         {...(returnFocus && { returnFocus })}
-        {...(focusPrimary && {
+        {...(focus !== "first" && {
           onOpenAutoFocus: (event: Event) => {
             event.preventDefault();
-            primary.current?.focus();
+            (focus === "primary" ? primary : dismiss).current?.focus();
           },
         })}
       >
@@ -133,42 +161,46 @@ export function DialogShell({
             if (!blocked) onSubmit();
           }}
         >
-          <div className="flex items-start gap-3 pt-5 pr-15 pl-6">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">
-                {title}
-              </DialogTitle>
-              <DialogDescription className={description ? "" : "sr-only"}>
-                {description ?? title}
-              </DialogDescription>
+          <div
+            className={`flex flex-col gap-1 pt-6 pr-16 pl-6 ${children ? "" : "pb-5"}`}
+          >
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription className={description ? "" : "sr-only"}>
+              {description ?? title}
+            </DialogDescription>
+          </div>
+          {children && (
+            <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
+              {children}
             </div>
-          </div>
-          <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
-            {children}
-          </div>
-          <div className="dialog-shell-footer flex shrink-0 min-h-15 flex-wrap items-center gap-x-2 gap-y-1 py-2 bg-(--background) pr-4 pl-6 shadow-[0_-1px_0_0_var(--border)]">
+          )}
+          {error && (
+            <div className="shrink-0 px-6 pb-4">
+              <Alert tone="error" size="compact">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </div>
+          )}
+          <div className="dialog-shell-footer flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-6 py-3">
             {footerLeading}
-            <p
-              id={reasonId}
-              className={`min-w-40 flex-1 text-xs text-muted-foreground ${footerLeading ? "text-right" : ""}`}
-            >
-              {blockedReason ?? footerNote}
+            <p id={reasonId} className="dialog-shell-note min-w-40 flex-1">
+              {note}
             </p>
             {primaryFirst ? [submit, cancel] : [cancel, submit]}
           </div>
-          {/* Last in the tab order, drawn in the header's corner. */}
+          {/* Last in the tab order, drawn on the title line. */}
           {showClose && (
-            <div className="absolute top-5 right-4">
+            <div className="absolute top-6 right-4">
               <DialogClose asChild>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
+                  aria-label="Close"
                   {...(onCancel && { onClick: onCancel })}
                   disabled={busy}
                 >
                   <XIcon />
-                  <span className="sr-only">Close</span>
                 </Button>
               </DialogClose>
             </div>

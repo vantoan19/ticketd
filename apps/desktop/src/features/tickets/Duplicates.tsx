@@ -310,7 +310,7 @@ export function Duplicates({
             : "Mark duplicate"
       }
       blockedReason={blockedReason}
-      width={713}
+      size="md"
       footerNote="Nothing changes until you apply."
       onSubmit={() => void apply()}
       onCancel={() => {
