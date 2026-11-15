@@ -4,10 +4,12 @@ import {
   CirclePlay,
   ListTodo,
   MessagesSquare,
+  MessageSquarePlus,
   Trash2,
   Settings,
-  ChevronRight,
+  ChevronDown,
   SquarePen,
+  NotebookPen,
   Folder,
   Layers,
   Archive,
@@ -16,6 +18,7 @@ import {
   Network,
   PanelLeftClose,
   PanelLeftOpen,
+  Rows3,
 } from "lucide-react";
 import {
   Sidebar,
@@ -31,7 +34,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -39,12 +46,19 @@ import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
-import { useContext, useRef, type ComponentType, type RefObject } from "react";
+import {
+  useContext,
+  useRef,
+  type ComponentType,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { setPreference, usePreferences } from "@/lib/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 import { useChatFeature } from "@/features/chats/use-chats";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 
 /** A secondary, trailing count; it is part of the row's name for assistive technology. */
 function SidebarCount({ value }: { value: number }) {
@@ -57,20 +71,30 @@ function SidebarCount({ value }: { value: number }) {
 }
 
 /**
- * The heading's way to the page that manages the list below it. One action is
- * a direct button, never a one-item menu (DESIGN.md section 11).
+ * A group heading that is also the way to the page managing the group
+ * (Projects, Plans): the nav row's hover and current fill on the 12px label,
+ * with no change of padding (DESIGN.md section 6).
  */
-function ManageLink({
+function GroupHeading({
   label,
-  onSelect,
+  current,
+  onOpen,
 }: {
   label: string;
-  onSelect: () => void;
+  current: boolean;
+  onOpen: () => void;
 }) {
   return (
-    <IconButton label={label} onClick={onSelect}>
-      <ChevronRight aria-hidden="true" size={16} />
-    </IconButton>
+    <div className="sidebar-heading">
+      <button
+        type="button"
+        className="sidebar-heading-link"
+        aria-current={current ? "page" : undefined}
+        onClick={onOpen}
+      >
+        {label}
+      </button>
+    </div>
   );
 }
 
@@ -78,12 +102,16 @@ type GroupEntry = {
   key: string;
   label: string;
   active: boolean;
+  /** The entry's own icon, as on its expanded row. */
+  icon: ReactNode;
   onSelect: () => void;
 };
 
 /**
  * A group on the folded rail: one icon that opens a menu of the group's
- * entries, so the rail holds a few fixed destinations and never scrolls.
+ * entries, so the rail holds a few fixed destinations and never scrolls. The
+ * menu is headed by the group's name, gives each entry its row's icon, marks
+ * the current one with a check, and ends with the group's page.
  */
 function GroupMenu({
   label,
@@ -94,7 +122,7 @@ function GroupMenu({
   label: string;
   icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>;
   entries: GroupEntry[];
-  manage: { label: string; onSelect: () => void };
+  manage: { label: string; current: boolean; onSelect: () => void };
 }) {
   const current = entries.find((entry) => entry.active);
   const name = current ? `${label}, ${current.label}` : label;
@@ -103,28 +131,136 @@ function GroupMenu({
       <DropdownMenu>
         <Tooltip content={name} side="right">
           <DropdownMenuTrigger asChild>
-            <SidebarMenuButton isActive={!!current} aria-label={name}>
+            <SidebarMenuButton
+              isActive={!!current || manage.current}
+              aria-label={name}
+            >
               <Icon size={16} aria-hidden />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
         </Tooltip>
         <DropdownMenuContent side="right" align="start">
-          {entries.map((entry) => (
-            <DropdownMenuItem
-              key={entry.key}
-              onSelect={entry.onSelect}
-              aria-current={entry.active ? "page" : undefined}
-            >
-              {entry.label}
-            </DropdownMenuItem>
-          ))}
+          <DropdownMenuLabel>{label}</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={current?.key ?? ""}>
+            {entries.map((entry) => (
+              <DropdownMenuRadioItem
+                key={entry.key}
+                value={entry.key}
+                onSelect={entry.onSelect}
+              >
+                {entry.icon}
+                {entry.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={manage.onSelect}>
+            <Rows3 aria-hidden />
             {manage.label}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </SidebarMenuItem>
+  );
+}
+
+/** The project glyph; dashed for "No project", the tickets that have none. */
+const projectIcon = (unlinked = false) => (
+  <Folder
+    size={16}
+    aria-hidden="true"
+    {...(unlinked && { style: { strokeDasharray: "2.5 2.5" } })}
+  />
+);
+
+/**
+ * New ticket in one click, over the current view, with a chevron beside it
+ * for the other ways to create: Capture a thought and, while Chat is on, New
+ * Chat. The menu repeats New ticket so it always offers a choice.
+ */
+function CreateButtons({
+  onNewTicket,
+  onCapture,
+  onNewChat,
+}: {
+  onNewTicket: (from: HTMLButtonElement | null) => void;
+  onCapture: (from: HTMLElement | null) => void;
+  onNewChat?: (() => void) | undefined;
+}) {
+  const newTrigger = useRef<HTMLButtonElement>(null);
+  const moreTrigger = useRef<HTMLButtonElement>(null);
+  // Choosing an item moves focus on its own; dismissing the menu returns it.
+  const chose = useRef(false);
+  return (
+    <span className="new-ticket-split">
+      <IconButton
+        ref={newTrigger}
+
+        label="New ticket"
+        shortcut={shortcutLabel("new-ticket")}
+        aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
+        onClick={() => onNewTicket(newTrigger.current)}
+      >
+        <SquarePen aria-hidden="true" />
+      </IconButton>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <IconButton
+            ref={moreTrigger}
+
+            label="More ways to create"
+          >
+            <ChevronDown aria-hidden="true" />
+          </IconButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          onCloseAutoFocus={(event) => {
+            if (chose.current) event.preventDefault();
+            chose.current = false;
+          }}
+        >
+          <DropdownMenuItem
+            aria-keyshortcuts={ariaKeyShortcuts("new-ticket")}
+            onSelect={() => {
+              chose.current = true;
+              // After the menu has closed, so it cannot take focus back.
+              window.setTimeout(() => onNewTicket(moreTrigger.current), 0);
+            }}
+          >
+            <SquarePen aria-hidden />
+            New ticket
+            <DropdownMenuShortcut aria-hidden="true">
+              {shortcutLabel("new-ticket")}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            aria-keyshortcuts={ariaKeyShortcuts("capture")}
+            onSelect={() => {
+              chose.current = true;
+              onCapture(moreTrigger.current);
+            }}
+          >
+            <NotebookPen aria-hidden />
+            Capture a thought
+            <DropdownMenuShortcut aria-hidden="true">
+              {shortcutLabel("capture")}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          {onNewChat && (
+            <DropdownMenuItem
+              onSelect={() => {
+                chose.current = true;
+                onNewChat();
+              }}
+            >
+              <MessageSquarePlus aria-hidden />
+              New Chat
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
   );
 }
 
@@ -144,7 +280,6 @@ export function WorkspaceSidebar({
   onCapture,
   onNewChat,
   counts,
-  activePlanCount,
   setView,
   projects,
   plans,
@@ -165,9 +300,8 @@ export function WorkspaceSidebar({
   onCapture: (from: HTMLElement | null) => void;
   /** Opens New Chat; only offered while Chat is turned on. */
   onNewChat?: () => void;
+  /** Work-view counts; Projects and Plans carry none (DESIGN.md section 6). */
   counts: SidebarCounts | null;
-  /** The open Plan's ticket count; Plans carry no counts of their own. */
-  activePlanCount?: number | undefined;
   setView: (view: View) => void;
   projects: Project[];
   plans: { id: string; name: string; archived: boolean }[];
@@ -187,9 +321,6 @@ export function WorkspaceSidebar({
   const { sidebarCollapsed } = usePreferences();
   // The sheet below 768px is never collapsed to icons.
   const collapsed = !isMobile && sidebarCollapsed;
-  const newTrigger = useRef<HTMLButtonElement>(null);
-  // Choosing an item moves focus on its own; dismissing the menu returns it to New.
-  const chose = useRef(false);
   const openGraph = useContext(ContextGraphNavigation);
   const unread = (counts?.unread_inbox ?? 0) > 0;
   const chat = useChatFeature();
@@ -203,7 +334,40 @@ export function WorkspaceSidebar({
   ].filter((part): part is string => Boolean(part));
   const chatsLabel = ["Chats", ...chatCounts].join(" · ");
   const chatsName = ["Chats", ...chatCounts].join(", ");
-  const archivedPlans = plans.filter((e) => e.archived).length;
+  const projectEntries: GroupEntry[] = [
+    ...projects.map((p) => ({
+      key: p.id,
+      label: p.name,
+      active: navigation.project === p.id && view === "tickets",
+      icon: projectIcon(),
+      onSelect: () => scope("all", p.id),
+    })),
+    {
+      key: "unlinked",
+      label: "No project",
+      active: navigation.project === "unlinked" && view === "tickets",
+      icon: projectIcon(true),
+      onSelect: () => scope("all", "unlinked"),
+    },
+  ];
+  const planEntries: GroupEntry[] = [
+    ...plans
+      .filter((e) => !e.archived)
+      .map((e) => ({
+        key: e.id,
+        label: e.name,
+        active: navigation.plan === e.id && view === "tickets",
+        icon: <Layers size={16} aria-hidden="true" />,
+        onSelect: () => scope("all", "all", e.id),
+      })),
+    {
+      key: "archived",
+      label: "Archived Plans",
+      active: view === "archived-plans",
+      icon: <Archive size={16} aria-hidden="true" />,
+      onSelect: () => setView("archived-plans"),
+    },
+  ];
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
@@ -232,54 +396,15 @@ export function WorkspaceSidebar({
               )}
             </IconButton>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                ref={newTrigger}
-                className="new-ticket"
-                label="New ticket"
-              >
-                <SquarePen aria-hidden="true" />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              onCloseAutoFocus={(event) => {
-                if (chose.current) event.preventDefault();
-                chose.current = false;
-              }}
-            >
-              <DropdownMenuItem
-                onSelect={() => {
-                  chose.current = true;
-                  createTriggerRef.current = newTrigger.current;
-                  // Opens over the current view, as Capture does.
-                  // After the menu has closed, so it cannot take focus back.
-                  window.setTimeout(() => setCreating(true), 0);
-                }}
-              >
-                New ticket
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  chose.current = true;
-                  onCapture(newTrigger.current);
-                }}
-              >
-                Capture a thought
-              </DropdownMenuItem>
-              {chat.enabled && onNewChat && (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    chose.current = true;
-                    onNewChat();
-                  }}
-                >
-                  New Chat
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <CreateButtons
+            onNewTicket={(from) => {
+              // Opens over the current view, as Capture does.
+              createTriggerRef.current = from;
+              setCreating(true);
+            }}
+            onCapture={onCapture}
+            onNewChat={chat.enabled ? onNewChat : undefined}
+          />
         </div>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
@@ -289,7 +414,7 @@ export function WorkspaceSidebar({
               <SidebarMenuButton
                 isActive={view === "inbox"}
                 tooltip={
-                  unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
+                  unread ? `Inbox · ${counts?.unread_inbox} unread` : "Inbox"
                 }
                 aria-label={
                   unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
@@ -373,86 +498,42 @@ export function WorkspaceSidebar({
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">
             {collapsed ? (
-              <>
-                {/* One line on the rail between the ticket views and the rest. */}
-                <div className="sidebar-heading" aria-hidden="true" />
-                <nav aria-label="Projects" className="sidebar-nav">
-                  <SidebarMenu>
-                    <GroupMenu
-                      label="Projects"
-                      icon={Folder}
-                      entries={[
-                        ...projects.map((p) => ({
-                          key: p.id,
-                          label: p.name,
-                          active:
-                            navigation.project === p.id && view === "tickets",
-                          onSelect: () => scope("all", p.id),
-                        })),
-                        {
-                          key: "unlinked",
-                          label: "No project",
-                          active:
-                            navigation.project === "unlinked" &&
-                            view === "tickets",
-                          onSelect: () => scope("all", "unlinked"),
-                        },
-                      ]}
-                      manage={{
-                        label: "All projects",
-                        onSelect: () => setView("projects"),
-                      }}
-                    />
-                  </SidebarMenu>
-                </nav>
-              </>
+              <nav aria-label="Projects" className="sidebar-nav">
+                <SidebarMenu>
+                  <GroupMenu
+                    label="Projects"
+                    icon={Folder}
+                    entries={projectEntries}
+                    manage={{
+                      label: "All projects",
+                      current: view === "projects",
+                      onSelect: () => setView("projects"),
+                    }}
+                  />
+                </SidebarMenu>
+              </nav>
             ) : (
               <>
-                <div
-                  className="sidebar-heading"
-                  data-active={view === "projects" || undefined}
-                >
-                  Projects{" "}
-                  <ManageLink
-                    label="All projects"
-                    onSelect={() => setView("projects")}
-                  />
-                </div>
+                <GroupHeading
+                  label="Projects"
+                  current={view === "projects"}
+                  onOpen={() => setView("projects")}
+                />
                 <nav aria-label="Project scopes" className="sidebar-nav">
                   <SidebarMenu>
-                    {projects.map((p) => (
-                      <SidebarMenuItem key={p.id}>
+                    {projectEntries.map((entry) => (
+                      <SidebarMenuItem key={entry.key}>
                         <SidebarMenuButton
-                          isActive={
-                            navigation.project === p.id && view === "tickets"
-                          }
-                          tooltip={p.name}
-                          onClick={() => scope("all", p.id)}
+                          isActive={entry.active}
+                          onClick={entry.onSelect}
                         >
-                          <Folder size={16} />{" "}
-                          <Tooltip content={p.name} overflowOnly>
-                            <span>{p.name}</span>
+                          {entry.icon}{" "}
+                          <Tooltip content={entry.label} overflowOnly>
+                            <span>{entry.label}</span>
                           </Tooltip>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
                     ))}
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        isActive={
-                          navigation.project === "unlinked" &&
-                          view === "tickets"
-                        }
-                        tooltip="No project"
-                        onClick={() => scope("all", "unlinked")}
-                      >
-                        {/* Dashed: not a project, the tickets that have none. */}
-                        <Folder
-                          size={16}
-                          style={{ strokeDasharray: "2.5 2.5" }}
-                        />{" "}
-                        No project
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
                   </SidebarMenu>
                 </nav>
               </>
@@ -499,25 +580,10 @@ export function WorkspaceSidebar({
                   <GroupMenu
                     label="Plans"
                     icon={Layers}
-                    entries={[
-                      ...plans
-                        .filter((e) => !e.archived)
-                        .map((e) => ({
-                          key: e.id,
-                          label: e.name,
-                          active:
-                            navigation.plan === e.id && view === "tickets",
-                          onSelect: () => scope("all", "all", e.id),
-                        })),
-                      {
-                        key: "archived",
-                        label: "Archived Plans",
-                        active: view === "archived-plans",
-                        onSelect: () => setView("archived-plans"),
-                      },
-                    ]}
+                    entries={planEntries}
                     manage={{
                       label: "All Plans",
+                      current: view === "plans",
                       onSelect: () => setView("plans"),
                     }}
                   />
@@ -525,50 +591,26 @@ export function WorkspaceSidebar({
               </nav>
             ) : (
               <>
-                <div className="sidebar-heading">
-                  Plans{" "}
-                  <ManageLink
-                    label="All Plans"
-                    onSelect={() => setView("plans")}
-                  />
-                </div>
+                <GroupHeading
+                  label="Plans"
+                  current={view === "plans"}
+                  onOpen={() => setView("plans")}
+                />
                 <nav aria-label="Plan scopes" className="sidebar-nav">
                   <SidebarMenu>
-                    {plans
-                      .filter((e) => !e.archived)
-                      .map((e) => (
-                        <SidebarMenuItem key={e.id}>
-                          <SidebarMenuButton
-                            isActive={
-                              navigation.plan === e.id && view === "tickets"
-                            }
-                            tooltip={e.name}
-                            onClick={() => scope("all", "all", e.id)}
-                          >
-                            <Layers size={16} />{" "}
-                            <Tooltip content={e.name} overflowOnly>
-                              <span>{e.name}</span>
-                            </Tooltip>
-                            {navigation.plan === e.id &&
-                              view === "tickets" &&
-                              activePlanCount !== undefined && (
-                                <SidebarCount value={activePlanCount} />
-                              )}
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        isActive={view === "archived-plans"}
-                        tooltip="Archived Plans"
-                        onClick={() => setView("archived-plans")}
-                      >
-                        <Archive size={16} /> Archived Plans
-                        {archivedPlans > 0 && (
-                          <SidebarCount value={archivedPlans} />
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    {planEntries.map((entry) => (
+                      <SidebarMenuItem key={entry.key}>
+                        <SidebarMenuButton
+                          isActive={entry.active}
+                          onClick={entry.onSelect}
+                        >
+                          {entry.icon}{" "}
+                          <Tooltip content={entry.label} overflowOnly>
+                            <span>{entry.label}</span>
+                          </Tooltip>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
                   </SidebarMenu>
                 </nav>
               </>

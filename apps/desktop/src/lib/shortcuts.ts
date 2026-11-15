@@ -36,6 +36,13 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
 
 export const SHORTCUTS = [
   {
+    id: "new-ticket",
+    keys: [["C"]],
+    scope: "Everywhere",
+    label: "New ticket",
+    note: "Opens over the current view; not while typing.",
+  },
+  {
     id: "capture",
     keys: [["Mod", "Shift", "N"]],
     scope: "Everywhere",

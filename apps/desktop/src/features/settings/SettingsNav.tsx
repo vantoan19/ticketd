@@ -72,10 +72,13 @@ function useSettingsNavItems() {
  */
 export function SettingsNav({
   onBack,
+  origin = "tickets",
   selected = "appearance",
   onSelect,
 }: {
   onBack: () => void;
+  /** Where Back returns, by name ("tickets", "Attachments"): shell SH-21. */
+  origin?: string;
   selected?: SettingsPageId;
   onSelect?: (page: SettingsPageId) => void;
 }) {
@@ -99,7 +102,7 @@ export function SettingsNav({
           onBack();
         }}
       >
-        <ArrowLeft size={16} aria-hidden="true" /> Back to tickets
+        <ArrowLeft size={16} aria-hidden="true" /> Back to {origin}
       </button>
       <nav aria-label="Settings sections">
         {/* A nav row like the others: the input is drawn on the Search page only. */}

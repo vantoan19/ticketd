@@ -864,38 +864,48 @@ body:has([data-slot="dialog-overlay"])
   color: var(--foreground);
   place-items: start center;
 }
+/* One 520px column, 120px from the top: wordmark, tile, title, sentence, the
+   file, Retry, then Details on a line of its own. */
 .recovery-screen-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: flex-start;
   width: 100%;
-  max-width: 480px;
-  margin-top: 12vh;
+  max-width: 520px;
+  margin-top: 72px;
   text-wrap: pretty;
 }
 .recovery-wordmark {
-  margin-bottom: 16px;
   font-size: var(--text-wordmark);
   font-weight: 600;
+  line-height: 20px;
+  letter-spacing: -0.3px;
+}
+.recovery-screen-body > [data-slot="icon-tile"] {
+  margin-top: 24px;
 }
 .recovery-title {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: var(--text-ui-line);
+  margin-top: 16px;
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: var(--text-title-line);
+  letter-spacing: -0.6px;
 }
 .recovery-sentence {
+  margin-top: 8px;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
 .recovery-path {
   display: flex;
+  align-self: stretch;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 8px 8px 8px 12px;
+  gap: 4px;
+  margin-top: 24px;
+  padding: 10px 8px 10px 12px;
   border-radius: var(--radius);
-  background: var(--recessed);
+  background: var(--surface);
   box-shadow: var(--shadow-border-base);
 }
 .recovery-path [data-slot="path-text"] {
@@ -912,6 +922,14 @@ body:has([data-slot="dialog-overlay"])
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+.recovery-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
   gap: 8px;
   margin-top: 16px;
 }
@@ -1364,8 +1382,10 @@ html[data-window-bar] {
   flex: none;
   display: flex;
   flex-direction: column;
-  /* The nav column is 208px wide, 8px from the window edge (design frame A). */
-  padding: 0 8px 12px 8px;
+  /* The nav column is 208px wide, 8px from the window edge (design frame A).
+     8px on top, as the content panel, so the brand row shares the pane
+     header's midline. */
+  padding: 8px 8px 12px 8px;
   background: var(--background);
   color: var(--foreground);
 }
@@ -1447,9 +1467,18 @@ html[data-window-bar] {
 .brand strong + button {
   margin-left: auto;
 }
-.new-ticket {
-  width: 32px;
-  padding: 0;
+/* New ticket in one click; the chevron beside it holds the other ways to create. */
+.new-ticket-split {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+.new-ticket-split > button:last-child {
+  width: 20px;
+}
+.new-ticket-split > button:last-child svg {
+  width: 14px;
+  height: 14px;
 }
 .sidebar-nav {
   display: grid;
@@ -1525,24 +1554,28 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   font-weight: 500;
   line-height: 16px;
 }
-/* The Projects page is open: its heading reads as the selected row. */
-.sidebar-heading[data-active] {
+/* Projects and Plans headings open their page: the nav row's hover and
+   current fills on the label, with the text where it rests (no shift). */
+.sidebar-heading:has(.sidebar-heading-link) {
+  padding-left: 0;
+}
+.sidebar-heading-link {
+  display: flex;
+  align-items: center;
+  width: 100%;
   height: 28px;
-  padding-left: 4px;
+  padding: 0 12px;
   border-radius: var(--radius);
-  background: var(--sidebar-accent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.sidebar-heading-link:hover {
+  background: var(--recessed);
   color: var(--foreground);
 }
-.sidebar-heading button {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-}
-.sidebar-heading button:hover {
-  background: var(--recessed);
+.sidebar-heading-link[aria-current="page"] {
+  background: var(--accent);
   color: var(--foreground);
 }
 .sidebar-heading + .sidebar-nav {
@@ -1561,7 +1594,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .sidebar[data-collapsed] .brand {
   flex-direction: column;
   height: auto;
-  padding: 8px 0;
+  padding: 0 0 8px;
 }
 .sidebar[data-collapsed] .brand strong {
   display: none;
@@ -1578,29 +1611,47 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   gap: 0;
   font-size: 0;
 }
+/* The dot alone, centred on the icon's top-right corner, cut out of the row
+   by a 2px ring in the row's own fill (DESIGN.md section 6). */
 .sidebar[data-collapsed] .sidebar-count {
   position: absolute;
   top: 6px;
   right: 6px;
+  display: flex;
   margin: 0;
   gap: 0;
   font-size: 0;
+  line-height: 0;
 }
 .sidebar[data-collapsed] .sidebar-count > :not([data-slot="status-dot"]) {
   display: none;
 }
-/* A heading becomes a divider. One that carries a manage menu keeps its button,
-   so the Projects and Plans pages stay one click away. */
-.sidebar[data-collapsed] .sidebar-heading {
-  justify-content: center;
-  margin: 10px 0 0;
-  padding: 0;
-  font-size: 0;
+.sidebar[data-collapsed] .sidebar-count [data-slot="status-dot"] {
+  box-shadow: 0 0 0 2px var(--sidebar);
 }
-.sidebar[data-collapsed] .sidebar-heading:not(:has(button)) {
+.sidebar[data-collapsed] .sidebar-nav button:hover [data-slot="status-dot"] {
+  box-shadow: 0 0 0 2px var(--recessed);
+}
+.sidebar[data-collapsed]
+  .sidebar-nav
+  button[data-active="true"]
+  [data-slot="status-dot"] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+/* One line between groups: work views │ Projects │ Context │ Plans. */
+.sidebar[data-collapsed] .sidebar-group::before {
+  content: "";
+  display: block;
   height: 1px;
   margin: 10px 8px;
   background: var(--border);
+}
+.sidebar[data-collapsed] .new-ticket-split {
+  flex-direction: column;
+}
+.sidebar[data-collapsed] .new-ticket-split > button:last-child {
+  width: 32px;
+  height: 20px;
 }
 .sidebar[data-collapsed] .sidebar-sources {
   align-items: center;
@@ -1640,12 +1691,30 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .content-panel:focus {
   outline: none;
 }
-.mobile-nav-bar {
+/* The narrow window's navigation button in a header's leading slot, with what
+   waits in the sheet as a dot on its corner, cut out by the panel's fill. */
+.shell-nav {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+}
+.shell-nav > [data-slot="status-dot"] {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+/* For a view whose header has no leading slot yet (ShellRow in App.tsx). */
+.shell-row {
   display: flex;
   align-items: center;
+  gap: 4px;
   height: 48px;
   flex: none;
   padding-inline: 8px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .icon-button {
   display: inline-flex;

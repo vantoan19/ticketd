@@ -19,22 +19,24 @@ import { HarnessMark } from "@/features/chats/HarnessMark";
 import { statusLabel } from "@/features/chats/model";
 import { addQuote, NEW_CHAT } from "@/features/chats/quotes";
 import { useChatFeature } from "@/features/chats/use-chats";
+import { BAR_HEIGHT, barPlacement } from "@/features/chats/selection-bar";
+import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 
 type Selected = {
   text: string;
   source: string;
   record: LinkRef | null;
   element: HTMLElement;
-  /** Where the bar sits: the selection's end, kept 16px from the window's edges. */
+  /** Where the bar sits (barPlacement): above the first line, or below. */
   left: number;
   top: number;
+  side: "top" | "bottom";
 };
 
 const SETTLE_MS = 250;
 /** How long the ⌘L hint stays when nothing is selected. */
 const HINT_MS = 2500;
 const MAX_CHATS = 4;
-const EDGE = 16;
 
 function parseRecord(value: string | undefined): LinkRef | null {
   const [kind, id] = (value ?? "").split(":");
@@ -75,16 +77,18 @@ function readSelection(): Selected | null {
   // sits at the source's corner.
   const rects =
     typeof range.getClientRects === "function" ? range.getClientRects() : [];
-  const end = rects[rects.length - 1] ?? source.getBoundingClientRect();
-  const width = window.innerWidth || 0;
-  const height = window.innerHeight || 0;
+  const box = source.getBoundingClientRect();
+  const first = rects[0] ?? box;
+  const last = rects[rects.length - 1] ?? box;
   return {
     text,
     source: source.dataset.chatSource ?? "",
     record: parseRecord(source.dataset.chatRecord),
     element: source,
-    left: Math.max(EDGE, Math.min(end.right, width - 140)),
-    top: Math.max(EDGE, Math.min(end.bottom + 4, height - 48)),
+    ...barPlacement(first, last, {
+      width: window.innerWidth || 0,
+      height: window.innerHeight || 0,
+    }),
   };
 }
 
@@ -208,6 +212,8 @@ export function SelectionAddToChat() {
     <>
       <div
         className="add-to-chat-bar"
+        // While its menu is open the menu takes the bar's place (P3).
+        data-open={open || undefined}
         style={{ left: selected.left, top: selected.top }}
         // Keeps the selection: the bar never takes focus from the text.
         onMouseDown={(event) => event.preventDefault()}
@@ -219,13 +225,16 @@ export function SelectionAddToChat() {
             setOpen(next);
           }}
         >
-          <Tooltip content="Add to chat" shortcut="⌘L">
+          <Tooltip
+            content="Add to chat"
+            shortcut={shortcutLabel("add-to-chat")}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
                 size="sm"
                 tabIndex={-1}
-                aria-keyshortcuts="Meta+L Control+L"
+                aria-keyshortcuts={ariaKeyShortcuts("add-to-chat")}
               >
                 <MessageSquarePlus aria-hidden />
                 Add to chat
@@ -233,6 +242,10 @@ export function SelectionAddToChat() {
             </DropdownMenuTrigger>
           </Tooltip>
           <DropdownMenuContent
+            // Grows away from the selection from where the bar was, covering
+            // the bar instead of stacking a second layer under it.
+            side={selected.side}
+            sideOffset={-BAR_HEIGHT}
             align="start"
             collisionPadding={8}
             onCloseAutoFocus={(event) => {

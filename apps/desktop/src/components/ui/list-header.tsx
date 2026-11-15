@@ -11,6 +11,12 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
+import {
+  ShellSlotContext,
+  useShellLeading,
+  useShellSlot,
+  type ShellSlot,
+} from "@/components/ui/shell-slot";
 import "./patterns.css";
 
 /** Below this header width, labelled controls collapse to their icons. */
@@ -18,9 +24,36 @@ const COLLAPSE_BELOW = 420;
 
 const Collapsed = createContext(false);
 
+/** Provides the shell's leading controls (shell-slot.ts) to every header below it. */
+export function ShellSlotProvider({
+  nav,
+  crumb,
+  children,
+}: ShellSlot & { children: ReactNode }) {
+  return <ShellSlotContext value={{ nav, crumb }}>{children}</ShellSlotContext>;
+}
+
+/**
+ * The shell's leading controls, for a header that is not a PaneHeader or
+ * PageHeader (those place it themselves). `navOnly` leaves the return crumb
+ * to the view's first header, as a detail pane does.
+ */
+export function ShellLeading({ navOnly = false }: { navOnly?: boolean }) {
+  const { nav, crumb } = useShellSlot();
+  if (!nav && (navOnly || !crumb)) return null;
+  return (
+    <>
+      {nav}
+      {!navOnly && crumb}
+    </>
+  );
+}
+
 /**
  * The 48px header of every pane: lists, detail, graph, Chats, Inbox. It never
- * wraps. `leading` holds the narrow-nav button or a `ReturnCrumb`; the title
+ * wraps. Its leading slot starts with the shell's controls (ShellSlotProvider:
+ * the narrow-nav button, the way back to the graph), then `leading`, such as
+ * the pane's own `ReturnCrumb`; the title
  * (14/20/500) truncates, with `count` 8px after it (a `Count`, or a summary in
  * that slot) and optional `children` as inline meta (a SegmentedControl).
  * `actions` is the right cluster of 32px controls in a fixed order: Refresh,
@@ -76,15 +109,17 @@ export function PaneHeader({
     return () => observer.disconnect();
   }, []);
   const Heading = titleLevel === 1 ? "h1" : "h2";
+  const shell = useShellLeading();
   return (
     <Collapsed value={collapsed}>
       <header
         ref={header}
         data-slot="pane-header"
-        data-leading={leading ? "" : undefined}
+        data-leading={leading || shell ? "" : undefined}
         data-collapsed={collapsed || undefined}
         className={cn("ui-pane-header", className)}
       >
+        {shell && <ShellLeading />}
         {leading}
         <span className="ui-pane-header-title">
           {icon && (

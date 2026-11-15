@@ -1,7 +1,7 @@
 {
   "src/components/layout/WorkspaceSidebar.tsx": {
     "shadcn/no-restyle": {
-      "count": 8
+      "count": 7
     }
   },
   "src/components/ui/command.tsx": {

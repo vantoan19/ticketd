@@ -139,16 +139,13 @@ function unfilteredOnly(args: unknown) {
   return narrowed ? [] : [bulkTicket(1)];
 }
 
-/** The sidebar's New ticket menu; an empty list may offer its own New ticket too. */
+/** The sidebar's New ticket button; an empty list may offer its own New ticket too. */
 const sidebarNewTicket = () =>
   screen.getAllByRole("button", { name: "New ticket" })[0]!;
 
+/** One click opens New ticket (shell SH-11: it was a two-click menu). */
 async function openNewTicket(trigger = sidebarNewTicket()) {
-  fireEvent.keyDown(trigger, { key: "Enter" });
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  fireEvent.click(screen.getByRole("menuitem", { name: "New ticket" }));
+  fireEvent.click(trigger);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -395,7 +392,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "All projects" }));
+  fireEvent.click(screen.getByRole("button", { name: "Projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
     target: { value: "Draft" },
@@ -409,7 +406,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   expect(
     screen.getByRole("navigation", { name: "Settings sections" }),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back to tickets" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to Projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
     "value",
@@ -594,6 +591,77 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
   expect(screen.queryAllByRole("tooltip")).toHaveLength(0);
 });
 
+test("first run shows the title and one New ticket action, no tools over nothing", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "count_tickets" ? bridgeDefault(command) : [],
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const header = document.querySelector<HTMLElement>(
+    '[data-slot="pane-header"]',
+  )!;
+  expect(within(header).getByRole("heading").textContent).toBe("All tickets");
+  // S20: no count, Refresh, Filters or Display act on an empty workspace.
+  expect(within(header).queryAllByRole("button")).toHaveLength(0);
+  expect(header.querySelector('[data-slot="count"]')).toBeNull();
+  const action = screen.getAllByRole("button", { name: "New ticket" })[1]!;
+  expect(action.getAttribute("aria-keyshortcuts")).toBe("C");
+});
+
+test("Settings' way back names the view it returns to", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  // Shell SH-21: it said "Back to tickets" whatever the origin.
+  fireEvent.click(screen.getByRole("button", { name: "Back to Attachments" }));
+  expect(screen.getByRole("heading", { name: "Attachments" })).toBeTruthy();
+});
+
+test("C opens New ticket from anywhere, but not while typing", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Attachments" }));
+  const search = document.createElement("input");
+  document.body.append(search);
+  fireEvent.keyDown(search, { key: "c" });
+  expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+  search.remove();
+  fireEvent.keyDown(document.body, { key: "c" });
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "Attachments", hidden: true }),
+  ).toBeTruthy();
+});
+
+test("the Projects and Plans headings open their pages and mark them current", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const projects = screen.getByRole("button", { name: "Projects" });
+  const plans = screen.getByRole("button", { name: "Plans" });
+  fireEvent.click(projects);
+  expect(projects.getAttribute("aria-current")).toBe("page");
+  expect(plans.getAttribute("aria-current")).toBeNull();
+  fireEvent.click(plans);
+  expect(plans.getAttribute("aria-current")).toBe("page");
+  expect(projects.getAttribute("aria-current")).toBeNull();
+});
+
 test("New ticket opens over the current view instead of switching to Tickets", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(bridgeDefault);
@@ -615,7 +683,13 @@ test("New ticket opens over the current view instead of switching to Tickets", a
 
 test("a sidebar choice that could not be saved stays reported after the list loads again", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(bridgeDefault);
+  // One ticket: an empty workspace has no Refresh (S20).
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string; reference?: string }) =>
+      command === "find_tickets"
+        ? unfilteredOnly(args)
+        : bridgeDefault(command, args),
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1458,7 +1532,7 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "All projects" }));
+  fireEvent.click(screen.getByRole("button", { name: "Projects" }));
   unread = 3;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -1518,7 +1592,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
   expect(container.querySelector(".ticket-workspace.expanded")).toBeNull();
 });
 
-test("the narrow navigation trigger shows its label and gets focus back when the sheet closes", async () => {
+test("the narrow navigation trigger sits in the view's header and gets focus back when the sheet closes", async () => {
   vi.useFakeTimers();
   narrowViewport = true;
   bridge.invoke.mockImplementation(async () => []);
@@ -1527,7 +1601,9 @@ test("the narrow navigation trigger shows its label and gets focus back when the
     await vi.advanceTimersByTimeAsync(0);
   });
   const trigger = screen.getByRole("button", { name: "Open navigation" });
-  expect(trigger.textContent).toContain("Navigation");
+  // Shell SH-16: in the header's leading slot, not a 48px bar above it.
+  expect(trigger.closest('[data-slot="pane-header"]')).not.toBeNull();
+  expect(document.querySelector(".shell-row")).toBeNull();
   trigger.focus();
   fireEvent.click(trigger);
   expect(screen.getByRole("dialog", { name: "Navigation" })).toBeTruthy();
@@ -2165,9 +2241,14 @@ test.each(["ticket", "document", "plan"] as const)(
     fireEvent.click(
       screen.getByRole("button", { name: /^Open (T-KQ1|Document|Plan)$/ }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Back to workspace graph" }),
-    );
+    const back = screen.getByRole("button", {
+      name: "Back to workspace graph",
+    });
+    // Shell SH-14: a ReturnCrumb in the leading slot, not a strip over both panes.
+    expect(
+      back.closest('[data-slot="pane-header"], .shell-row'),
+    ).not.toBeNull();
+    fireEvent.click(back);
     expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe(
       "First",
     );
@@ -2262,7 +2343,7 @@ test("opening the workspace graph from Plans does not stack the Plans list", asy
       omitted_groups: [],
     }),
   });
-  fireEvent.click(screen.getByRole("button", { name: "All Plans" }));
+  fireEvent.click(screen.getByRole("button", { name: "Plans" }));
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
   await act(async () => {
