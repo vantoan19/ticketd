@@ -87,7 +87,7 @@ export function CommandPalette({
   plans,
   refresh,
 }: {
-  create: (kind: "ticket" | "capture" | "chat") => void;
+  create: (kind: "ticket" | "capture" | "chat" | "plan") => void;
   createDisabledReason: string | null;
   initialTicket: Ticket | null;
   reference: string | null;
@@ -498,6 +498,12 @@ export function CommandPalette({
                         label: "New ticket",
                         icon: SquarePen,
                         key: "new-ticket",
+                      },
+                      {
+                        id: "plan",
+                        label: "New Plan",
+                        icon: Layers,
+                        key: "new-plan",
                       },
                       {
                         id: "capture",

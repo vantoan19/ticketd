@@ -806,9 +806,9 @@ test("moves focus between ticket rows without opening them until Enter, and reta
       .getByRole("button", { name: /A very long title/ })
       .getAttribute("aria-pressed"),
   ).toBe("true");
-  // The row moved to the Done group; the group header names its status.
-  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
-  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+  // The selected row keeps its old group while its glyph reflects saved data.
+  expect(screen.getByRole("heading", { name: "Todo" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Done" })).toBeNull();
 });
 
 test("clears additional filters while preserving the selected Plan", async () => {
@@ -1170,6 +1170,10 @@ test("closing details falls back to the list heading when the ticket has left th
   tickets = [bulkTicket(1)];
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByRole("button", { name: /Second/ })).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
   });
   expect(screen.queryByRole("button", { name: /Second/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Close ticket details" }));
@@ -1958,8 +1962,8 @@ test("a status move between groups keeps the selected ticket, its draft, and foc
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
-  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+  expect(screen.getByRole("heading", { name: "Todo" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Done" })).toBeNull();
   expect(
     screen.getByRole("button", { name: /First/ }).getAttribute("aria-pressed"),
   ).toBe("true");
@@ -3488,4 +3492,365 @@ test("a property drill-in highlights its current clearing value instead of the f
   await vi.waitFor(() =>
     expect(clear.getAttribute("aria-selected")).toBe("true"),
   );
+});
+
+test("sticky ledger keeps palette mutations in place until J leaves, then targets the newly focused ticket", async () => {
+  let tickets = [
+    bulkTicket(1, { title: "Sticky target", status: "In progress" }),
+    bulkTicket(2, { title: "Next target", status: "In review" }),
+    bulkTicket(3, { title: "Last target", status: "Todo" }),
+  ];
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args?: {
+        reference?: string;
+        patch?: { status?: string };
+      },
+    ) => {
+      if (command === "find_tickets") return tickets;
+      if (command === "show_ticket")
+        return tickets.find((ticket) => ticket.reference === args?.reference);
+      if (command === "count_tickets")
+        return counted({ in_progress: 1, in_review: 1, todo: 1 });
+      if (command === "change_ticket") {
+        tickets = tickets.map((ticket) =>
+          ticket.reference === args?.reference
+            ? { ...ticket, status: args?.patch?.status ?? ticket.status }
+            : ticket,
+        );
+        return tickets.find((ticket) => ticket.reference === args?.reference);
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  const target = await screen.findByRole("button", { name: /Sticky target/ });
+  const list = target.closest("ul")!;
+  const order = () =>
+    Array.from(list.querySelectorAll(".ticket-row")).map((row) =>
+      row.getAttribute("data-ticket-reference"),
+    );
+  const changeStatus = async (row: HTMLElement, key: string) => {
+    fireEvent.keyDown(row, { key: "s" });
+    const input = await screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+    fireEvent.keyDown(input, { key });
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  };
+  act(() => target.focus());
+  await changeStatus(target, "3");
+  expect(target.getAttribute("data-status")).toBe("In review");
+  expect(order()).toEqual(["T-KQ1", "T-KQ2", "T-KQ3"]);
+  expect(list.querySelector("li")?.getAttribute("data-status")).toBe(
+    "In progress",
+  );
+  act(() => target.focus());
+  await changeStatus(target, "4");
+  expect(target.getAttribute("data-status")).toBe("Done");
+  expect(order()).toEqual(["T-KQ1", "T-KQ2", "T-KQ3"]);
+  act(() => target.focus());
+  fireEvent.keyDown(target, { key: "j" });
+  const next = screen.getByRole("button", { name: /Next target/ });
+  expect(document.activeElement).toBe(next);
+  expect(order()).toEqual(["T-KQ2", "T-KQ3", "T-KQ1"]);
+  expect(list.querySelector("li")?.getAttribute("data-status")).toBe(
+    "In review",
+  );
+  expect(target.closest("li")?.getAttribute("data-arriving")).toBe("true");
+  await changeStatus(next, "4");
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "change_ticket",
+    expect.objectContaining({ reference: "T-KQ2", patch: { status: "Done" } }),
+  );
+});
+
+test.each([false, true])(
+  "sticky navigator defers live changes while hovered and releases after idle (reduced motion %s)",
+  async (reducedMotion) => {
+    let tickets = [bulkTicket(1), bulkTicket(2, { status: "In progress" })];
+    await renderBulk({
+      find_tickets: () => tickets,
+      show_ticket: ({ reference }: { reference: string }) =>
+        tickets.find((ticket) => ticket.reference === reference),
+      count_tickets: counted({ todo: 1, in_progress: 1 }),
+    });
+    const row = screen.getByRole("button", { name: /First/ });
+    fireEvent.click(row);
+    await act(async () => {});
+    fireEvent.pointerEnter(row.closest("li")!);
+    tickets = [{ ...tickets[0]!, status: "Done" }, tickets[1]!];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(screen.getByRole("heading", { name: "Todo" })).toBeTruthy();
+    expect(row.getAttribute("data-status")).toBe("Done");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(screen.getByRole("heading", { name: "Todo" })).toBeTruthy();
+    narrowViewport = reducedMotion;
+    fireEvent.pointerLeave(row.closest("li")!);
+    expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
+    expect(row.closest("li")?.getAttribute("data-arriving")).toBe("true");
+    if (reducedMotion) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(row.closest("li")?.hasAttribute("data-arriving")).toBe(false);
+    }
+  },
+);
+
+test.each(["project", "Plan"])(
+  "sticky Plan list retains a row removed by a saved %s change until leaving it",
+  async (property) => {
+    let current: Omit<
+      ReturnType<typeof bulkTicket>,
+      "project_id" | "plan_id"
+    > & { project_id: string | null; plan_id: string | null } = bulkTicket(1, {
+      project_id: "project-old",
+      plan_id: "plan-old",
+    });
+    let included = true;
+    const plan = {
+      id: "plan-old",
+      name: "Sticky Plan",
+      archived: false,
+      purpose: "Keep reading",
+    };
+    bridge.invoke.mockImplementation(
+      (
+        command: string,
+        args?: {
+          reference?: string;
+          patch?: { project_id?: string };
+          plan?: string;
+        },
+      ) => {
+        if (command === "find_tickets") return included ? [current] : [];
+        if (command === "show_ticket") return current;
+        if (command === "list_plans")
+          return [plan, { ...plan, id: "plan-next", name: "Next Plan" }];
+        if (command === "show_plan")
+          return { plan, members: [current], counts: counted({ todo: 1 }) };
+        if (command === "list_projects")
+          return [
+            {
+              id: "project-old",
+              name: "Old project",
+              paths: ["/old"],
+              path: "/old",
+            },
+            {
+              id: "project-next",
+              name: "Next project",
+              paths: ["/next"],
+              path: "/next",
+            },
+          ];
+        if (command === "count_tickets")
+          return counted({ todo: included ? 1 : 0 });
+        if (command === "change_ticket" || command === "set_plan") {
+          current =
+            property === "project"
+              ? { ...current, project_id: args?.patch?.project_id ?? null }
+              : { ...current, plan_id: args?.plan ?? null };
+          included = false;
+          return current;
+        }
+        return bridgeDefault(command);
+      },
+    );
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /^Sticky Plan/ }),
+    );
+    const row = await screen.findByRole("button", { name: /First/ });
+    fireEvent.click(row);
+    await screen.findByRole("textbox", { name: "Title" });
+    fireEvent.keyDown(row, { key: property === "project" ? "p" : "l" });
+    const next = await screen.findByRole("option", {
+      name: property === "project" ? /^Next project/ : /^Next Plan/,
+    });
+    fireEvent.click(next);
+    await vi.waitFor(() => expect(included).toBe(false));
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+    expect(row.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("heading", { name: "Todo" }));
+    expect(screen.queryByRole("button", { name: /First/ })).toBeNull();
+  },
+);
+
+test("checked rows keep their live-update positions until idle even without an open detail", async () => {
+  let tickets = [bulkTicket(1), bulkTicket(2, { status: "In progress" })];
+  await renderBulk({
+    find_tickets: () => tickets,
+    count_tickets: counted({ todo: 1, in_progress: 1 }),
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  tickets = [{ ...tickets[0]!, status: "Done" }, tickets[1]!];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByRole("heading", { name: "Todo" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /First/ }).getAttribute("data-status"),
+  ).toBe("Done");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
+});
+
+test("Plans cards join full counts, Flow-ordered Ready work, newest update and spec", async () => {
+  const tickets = [
+    bulkTicket(2, {
+      title: "Ready second",
+      availability: "Ready",
+      updated_at: "2026-01-01T00:00:00Z",
+    }),
+    bulkTicket(9, {
+      title: "Ready first",
+      availability: "Ready",
+      updated_at: "2026-02-01T00:00:00Z",
+    }),
+    bulkTicket(3, {
+      title: "Waiting",
+      availability: "Blocked",
+      prerequisites: [
+        {
+          reference: "T-KQ9",
+          title: "Ready first",
+          status: "Todo",
+          trashed: false,
+          unresolved: true,
+        },
+      ],
+    }),
+  ];
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans")
+        return [
+          {
+            id: "P-1",
+            name: "Launch cards",
+            archived: false,
+            purpose: "Ship together",
+          },
+        ];
+      if (command === "list_projects")
+        return [
+          { id: "project", name: "Desktop app", path: "/app", paths: ["/app"] },
+        ];
+      if (command === "show_plan")
+        return {
+          plan: {
+            id: "P-1",
+            name: "Launch cards",
+            archived: false,
+            spec_document_id: "spec",
+          },
+          counts: {
+            todo: 3,
+            in_progress: 2,
+            in_review: 1,
+            done: 4,
+            canceled: 1,
+            duplicate: 2,
+          },
+          members: tickets.map((t) => ({ ...t, project_id: "project" })),
+          documents: [
+            { id: "spec", heading: "Launch specification", trashed: false },
+          ],
+        };
+      if (
+        command === "find_tickets" &&
+        (args.filter as { plan?: string }).plan === "P-1"
+      )
+        return tickets;
+      if (command === "show_ticket")
+        return tickets.find((ticket) => ticket.reference === args.reference);
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
+  const cards = await screen.findByRole("list", { name: "Active Plans" });
+  expect(await within(cards).findByText("4 of 10 done")).toBeTruthy();
+  expect(within(cards).getByText("1 canceled, not counted")).toBeTruthy();
+  expect(within(cards).getByText("2 duplicates, not counted")).toBeTruthy();
+  expect(
+    await within(cards).findByRole("button", { name: /T-KQ9 Ready first/ }),
+  ).toBeTruthy();
+  expect(within(cards).queryByText("Ready second")).toBeNull();
+  expect(within(cards).getByText("Desktop app")).toBeTruthy();
+  expect(
+    within(cards).getByText("2 ready, 1 blocked", { exact: false }),
+  ).toBeTruthy();
+  expect(within(cards).getByText("Launch specification")).toBeTruthy();
+  expect(cards.querySelector("time")?.getAttribute("datetime")).toBe(
+    "2026-02-01T00:00:00Z",
+  );
+  fireEvent.click(
+    within(cards).getByRole("button", { name: /T-KQ9 Ready first/ }),
+  );
+  expect(await screen.findByRole("heading", { name: "T-KQ9" })).toBeTruthy();
+});
+
+test("New Plan is reachable from the palette and its registered page key", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Search or jump to…" }),
+  );
+  fireEvent.click(await screen.findByRole("option", { name: /^New Plan/ }));
+  const dialog = await screen.findByRole("dialog", { name: "New Plan" });
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Plans/ }));
+  fireEvent.keyDown(document.body, { key: "n" });
+  expect(await screen.findByRole("dialog", { name: "New Plan" })).toBeTruthy();
+});
+
+test("Plans with no Ready work keep canceled-only progress explicit without inventing a time", async () => {
+  bridge.invoke.mockImplementation(
+    (command: string, args: Record<string, unknown>) => {
+      if (command === "list_plans")
+        return [{ id: "P-empty", name: "Stopped work", archived: false }];
+      if (command === "show_plan")
+        return {
+          plan: { id: "P-empty", name: "Stopped work", archived: false },
+          counts: {
+            todo: 0,
+            in_progress: 0,
+            in_review: 0,
+            done: 0,
+            canceled: 2,
+            duplicate: 0,
+          },
+          members: [],
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
+  const cards = await screen.findByRole("list", { name: "Active Plans" });
+  expect(await within(cards).findByText("0 of 0 done")).toBeTruthy();
+  expect(await within(cards).findByText("No Ready tickets")).toBeTruthy();
+  expect(within(cards).getByText("2 canceled, not counted")).toBeTruthy();
+  expect(cards.querySelector("time")).toBeNull();
+  fireEvent.click(
+    within(cards).getByRole("button", { name: "Open Plan Stopped work" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Stopped work" }),
+  ).toBeTruthy();
 });

@@ -11,6 +11,7 @@ import { RowTags } from "./RowTags";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
+import { useStickyRows } from "./use-sticky-rows";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
@@ -41,8 +42,14 @@ export function TicketList({
   grouping,
   singleStatus = false,
   simple = true,
+  empty,
+  scopeKey = "",
+  details = {},
 }: {
   tickets: Ticket[];
+  empty?: ReactNode;
+  scopeKey?: string;
+  details?: Record<string, Ticket>;
   selected: string | null;
   onOpen: (reference: string) => void;
   bulkSelection: string[];
@@ -79,6 +86,13 @@ export function TicketList({
 }) {
   const listElement = useRef<HTMLUListElement>(null);
   const narrow = useNarrowPane(listElement, 481);
+  const sticky = useStickyRows(
+    tickets,
+    selected,
+    details,
+    bulkSelection,
+    scopeKey,
+  );
   const { conflicts } = useConflicts();
   const needsReview = new Set(
     conflicts.filter((item) => item.kind === "ticket").map((item) => item.id),
@@ -93,11 +107,13 @@ export function TicketList({
     { header: ReturnType<typeof groupTickets>[number] } | { ticket: Ticket }
   )[] =
     grouping && !singleStatus
-      ? groupTickets(tickets, grouping.counts).flatMap((group) => [
-          { header: group },
-          ...group.tickets.map((ticket) => ({ ticket })),
-        ])
-      : tickets.map((ticket) => ({ ticket }));
+      ? groupTickets(sticky.tickets, grouping.counts, sticky.status).flatMap(
+          (group) => [
+            { header: group },
+            ...group.tickets.map((ticket) => ({ ticket })),
+          ],
+        )
+      : sticky.tickets.map((ticket) => ({ ticket }));
   const ordered = entries.flatMap((entry) =>
     "ticket" in entry ? [entry.ticket] : [],
   );
@@ -120,6 +136,7 @@ export function TicketList({
     return ordered.slice(low, high + 1).map((item) => item.reference);
   };
   const canSelect = selectable && !selectionDisabled;
+  if (sticky.tickets.length === 0 && empty) return empty;
   return (
     <ul ref={listElement} className="ticket-rows">
       {entries.map((entry) => {
@@ -178,7 +195,15 @@ export function TicketList({
             variant={selected || narrow ? "navigator" : "ledger"}
             asChild
           >
-            <li>
+            <li
+              data-arriving={sticky.arrivals.has(ticket.id) || undefined}
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget)
+                  sticky.onArrivalEnd(ticket.id);
+              }}
+              onPointerEnter={() => sticky.onPointerEnter(ticket.id)}
+              onPointerLeave={sticky.onPointerLeave}
+            >
               {!selectable && (
                 // Keeps rows aligned with lists that have a selection column.
                 <span className="ticket-select" aria-hidden="true" />

@@ -1268,6 +1268,9 @@ body:has([data-slot="dialog-overlay"])
   border-radius: var(--radius);
   color: var(--foreground);
 }
+.ui-badge-doc:is(button, a):hover {
+  background: var(--accent);
+}
 .ui-badge-doc svg {
   width: 14px;
   height: 14px;

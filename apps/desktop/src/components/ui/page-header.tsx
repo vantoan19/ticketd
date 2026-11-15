@@ -11,11 +11,13 @@ import "./patterns.css";
  */
 export function ManagementPage({
   className,
+  layout = "default",
   children,
   "aria-labelledby": labelledBy,
   "aria-label": label,
 }: {
   className?: string;
+  layout?: "default" | "centered";
   children: ReactNode;
   "aria-labelledby"?: string;
   "aria-label"?: string;
@@ -25,7 +27,11 @@ export function ManagementPage({
       data-slot="management-page"
       aria-labelledby={labelledBy}
       aria-label={label}
-      className={cn("ui-management-page", className)}
+      className={cn(
+        "ui-management-page",
+        layout === "centered" && "ui-management-page-centered",
+        className,
+      )}
     >
       {children}
     </section>

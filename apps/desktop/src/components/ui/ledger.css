@@ -198,3 +198,18 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+
+/* Regrouping is instant; only the arrival surface fades. */
+:is(.ui-item-ledger, .ui-item-navigator)[data-arriving] {
+  animation: ledger-arrival var(--dur-arrival) var(--ease-out);
+}
+@keyframes ledger-arrival {
+  from {
+    background-color: var(--hover);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.ui-item-ledger, .ui-item-navigator)[data-arriving] {
+    animation: none;
+  }
+}
