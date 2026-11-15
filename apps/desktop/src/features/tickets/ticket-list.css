@@ -296,7 +296,12 @@
 }
 /* A status group's header is a 32px recessed band with a hairline above and below. Rows and
    headers share one list, so a row that changes group is not remounted. */
+/* Sticky (list R-09): at any depth the rows keep their group's name. The band
+   is opaque, so rows scroll under it. */
 .ticket-rows li.ticket-group-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   align-items: center;
   gap: 8px;
   height: 32px;
@@ -326,8 +331,25 @@
   line-height: 20px;
   letter-spacing: -0.28px;
 }
+.ticket-group-meta {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
 .ticket-group-add {
+  display: flex;
   margin-left: auto;
+}
+/* Revealed on the header's hover or focus; always shown on touch (R-03). */
+@media (hover: hover) and (pointer: fine) {
+  .ticket-group-add {
+    opacity: 0;
+  }
+  .ticket-group-header:hover .ticket-group-add,
+  .ticket-group-add:focus-within {
+    opacity: 1;
+  }
 }
 
 /* Source filter follows the inset canvas composition. */

@@ -207,15 +207,13 @@ export function TicketWorkspaceView({
           orientation="horizontal"
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
-          disabled={
-            narrow || expanded || (workspace.layout === "board" && !selected)
-          }
+          disabled={narrow || expanded || !selected}
           className={cn(
             "ticket-workspace",
             expanded && "expanded",
             narrowDetail && "narrow-detail",
             workspace.layout === "board" && "board-layout",
-            !selected && "board-unselected",
+            !selected && "unselected",
           )}
           groupRef={groupRef}
           defaultLayout={

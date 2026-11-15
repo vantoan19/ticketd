@@ -1652,8 +1652,8 @@ test("totals and group counts describe the whole result, not the loaded page", a
       selector: '.ui-pane-header [data-slot="count"]',
     }),
   ).toBeTruthy();
-  // One Todo ticket is on this page of the 119 in the result.
-  expect(screen.getByText("1 of 119")).toBeTruthy();
+  // The Todo header counts all 119 in the result, not the one shown.
+  expect(screen.getByText("119")).toBeTruthy();
   expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
   const next = screen.getByRole("button", { name: "Next" });
   expect((next as HTMLButtonElement).disabled).toBe(false);
@@ -1912,7 +1912,9 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     count_tickets: counted({ duplicate: 1 }),
     search_tickets: () => [bulkTicket(2)],
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate…" }),
+  );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
@@ -1962,7 +1964,9 @@ test("an exact reference leads the matches in the mark-duplicate search", async 
     search_tickets: () => [bulkTicket(2)],
     show_ticket: () => bulkTicket(3),
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate…" }),
+  );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",

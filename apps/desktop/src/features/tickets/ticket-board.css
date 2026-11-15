@@ -179,12 +179,14 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
-/* !important: the panel library sets flex inline on the panels (see styles.css). */
-.ticket-workspace.board-layout.board-unselected #list {
+/* With nothing open, the list or board takes the full width rather than
+   cutting titles beside an empty detail pane (list R-04). !important: the
+   panel library sets flex inline on the panels (see styles.css). */
+.ticket-workspace.unselected #list {
   flex: 1 1 0 !important;
 }
-.ticket-workspace.board-layout.board-unselected #detail,
-.ticket-workspace.board-layout.board-unselected .split-handle {
+.ticket-workspace.unselected #detail,
+.ticket-workspace.unselected .split-handle {
   display: none !important;
 }
 @container plan-workspace (max-width: 839px) {
