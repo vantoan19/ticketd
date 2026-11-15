@@ -1,3 +1,4 @@
+import { RecordLink } from "@/components/ui/record-link";
 import { useState, type ReactNode } from "react";
 import {
   AttachmentPreview,
@@ -20,13 +21,9 @@ export function AttachmentLink({
   } | null>(null);
   return (
     <>
-      <button
-        type="button"
-        className="context-link"
-        onClick={() => setPreview({ uri, replace: onReplace })}
-      >
+      <RecordLink onClick={() => setPreview({ uri, replace: onReplace })}>
         {children}
-      </button>
+      </RecordLink>
       {preview && (
         <AttachmentPreview
           target={{ uri: preview.uri }}

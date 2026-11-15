@@ -1722,22 +1722,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   list-style: none;
   margin-left: -20px;
 }
-.markdown-document .context-link {
-  display: inline;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  text-align: inherit;
-  color: var(--foreground);
-  text-decoration: underline;
-  text-decoration-color: var(--interactive);
-  text-underline-offset: 4px;
-  cursor: pointer;
-}
-.markdown-document .context-link:hover {
-  color: var(--interactive);
-}
 .markdown-document li + li {
   margin-top: 4px;
 }

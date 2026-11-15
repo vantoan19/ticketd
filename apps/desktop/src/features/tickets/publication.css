@@ -46,7 +46,7 @@
   display: grid;
   gap: 4px;
 }
-.publication-attachment-links .context-link {
+.publication-attachment-links [data-slot="record-link"] {
   justify-self: start;
   text-align: left;
   overflow-wrap: anywhere;

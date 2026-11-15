@@ -1,3 +1,4 @@
+import { RecordLink } from "@/components/ui/record-link";
 import {
   useCallback,
   useContext,
@@ -448,9 +449,7 @@ export function AttachmentPreview({
                             {(entry.target?.kind === "ticket" && openTicket) ||
                             (entry.target?.kind === "document" &&
                               openDocument) ? (
-                              <button
-                                type="button"
-                                className="context-link"
+                              <RecordLink
                                 onClick={() => {
                                   close();
                                   if (entry.target?.kind === "ticket")
@@ -460,7 +459,7 @@ export function AttachmentPreview({
                                 }}
                               >
                                 {entry.label}
-                              </button>
+                              </RecordLink>
                             ) : (
                               <strong>{entry.label}</strong>
                             )}

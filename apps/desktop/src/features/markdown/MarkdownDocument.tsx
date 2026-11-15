@@ -21,6 +21,7 @@ import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
 import { writeClipboard } from "@/lib/clipboard";
 import { useStatusLine } from "@/components/ui/use-status-line";
+import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
@@ -120,13 +121,7 @@ function DocumentLink({
   if (href?.startsWith("ticketd://plan/")) {
     const id = href.slice("ticketd://plan/".length);
     return openPlan ? (
-      <button
-        type="button"
-        className="context-link"
-        onClick={() => openPlan(id)}
-      >
-        {children}
-      </button>
+      <RecordLink onClick={() => openPlan(id)}>{children}</RecordLink>
     ) : (
       <>{children}</>
     );
@@ -134,14 +129,10 @@ function DocumentLink({
   if (href?.startsWith("ticketd://document/")) {
     const id = href.slice("ticketd://document/".length);
     return openDocument ? (
-      <button
-        type="button"
-        className="context-link"
-        onClick={() => openDocument(id)}
-      >
+      <RecordLink onClick={() => openDocument(id)}>
         {children}
         <TrashedMark id={id} revision={revision} />
-      </button>
+      </RecordLink>
     ) : (
       <>{children}</>
     );

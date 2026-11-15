@@ -14,26 +14,31 @@ export function references() {
         parent.type === "linkReference"
       )
         return;
+      // "[[T-FV8]]" (a wiki-style reference) shows as the reference alone:
+      // the brackets belong to the syntax, not the text (detA MK-10, detB DB-33).
       const matches = [
         ...node.value.matchAll(
-          /(?<![\p{L}\p{N}_-])T-[A-Z]{2}[1-9]\d*(?![\p{L}\p{N}_-])/gu,
+          /(\[\[)?(?<![\p{L}\p{N}_-])(T-[A-Z]{2}[1-9]\d*)(?![\p{L}\p{N}_-])(\]\])?/gu,
         ),
       ];
       if (!matches.length) return;
       const parts: PhrasingContent[] = [];
       let last = 0;
       for (const match of matches) {
-        if (match.index > last)
-          parts.push({
-            type: "text",
-            value: node.value.slice(last, match.index),
-          });
+        const reference = match[2] ?? match[0];
+        // Only a matched pair of brackets is dropped; a lone one stays text.
+        const wrapped = Boolean(match[1] && match[3]);
+        const start = match.index + (match[1] && !wrapped ? 2 : 0);
+        const end =
+          match.index + match[0].length - (match[3] && !wrapped ? 2 : 0);
+        if (start > last)
+          parts.push({ type: "text", value: node.value.slice(last, start) });
         parts.push({
           type: "link",
-          url: `ticketd:${match[0]}`,
-          children: [{ type: "text", value: match[0] }],
+          url: `ticketd:${reference}`,
+          children: [{ type: "text", value: reference }],
         });
-        last = match.index + match[0].length;
+        last = end;
       }
       if (last < node.value.length)
         parts.push({ type: "text", value: node.value.slice(last) });

@@ -149,6 +149,10 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
   );
 }
 const marked = () => document.querySelector("[data-mention-target]");
+/** The body paragraph, whose reference is its own element (a RecordLink). */
+const passage = (_: string, element: Element | null) =>
+  element?.tagName === "P" &&
+  /^Blocked on T-KQ1 today\.$/.test(element.textContent ?? "");
 async function followBacklink() {
   render(
     <TickingChanges>
@@ -157,7 +161,7 @@ async function followBacklink() {
   );
   // Cache T-KQ2 with its old body, then look at T-KQ1, whose backlinks list T-KQ2.
   act(() => api.select("T-KQ2"));
-  await screen.findByText(/Blocked on T-KQ1 today\./, { selector: "p" });
+  await screen.findByText(passage);
   act(() => api.select("T-KQ1"));
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
 }
@@ -178,7 +182,7 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
     </TickingChanges>,
   );
   act(() => api.select("T-KQ2"));
-  await screen.findByText(/Blocked on T-KQ1 today\./, { selector: "p" });
+  await screen.findByText(passage);
   act(() => api.select("T-KQ1"));
   fresh = true;
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
