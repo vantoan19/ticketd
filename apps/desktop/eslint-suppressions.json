@@ -82,11 +82,6 @@
       "count": 2
     }
   },
-  "src/features/tickets/BulkControls.tsx": {
-    "shadcn/no-restyle": {
-      "count": 3
-    }
-  },
   "src/features/tickets/Duplicates.tsx": {
     "shadcn/no-restyle": {
       "count": 1
@@ -143,11 +138,6 @@
     }
   },
   "src/features/tickets/TicketEditor.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
-  "src/features/tickets/TicketList.tsx": {
     "shadcn/no-restyle": {
       "count": 1
     }

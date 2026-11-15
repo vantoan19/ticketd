@@ -11,6 +11,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureDetails, FailureState } from "@/components/ui/failure-alert";
 import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
 import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
 import { PaneHeader } from "@/components/ui/list-header";
@@ -75,8 +76,10 @@ function TicketListBody({
     filter,
     query,
     setQuery,
-    offset,
-    setOffset,
+    pages,
+    resetPaging,
+    showMore,
+    matchingReferences,
     plan,
     setPlan,
     status,
@@ -149,11 +152,16 @@ function TicketListBody({
         ? item.project_id === null
         : item.project_id === filter),
   );
-  // A selection belongs to the page it was made on. Moving to another page,
-  // scope, search or filter drops it, so the bar never acts on tickets that are
-  // no longer listed.
+  const visibleTicketsRef = useRef(visibleTickets);
+  useEffect(() => {
+    visibleTicketsRef.current = visibleTickets;
+  });
+  // A selection belongs to the view it was made in. Another scope, search,
+  // filter or layout drops it, so the bar never acts on tickets that are no
+  // longer listed; the board has no bar, so a selection never waits hidden
+  // there (list B-08). Showing more keeps it.
   const viewKey = JSON.stringify([
-    offset,
+    workspace.layout,
     filter,
     query,
     plan,
@@ -166,24 +174,26 @@ function TicketListBody({
     navigation,
   ]);
   const previousView = useRef(viewKey);
-  // Pressing Previous or Next can disable that very button (the first or last
-  // page). Focus then moves to the other button, or to the list, never to the
-  // document root.
-  const previousButton = useRef<HTMLButtonElement>(null);
-  const nextButton = useRef<HTMLButtonElement>(null);
-  const paged = useRef<"previous" | "next" | null>(null);
+  // "Show 50 more" (P17): the next rows arrive where the button was. For a
+  // moment a click there is ignored, so a double click never opens a ticket
+  // that slid under the pointer, and keyboard focus moves to the first new
+  // row (list BD-09).
+  const arriving = useRef<{ from: number; focused: boolean } | null>(null);
+  const guardUntil = useRef(0);
+  const shownCount = visibleTickets.length;
   useEffect(() => {
-    const which = paged.current;
-    if (!which || loading) return;
-    const own = which === "previous" ? previousButton : nextButton;
-    const other = which === "previous" ? nextButton : previousButton;
-    if (!own.current?.disabled) return;
-    paged.current = null;
-    (other.current && !other.current.disabled
-      ? other.current
-      : listRef.current
-    )?.focus();
-  });
+    const pending = arriving.current;
+    if (!pending || shownCount <= pending.from) return;
+    arriving.current = null;
+    guardUntil.current = Date.now() + 400;
+    const first = visibleTicketsRef.current[pending.from];
+    if (pending.focused && first)
+      listRef.current
+        ?.querySelector<HTMLElement>(
+          `[data-ticket-reference="${first.reference}"]`,
+        )
+        ?.focus();
+  }, [shownCount, listRef]);
   const { clearSelection } = bulk;
   useEffect(() => {
     if (previousView.current === viewKey) return;
@@ -215,7 +225,7 @@ function TicketListBody({
     family,
     setFamily,
     plans,
-    setOffset,
+    resetPaging,
     navigation,
     clearFilters,
     scopeName,
@@ -377,7 +387,7 @@ function TicketListBody({
                               size="sm"
                               onClick={() => {
                                 setQuery("");
-                                setOffset(0);
+                                resetPaging();
                               }}
                             >
                               Clear search
@@ -522,7 +532,11 @@ function TicketListBody({
                     selectionDisabled={bulk.pending}
                     bulkSelection={bulk.selection}
                     onToggle={bulk.toggle}
-                    onOpen={onOpen}
+                    onSelectMany={bulk.selectAll}
+                    onOpen={(reference) => {
+                      if (Date.now() < guardUntil.current) return;
+                      onOpen(reference);
+                    }}
                     {...(scopedPlan &&
                       planWritable && {
                         rowAction: (ticket: Ticket) => (
@@ -561,39 +575,24 @@ function TicketListBody({
                 </>
               )}
               {!trash &&
-                workspace.layout === "list" &&
-                (offset > 0 || total > PAGE_SIZE) && (
-                  <div className="pagination">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      ref={previousButton}
-                      disabled={offset === 0}
-                      onClick={() => {
-                        paged.current = "previous";
-                        setOffset(Math.max(0, offset - PAGE_SIZE));
-                      }}
-                    >
-                      Previous
-                    </Button>
-                    <span>
-                      {" "}
-                      Showing {offset + 1}–{offset + tickets.length} of{" "}
-                      {total}{" "}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      ref={nextButton}
-                      disabled={offset + tickets.length >= total}
-                      onClick={() => {
-                        paged.current = "next";
-                        setOffset(offset + PAGE_SIZE);
-                      }}
-                    >
-                      Next
-                    </Button>
-                  </div>
+                !queryError &&
+                tickets.length > 0 &&
+                tickets.length < total && (
+                  <Pager
+                    more={Math.min(PAGE_SIZE, total - tickets.length)}
+                    noun="tickets"
+                    loading={loading && pages * PAGE_SIZE > tickets.length}
+                    onMore={() => {
+                      arriving.current = {
+                        from: visibleTickets.length,
+                        focused:
+                          document.activeElement?.closest(
+                            '[data-slot="pager"]',
+                          ) != null,
+                      };
+                      showMore();
+                    }}
+                  />
                 )}
             </div>
           )}
@@ -608,6 +607,8 @@ function TicketListBody({
         <BulkControls
           bulk={bulk}
           visible={visibleTickets}
+          total={total}
+          matchingReferences={matchingReferences}
           projects={projects}
           plans={plans}
         />

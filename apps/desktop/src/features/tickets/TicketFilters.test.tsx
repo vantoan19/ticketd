@@ -33,7 +33,7 @@ function props(
     family: "",
     setFamily: vi.fn(),
     plans: [],
-    setOffset: vi.fn(),
+    resetPaging: vi.fn(),
     navigation: { kind: "all", project: "all", plan: "" },
     clearFilters: vi.fn(),
     scopeName: "All tickets",

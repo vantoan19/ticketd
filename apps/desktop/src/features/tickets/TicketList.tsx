@@ -30,6 +30,7 @@ export function TicketList({
   onOpen,
   bulkSelection,
   onToggle,
+  onSelectMany,
   selectable,
   selectionDisabled = false,
   scope,
@@ -44,6 +45,11 @@ export function TicketList({
   onOpen: (reference: string) => void;
   bulkSelection: string[];
   onToggle: (reference: string) => void;
+  /**
+   * Adds several tickets to the selection: a Shift-click or Shift+↑/↓ range
+   * from the last one toggled, or Mod+A for every listed ticket.
+   */
+  onSelectMany?: (references: string[]) => void;
   selectable: boolean;
   selectionDisabled?: boolean;
   scope: RowScope;
@@ -98,6 +104,18 @@ export function TicketList({
   const focusRow = (ticket: Ticket | undefined) => {
     if (ticket) rows.current.get(ticket.id)?.focus();
   };
+  // Where a Shift range starts: the ticket last toggled by itself.
+  const anchor = useRef<string | null>(null);
+  // A Shift-click already applied its range; its change event must not toggle.
+  const ranged = useRef(false);
+  const range = (to: Ticket) => {
+    const from = ordered.findIndex((item) => item.reference === anchor.current);
+    const end = ordered.indexOf(to);
+    if (from < 0 || end < 0) return [to.reference];
+    const [low, high] = from < end ? [from, end] : [end, from];
+    return ordered.slice(low, high + 1).map((item) => item.reference);
+  };
+  const canSelect = selectable && !selectionDisabled;
   return (
     <ul className="ticket-rows">
       {entries.map((entry) => {
@@ -166,7 +184,23 @@ export function TicketList({
                   aria-label={`Select ${ticket.reference}`}
                   checked={bulkSelection.includes(ticket.reference)}
                   disabled={selectionDisabled}
-                  onChange={() => onToggle(ticket.reference)}
+                  onClick={(event) => {
+                    // Shift-click selects the range from the last ticket toggled.
+                    if (event.shiftKey && anchor.current && onSelectMany) {
+                      event.preventDefault();
+                      ranged.current = true;
+                      window.setTimeout(() => (ranged.current = false), 0);
+                      onSelectMany(range(ticket));
+                    }
+                  }}
+                  onChange={() => {
+                    if (ranged.current) {
+                      ranged.current = false;
+                      return;
+                    }
+                    anchor.current = ticket.reference;
+                    onToggle(ticket.reference);
+                  }}
                 />
               </label>
             )}
@@ -189,6 +223,30 @@ export function TicketList({
               onKeyDown={(event) => {
                 const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
                 if (
+                  canSelect &&
+                  onSelectMany &&
+                  event.shiftKey &&
+                  (event.key === "ArrowDown" || event.key === "ArrowUp")
+                ) {
+                  // Shift+↑/↓ extends the selection as focus moves.
+                  event.preventDefault();
+                  const next =
+                    ordered[index + (event.key === "ArrowDown" ? 1 : -1)];
+                  if (!next) return;
+                  anchor.current ??= ticket.reference;
+                  onSelectMany(range(next));
+                  focusRow(next);
+                } else if (
+                  canSelect &&
+                  onSelectMany &&
+                  (event.metaKey || event.ctrlKey) &&
+                  !event.altKey &&
+                  event.key.toLowerCase() === "a"
+                ) {
+                  // Mod+A selects every listed ticket.
+                  event.preventDefault();
+                  onSelectMany(ordered.map((item) => item.reference));
+                } else if (
                   event.key === "ArrowDown" ||
                   event.key === "ArrowUp" ||
                   (plain && (event.key === "j" || event.key === "k"))
@@ -209,6 +267,7 @@ export function TicketList({
                 ) {
                   // Space selects for bulk actions; Enter opens.
                   event.preventDefault();
+                  anchor.current = ticket.reference;
                   onToggle(ticket.reference);
                 }
               }}
@@ -217,7 +276,11 @@ export function TicketList({
                 if (event.key === " " && selectable && !selectionDisabled)
                   event.preventDefault();
               }}
-              aria-keyshortcuts={selectable ? "Space Enter" : undefined}
+              aria-keyshortcuts={
+                selectable
+                  ? "Space Enter Shift+ArrowDown Shift+ArrowUp Meta+A Control+A"
+                  : undefined
+              }
             >
               {grouping && !singleStatus ? (
                 // The group header already names the status (list R-02).

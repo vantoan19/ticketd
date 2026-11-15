@@ -80,6 +80,22 @@ export const SHORTCUTS = [
     label: "Select the focused ticket for bulk changes",
   },
   {
+    id: "list-select-range",
+    keys: [
+      ["Shift", "↑"],
+      ["Shift", "↓"],
+    ],
+    scope: "Lists",
+    label: "Extend the selection",
+    note: "Shift-click a checkbox to select the range from the last one.",
+  },
+  {
+    id: "list-select-all",
+    keys: [["Mod", "A"]],
+    scope: "Lists",
+    label: "Select every listed ticket",
+  },
+  {
     id: "list-clear-selection",
     keys: [["Esc"]],
     scope: "Lists",

@@ -56,7 +56,8 @@ type Props = {
   family: string;
   setFamily: (value: string) => void;
   plans: { id: string; name: string; archived: boolean }[];
-  setOffset: (value: number) => void;
+  /** Starts the list again at its first page. */
+  resetPaging: () => void;
   navigation: {
     kind: "all" | "ready" | "progress" | "trash";
     project: string;
@@ -86,7 +87,7 @@ function dimensions(p: Props) {
     .filter(Boolean);
   const update = (setter: (value: string) => void, value: string) => {
     setter(value);
-    p.setOffset(0);
+    p.resetPaging();
   };
   const shown = {
     // The In progress view is a status; the Ready view is an availability; a
@@ -170,7 +171,7 @@ function HeaderSearch(p: Props) {
   const [searching, setSearching] = useState(false);
   const update = (value: string) => {
     p.setQuery(value);
-    p.setOffset(0);
+    p.resetPaging();
   };
   if (!searching)
     return (
@@ -484,7 +485,7 @@ function FilterChips(p: Props & { menu: FiltersMenuState }) {
             value: query,
             clear: () => {
               p.setQuery("");
-              p.setOffset(0);
+              p.resetPaging();
             },
           },
         ]

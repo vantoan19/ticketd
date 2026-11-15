@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { chooseFilter } from "@/test/filters";
+import { setPreference } from "@/lib/preferences";
 import {
   act,
   cleanup,
@@ -1235,10 +1236,8 @@ test("keeps the selection and retries a failed bulk change with the same request
   expect(requests[1]).toBe(requests[0]);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByText("2 selected")).toBeNull();
-  // The menu that started the change is gone; focus lands on the list heading.
-  expect(document.activeElement).toBe(
-    document.getElementById("tickets-heading"),
-  );
+  // The menu that started the change is gone; focus goes back to the list.
+  expect(document.activeElement?.classList.contains("ticket-row")).toBe(true);
 });
 
 test("names the ticket the core rejected and offers no Retry that cannot succeed", async () => {
@@ -1386,7 +1385,8 @@ test("the status menu counts tickets per status and checks the one all share", a
   openMenu("Status of selected tickets");
   expect(screen.getByText("Set status for 2 tickets")).toBeTruthy();
   const todo = screen.getByRole("menuitem", { name: /^Todo/ });
-  expect(todo.textContent).toContain("both");
+  // Every selected ticket is Todo: a check, and no "both" or "all" word.
+  expect(todo.textContent).toBe("Todo");
   expect(todo.querySelector("svg.bulk-status-check")).not.toBeNull();
   expect(screen.getByRole("menuitem", { name: "Done" })).toBeTruthy();
   fireEvent.keyDown(document.activeElement ?? document.body, {
@@ -1403,8 +1403,10 @@ test("Escape clears the selection and the bar shows the shortcut", async () => {
   await renderBulk({ find_tickets: () => [bulkTicket(1)] });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   expect(
-    screen.getByRole("button", { name: "Clear selection" }).textContent,
-  ).toContain("Esc");
+    screen
+      .getByRole("button", { name: "Clear selection" })
+      .getAttribute("aria-keyshortcuts"),
+  ).toBe("Escape");
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(screen.queryByText("1 selected")).toBeNull();
 });
@@ -1633,9 +1635,11 @@ test("the list header stays outside the scroller that holds the rows", async () 
     scroller?.contains(screen.getByRole("heading", { name: "All tickets" })),
   ).toBe(false);
   expect(scroller?.contains(document.querySelector(".ticket-rows"))).toBe(true);
-  expect(scroller?.contains(screen.getByRole("button", { name: "Next" }))).toBe(
-    true,
-  );
+  expect(
+    scroller?.contains(
+      screen.getByRole("button", { name: "Show 50 more tickets" }),
+    ),
+  ).toBe(true);
 });
 
 test("totals and group counts describe the whole result, not the loaded page", async () => {
@@ -1654,9 +1658,11 @@ test("totals and group counts describe the whole result, not the loaded page", a
   ).toBeTruthy();
   // The Todo header counts all 119 in the result, not the one shown.
   expect(screen.getByText("119")).toBeTruthy();
-  expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
-  const next = screen.getByRole("button", { name: "Next" });
-  expect((next as HTMLButtonElement).disabled).toBe(false);
+  // One paging pattern: "Show 50 more" under the rows (P17).
+  expect(
+    screen.getByRole("button", { name: "Show 50 more tickets" }),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Showing 1–2/)).toBeNull();
   // The list is requested in workflow order and counted with the same filter.
   const asked = bridge.invoke.mock.calls
     .filter(([command]) => command === "find_tickets")
@@ -2030,71 +2036,84 @@ test("Next at the end of a page opens the first ticket of the next page", async 
   ).toBe("true");
 });
 
-test("pressing Next on the last page keeps focus in the pagination, on Previous", async () => {
-  const all = Array.from({ length: 50 }, (_, index) => ({
+test("Show more adds the next page under the rows and keeps the selection", async () => {
+  const all = Array.from({ length: 51 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-KQ${index + 1}`,
+    title: `Ticket ${index + 1}`,
+  }));
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) =>
+      all.slice(args.filter.offset, args.filter.offset + 50),
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: 51 }),
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  const more = screen.getByRole("button", { name: "Show 1 more tickets" });
+  more.focus();
+  fireEvent.click(more);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.getByRole("button", { name: /Ticket 51/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Show \d+ more/ })).toBeNull();
+  // Focus moves to the first new row, never to the document root (BD-09).
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /Ticket 51/ }),
+  );
+  // Showing more is not a new view: the selection stays.
+  expect(screen.getByText("1 selected")).toBeTruthy();
+});
+
+test("Select all reaches every matching ticket, beyond the listed page (list B-02)", async () => {
+  const all = Array.from({ length: 51 }, (_, index) => ({
     ...bulkTicket(1),
     id: String(index + 1),
     reference: `T-KQ${index + 1}`,
   }));
   await renderBulk({
     find_tickets: (args: { filter: { offset: number } }) =>
-      args.filter.offset === 0
-        ? all
-        : [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }],
-    show_ticket: () => all[0],
+      all.slice(args.filter.offset, args.filter.offset + 50),
     count_tickets: () => counted({ todo: 51 }),
   });
-  const next = screen.getByRole("button", { name: "Next" });
-  next.focus();
-  fireEvent.click(next);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
-  });
-  expect((next as HTMLButtonElement).disabled).toBe(true);
-  // Never the document root: the person can keep paging with the keyboard.
-  expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Previous" }),
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select all 50" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Select all 51 matching" }),
   );
+  await act(async () => {});
+  expect(screen.getByText("51 selected")).toBeTruthy();
 });
 
-test("a later page that empties moves back to the last page that exists", async () => {
-  const all = Array.from({ length: 50 }, (_, index) => ({
-    ...bulkTicket(1),
-    id: String(index + 1),
-    reference: `T-KQ${index + 1}`,
-    title: `Ticket ${index + 1}`,
-  }));
-  let total = 51;
-  const offsets: number[] = [];
+test("Shift-click selects the range from the last ticket toggled", async () => {
   await renderBulk({
-    find_tickets: (args: { filter: { offset: number } }) => {
-      offsets.push(args.filter.offset);
-      if (args.filter.offset === 0) return all;
-      return total > 50
-        ? [{ ...bulkTicket(1), id: "51", reference: "T-KQ51" }]
-        : [];
-    },
-    show_ticket: () => all[0],
-    count_tickets: () => counted({ todo: total }),
+    find_tickets: () => [bulkTicket(1), bulkTicket(2), bulkTicket(3)],
   });
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(10);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ3" }), {
+    shiftKey: true,
   });
-  expect(offsets.at(-1)).toBe(50);
-  // The only ticket on page 2 leaves the result (trashed, or closed by an agent).
-  total = 50;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2500);
+  expect(screen.getByText("3 selected")).toBeTruthy();
+});
+
+test("switching to the board drops a selection the board cannot act on (list B-08)", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  act(() => {
+    setPreference("ticketLayout", "board");
   });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
-  expect(offsets.at(-1)).toBe(0);
-  expect(
-    screen.getByText("50", { selector: '.ui-pane-header [data-slot="count"]' }),
-  ).toBeTruthy();
-  expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
+  act(() => {
+    setPreference("ticketLayout", "list");
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.queryByText("1 selected")).toBeNull();
 });
 
 test.each(["ticket", "document", "plan"] as const)(
