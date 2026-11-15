@@ -1,16 +1,21 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Layers, Link2, Network } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
+import { useEffect, useState } from "react";
+import { Layers, Link2, Network, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Item } from "@/components/ui/item";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FailureState } from "@/components/ui/failure-alert";
+import {
+  GraphCanvas,
+  GraphPanel,
+  GraphPanelSection,
+  GraphRow,
+} from "@/components/ui/graph-kit";
+import { IconButton } from "@/components/ui/icon-button";
+import { StatusLineRegion } from "@/components/ui/status-line";
+import { useStatusLine } from "@/components/ui/use-status-line";
 import { Canvas, SelectionPanel } from "@/features/tickets/DependencyGraph";
 import { byReference } from "@/features/tickets/dependency-graph-model";
+import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { useTicketSearch } from "@/features/tickets/useTicketSearch";
 import {
   client,
   type DependencyGraph,
@@ -21,304 +26,39 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { toFailure } from "@/lib/api/bridge-failure";
 import { plansClient } from "@/lib/api/plans";
-import "@/features/tickets/linked-work.css";
-import { Reference } from "@/components/ui/reference";
+import "./plan-dependencies.css";
 
 type GraphTicket = DependencyGraph["nodes"][number];
 
-/** Why a blocker holds its dependent back, in the core's own terms. */
-function reasonFor(status: string) {
-  if (status === "Done") return "Done, so it no longer blocks.";
-  if (status === "Canceled" || status === "Duplicate")
-    return `${status}, but still blocks until this link is removed.`;
-  return `${status}, so it blocks until it is Done.`;
+/** Blockers that are not Done still hold a ticket back. */
+function openBlockers(graph: DependencyGraph, member: GraphTicket) {
+  return graph.edges.filter(
+    (edge) =>
+      edge.dependent === member.reference &&
+      graph.nodes.find((node) => node.reference === edge.blocker)?.status !==
+        "Done",
+  ).length;
 }
 
 /**
- * Why a blocker was refused, in terms of the two tickets rather than the
- * core's one-liner. A loop or a missing ticket is about the choice, so it reads
- * as a field problem and Add waits for another choice; anything else is a
- * failed action. Decided by the failure's kind, never by its message.
+ * A Plan's members and their outside neighbours as one canvas with the graph
+ * kit, and a fixed panel at its right: the Plan's tickets, or the selected
+ * ticket's "Blocked by" and "Blocks" with Remove (Undo in the status line) and
+ * "Add blocker…" through the shared Link ticket dialog. Membership never
+ * changes here.
  */
-function dependencyError(
-  reason: unknown,
-  blocker: string,
-  dependent: string,
-  action: string,
-): { field: string } | { failure: FailureDescription } {
-  const failure = toFailure(reason);
-  if (failure.kind === "cycle") {
-    if (blocker === dependent)
-      return { field: `${dependent} can’t block itself.` };
-    // The core may name the loop: "D already reaches B through X → Y."
-    const through = /\bthrough (.+?)\.?$/.exec(failure.message)?.[1];
-    return {
-      field: `${blocker} already waits on ${dependent}${through ? ` through ${through}` : ""}, so it can’t block it. Choose another ticket.`,
-    };
-  }
-  if (failure.kind === "not_found") return { field: `No ticket ${blocker}.` };
-  return { failure: describeFailure(reason, action) };
-}
-
-function Blockers({
-  member,
-  graph,
-  projects,
-  refresh,
-  onOpen,
-  archived,
-}: {
-  member: GraphTicket;
-  graph: DependencyGraph;
-  projects: Project[];
-  refresh: () => Promise<void>;
-  onOpen: (reference: string) => void;
-  archived: boolean;
-}) {
-  const [query, setQuery] = useState("");
-  const [chosen, setChosen] = useState<Ticket | null>(null);
-  const [error, setError] = useState("");
-  const [failure, setFailure] = useState<{
-    description: FailureDescription;
-    retry: () => void;
-  } | null>(null);
-  const [pending, setPending] = useState(false);
-  const blockers = graph.edges
-    .filter((edge) => edge.dependent === member.reference)
-    .map((edge) => edge.blocker);
-  const dependents = byReference(
-    graph.edges
-      .filter((edge) => edge.blocker === member.reference)
-      .flatMap((edge) =>
-        graph.nodes.filter((node) => node.reference === edge.dependent),
-      ),
-  );
-  const search = useTicketSearch(
-    query,
-    !chosen,
-    (item) =>
-      item.reference !== member.reference && !blockers.includes(item.reference),
-  );
-  async function change(
-    kind: "add_dependency" | "remove_dependency",
-    ref: string,
-  ) {
-    setPending(true);
-    setError("");
-    setFailure(null);
-    try {
-      await client.changeDependency(kind, ref, member.reference);
-      await refresh();
-      return true;
-    } catch (reason) {
-      const refused = dependencyError(
-        reason,
-        ref,
-        member.reference,
-        kind === "add_dependency"
-          ? `add ${ref} as a blocker`
-          : `remove ${ref} as a blocker`,
-      );
-      if ("field" in refused) setError(refused.field);
-      else
-        setFailure({
-          description: refused.failure,
-          retry: () => void change(kind, ref),
-        });
-      return false;
-    } finally {
-      setPending(false);
-    }
-  }
-  async function add(event: FormEvent) {
-    event.preventDefault();
-    if (chosen && (await change("add_dependency", chosen.reference))) {
-      setChosen(null);
-      setQuery("");
-      search.reset();
-    }
-  }
-  const visible = query.trim() ? search.results : [];
-  // Searching for the ticket itself would otherwise look like a broken search.
-  const selfSearch =
-    query.trim().toUpperCase() === member.reference ||
-    (query.trim().length > 2 &&
-      member.title.toLowerCase().includes(query.trim().toLowerCase()) &&
-      visible.length === 0);
+export function PlanDependencies(props: Props) {
   return (
-    <div className="plan-blockers">
-      {blockers.length === 0 ? (
-        <EmptyState size="hint" title={`Nothing blocks ${member.reference}.`} />
-      ) : (
-        <ul aria-label={`Blockers of ${member.reference}`}>
-          {blockers.map((reference) => {
-            const node = graph.nodes.find(
-              (item) => item.reference === reference,
-            );
-            const project = projects.find(
-              (item) => item.id === node?.project_id,
-            );
-            return (
-              <li key={reference}>
-                <div className="plan-blocker-main">
-                  {node && (
-                    <StatusIcon status={node.status} size={14} decorative />
-                  )}
-                  <button type="button" onClick={() => onOpen(reference)}>
-                    <Reference>{reference}</Reference> {node?.title}
-                  </button>
-                  {!archived && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={pending}
-                      aria-label={`Remove blocker ${reference} from ${member.reference}`}
-                      onClick={() =>
-                        void change("remove_dependency", reference)
-                      }
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </div>
-                {node && (
-                  <p className="plan-note">
-                    {[
-                      project?.name,
-                      node.boundary ? "Outside Plan" : null,
-                      reasonFor(node.status),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {dependents.length > 0 && (
-        <>
-          <p className="plan-note">Blocks</p>
-          <ul aria-label={`Tickets blocked by ${member.reference}`}>
-            {dependents.map((item) => (
-              <li key={item.reference}>
-                <div className="plan-blocker-main">
-                  <StatusIcon status={item.status} size={14} decorative />
-                  <button type="button" onClick={() => onOpen(item.reference)}>
-                    <Reference>{item.reference}</Reference> {item.title}
-                    {projects.find((p) => p.id === item.project_id) &&
-                      ` · ${projects.find((p) => p.id === item.project_id)?.name}`}
-                    {item.boundary && " · Outside Plan"}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {!archived && (
-        <form
-          className="plan-blocker-form"
-          onSubmit={(event) => void add(event)}
-        >
-          <Field>
-            <FieldLabel htmlFor="plan-blocker">Add a blocker</FieldLabel>
-            {chosen ? (
-              <div className="link-ticket-chosen">
-                <StatusIcon status={chosen.status} size={14} decorative />
-                <span>
-                  {chosen.reference} {chosen.title}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setChosen(null);
-                    setError("");
-                  }}
-                >
-                  Change ticket
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Input
-                  id="plan-blocker"
-                  aria-invalid={error || search.error ? true : undefined}
-                  value={query}
-                  placeholder="Search tickets by title or reference"
-                  autoComplete="off"
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                    setError("");
-                  }}
-                />
-                {visible.length > 0 && (
-                  <ul className="link-ticket-results" aria-label="Matches">
-                    {visible.map((item) => (
-                      <li key={item.reference}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setChosen(item);
-                            setError("");
-                          }}
-                        >
-                          <StatusIcon
-                            status={item.status}
-                            size={14}
-                            decorative
-                          />
-                          <span className="link-ticket-reference">
-                            {item.reference}
-                          </span>
-                          <span>{item.title}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
-            )}
-            <FieldError>{error || search.error}</FieldError>
-            {!chosen && selfSearch && !error && !search.error && (
-              <p className="plan-note">A ticket can’t block itself.</p>
-            )}
-          </Field>
-          {failure && (
-            <FailureAlert
-              size="compact"
-              failure={failure.description}
-              onRetry={failure.retry}
-            />
-          )}
-          <Button
-            type="submit"
-            size="sm"
-            disabled={pending || !chosen || Boolean(error)}
-          >
-            Add blocker
-          </Button>
-        </form>
-      )}
-    </div>
+    <section className="plan-dependencies" aria-label="Plan dependencies">
+      <StatusLineRegion>
+        <Dependencies {...props} />
+      </StatusLineRegion>
+    </section>
   );
 }
 
-/** A Plan's members and their outside neighbors, without changing membership. */
-export function PlanDependencies({
-  id,
-  revision,
-  projects,
-  refresh,
-  onOpen,
-  onClose,
-  archived = false,
-}: {
+type Props = {
   id: string;
   revision: number;
   projects: Project[];
@@ -328,11 +68,24 @@ export function PlanDependencies({
   onClose: () => void;
   /** The Plan is archived, so its blockers can be read but not changed. */
   archived?: boolean;
-}) {
+};
+
+function Dependencies({
+  id,
+  revision,
+  projects,
+  refresh,
+  onOpen,
+  onClose,
+  archived = false,
+}: Props) {
   const [graph, setGraph] = useState<DependencyGraph | null>(null);
   const [error, setError] = useState<FailureDescription | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
+  const [linking, setLinking] = useState<Ticket | null>(null);
+  const [pending, setPending] = useState(false);
+  const statusLine = useStatusLine();
   useEffect(() => {
     let active = true;
     plansClient.graph(id).then(
@@ -350,186 +103,227 @@ export function PlanDependencies({
       active = false;
     };
   }, [id, revision, attempt]);
-  const members = graph?.nodes.filter((node) => !node.boundary) ?? [];
-  const outside = graph ? graph.nodes.length - members.length : 0;
-  const total = graph?.total_members ?? members.length;
-  const empty =
-    graph !== null && members.length > 0 && graph.edges.length === 0;
-  const key = (
-    <p className="plan-dependencies-key">
-      <span>
-        <svg width="40" height="10" viewBox="0 0 40 10" aria-hidden="true">
-          <line
-            x1="2"
-            y1="5"
-            x2="31"
-            y2="5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          <path d="M30 1.5l7 3.5-7 3.5z" fill="currentColor" />
-        </svg>
-        blocks: arrow points at the ticket that waits
-      </span>
-      <span>
-        <span className="plan-dependencies-key-box" aria-hidden="true" />
-        outside this Plan
-      </span>
-    </p>
-  );
-  return (
-    <section className="plan-dependencies" aria-label="Plan dependencies">
-      {!empty && key}
-      {error && (
+  async function removeBlocker(blocker: string, dependent: string) {
+    setPending(true);
+    try {
+      await client.changeDependency("remove_dependency", blocker, dependent);
+      await refresh();
+      statusLine.show({
+        message: `Removed ${blocker} as a blocker of ${dependent}`,
+        undo: async () => {
+          await client.changeDependency("add_dependency", blocker, dependent);
+          await refresh();
+        },
+      });
+    } catch (reason: unknown) {
+      const failure = describeFailure(reason, `remove ${blocker} as a blocker`);
+      statusLine.show({
+        tone: "error",
+        message: `${failure.title}. ${failure.sentence}`,
+        ...(failure.action === "retry" && {
+          action: {
+            label: "Retry",
+            run: () => removeBlocker(blocker, dependent),
+          },
+        }),
+      });
+    } finally {
+      setPending(false);
+    }
+  }
+  if (error)
+    return (
+      <div className="plan-dependencies-state">
         <FailureState
           failure={error}
           onRetry={() => setAttempt((value) => value + 1)}
         />
-      )}
-      {!graph && !error && (
-        <EmptyState
-          size="inline"
-          role="status"
-          description="Loading dependencies…"
-        />
-      )}
-      {graph && members.length === 0 && (
-        <EmptyState
-          icon={<Layers />}
-          title="No tickets in this Plan"
-          description="Add tickets to the Plan to see how they depend on each other."
-        />
-      )}
-      {graph && members.length > 0 && (
-        <>
-          {graph.edges.length === 0 ? (
-            // Nothing to draw: say what the arrows will mean and how to get one.
-            <div className="plan-dependencies-card">
-              {key}
-              <EmptyState
-                icon={<Network />}
-                title="Nothing blocks anything in this Plan yet"
-                description={`${
-                  members.length === 1
-                    ? `${members[0]?.reference} is its only ticket. `
-                    : `None of its ${members.length} tickets waits on another. `
-                }When one ticket must finish before another, add a blocker and the order appears here.`}
-                action={
-                  !archived && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-expanded={selected === members[0]?.reference}
-                      onClick={() => setSelected(members[0]?.reference ?? null)}
-                    >
-                      <Link2 data-icon="inline-start" aria-hidden="true" />
-                      Add blocker…
-                    </Button>
-                  )
-                }
-              />
-            </div>
-          ) : (
+      </div>
+    );
+  if (!graph)
+    return (
+      <EmptyState
+        size="hint"
+        role="status"
+        title="Loading dependencies…"
+        className="flex-1 self-center"
+      />
+    );
+  const members = byReference(graph.nodes.filter((node) => !node.boundary));
+  const outside = graph.nodes.length - members.length;
+  const total = graph.total_members ?? members.length;
+  const ticket = graph.nodes.find((node) => node.reference === selected);
+  const footnote = [
+    total > members.length
+      ? `Showing ${members.length} of ${total} tickets`
+      : null,
+    outside > 0
+      ? graph.outside_total && graph.outside_total > outside
+        ? `Dashed: ${outside} of ${graph.outside_total} tickets outside this Plan`
+        : `Dashed: ${outside} ${outside === 1 ? "ticket" : "tickets"} outside this Plan`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const canvas =
+    members.length === 0 ? (
+      <GraphCanvas
+        label="Plan dependencies"
+        notice={
+          <EmptyState
+            anchor="center"
+            icon={<Layers />}
+            title="No tickets in this Plan"
+            description={
+              archived
+                ? "This archived Plan has no tickets."
+                : "Add tickets to the Plan to see how they depend on each other."
+            }
+          />
+        }
+      />
+    ) : graph.edges.length === 0 ? (
+      <GraphCanvas
+        label="Plan dependencies"
+        notice={
+          <EmptyState
+            anchor="center"
+            icon={<Network />}
+            title={
+              archived
+                ? "This archived Plan has no blockers"
+                : "Nothing blocks anything in this Plan yet"
+            }
+            description={
+              archived
+                ? "Its tickets can be read but not changed."
+                : "When one ticket must finish before another, add a blocker and the order appears here."
+            }
+            action={
+              !archived && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelected(members[0]?.reference ?? null)}
+                >
+                  <Link2 data-icon="inline-start" aria-hidden="true" />
+                  Add blocker…
+                </Button>
+              )
+            }
+          />
+        }
+      />
+    ) : (
+      <Canvas
+        graph={graph}
+        focus={selected}
+        selected={selected}
+        onSelect={setSelected}
+        label="Plan dependencies"
+        outsideLabel="outside this Plan"
+        footnote={
+          footnote && (
             <>
-              <div className="plan-graph-canvas">
-                <Canvas
-                  graph={graph}
-                  origin=""
-                  selected={selected}
-                  onSelect={setSelected}
-                  projects={projects}
-                  readable
-                />
-              </div>
-              {graph.nodes.find((node) => node.reference === selected) && (
-                <SelectionPanel
-                  ticket={graph.nodes.find(
-                    (node) => node.reference === selected,
-                  )!}
-                  origin=""
-                  projects={projects}
-                  nodes={graph.nodes}
-                  version={graph}
-                  onOpen={onOpen}
-                />
+              {footnote}
+              {total > members.length && (
+                <>
+                  {" · "}
+                  <Button variant="link" size="sm" onClick={onClose}>
+                    See all Plan tickets
+                  </Button>
+                </>
               )}
             </>
-          )}
-          {total > members.length && (
-            <Alert role="status" size="compact">
-              <AlertDescription>
-                Showing {members.length} of {total} tickets.
-              </AlertDescription>
-              <Button variant="outline" size="sm" onClick={onClose}>
-                See all Plan tickets
+          )
+        }
+      />
+    );
+  return (
+    <>
+      {canvas}
+      {ticket ? (
+        <SelectionPanel
+          key={ticket.reference}
+          ticket={ticket}
+          nodes={graph.nodes}
+          version={graph}
+          projects={projects}
+          onOpen={onOpen}
+          onSelect={setSelected}
+          onBack={() => setSelected(null)}
+          backLabel="Plan tickets"
+          {...(!archived && {
+            blockerAction: (reference: string) => (
+              <IconButton
+                label={`Remove blocker ${reference} from ${ticket.reference}`}
+                size="icon-xs"
+                tooltipSide="top"
+                disabled={pending}
+                onClick={() => void removeBlocker(reference, ticket.reference)}
+              >
+                <X />
+              </IconButton>
+            ),
+            addBlocker: (detail: Ticket) => (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-2 self-start"
+                onClick={() => setLinking(detail)}
+              >
+                <Link2 aria-hidden="true" />
+                Add blocker…
               </Button>
-            </Alert>
-          )}
-          {outside > 0 && (
-            <Alert role="status" size="compact">
-              <AlertDescription>
-                {graph.outside_total && graph.outside_total > outside
-                  ? `${outside} of ${graph.outside_total} outside-Plan tickets shown dashed`
-                  : `${outside} outside-Plan ${outside === 1 ? "ticket" : "tickets"} shown dashed`}{" "}
-                · not included in the {total} member tickets
-              </AlertDescription>
-            </Alert>
-          )}
-          {(graph.edges.length > 0 || members.length > 1 || selected) && (
-            <ul className="plan-dependency-rows" aria-label="Plan tickets">
-              {members.map((member) => {
-                // Only blockers that are not Done still hold the ticket back.
-                const count = graph.edges.filter(
-                  (edge) =>
-                    edge.dependent === member.reference &&
-                    graph.nodes.find((node) => node.reference === edge.blocker)
-                      ?.status !== "Done",
-                ).length;
-                const open = selected === member.reference;
-                const label =
-                  count > 0
-                    ? `${count} open ${count === 1 ? "blocker" : "blockers"}`
-                    : archived
-                      ? "No blockers"
-                      : "Add blocker";
-                return (
-                  <li key={member.reference}>
-                    <Item>
-                      <StatusIcon status={member.status} size={14} decorative />
-                      <span className="plan-dependency-title">
-                        <Reference>{member.reference}</Reference> {member.title}
-                      </span>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        aria-expanded={open}
-                        aria-label={`${member.reference}: ${label}`}
-                        onClick={() =>
-                          setSelected(open ? null : member.reference)
+            ),
+          })}
+          note={archived ? "Read-only while archived." : undefined}
+        />
+      ) : (
+        members.length > 0 && (
+          <GraphPanel label="Plan tickets">
+            <GraphPanelSection title="Tickets" count={members.length}>
+              <ul className="plan-dependencies-rows" aria-label="Plan tickets">
+                {members.map((member) => {
+                  const count = openBlockers(graph, member);
+                  return (
+                    <li key={member.reference}>
+                      <GraphRow
+                        icon={
+                          <StatusIcon
+                            status={member.status}
+                            size={16}
+                            decorative
+                          />
                         }
-                      >
-                        <Link2 aria-hidden="true" />
-                        {label}
-                      </Button>
-                    </Item>
-                    {open && (
-                      <Blockers
-                        key={member.reference}
-                        member={member}
-                        graph={graph}
-                        projects={projects}
-                        refresh={refresh}
-                        onOpen={onOpen}
-                        archived={archived}
+                        reference={member.reference}
+                        caption={
+                          count > 0
+                            ? `${count} open ${count === 1 ? "blocker" : "blockers"}`
+                            : "No open blockers"
+                        }
+                        title={member.title}
+                        onClick={() => setSelected(member.reference)}
                       />
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </>
+                    </li>
+                  );
+                })}
+              </ul>
+            </GraphPanelSection>
+          </GraphPanel>
+        )
       )}
-    </section>
+      {linking && (
+        <LinkTicketDialog
+          ticket={linking}
+          initialKind="blocked_by"
+          open
+          onOpenChange={(open) => {
+            if (!open) setLinking(null);
+          }}
+          onLinked={refresh}
+        />
+      )}
+    </>
   );
 }

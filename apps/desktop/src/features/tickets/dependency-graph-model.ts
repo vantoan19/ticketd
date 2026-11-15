@@ -2,7 +2,7 @@ import dagre from "@dagrejs/dagre";
 import type { DependencyGraph } from "@/lib/api/client";
 
 export const NODE_WIDTH = 224;
-export const NODE_HEIGHT = 76;
+export const NODE_HEIGHT = 64;
 
 /** Widest rank drawn on one row; wider ranks wrap onto more rows. */
 export const MAX_PER_ROW = 8;
@@ -94,7 +94,7 @@ export function layoutGraph(graph: DependencyGraph) {
 /** How far a limited graph reaches, or null when nothing was cut off. */
 export function scopeNotice(graph: DependencyGraph, origin: string) {
   if (!graph.truncated) return null;
-  return `This graph is limited. It reaches up to ${graph.max_depth} links from ${origin} and at most ${graph.max_nodes} tickets and ${graph.max_edges} relationships. Some tickets or relationships may be missing. Select a ticket and center the graph on it to explore further.`;
+  return `Showing up to ${graph.max_depth} links from ${origin} and at most ${graph.max_nodes} tickets · center on a ticket to go further`;
 }
 
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -122,11 +122,11 @@ export function boundsOf(
 }
 
 type Padding = { top: number; right: number; bottom: number; left: number };
-/** Leaves room above the first node for the zoom controls. */
+/** Leaves room for the legend above and the zoom control below. */
 export const FIT_PADDING: Padding = {
-  top: 56,
+  top: 52,
   right: 24,
-  bottom: 24,
+  bottom: 52,
   left: 24,
 };
 
