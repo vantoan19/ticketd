@@ -5,7 +5,7 @@
   min-width: 0;
 }
 .context-view-wrapper > .documents-page,
-.context-view-wrapper > .context-graph-page {
+.context-view-wrapper > .cgraph-page {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;

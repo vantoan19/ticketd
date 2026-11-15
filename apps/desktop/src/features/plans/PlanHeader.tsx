@@ -241,7 +241,7 @@ export function PlanHeader({
             {current.archived
               ? openGraph && (
                   <IconButton
-                    label="Open context graph"
+                    label="Open graph"
                     onClick={() => openGraph(plan.id)}
                   >
                     <Network />
@@ -284,7 +284,7 @@ export function PlanHeader({
                       </DropdownMenuItem>
                       {openGraph && (
                         <DropdownMenuItem onSelect={() => openGraph(plan.id)}>
-                          <Network /> Open context graph
+                          <Network /> Open graph
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />

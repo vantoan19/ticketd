@@ -12,7 +12,6 @@ const srcDir = join(__dirname, "..");
 // beat the panel library's inline flex and display on the ticket workspace, or
 // implement reduced motion. The #000 of a mask is alpha, not a color.
 const KNOWN: Record<string, number> = {
-  "features/documents/context-graph.css": 2,
   "features/tickets/ticket-board.css": 4,
   "styles.css": 11,
 };

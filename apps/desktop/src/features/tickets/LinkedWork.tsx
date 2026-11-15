@@ -126,10 +126,12 @@ export function LinkedWork({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => openContextGraph(reference)}
+              onClick={() =>
+                openContextGraph(reference, { dependencies: true })
+              }
             >
               <Network aria-hidden="true" />
-              Open context graph
+              Open graph
             </Button>
           )}
           {!current && (
@@ -257,11 +259,13 @@ export function LinkedWork({
             variant="ghost"
             size="sm"
             onClick={() =>
-              openContextGraph ? openContextGraph(reference) : onOpenGraph()
+              openContextGraph
+                ? openContextGraph(reference, { dependencies: true })
+                : onOpenGraph()
             }
           >
             <Network aria-hidden="true" />
-            {openContextGraph ? "Open context graph" : "Dependencies"}
+            Open graph
           </Button>
         </div>
       </div>

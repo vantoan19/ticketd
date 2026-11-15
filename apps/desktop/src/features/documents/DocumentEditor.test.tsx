@@ -422,7 +422,7 @@ it("saves a draft before opening the context graph without a dialog", async () =
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open context graph" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
   await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");
 });
@@ -502,7 +502,7 @@ it("consumes graph navigation after saving so later edits stay on the Document",
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "First" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open context graph" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
   await act(async () => {});
   expect(graph).toHaveBeenCalledTimes(1);
   fireEvent.change(screen.getByLabelText("Your thought"), {
@@ -1054,7 +1054,7 @@ it("keeps Link a Document, Create ticket and Context graph in Read and Edit", ()
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={vi.fn()} />,
   );
   const names = () =>
-    ["Link a Document", "Create ticket from this", "Open context graph"].map(
+    ["Link a Document", "Create ticket from this", "Open graph"].map(
       (name) => screen.queryByRole("button", { name }) !== null,
     );
   expect(names()).toEqual([true, true, true]);
