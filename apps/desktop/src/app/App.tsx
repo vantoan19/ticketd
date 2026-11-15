@@ -530,7 +530,7 @@ function AppContent() {
                               )}
                             {
                               <div
-                                className="management"
+                                className="management-host"
                                 hidden={
                                   view !== "projects" || graphOrigin !== null
                                 }
@@ -556,7 +556,11 @@ function AppContent() {
                                   plans={plans}
                                   archived={view === "archived-plans"}
                                   onOpen={(id) => scope("all", "all", id)}
-                                  onBrowsePlans={() => setView("plans")}
+                                  onArchivedChange={(archived) =>
+                                    setView(
+                                      archived ? "archived-plans" : "plans",
+                                    )
+                                  }
                                   refresh={refresh}
                                 />
                               )}

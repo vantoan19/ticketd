@@ -1677,18 +1677,9 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   overflow-x: hidden;
   overflow-y: auto;
 }
-.management h1 {
-  font-size: var(--text-title);
-  font-weight: 600;
-  line-height: 32px;
-  letter-spacing: -0.6px;
-  color: var(--foreground);
-}
-.management > p {
-  margin-top: 8px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
+/* Keeps the Projects page mounted while hidden; ManagementPage lays it out. */
+.management-host:not([hidden]) {
+  display: contents;
 }
 .list-controls {
   display: flex;
@@ -1914,18 +1905,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   :root {
     --page-gutter: 16px;
   }
-}
-.management {
-  width: 100%;
-  max-width: 1200px;
-  padding: 32px var(--page-gutter) 48px;
-  overflow-y: auto;
-}
-.management h2 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
 }
 .create-panel {
   width: min(720px, calc(100vw - 32px));
@@ -2186,9 +2165,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   }
 }
 @media (max-width: 440px) {
-  .management {
-    padding-inline: 16px;
-  }
   .detail-header,
   .detail-document,
   .ticket-properties {

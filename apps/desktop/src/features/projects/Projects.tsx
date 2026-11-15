@@ -1,29 +1,49 @@
-import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
-import { Tooltip } from "@/components/ui/tooltip";
-import { useEffect, useState } from "react";
-import { Folder, FolderOpen, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ChevronRight,
+  Copy,
+  Folder,
+  FolderOpen,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Item } from "@/components/ui/item";
+import { CopyButton } from "@/components/ui/copy-button";
+import { Count } from "@/components/ui/count";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert } from "@/components/ui/failure-alert";
-import { Count } from "@/components/ui/count";
-import { PageHeader } from "@/components/ui/page-header";
-import { emptyCopy } from "@/lib/empty-copy";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { CopyButton } from "@/components/ui/copy-button";
+import { ManagementPage, PageHeader } from "@/components/ui/page-header";
+import { PathText } from "@/components/ui/path-text";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCopy } from "@/components/ui/use-copy";
+import {
+  useStatusLine,
+  type StatusLine,
+} from "@/components/ui/use-status-line";
 import { client, type Project } from "@/lib/api/client";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { workspaceClient } from "@/lib/api/workspace";
-import { fileManagerName } from "@/lib/platform";
+import { emptyCopy } from "@/lib/empty-copy";
+import { plural } from "@/lib/format";
 import { nameFromFolder } from "@/lib/paths";
+import { allowRemoval } from "@/lib/removal-guard";
+import { fileManagerName } from "@/lib/platform";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
-import { PathText } from "@/components/ui/path-text";
 import "./projects.css";
 
 type OpenDialog =
@@ -46,116 +66,74 @@ const COUNT_FILTER = {
   offset: 0,
 };
 
-/** "d5b4cc0e…669eae": the ends of an ID, enough to recognise it. */
-function truncateId(id: string) {
-  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-6)}` : id;
+/** "10 tickets · 8 open · 2 checkouts", as far as it is known. */
+function projectMeta(project: Project, count: TicketCount | undefined) {
+  return [
+    count && plural(count.total, "ticket"),
+    count && count.total > 0 && `${count.open} open`,
+    plural(project.paths.length, "checkout"),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
-function ticketsLabel(count: TicketCount | undefined) {
-  if (!count) return "";
-  const noun = count.total === 1 ? "ticket" : "tickets";
-  return `${count.total} ${noun} · ${count.open} open`;
+/** Shows a failure on the page's status line, with Retry when it can work. */
+function reportFailure(
+  statusLine: StatusLine,
+  failure: FailureDescription,
+  retry?: () => unknown,
+) {
+  statusLine.show({
+    tone: "error",
+    message: `${failure.title}. ${failure.sentence}`,
+    ...(retry &&
+      failure.action === "retry" && { action: { label: "Retry", run: retry } }),
+  });
 }
 
+/** One checkout: its path (muted, shortened in the middle) and its actions. */
 function CheckoutRow({
-  project,
   path,
   first,
-  confirming,
-  pending,
-  error,
-  onAsk,
-  onCancel,
-  onConfirm,
+  onRemove,
 }: {
-  project: Project;
   path: string;
   first: boolean;
-  confirming: boolean;
-  pending: boolean;
-  error: FailureDescription | null;
-  onAsk: () => void;
-  onCancel: () => void;
-  onConfirm: () => void;
+  onRemove: () => void;
 }) {
   const manager = fileManagerName();
-  const [revealError, setRevealError] = useState<FailureDescription | null>(
-    null,
-  );
-  if (confirming)
-    return (
-      <div
-        className="checkout-confirm"
-        role="group"
-        aria-label={`Remove checkout ${path}`}
-      >
-        <p>
-          Remove <code>{path}</code> from {project.name}? The command line will
-          no longer infer this project from that folder. The project and its
-          tickets are unchanged.
-        </p>
-        {error && (
-          <FailureAlert size="compact" failure={error} onRetry={onConfirm} />
-        )}
-        <div className="checkout-confirm-actions">
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={pending}
-            onClick={onConfirm}
-          >
-            {pending ? "Removing…" : "Remove checkout"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={pending}
-            onClick={onCancel}
-          >
-            Cancel
-          </Button>
-        </div>
-      </div>
-    );
+  const statusLine = useStatusLine();
+  const reveal = () =>
+    void workspaceClient
+      .reveal(path)
+      .catch((reason) =>
+        reportFailure(
+          statusLine,
+          describeFailure(reason, `show it in ${manager}`),
+          reveal,
+        ),
+      );
   return (
-    <Item>
-      <span className="checkout-text">
+    <li className="checkout-row">
+      <Folder aria-hidden="true" className="checkout-icon" />
+      <span className="checkout-path">
         <PathText path={path} layout="inline" />
-        <span className="checkout-note">
-          {first ? "First checkout" : "Checkout"}
-          {revealError && ` · ${revealError.title}`}
-        </span>
       </span>
-      <CopyButton label="Copy path" subject={path} text={path} />
-      <IconButton
-        type="button"
-        label={`Show ${path} in ${manager}`}
-        onClick={() =>
-          void workspaceClient
-            .reveal(path)
-            .then(() => setRevealError(null))
-            .catch((reason) =>
-              setRevealError(describeFailure(reason, `show it in ${manager}`)),
-            )
-        }
-      >
-        <FolderOpen aria-hidden />
-      </IconButton>
-      {/* One action is a direct button, never a one-item menu. */}
-      <IconButton
-        type="button"
-        label={`Remove checkout ${path}`}
-        onClick={onAsk}
-      >
-        <Trash2 aria-hidden />
-      </IconButton>
-    </Item>
+      {first && <span className="checkout-note">First checkout</span>}
+      <span className="checkout-actions">
+        <CopyButton label="Copy path" subject={path} text={path} />
+        <IconButton label={`Show in ${manager}`} onClick={reveal}>
+          <FolderOpen />
+        </IconButton>
+        <IconButton label="Remove checkout" onClick={onRemove}>
+          <X />
+        </IconButton>
+      </span>
+    </li>
   );
 }
 
-/** Shows the chosen folder, or that none is chosen, beside the picker. */
+/** Shows the chosen folder, or that none is chosen, inside a field frame. */
 function FolderPicker({
   path,
   label,
@@ -183,15 +161,12 @@ function FolderPicker({
     <Field>
       <FieldLabel>{label}</FieldLabel>
       <div className="folder-picker">
-        <Folder
-          aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground"
-        />
+        <Folder aria-hidden="true" className="folder-picker-icon" />
         <span className="folder-path" data-empty={!path}>
           {path ? <PathText path={path} layout="inline" /> : "No folder chosen"}
         </span>
         <Button type="button" variant="outline" size="sm" onClick={choose}>
-          {path ? "Change…" : "Choose folder…"}
+          {path ? "Change…" : "Choose…"}
         </Button>
       </div>
       {hint && <small className="folder-hint">{hint}</small>}
@@ -206,6 +181,12 @@ function FolderPicker({
   );
 }
 
+/**
+ * The Projects page (DESIGN.md section 10): a management page of calm project
+ * rows (icon, name, "10 tickets · 8 open · 2 checkouts", Open tickets, one
+ * "…") that open to their checkouts. Removing a checkout acts at once with
+ * Undo; write failures stay in their dialog.
+ */
 export function Projects({
   projects,
   loading,
@@ -221,7 +202,10 @@ export function Projects({
   /** Opens the tickets that belong to no project. */
   onShowUnassigned?: () => void;
 }) {
+  const statusLine = useStatusLine();
+  const { copy } = useCopy();
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // Drafts survive closing a dialog; a successful save discards them.
   const [newPath, setNewPath] = useState("");
   const [newName, setNewName] = useState<string | undefined>(undefined);
@@ -231,16 +215,11 @@ export function Projects({
   );
   // A failed write: shown above the dialog footer, never on a valid field.
   const [error, setError] = useState<FailureDescription | null>(null);
-  const [pending, setPending] = useState("");
-  const [confirming, setConfirming] = useState<{
-    id: string;
-    path: string;
-  } | null>(null);
-  const [removeError, setRemoveError] = useState<FailureDescription | null>(
-    null,
-  );
+  const [pending, setPending] = useState(false);
   const [counts, setCounts] = useState<Record<string, TicketCount>>({});
   const [unassigned, setUnassigned] = useState(0);
+  // A second click lands on the row that moved up: ignore it for 400ms (P7).
+  const lastRemoval = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -289,24 +268,19 @@ export function Projects({
     setError(null);
     setDialog(next);
   }
-  /** Runs a write, refreshes, and reports whether it all succeeded. */
-  async function run(
-    key: string,
-    fn: () => Promise<unknown>,
-    action: string,
-    fail: (failure: FailureDescription | null) => void,
-  ) {
-    setPending(key);
-    fail(null);
+  /** Runs a dialog's write, refreshes, and reports whether it all succeeded. */
+  async function save(fn: () => Promise<unknown>, action: string) {
+    setPending(true);
+    setError(null);
     try {
       await fn();
       await onChange();
       return true;
     } catch (reason) {
-      fail(describeFailure(reason, action));
+      setError(describeFailure(reason, action));
       return false;
     } finally {
-      setPending("");
+      setPending(false);
     }
   }
   function drop(
@@ -322,11 +296,9 @@ export function Projects({
     });
   }
   async function createProject() {
-    const saved = await run(
-      "save",
+    const saved = await save(
       () => client.createProject(newNameValue.trim(), newPath),
       "create the project",
-      setError,
     );
     if (!saved) return;
     setNewPath("");
@@ -335,11 +307,9 @@ export function Projects({
   }
   async function renameProject() {
     if (!renaming) return;
-    const saved = await run(
-      "save",
+    const saved = await save(
       () => client.editProject(renaming.id, renameValue.trim(), renaming.path),
       "rename the project",
-      setError,
     );
     if (!saved) return;
     drop(setRenames, renaming.id);
@@ -347,24 +317,51 @@ export function Projects({
   }
   async function registerCheckout() {
     if (!checkoutProject) return;
-    const saved = await run(
-      "checkout",
+    const saved = await save(
       () => client.registerCheckout(checkoutProject.id, checkoutPath),
       "register the checkout",
-      setError,
     );
     if (!saved) return;
     drop(setCheckoutDrafts, checkoutProject.id);
+    setExpanded((old) => ({ ...old, [checkoutProject.id]: true }));
     setDialog(null);
   }
+  /** Removing a checkout is reversible (register it again): act, then Undo. */
   async function removeCheckout(project: Project, path: string) {
-    const removed = await run(
-      "remove",
-      () => client.removeCheckout(project.id, path),
-      "remove the checkout",
-      setRemoveError,
+    if (!allowRemoval(lastRemoval)) return;
+    const folder =
+      path
+        .replace(/[\\/]+$/, "")
+        .split(/[\\/]/)
+        .pop() || path;
+    try {
+      await client.removeCheckout(project.id, path);
+      await onChange();
+      statusLine.show({
+        message: `Removed checkout ${folder}`,
+        undo: async () => {
+          await client.registerCheckout(project.id, path);
+          await onChange();
+        },
+      });
+    } catch (reason) {
+      reportFailure(
+        statusLine,
+        describeFailure(reason, `remove the checkout ${folder}`),
+        () => removeCheckout(project, path),
+      );
+    }
+  }
+  async function copyId(project: Project) {
+    const done = await copy("Project ID", project.id);
+    statusLine.show(
+      done
+        ? { message: `Copied the project ID of ${project.name}` }
+        : {
+            tone: "error",
+            message: "Couldn't copy the project ID. Your clipboard refused it.",
+          },
     );
-    if (removed) setConfirming(null);
   }
 
   const newProject = (
@@ -373,24 +370,29 @@ export function Projects({
       New project
     </Button>
   );
-  const saving = pending === "save" || pending === "checkout";
+  const blocked = pending ? "Saving…" : null;
 
   return (
-    <section className="projects-column" aria-label="Project management">
+    <ManagementPage aria-labelledby="projects-heading">
       <PageHeader
         title="Projects"
+        titleId="projects-heading"
         {...(projects.length > 0 && {
           count: <Count>{projects.length}</Count>,
           actions: newProject,
         })}
-        lede="A project is a repository. Its identity survives moves and renames, and each checkout lets the command line infer the project from the folder you are in."
+        lede="A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in."
       />
-      {loading ? (
-        <EmptyState
-          size="inline"
+      {loading && projects.length === 0 ? (
+        <div
+          className="project-skeleton"
           role="status"
-          description="Loading projects…"
-        />
+          aria-label="Loading projects"
+        >
+          {[0, 1, 2].map((key) => (
+            <Skeleton key={key} className="project-skeleton-row" />
+          ))}
+        </div>
       ) : projects.length === 0 ? (
         <EmptyState
           icon={<Folder aria-hidden />}
@@ -399,121 +401,128 @@ export function Projects({
           action={newProject}
         />
       ) : (
-        <ul className="projects-list" aria-label="Projects">
-          {projects.map((item) => (
-            <li key={item.id}>
-              <Card asChild>
-                <section aria-labelledby={`project-${item.id}-name`}>
-                  <CardHeader asChild>
-                    <div className="project-card-header">
+        <ul className="project-list" aria-label="Projects">
+          {projects.map((item) => {
+            const isOpen = expanded[item.id] ?? false;
+            const checkouts = `project-${item.id}-checkouts`;
+            return (
+              <li
+                key={item.id}
+                className="project-row"
+                data-open={isOpen || undefined}
+              >
+                <div className="project-row-main">
+                  <h2 className="project-row-heading">
+                    <button
+                      type="button"
+                      className="project-row-toggle"
+                      aria-expanded={isOpen}
+                      aria-controls={checkouts}
+                      onClick={() =>
+                        setExpanded((old) => ({ ...old, [item.id]: !isOpen }))
+                      }
+                    >
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="project-row-chevron"
+                      />
                       <ProjectIcon
                         project={{ id: item.id, title: item.name }}
                         size={20}
                       />
-                      <h2 id={`project-${item.id}-name`}>{item.name}</h2>
-                      <span className="project-tickets">
-                        {ticketsLabel(counts[item.id])}
+                      <span className="project-row-text">
+                        <span className="project-row-name">{item.name}</span>
+                        <span className="project-row-meta">
+                          {projectMeta(item, counts[item.id])}
+                        </span>
                       </span>
-                      <span className="projects-spacer" />
-                      {onOpenTickets && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="project-open-tickets"
-                          aria-label={`Open tickets of ${item.name}`}
-                          onClick={() => onOpenTickets(item)}
-                        >
-                          Open tickets
-                        </Button>
-                      )}
-                      <IconButton
-                        type="button"
-                        label={`Rename project ${item.name}`}
-                        onClick={() => open({ kind: "rename", id: item.id })}
-                      >
-                        <Pencil aria-hidden />
-                      </IconButton>
-                    </div>
-                  </CardHeader>
-                  <CardBody asChild>
-                    <div className="project-card-body">
-                      <span className="project-label">Checkouts</span>
-                      {item.paths.length === 0 ? (
-                        <p className="settings-hint">
-                          No registered checkouts. Register one so the command
-                          line can infer {item.name} from its folder.
-                        </p>
-                      ) : (
-                        <ul
-                          className="checkout-list"
-                          aria-label={`Checkouts of ${item.name}`}
-                        >
-                          {item.paths.map((path) => (
-                            <li key={path}>
-                              <CheckoutRow
-                                project={item}
-                                path={path}
-                                first={path === item.path}
-                                confirming={
-                                  confirming?.id === item.id &&
-                                  confirming.path === path
-                                }
-                                pending={pending === "remove"}
-                                error={removeError}
-                                onAsk={() => {
-                                  setRemoveError(null);
-                                  setConfirming({ id: item.id, path });
-                                }}
-                                onCancel={() => setConfirming(null)}
-                                onConfirm={() =>
-                                  void removeCheckout(item, path)
-                                }
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                    </button>
+                  </h2>
+                  <span className="project-row-actions">
+                    {onOpenTickets && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="register-checkout"
-                        aria-label={`Register checkout for ${item.name}`}
+                        aria-label={`Open tickets of ${item.name}`}
+                        onClick={() => onOpenTickets(item)}
+                      >
+                        Open tickets
+                      </Button>
+                    )}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <IconButton label={`Actions for ${item.name}`}>
+                          <MoreHorizontal />
+                        </IconButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() => open({ kind: "rename", id: item.id })}
+                        >
+                          <Pencil /> Rename…
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => void copyId(item)}>
+                          <Copy /> Copy project ID
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            open({ kind: "checkout", id: item.id })
+                          }
+                        >
+                          <Plus /> Register checkout…
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </span>
+                </div>
+                <div
+                  id={checkouts}
+                  className="project-checkouts"
+                  hidden={!isOpen}
+                >
+                  {item.paths.length === 0 ? (
+                    <p className="project-checkouts-empty">
+                      No checkouts. Register one so the command line finds{" "}
+                      {item.name} from its folder.{" "}
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="inline"
                         onClick={() => open({ kind: "checkout", id: item.id })}
                       >
-                        <Plus aria-hidden />
                         Register checkout…
                       </Button>
-                    </div>
-                  </CardBody>
-                  <CardFooter asChild>
-                    <div className="project-card-footer">
-                      <span>Project ID</span>
-                      <Tooltip content={item.id}>
-                        <code tabIndex={0}>{truncateId(item.id)}</code>
-                      </Tooltip>
-                      <CopyButton label="Copy project ID" text={item.id} />
-                      <span className="projects-spacer" />
-                      <span>
-                        Used by <code>ticketd list --project</code>
-                      </span>
-                    </div>
-                  </CardFooter>
-                </section>
-              </Card>
-            </li>
-          ))}
+                    </p>
+                  ) : (
+                    <ul
+                      className="checkout-list"
+                      aria-label={`Checkouts of ${item.name}`}
+                    >
+                      {item.paths.map((path) => (
+                        <CheckoutRow
+                          key={path}
+                          path={path}
+                          first={path === item.path}
+                          onRemove={() => void removeCheckout(item, path)}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
       {unassigned > 0 && onShowUnassigned && (
         <p className="projects-unassigned">
-          {unassigned} {unassigned === 1 ? "ticket has" : "tickets have"} no
+          {plural(unassigned, "ticket")} {unassigned === 1 ? "has" : "have"} no
           project.{" "}
           <Button
             type="button"
             variant="link"
-            size="sm"
+            size="inline"
             onClick={onShowUnassigned}
           >
             Show {unassigned === 1 ? "it" : "them"}
@@ -526,14 +535,23 @@ export function Projects({
         title="New project"
         description="Start from the repository folder on this computer."
         primaryLabel="Create project"
+        busy={pending}
         blockedReason={
-          saving
-            ? "Saving…"
-            : !newPath
-              ? "Choose a folder to continue"
-              : !newNameValue.trim()
-                ? "Enter a project name."
-                : null
+          blocked ??
+          (!newPath
+            ? "Choose a folder to continue."
+            : !newNameValue.trim()
+              ? "Enter a project name."
+              : null)
+        }
+        error={
+          error && (
+            <FailureAlert
+              size="compact"
+              failure={error}
+              onRetry={() => void createProject()}
+            />
+          )
         }
         onSubmit={() => void createProject()}
       >
@@ -542,41 +560,40 @@ export function Projects({
             label="Repository folder"
             path={newPath}
             title="Choose the repository folder"
-            hint="Choose it with the button. It becomes the first checkout."
+            hint="It becomes the project's first checkout."
             onChoose={setNewPath}
           />
           <Field>
             <FieldLabel htmlFor="project-name">Name</FieldLabel>
             <Input
               id="project-name"
-              className="project-name-input"
               value={newNameValue}
-              placeholder="Filled in from the folder name"
+              placeholder="e.g. Desktop app"
               autoComplete="off"
               onChange={(e) => setNewName(e.target.value)}
             />
           </Field>
-          {error && (
-            <FailureAlert
-              size="compact"
-              failure={error}
-              onRetry={() => void createProject()}
-            />
-          )}
         </div>
       </DialogShell>
       <DialogShell
         open={!!renaming}
         onOpenChange={(next) => !next && setDialog(null)}
+        size="sm"
         title="Rename project"
-        description="Its identity stays the same, and so do its tickets."
+        description="Its tickets and checkouts stay with it."
         primaryLabel="Save name"
+        busy={pending}
         blockedReason={
-          saving
-            ? "Saving…"
-            : !renameValue.trim()
-              ? "Enter a project name."
-              : null
+          blocked ?? (!renameValue.trim() ? "Enter a project name." : null)
+        }
+        error={
+          error && (
+            <FailureAlert
+              size="compact"
+              failure={error}
+              onRetry={() => void renameProject()}
+            />
+          )
         }
         onSubmit={() => void renameProject()}
       >
@@ -592,26 +609,26 @@ export function Projects({
             }
           />
         </Field>
-        {error && (
-          <FailureAlert
-            size="compact"
-            failure={error}
-            onRetry={() => void renameProject()}
-          />
-        )}
       </DialogShell>
       <DialogShell
         open={!!checkoutProject}
         onOpenChange={(next) => !next && setDialog(null)}
         title="Register checkout"
-        description={`Another folder where ${checkoutProject?.name ?? "this project"} lives on this computer.`}
+        description={`Choose another folder where ${checkoutProject?.name ?? "this project"} is checked out.`}
         primaryLabel="Register checkout"
+        busy={pending}
         blockedReason={
-          saving
-            ? "Saving…"
-            : !checkoutPath
-              ? "Choose the checkout folder to continue."
-              : null
+          blocked ??
+          (!checkoutPath ? "Choose the checkout folder to continue." : null)
+        }
+        error={
+          error && (
+            <FailureAlert
+              size="compact"
+              failure={error}
+              onRetry={() => void registerCheckout()}
+            />
+          )
         }
         onSubmit={() => void registerCheckout()}
       >
@@ -627,14 +644,7 @@ export function Projects({
             }))
           }
         />
-        {error && (
-          <FailureAlert
-            size="compact"
-            failure={error}
-            onRetry={() => void registerCheckout()}
-          />
-        )}
       </DialogShell>
-    </section>
+    </ManagementPage>
   );
 }
