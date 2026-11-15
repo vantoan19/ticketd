@@ -59,7 +59,7 @@
   text-align: left;
 }
 .chat-row:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .chat-row[aria-current="true"] {
   background: var(--accent);

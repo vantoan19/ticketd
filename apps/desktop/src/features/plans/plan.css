@@ -217,7 +217,7 @@
   border-radius: var(--radius);
 }
 .plan-index-list li:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .plan-index-list li > button:first-child {
   display: flex;

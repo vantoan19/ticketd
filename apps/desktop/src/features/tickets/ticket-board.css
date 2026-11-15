@@ -79,7 +79,7 @@
   box-shadow: var(--shadow-border-base);
 }
 .ui-button.board-card:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .ui-button.board-card[aria-pressed="true"] {
   background: var(--accent);

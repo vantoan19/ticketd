@@ -99,15 +99,17 @@
   pointer-events: auto;
 }
 .graph-node:hover {
-  background: var(--muted);
+  background: var(--hover);
 }
-/* Selection is a solid ring; keyboard focus is the offset focus ring. */
+/* Selection is the accent fill with a 1px interactive ring; keyboard focus is
+   the offset focus outline. */
 .graph-node[data-selected] {
-  box-shadow: 0 0 0 2px var(--foreground);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--interactive);
 }
 .graph-node:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 .graph-node-line {
   display: flex;

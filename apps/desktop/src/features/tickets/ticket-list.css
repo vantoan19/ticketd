@@ -17,7 +17,7 @@
   border-radius: 0;
 }
 .ticket-rows li:hover {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .ticket-rows li:has(.ticket-row[aria-pressed="true"]) {
   background: var(--accent);

@@ -292,7 +292,7 @@ The sidebar sits on the canvas surface, top to bottom:
 - **Title bar:** on Windows the app draws its own 32px title bar on the canvas in place of the native one. It is the window's drag handle, and double-clicking it maximizes; Minimize, Maximize or Restore, and Close sit at its end, and Close turns the system red on hover. The window keeps its native resize edges and shadow. macOS keeps its transparent native bar.
 - **Collapse:** a button beside New ticket collapses the sidebar to a 52px rail of icons. Like a navigation rail, it holds a few fixed destinations and never scrolls. Inbox, the three ticket views, Documents and Workspace graph keep their icons. Projects and Plans each fold into one icon that opens a menu of the group's entries and its manage action. Each label becomes its icon's tooltip, counts hide, and an unread dot moves to the icon's corner. The window's minimum size, 480 by 600, keeps the rail whole.
 
-Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
+Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses the `--accent` fill and primary text, plus semantic current-state markup. Inactive rows use secondary text; hover promotes the text and uses the quieter `--recessed` fill, so a hovered row never looks current. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
 
 ### Approved deviations from the base design
 
@@ -315,7 +315,8 @@ Use stable columns: selection, status, reference, title, then the source pill of
 - Status color appears only as the small dot beside a word, never as an icon tint or fill.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
 - An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
-- Row hover uses a quieter fill than selection. Hover actions also appear on focus; essential actions cannot be hover-only.
+- Row hover uses `--hover` (`#F7F7F7` light, `#1F1F1F` dark), quieter than the `--accent` selection and distinct from the recessed group header. Hover actions also appear on focus; essential actions cannot be hover-only.
+- Interaction states follow one matrix. Selectable rows and cards (tickets, Inbox entries, Documents, Plans, Chats, graph lists) hover on `--hover`, and the open or selected one uses `--accent` with `aria-current` or `aria-selected`. Controls (ghost and outline buttons, rail rows, menu items) hover on `--accent`. Pressed toggles and open triggers keep the `--accent` fill with primary text (`aria-pressed`, `[data-state=open]`); the inverted primary fill is reserved for one primary action per surface. A segmented control's chosen segment is `--surface` with the small elevation in light and `--accent` in dark, where the surface is darker than the track. Nav rows on the canvas hover on `--recessed`. Disabled controls use `--disabled-foreground` with no opacity; filled ones keep `--recessed`.
 
 There is no permanent “0 selected” bar. When tickets are selected, show a compact action bar with the count, Change status, Organize, and Clear selection. Organize exposes project, Plan, and explicit tag addition/removal choices. Do not display four inline forms and their submit buttons at once. Keep the count visible after validation errors; show which ticket prevents the batch and state that nothing changed.
 
@@ -545,8 +546,8 @@ Compose a control before inventing another. Inputs, buttons, menus, fields, noti
 | Rest           | Clear label, semantic surface and foreground, stable dimensions                               |
 | Hover          | Subtle neutral fill or border change; no translation or scaling                               |
 | Keyboard focus | Visible outline ring independent of hover and selection (section 4)                           |
-| Pressed/open   | Persistent selected treatment and semantic expanded/pressed state                             |
-| Disabled       | Native disabled semantics, no activation, readable label; explain a non-obvious restriction   |
+| Pressed/open   | `--accent` fill and semantic expanded/pressed state; never the primary fill                   |
+| Disabled       | Native disabled semantics, no activation, readable label without opacity; explain why         |
 | Pending        | Preserve width, show progress text/icon, block duplicate submission, retain the draft         |
 | Invalid        | Field-level message and invalid semantics; never only a red outline                           |
 | Failure        | Actionable local error with retry where possible; distinguish failed saves from saved content |

@@ -159,9 +159,12 @@
   border-bottom: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.context-graph-list li:hover,
-.context-graph-list li:focus-within {
-  background: color-mix(in srgb, var(--muted) 60%, transparent);
+.context-graph-list li:hover {
+  background: var(--hover);
+}
+/* Selected: the accent fill and primary text, stronger than hover. */
+.context-graph-list li:has(> button[aria-current="true"]) {
+  background: var(--accent);
 }
 .context-graph-kind {
   grid-column: 1;

@@ -412,6 +412,15 @@
 .ui-button-link:hover {
   text-decoration: underline;
 }
+/* Pressed toggles and open triggers: the accent fill with primary text, never
+   the inverted primary fill (DESIGN.md section 6, state matrix). */
+.ui-button-outline[aria-pressed="true"],
+.ui-button-ghost[aria-pressed="true"],
+.ui-button-outline[data-state="open"],
+.ui-button-ghost[data-state="open"] {
+  color: var(--foreground);
+  background: var(--accent);
+}
 .ui-button-destructive {
   color: var(--destructive);
   background: var(--surface);
@@ -495,6 +504,21 @@
 [data-slot="choice-tile"][data-state="checked"]
   [data-slot="choice-tile-radio"] {
   box-shadow: inset 0 0 0 5px var(--interactive);
+}
+/* Dark: --surface is darker than the --recessed track, so the chosen segment
+   rises on --accent instead. */
+:where(:root[data-theme="dark"], [data-theme-preview="dark"])
+  [data-slot="segmented-control"]:not([data-theme-preview="light"] *)
+  [role="radio"][data-state="checked"] {
+  background: var(--accent);
+}
+/* A disabled switch keeps its shape at full strength: a recessed track and a
+   disabled-foreground thumb, no opacity. */
+[data-slot="switch"]:disabled {
+  background: var(--recessed);
+}
+[data-slot="switch"]:disabled > [data-slot="switch-thumb"] {
+  background: var(--disabled-foreground);
 }
 [data-slot="command-block"] {
   box-shadow: inset 0 0 0 1px var(--border);
@@ -1212,7 +1236,8 @@ html[data-window-bar] {
   color: var(--muted-foreground);
 }
 .sidebar-nav button:hover {
-  background: var(--accent);
+  /* Hover is quieter than the current row (--accent). */
+  background: var(--recessed);
   color: var(--foreground);
 }
 .sidebar-nav button[data-active="true"] {

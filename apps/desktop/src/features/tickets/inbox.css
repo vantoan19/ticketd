@@ -41,7 +41,7 @@
 }
 .inbox-entry:hover,
 .inbox-entry:focus-within {
-  background: var(--recessed);
+  background: var(--hover);
 }
 .inbox-dot {
   display: flex;
