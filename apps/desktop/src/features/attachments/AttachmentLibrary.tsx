@@ -1,14 +1,17 @@
 import { useRef, useState } from "react";
-import { ChevronRight, Plus, Settings } from "lucide-react";
+import { Paperclip, Plus, SearchX, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { SearchInput } from "@/components/ui/search-input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Time } from "@/components/ui/time";
+import { emptyCopy } from "@/lib/empty-copy";
 import {
   attachments,
   type Attachment,
   type AttachmentState,
 } from "@/lib/api/attachments";
-import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { AttachmentCleanup } from "./AttachmentCleanup";
 import { PurgeAttachment } from "./PurgeAttachment";
 import { RemoveRemoteAttachment } from "./RemoveRemoteAttachment";
@@ -53,67 +56,75 @@ export function AttachmentLibrary({
       .map(({ attachment }) => attachment.id),
   );
   const [downloadError, setDownloadError] = useState("");
+  // An empty library, not an empty result: nothing to search or filter yet.
+  const bare =
+    !loading &&
+    !error &&
+    files.length === 0 &&
+    !search &&
+    state === "all" &&
+    offset === 0;
   return (
     <div className="attachment-workspace">
-      <div className="attachment-library-bar">
-        <nav aria-label="Attachment location">
-          <span>Workspace</span>
-          <ChevronRight aria-hidden="true" />
-          <span aria-current="page">Attachments</span>
-        </nav>
-        {onOpenSettings && (
-          <Button variant="ghost" size="sm" onClick={onOpenSettings}>
-            <Settings aria-hidden="true" />
-            Storage settings
-          </Button>
-        )}
-      </div>
       <section className="attachment-library" aria-label="Attachment library">
-        <header>
-          <div>
-            <h1>Attachments</h1>
-            <p>Files used across your tickets and Documents.</p>
-          </div>
-          <div className="attachment-actions">
-            <Button
-              ref={cleanupTrigger}
-              variant="outline"
-              onClick={() => setCleanup(true)}
-            >
-              Clean up
-            </Button>
-            <Button onClick={() => setPicker(true)}>
-              <Plus aria-hidden="true" />
-              Add files
-            </Button>
-          </div>
-        </header>
-        <div className="attachment-library-tools">
-          <Input
-            type="search"
-            aria-label="Search files"
-            placeholder="Search files…"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setOffset(0);
-            }}
-          />
-          <SegmentedControl
-            aria-label="File usage"
-            value={state}
-            onValueChange={(next) => {
-              setState(next);
-              setOffset(0);
-            }}
-            options={[
-              { value: "all", label: "All files" },
-              { value: "in_use", label: "In use" },
-              { value: "unused", label: "Unused" },
-              { value: "quarantined", label: "Quarantine" },
-            ]}
-          />
-        </div>
+        <PageHeader
+          title="Attachments"
+          lede="Files used across your tickets and Documents."
+          actions={
+            <>
+              {onOpenSettings && (
+                <Button variant="ghost" size="sm" onClick={onOpenSettings}>
+                  <Settings aria-hidden="true" />
+                  Storage settings
+                </Button>
+              )}
+              {!bare && (
+                <Button
+                  ref={cleanupTrigger}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCleanup(true)}
+                >
+                  Clean up
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setPicker(true)}>
+                <Plus aria-hidden="true" />
+                Add files
+              </Button>
+            </>
+          }
+          // Chrome rule (P9): no search or usage filter over an empty library.
+          {...(!bare && {
+            toolbar: (
+              <>
+                <SearchInput
+                  aria-label="Search files"
+                  placeholder="Search files…"
+                  value={search}
+                  onValueChange={(value) => {
+                    setSearch(value);
+                    setOffset(0);
+                  }}
+                />
+                <SegmentedControl
+                  aria-label="File usage"
+                  value={state}
+                  onValueChange={(next) => {
+                    setState(next);
+                    setOffset(0);
+                  }}
+                  options={[
+                    { value: "all", label: "All files" },
+                    { value: "in_use", label: "In use" },
+                    { value: "unused", label: "Unused" },
+                    { value: "quarantined", label: "Quarantine" },
+                  ]}
+                />
+              </>
+            ),
+          })}
+        />
         {error && <p role="alert">{error}</p>}
         {restoreError && <p role="alert">{restoreError}</p>}
         {loading ? (
@@ -194,12 +205,7 @@ export function AttachmentLibrary({
                       </td>
                       <td data-label="Added">
                         {file.added_at ? (
-                          <time
-                            dateTime={file.added_at}
-                            title={formatDateTime(file.added_at)}
-                          >
-                            {relativeDateTime(file.added_at)}
-                          </time>
+                          <Time value={file.added_at} />
                         ) : (
                           <span title="No registration date was recorded">
                             Unknown
@@ -280,26 +286,54 @@ export function AttachmentLibrary({
               </table>
             </div>
             {downloadError && <p role="alert">{downloadError}</p>}
-            {!files.length && <p>No matching files</p>}
-            <footer>
-              <span>Search covers filenames and available metadata</span>
-              <div className="attachment-actions">
-                <Button
-                  variant="ghost"
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - 50))}
-                >
-                  Previous files
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={files.length < 50}
-                  onClick={() => setOffset(offset + 50)}
-                >
-                  Next files
-                </Button>
-              </div>
-            </footer>
+            {!files.length && (
+              <EmptyState
+                icon={search ? <SearchX /> : <Paperclip />}
+                {...(search
+                  ? {
+                      title: emptyCopy("attachments-search", { query: search })
+                        .title,
+                      description: emptyCopy("attachments-search").sentence,
+                      action: (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSearch("");
+                            setOffset(0);
+                          }}
+                        >
+                          Clear search
+                        </Button>
+                      ),
+                    }
+                  : {
+                      title: emptyCopy("attachments").title,
+                      description: emptyCopy("attachments").sentence,
+                    })}
+              />
+            )}
+            {(files.length > 0 || offset > 0) && (
+              <footer>
+                <span>Search covers filenames and available metadata</span>
+                <div className="attachment-actions">
+                  <Button
+                    variant="ghost"
+                    disabled={offset === 0}
+                    onClick={() => setOffset(Math.max(0, offset - 50))}
+                  >
+                    Previous files
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={files.length < 50}
+                    onClick={() => setOffset(offset + 50)}
+                  >
+                    Next files
+                  </Button>
+                </div>
+              </footer>
+            )}
           </>
         )}
         <AttachmentPicker

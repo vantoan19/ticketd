@@ -121,6 +121,10 @@ const COPY = {
     sentence: "A Chat runs an agent on your tickets and code.",
     action: "New Chat",
   },
+  "chats-trash": {
+    title: "Trash is empty",
+    sentence: "Chats you move to Trash wait here.",
+  },
   "chats-archived": {
     title: "Archived Chats wait here until you unarchive them.",
     sentence: "",

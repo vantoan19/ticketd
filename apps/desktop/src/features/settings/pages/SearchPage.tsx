@@ -1,3 +1,4 @@
+import { emptyCopy } from "@/lib/empty-copy";
 import { Fragment, useEffect, useId, useMemo, useRef } from "react";
 import { ChevronRight, Search, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -174,8 +175,8 @@ export function SearchPage() {
           <SettingsList>
             <EmptyState
               icon={<Search />}
-              title={`No settings match “${needle}”`}
-              description="Search looks at setting names, descriptions and related words."
+              title={emptyCopy("settings-search", { query: needle }).title}
+              description={emptyCopy("settings-search").sentence}
               action={shortcuts.map((shortcut) => (
                 <Button
                   key={shortcut.id}

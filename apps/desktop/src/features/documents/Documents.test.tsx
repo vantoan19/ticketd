@@ -268,7 +268,7 @@ it("an empty Documents list offers Capture inside the empty state", async () => 
       target={null}
     />,
   );
-  await screen.findByText("No recent Documents");
+  await screen.findByText("No recently opened Documents");
   const captures = screen.getAllByRole("button", { name: "Capture" });
   expect(captures).toHaveLength(2);
   fireEvent.click(captures[1]!);

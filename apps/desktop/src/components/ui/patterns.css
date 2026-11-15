@@ -212,12 +212,17 @@
   }
 }
 
-/* Page header (Plans, Projects, Attachments): a management page's title,
-   lede and one primary, on the 32px gutter (16px narrow). */
+/* Management page and its header (Plans, Projects, Attachments): one
+   column at most 960px, left-aligned on the page gutter. */
 .ui-management-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
   width: 100%;
   max-width: 960px;
-  padding: 32px 32px 48px;
+  min-height: 0;
+  padding: 32px var(--page-gutter) 48px;
+  overflow-y: auto;
 }
 .ui-page-header {
   display: flex;
@@ -244,7 +249,11 @@
   font-weight: 600;
   line-height: var(--text-title-line);
   letter-spacing: -0.6px;
+  overflow-wrap: anywhere;
   text-wrap: balance;
+}
+.ui-page-header-title > h1:focus {
+  outline: none;
 }
 .ui-page-header-lede {
   max-width: 560px;
@@ -258,6 +267,7 @@
   flex: none;
   align-items: center;
   gap: 8px;
+  padding-top: 4px;
 }
 .ui-page-toolbar {
   display: flex;
@@ -265,14 +275,6 @@
   align-items: center;
   gap: 8px;
   margin-top: 16px;
-}
-.ui-page-body {
-  margin-top: 24px;
-}
-@media (max-width: 768px) {
-  .ui-management-page {
-    padding-inline: 16px;
-  }
 }
 
 /* Return crumb: "← Origin /" in a pane header's leading slot. */

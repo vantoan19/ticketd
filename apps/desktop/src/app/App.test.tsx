@@ -93,7 +93,9 @@ test("Attachments opens from the existing Context navigation without replacing t
   expect(
     await screen.findByRole("heading", { name: "Attachments" }),
   ).toBeTruthy();
-  expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
+  // An empty library says so, with no search over nothing (P9).
+  expect(await screen.findByText("No attachments yet")).toBeTruthy();
+  expect(screen.queryByRole("searchbox", { name: "Search files" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
   expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
 });

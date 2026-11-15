@@ -182,7 +182,6 @@ export function AttachmentCleanup({
             )}
             {rows.some((row) => !row.eligible) && (
               <Disclosure
-                className="attachment-cleanup-protected"
                 label="Protected or unavailable"
                 count={rows.filter((row) => !row.eligible).length}
               >

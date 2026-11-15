@@ -136,7 +136,7 @@ test("an empty Inbox explains itself and offers to browse tickets", async () => 
   store = [];
   const onBrowse = vi.fn();
   render(<Inbox revision={0} select={vi.fn()} onBrowse={onBrowse} />);
-  await screen.findByText("Nothing in your Inbox");
+  await screen.findByText("No updates to review");
   const mark = screen.getByRole("button", { name: "Mark shown as read" });
   expect(mark.hasAttribute("disabled")).toBe(true);
   fireEvent.click(

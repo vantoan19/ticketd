@@ -1,3 +1,4 @@
+import { emptyCopy } from "@/lib/empty-copy";
 import { SectionHeader } from "@/components/ui/section-header";
 import { ContextGraphNavigation } from "./navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -427,8 +428,8 @@ export function Documents({
               trash.length === 0 && (
                 <EmptyState
                   icon={<Trash2 />}
-                  title="Trash is empty"
-                  description="Documents you move to Trash wait here until you restore them."
+                  title={emptyCopy("documents-trash").title}
+                  description={emptyCopy("documents-trash").sentence}
                   action={
                     <Button
                       variant="outline"
@@ -538,8 +539,8 @@ export function Documents({
                   allOffset === 0 && (
                     <EmptyState
                       icon={<FileText />}
-                      title="No Documents yet"
-                      description="Capture a thought or create a Document to start."
+                      title={emptyCopy("documents-all").title}
+                      description={emptyCopy("documents-all").sentence}
                       action={captureAction}
                     />
                   )
@@ -576,8 +577,8 @@ export function Documents({
                   recentOffset === 0 && (
                     <EmptyState
                       icon={<FileText />}
-                      title="No recent Documents"
-                      description="Your captured thoughts will appear here."
+                      title={emptyCopy("documents-recent").title}
+                      description={emptyCopy("documents-recent").sentence}
                       action={captureAction}
                     />
                   )

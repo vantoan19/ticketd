@@ -124,7 +124,7 @@ test("explicit local cleanup reviews protections and restores quarantine", async
   await screen.findByRole("dialog", { name: "Review unused attachments" });
   await screen.findByRole("checkbox", { name: "Select Unused trace" });
   const protections = screen.getByRole("button", {
-    name: /^Protected or unavailable\s*1$/
+    name: /^Protected or unavailable\s*1$/,
   });
   expect(protections.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(protections);
@@ -273,7 +273,7 @@ test("library searches core metadata and state and opens the chosen stable file"
   fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
     target: { value: "no match" },
   });
-  await screen.findByText("No matching files");
+  await screen.findByText("No attachments match “no match”");
 });
 
 test("adding files to the library offers storage without an insertion into nowhere", async () => {

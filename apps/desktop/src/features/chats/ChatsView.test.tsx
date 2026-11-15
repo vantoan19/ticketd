@@ -727,9 +727,7 @@ test("archive keeps the work running; trash stops it and restore re-runs nothing
   openMenu("Chat actions");
   fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
   expect(await screen.findByRole("button", { name: "Unarchive" })).toBeTruthy();
-  expect(
-    await screen.findByText("No Chats yet. Start one with New Chat."),
-  ).toBeTruthy();
+  expect(await screen.findByText("No Chats yet")).toBeTruthy();
   expect(button("Stop")).toBeTruthy();
   expect((await client.openChat("kept")).chat.activity).toBe("working");
 

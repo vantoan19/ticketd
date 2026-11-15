@@ -5,6 +5,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Count } from "@/components/ui/count";
+import { ManagementPage, PageHeader } from "@/components/ui/page-header";
+import { emptyCopy } from "@/lib/empty-copy";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import "./plan.css";
 
@@ -30,6 +33,7 @@ export function PlanList({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const shown = plans.filter((item) => item.archived === archived);
+  const empty = emptyCopy(archived ? "plans-archived" : "plans");
 
   async function act(change: () => Promise<unknown>) {
     setPending(true);
@@ -62,13 +66,17 @@ export function PlanList({
     }
   }
   return (
-    <section className="plan-index" aria-labelledby="plan-index-heading">
-      <h1 id="plan-index-heading">{archived ? "Archived Plans" : "Plans"}</h1>
-      <p className="plan-note">
-        {archived
-          ? "Archived Plans are hidden from the sidebar. Their tickets stay searchable and unchanged."
-          : "Group tickets around a shared objective, across projects."}
-      </p>
+    <ManagementPage aria-labelledby="plan-index-heading">
+      <PageHeader
+        title={archived ? "Archived Plans" : "Plans"}
+        titleId="plan-index-heading"
+        {...(shown.length > 0 && { count: <Count>{shown.length}</Count> })}
+        lede={
+          archived
+            ? "Archived Plans are hidden from the sidebar. Their tickets stay searchable and unchanged."
+            : "Group tickets around a shared objective, across projects."
+        }
+      />
       {!archived && (
         <form className="plan-create" onSubmit={(event) => void create(event)}>
           <Field data-invalid={nameError ? true : undefined}>
@@ -96,30 +104,16 @@ export function PlanList({
         </Alert>
       )}
       {shown.length === 0 ? (
+        // The create form above already fills this page; no second action.
         <EmptyState
           icon={<Layers />}
-          title={archived ? "No archived Plans" : "No Plans yet"}
-          description={
-            archived
-              ? "Plans you archive are kept here, read-only."
-              : "A Plan groups tickets toward one goal. Create one above."
-          }
+          title={empty.title}
+          description={empty.sentence}
           action={
-            archived ? (
-              onBrowsePlans && (
-                <Button variant="outline" size="sm" onClick={onBrowsePlans}>
-                  Back to Plans
-                </Button>
-              )
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  document.getElementById("plan-create-name")?.focus()
-                }
-              >
-                Name a Plan
+            archived &&
+            onBrowsePlans && (
+              <Button variant="outline" size="sm" onClick={onBrowsePlans}>
+                Show active Plans
               </Button>
             )
           }
@@ -151,6 +145,6 @@ export function PlanList({
           ))}
         </ul>
       )}
-    </section>
+    </ManagementPage>
   );
 }

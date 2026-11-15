@@ -61,7 +61,7 @@ export function SegmentedControl<T extends string>({
           )}
         >
           {option.icon}
-          <span className="truncate">{option.label}</span>
+          <span className="truncate">{option.label}</span>{" "}
           {option.count !== undefined && <Count>{option.count}</Count>}
         </RadioGroup.Item>
       ))}

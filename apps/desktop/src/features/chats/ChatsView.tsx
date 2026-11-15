@@ -1,10 +1,14 @@
+import { EmptyState } from "@/components/ui/empty-state";
+import { emptyCopy } from "@/lib/empty-copy";
 import { useContext, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   BellOff,
   Check,
   ChevronDown,
+  MessagesSquare,
   SquarePen,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reference } from "@/components/ui/reference";
@@ -38,27 +42,17 @@ import { chatTime, emphasised } from "@/features/chats/model";
 import { NewChat } from "@/features/chats/NewChat";
 import { useChatFeature, useChatList } from "@/features/chats/use-chats";
 
-const SCOPES: { id: Retention; menu: string; title: string; empty: string }[] =
-  [
-    {
-      id: "active",
-      menu: "Active",
-      title: "Chats",
-      empty: "No Chats yet. Start one with New Chat.",
-    },
-    {
-      id: "archived",
-      menu: "Archived",
-      title: "Archived",
-      empty: "No archived Chats.",
-    },
-    {
-      id: "trashed",
-      menu: "Trash",
-      title: "Trash",
-      empty: "No Chats in Trash.",
-    },
-  ];
+const SCOPES: { id: Retention; menu: string; title: string }[] = [
+  { id: "active", menu: "Active", title: "Chats" },
+  { id: "archived", menu: "Archived", title: "Archived" },
+  { id: "trashed", menu: "Trash", title: "Trash" },
+];
+/** The empty list per scope; New Chat is already in the header (P9). */
+const EMPTY = {
+  active: "chats",
+  archived: "chats-archived",
+  trashed: "chats-trash",
+} as const;
 /** The list pane's 360px plus the detail pane's 480px: below this one pane shows. */
 const STACK_MIN_WIDTH = 840;
 const PANEL_STYLE = {
@@ -378,7 +372,7 @@ export function ChatsView({
         </p>
       )}
       {list && !list.error && list.chats.length === 0 && (
-        <p className="chat-list-empty">{current?.empty}</p>
+        <ChatListEmpty scope={scope} />
       )}
       <ul className="chat-rows" aria-label="Chats">
         {list?.chats.map((chat, index) => (
@@ -459,5 +453,18 @@ export function ChatsView({
         </div>
       )}
     </div>
+  );
+}
+
+function ChatListEmpty({ scope }: { scope: Retention }) {
+  const copy = emptyCopy(EMPTY[scope]);
+  if (scope === "archived")
+    return <EmptyState size="hint" className="my-12" title={copy.title} />;
+  return (
+    <EmptyState
+      icon={scope === "trashed" ? <Trash2 /> : <MessagesSquare />}
+      title={copy.title}
+      description={copy.sentence}
+    />
   );
 }

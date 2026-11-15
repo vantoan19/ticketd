@@ -1,3 +1,4 @@
+import { emptyCopy } from "@/lib/empty-copy";
 import { useEffect, useState } from "react";
 import {
   AlarmClock,
@@ -371,10 +372,9 @@ export function Inbox({
           filter === "all" &&
           !error && (
             <EmptyState
-              className="p-0 pb-10 md:p-0 md:pb-10"
               icon={<InboxIcon />}
-              title="Nothing in your Inbox"
-              description="Changes on tickets you follow, and reminders that come due, appear here."
+              title={emptyCopy("inbox-all").title}
+              description={emptyCopy("inbox-all").sentence}
               action={
                 <Button variant="outline" size="sm" onClick={onBrowse}>
                   Browse tickets to follow

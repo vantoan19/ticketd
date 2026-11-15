@@ -11,6 +11,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Count } from "@/components/ui/count";
+import { PageHeader } from "@/components/ui/page-header";
+import { emptyCopy } from "@/lib/empty-copy";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +25,6 @@ import { nameFromFolder } from "@/lib/paths";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { PathText } from "@/components/ui/path-text";
 import "./projects.css";
-import { SectionHeader } from "@/components/ui/section-header";
 
 type OpenDialog =
   | { kind: "project" }
@@ -359,17 +361,14 @@ export function Projects({
 
   return (
     <section className="projects-column" aria-label="Project management">
-      <SectionHeader
-        level={1}
+      <PageHeader
         title="Projects"
-        count={projects.length > 0 ? projects.length : undefined}
-        actions={projects.length > 0 && newProject}
+        {...(projects.length > 0 && {
+          count: <Count>{projects.length}</Count>,
+          actions: newProject,
+        })}
+        lede="A project is a repository. Its identity survives moves and renames, and each checkout lets the command line infer the project from the folder you are in."
       />
-      <p className="projects-description">
-        A project is a repository. Its identity survives moves and renames, and
-        each checkout lets the command line infer the project from the folder
-        you are in.
-      </p>
       {loading ? (
         <EmptyState
           size="inline"
@@ -379,8 +378,8 @@ export function Projects({
       ) : projects.length === 0 ? (
         <EmptyState
           icon={<Folder aria-hidden />}
-          title="No projects yet"
-          description="Add a repository to link tickets to it and let the command line pick it from a registered checkout."
+          title={emptyCopy("projects").title}
+          description={emptyCopy("projects").sentence}
           action={newProject}
         />
       ) : (
