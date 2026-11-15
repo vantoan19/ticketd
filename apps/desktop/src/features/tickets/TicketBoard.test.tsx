@@ -1575,7 +1575,7 @@ test("board cards and their status actions announce the current status once", as
   await settle();
   await showBoard();
   expect(
-    screen.getByRole("button", { name: "T-KQ2 In review Ticket 2" }),
+    screen.getByRole("button", { name: "T-KQ2 In review Ticket 2 No project" }),
   ).toBeTruthy();
   const trigger = screen.getByRole("button", {
     name: "Change status of T-KQ2, current status: In review",
@@ -1588,7 +1588,7 @@ test("board cards and their status actions announce the current status once", as
   fireEvent.click(screen.getByRole("menuitemradio", { name: "Done" }));
   await settle(20);
   expect(
-    screen.getByRole("button", { name: "T-KQ2 Done Ticket 2" }),
+    screen.getByRole("button", { name: "T-KQ2 Done Ticket 2 No project" }),
   ).toBeTruthy();
   expect(
     screen.getByRole("button", {

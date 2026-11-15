@@ -140,7 +140,7 @@
 }
 /* The card being dragged leaves a dashed slot; so does a card that moved
    at once, until the core confirms it. */
-.board-card-container[data-dragging] [data-board-reference] {
+.board-card-container[data-dragging] > * {
   visibility: hidden;
 }
 [data-board-slot] {
@@ -248,7 +248,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 8px 10px;
+  padding: 0;
 
   transform: scale(1.02) rotate(-1.2deg);
   animation: board-lift var(--dur-lift) var(--ease-out);

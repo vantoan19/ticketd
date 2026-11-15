@@ -478,14 +478,23 @@ export function TicketBoard({
             variant="lift"
             data-board-drag-preview=""
             aria-hidden="true"
+            inert
             style={{
               left: drag.x - drag.offsetX,
               top: drag.y - drag.offsetY,
               width: drag.width,
             }}
           >
-            <Reference>{drag.ticket.reference}</Reference>
-            <span className="board-card-title">{drag.ticket.title}</span>
+            <BoardCard
+              ticket={drag.ticket}
+              workspace={workspace}
+              scope={scope}
+              selected={false}
+              dragging={false}
+              needsReview={needsReview.has(drag.ticket.id)}
+              onPointerDown={() => {}}
+              onClick={() => {}}
+            />
           </Card>
           <p className="sr-only" role="status">
             {drag.target
@@ -611,7 +620,7 @@ function BoardCard({
         </span>{" "}
         <Tooltip content={ticket.title} overflowOnly>
           <span className="board-card-title">{ticket.title}</span>
-        </Tooltip>
+        </Tooltip>{" "}
         <span className="board-card-meta">
           {agentState && <span className="board-card-state">{agentState}</span>}
           {needsReview ? (
