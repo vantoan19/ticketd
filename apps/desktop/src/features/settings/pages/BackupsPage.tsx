@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Archive,
-  Check,
-  CircleAlert,
-  FolderOpen,
-  Loader2,
-  Minus,
-} from "lucide-react";
+import { Check, Minus } from "lucide-react";
 import { client } from "@/lib/api/client";
 import {
   describeFailure,
@@ -15,14 +8,12 @@ import {
 import { workspaceClient, type BackupRecord } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
-import { IconButton } from "@/components/ui/icon-button";
+import { PathText } from "@/components/ui/path-text";
+import { RevealButton } from "@/components/ui/reveal-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
-import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
-import { revealFile } from "@/lib/reveal";
-import { PathText } from "@/components/ui/path-text";
-import { lineFailure, localDate } from "@/features/settings/settings-format";
+import { localDate } from "@/features/settings/settings-format";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import { sectionMeta } from "@/features/settings/settings-sections";
@@ -32,7 +23,6 @@ import {
   SettingsList,
   SettingsListFooter,
   SettingsRow,
-  SettingsRowTile,
 } from "@/features/settings/layout/SettingsList";
 import "@/features/settings/restore-review.css";
 
@@ -41,75 +31,44 @@ type LastBackup =
   | { status: "failed" }
   | { status: "ready"; record: BackupRecord | null };
 
-const CONTAINS = [
+/** What a backup holds, in words: the icons beside them stay neutral. */
+const INCLUDED = [
   {
     title: "The whole workspace",
     detail: "Tickets, Documents, Plans, Projects, activity and evidence",
-    included: true,
   },
   {
     title: "Local attachment files",
     detail: "Every retained file stored on this computer",
-    included: true,
-  },
-  {
-    title: "Files in Google Drive",
-    detail: "Kept as references and metadata, not copied",
-    included: false,
   },
   {
     title: "An integrity check",
     detail: "Run on the saved copy before it is marked Checked",
-    included: true,
+  },
+] as const;
+const NOT_INCLUDED = [
+  {
+    title: "Files in Google Drive",
+    detail: "Kept as links and their details, not copied",
   },
 ] as const;
 
+/** The first row: the last backup's file and its Checked status, or why there is none. */
 function LastBackupRow({
   last,
-  busy,
-  onBackUp,
   onRetry,
-  onReveal,
+  onRevealFailure,
 }: {
   last: LastBackup;
-  busy: boolean;
-  onBackUp: () => void;
   onRetry: () => void;
-  onReveal: (path: string) => void;
+  onRevealFailure: (failure: FailureDescription | null) => void;
 }) {
-  const backUp = (
-    <Button
-      type="button"
-      disabled={busy || last.status === "loading"}
-      onClick={onBackUp}
-    >
-      {busy ? "Backing up…" : "Back up now…"}
-    </Button>
-  );
-  if (busy)
-    return (
-      <div role="status">
-        <SettingsRow
-          leading={
-            <SettingsRowTile>
-              <Loader2 size={20} className="animate-spin" />
-            </SettingsRowTile>
-          }
-          title="Backing up…"
-          description="Copying the workspace and its local attachment files, then checking the copy."
-          trailing={backUp}
-        />
-      </div>
-    );
   if (last.status === "loading")
     return (
       <div role="status" aria-label="Checking for the last backup">
-        <SettingsRow
-          leading={<SettingsRowTile>{null}</SettingsRowTile>}
-          trailing={backUp}
-        >
-          <Skeleton className="h-2.5 w-45" />
-          <Skeleton className="mt-2 h-2 w-70" />
+        <SettingsRow title="Last backup">
+          <Skeleton className="mt-1 h-2.5 w-60" />
+          <Skeleton className="mt-1.5 h-2 w-40" />
         </SettingsRow>
       </div>
     );
@@ -117,20 +76,16 @@ function LastBackupRow({
     return (
       <div role="alert">
         <SettingsRow
-          leading={
-            <SettingsRowTile>
-              <CircleAlert size={20} className="backups-icon-error" />
-            </SettingsRowTile>
+          title={
+            <StatusLabel tone="attention">
+              Couldn't load the last backup
+            </StatusLabel>
           }
-          title="Couldn't read the last backup"
-          description="The backups themselves are fine. Retry, or back up now."
+          description="The backups themselves are fine."
           trailing={
-            <>
-              <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
-                Retry
-              </Button>
-              {backUp}
-            </>
+            <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
+              Retry
+            </Button>
           }
         />
       </div>
@@ -138,48 +93,31 @@ function LastBackupRow({
   if (!last.record)
     return (
       <SettingsRow
-        leading={
-          <SettingsRowTile>
-            <Archive size={20} className="backups-icon-muted" />
-          </SettingsRowTile>
-        }
         title="No backups yet"
         description="Your first backup will be listed here with its date."
-        trailing={backUp}
       />
     );
   const { record } = last;
   return (
     <SettingsRow
-      leading={
-        <SettingsRowTile>
-          <Archive size={20} />
-        </SettingsRowTile>
-      }
       title={
-        <span className="backups-title-line">
-          {formatDateTime(record.completed_at)}
+        <>
+          Last backup
+          <span className="backups-when">
+            {" · "}
+            {formatDateTime(record.completed_at)}
+          </span>
+        </>
+      }
+      // The file name whole on line one; the folder under it gives way in the
+      // middle, with the full path on hover. The row keeps its height.
+      description={<PathText path={record.path} />}
+      trailing={
+        <>
           <StatusLabel tone="checked" size="caption">
             Checked
           </StatusLabel>
-        </span>
-      }
-      description={
-        // The file name whole on its own line; the folder under it gives way
-        // in the middle, with the full path on hover.
-        <span className="backups-last-path">
-          <PathText path={record.path} />
-        </span>
-      }
-      trailing={
-        <>
-          <IconButton
-            label={`Show in ${fileManagerName()}`}
-            onClick={() => onReveal(record.path)}
-          >
-            <FolderOpen aria-hidden="true" />
-          </IconButton>
-          {backUp}
+          <RevealButton path={record.path} onFailure={onRevealFailure} />
         </>
       }
     />
@@ -240,6 +178,8 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
         setFailure(describeFailure(reason, "save the backup"));
         return;
       }
+      // The Last backup row's Checked says it; this line is for screen
+      // readers, unless the row could not be updated.
       setMessage(
         recorded
           ? "Backup saved and checked."
@@ -260,10 +200,6 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
       setBusy(false);
     }
   }
-  async function reveal(path: string) {
-    const failure = await revealFile(path);
-    if (failure) setFailure(lineFailure(failure));
-  }
   async function chooseBackup() {
     setFailure(null);
     try {
@@ -275,60 +211,45 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
       setFailure(describeFailure(reason, "open the file dialog"));
     }
   }
+  const quiet = message === "Backup saved and checked.";
   return (
     <>
-      <SettingsSection title="Last backup">
-        <SettingsList>
+      <div className="settings-section">
+        <SettingsList aria-label="Backups" role="group">
           <LastBackupRow
             last={last}
-            busy={busy}
-            onBackUp={() => void backUp()}
             onRetry={() => void loadLast()}
-            onReveal={(path) => void reveal(path)}
+            onRevealFailure={setFailure}
           />
-          <SettingsListFooter>
-            Each backup goes to a new file you choose. A backup never replaces
-            an existing file.
-            {failure && <FailureAlert size="compact" failure={failure} />}
-            <p role="status" className="backups-message">
-              {message}
-            </p>
-          </SettingsListFooter>
-        </SettingsList>
-      </SettingsSection>
-
-      <SettingsSection title="What a backup contains">
-        <SettingsList>
-          <ul className="backups-contains">
-            {CONTAINS.map((item) => (
-              <li key={item.title}>
-                {item.included ? (
-                  <Check size={16} aria-hidden="true" className="included" />
-                ) : (
-                  <Minus size={16} aria-hidden="true" className="excluded" />
-                )}
-                <span>
-                  <span className="backups-contains-title">{item.title}</span>
-                  <span className="backups-contains-detail">{item.detail}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </SettingsList>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Restore"
-        caption="Replaces this workspace with a backup. You review what it contains first, and a safety backup of the current workspace is saved before anything changes."
-      >
-        <SettingsList>
           <SettingsRow
-            title="Restore from a backup"
-            description="Choose a backup file saved by this version of ticketd or an earlier one."
+            title="Back up now"
+            description={
+              <span aria-live="polite">
+                {busy
+                  ? "Copying the workspace and its local attachment files, then checking the copy."
+                  : "Saves a checked copy to a new file you choose. It never replaces an existing file."}
+              </span>
+            }
             trailing={
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
+                disabled={busy || last.status === "loading"}
+                onClick={() => void backUp()}
+              >
+                {busy ? "Backing up…" : "Back up now…"}
+              </Button>
+            }
+          />
+          <SettingsRow
+            title="Restore from a backup"
+            description="Replaces this workspace after a review. A safety backup of it is saved first."
+            trailing={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 disabled={busy}
                 onClick={() => void chooseBackup()}
               >
@@ -336,10 +257,52 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
               </Button>
             }
           />
+          {(failure || (message && !quiet)) && (
+            <SettingsListFooter>
+              {failure ? (
+                <FailureAlert size="compact" failure={failure} />
+              ) : (
+                message
+              )}
+            </SettingsListFooter>
+          )}
+        </SettingsList>
+        <p role="status" className="sr-only">
+          {quiet ? message : ""}
+        </p>
+      </div>
+
+      <SettingsSection title="What a backup contains">
+        <SettingsList>
+          <div className="backups-contains">
+            {[
+              { heading: "Included", items: INCLUDED, Icon: Check },
+              { heading: "Not included", items: NOT_INCLUDED, Icon: Minus },
+            ].map(({ heading, items, Icon }) => (
+              <div key={heading} className="backups-contains-column">
+                <p className="backups-contains-heading">{heading}</p>
+                <ul aria-label={heading}>
+                  {items.map((item) => (
+                    <li key={item.title}>
+                      <Icon size={16} aria-hidden="true" />
+                      <span>
+                        <span className="backups-contains-title">
+                          {item.title}
+                        </span>
+                        <span className="backups-contains-detail">
+                          {item.detail}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </SettingsList>
       </SettingsSection>
 
-      <SafetyBackups key={restoredCount} />
+      <SafetyBackups key={restoredCount} onRestore={setRestoring} />
 
       {restoring !== null && (
         <RestoreDialog
@@ -360,7 +323,7 @@ export function BackupsPage({ onRestore }: { onRestore: () => Promise<void> }) {
   return (
     <SettingsPage
       {...sectionMeta("backups")}
-      lede="Complete copies of this workspace, checked after they are saved, that you can restore later."
+      lede="Save a checked copy of this workspace, and restore one later."
     >
       <BackupsContent onRestore={onRestore} />
     </SettingsPage>
