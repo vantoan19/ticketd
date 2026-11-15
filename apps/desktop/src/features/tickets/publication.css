@@ -181,14 +181,6 @@
   font-size: var(--text-ui);
   line-height: 20px;
 }
-.rail-publish-link {
-  padding: 0;
-  color: var(--link-foreground);
-  text-decoration: none;
-}
-.rail-publish-link:hover {
-  text-decoration: underline;
-}
 .publication-inline-actions {
   display: flex;
   flex-wrap: wrap;
@@ -220,34 +212,8 @@
   min-width: 0;
 }
 
-.rail-source .ui-button.rail-publish-link {
-  margin-left: 0;
-  padding: 0;
-}
-.rail-source-actions [data-variant="link"] {
-  color: var(--link-foreground);
-  text-decoration: none;
-  padding-inline: 0;
-}
-
 /* A fixed repository is still essential preview content, so keep it readable. */
 .publication-repository[data-readonly]:disabled {
   color: var(--foreground);
   background: var(--surface);
-}
-
-/* An inline link in a rail note: one 12px/16px caption, the link inline with
-   the sentence. The focus ring is a box-shadow and may pass over the next line. */
-.rail-note .rail-publish-link {
-  display: inline;
-  height: auto;
-  min-height: 0;
-  font-size: inherit;
-  line-height: inherit;
-  vertical-align: baseline;
-  border-radius: var(--radius-segment);
-}
-.rail-source .rail-note .ui-button.rail-publish-link {
-  padding: 0;
-  margin: 0;
 }

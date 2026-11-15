@@ -160,7 +160,7 @@ test("a failed takeover says why and a retry reuses the same request id", async 
   expect(ids[0]).toBe(ids[1]);
 });
 
-test("the rail offers Take ownership only while the source is unavailable, and local tickets show provenance only", () => {
+test("the rail never offers Take ownership (the unavailable notice does), and local tickets show provenance only", () => {
   bridge.invoke.mockResolvedValue([]);
   const props = {
     projects: [],
@@ -174,8 +174,8 @@ test("the rail offers Take ownership only while the source is unavailable, and l
   const section = () =>
     screen.getByRole("heading", { name: "Source" }).closest("section")!;
   expect(
-    within(section()).getByRole("button", { name: /Take ownership/ }),
-  ).toBeTruthy();
+    within(section()).queryByRole("button", { name: /Take ownership/ }),
+  ).toBeNull();
   rerender(
     <TicketProperties
       ticket={ticket({

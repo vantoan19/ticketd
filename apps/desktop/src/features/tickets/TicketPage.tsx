@@ -1,16 +1,16 @@
-import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
-import { Follow } from "@/features/tickets/Inbox";
+import { FollowToggle } from "@/features/tickets/Attention";
 import { Reminder } from "@/features/tickets/Reminder";
-import { RailSection } from "@/features/tickets/RailSection";
+import { RailPlacement } from "@/features/tickets/rail-placement";
 import { LinkedChats } from "@/features/chats/LinkedChats";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
-import { TicketDocuments } from "@/features/tickets/TicketDocuments";
-import { TicketAttachments } from "@/features/tickets/TicketAttachments";
+import { TicketFiles } from "@/features/tickets/TicketFiles";
 import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
@@ -25,6 +25,8 @@ import { NeedsReviewNotice } from "@/features/sync-review/NeedsReviewNotice";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import { externalSource, sourceState } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
+import { useSourcesConfigured } from "@/features/tickets/use-publication-preview";
+import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
 import type { Project, Ticket } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 
@@ -35,6 +37,7 @@ export function TicketPage({
   ticket,
   active,
   narrow = false,
+  outsideResults = false,
   projects,
   plans,
   revision,
@@ -49,8 +52,10 @@ export function TicketPage({
   ticket: Ticket;
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
-  /** Too narrow for the rail: its controls fold into a chip bar under the title. */
+  /** Too narrow for the rail: it folds into a property strip under the title. */
   narrow?: boolean;
+  /** The ticket is not among the list's current results. */
+  outsideResults?: boolean;
   projects: Project[];
   plans: Plan[];
   revision: number;
@@ -66,6 +71,8 @@ export function TicketPage({
   const now = useNow();
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(ticket, revision, refresh, active);
+  const sourcesConfigured = useSourcesConfigured();
+  const trash = useTicketTrash(updateTicket, refresh);
   // Pages stay mounted while hidden and the shared scrollers keep their
   // offset, so showing a ticket starts it at the top: document, rail, detail.
   const page = useRef<HTMLDivElement>(null);
@@ -96,6 +103,15 @@ export function TicketPage({
     original && source && original.display.startsWith(`${source.place}#`)
       ? original.display.slice(source.place.length)
       : original?.display;
+  const updated = ticket.updated_at && (
+    <Tooltip content={formatDateTime(ticket.updated_at)} side="bottom">
+      <time dateTime={ticket.updated_at} tabIndex={0}>
+        {relativeDateTime(ticket.updated_at, now)}
+      </time>
+    </Tooltip>
+  );
+  // One line under the title. Until a source is set up every ticket is local,
+  // so it says only when it changed (DESIGN.md section 7).
   const stateLine = (
     <p className="ticket-state-line">
       {source && state ? (
@@ -141,55 +157,37 @@ export function TicketPage({
             </>
           )}
         </>
+      ) : sourcesConfigured || ticket.source ? (
+        <span>Local ticket{updated && <> · updated {updated}</>}</span>
       ) : (
-        <span>
-          Local ticket
-          {ticket.updated_at && (
-            <>
-              {" "}
-              · updated{" "}
-              <Tooltip
-                content={formatDateTime(ticket.updated_at)}
-                side="bottom"
-              >
-                <time dateTime={ticket.updated_at} tabIndex={0}>
-                  {relativeDateTime(ticket.updated_at, now)}
-                </time>
-              </Tooltip>
-            </>
-          )}
-        </span>
+        updated && <span>Updated {updated}</span>
       )}
+      {outsideResults && <span>Not in the current results</span>}
     </p>
   );
   // The source owns the title and description, so they are read, never edited.
   const contentLocked = Boolean(source?.content_locked);
-  const attention = active && !ticket.trashed && (
-    <>
-      <Follow
-        key={`follow-${ticket.reference}`}
-        reference={ticket.reference}
-        revision={revision}
-        chip={narrow}
-      />
-      <Reminder
-        key={`reminder-${ticket.reference}`}
-        reference={ticket.reference}
-        revision={revision}
-        {...(narrow && { variant: "outline" as const })}
-      />
-    </>
-  );
-  const attachments = active && (
-    <TicketAttachments
+  const attentionFor = (variant: "rail" | "strip") =>
+    active &&
+    !ticket.trashed && (
+      <>
+        <FollowToggle
+          key={`follow-${ticket.reference}`}
+          reference={ticket.reference}
+          revision={revision}
+          variant={variant}
+        />
+        <Reminder
+          key={`reminder-${ticket.reference}`}
+          reference={ticket.reference}
+          revision={revision}
+          variant={variant}
+        />
+      </>
+    );
+  const files = active && (
+    <TicketFiles
       key={ticket.reference}
-      ticket={ticket}
-      revision={revision}
-      refresh={refresh}
-    />
-  );
-  const documents = active && !ticket.trashed && (
-    <TicketDocuments
       ticket={ticket}
       revision={revision}
       refresh={refresh}
@@ -209,14 +207,15 @@ export function TicketPage({
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
-  // Folded, the rail's controls sit under the title in rail order.
-  const stateAndChips = (
+  // Folded, the rail's values sit under the title as one strip, in rail order.
+  const stateAndStrip = (
     <>
       {stateLine}
       {narrow && (
         <TicketProperties
-          layout="chips"
+          layout="strip"
           chats={chats}
+          attention={attentionFor("strip")}
           ticket={ticket}
           active={active}
           revision={revision}
@@ -226,9 +225,7 @@ export function TicketPage({
           refresh={refresh}
           onOpenTicket={select}
           onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
-        >
-          {attention}
-        </TicketProperties>
+        />
       )}
     </>
   );
@@ -243,6 +240,24 @@ export function TicketPage({
           the breakpoint never remounts an open review and drops its state. */}
       {active && !ticket.trashed && <LinkedWorkDialogs work={work} />}
       <div className="detail-document">
+        {/* One notice for the whole state; the header and rail keep their shape. */}
+        {ticket.trashed && (
+          <Alert size="compact" role="status" className="mb-6">
+            <AlertDescription>
+              In Trash. Relationships are kept.
+            </AlertDescription>
+            <AlertActions>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={trash.pending}
+                onClick={() => void trash.setTrashed(ticket.reference, false)}
+              >
+                Restore
+              </Button>
+            </AlertActions>
+          </Alert>
+        )}
         {active && (
           <NeedsReviewNotice kind="ticket" id={ticket.id} className="mb-6" />
         )}
@@ -257,7 +272,7 @@ export function TicketPage({
             ) : (
               <h3 className="detail-title">{ticket.title}</h3>
             )}
-            {stateAndChips}
+            {stateAndStrip}
             <div className="editor-body">
               {source && contentLocked ? (
                 <SourceDescription
@@ -277,7 +292,7 @@ export function TicketPage({
                         revision={revision}
                       />
                     ) : (
-                      <EmptyState size="hint" title="No description." />
+                      <p className="ticket-no-description">No description</p>
                     )}
                   </div>
                 </>
@@ -292,10 +307,10 @@ export function TicketPage({
             revision={revision}
             mention={mention}
           >
-            {stateAndChips}
+            {stateAndStrip}
           </TicketEditor>
         )}
-        {active && !ticket.trashed && (
+        {active && (
           <Subtickets work={work} select={select} external={Boolean(source)} />
         )}
         {active && (
@@ -307,11 +322,12 @@ export function TicketPage({
           />
         )}
         {narrow && (
-          <div className="detail-connected">
-            {attachments}
-            {documents}
-            {relationships}
-          </div>
+          <RailPlacement value="column">
+            <div className="detail-connected">
+              {relationships}
+              {files}
+            </div>
+          </RailPlacement>
         )}
         {active && (
           <Backlinks
@@ -353,6 +369,7 @@ export function TicketPage({
         <TicketProperties
           ticket={ticket}
           chats={chats}
+          attention={attentionFor("rail")}
           active={active}
           revision={revision}
           projects={projects}
@@ -362,14 +379,8 @@ export function TicketPage({
           onOpenTicket={select}
           onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
         >
-          {attachments}
-          {documents}
           {relationships}
-          {attention && (
-            <RailSection label="Attention">
-              <div className="rail-attention">{attention}</div>
-            </RailSection>
-          )}
+          {files}
         </TicketProperties>
       )}
     </div>

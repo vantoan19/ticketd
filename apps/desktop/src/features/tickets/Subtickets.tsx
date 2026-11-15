@@ -3,16 +3,18 @@ import { useId } from "react";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { FailureAlert } from "@/components/ui/failure-alert";
+import { Pager } from "@/components/ui/pager";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
+import { ReferenceRow } from "./ReferenceRow";
+import "./linked-work.css";
 import "./subtickets.css";
-import { Item } from "@/components/ui/item";
-import { Reference } from "@/components/ui/reference";
 import { Progress } from "@/components/ui/progress";
 
 /**
- * The ticket's subtickets directly under its description, with local progress.
- * With none, only the Add subticket action shows.
+ * The ticket's subtickets directly under its description, with local progress,
+ * as one-line ReferenceRows. With none, only the Add subticket action shows;
+ * a ticket in Trash shows its subtickets read-only, and nothing without any.
  */
 export function Subtickets({
   work,
@@ -26,8 +28,12 @@ export function Subtickets({
   const headingId = useId();
   const rows = work.rows.filter((row) => row.kind === "subticket");
   const links = work.current?.links;
+  const readOnly = work.ticket.trashed;
   if (!links) return null;
-  const add = (
+  // Progress comes from the core over every subticket, not the page read.
+  const { done, total } = links.children_progress;
+  if (readOnly && total === 0) return null;
+  const add = !readOnly && (
     <Button
       variant="ghost"
       size="sm"
@@ -37,13 +43,17 @@ export function Subtickets({
       Add subticket
     </Button>
   );
-  // Progress comes from the core over every subticket, not the page read.
-  const { done, total } = links.children_progress;
   const partial = links.children.next_offset !== null;
   const summary = `${done} of ${total} done`;
+  // A failed removal shows here, where it was asked for.
+  const error = work.error?.kind === "subticket" ? work.error.failure : null;
   return (
     <section className="subtickets" aria-labelledby={headingId}>
-      <SectionHeader title="Subtickets" titleId={headingId} actions={add}>
+      <SectionHeader
+        title="Subtickets"
+        titleId={headingId}
+        {...(add && { actions: add })}
+      >
         {total > 0 && (
           <>
             <Progress
@@ -60,43 +70,36 @@ export function Subtickets({
           Subtickets are local. Publishing never includes them.
         </p>
       )}
-      <ul className="subtickets-rows">
+      <ul className="reference-rows">
         {rows.map((row) => (
-          <Item key={row.reference} asChild>
-            <li>
-              <StatusIcon status={row.status} size={16} decorative />
-              <Reference>{row.reference}</Reference>
-              <Button
-                variant="link"
-                className="subtickets-title"
-                onClick={() => select(row.reference)}
-              >
-                <span className="truncate">{row.title}</span>
-              </Button>
-              <span className="subtickets-status">
-                {row.trashed ? `${row.status} · in trash` : row.status}
-              </span>
-              <IconButton
-                size="icon-xs"
-                className="subtickets-remove"
-                label={`Remove relationship: Subtickets ${row.reference}`}
-                disabled={work.pending}
-                onClick={() => void work.remove(row)}
-              >
-                <X aria-hidden="true" />
-              </IconButton>
-            </li>
-          </Item>
+          <ReferenceRow
+            key={row.reference}
+            kind="subticket"
+            density="list"
+            reference={row.reference}
+            title={row.title}
+            status={row.status}
+            caption={row.trashed ? `${row.status} · in Trash` : row.status}
+            onOpen={() => select(row.reference)}
+            action={
+              readOnly ? undefined : (
+                <IconButton
+                  size="icon-xs"
+                  label={`Remove ${row.reference} as subticket`}
+                  tooltipSide="top"
+                  disabled={work.pending}
+                  onClick={() => void work.remove(row)}
+                >
+                  <X aria-hidden="true" />
+                </IconButton>
+              )
+            }
+          />
         ))}
       </ul>
+      {error && <FailureAlert size="compact" failure={error} />}
       {partial && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void work.showMore()}
-        >
-          Show more subtickets
-        </Button>
+        <Pager noun="subtickets" onMore={() => void work.showMore()} />
       )}
     </section>
   );

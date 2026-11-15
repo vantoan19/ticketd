@@ -191,9 +191,10 @@ test("loading and a failed read are distinct from having no links", async () => 
   const view = render(
     <Section ticket={base} refresh={async () => {}} onOpenGraph={() => {}} />,
   );
-  expect(screen.getByRole("status").textContent).toContain(
-    "Loading relationships",
-  );
+  expect(
+    screen.getByRole("status", { name: "Loading relationships" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Add relationship" })).toBeNull();
   view.unmount();
   bridge({ fail: { contextual_relationships: "database busy" } });
   renderSection(base);
@@ -236,13 +237,13 @@ test("builds every row from the one relationships read, including all dependents
     "related",
     "duplicate_of",
   ]);
-  expect(screen.getByText("In progress · not done · in trash")).toBeTruthy();
+  expect(screen.getByText("In progress · not done · in Trash")).toBeTruthy();
   const blocker = screen
     .getByRole("button", { name: "Blocker" })
     .closest("li")!;
   expect(
     within(blocker).getByRole("img", {
-      name: "In progress · not done · in trash",
+      name: "In progress · not done · in Trash",
     }),
   ).toBeTruthy();
   const dependent = screen
@@ -258,7 +259,9 @@ test("shows n+ and loads the next page when more links exist", async () => {
   bridge({ related: [{ reference: "T-KQ4", title: "Sibling" }], more: 20 });
   renderSection(base);
   await screen.findByText("Sibling");
-  expect(screen.getByRole("button", { name: "Show more links" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Show more relationships" }),
+  ).toBeTruthy();
 });
 
 test("Open graph opens the ticket graph without a navigation provider", async () => {
@@ -274,7 +277,7 @@ test("Remove relationship takes the link off the ticket", async () => {
   const refresh = renderSection(base);
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Remove relationship: Blocked by T-KQ2",
+      name: "Remove T-KQ2 from Blocked by",
     }),
   );
   await waitFor(() =>
@@ -293,16 +296,22 @@ test("removing a duplicate link explains the result before anything changes", as
   const refresh = renderSection({ ...base, duplicate_of: "T-KQ9" });
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Remove relationship: Duplicate of T-KQ9",
+      name: "Remove T-KQ9 from Duplicate of",
     }),
   );
   const confirm = await screen.findByRole("dialog", {
     name: "Remove duplicate link",
   });
   expect(confirm.textContent).toContain(
-    "T-KQ1 stops being a duplicate of T-KQ9",
+    "T-KQ1 returns to the status it had before",
   );
-  expect(confirm.textContent).toContain("review them separately");
+  expect(confirm.textContent).toContain("Dependencies moved to T-KQ9 stay");
+  // Cancel first; the destructive action is named for its result.
+  expect(
+    within(confirm)
+      .getByRole("button", { name: "Remove duplicate link" })
+      .getAttribute("data-variant"),
+  ).toBe("destructive");
   expect(invoke).not.toHaveBeenCalledWith(
     "remove_duplicate",
     expect.anything(),
@@ -319,8 +328,41 @@ test("removing a duplicate link explains the result before anything changes", as
   await waitFor(() => expect(refresh).toHaveBeenCalled());
 });
 
+test("a double-click removes one relationship, not the next row's too", async () => {
+  bridge({
+    related: [
+      { reference: "T-KQ4", title: "First" },
+      { reference: "T-KQ5", title: "Second" },
+    ],
+  });
+  renderSection(base);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Remove T-KQ4 from Related to" }),
+  );
+  // The row collapses at once, and the next row's × arrives under the pointer.
+  expect(screen.queryByText("First")).toBeNull();
+  // Once the first removal is done, its × is enabled again under the pointer.
+  const next = screen.getByRole("button", {
+    name: "Remove T-KQ5 from Related to",
+  });
+  await waitFor(() => expect(next).toHaveProperty("disabled", false));
+  fireEvent.click(next);
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.filter(
+          ([command]) => command === "change_contextual_relationship",
+        ),
+    ).toHaveLength(1),
+  );
+  expect(screen.getByText("Second")).toBeTruthy();
+});
+
 async function chooseTarget() {
-  fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add relationship" }),
+  );
   fireEvent.change(
     await screen.findByLabelText("Search tickets by title or reference"),
     { target: { value: "target" } },
@@ -380,7 +422,9 @@ test("choosing a new parent says it replaces the current one", async () => {
     ...base,
     parent: { reference: "T-KQ3", title: "Epic", trashed: false },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add relationship" }),
+  );
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).queryByRole("status")).toBeNull();
   await chooseRelationship("parent");
@@ -416,7 +460,7 @@ test("Add subticket opens the link dialog already saying this ticket is the pare
   });
   renderSection(base);
   fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
-  const dialog = await screen.findByRole("dialog", { name: "Add subticket" });
+  const dialog = await screen.findByRole("dialog", { name: "Link a ticket" });
   expect(
     within(dialog).getByRole("combobox", { name: /^Relationship: / })
       .textContent,
@@ -470,7 +514,7 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
       onOpenGraph={() => {}}
     />,
   );
-  const row = (await screen.findByText("acme/api#9")).closest("li")!;
+  const row = (await screen.findByText("acme/api#9")).closest("section")!;
   expect(within(row).getByText("Duplicate of")).toBeTruthy();
   expect(within(row).getByText("Not imported into ticketd.")).toBeTruthy();
   expect(within(row).queryByRole("button")).toBeNull();
@@ -483,7 +527,7 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
   );
   const resolved = (
     await screen.findByRole("button", { name: "T-KQ7" })
-  ).closest("li")!;
+  ).closest("section")!;
   expect(within(resolved).getByText("acme/api#9")).toBeTruthy();
   view.rerender(
     <Section

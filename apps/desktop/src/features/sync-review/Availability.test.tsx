@@ -13,7 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { syncReview, type Availability } from "@/lib/sync-review-api";
 import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
 import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
-import { TicketAttachments } from "@/features/tickets/TicketAttachments";
+import { TicketFiles } from "@/features/tickets/TicketFiles";
 import type { Ticket } from "@/lib/api/client";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 
@@ -116,7 +116,7 @@ test("the library's Storage column says what is on this desktop and offers Downl
 
 test("a ticket's attached files say whether they are downloaded", async () => {
   render(
-    <TicketAttachments
+    <TicketFiles
       ticket={{ id: "t", reference: "T-KQ12", trashed: false } as Ticket}
       revision={0}
       refresh={async () => {}}
@@ -183,11 +183,7 @@ test("availability that cannot be read again keeps what was last known", async (
   const ticket = { id: "t", reference: "T-KQ12", trashed: false } as Ticket;
   const view = (change: number) => (
     <WorkspaceChangeProvider value={change}>
-      <TicketAttachments
-        ticket={ticket}
-        revision={0}
-        refresh={async () => {}}
-      />
+      <TicketFiles ticket={ticket} revision={0} refresh={async () => {}} />
     </WorkspaceChangeProvider>
   );
   const { rerender } = render(view(0));

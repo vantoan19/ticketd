@@ -39,7 +39,11 @@ export function useLinkedWork(
   const [linking, setLinking] = useState<AddableKind | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
-  const [error, setError] = useState<FailureDescription | null>(null);
+  // A failed action, and which kind of row it was on: a subticket's shows under Subtickets, the rest in the rail.
+  const [error, setError] = useState<{
+    kind: LinkRow["kind"] | null;
+    failure: FailureDescription;
+  } | null>(null);
   const [pending, setPending] = useState(false);
   // A removal acts at once; the pane's status line offers Undo (P7).
   const statusLine = useStatusLine();
@@ -75,36 +79,69 @@ export function useLinkedWork(
     };
   }, [enabled, reference, revision, reload]);
 
+  // Rows removed but not yet re-read: they collapse at once, in place.
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  // A removal hides a row and the next one slides under the pointer with its
+  // × already showing, so clicks on that slot wait out 400ms: a double-click
+  // never removes a second relationship.
+  const settling = useRef(false);
   const current = loaded?.reference === reference ? loaded : null;
-  const rows: LinkRow[] = current?.links ? linkRows(current.links) : [];
+  const rowKey = (row: Pick<LinkRow, "kind" | "reference">) =>
+    JSON.stringify([row.kind, row.reference]);
+  const rows: LinkRow[] = current?.links
+    ? linkRows(current.links).filter((row) => !hidden.has(rowKey(row)))
+    : [];
   const more = current?.links ? nextOffset(current.links) : null;
   const retry = useCallback(() => setReload((value) => value + 1), []);
+  const show = (key: string, shown: boolean) =>
+    setHidden((old) => {
+      const next = new Set(old);
+      if (shown) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   async function remove(row: LinkRow) {
-    const key = JSON.stringify([row.kind, row.reference]);
+    if (settling.current) return;
+    settling.current = true;
+    window.setTimeout(() => {
+      settling.current = false;
+    }, 400);
+    const key = rowKey(row);
     const id = attempts.current.get(key) ?? crypto.randomUUID();
     attempts.current.set(key, id);
     setPending(true);
     setError(null);
+    show(key, false);
     try {
       await removeLink(reference, row.kind, row.reference, id);
       attempts.current.delete(key);
       setReload((value) => value + 1);
       await refresh();
-      // A duplicate link is undone through its own review, not by Undo.
       const kind = row.kind;
-      if (kind !== "duplicate_of" && kind !== "duplicates")
+      // A duplicate link is undone through its own review, not by Undo.
+      if (kind === "duplicate_of" || kind === "duplicates")
         statusLine.show({
-          message: `Removed the link to ${row.reference}`,
+          message: `Removed the duplicate link to ${row.reference}`,
+          action: {
+            label: "Review dependencies",
+            run: () => setReviewing(true),
+          },
+        });
+      else
+        statusLine.show({
+          message: `Removed ${row.reference} from ${linkLabel(kind)}`,
           undo: () => putBack(kind, row.reference),
         });
     } catch (reason) {
-      setError(
-        describeFailure(
+      show(key, true);
+      setError({
+        kind: row.kind,
+        failure: describeFailure(
           reason,
           `remove ${linkLabel(row.kind)} ${row.reference}`,
         ),
-      );
+      });
     } finally {
       setPending(false);
     }
@@ -114,6 +151,7 @@ export function useLinkedWork(
     setPending(true);
     try {
       await addLink(reference, kind, target, crypto.randomUUID());
+      show(rowKey({ kind, reference: target }), true);
       setReload((value) => value + 1);
       await refresh();
     } finally {
@@ -130,7 +168,10 @@ export function useLinkedWork(
           : previous,
       );
     } catch (reason) {
-      setError(describeFailure(reason, "load more links"));
+      setError({
+        kind: null,
+        failure: describeFailure(reason, "load more links"),
+      });
     }
   }
   return {

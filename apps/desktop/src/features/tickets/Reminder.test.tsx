@@ -2,6 +2,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { Reminder } from "./Reminder";
+import { reminderPresets } from "./reminder-presets";
 
 vi.mock("@tauri-apps/api/core", () => {
   let due: string | null = null;
@@ -12,27 +13,64 @@ vi.mock("@tauri-apps/api/core", () => {
     }),
   };
 });
+// The preset list (cmdk) and the clock-change select need these.
+window.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+Element.prototype.scrollIntoView ??= () => {};
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => {};
+
+/** Opens the popover and reveals the date and time field. */
+async function openCustom() {
+  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Custom…" }));
+  return screen.getByLabelText("Date and time");
+}
 
 test("schedules and dismisses a ticket reminder", async () => {
   const view = render(<Reminder reference="T-KQ1" revision={0} />);
-  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
-  fireEvent.change(screen.getByLabelText("Local reminder date and time"), {
-    target: { value: "2030-01-01T12:00" },
-  });
+  const field = await openCustom();
+  // Prefilled, so it never looks filled while being empty.
+  expect((field as HTMLInputElement).value).not.toBe("");
+  fireEvent.change(field, { target: { value: "2030-01-01T12:00" } });
   fireEvent.click(screen.getByRole("button", { name: "Set reminder" }));
-  await screen.findByText(/Scheduled:/);
+  await screen.findByText(/Scheduled for/);
   fireEvent.click(screen.getByRole("button", { name: "Dismiss reminder" }));
-  await waitFor(() => expect(screen.queryByText(/Scheduled:/)).toBeNull());
+  await waitFor(() => expect(screen.queryByText(/Scheduled for/)).toBeNull());
   view.unmount();
 });
 
-test("requires a choice for repeated local times and rejects skipped times", () => {
+test("a preset schedules at once at its resolved time", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const view = render(<Reminder reference="T-KQ4" revision={0} />);
+  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Tomorrow/ }));
+  const tomorrow = reminderPresets(new Date()).find(
+    (preset) => preset.key === "tomorrow",
+  )!.at;
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "set_reminder",
+      expect.objectContaining({ dueAt: tomorrow.toISOString() }),
+    ),
+  );
+  expect(tomorrow.getHours()).toBe(9);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Dismiss reminder" }),
+  );
+  await waitFor(() => expect(screen.queryByText(/Scheduled for/)).toBeNull());
+  view.unmount();
+});
+
+test("requires a choice for repeated local times and rejects skipped times", async () => {
   const original = process.env.TZ;
   process.env.TZ = "America/New_York";
   try {
     const view = render(<Reminder reference="T-KQ1" revision={0} />);
-    fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
-    const input = screen.getByLabelText("Local reminder date and time");
+    const input = await openCustom();
     fireEvent.change(input, { target: { value: "2030-03-10T02:30" } });
     expect(screen.getByRole("alert").textContent).toContain("skips this time");
     expect(screen.getByRole("button", { name: "Set reminder" })).toHaveProperty(
@@ -40,13 +78,13 @@ test("requires a choice for repeated local times and rejects skipped times", () 
       true,
     );
     fireEvent.change(input, { target: { value: "2030-11-03T01:30" } });
-    expect(
-      screen.getByLabelText("Clock change: choose which occurrence"),
-    ).toBeTruthy();
-    fireEvent.change(
-      screen.getByLabelText("Clock change: choose which occurrence"),
-      { target: { value: "2030-11-03T05:30:00.000Z" } },
+    const choice = screen.getByRole("combobox", { name: /^Clock change/ });
+    expect(screen.getByRole("button", { name: "Set reminder" })).toHaveProperty(
+      "disabled",
+      true,
     );
+    fireEvent.keyDown(choice, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: /UTC−04:00/ }));
     expect(screen.getByRole("button", { name: "Set reminder" })).toHaveProperty(
       "disabled",
       false,
@@ -58,10 +96,9 @@ test("requires a choice for repeated local times and rejects skipped times", () 
   }
 });
 
-test("a year still being typed is not blamed on a clock change", () => {
+test("a year still being typed is not blamed on a clock change", async () => {
   const view = render(<Reminder reference="T-KQ1" revision={0} />);
-  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
-  fireEvent.change(screen.getByLabelText("Local reminder date and time"), {
+  fireEvent.change(await openCustom(), {
     target: { value: "0006-01-01T12:00" },
   });
   expect(screen.queryByRole("alert")).toBeNull();
@@ -98,7 +135,9 @@ test("retries a lost snooze response with the original request and instant", asy
     }
   });
   const view = render(<Reminder reference="T-KQ2" revision={0} />);
-  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Manage reminder, due" }),
+  );
   await screen.findByText(/Due since/);
   fireEvent.click(screen.getByRole("button", { name: "Snooze 1 hour" }));
   await screen.findByRole("alert");
@@ -132,8 +171,10 @@ test("prevents a second reminder change while a write is pending", async () => {
       });
   });
   const view = render(<Reminder reference="T-KQ3" revision={0} />);
-  fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
-  await screen.findByText(/Scheduled:/);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Manage reminder, scheduled/ }),
+  );
+  await screen.findByText(/Scheduled for/);
   const snooze = screen.getByRole("button", { name: "Snooze 1 hour" });
   fireEvent.click(snooze);
   expect(snooze).toHaveProperty("disabled", true);

@@ -94,12 +94,12 @@
   },
   "src/features/tickets/LinkedWork.tsx": {
     "shadcn/no-restyle": {
-      "count": 5
+      "count": 1
     }
   },
   "src/features/tickets/PublishToSource.tsx": {
     "shadcn/no-restyle": {
-      "count": 3
+      "count": 1
     }
   },
   "src/features/tickets/ReadOnlySource.tsx": {
@@ -117,11 +117,6 @@
       "count": 1
     }
   },
-  "src/features/tickets/Subtickets.tsx": {
-    "shadcn/no-restyle": {
-      "count": 2
-    }
-  },
   "src/features/tickets/TakeOwnership.tsx": {
     "shadcn/no-restyle": {
       "count": 1
@@ -130,11 +125,6 @@
   "src/features/tickets/TicketBoard.tsx": {
     "shadcn/no-restyle": {
       "count": 1
-    }
-  },
-  "src/features/tickets/TicketDocuments.tsx": {
-    "shadcn/no-restyle": {
-      "count": 3
     }
   },
   "src/features/tickets/TicketEditor.tsx": {

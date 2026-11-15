@@ -1843,12 +1843,18 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0 4px;
-  min-height: 48px;
-  padding: 0 8px 0 20px;
+  height: 48px;
+  /* The reference starts on the document's 32px gutter; the header never
+     wraps and never grows a row (feedback goes to the status line). */
+  padding: 0 8px 0 32px;
   background: var(--surface);
   color: var(--muted-foreground);
+}
+/* Nothing selected: no band over the empty pane, only the hint below. */
+.detail-header[data-empty] {
+  box-shadow: none;
 }
 .detail-header h2 {
   font-size: var(--text-ui);
@@ -1867,7 +1873,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   align-items: center;
   gap: 4px;
 }
-/* The reading column and the property rail. Below 652px the rail is
+/* The reading column and the property rail. Below 760px the rail is
    replaced by a chip bar under the title; see properties.css. */
 .detail-content {
   min-height: 100%;
@@ -1882,7 +1888,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   min-width: 0;
   padding: 24px 32px 48px;
 }
-@container ticket-detail (min-width: 652px) {
+@container ticket-detail (min-width: 760px) {
   /* Side by side, the document and the rail each scroll on their own. */
   .detail-scroll {
     display: flex;
