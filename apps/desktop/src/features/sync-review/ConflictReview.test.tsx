@@ -159,7 +159,7 @@ test("Later closes without deciding, and a failed save stays open with its reaso
   await screen.findByRole("radio", { name: /Status from this desktop/ });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "disk is full",
+    "Couldn't save your choices. Disk is full.",
   );
   expect(onResolved).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Later" }));
