@@ -111,7 +111,14 @@ export function LinkPicker({
   withLabel = false,
   open: openFromOutside,
   onOpenChange,
+  anchorClassName,
 }: {
+  /**
+   * Opened from elsewhere, where the picker is anchored: the Chat header
+   * passes a box over the whole header, so the picker opens under it at its
+   * end and never covers Expand or Close (CH-09).
+   */
+  anchorClassName?: string;
   linked: LinkedRecord[];
   onPick: (record: LinkedRecord) => void;
   /** New Chat shows the word beside the plus. */
@@ -136,7 +143,9 @@ export function LinkPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {controlled ? (
-        <PopoverAnchor />
+        <PopoverAnchor asChild>
+          <span className={anchorClassName} />
+        </PopoverAnchor>
       ) : (
         <PopoverTrigger asChild>
           {withLabel ? (
@@ -155,7 +164,7 @@ export function LinkPicker({
         </PopoverTrigger>
       )}
       <PopoverContent
-        align="start"
+        align={controlled ? "end" : "start"}
         variant="list"
         aria-label="Link a ticket, Document or Project"
       >

@@ -16,6 +16,7 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
+import { StatusLineRegion } from "@/components/ui/status-line";
 import { ProjectNavigation } from "@/features/documents/navigation";
 import { drafts } from "@/features/chats/drafts";
 import {
@@ -85,7 +86,9 @@ async function open(
     <ProjectNavigation.Provider value={openProject}>
       <ChatClientContext value={client}>
         <ChatProvider>
-          <ChatsView />
+          <StatusLineRegion>
+            <ChatsView />
+          </StatusLineRegion>
         </ChatProvider>
       </ChatClientContext>
     </ProjectNavigation.Provider>,
@@ -155,8 +158,7 @@ test("while a turn runs, Enter steers, Cmd+Enter queues, and the caret holds bot
   fireEvent.keyDown(composer("Steer Codex"), { key: "Enter", metaKey: true });
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("also cover the admin login")).toBeTruthy();
-  expect(screen.getByText("Queued 1")).toBeTruthy();
-  expect(screen.getByText("After this turn")).toBeTruthy();
+  expect(screen.getByText("Queued 1 · After this turn")).toBeTruthy();
 
   type("use Redis", "Steer Codex");
   fireEvent.keyDown(composer("Steer Codex"), { key: "Enter" });
@@ -250,11 +252,11 @@ test("Esc stops the turn from an empty box and pauses the queue, which waits for
     ),
   ).toBeTruthy();
   // The queue shows it is paused.
-  expect(screen.getByText("Paused")).toBeTruthy();
+  expect(screen.getByText(/^Queued \d+ · Paused$/)).toBeTruthy();
   expect(screen.getByText("then add tests")).toBeTruthy();
   expect((await client.openChat("c1")).chat.activity).toBe("interrupted");
   fireEvent.click(button("Resume"));
-  await waitFor(() => expect(screen.queryByText("Paused")).toBeNull());
+  await waitFor(() => expect(screen.queryByText(/· Paused$/)).toBeNull());
 });
 
 test("Esc is not a stop from a request or just after closing a menu; Stop leaves focus in the box", async () => {
@@ -395,7 +397,12 @@ test("an expired request cannot be answered", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [{ ...approval, state: "expired" }]),
   );
-  const receipt = screen.getByText("Expired · npm install @pagerduty/pdjs");
+  // What expired is set in mono, as step targets are (CH-30).
+  const receipt = screen.getByText("npm install @pagerduty/pdjs");
+  expect(receipt.tagName).toBe("CODE");
+  expect(receipt.parentElement?.textContent).toBe(
+    "Expired · npm install @pagerduty/pdjs",
+  );
   expect(receipt.closest("button")).toBeNull();
   noButton("Allow once");
 });
@@ -413,9 +420,11 @@ test("answering a request that expired behind a lost update is refused, then the
   );
   // The next change exposes the gap; the view takes a fresh snapshot.
   act(() => client.patch("c1", { activity: "idle" }));
-  expect(
-    await screen.findByText("Expired · npm install @pagerduty/pdjs"),
-  ).toBeTruthy();
+  await waitFor(() =>
+    expect(document.querySelector(".chat-receipt")?.textContent).toBe(
+      "Expired · npm install @pagerduty/pdjs",
+    ),
+  );
   noButton("Allow once");
 });
 
@@ -554,7 +563,7 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
   const notice = screen.getByRole("alert");
   expect(notice.textContent).toContain("Codex reached your usage limit");
   expect(notice.textContent).toContain(
-    "It says the limit resets on Nov 12 at 3:00 PM. Your work so far is kept. ticketd won't switch model or billing.",
+    "It resets on Nov 12 at 3:00 PM. The last turn stopped there; your work so far is kept.",
   );
   // It is why the last turn stopped: the person can still send.
   type("try again");
@@ -631,7 +640,7 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(notice.querySelector("code")).toBeNull();
   expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
   client.nextFolder = "~/code/emails";
-  fireEvent.click(button("Pick another folder…"));
+  fireEvent.click(button("Choose a folder…"));
   expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
   expect(button("Folder emails").textContent).toBe("emails");
 });
@@ -706,14 +715,20 @@ test("picking messages turns the transcript into the history picker", async () =
     within(dialog).getByRole("radio", { name: "Let me pick messages…" }),
   );
   fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
-  expect(await screen.findByText("0 of 2 messages picked")).toBeTruthy();
+  expect(
+    await screen.findByText(
+      "Pick the messages to give the new session · 0 of 2",
+    ),
+  ).toBeTruthy();
   expect(button("Resume")).toHaveProperty("disabled", true);
   fireEvent.click(
     screen.getByRole("checkbox", {
       name: "Include the reply: Added the limiter.",
     }),
   );
-  expect(screen.getByText("1 of 2 messages picked")).toBeTruthy();
+  expect(
+    screen.getByText("Pick the messages to give the new session · 1 of 2"),
+  ).toBeTruthy();
   fireEvent.click(button("Resume"));
   expect(
     await screen.findByText("Fresh session · started with 1 picked message"),
@@ -731,9 +746,13 @@ test("archive keeps the work running; trash stops it and restore re-runs nothing
   expect(button("Stop")).toBeTruthy();
   expect((await client.openChat("kept")).chat.activity).toBe("working");
 
-  openMenu("Chats shown: Active");
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
-  expect(await screen.findByRole("heading", { name: "Archived" })).toBeTruthy();
+  openMenu("Chats");
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Archived Chats" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Archived Chats" }),
+  ).toBeTruthy();
   fireEvent.click(await screen.findByRole("button", { name: /^Limiter/ }));
   await screen.findByRole("button", { name: "Unarchive" });
 
@@ -871,7 +890,7 @@ test("a clicked notification opens its Chat under its own list", async () => {
   expect(
     await screen.findByRole("heading", { name: "Rate-limit failed logins" }),
   ).toBe(document.activeElement);
-  expect(screen.getByRole("heading", { name: "Archived" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Archived Chats" })).toBeTruthy();
 });
 
 test("a view that missed changes resyncs from a snapshot instead of showing a broken transcript", async () => {
@@ -1408,14 +1427,12 @@ test("a response is saved as a Document only when asked", async () => {
   );
   expect(client.savedDocuments).toEqual([]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-  expect(await screen.findByText("Saved to Documents.")).toBeTruthy();
+  // CH-33: said once in the pane's status line, never left above the composer.
+  expect(
+    await screen.findByText("Saved “Login rate limiter” to Documents"),
+  ).toBeTruthy();
   expect(client.savedDocuments).toEqual(["Login rate limiter"]);
-  // CH-33: the confirmation does not stay above the composer; sending clears it.
-  type("Next step");
-  fireEvent.click(button("Send"));
-  await waitFor(() =>
-    expect(screen.queryByText("Saved to Documents.")).toBeNull(),
-  );
+  expect(document.querySelector(".chat-dock .chat-fine")).toBeNull();
 });
 
 /** With no links there is no chip row: the Chat actions menu links one. */
@@ -1871,11 +1888,6 @@ test("New Chat picks harness, model and effort in one composer picker and starts
     },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  expect(
-    screen
-      .getByText("Checking which harnesses are installed…")
-      .getAttribute("role"),
-  ).toBe("status");
   // No radios: the harness is the picker's, beside Send.
   const trigger = await screen.findByRole("button", {
     name: "Claude Code, model Opus 5.5, effort Default",
@@ -2068,7 +2080,7 @@ test("linking a Project with a folder in New Chat starts the Chat there", async 
   const client = await open([]);
   client.projectFolders.set("p1", "/work/storefront");
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  expect(button("Folder: Scratch folder")).toBeTruthy();
+  expect(button("Scratch folder")).toBeTruthy();
   fireEvent.click(button("Link a ticket, Document or Project"));
   // Recent records show before anything is typed.
   expect(await screen.findByRole("group", { name: "Recent" })).toBeTruthy();
@@ -2214,7 +2226,9 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   expect(button("Permissions: Accept edits").textContent).toBe("Accept edits");
 
   fireEvent.click(button(picker));
-  expect(await screen.findByText("From your next message")).toBeTruthy();
+  expect(
+    await screen.findByText("Applies from your next message."),
+  ).toBeTruthy();
   // A Chat keeps its harness: only its own tab shows.
   expect(screen.getByRole("tab", { name: "Claude Code" })).toBeTruthy();
   expect(screen.queryByRole("tab", { name: "Codex" })).toBeNull();
@@ -2243,7 +2257,7 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   );
 });
 
-test("a change held for the turn's end shows the new value, From your next message", async () => {
+test("a change held for the turn's end shows the new value with a clock, never squeezing it", async () => {
   await open(
     one({
       id: "held",
@@ -2264,12 +2278,16 @@ test("a change held for the turn's end shows the new value, From your next messa
       },
     }),
   );
-  const trigger = button("Codex, model Sonnet 5");
+  const trigger = button("Codex, model Sonnet 5, from your next message");
   expect(trigger.textContent).toBe("Sonnet 5");
   expect(trigger.querySelector(".chat-spin")).toBeNull();
-  expect(screen.getByText("From your next message")).toBeTruthy();
+  // Marked by a clock, not by words beside the trigger (CH-19).
+  expect(trigger.querySelector(".chat-control-held")).not.toBeNull();
+  expect(screen.queryByText(/from your next message/i)).toBeNull();
   fireEvent.click(trigger);
-  expect(await screen.findAllByText("From your next message")).toHaveLength(2);
+  expect(
+    await screen.findByText("Applies from your next message."),
+  ).toBeTruthy();
   expect(screen.queryByText("From the next request")).toBeNull();
 });
 
@@ -2315,9 +2333,7 @@ test("LIVE-4: a ticketd approval says what it does, names the Project, and shows
     name: "Codex wants to read Project Storefront",
   });
   expect(request.textContent).not.toContain("/Users/me");
-  fireEvent.click(
-    within(request).getByRole("button", { name: "Show command" }),
-  );
+  fireEvent.click(within(request).getByRole("button", { name: "Command" }));
   expect(within(request).getByText(exact)).toBeTruthy();
 });
 
@@ -2371,4 +2387,50 @@ test("CH-12: Expand keeps New Chat's links and harness check, and the list stays
   expect(document.querySelector(".chat-new")).toBe(pane);
   expect(document.querySelector(".chat-rows")).toBe(list);
   expect(linked()).not.toBeNull();
+});
+
+test("the notice, the request and the message box are one tray; options carry no number badge", async () => {
+  await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "waiting",
+        problem: { kind: "usage_limit", past: true },
+      },
+      [question],
+    ),
+  );
+  const request = await screen.findByRole("group", {
+    name: /Redis is unreachable/,
+  });
+  const tray = request.closest<HTMLElement>(".chat-tray")!;
+  expect(tray).not.toBeNull();
+  expect(within(tray).getByText(/^It didn't say when it resets/)).toBeTruthy();
+  expect(within(tray).getByLabelText(/^Answer/)).toBeTruthy();
+  // It needs the person, so its title wears the attention dot (CH-35).
+  expect(
+    within(tray).getByRole("alert").querySelector('[data-slot="status-dot"]'),
+  ).not.toBeNull();
+  const option = within(tray).getByRole("button", { name: /^Fail open/ });
+  expect(option.textContent).toBe(
+    "Fail openLet logins through and log a warning",
+  );
+  expect(option.getAttribute("aria-keyshortcuts")).toBe("1");
+});
+
+test("with no Chat open the detail pane is New Chat, and the pencil keeps its draft", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  fireEvent.click(button("Close Chat"));
+  expect(
+    await screen.findByRole("heading", { name: "What should we work on?" }),
+  ).toBeTruthy();
+  // Resting, it has nothing to close and leaves focus on the closed Chat's row.
+  noButton("Close New Chat");
+  expect(document.activeElement).toBe(button(/^Limiter/));
+  type("Draft the reset email", "Describe a task or ask a question");
+  fireEvent.click(button("New Chat"));
+  const box = composer("Describe a task or ask a question");
+  expect(box).toHaveProperty("value", "Draft the reset email");
+  await waitFor(() => expect(document.activeElement).toBe(box));
 });

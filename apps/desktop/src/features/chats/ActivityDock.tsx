@@ -21,6 +21,8 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
+import { Disclosure } from "@/components/ui/disclosure";
 import { IconButton } from "@/components/ui/icon-button";
 import type { ChatState } from "@/features/chats/client";
 import { requestChoices as choices } from "@/features/chats/dock-focus";
@@ -63,7 +65,6 @@ function Request({
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<FailureDescription | null>(null);
   const [showCommand, setShowCommand] = useState(false);
-  const commandId = useId();
   const question = request.request === "question";
   // What runs exactly, when the title says it as sentences or shortened.
   const exact =
@@ -96,6 +97,12 @@ function Request({
       aria-labelledby={titleId}
       {...(request.reason && { "aria-describedby": reasonId })}
       onKeyDown={(event) => {
+        // Esc inside a request goes back to the message box (CH-54).
+        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          onLeave();
+          return;
+        }
         const list = choices(event.currentTarget);
         const at = list.indexOf(event.target as HTMLButtonElement);
         if (at < 0 || event.altKey || event.metaKey || event.ctrlKey) return;
@@ -165,27 +172,27 @@ function Request({
           </p>
         )}
         {exact && (
-          <>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="-ml-2 mt-1"
-              aria-expanded={showCommand}
-              aria-controls={showCommand ? commandId : undefined}
-              onClick={() => setShowCommand(!showCommand)}
+          // What runs exactly, opened in place with Copy (CH-24).
+          <div className="chat-request-command">
+            <Disclosure
+              label="Command"
+              open={showCommand}
+              onOpenChange={setShowCommand}
             >
-              {showCommand ? "Hide command" : "Show command"}
-            </Button>
-            {showCommand && (
-              <pre id={commandId} className="chat-out chat-request-command">
-                {exact}
-              </pre>
-            )}
-          </>
+              {showCommand && (
+                <div className="chat-request-command-box">
+                  <pre className="chat-out">{exact}</pre>
+                  <CopyButton text={exact} label="Copy command" />
+                </div>
+              )}
+            </Disclosure>
+          </div>
         )}
         {question ? (
           <div className="chat-request-options">
             {request.options.map((option, index) => (
+              // A plain 40px row: label, muted description, a spinner while
+              // sending. 1–9 still pick, with no key badge (CH-23).
               <button
                 key={option.id}
                 type="button"
@@ -197,10 +204,6 @@ function Request({
                 aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                 onClick={() => pick(option.id)}
               >
-                {/* A choice, with its number key: 1, 2, 3. */}
-                <span className="chat-option-key" aria-hidden>
-                  {index < 9 ? index + 1 : ""}
-                </span>
                 <span>{option.label}</span>
                 {option.description && <small>{option.description}</small>}
                 {sending === option.id && (
@@ -357,9 +360,8 @@ export function ActivityDock({
       {queue.length > 0 && (
         <section className="chat-queue">
           <div className="chat-queue-head">
-            <span>Queued {queue.length}</span>
-            <span className="chat-queue-caption">
-              {paused ? "Paused" : "After this turn"}
+            <span>
+              Queued {queue.length} · {paused ? "Paused" : "After this turn"}
             </span>
             {paused && (
               <Button

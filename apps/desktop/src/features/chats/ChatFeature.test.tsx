@@ -218,7 +218,11 @@ test("with Chat on, the sidebar entry says how many Chats wait and opens them", 
 
   // Answered elsewhere: the indicator follows the host, not the workspace poll.
   await act(() => client.stop("c1"));
-  expect(await screen.findByRole("button", { name: "Chats" })).toBeTruthy();
+  expect(
+    await within(
+      screen.getByRole("navigation", { name: "Workspace views" }),
+    ).findByRole("button", { name: "Chats" }),
+  ).toBeTruthy();
 
   fireEvent.keyDown(screen.getByRole("button", { name: "New ticket" }), {
     key: "Enter",

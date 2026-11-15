@@ -30,7 +30,9 @@ const Collapsed = createContext(false);
  * one fixed 28px line under the header ("Todo tickets with nothing left to
  * wait on."). `icon` is a 16px muted mark before the title (a Plan's
  * Layers); `titleEditor` takes the title's place while it is renamed in
- * place, at the same height, so nothing around it moves.
+ * place, at the same height, so nothing around it moves. `titleControl`
+ * makes the title itself a control, such as the trigger of a scope menu
+ * ("Chats ⌄"): it renders the heading's content.
  */
 export function PaneHeader({
   title,
@@ -44,8 +46,11 @@ export function PaneHeader({
   actions,
   caption,
   className,
+  titleControl,
 }: {
   title: string;
+  /** Renders the title as a control inside the heading (a menu trigger). */
+  titleControl?: (title: string) => ReactNode;
   /** The heading's id, for `aria-labelledby` and focus after a change. */
   titleId?: string;
   titleLevel?: 1 | 2;
@@ -87,14 +92,23 @@ export function PaneHeader({
               {icon}
             </span>
           )}
-          {titleEditor ?? (
-            // The full title while it is cut, below the header.
-            <Tooltip content={title} side="bottom" overflowOnly>
-              <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
-                {title}
+          {titleEditor ??
+            (titleControl ? (
+              <Heading
+                id={titleId}
+                tabIndex={titleId ? -1 : undefined}
+                data-control=""
+              >
+                {titleControl(title)}
               </Heading>
-            </Tooltip>
-          )}
+            ) : (
+              // The full title while it is cut, below the header.
+              <Tooltip content={title} side="bottom" overflowOnly>
+                <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                  {title}
+                </Heading>
+              </Tooltip>
+            ))}
           {count}
           {children}
         </span>

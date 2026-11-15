@@ -95,7 +95,7 @@ function FolderGroup({ chat }: { chat: ChatState }) {
             {branch.kind === "detached" && <span>Detached at</span>}
             {/* Right-to-left puts the ellipsis at the start: the end of a
                 branch name tells branches apart. */}
-            <span className="chat-mono chat-pop-branch-name">
+            <span className="chat-pop-branch-name">
               <bdo dir="ltr">{branch.name}</bdo>
             </span>
           </p>

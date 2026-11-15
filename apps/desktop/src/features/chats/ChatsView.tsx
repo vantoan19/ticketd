@@ -4,7 +4,6 @@ import { useContext, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   BellOff,
-  Check,
   ChevronDown,
   MessagesSquare,
   SquarePen,
@@ -20,7 +19,8 @@ import { Count } from "@/components/ui/count";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
@@ -43,10 +43,11 @@ import { chatTime, emphasised } from "@/features/chats/model";
 import { NewChat } from "@/features/chats/NewChat";
 import { useChatFeature, useChatList } from "@/features/chats/use-chats";
 
-const SCOPES: { id: Retention; menu: string; title: string }[] = [
-  { id: "active", menu: "Active", title: "Chats" },
-  { id: "archived", menu: "Archived", title: "Archived" },
-  { id: "trashed", menu: "Trash", title: "Trash" },
+/** The title names the scope once and is its menu's trigger (CH-04). */
+const SCOPES: { id: Retention; title: string }[] = [
+  { id: "active", title: "Chats" },
+  { id: "archived", title: "Archived Chats" },
+  { id: "trashed", title: "Chats in Trash" },
 ];
 /** The empty list per scope; New Chat is already in the header (P9). */
 const EMPTY = {
@@ -149,6 +150,7 @@ function ChatRow({
         ref={row}
         type="button"
         className="chat-row"
+        data-chat-id={chat.id}
         tabIndex={tabStop ? 0 : -1}
         aria-current={active ? "true" : undefined}
         data-attention={strong ? "" : undefined}
@@ -250,6 +252,8 @@ export function ChatsView({
   const [open, setOpen] = useState<Open>(null);
   const [expanded, setExpanded] = useState(false);
   const [seenRequest, setSeenRequest] = useState(0);
+  /** Rises when New Chat is asked for: its message box takes focus. */
+  const [newFocus, setNewFocus] = useState(0);
   const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   // A clicked notification opens its Chat under its own list, title focused.
   const { openRequest, chatRequest } = useChatFeature();
@@ -288,6 +292,7 @@ export function ChatsView({
     setSeenRequest(newChatRequest);
     setScope("active");
     setOpen({ kind: "new" });
+    setNewFocus((count) => count + 1);
   }
   const list = useChatList(scope);
   const now = useNow();
@@ -310,56 +315,69 @@ export function ChatsView({
     if (!next) setExpanded(false);
     setOpen(next);
   };
+  // New Chat rests in the empty detail pane (U1): the pencil and the sidebar's
+  // New Chat put the person in its message box rather than mounting it anew.
+  const startNew = () => {
+    show({ kind: "new" });
+    setNewFocus((count) => count + 1);
+  };
+  // Closing a Chat returns focus to its row, as closing a ticket does.
+  const closed = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = closed.current;
+    closed.current = null;
+    if (!id) return;
+    [
+      ...(workspaceRef.current?.querySelectorAll<HTMLElement>(".chat-row") ??
+        []),
+    ]
+      .find((row) => row.dataset.chatId === id)
+      ?.focus();
+  }, [open]);
 
   const listPane = (
     <section className="ticket-list chat-pane" aria-label="Chat list">
       <PaneHeader
         title={current?.title ?? "Chats"}
-        actions={
-          <>
-            {/* LIVE-18: a labelled filter, not a "⋯" that reads as actions. */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Chats shown: ${current?.menu ?? "Active"}`}
-                >
-                  {current?.menu ?? "Active"}
-                  <ChevronDown aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+        titleControl={(title) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm">
+                <span className="truncate">{title}</span>
+                <ChevronDown aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuRadioGroup
+                value={scope}
+                onValueChange={(next) => {
+                  setScope(next as Retention);
+                  show(null);
+                }}
+              >
                 {SCOPES.map((item) => (
-                  <DropdownMenuItem
-                    key={item.id}
-                    aria-current={item.id === scope ? "true" : undefined}
-                    onSelect={() => {
-                      setScope(item.id);
-                      show(null);
-                    }}
-                  >
-                    {item.menu}
-                    {item.id === scope && (
-                      <Check className="ml-auto" aria-hidden />
-                    )}
-                  </DropdownMenuItem>
+                  <DropdownMenuRadioItem key={item.id} value={item.id}>
+                    {item.title}
+                  </DropdownMenuRadioItem>
                 ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <IconButton label="New Chat" onClick={() => show({ kind: "new" })}>
-              <SquarePen aria-hidden />
-            </IconButton>
-          </>
-        }
-      >
-        {list && (
-          <Count>
-            {list.chats.length}
-            <span className="sr-only"> chats</span>
-          </Count>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
-      </PaneHeader>
+        count={
+          list && (
+            <Count>
+              {list.chats.length}
+              <span className="sr-only"> chats</span>
+            </Count>
+          )
+        }
+        actions={
+          <IconButton label="New Chat" onClick={startNew}>
+            <SquarePen aria-hidden />
+          </IconButton>
+        }
+      />
       {failure && (
         <div className="chat-list-alert">
           <FailureAlert
@@ -408,11 +426,27 @@ export function ChatsView({
     onClose: () => show(null),
   };
   const detailPane =
-    open?.kind === "new" ? (
-      <NewChat
-        key={open.n ?? 0}
+    open?.kind === "chat" ? (
+      <ChatDetail
+        key={open.id}
+        id={open.id}
         {...paneProps}
-        {...(open.start && {
+        onClose={() => {
+          closed.current = open.id;
+          show(null);
+        }}
+        {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
+        focusRequest={Boolean(open.notified)}
+      />
+    ) : (
+      // With nothing open the detail pane is New Chat itself (U1), one
+      // instance, so asking for it keeps what was typed and nothing moves.
+      <NewChat
+        key={open?.n ?? 0}
+        {...paneProps}
+        resting={!open}
+        focusRequest={newFocus}
+        {...(open?.start && {
           start: open.start,
           crumb: <TicketCrumb reference={open.start.ticket.reference} />,
         })}
@@ -421,18 +455,6 @@ export function ChatsView({
           show({ kind: "chat", id });
         }}
       />
-    ) : open ? (
-      <ChatDetail
-        key={open.id}
-        id={open.id}
-        {...paneProps}
-        {...(open.from && { crumb: <TicketCrumb reference={open.from} /> })}
-        focusRequest={Boolean(open.notified)}
-      />
-    ) : (
-      <section className="ticket-detail chat-pane" aria-label="No Chat open">
-        <p className="chat-list-empty">Open a Chat, or start a new one.</p>
-      </section>
     );
   // One tree at every width and in Expanded (DESIGN §5): the pane that is not
   // shown is hidden with CSS, so New Chat's links, folder and harness check,

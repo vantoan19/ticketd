@@ -14,10 +14,15 @@ const alertVariants = cva("ui-notice", {
       default: "",
       compact: "ui-notice-compact",
     },
+    flat: {
+      true: "ui-notice-flat",
+      false: "",
+    },
   },
   defaultVariants: {
     tone: "neutral",
     size: "default",
+    flat: false,
   },
 });
 
@@ -29,13 +34,17 @@ const ToneContext = React.createContext<Tone>("neutral");
  * The one inline notice: an optional title, one sentence and its actions.
  * `neutral` is context, `attention` puts a status dot in the title (a source
  * is unavailable, an outcome is unknown) and `error` is a failure. `compact`
- * is a single row for a short sentence. It is `role="alert"` unless the
- * caller passes another role, such as `status` for a calm update.
+ * is a single row for a short sentence. `flat` draws it as a section of a
+ * surface that already has the ring (the Chat's tray, a popover): no fill,
+ * ring or radius, and an error's sentence stays muted, only its title in the
+ * error colour. It is `role="alert"` unless the caller passes another role,
+ * such as `status` for a calm update.
  */
 function Alert({
   className,
   tone = "neutral",
   size = "default",
+  flat = false,
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
   return (
@@ -44,7 +53,7 @@ function Alert({
         data-slot="alert"
         data-tone={tone}
         role="alert"
-        className={cn(alertVariants({ tone, size }), className)}
+        className={cn(alertVariants({ tone, size, flat }), className)}
         {...props}
       />
     </ToneContext>

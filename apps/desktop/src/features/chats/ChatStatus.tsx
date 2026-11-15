@@ -19,8 +19,9 @@ export function ChatStatus({
     status.rank === "working" &&
     (activity === "working" || activity === "waiting") &&
     status.word === "Working";
+  const signal = needsYou(status) || status.unseen || working;
   return (
-    <span className="chat-status">
+    <span className="chat-status" data-signal={signal ? "" : undefined}>
       {needsYou(status) ? (
         <StatusDot tone="attention" />
       ) : status.unseen ? (
