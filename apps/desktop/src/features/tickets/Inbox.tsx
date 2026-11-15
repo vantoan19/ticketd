@@ -1,3 +1,5 @@
+import { StatusLineRegion } from "@/components/ui/status-line";
+import { StatusLineContext } from "@/components/ui/use-status-line";
 import { Skeleton } from "@/components/ui/skeleton";
 import { onInboxAction } from "./inbox-commands";
 import { useInboxAction } from "./use-inbox-action";
@@ -184,6 +186,7 @@ export function Snooze({
         {snoozeChoices.map((choice) => (
           <DropdownMenuItem
             key={choice.value}
+            disabled={disabled}
             onSelect={() => void snooze(choice.value)}
           >
             <Clock aria-hidden="true" />
@@ -259,6 +262,11 @@ function InboxRow({
             event.altKey
           )
             return;
+          if (disabledReason && ["e", "h"].includes(event.key.toLowerCase())) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (event.key === "e" || event.key === "E") {
             event.preventDefault();
             event.stopPropagation();
@@ -318,8 +326,10 @@ function SyncRow({
   entry,
   mark,
   open,
+  disabledReason,
 }: {
   entry: SyncEntry;
+  disabledReason?: string | null;
   mark: (read: boolean) => void;
   open: () => void;
 }) {
@@ -338,6 +348,7 @@ function SyncRow({
       read={entry.read}
       timestamp={entry.timestamp}
       current={false}
+      disabledReason={disabledReason ?? null}
       markLabel={`Mark ${entry.reference ?? "Drive file"} ${entry.conflict ? "review" : "notice"} ${entry.read ? "unread" : "read"}`}
       onOpen={() => {
         if (!entry.read) mark(true);
@@ -360,13 +371,15 @@ export function Inbox(props: {
   selected?: string | null;
 }) {
   const attention = useInboxAttention();
-  return attention ? (
+  const line = useContext(StatusLineContext);
+  const content = attention ? (
     <InboxContent {...props} />
   ) : (
     <InboxAttentionProvider revision={props.revision}>
       <InboxContent {...props} />
     </InboxAttentionProvider>
   );
+  return line ? content : <StatusLineRegion>{content}</StatusLineRegion>;
 }
 
 function InboxContent({
@@ -386,12 +399,22 @@ function InboxContent({
   const [held, setHeld] = useState<Attention | null>(null);
   const [heldSync, setHeldSync] = useState<SyncEntry[] | null>(null);
   const [heldTime, setHeldTime] = useState<number | null>(null);
-  const projection =
-    triage && !triage.selection ? attention : (held ?? attention);
+  const [readingSelection, setReadingSelection] = useState(
+    triage?.selection ?? null,
+  );
+  if (readingSelection !== (triage?.selection ?? null)) {
+    setReadingSelection(triage?.selection ?? null);
+    if (!triage?.selection) {
+      setHeld(null);
+      setHeldSync(null);
+      setHeldTime(null);
+    }
+  }
+  const projection = held ?? attention;
   const chats = useChatClient();
   const chatFeature = useChatFeature();
   const liveNow = useNow();
-  const now = triage && !triage.selection ? liveNow : (heldTime ?? liveNow);
+  const now = heldTime ?? liveNow;
   const [pages, setPages] = useState(1);
   // Attention never disappears behind update paging, even when its event is old.
   const urgent = projection.entries.filter((entry) =>
@@ -411,10 +434,14 @@ function InboxContent({
   const [reviewing, setReviewing] = useState<ConflictSummary | null>(null);
   const reload = attention.reload;
   const blocked = editingBlockedReason(useWorkspaceState());
-  const { pending, perform } = useInboxAction(() => {
-    reload();
-    sync.reload();
-  });
+  const { pending, perform } = useInboxAction(
+    () => {
+      reload();
+      sync.reload();
+    },
+    undefined,
+    true,
+  );
   async function mark(ids: number[], read: boolean, notify = true) {
     if (blocked || !ids.length) return;
     const before = attention.entries.filter((entry) => ids.includes(entry.id));
@@ -472,10 +499,10 @@ function InboxContent({
         for (const entry of before)
           await syncReview.setRead([entry.id], entry.read);
       },
+      read ? "mark updates as read" : "mark as unread",
     );
   }
-  const syncShown =
-    triage && !triage.selection ? sync.entries : (heldSync ?? sync.entries);
+  const syncShown = heldSync ?? sync.entries;
   const unreadShown = entries.filter(
     (e) =>
       !(attention.entries.find((entry) => entry.id === e.id)?.read ?? e.read),
@@ -850,7 +877,13 @@ function InboxContent({
                   return (
                     <SyncRow
                       key={e.id}
-                      entry={e}
+                      entry={{
+                        ...e,
+                        read:
+                          sync.entries.find((entry) => entry.id === e.id)
+                            ?.read ?? e.read,
+                      }}
+                      disabledReason={blocked}
                       mark={(read) => void markSync([e.id], read)}
                       open={() => {
                         if (e.conflict) setReviewing(e.conflict);

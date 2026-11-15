@@ -1,6 +1,13 @@
-import { useId, useRef, type ReactNode, type RefObject } from "react";
-import { XIcon } from "lucide-react";
+import {
+  useId,
+  useRef,
+  type ReactNode,
+  type RefObject,
+  type KeyboardEventHandler,
+} from "react";
+import { XIcon, FilePlus2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -57,7 +64,15 @@ export function DialogShell({
   busy = false,
   tabs,
   bodyBoundary = "none",
+  variant = "default",
+  expanded = false,
+  headerActions,
+  onKeyDownCapture,
 }: {
+  variant?: "default" | "create" | "capture";
+  expanded?: boolean;
+  headerActions?: ReactNode;
+  onKeyDownCapture?: KeyboardEventHandler<HTMLFormElement>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
@@ -118,11 +133,19 @@ export function DialogShell({
   const focus =
     initialFocus ?? (primaryVariant === "destructive" ? "cancel" : "first");
   const note = blockedReason ?? footerNote;
+  const compact = variant !== "default";
   const header = (
     <div
-      className={`flex flex-col gap-1 pt-6 pr-16 pl-6 ${children || tabs ? "" : "pb-5"}`}
+      className={
+        compact
+          ? "dialog-shell-compact-header"
+          : `flex flex-col gap-1 pt-6 pr-16 pl-6 ${children || tabs ? "" : "pb-5"}`
+      }
     >
-      <DialogTitle>{title}</DialogTitle>
+      <DialogTitle>
+        {variant === "capture" && <FilePlus2 aria-hidden="true" />}
+        {title}
+      </DialogTitle>
       <DialogDescription className={description ? "" : "sr-only"}>
         {description ?? title}
       </DialogDescription>
@@ -171,6 +194,7 @@ export function DialogShell({
   );
   return (
     <Dialog
+      modal={variant !== "capture"}
       open={open}
       onOpenChange={(next) => {
         if (!busy) onOpenChange(next);
@@ -178,6 +202,9 @@ export function DialogShell({
     >
       <DialogContent
         size={size}
+        surface={variant}
+        expanded={expanded}
+        overlay={variant !== "capture"}
         variant="flush"
         showCloseButton={false}
         // Escape that confirms an IME candidate belongs to the field, not the dialog.
@@ -202,6 +229,7 @@ export function DialogShell({
           </>
         )}
         <form
+          onKeyDownCapture={onKeyDownCapture}
           className={`dialog-shell-form min-w-0 ${tabs ? "" : "relative"}`}
           onSubmit={(event) => {
             event.preventDefault();
@@ -236,22 +264,30 @@ export function DialogShell({
             <p id={reasonId} className="dialog-shell-note min-w-40 flex-1">
               {note}
             </p>
-            {primaryFirst ? [submit, cancel] : [cancel, submit]}
+            {variant !== "capture" &&
+              (primaryFirst ? [submit, cancel] : [cancel, submit])}
           </div>
           {/* Last in the tab order, drawn on the title line. */}
           {showClose && (
-            <div className="absolute top-6 right-4">
+            <div
+              className={
+                compact
+                  ? "dialog-shell-compact-actions"
+                  : "absolute top-6 right-4"
+              }
+            >
+              {headerActions}
               <DialogClose asChild>
-                <Button
+                <IconButton
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Close"
+                  label="Close"
                   {...(onCancel && { onClick: onCancel })}
                   disabled={busy}
                 >
                   <XIcon />
-                </Button>
+                </IconButton>
               </DialogClose>
             </div>
           )}

@@ -80,6 +80,17 @@ test("tags check in their submenu and stay one chip for the dimension", async ()
   });
   await act(async () => {});
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "ui" }));
+  expect(setTags).not.toHaveBeenCalled();
+  for (
+    let tries = 0;
+    tries < 3 && screen.queryAllByRole("menu").length;
+    tries++
+  ) {
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    await act(async () => {});
+  }
   expect(setTags).toHaveBeenCalledWith("ui");
   cleanup();
 

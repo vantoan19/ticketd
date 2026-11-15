@@ -1,3 +1,5 @@
+import { Check } from "lucide-react";
+import "./patterns.css";
 import { Children, createContext, useContext, type ReactNode } from "react";
 import { cn } from "cn";
 
@@ -10,13 +12,16 @@ const StepNumber = createContext(0);
 export function Steps({
   className,
   children,
+  variant = "default",
 }: {
+  variant?: "default" | "settings";
   className?: string;
   children: ReactNode;
 }) {
   return (
     <ol
       data-slot="steps"
+      data-variant={variant}
       className={cn("m-0 flex list-none flex-col p-0", className)}
     >
       {Children.toArray(children).map((child, index) => (
@@ -64,7 +69,7 @@ export function Step({
           !state && "bg-(--surface)",
         )}
       >
-        {number}
+        {state === "done" ? <Check aria-hidden="true" /> : number}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5 text-sm">
         <span className="flex flex-wrap items-center gap-2">

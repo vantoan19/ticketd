@@ -1,3 +1,4 @@
+import { TicketLinksIncomplete } from "./create-ticket-failure";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTicketBoard } from "./useTicketBoard";
 import { useBoardStatus } from "./useBoardStatus";
@@ -398,6 +399,7 @@ export function useTicketWorkspace(
     keepOpen = false,
     requestId?: string,
     followCreated?: boolean,
+    blockers: string[] = [],
   ) {
     const ticket = await client.createTicket(
       title,
@@ -409,6 +411,18 @@ export function useTicketWorkspace(
       followCreated ?? loadPreferences().followCreated,
       requestId,
     );
+    // The create request is replayable; dependency insertion is idempotent.
+    // Do not close on a partial failure: Retry completes the same ticket.
+    try {
+      for (const blocker of blockers)
+        await client.changeDependency(
+          "add_dependency",
+          blocker,
+          ticket.reference,
+        );
+    } catch (reason) {
+      throw new TicketLinksIncomplete(ticket.reference, reason);
+    }
     setDetails((previous) => ({ ...previous, [ticket.reference]: ticket }));
     if (!keepOpen) {
       setCreating(false);

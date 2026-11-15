@@ -121,6 +121,7 @@ export function PaneHeader({
       <header
         ref={header}
         data-slot="pane-header"
+        data-title-editor={titleEditor ? "" : undefined}
         data-leading={leading || shell ? "" : undefined}
         data-collapsed={collapsed || undefined}
         className={cn(

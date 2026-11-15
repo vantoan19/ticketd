@@ -1,3 +1,12 @@
+import { SettingsNavigation } from "@/lib/settings-navigation";
+import { searchMatch } from "@/lib/search-match";
+import { documents, type DocumentSummary } from "@/features/documents/api";
+import {
+  DocumentNavigation,
+  PlanNavigation,
+} from "@/features/documents/navigation";
+import { plansClient, type PlanCounts } from "@/lib/api/plans";
+import { useInboxAttention } from "@/features/tickets/use-inbox-attention";
 import {
   workspaceGraphCommand,
   ContextGraphNavigation,
@@ -9,6 +18,8 @@ import { localInstants, localValue } from "@/features/tickets/reminder-time";
 import { reminderPresets } from "@/features/tickets/reminder-presets";
 import { Button } from "@/components/ui/button";
 import {
+  Bot,
+  Cloud,
   Check,
   Circle,
   Folder,
@@ -26,7 +37,7 @@ import {
 import { matchesShortcut } from "@/lib/shortcuts";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { ConfirmLeaveDuplicate } from "@/features/tickets/ConfirmLeaveDuplicate";
-import { useContext, useRef, useState, type RefObject } from "react";
+import { useContext, useEffect, useRef, useState, type RefObject } from "react";
 import {
   Inbox,
   ListTodo,
@@ -58,7 +69,7 @@ import {
 } from "@/components/ui/dialog";
 import { Reference } from "@/components/ui/reference";
 import { KeyChords, Kbd } from "@/components/ui/kbd";
-import { shortcut, type ShortcutId } from "@/lib/shortcuts";
+import { SHORTCUTS, shortcut, type ShortcutId } from "@/lib/shortcuts";
 import { useTicketSearch } from "@/features/tickets/useTicketSearch";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { GoTo } from "./use-command-keys";
@@ -68,6 +79,12 @@ const targets = [
   { id: "all", label: "All tickets", icon: ListTodo, key: "go-all" },
   { id: "ready", label: "Ready", icon: CircleCheck, key: "go-ready" },
   { id: "chats", label: "Chats", icon: MessagesSquare, key: "go-chats" },
+  {
+    id: "automations",
+    label: "Automations",
+    icon: Layers,
+    key: "go-automations",
+  },
   { id: "documents", label: "Documents", icon: Files, key: "go-documents" },
   { id: "projects", label: "Projects", icon: Folder },
   { id: "plans", label: "Plans", icon: Layers },
@@ -76,6 +93,13 @@ const targets = [
 ] satisfies { id: GoTo; label: string; icon: typeof Inbox; key?: ShortcutId }[];
 
 export function CommandPalette({
+  writeUpdate = null,
+  memoryTickets = [],
+  readyCount = null,
+  automationCount = null,
+  documentCommands = null,
+  attachmentCommands = null,
+  inboxCommands = null,
   currentPlan = null,
   workspaceGraphActive = false,
   create,
@@ -93,6 +117,27 @@ export function CommandPalette({
   plans,
   refresh,
 }: {
+  writeUpdate?: (() => void) | null;
+  memoryTickets?: Ticket[];
+  readyCount?: number | null;
+  automationCount?: number | null;
+  inboxCommands?:
+    | {
+        id: ShortcutId;
+        label: string;
+        disabledReason: string | null;
+        run: () => void;
+      }[]
+    | null;
+  attachmentCommands?: Record<
+    "search" | "add" | "open" | "more" | "back",
+    (() => void) | null
+  > | null;
+  documentCommands?: {
+    search: () => void;
+    pin: (() => void) | null;
+    pinned: boolean;
+  } | null;
   currentPlan?: string | null;
   workspaceGraphActive?: boolean;
   create: (kind: "ticket" | "capture" | "chat" | "plan") => void;
@@ -110,7 +155,17 @@ export function CommandPalette({
   ticket: (reference: string) => void;
   chatsEnabled: boolean;
 }) {
+  const navigateSettings = useContext(SettingsNavigation);
   const openGraph = useContext(ContextGraphNavigation);
+  const openDocument = useContext(DocumentNavigation);
+  const openPlan = useContext(PlanNavigation);
+  const attention = useInboxAttention();
+  const [recentDocuments, setRecentDocuments] = useState<DocumentSummary[]>([]);
+  const [foundDocuments, setFoundDocuments] = useState<{
+    query: string;
+    items: DocumentSummary[];
+  }>({ query: "", items: [] });
+  const [planCounts, setPlanCounts] = useState<Record<string, PlanCounts>>({});
   const [query, setQuery] = useState("");
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState("");
@@ -120,6 +175,54 @@ export function CommandPalette({
   const [scope, setScope] = useState<TicketCommandScope | null>(null);
   const commandsOnly = query.trimStart().startsWith(">");
   const filter = commandsOnly ? query.trimStart().slice(1).trim() : query;
+  const referencesOnly = !commandsOnly && /^t-/i.test(query.trimStart());
+  const matches = (label: string) =>
+    !referencesOnly && searchMatch(label, filter) !== null;
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void documents.recent(0).then(
+      (items) => {
+        if (active) setRecentDocuments(items);
+      },
+      () => {},
+    );
+    void Promise.all(
+      plans
+        .filter((plan) => !plan.archived)
+        .map(async (plan) => {
+          try {
+            return [plan.id, (await plansClient.show(plan.id)).counts] as const;
+          } catch {
+            return null;
+          }
+        }),
+    ).then((entries) => {
+      if (active)
+        setPlanCounts(
+          Object.fromEntries(entries.filter((entry) => entry !== null)),
+        );
+    });
+    return () => {
+      active = false;
+    };
+  }, [open, plans]);
+  useEffect(() => {
+    if (!open || commandsOnly || referencesOnly || !query.trim()) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void documents.search(query.trim(), null, 0).then(
+        (items) => {
+          if (active) setFoundDocuments({ query, items });
+        },
+        () => {},
+      );
+    }, 150);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [open, commandsOnly, referencesOnly, query]);
   const actions = useTicketCommands({
     reference,
     initialTicket,
@@ -172,6 +275,38 @@ export function CommandPalette({
     open && !commandsOnly && !scope,
     () => true,
   );
+  const ticketResults = [
+    ...new Map(
+      [
+        ...search.results,
+        ...memoryTickets.filter(
+          (item) =>
+            !item.trashed &&
+            (referencesOnly
+              ? item.reference
+                  .toLowerCase()
+                  .includes(query.trim().toLowerCase())
+              : searchMatch(`${item.reference} ${item.title}`, query) !== null),
+        ),
+      ]
+        .filter(
+          (item) =>
+            !referencesOnly ||
+            item.reference.toLowerCase().includes(query.trim().toLowerCase()),
+        )
+        .map((item) => [item.id, item]),
+    ).values(),
+  ].slice(0, 8);
+  const documentResults = [
+    ...new Map(
+      [
+        ...(foundDocuments.query === query ? foundDocuments.items : []),
+        ...recentDocuments.filter(
+          (item) => searchMatch(item.heading, query) !== null,
+        ),
+      ].map((item) => [item.id, item]),
+    ).values(),
+  ].slice(0, 8);
   const run = (action: () => void) => {
     navigated.current = true;
     onOpenChange(false);
@@ -301,11 +436,6 @@ export function CommandPalette({
                   : "Search tickets, Documents and actions"
               }
             />
-            {actions.error && (
-              <p role="alert" className="px-4 py-2 text-sm">
-                {actions.error}
-              </p>
-            )}
             {custom && actions.ticket && (
               <div
                 className="ui-palette-custom"
@@ -386,11 +516,7 @@ export function CommandPalette({
                   heading={`${actions.ticket.reference} · ${actions.ticket.title}`}
                 >
                   {ticketCommandActions
-                    .filter((action) =>
-                      action.label
-                        .toLowerCase()
-                        .includes(filter.trim().toLowerCase()),
-                    )
+                    .filter((action) => matches(action.label))
                     .map((action) => {
                       const Icon = icons[action.scope];
                       const keys = shortcut(action.shortcut);
@@ -421,19 +547,35 @@ export function CommandPalette({
                           ) : (
                             <Icon aria-hidden="true" />
                           )}
-                          <span className="flex-1">{action.label}</span>
+                          <span className="flex-1">
+                            <CommandMatch text={action.label} query={filter} />
+                          </span>
                           <CommandShortcut>
                             {value} <KeyChords keys={keys.keys} />
                           </CommandShortcut>
                         </CommandItem>
                       );
                     })}
+                  {writeUpdate &&
+                    filter.trim() &&
+                    matches("Write an update") && (
+                      <CommandItem
+                        value="ticket-update"
+                        onSelect={() =>
+                          run(() => requestAnimationFrame(writeUpdate))
+                        }
+                      >
+                        <SquarePen aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text="Write an update" query={filter} />
+                        </span>
+                        <CommandShortcut>
+                          <KeyChords keys={shortcut("ticket-update").keys} />
+                        </CommandShortcut>
+                      </CommandItem>
+                    )}
                   {linkedChats?.chats
-                    .filter((item) =>
-                      `open chat ${item.title}`
-                        .toLowerCase()
-                        .includes(filter.trim().toLowerCase()),
-                    )
+                    .filter((item) => matches(`open chat ${item.title}`))
                     .map((item) => (
                       <CommandItem
                         key={item.id}
@@ -458,7 +600,7 @@ export function CommandPalette({
                         </CommandShortcut>
                       </CommandItem>
                     ))}
-                  {"copy reference".includes(filter.trim().toLowerCase()) && (
+                  {matches("copy reference") && (
                     <CommandItem
                       value="copy-reference"
                       onSelect={() => {
@@ -481,7 +623,7 @@ export function CommandPalette({
               )}
               {!scope && !commandsOnly && query.trim() && (
                 <CommandGroup heading="Tickets">
-                  {search.results.map((result) => (
+                  {ticketResults.map((result) => (
                     <CommandItem
                       key={result.reference}
                       value={result.reference}
@@ -496,6 +638,159 @@ export function CommandPalette({
                       </span>
                     </CommandItem>
                   ))}
+                </CommandGroup>
+              )}
+              {!scope &&
+                !commandsOnly &&
+                !referencesOnly &&
+                query.trim() &&
+                documentResults.length > 0 && (
+                  <CommandGroup heading="Documents">
+                    {documentResults.map((document) => (
+                      <CommandItem
+                        key={document.id}
+                        value={`document-${document.id}`}
+                        onSelect={() => run(() => openDocument?.(document.id))}
+                      >
+                        <Files aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate">
+                          <CommandMatch
+                            text={document.heading || "Untitled"}
+                            query={query}
+                          />
+                        </span>
+                        <CommandShortcut>Document</CommandShortcut>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              {!scope && documentCommands && (
+                <CommandGroup heading="Documents actions">
+                  {matches("Search this Documents list") && (
+                    <CommandItem
+                      value="documents-search"
+                      onSelect={() =>
+                        run(() =>
+                          requestAnimationFrame(documentCommands.search),
+                        )
+                      }
+                    >
+                      <Files aria-hidden="true" />
+                      <span className="flex-1">
+                        <CommandMatch
+                          text="Search this Documents list"
+                          query={filter}
+                        />
+                      </span>
+                      <CommandShortcut>
+                        <KeyChords keys={shortcut("documents-search").keys} />
+                      </CommandShortcut>
+                    </CommandItem>
+                  )}
+                  {matches("Pin or unpin the focused Document") && (
+                    <CommandItem
+                      value="documents-pin"
+                      disabled={!documentCommands.pin}
+                      onSelect={() =>
+                        run(() =>
+                          requestAnimationFrame(() => documentCommands.pin?.()),
+                        )
+                      }
+                    >
+                      <Files aria-hidden="true" />
+                      <span className="flex-1">
+                        {documentCommands.pinned ? "Unpin" : "Pin"} the focused
+                        Document
+                      </span>
+                      <CommandShortcut>
+                        <KeyChords keys={shortcut("documents-pin").keys} />
+                      </CommandShortcut>
+                    </CommandItem>
+                  )}
+                </CommandGroup>
+              )}
+              {!scope && inboxCommands && (
+                <CommandGroup heading="Inbox actions">
+                  {inboxCommands
+                    .filter((command) => matches(command.label))
+                    .map((command) => (
+                      <CommandItem
+                        key={command.id}
+                        value={command.id}
+                        disabled={!!command.disabledReason}
+                        onSelect={() =>
+                          run(() => requestAnimationFrame(command.run))
+                        }
+                      >
+                        <Inbox aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text={command.label} query={filter} />
+                          {command.disabledReason && (
+                            <span> · {command.disabledReason}</span>
+                          )}
+                        </span>
+                        <CommandShortcut>
+                          <KeyChords keys={shortcut(command.id).keys} />
+                        </CommandShortcut>
+                      </CommandItem>
+                    ))}
+                </CommandGroup>
+              )}
+              {!scope && attachmentCommands && (
+                <CommandGroup heading="Attachments actions">
+                  {[
+                    {
+                      id: "attachments-search",
+                      label: "Search files",
+                      run: attachmentCommands.search,
+                    },
+                    {
+                      id: "attachments-add",
+                      label: "Add files",
+                      run: attachmentCommands.add,
+                    },
+                    {
+                      id: "attachments-open",
+                      label: "Open file",
+                      run: attachmentCommands.open,
+                    },
+                    {
+                      id: "attachments-more",
+                      label: "More file actions",
+                      run: attachmentCommands.more,
+                    },
+                    {
+                      id: "attachments-back",
+                      label: "Back to Attachments",
+                      run: attachmentCommands.back,
+                    },
+                  ]
+                    .filter((command) => matches(command.label))
+                    .map((command) => (
+                      <CommandItem
+                        key={command.id}
+                        value={command.id}
+                        disabled={!command.run}
+                        onSelect={() =>
+                          run(() =>
+                            requestAnimationFrame(() => command.run?.()),
+                          )
+                        }
+                      >
+                        <Files aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text={command.label} query={filter} />
+                        </span>
+                        <CommandShortcut>
+                          <KeyChords
+                            keys={
+                              SHORTCUTS.find((entry) => entry.id === command.id)
+                                ?.keys ?? []
+                            }
+                          />
+                        </CommandShortcut>
+                      </CommandItem>
+                    ))}
                 </CommandGroup>
               )}
               {!scope && workspaceGraphActive && (
@@ -514,11 +809,7 @@ export function CommandPalette({
                       },
                     ] as const
                   )
-                    .filter((item) =>
-                      item.label
-                        .toLowerCase()
-                        .includes(filter.trim().toLowerCase()),
-                    )
+                    .filter((item) => matches(item.label))
                     .map((item) => (
                       <CommandItem
                         key={item.id}
@@ -527,7 +818,9 @@ export function CommandPalette({
                           run(() => workspaceGraphCommand(item.command))
                         }
                       >
-                        <span className="flex-1">{item.label}</span>
+                        <span className="flex-1">
+                          <CommandMatch text={item.label} query={filter} />
+                        </span>
                         <CommandShortcut>
                           <KeyChords keys={shortcut(item.id).keys} />
                         </CommandShortcut>
@@ -538,7 +831,7 @@ export function CommandPalette({
               {!scope &&
                 currentPlan &&
                 openGraph &&
-                "open the full graph".includes(filter.trim().toLowerCase()) && (
+                matches("open the full graph") && (
                   <CommandGroup heading="Plan">
                     <CommandItem
                       value="plan-full-graph"
@@ -559,72 +852,9 @@ export function CommandPalette({
                   </CommandGroup>
                 )}
               {!scope && (
-                <CommandGroup heading="Create">
-                  {(
-                    [
-                      {
-                        id: "ticket",
-                        label: "New ticket",
-                        icon: SquarePen,
-                        key: "new-ticket",
-                      },
-                      {
-                        id: "plan",
-                        label: "New Plan",
-                        icon: Layers,
-                        key: "new-plan",
-                      },
-                      {
-                        id: "capture",
-                        label: "Capture a thought",
-                        icon: NotebookPen,
-                        key: "capture",
-                      },
-                      {
-                        id: "chat",
-                        label: "New Chat",
-                        icon: MessageSquarePlus,
-                      },
-                    ] as const
-                  )
-                    .filter((item) =>
-                      item.label
-                        .toLowerCase()
-                        .includes(filter.trim().toLowerCase()),
-                    )
-                    .map((item) => (
-                      <CommandItem
-                        key={item.id}
-                        value={`create-${item.id}`}
-                        disabled={
-                          !!createDisabledReason ||
-                          (item.id === "chat" && !chatsEnabled)
-                        }
-                        onSelect={() => run(() => create(item.id))}
-                      >
-                        <item.icon aria-hidden="true" />
-                        <span className="flex-1">{item.label}</span>
-                        {createDisabledReason ? (
-                          <CommandShortcut>
-                            {createDisabledReason}
-                          </CommandShortcut>
-                        ) : "key" in item ? (
-                          <CommandShortcut>
-                            <KeyChords keys={shortcut(item.key).keys} />
-                          </CommandShortcut>
-                        ) : null}
-                      </CommandItem>
-                    ))}
-                </CommandGroup>
-              )}
-              {!scope && (
                 <CommandGroup heading="Go to">
                   {targets
-                    .filter((target) =>
-                      target.label
-                        .toLowerCase()
-                        .includes(filter.trim().toLowerCase()),
-                    )
+                    .filter((target) => matches(target.label))
                     .map((target) => {
                       const keys =
                         "key" in target ? shortcut(target.key) : null;
@@ -632,15 +862,49 @@ export function CommandPalette({
                         <CommandItem
                           key={target.id}
                           value={target.id}
-                          disabled={target.id === "chats" && !chatsEnabled}
+                          aria-label={
+                            target.id === "automations" && automationCount
+                              ? `Automations, ${automationCount} ${automationCount === 1 ? "run needs" : "runs need"} you`
+                              : undefined
+                          }
+                          disabled={
+                            (target.id === "chats" ||
+                              target.id === "automations") &&
+                            !chatsEnabled
+                          }
                           onSelect={() => run(() => go(target.id))}
                         >
                           <target.icon aria-hidden="true" />
                           <span className="flex-1">
                             <CommandMatch text={target.label} query={filter} />
                           </span>
-                          {target.id === "chats" && !chatsEnabled && (
-                            <CommandShortcut>Chat is off</CommandShortcut>
+                          {(target.id === "chats" ||
+                            target.id === "automations") &&
+                            !chatsEnabled && (
+                              <CommandShortcut>Chat is off</CommandShortcut>
+                            )}
+                          {target.id === "automations" &&
+                            automationCount !== null &&
+                            automationCount > 0 && (
+                              <CommandShortcut>
+                                {automationCount}{" "}
+                                {automationCount === 1
+                                  ? "run needs"
+                                  : "runs need"}{" "}
+                                you
+                              </CommandShortcut>
+                            )}
+                          {target.id === "inbox" &&
+                            attention &&
+                            !attention.loading && (
+                              <CommandShortcut>
+                                {attention.needsCount} need you
+                              </CommandShortcut>
+                            )}
+                          {target.id === "ready" && readyCount !== null && (
+                            <CommandShortcut>
+                              {readyCount} tickets
+                            </CommandShortcut>
                           )}
                           {keys && (
                             <CommandShortcut>
@@ -654,6 +918,123 @@ export function CommandPalette({
                         </CommandItem>
                       );
                     })}
+                  {(
+                    [
+                      {
+                        id: "go-agent-skills",
+                        section: "agent-skills",
+                        label: "Agent skills",
+                        icon: Bot,
+                      },
+                      {
+                        id: "go-sync",
+                        section: "google-drive",
+                        label: "Google Drive sync",
+                        icon: Cloud,
+                      },
+                    ] as const
+                  )
+                    .filter((target) => matches(target.label))
+                    .map((target) => (
+                      <CommandItem
+                        key={target.id}
+                        value={target.id}
+                        disabled={!navigateSettings}
+                        onSelect={() =>
+                          run(() => navigateSettings?.(target.section))
+                        }
+                      >
+                        <target.icon aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text={target.label} query={filter} />
+                        </span>
+                        <CommandShortcut>
+                          <KeyChords keys={shortcut(target.id).keys} />
+                        </CommandShortcut>
+                      </CommandItem>
+                    ))}
+                  {plans
+                    .filter(
+                      (plan) =>
+                        !commandsOnly && !plan.archived && matches(plan.name),
+                    )
+                    .map((plan) => {
+                      const counts = planCounts[plan.id];
+                      return (
+                        <CommandItem
+                          key={plan.id}
+                          value={`plan-${plan.id}`}
+                          onSelect={() => run(() => openPlan?.(plan.id))}
+                        >
+                          <PlanIcon aria-hidden="true" />
+                          <span className="min-w-0 flex-1 truncate">
+                            <CommandMatch text={plan.name} query={filter} />
+                          </span>
+                          <CommandShortcut>
+                            Plan
+                            {counts &&
+                              ` · ${counts.done} of ${counts.todo + counts.in_progress + counts.in_review + counts.done} done`}
+                          </CommandShortcut>
+                        </CommandItem>
+                      );
+                    })}
+                </CommandGroup>
+              )}
+              {!scope && (
+                <CommandGroup heading="Create">
+                  {(
+                    [
+                      {
+                        id: "ticket",
+                        label: "New ticket",
+                        icon: SquarePen,
+                        key: "new-ticket",
+                      },
+                      {
+                        id: "capture",
+                        label: "Capture a thought",
+                        icon: NotebookPen,
+                        key: "capture",
+                      },
+                      {
+                        id: "chat",
+                        label: "New Chat",
+                        icon: MessageSquarePlus,
+                      },
+                      {
+                        id: "plan",
+                        label: "New Plan",
+                        icon: Layers,
+                        key: "new-plan",
+                      },
+                    ] as const
+                  )
+                    .filter((item) => matches(item.label))
+                    .map((item) => (
+                      <CommandItem
+                        key={item.id}
+                        value={`create-${item.id}`}
+                        disabled={
+                          !!createDisabledReason ||
+                          (item.id === "chat" && !chatsEnabled)
+                        }
+                        onSelect={() => run(() => create(item.id))}
+                      >
+                        <item.icon aria-hidden="true" />
+                        <span className="flex-1">
+                          <CommandMatch text={item.label} query={filter} />
+                        </span>
+                        {createDisabledReason ? (
+                          <CommandShortcut>
+                            {createDisabledReason}
+                          </CommandShortcut>
+                        ) : "key" in item ? (
+                          <CommandShortcut>
+                            <KeyChords keys={shortcut(item.key).keys} />
+                          </CommandShortcut>
+                        ) : null}
+                      </CommandItem>
+                    ))}
                 </CommandGroup>
               )}
               <CommandEmpty>
@@ -663,7 +1044,9 @@ export function CommandPalette({
               </CommandEmpty>
             </CommandList>
             <div className="ui-palette-footer">
-              {scope ? (
+              {actions.error ? (
+                <span role="alert">{actions.error}</span>
+              ) : scope ? (
                 <>
                   <span>
                     <Kbd>↵</Kbd> {scope === "Status" ? "Set status" : "Apply"}

@@ -14,7 +14,7 @@ function Input({
   variant = "default",
   ...props
 }: React.ComponentProps<"input"> & {
-  variant?: "default" | "inline" | "title";
+  variant?: "default" | "inline" | "title" | "document-title" | "capture-title";
 }) {
   return (
     <input

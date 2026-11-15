@@ -39,6 +39,8 @@ export function bridgeDefault(
     case "find_tickets":
     case "search_tickets":
     case "recent_documents":
+    case "search_documents":
+    case "all_documents":
     case "pinned_documents":
     case "activity_feed":
     case "ticket_history":
@@ -54,6 +56,7 @@ export function bridgeDefault(
     case "sync_conflicts": // without sync: nothing to review, every file local
     case "sync_notices":
     case "attachment_availability":
+    case "list_trash":
     case "list_sources": // no built-in connector unless a test supplies one
       return [];
     case "count_tickets":

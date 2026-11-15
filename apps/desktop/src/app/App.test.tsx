@@ -1,3 +1,4 @@
+import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
 import {
   reportWorkspaceFailure,
@@ -17,7 +18,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
-import { syncStatus } from "@/features/sync/sync-fixtures";
+import { syncStatus, syncSettings } from "@/features/sync/sync-fixtures";
 
 class ResizeObserverStub {
   constructor(private callback: ResizeObserverCallback) {}
@@ -1996,7 +1997,7 @@ test("a group's Add action starts a ticket in that status", async () => {
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "New ticket" });
   expect(
-    within(dialog).getByRole("combobox", { name: "Status: In review" }),
+    within(dialog).getByRole("button", { name: "Status: In review" }),
   ).toBeTruthy();
 });
 
@@ -3433,11 +3434,26 @@ test.each([
     fireEvent.click(
       await screen.findByRole("button", { name: /Document target/ }),
     );
-    fireEvent.click(await screen.findByRole("button", { name: chip }));
-    expect(await screen.findByText(`${scope} of T-FV1`)).toBeTruthy();
-    fireEvent.click(
-      await screen.findByRole("option", { name: new RegExp(`^${label}`) }),
+    if (scope === "Reminder") {
+      expect(screen.queryByRole("button", { name: "Remind me" })).toBeNull();
+      fireEvent.keyDown(
+        await screen.findByRole("button", { name: "Add ticket property" }),
+        { key: "ArrowDown" },
+      );
+      fireEvent.click(
+        await screen.findByRole("menuitem", { name: "Reminder" }),
+      );
+    } else fireEvent.click(await screen.findByRole("button", { name: chip }));
+    const choices = await screen.findByText(`${scope} of T-FV1`);
+    expect(choices.closest('[data-slot="popover-content"]')).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+    const option = await screen.findByRole("option", {
+      name: new RegExp(`^${label}`),
+    });
+    await vi.waitFor(() =>
+      expect(option.getAttribute("aria-disabled")).not.toBe("true"),
     );
+    fireEvent.click(option);
     await vi.waitFor(() =>
       expect(bridge.invoke).toHaveBeenCalledWith(
         command,
@@ -5151,6 +5167,175 @@ test.each([null, "codex"])(
   },
 );
 
+test("palette orders Go to before Create and joins fuzzy Tickets, Documents and active Plans", async () => {
+  const ticket = bulkTicket(1, { reference: "T-FV1", title: "Board geometry" });
+  const doc = { id: "doc-board", heading: "Board handoff" };
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "list_plans")
+      return [
+        { id: "plan-board", name: "Board polish", archived: false },
+        { id: "plan-old", name: "Board retired", archived: true },
+      ];
+    if (command === "recent_documents") return [doc];
+    if (command === "show_plan")
+      return {
+        plan: { id: "plan-board", name: "Board polish", archived: false },
+        members: [],
+        counts: {
+          todo: 2,
+          in_progress: 1,
+          in_review: 0,
+          done: 2,
+          canceled: 5,
+          duplicate: 1,
+        },
+      };
+    if (command === "sidebar_counts")
+      return { unread_inbox: 0, ready: 7, in_progress: 1 };
+    if (command === "document_tags") return [];
+    if (command === "open_document" || command === "show_document")
+      return {
+        id: doc.id,
+        title: doc.heading,
+        body: "A board handoff.",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        trashed: false,
+      };
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  await screen.findByRole("button", { name: /Board geometry/ });
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  const labels = screen
+    .getAllByRole("option")
+    .map((row) => row.getAttribute("data-value"));
+  expect(labels.indexOf("inbox")).toBeLessThan(labels.indexOf("create-ticket"));
+  expect(labels.filter((label) => label?.startsWith("create-"))).toEqual([
+    "create-ticket",
+    "create-capture",
+    "create-chat",
+    "create-plan",
+  ]);
+  expect(screen.getByRole("option", { name: /Ready/ }).textContent).toContain(
+    "7 tickets",
+  );
+  fireEvent.change(input, { target: { value: "brd" } });
+  expect(await screen.findByRole("option", { name: /T-FV1/ })).toBeTruthy();
+  const documentResult = await screen.findByRole("option", {
+    name: /Board handoff/,
+  });
+  expect(documentResult.querySelectorAll("mark").length).toBeGreaterThan(1);
+  const plan = await screen.findByRole("option", { name: /Board polish/ });
+  await vi.waitFor(() => expect(plan.textContent).toContain("2 of 5 done"));
+  expect(screen.queryByRole("option", { name: /Board retired/ })).toBeNull();
+  fireEvent.change(input, { target: { value: "T-FV" } });
+  expect(await screen.findByRole("option", { name: /T-FV1/ })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: /Board handoff/ })).toBeNull();
+  expect(screen.queryByRole("option", { name: /New ticket/ })).toBeNull();
+  fireEvent.change(input, { target: { value: "> brd" } });
+  expect(
+    screen.queryByRole("option", { name: /Board handoff|Board polish|T-FV1/ }),
+  ).toBeNull();
+  fireEvent.change(input, { target: { value: "brd hnd" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Board handoff/ }));
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("open_document", {
+      id: "doc-board",
+    }),
+  );
+  expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+});
+
+test("palette opens a named active Plan through the workspace navigation", async () => {
+  bridge.invoke.mockImplementation((command: string, args?: object) =>
+    command === "list_plans"
+      ? [{ id: "plan-board", name: "Board polish", archived: false }]
+      : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await screen.findByRole("button", { name: /Attachments/ });
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  fireEvent.change(input, { target: { value: "brd plsh" } });
+  fireEvent.click(await screen.findByRole("option", { name: /Board polish/ }));
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("find_tickets", {
+      filter: expect.objectContaining({ plan: "plan-board" }),
+    }),
+  );
+  expect(screen.queryByRole("dialog", { name: "Go anywhere" })).toBeNull();
+});
+
+test("filter checks stay staged until the menu closes, then the bar follows the header", async () => {
+  const tickets = [
+    bulkTicket(1, { title: "First retained row", tags: ["polish"] }),
+    bulkTicket(2, { title: "Second retained row", tags: [] }),
+  ];
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args?: { filter?: { tags: string[] }; id?: string; reference?: string },
+    ) => {
+      if (command === "find_tickets")
+        return args?.filter?.tags.length ? tickets.slice(0, 1) : tickets;
+      if (command === "search_tags") return ["polish"];
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const first = await screen.findByRole("button", {
+    name: /First retained row/,
+  });
+  const second = await screen.findByRole("button", {
+    name: /Second retained row/,
+  });
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Filters" }), {
+    key: "Enter",
+  });
+  fireEvent.keyDown(await screen.findByRole("menuitem", { name: /^Tags/ }), {
+    key: "ArrowRight",
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitemcheckbox", { name: "polish" }),
+  );
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+  expect(first.isConnected).toBe(true);
+  expect(second.isConnected).toBe(true);
+  expect(
+    bridge.invoke.mock.calls
+      .filter(([name]) => name === "find_tickets")
+      .at(-1)?.[1],
+  ).toEqual(
+    expect.objectContaining({ filter: expect.objectContaining({ tags: [] }) }),
+  );
+  for (let step = 0; step < 3 && screen.queryAllByRole("menu").length; step++) {
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    await act(async () => {});
+  }
+  const bar = await screen.findByLabelText("Active filters");
+  expect(bar.previousElementSibling?.getAttribute("data-slot")).toBe(
+    "pane-header",
+  );
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: /Second retained row/ }),
+    ).toBeNull(),
+  );
+  fireEvent.click(within(bar).getByRole("button", { name: "Clear filters" }));
+  await screen.findByRole("button", { name: /Second retained row/ });
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
 test("Documents folds local search in its header and navigates one row stop without replacing the reader metadata", async () => {
   const docs = [
     {
@@ -5443,6 +5628,225 @@ test("New Chat exposes its complete current pick before the first message", asyn
   ).toBeTruthy();
   expect(client.created).toHaveLength(0);
 });
+
+test("Attachments folds search in its header and shares the Documents navigator keys and return focus", async () => {
+  const files = ["icon.png", "notes.txt"].map((name, index) => ({
+    id: `library-${index}`,
+    display_name: name,
+    original_filename: name,
+    size_bytes: index === 0 ? 567 : 17,
+    kind: "local_snapshot",
+    locator: `fixture/${name}`,
+    added_at: "2026-11-14T10:46:00Z",
+  }));
+  bridge.invoke.mockImplementation(
+    (
+      command: string,
+      args: { id?: string; query?: { search: string } } = {},
+    ) => {
+      if (command === "search_attachments")
+        return files
+          .filter((file) =>
+            file.display_name.includes(args.query?.search ?? ""),
+          )
+          .map((attachment) => ({
+            attachment,
+            related: false,
+            usage: {
+              eligible: false,
+              legacy_drafts_pending: false,
+              protections: [
+                {
+                  kind: "ticket_attachment",
+                  owner: "ticket",
+                  ticket_id: "ticket",
+                  trashed: false,
+                },
+              ],
+            },
+          }));
+      if (command === "attachment_preview")
+        return {
+          attachment: files.find((file) => file.id === args.id),
+          status: "unsupported",
+          media_type: null,
+          message: null,
+          can_open: true,
+          text_excerpt: { text: "Launch checklist", truncated: false },
+          usage: { total: 1, legacy_drafts_pending: false, entries: [] },
+        };
+      if (command === "open_attachment") return null;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  await screen.findByRole("button", { name: "icon.png" });
+  const header = screen
+    .getByRole("heading", { name: "Attachments" })
+    .closest("header")!;
+  fireEvent.click(within(header).getByRole("button", { name: "Search files" }));
+  const search = within(header).getByRole("searchbox", {
+    name: "Search files",
+  });
+  fireEvent.change(search, { target: { value: "notes" } });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("button", { name: "icon.png" })).toBeNull(),
+  );
+  fireEvent.keyDown(search, { key: "Escape" });
+  expect(within(header).queryByRole("searchbox")).toBeNull();
+  const restored = await screen.findByRole("button", { name: "icon.png" });
+  restored.focus();
+  fireEvent.keyDown(restored, { key: "j" });
+  const second = screen.getByRole("button", { name: "notes.txt" });
+  expect(document.activeElement).toBe(second);
+  expect(screen.queryByRole("region", { name: "notes.txt" })).toBeNull();
+  fireEvent.keyDown(second, { key: "Enter" });
+  const preview = await screen.findByRole("region", { name: "notes.txt" });
+  await within(preview).findByText("Launch checklist");
+  fireEvent.click(within(preview).getByRole("button", { name: "Open file" }));
+  await vi.waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("open_attachment", {
+      id: "library-1",
+    }),
+  );
+  fireEvent.click(
+    within(preview).getByRole("button", { name: "Back to Attachments" }),
+  );
+  expect(document.activeElement).toBe(second);
+  fireEvent.keyDown(second, { key: "Enter" });
+  const reopened = await screen.findByRole("region", { name: "notes.txt" });
+  fireEvent.keyDown(
+    within(reopened).getByRole("heading", { name: "notes.txt" }),
+    { key: "." },
+  );
+  expect(await screen.findByRole("menuitem", { name: "Rename…" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await vi.waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(screen.getByRole("region", { name: "notes.txt" })).toBe(reopened);
+  fireEvent.keyDown(
+    within(reopened).getByRole("heading", { name: "notes.txt" }),
+    { key: "Escape" },
+  );
+  expect(document.activeElement).toBe(second);
+  expect(
+    screen.getByText(
+      "Drop files anywhere on a ticket or Document to attach them. They are kept on this computer.",
+    ),
+  ).toBeTruthy();
+});
+
+test.each(["missing", "quarantined", "unavailable"])(
+  "Attachments keeps %s recovery and Used in navigation in the preview",
+  async (state) => {
+    let restored = false;
+    let retry = false;
+    const file = () => ({
+      id: "attachment-state",
+      display_name: "notes.txt",
+      original_filename: "notes.txt",
+      size_bytes: 17,
+      kind: "local_snapshot",
+      locator: "fixture/notes.txt",
+      quarantined: state === "quarantined" && !restored,
+    });
+    const owner = bulkTicket(1, { title: "Attachment owner" });
+    bridge.invoke.mockImplementation(
+      (command: string, args: { id?: string; reference?: string } = {}) => {
+        if (command === "find_tickets") return [owner];
+        if (command === "show_ticket") return owner;
+        if (command === "search_attachments")
+          return [
+            {
+              attachment: file(),
+              related: false,
+              missing: state === "missing",
+              usage: {
+                eligible: false,
+                legacy_drafts_pending: false,
+                protections: [],
+              },
+            },
+          ];
+        if (command === "attachment_preview")
+          return {
+            attachment: file(),
+            status:
+              state === "missing"
+                ? "missing"
+                : state === "unavailable" && !retry
+                  ? "unavailable"
+                  : "unsupported",
+            media_type: null,
+            message: null,
+            can_open: state !== "missing",
+            text_excerpt: retry
+              ? { text: "Recovered preview", truncated: false }
+              : null,
+            usage: {
+              total: 1,
+              legacy_drafts_pending: false,
+              entries: [
+                {
+                  kind: "ticket_attachment",
+                  owner: "1",
+                  label: "T-KQ1 · Attachment owner",
+                  trashed: false,
+                  target: { kind: "ticket", id: "T-KQ1" },
+                },
+              ],
+            },
+          };
+        if (command === "restore_attachment") {
+          restored = true;
+          return file();
+        }
+        return bridgeDefault(command, args);
+      },
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    const pane = await screen.findByRole("region", { name: "notes.txt" });
+    const stage = pane.querySelector(".attachment-preview-stage");
+    if (state === "missing") {
+      await within(pane).findByText("This file is missing from this computer");
+      expect(
+        within(pane).getByRole("button", { name: "Open file" }),
+      ).toHaveProperty("disabled", true);
+      expect(
+        within(pane).getByRole("button", { name: "Restore from a backup…" }),
+      ).toBeTruthy();
+    } else if (state === "quarantined") {
+      fireEvent.click(
+        await within(pane).findByRole("button", { name: "Restore file" }),
+      );
+      await vi.waitFor(() =>
+        expect(
+          within(pane).queryByRole("button", { name: "Restore file" }),
+        ).toBeNull(),
+      );
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        "restore_attachment",
+        expect.objectContaining({ id: "attachment-state" }),
+      );
+    } else {
+      await within(pane).findByText("Couldn't read this file");
+      retry = true;
+      fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
+      await within(pane).findByText("Recovered preview");
+    }
+    expect(pane.querySelector(".attachment-preview-stage")).toBe(stage);
+    fireEvent.click(
+      await within(pane).findByRole("button", {
+        name: "T-KQ1 · Attachment owner",
+      }),
+    );
+    expect(
+      await screen.findByRole("textbox", { name: "Title" }),
+    ).toHaveProperty("value", "Attachment owner");
+  },
+);
 
 test("a blocker removed and re-added through Linked is visible and can be removed with Undo", async () => {
   const current = bulkTicket(1, { title: "Waiting outcome" });
@@ -6120,9 +6524,25 @@ test("Inbox Retry preserves its operation identity and Undo restores Needs you a
   await flush();
   expect(first.status).toBe("Done");
   const failure = screen.getByRole("button", { name: "Retry" });
+  entries = [
+    {
+      ...entries[1]!,
+      id: 403,
+      reference: "T-KQ3",
+      title: "Live Ticket",
+      kind: "status",
+      to_value: "In progress",
+      timestamp: "2026-11-16T00:00:00Z",
+      read: false,
+    },
+    ...entries,
+  ];
   await act(async () => {
     await vi.advanceTimersByTimeAsync(15000);
   });
+  expect(
+    screen.queryByRole("button", { name: /T-KQ3.*Live Ticket/ }),
+  ).toBeNull();
   expect(screen.getByRole("button", { name: "Retry" })).toBe(failure);
   expect(row.closest("section")?.textContent).toContain("Needs you");
   fireEvent.click(failure);
@@ -6148,6 +6568,9 @@ test("Inbox Retry preserves its operation identity and Undo restores Needs you a
       .getByRole("button", { name: /T-KQ1.*waiting for you/ })
       .closest("section")?.textContent,
   ).toContain("Needs you");
+  expect(
+    screen.getByRole("button", { name: /T-KQ3.*Live Ticket/ }),
+  ).toBeTruthy();
   cleanup();
   render(<App />);
   await flush();
@@ -6297,4 +6720,682 @@ test("Inbox unlinked approvals keep Chat review available and mark all read send
     await screen.findByRole("heading", { name: "Unlinked approval" }),
   ).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
+});
+test("first run creates through the shared dialog and gives way to the ticket list", async () => {
+  let created = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "find_tickets") return created ? [bulkTicket(1)] : [];
+      if (command === "create_ticket") {
+        created = true;
+        return bulkTicket(1);
+      }
+      if (command === "show_ticket") return bulkTicket(1);
+      if (command === "workspace_info")
+        return {
+          ...((await bridgeDefault(command)) as object),
+          tickets: created ? 1 : 0,
+        };
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const guide = await screen.findByRole("region", {
+    name: "Your workspace is ready",
+  });
+  fireEvent.click(within(guide).getByRole("button", { name: /New ticket/ }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+    target: { value: "First" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await screen.findByRole("button", { name: /First/ });
+  expect(
+    screen.queryByRole("region", { name: "Your workspace is ready" }),
+  ).toBeNull();
+});
+
+test("first run reads completed steps and opens the exact existing Settings sections", async () => {
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "agent_skills")
+        return [
+          {
+            id: "claude",
+            name: "Claude Code",
+            path: "/fake/skills",
+            detected: true,
+            state: "installed",
+            error: null,
+          },
+        ];
+      if (command === "sync_status")
+        return syncStatus({ connection: "connected" });
+      if (command === "sync_settings") return syncSettings();
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  const guide = await screen.findByRole("region", {
+    name: "Your workspace is ready",
+  });
+  expect(await within(guide).findByText(/Let your agents in/)).toBeTruthy();
+  await act(async () => {});
+  expect(
+    within(guide)
+      .getByText(/Let your agents in/)
+      .closest('[data-slot="step"]')
+      ?.getAttribute("data-state"),
+  ).toBe("done");
+  expect(
+    within(guide)
+      .getByText(/Keep it on every Mac/)
+      .closest('[data-slot="step"]')
+      ?.getAttribute("data-state"),
+  ).toBe("done");
+  fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Agent skills" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
+  fireEvent.click(
+    within(
+      await screen.findByRole("region", { name: "Your workspace is ready" }),
+    ).getByRole("button", { name: "Set up" }),
+  );
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Google Drive" }),
+  ).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) =>
+      ["install_agent_skill", "sync_connect", "sync_setup"].includes(command),
+    ),
+  ).toBe(false);
+});
+
+test.each(["ready", "trashed"] as const)(
+  "first run stays absent when existing tickets are %s",
+  async (kind) => {
+    bridge.invoke.mockImplementation(
+      async (command: string, args?: Record<string, unknown>) => {
+        if (command === "workspace_info")
+          return {
+            ...((await bridgeDefault(command)) as object),
+            tickets: kind === "ready" ? 1 : 0,
+          };
+        if (command === "list_trash")
+          return [{ ...bulkTicket(1), trashed: true }];
+        if (command === "find_tickets") return [];
+        return bridgeDefault(command, args);
+      },
+    );
+    render(<App />);
+    await act(async () => {});
+    expect(await screen.findByText("No tickets yet")).toBeTruthy();
+    if (kind === "ready")
+      fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+    else fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+    expect(
+      await screen.findByText(
+        kind === "ready" ? "No Ready tickets" : "Trash is empty",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Your workspace is ready" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Install skill" })).toBeNull();
+  },
+);
+test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
+  const current = bulkTicket(1, { title: "Follow outcome" });
+  let following = false;
+  let failed = true;
+  bridge.invoke.mockImplementation(
+    (command: string, args?: { following?: boolean }) => {
+      if (command === "find_tickets") return [current];
+      if (command === "show_ticket") return current;
+      if (command === "is_following") return following;
+      if (command === "set_following") {
+        if (failed) throw new Error("Storage is busy");
+        following = args?.following ?? false;
+        return null;
+      }
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Follow outcome/ }),
+  );
+  const follow = await screen.findByRole("button", { name: "Follow" });
+  const header = follow.closest("header");
+  expect(header).toBeTruthy();
+  expect(
+    within(
+      screen.getByRole("group", { name: "Ticket properties" }),
+    ).queryByRole("button", { name: "Follow" }),
+  ).toBeNull();
+  fireEvent.click(follow);
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(follow.closest("header")).toBe(header);
+  expect(header?.querySelector('[role="alert"]')).toBeNull();
+  expect(follow.getAttribute("aria-pressed")).toBe("false");
+  failed = false;
+  fireEvent.click(retry);
+  await vi.waitFor(() =>
+    expect(follow.getAttribute("aria-pressed")).toBe("true"),
+  );
+  following = false;
+  await vi.waitFor(
+    () => expect(follow.getAttribute("aria-pressed")).toBe("false"),
+    { timeout: 3000 },
+  );
+  act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
+  expect(follow.hasAttribute("disabled")).toBe(true);
+});
+
+test("New ticket expands without replacing the rich draft and creates once from a focused property", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  const created = bulkTicket(16, { title: "Keep every keystroke" });
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "create_ticket") return created;
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await openNewTicket();
+  const title = screen.getByRole("textbox", { name: "Title" });
+  expect(document.activeElement).toBe(title);
+  fireEvent.change(title, { target: { value: "Keep every keystroke" } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(
+    screen.getByRole("textbox", { name: "Description rich text" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Description source" }),
+    {
+      target: {
+        value:
+          "# Exact draft\n\n- [ ] Keep **this**\n\n```mermaid\ngraph LR; A-->B\n```",
+      },
+    },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
+  const beforeExpand = screen.getByRole("textbox", {
+    name: "Description rich text",
+  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "New ticket" }))
+      .getAllByRole("button", { name: "Expand" })
+      .at(-1)!,
+  );
+  expect(screen.getByRole("textbox", { name: "Description rich text" })).toBe(
+    beforeExpand,
+  );
+  fireEvent.click(screen.getByRole("switch", { name: "Create more" }));
+  const status = screen.getByRole("button", { name: "Status: Todo" });
+  status.focus();
+  fireEvent.keyDown(status, { key: "Enter", ctrlKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "create_ticket",
+  );
+  expect(writes).toHaveLength(1);
+  expect(writes[0]?.[1]).toMatchObject({
+    title: "Keep every keystroke",
+    body: expect.stringContaining("A-->B"),
+  });
+  expect(screen.queryByRole("listbox", { name: "Status choices" })).toBeNull();
+  expect(screen.getByText("Created T-KQ16.")).toBeTruthy();
+  expect(document.activeElement).toBe(
+    screen.getByRole("textbox", { name: "Title" }),
+  );
+});
+
+test("Capture saves a linked Document without changing the thought and keeps it in Documents", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  const ticket = bulkTicket(1);
+  let documentBody: string | null = null;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { body?: string }) => {
+      if (command === "find_tickets") return [ticket];
+      if (command === "show_ticket") return ticket;
+      if (command === "save_document") {
+        documentBody = args?.body ?? "";
+        return {
+          id: "capture-1",
+          title: "Drag idea",
+          body: documentBody,
+          created_at: "2026-11-16",
+          updated_at: "2026-11-16",
+          trashed: false,
+        };
+      }
+      if (command === "recent_documents" && documentBody !== null)
+        return [{ id: "capture-1", heading: "Drag idea" }];
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const card = within(screen.getByRole("dialog", { name: "New Document" }));
+  expect(card.getByText("Linked to")).toBeTruthy();
+  expect(card.getByText("T-KQ1")).toBeTruthy();
+  expect(card.getByText("Kept in Documents")).toBeTruthy();
+  fireEvent.change(card.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Drag idea" },
+  });
+  fireEvent.click(card.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(card.getByRole("textbox", { name: "Your thought source" }), {
+    target: { value: "Reserve column height." },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(documentBody).toBe(
+    "Reserve column height.\n\n[T-KQ1](ticketd://ticket/T-KQ1)",
+  );
+  expect(
+    card.getByRole("textbox", { name: "Your thought source" }),
+  ).toHaveProperty("value", "Reserve column height.");
+  expect(card.getByText("Saved")).toBeTruthy();
+  fireEvent.click(card.getByRole("button", { name: "Close" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Documents" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(
+    screen.getAllByRole("button", { name: /Drag idea/ }).length,
+  ).toBeGreaterThan(0);
+});
+
+test("read-only Capture keeps an exact text draft across restart and retries the original save", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  let writable = false;
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { draft?: { revision: number }; body?: string },
+    ) => {
+      if (command === "draft_retentions") return [];
+      if (command === "draft_cutover_pending") return false;
+      if (command === "retain_draft") {
+        if (!writable)
+          throw { code: "workspace_read_only", message: "read-only" };
+        return { ...args?.draft, revision: (args?.draft?.revision ?? 0) + 1 };
+      }
+      if (command === "save_document")
+        return {
+          id: "recovered-capture",
+          title: null,
+          body: args?.body ?? "",
+          created_at: "2026-11-16",
+          updated_at: "2026-11-16",
+          trashed: false,
+        };
+      return bridgeDefault(command);
+    },
+  );
+  const first = render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const exact = "# Retry policy\n\n- [ ] Keep **all** keystrokes\n";
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+    { target: { value: exact } },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close and keep draft" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByRole("dialog", { name: "New Document" })).toBeNull();
+  first.unmount();
+  clearWorkspaceFailure();
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  expect(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+  ).toHaveProperty("value", exact);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  writable = true;
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "New Document" })).getByRole(
+      "button",
+      { name: "Retry" },
+    ),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByText("Saved")).toBeTruthy();
+  const saves = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "save_document",
+  );
+  expect(saves).toHaveLength(1);
+  expect(saves[0]?.[1]).toMatchObject({ body: exact });
+  expect(
+    localStorage.getItem("ticketd:capture-text-fallback:workspace-test"),
+  ).toBeNull();
+});
+
+test("Capture refuses browser-only recovery for canonical attachment references", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft")
+      throw { code: "workspace_read_only", message: "read-only" };
+    return bridgeDefault(command);
+  });
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const exact =
+    "[Trace][file]\n\n[file]: ticketd&#58;//attachment/workspace-test/file-1";
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+    { target: { value: exact } },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close and keep draft" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("dialog", { name: "New Document" })).toBeTruthy();
+  expect(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+  ).toHaveProperty("value", exact);
+  expect(
+    screen.queryByRole("button", { name: "Close and keep draft" }),
+  ).toBeNull();
+  expect(
+    localStorage.getItem("ticketd:capture-text-fallback:workspace-test"),
+  ).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "save_document"),
+  ).toHaveLength(0);
+});
+
+test("New ticket changes draft properties locally and safely retries partially linked blockers", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  const blocker = bulkTicket(1);
+  const created = bulkTicket(2, { title: "Dependent" });
+  let failLink = true;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "search_tickets" || command === "find_tickets")
+      return [blocker];
+    if (command === "show_ticket") return created;
+    if (command === "create_ticket") return created;
+    if (command === "add_dependency") {
+      if (failLink) {
+        failLink = false;
+        throw new Error("Link temporarily unavailable");
+      }
+      return created;
+    }
+    return bridgeDefault(command);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await openNewTicket();
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Dependent" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Status: Todo" }));
+  fireEvent.click(screen.getByRole("option", { name: "In progress" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Blocked by: none" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(150);
+  });
+  fireEvent.click(screen.getByRole("option", { name: /T-KQ1.*First/ }));
+  fireEvent.keyDown(
+    screen.getByRole("dialog", { name: "Blocked by choices" }),
+    { key: "Escape" },
+  );
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) =>
+      ["create_ticket", "add_dependency", "change_ticket"].includes(command),
+    ),
+  ).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry safely" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry safely" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const creates = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "create_ticket",
+  );
+  expect(creates).toHaveLength(2);
+  expect(creates[0]?.[1]).toEqual(creates[1]?.[1]);
+  expect(creates[0]?.[1]).toMatchObject({ status: "In progress" });
+  const links = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "add_dependency",
+  );
+  expect(links.map(([, args]) => args)).toEqual([
+    { blocker: "T-KQ1", dependent: "T-KQ2" },
+    { blocker: "T-KQ1", dependent: "T-KQ2" },
+  ]);
+  expect(screen.queryByRole("dialog", { name: "New ticket" })).toBeNull();
+});
+
+test("Capture keeps its editor open if the browser cannot verify a text draft", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft")
+      throw { code: "workspace_read_only", message: "read-only" };
+    return bridgeDefault(command);
+  });
+  render(
+    <DraftRecoveryProvider>
+      <App />
+    </DraftRecoveryProvider>,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.keyDown(window, { key: "N", ctrlKey: true, shiftKey: true });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Your thought source" }),
+    { target: { value: "Still here." } },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  const store = Storage.prototype.setItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("ticketd:capture-text-fallback:"))
+        throw new Error("Browser storage is full");
+      store.call(this, key, value);
+    });
+  try {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close and keep draft" }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole("dialog", { name: "New Document" })).toBeTruthy();
+    expect(
+      screen.getByRole("textbox", { name: "Your thought source" }),
+    ).toHaveProperty("value", "Still here.");
+    expect(screen.getByRole("button", { name: "Copy text" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Close and keep draft" }),
+    ).toBeNull();
+  } finally {
+    blocked.mockRestore();
+  }
+});
+
+test.each([
+  ["Agent skills", "Agent skills"],
+  ["Google Drive sync", "Google Drive"],
+])(
+  "first run's %s action is also reachable in the palette",
+  async (command, heading) => {
+    bridge.invoke.mockImplementation(bridgeDefault);
+    render(<App />);
+    await screen.findByRole("region", { name: "Your workspace is ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Search or jump to…" }));
+    const palette = await screen.findByRole("dialog", {
+      name: "Go anywhere",
+    });
+    fireEvent.click(
+      within(palette).getByRole("option", { name: new RegExp(command) }),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: heading }),
+    ).toBeTruthy();
+  },
+);
+
+test("Inbox palette actions share selected-entry read, reminder and Activity handlers", async () => {
+  await import("@/features/markdown/MarkdownEditor");
+  const ticket = bulkTicket(1);
+  const due = "2020-01-01T00:00:00Z";
+  let read = false;
+  await renderBulk({
+    latest_update: () => null,
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    reminder: () => due,
+    inbox: () => [
+      {
+        id: 601,
+        reference: "T-KQ1",
+        title: "First",
+        kind: "reminder",
+        from_value: "",
+        to_value: due,
+        timestamp: "2026-11-16T00:00:00Z",
+        editing_agent: null,
+        read,
+      },
+    ],
+    set_inbox_read: ({ read: value }: { read: boolean }) => {
+      read = value;
+    },
+  });
+  const flush = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  fireEvent.keyDown(document.body, { key: "g" });
+  fireEvent.keyDown(document.body, { key: "i" });
+  await flush();
+  const row = screen.getByRole("button", {
+    name: /T-KQ1.*First.*Your reminder/,
+  });
+  fireEvent.click(row);
+  await flush();
+  expect(read).toBe(true);
+  async function command(name: string) {
+    fireEvent.keyDown(row, { key: "k", ctrlKey: true });
+    await flush();
+    const palette = screen.getByRole("dialog", { name: "Go anywhere" });
+    fireEvent.click(
+      within(palette).getByRole("option", { name: new RegExp(name) }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+  }
+  await command("Toggle Inbox read state");
+  expect(read).toBe(false);
+  expect(screen.getAllByRole("button", { name: "Undo" })).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await flush();
+  expect(read).toBe(true);
+  await command("Snooze reminder");
+  expect(screen.getByRole("menu")).toBeTruthy();
+  expect(screen.getByText("Snooze until")).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  await command("Reply on this Ticket");
+  expect(
+    screen.getByRole("textbox", { name: "New update rich text" }).textContent,
+  ).toContain("Your reminder is due");
 });

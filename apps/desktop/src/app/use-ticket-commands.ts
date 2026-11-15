@@ -56,12 +56,16 @@ export function useTicketCommands({
         }
       })
       .catch((reason: unknown) => {
-        if (active) setError(failureText(reason, "load ticket actions"));
+        if (active) {
+          const message = failureText(reason, "load ticket actions");
+          setError(message);
+          line.show({ message, tone: "error" });
+        }
       });
     return () => {
       active = false;
     };
-  }, [open, reference]);
+  }, [open, reference, line]);
   useEffect(() => {
     if (!open || scope !== "Tags") return;
     let active = true;
@@ -71,12 +75,16 @@ export function useTicketCommands({
         if (active) setTags(value);
       })
       .catch((reason: unknown) => {
-        if (active) setError(failureText(reason, "load tag suggestions"));
+        if (active) {
+          const message = failureText(reason, "load tag suggestions");
+          setError(message);
+          line.show({ message, tone: "error" });
+        }
       });
     return () => {
       active = false;
     };
-  }, [open, scope, query]);
+  }, [open, scope, query, line]);
   useEffect(() => {
     if (!open || !reference || scope !== "Reminder") return;
     let active = true;
@@ -90,12 +98,16 @@ export function useTicketCommands({
         }
       })
       .catch((reason: unknown) => {
-        if (active) setError(failureText(reason, "load reminder"));
+        if (active) {
+          const message = failureText(reason, "load reminder");
+          setError(message);
+          line.show({ message, tone: "error" });
+        }
       });
     return () => {
       active = false;
     };
-  }, [open, reference, scope]);
+  }, [open, reference, scope, line]);
   const ticket =
     initialTicket ?? (target?.reference === reference ? target : null);
   const presets = reminderPresets(new Date());

@@ -48,6 +48,9 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  overlay = true,
+  surface = "default",
+  expanded = false,
   variant = "default",
   size,
   returnFocus,
@@ -55,6 +58,9 @@ function DialogContent({
   onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  overlay?: boolean;
+  surface?: "default" | "create" | "capture";
+  expanded?: boolean;
   showCloseButton?: boolean;
   /**
    * `flush` drops the padding and gap so the content draws its own
@@ -65,7 +71,7 @@ function DialogContent({
    * DESIGN.md section 11: `sm` 480 (confirm), `md` 640 (form, picker), `lg`
    * 920 (review, compare), all anchored at max(48px, 12vh) so they grow
    * downward and never re-centre; `viewer` (the attachment preview only) is
-   * min(1120px, 100vw − 64) by min(800px, 100vh − 64), centred. Use
+   * min(1120px, 100vw − 64) wide and fits below its 96px top anchor. Use
    * DialogShell for every dialog but the viewer.
    */
   size?: "sm" | "md" | "lg" | "viewer" | "palette";
@@ -78,10 +84,12 @@ function DialogContent({
   });
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      {overlay && <DialogOverlay />}
       <DialogPrimitive.Content
         data-slot="dialog-content"
         data-size={size ?? "default"}
+        data-surface={surface}
+        data-expanded={expanded || undefined}
         className={cn(
           // Position and width come from data-size in styles.css.
           "ui-dialog fixed z-50 grid outline-none",

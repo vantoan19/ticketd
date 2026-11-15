@@ -9,19 +9,21 @@ import { describeFailure } from "@/lib/api/describe-failure";
 export function useInboxAction(
   reload: () => void | Promise<void>,
   sharedLine?: StatusLine,
+  concurrent = false,
 ) {
   const paneLine = useStatusLine();
   const line = sharedLine ?? paneLine;
-  const busy = useRef(false);
+  const busy = useRef(0);
   const [pending, setPending] = useState(false);
   async function perform(
     message: string,
     action: () => Promise<void>,
     undo?: () => Promise<void>,
+    failureAction = "save the Inbox action",
   ) {
-    if (busy.current) return;
+    if (busy.current > 0 && !concurrent) return;
     const retry = async () => {
-      busy.current = true;
+      busy.current += 1;
       setPending(true);
       try {
         await action();
@@ -35,15 +37,15 @@ export function useInboxAction(
             },
           });
       } catch (reason) {
-        const failure = describeFailure(reason, "save the Inbox action");
+        const failure = describeFailure(reason, failureAction);
         line.show({
           tone: "error",
           message: `${failure.title}. ${failure.sentence}`,
           action: { label: "Retry", run: retry },
         });
       } finally {
-        busy.current = false;
-        setPending(false);
+        busy.current -= 1;
+        setPending(busy.current > 0);
       }
     };
     await retry();

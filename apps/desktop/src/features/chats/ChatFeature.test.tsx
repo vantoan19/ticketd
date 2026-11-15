@@ -253,17 +253,13 @@ test("with Chat off, nothing about Chat is in the workspace", async () => {
   ).toBeNull();
 });
 
-test("with Chat on, Automations follows Chats in the sidebar and opens its page", async () => {
+test("with Chat on, Automations opens from the palette while the sidebar keeps its five work views", async () => {
   app(createMockChatClient({ enabled: true }));
-  const chats = await screen.findByRole("button", { name: "Chats" });
-  const entry = screen.getByRole("button", { name: "Automations" });
-  expect(
-    chats.compareDocumentPosition(entry) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
-
+  await screen.findByRole("button", { name: "Chats" });
+  expect(screen.queryByRole("button", { name: "Automations" })).toBeNull();
+  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
+  const entry = await screen.findByRole("option", { name: /^Automations/ });
   fireEvent.click(entry);
-
-  expect(entry.getAttribute("aria-current")).toBe("page");
   const tabs = within(await screen.findByRole("radiogroup", { name: "Show" }));
   expect(tabs.getByRole("radio", { name: /^Automations/ })).toBeTruthy();
   fireEvent.click(tabs.getByRole("radio", { name: /^Agents/ }));

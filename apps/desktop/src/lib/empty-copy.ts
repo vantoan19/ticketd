@@ -12,6 +12,12 @@ import { plural } from "@/lib/format";
  * filters"), filled by `emptyCopy`.
  */
 const COPY = {
+  "workspace-first-run": {
+    title: "Your workspace is ready",
+    sentence:
+      "Tickets you and your agents create appear here. Everything stays on this computer unless you choose to sync it.",
+    action: "New ticket",
+  },
   "tickets-first-run": {
     title: "No tickets yet",
     sentence: "Tickets you create or import appear here.",

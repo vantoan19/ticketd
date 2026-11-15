@@ -1,5 +1,9 @@
+import { requestInboxAction } from "@/features/tickets/inbox-commands";
+import type { TriageSelection } from "@/features/tickets/inbox-triage-context";
 import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
 import { requestTicketUpdate } from "@/features/tickets/activity-composer-request";
+import { FirstRunGuide } from "@/features/tickets/FirstRunGuide";
+import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
 import {
   TicketCommandContext,
   ticketCommandActions,
@@ -19,10 +23,13 @@ import {
   Documents,
   type DocumentCommands,
 } from "@/features/documents/Documents";
-import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
+import {
+  AttachmentLibrary,
+  type AttachmentCommands,
+} from "@/features/attachments/AttachmentLibrary";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
-import { type ContextGraph as GraphData } from "@/lib/api/client";
+import { client, type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { InboxAttentionProvider } from "@/features/tickets/inbox-attention";
 import { Inbox } from "@/features/tickets/Inbox";
@@ -171,6 +178,8 @@ function AppContent() {
       return release;
     }
   }, [view]);
+  const [attachmentCommands, setAttachmentCommands] =
+    useState<AttachmentCommands | null>(null);
   const [documentCommands, setDocumentCommands] =
     useState<DocumentCommands | null>(null);
   const [documentListRequest, setDocumentListRequest] = useState(0);
@@ -197,6 +206,9 @@ function AppContent() {
     // A record that needs review has an Inbox entry that opens its comparison.
     openReview: () => openView("inbox"),
   });
+  const [inboxSelection, setInboxSelection] = useState<TriageSelection | null>(
+    null,
+  );
   const [inboxTarget, setInboxTarget] = useState<{
     reference: string;
     id: string;
@@ -352,8 +364,56 @@ function AppContent() {
     scope,
     navigation,
   } = workspace;
+  // Workspace info excludes Trash. Join the existing Trash read before
+  // treating an empty filtered list as a brand-new Workspace.
+  const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    void workspaceClient
+      .info()
+      .then(async (info) => {
+        if (info.tickets === 0 && (await client.listTrash()).length > 0)
+          return null;
+        return info;
+      })
+      .then(
+        (info) => {
+          if (live) setWorkspaceInfo(info);
+        },
+        () => {
+          if (live) setWorkspaceInfo(null);
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [revision]);
+  const firstRun =
+    workspaceInfo?.tickets === 0 &&
+    workspaceInfo.documents === 0 &&
+    workspaceInfo.projects === 0 &&
+    workspaceInfo.active_plans === 0 &&
+    projects.length === 0 &&
+    plans.length === 0 &&
+    !loading &&
+    !error &&
+    workspace.tickets.length === 0 &&
+    Object.keys(workspace.details).length === 0 &&
+    (counts?.total ?? 0) === 0 &&
+    (workspace.counts?.total ?? 0) === 0 &&
+    navigation.kind === "all" &&
+    navigation.project === "all" &&
+    !navigation.plan &&
+    !workspace.query &&
+    !workspace.status &&
+    !workspace.tags.length &&
+    !workspace.availability &&
+    workspace.source === "all";
   const goTo = (target: GoTo) => {
-    if (target === "chats" && !chat.enabled) return;
+    if ((target === "chats" || target === "automations") && !chat.enabled)
+      return;
     if (target === "all" || target === "ready" || target === "trash") {
       scope(target);
       setView("tickets");
@@ -381,6 +441,9 @@ function AppContent() {
     setPaletteScope(scope);
     setPaletteOpen(true);
   }
+  function openTicketUpdate() {
+    if (workspace.selected) requestTicketUpdate(workspace.selected);
+  }
   useCommandKeys(
     () => openPalette(),
     goTo,
@@ -404,7 +467,7 @@ function AppContent() {
         view === "tickets" &&
         workspace.selected === reference
       ) {
-        requestTicketUpdate(reference);
+        openTicketUpdate();
         return true;
       }
       return false;
@@ -546,7 +609,126 @@ function AppContent() {
                           onCreated={(id) => scope("all", "all", id)}
                         />
                         <CommandPalette
+                          inboxCommands={
+                            view === "inbox" && inboxSelection
+                              ? (() => {
+                                  const entry =
+                                    inboxSelection.kind === "entry"
+                                      ? inboxSelection.entry
+                                      : null;
+                                  const chat =
+                                    inboxSelection.kind === "approval"
+                                      ? inboxSelection.chat
+                                      : null;
+                                  const reference =
+                                    entry?.reference ??
+                                    chat?.tickets[0]?.reference ??
+                                    chat?.first_ticket;
+                                  const ticketReason =
+                                    editingBlockedReason(workspaceProblem) ??
+                                    (!reference
+                                      ? "This Chat has no linked Ticket."
+                                      : null);
+                                  const blocked =
+                                    editingBlockedReason(workspaceProblem);
+                                  const activeTicket = reference
+                                    ? workspace.details[reference]
+                                    : undefined;
+                                  const ticketActionReason =
+                                    ticketReason ??
+                                    (!activeTicket
+                                      ? "The Ticket is still loading."
+                                      : activeTicket.trashed
+                                        ? "Restore the Ticket before changing it."
+                                        : null);
+                                  const isReview =
+                                    entry?.kind === "status" &&
+                                    entry.to_value === "In review";
+                                  const primaryReason = isReview
+                                    ? (ticketActionReason ??
+                                      (activeTicket?.status !== "In review"
+                                        ? "This review is already resolved."
+                                        : activeTicket.source?.ownership ===
+                                              "external" &&
+                                            (activeTicket.source
+                                              .status_locked ||
+                                              !activeTicket.source.status_choices.includes(
+                                                "Done",
+                                              ))
+                                          ? "The source does not allow moving this Ticket to Done."
+                                          : null))
+                                    : entry?.kind === "reminder"
+                                      ? ticketActionReason
+                                      : blocked;
+                                  const primaryLabel = chat
+                                    ? "Review in Chat"
+                                    : entry?.kind === "reminder"
+                                      ? "Clear reminder"
+                                      : entry?.kind === "status" &&
+                                          entry.to_value === "In review"
+                                        ? "Move to Done"
+                                        : "Mark read";
+                                  return [
+                                    {
+                                      id: "inbox-primary" as const,
+                                      label: primaryLabel,
+                                      disabledReason: chat
+                                        ? null
+                                        : primaryReason,
+                                      run: () => requestInboxAction("primary"),
+                                    },
+                                    {
+                                      id: "inbox-reply" as const,
+                                      label: "Reply on this Ticket",
+                                      disabledReason: ticketActionReason,
+                                      run: () => requestInboxAction("reply"),
+                                    },
+                                    {
+                                      id: "inbox-remind" as const,
+                                      label:
+                                        entry?.kind === "reminder"
+                                          ? "Snooze reminder"
+                                          : "Remind me on this Ticket",
+                                      disabledReason: ticketActionReason,
+                                      run: () => requestInboxAction("remind"),
+                                    },
+                                    {
+                                      id: "inbox-read" as const,
+                                      label: "Toggle Inbox read state",
+                                      disabledReason: blocked,
+                                      run: () => requestInboxAction("read"),
+                                    },
+                                    {
+                                      id: "inbox-next" as const,
+                                      label: "Next Inbox entry",
+                                      disabledReason: null,
+                                      run: () => requestInboxAction("next"),
+                                    },
+                                    {
+                                      id: "inbox-previous" as const,
+                                      label: "Previous Inbox entry",
+                                      disabledReason: null,
+                                      run: () => requestInboxAction("previous"),
+                                    },
+                                  ];
+                                })()
+                              : null
+                          }
+                          writeUpdate={
+                            view === "tickets" &&
+                            workspace.selected === paletteReference &&
+                            editingBlockedReason(workspaceProblem) === null
+                              ? openTicketUpdate
+                              : null
+                          }
+                          memoryTickets={workspace.tickets}
+                          readyCount={counts?.ready ?? null}
+                          automationCount={counts?.runs_needing_you ?? null}
                           {...{
+                            attachmentCommands:
+                              view === "attachments" && graphOrigin === null
+                                ? attachmentCommands
+                                : null,
                             documentCommands:
                               view === "documents" && graphOrigin === null
                                 ? documentCommands
@@ -738,7 +920,11 @@ function AppContent() {
                                     />
                                   )}
                                 {view === "attachments" &&
-                                  graphOrigin === null && <AttachmentLibrary />}
+                                  graphOrigin === null && (
+                                    <AttachmentLibrary
+                                      onCommandsChange={setAttachmentCommands}
+                                    />
+                                  )}
                                 {
                                   <div
                                     className="management-host"
@@ -920,14 +1106,28 @@ function AppContent() {
                                     setPaletteOpen(true);
                                   }}
                                 >
+                                  {firstRun &&
+                                    view === "tickets" &&
+                                    graphOrigin === null && (
+                                      <FirstRunGuide
+                                        disabledReason={createDisabledReason}
+                                        onCreate={(trigger) => {
+                                          createTriggerRef.current = trigger;
+                                          setCreateStatus(undefined);
+                                          setCreating(true);
+                                        }}
+                                      />
+                                    )}
                                   <InboxTriageProvider
                                     active={view === "inbox"}
+                                    onSelectionChange={setInboxSelection}
                                   >
                                     <TicketWorkspaceView
                                       key={`tickets:${recoveryGeneration}`}
                                       workspace={workspace}
                                       bulk={bulk}
                                       hidden={
+                                        (firstRun && view === "tickets") ||
                                         (view !== "tickets" &&
                                           view !== "inbox") ||
                                         graphOrigin !== null

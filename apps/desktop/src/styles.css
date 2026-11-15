@@ -774,7 +774,8 @@ body:has([data-slot="dialog-overlay"])
   padding-left: 24px;
 }
 /* A popover holding a choice list or picker (P3). */
-.ui-popover[data-variant="list"] {
+.ui-popover[data-variant="list"],
+.ui-popover[data-variant="constrained-list"] {
   width: max(var(--radix-popover-trigger-width), 280px);
   padding: 4px;
 }
@@ -969,6 +970,9 @@ body:has([data-slot="dialog-overlay"])
 }
 .recovery-title {
   margin-top: 16px;
+}
+.recovery-title,
+.ui-input[data-variant="document-title"] {
   font-size: var(--text-title);
   font-weight: 600;
   line-height: var(--text-title-line);
@@ -1613,7 +1617,6 @@ html[data-window-bar] {
   list-style: none;
   margin: 0;
   padding: 0;
-  gap: 0;
 }
 .sidebar-nav li {
   width: 100%;
@@ -1675,7 +1678,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   margin: 14px 0 0;
   padding-left: 10px;
   font-size: var(--text-caption);
-  font-weight: 500;
+  font-weight: 400;
   line-height: 16px;
 }
 /* Projects and Plans headings open their page: the nav row's hover and
@@ -2482,11 +2485,11 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   width: min(920px, calc(100vw - 32px));
 }
 .ui-dialog[data-size="viewer"] {
-  top: 50%;
-  translate: -50% -50%;
+  --dialog-top: 96px;
+  top: var(--dialog-top);
+  translate: -50% 0;
   width: min(1120px, calc(100vw - 64px));
-  height: min(800px, calc(100dvh - 64px));
-  max-height: none;
+  height: min(800px, calc(100dvh - var(--dialog-top) - 16px));
 }
 
 /* The tooltip chip (DESIGN.md section 4): 12/16 text, 4px 8px, wrapping at
@@ -2808,6 +2811,8 @@ kbd,
 }
 [data-slot="command"][data-variant="palette"] {
   min-height: 0;
+  max-height: calc(100dvh - 112px);
+  height: auto;
 }
 [data-variant="palette"] [data-slot="command-input-wrapper"] {
   height: 56px;
@@ -2821,7 +2826,9 @@ kbd,
   line-height: 24px;
 }
 [data-variant="palette"] [data-slot="command-list"] {
-  max-height: min(440px, calc(100dvh - 220px));
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 440px;
   padding: 6px;
 }
 [data-variant="palette"] [data-slot="command-group"] {
@@ -2846,6 +2853,7 @@ kbd,
   text-underline-offset: 3px;
 }
 .ui-palette-footer {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -3119,6 +3127,96 @@ kbd,
   animation: palette-scrim var(--dur-2) var(--ease-in-out);
 }
 
+/* A quiet label for a capability still being tried. */
+.ui-badge-experimental {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding-inline: 6px;
+  border-radius: var(--radius-segment);
+  background: var(--recessed);
+  box-shadow: none;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+}
+[data-theme="dark"] .ui-badge-experimental {
+  background: var(--accent);
+}
+
+/* A record summary shares the Card surface, with content roles rather than a band. */
+.ui-card-summary {
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+.ui-card-summary:has([data-slot="card-open"]:hover) {
+  background: var(--hover);
+}
+[data-slot="card-open"] {
+  border-radius: inherit;
+}
+[data-slot="card-open"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ui-card-title {
+  font-size: var(--text-reading);
+  line-height: var(--text-doc-line);
+  font-weight: 600;
+}
+.ui-card-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-card-description {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-card-summary[data-archived] [data-slot="card-title"] {
+  color: var(--muted-foreground);
+}
+.ui-progress-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.ui-progress-key i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-segment);
+  background: var(--track);
+}
+.ui-progress-key [data-segment="done"] {
+  background: var(--seg-done);
+}
+.ui-progress-key [data-segment="review"] {
+  background: var(--seg-review);
+}
+.ui-progress-key [data-segment="progress"] {
+  background: var(--seg-progress);
+}
+
+.ui-card-footer-summary {
+  border-top: 1px solid var(--group-hairline);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.ui-popover[data-variant="constrained-list"] {
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
+}
+
 /* Documents use the shared pane, navigator and reading roles (S13). */
 .documents-list-view {
   box-shadow: inset -1px 0 0 var(--border);
@@ -3276,6 +3374,169 @@ kbd,
   pointer-events: auto;
 }
 
+/* Shared file presentation, referenced by library, ticket, Document and Chat previews. */
+.attachment-cleanup-files > li {
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+}
+.attachment-cleanup-files label {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-cleanup-files small,
+.attachment-cleanup-reason {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-cleanup-files input {
+  accent-color: var(--primary);
+}
+.attachment-cleanup-all {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-inline-preview {
+  color: var(--muted-foreground);
+  border-radius: var(--radius-segment);
+}
+.attachment-preview[data-layout="viewer"] .attachment-preview-stage {
+  box-shadow: inset -1px 0 0 var(--group-hairline);
+}
+.attachment-preview-image {
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--surface) 0 50%
+    )
+    0 0 / 16px 16px;
+  box-shadow: var(--shadow-border-base);
+}
+.attachment-preview-text {
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: 20px;
+}
+.attachment-preview-text-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-facts {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-facts dt {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-facts-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+.attachment-facts-muted {
+  color: var(--muted-foreground);
+}
+.attachment-uses small {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.file-thumb {
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+}
+.file-thumb[data-size="row"] {
+  border-radius: var(--radius-segment);
+}
+.file-thumb[data-image] {
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--surface) 0 50%
+    )
+    0 0 / 8px 8px;
+}
+.file-thumb svg {
+  color: var(--muted-foreground);
+}
+.file-thumb[data-size="navigator"] {
+  border-radius: var(--radius);
+}
+
+/* Library navigator and file-preview visual variants (S13/S14). */
+.attachment-list-pane {
+  box-shadow: 1px 0 0 var(--border);
+}
+.attachment-mrow-main {
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  border-radius: var(--radius-card);
+}
+.attachment-mrow-main:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-mrow-name {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-mrow-caption,
+.attachment-mrow-time {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-mrow-time {
+  font-variant-numeric: tabular-nums;
+}
+.ui-notice-hint {
+  border-radius: var(--radius-panel);
+  box-shadow: inset 0 0 0 1px var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-ui-line);
+}
+.attachment-preview-stage {
+  border-radius: var(--radius-panel);
+  background: var(--recessed);
+}
+.attachment-preview-stage[data-image] {
+  background: repeating-conic-gradient(
+      var(--accent) 0 25%,
+      var(--recessed) 0 50%
+    )
+    0 0 / 20px 20px;
+}
+.attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.attachment-preview-image {
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-notice-hint {
+  flex-direction: row;
+  align-items: center;
+  padding: 14px;
+  line-height: calc(var(--text-caption-line) + 2px);
+  border-radius: calc(var(--radius-panel) - 2px);
+  box-shadow: inset 0 0 0 1.25px var(--border);
+}
+.attachment-preview-title > h2:focus {
+  outline: none;
+}
+
 /* Document relationship groups share the section typography and neutral rows. */
 .linked-work-document .linked-work-group {
   color: var(--muted-foreground);
@@ -3350,4 +3611,157 @@ kbd,
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
+}
+
+.ui-card-value {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.ui-card-caption time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* S06 and S09 share the shell while retaining their own fixed bands. */
+.ui-dialog[data-surface="create"],
+.ui-dialog[data-surface="capture"] {
+  --dialog-top: 96px;
+  box-shadow: var(--shadow-modal);
+}
+.ui-dialog[data-surface="capture"] {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--popover);
+}
+.ui-dialog[data-surface="create"][data-expanded] {
+  width: min(920px, calc(100vw - 32px));
+  height: calc(100dvh - var(--dialog-top) - 16px);
+}
+.dialog-shell-compact-header {
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 96px 0 20px;
+}
+.dialog-shell-compact-header [data-slot="dialog-title"] {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  letter-spacing: normal;
+}
+.dialog-shell-compact-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ui-dialog[data-surface="create"] .dialog-shell-body {
+  padding-top: 4px;
+  padding-bottom: 16px;
+}
+.ui-dialog[data-surface="create"] .dialog-shell-footer {
+  min-height: 56px;
+  padding: 8px 12px 8px 20px;
+}
+.ui-dialog[data-surface="create"][data-expanded] .dialog-shell-body {
+  flex: 1;
+}
+.ui-input[data-variant="document-title"],
+.ui-input[data-variant="capture-title"] {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 600;
+}
+.ui-input[data-variant="document-title"] {
+  height: 32px;
+  font-size: var(--text-title);
+  line-height: var(--text-title-line);
+}
+.ui-input[data-variant="capture-title"] {
+  height: 26px;
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
+}
+.create-description .markdown-editor,
+.ui-dialog[data-surface="capture"] .markdown-editor {
+  --text-editor: var(--text-doc);
+  --text-editor-line: var(--text-doc-line);
+  box-shadow: none;
+  background: transparent;
+}
+.create-description .rich-document,
+.ui-dialog[data-surface="capture"] .rich-document {
+  padding: 0;
+  min-height: 24px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-compact-header {
+  height: 40px;
+  padding-left: 16px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-compact-actions {
+  top: 4px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-body {
+  padding: 2px 20px 18px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-footer {
+  min-height: 48px;
+  padding: 8px 12px 8px 16px;
+}
+.ui-dialog[data-surface="capture"] .document-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  min-width: 0;
+}
+.ui-badge-linked {
+  display: inline-flex;
+  overflow: visible;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  color: var(--foreground);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-border-base);
+  font-size: var(--text-caption);
+}
+.ui-badge-linked > svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ui-dialog[data-surface="capture"]
+  .dialog-shell-compact-header
+  [data-slot="dialog-title"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.ui-dialog[data-surface="capture"] [data-slot="dialog-title"] svg {
+  width: 14px;
+  height: 14px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-note {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-button-property {
+  color: var(--foreground);
+  background: transparent;
+  box-shadow: var(--shadow-border-base);
+}
+.ui-button-property:hover {
+  background: var(--accent);
 }

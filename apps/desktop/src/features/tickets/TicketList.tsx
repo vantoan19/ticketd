@@ -268,7 +268,9 @@ export function TicketList({
                 data-status={ticket.status}
                 aria-pressed={ticket.reference === selected}
                 tabIndex={ticket.id === tabStop ? 0 : -1}
-                onClick={() => onOpen(ticket.reference)}
+                onClick={(event) => {
+                  if (event.detail <= 1) onOpen(ticket.reference);
+                }}
                 onFocus={(event) => {
                   setFocusedRow(ticket.id);
                   event.currentTarget.scrollIntoView?.({ block: "nearest" });
