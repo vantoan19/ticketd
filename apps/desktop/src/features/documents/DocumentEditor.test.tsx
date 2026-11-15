@@ -75,23 +75,13 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
-it("disables Done with a stated reason until a thought is written", async () => {
+it("lets an empty Capture close without creating a Document", async () => {
   const close = vi.fn();
   renderEditor(<DocumentEditor initial={null} onClose={close} />);
-  const done = screen.getByRole("button", { name: "Done" });
-  expect((done as HTMLButtonElement).disabled).toBe(true);
-  expect(done.getAttribute("aria-describedby")).toBeTruthy();
-  expect(screen.getByText("Write a thought to finish.")).toBeTruthy();
-  fireEvent.click(done);
-  expect(close).not.toHaveBeenCalled();
+  expect(screen.getByText("Kept in Documents")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(close).toHaveBeenCalledOnce();
   expect(documents.save).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Your thought"), {
-    target: { value: "A thought" },
-  });
-  expect(
-    (screen.getByRole("button", { name: "Done" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(false);
 });
 it("tells a capture it is saved to Documents once it has text", async () => {
   vi.mocked(documents.save).mockResolvedValue({
@@ -106,7 +96,7 @@ it("tells a capture it is saved to Documents once it has text", async () => {
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
-  const status = await screen.findByText("Saved to Documents as you type");
+  const status = await screen.findByText("Saved");
   expect(status.querySelector("svg")).toBeTruthy();
   expect(screen.queryByText("Saved on this computer")).toBeNull();
 });
@@ -126,7 +116,7 @@ it("keeps a failed capture open and retries the same request before returning", 
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
-  fireEvent.click(screen.getByText("Done"));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await screen.findByText(/Couldn't save the Document/);
   expect(close).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Retry"));
@@ -134,8 +124,8 @@ it("keeps a failed capture open and retries the same request before returning", 
   expect(vi.mocked(documents.save).mock.calls[0]).toEqual(
     vi.mocked(documents.save).mock.calls[1],
   );
-  await screen.findByText("Saved to Documents as you type");
-  fireEvent.click(screen.getByText("Done"));
+  await screen.findByText("Saved");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(close).toHaveBeenCalledOnce();
 });
 it("after a failed capture save, closing explains the risk and can discard", async () => {
@@ -149,7 +139,7 @@ it("after a failed capture save, closing explains the risk and can discard", asy
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
-  fireEvent.click(screen.getByText("Done"));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(
     await screen.findByText(
       "The workspace is read-only, so nothing changed. Your draft is still here.",
@@ -157,7 +147,7 @@ it("after a failed capture save, closing explains the risk and can discard", asy
   ).toBeTruthy();
   expect(close).not.toHaveBeenCalled();
   // Without draft recovery the draft would be lost, so Cancel asks instead of hanging.
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Discard and close" }),
   );
@@ -250,7 +240,7 @@ it("suggests only the current ticket and lets it be removed before capture", asy
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
   });
-  fireEvent.click(screen.getByText("Done"));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await waitFor(() => expect(documents.save).toHaveBeenCalled());
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Thought");
 });
@@ -374,7 +364,7 @@ it("keeps capture typing unchanged while saving the suggested connection", async
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
   });
-  fireEvent.click(screen.getByText("Done"));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await waitFor(() => expect(documents.save).toHaveBeenCalled());
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe(
     "Thought\n\n[T-KQ12](ticketd://ticket/T-KQ12)",
@@ -978,7 +968,7 @@ it("says nothing is saved and explains a blocked Back to work while the conflict
   expect(document.activeElement).toBe(notice);
   expect(notice.textContent).toContain("Choose Reload or Save my draft first");
 });
-it("keeps Done in place through the pointer sequence that blurs the editor", async () => {
+it("keeps Close in place through the pointer sequence that blurs the editor", async () => {
   vi.mocked(documents.save).mockResolvedValue({
     id: "d1",
     title: null,
@@ -991,12 +981,12 @@ it("keeps Done in place through the pointer sequence that blurs the editor", asy
   renderEditor(<DocumentEditor initial={null} onClose={close} />);
   const editor = screen.getByLabelText("Your thought");
   fireEvent.change(editor, { target: { value: "A thought" } });
-  const done = screen.getByRole("button", { name: "Done" });
+  const done = screen.getByRole("button", { name: "Close" });
   editor.focus();
   fireEvent.pointerDown(done);
   fireEvent.mouseDown(done);
   editor.blur();
-  expect(screen.getByRole("button", { name: "Done" })).toBe(done);
+  expect(screen.getByRole("button", { name: "Close" })).toBe(done);
   fireEvent.pointerUp(done);
   fireEvent.mouseUp(done);
   fireEvent.click(done);

@@ -361,6 +361,12 @@ export const SHORTCUTS = [
     label: "Take back a suggestion you just chose",
   },
   {
+    id: "create-expand",
+    keys: [],
+    scope: "Dialogs and menus",
+    label: "Expand the New ticket draft",
+  },
+  {
     id: "palette-drill",
     keys: [["Tab"], ["→"]],
     scope: "Dialogs and menus",

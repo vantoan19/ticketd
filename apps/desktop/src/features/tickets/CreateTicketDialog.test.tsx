@@ -196,17 +196,16 @@ test("the empty description says what to write and that Markdown works", async (
     name: "Description rich text",
   });
   expect(editor.style.getPropertyValue("--editor-placeholder")).toBe(
-    '"Steps, acceptance criteria, or a checklist"',
+    '"Markdown works here; type / for blocks."',
   );
-  expect(screen.getByText("Markdown works · type / for blocks")).toBeTruthy();
 });
 
-test("Create ticket stays disabled with its reason until there is a title", () => {
+test("Create ticket stays disabled until there is a title without a redundant visible hint", () => {
   const create = vi.fn();
   render(<Harness create={create} />);
   const button = screen.getByRole("button", { name: "Create ticket" });
   expect(button).toHaveProperty("disabled", true);
-  expect(screen.getByText("Add a title to create")).toBeTruthy();
+  expect(screen.queryByText("Add a title to create")).toBeNull();
   expect(button.getAttribute("aria-describedby")).toBeTruthy();
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Ready" },
@@ -219,7 +218,7 @@ test("the primary shortcut hint names the platform modifier", () => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
   render(<Harness create={vi.fn()} />);
   const button = screen.getByRole("button", { name: /^Create ticket/ });
-  expect(button.textContent).toBe("Create ticketCtrl↵");
+  expect(button.textContent).toBe("Create ticketCtrl+Enter");
   vi.restoreAllMocks();
 });
 
@@ -232,7 +231,7 @@ test("opening from a project scope preselects that project", () => {
     />,
   );
   expect(
-    screen.getByRole("combobox", { name: "Project: Desktop app" }),
+    screen.getByRole("button", { name: "Project: Desktop app" }),
   ).toBeTruthy();
 });
 
@@ -319,7 +318,7 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(title).toHaveProperty("value", "");
   expect(document.activeElement).toBe(title);
-  expect(screen.getByRole("combobox", { name: "Plan: Sprint 1" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Plan: Sprint 1" })).toBeTruthy();
   fireEvent.change(title, { target: { value: "Second" } });
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
@@ -612,7 +611,7 @@ test("closing an empty recovered submission preserves its request identity", asy
 test("a new tag is created from the typed words, lower case, and toggled off again", () => {
   render(<Harness create={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Tags: none" }));
-  fireEvent.change(screen.getByLabelText("Search tags"), {
+  fireEvent.change(screen.getByLabelText("Search tags…"), {
     target: { value: "Bug" },
   });
   fireEvent.click(screen.getByRole("option", { name: "Create “Bug”" }));

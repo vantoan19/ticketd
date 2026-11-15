@@ -48,6 +48,9 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  overlay = true,
+  surface = "default",
+  expanded = false,
   variant = "default",
   size,
   returnFocus,
@@ -55,6 +58,9 @@ function DialogContent({
   onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  overlay?: boolean;
+  surface?: "default" | "create" | "capture";
+  expanded?: boolean;
   showCloseButton?: boolean;
   /**
    * `flush` drops the padding and gap so the content draws its own
@@ -78,10 +84,12 @@ function DialogContent({
   });
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      {overlay && <DialogOverlay />}
       <DialogPrimitive.Content
         data-slot="dialog-content"
         data-size={size ?? "default"}
+        data-surface={surface}
+        data-expanded={expanded || undefined}
         className={cn(
           // Position and width come from data-size in styles.css.
           "ui-dialog fixed z-50 grid outline-none",

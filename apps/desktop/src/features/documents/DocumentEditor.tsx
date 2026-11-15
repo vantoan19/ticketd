@@ -11,7 +11,15 @@ import {
   Network,
   Pin,
   SquarePen,
+  X,
 } from "lucide-react";
+import {
+  readCaptureTextDraft,
+  keepCaptureTextDraft,
+  clearCaptureTextDraft,
+} from "./capture-text-recovery";
+import { attachments as workspaceAttachments } from "@/lib/api/attachments";
+import { writeClipboard } from "@/lib/clipboard";
 import { client } from "@/lib/api/client";
 import { Alert, AlertActions, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -30,8 +38,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Badge } from "@/components/ui/badge";
+import { Reference } from "@/components/ui/reference";
 import { Input } from "@/components/ui/input";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
@@ -65,25 +75,25 @@ import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { useRecordSyncState } from "@/features/sync/record-sync";
 
 /**
- * A Document reads in the workspace; a new thought is captured in the one
- * dialog (DialogShell md). Its footer holds the save state in the note slot
- * and Done; a failed save shows above the footer and never traps the dialog.
+ * A Document reads in the workspace; Capture uses the shared shell's floating
+ * card variant. Save state stays in the header, context in the footer, and a
+ * failed save keeps the same editor and recovery decisions in place.
  */
 function DocumentSurface({
   capture,
   onClose,
   onDismiss,
-  blockedReason,
+  footer,
   note,
   error,
   children,
 }: {
+  footer: ReactNode;
   capture: boolean;
-  /** Done: save, then close. */
+  /** Submit: save, then close. */
   onClose: () => void;
-  /** Cancel, the X and Escape: close (after a failed save, at once). */
+  /** The X and Escape use the same save and draft-protection controller. */
   onDismiss: () => void;
-  blockedReason: string | null;
   note: ReactNode;
   error: ReactNode;
   children: ReactNode;
@@ -96,10 +106,17 @@ function DocumentSurface({
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}
-      title="Capture a thought"
-      primaryLabel="Done"
-      blockedReason={blockedReason}
-      footerNote={note}
+      title="New Document"
+      variant="capture"
+      headerActions={note}
+      footerLeading={footer}
+      primaryLabel={null}
+      blockedReason={null}
+      footerNote={
+        <>
+          <span>Kept in Documents</span> <Kbd>esc</Kbd>
+        </>
+      }
       error={error}
       onSubmit={onClose}
     >
@@ -226,6 +243,8 @@ export function DocumentEditor({
   // The floating bar's controls slot, where the editor puts its formatting.
   const [sessionHost, setSessionHost] = useState<HTMLSpanElement | null>(null);
   const recovery = useDraftRecovery();
+  const fallbackWorkspace = useRef<string | null>(null);
+  const [restoringCapture, setRestoringCapture] = useState(!initial);
   const recoveryOwner = `document:${initial?.id ?? "capture"}`;
   const [recovered] = useState(() =>
     recovery.read(recoveryOwner, recoverySchema),
@@ -302,6 +321,7 @@ export function DocumentEditor({
   const [leaveBlocked, setLeaveBlocked] = useState<(() => void) | null>(null);
   const [failedTrash, setFailedTrash] = useState(false);
   // Where a person tried to go after a failed save, when recovery could not keep the draft.
+  const [copyResult, setCopyResult] = useState("");
   const [draftAtRisk, setDraftAtRisk] = useState<(() => void) | null>(null);
   // Editor state model. A Trash/Restore click is a one-shot intent: it is queued in
   // `transition` until the draft is saved, and dropped (remembered in `failedTransition`
@@ -343,7 +363,7 @@ export function DocumentEditor({
   const externalRevision = useRef<string | null>(
     recovered?.externalRevision ?? null,
   );
-  const persistRecovery = () => {
+  const recoveryPayload = () => {
     const dirty =
       storedTitle(draft.current.title) !== saved.current.title ||
       draft.current.body !== saved.current.body ||
@@ -361,6 +381,10 @@ export function DocumentEditor({
             externalRevision: externalRevision.current,
           }
         : null;
+    return payload;
+  };
+  const persistRecovery = () => {
+    const payload = recoveryPayload();
     return recovery.put(
       recoveryOwner,
       payload,
@@ -376,6 +400,45 @@ export function DocumentEditor({
   useEffect(() => {
     void persistRecovery().catch(() => {});
   });
+  useEffect(() => {
+    if (initial) return;
+    let active = true;
+    void workspaceAttachments
+      .workspaceId()
+      .then((workspaceId) => {
+        if (!active) return null;
+        fallbackWorkspace.current = workspaceId;
+        return recovered ? null : readCaptureTextDraft(workspaceId);
+      })
+      .then((value) => {
+        if (!active || !value || draft.current.body || draft.current.title)
+          return;
+        const result = recoverySchema.safeParse(value);
+        if (!result.success) return;
+        const snapshot = result.data;
+        draft.current = snapshot.draft;
+        saved.current = snapshot.saved;
+        id.current = snapshot.id;
+        pending.current = snapshot.pending;
+        revision.current = snapshot.revision;
+        externalRef.current = snapshot.external;
+        externalRevision.current = snapshot.externalRevision;
+        setTitle(snapshot.draft.title);
+        setBody(snapshot.draft.body);
+        setSuggestion(snapshot.draft.suggestion);
+        setExternal(snapshot.external);
+        setDiscarded(snapshot.discarded);
+        setStatus("Draft restored");
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setRestoringCapture(false);
+      });
+    return () => {
+      active = false;
+      fallbackWorkspace.current = null;
+    };
+  }, [initial, recovered]);
   const lastVersion = useRef<string | null>(
     initial ? `${initial.updated_at}|${initial.trashed}` : null,
   );
@@ -500,6 +563,8 @@ export function DocumentEditor({
       await persistRecovery();
       saving.current = false;
       setStatus("Saved on this computer");
+      if (!initial && fallbackWorkspace.current)
+        void clearCaptureTextDraft(fallbackWorkspace.current).catch(() => {});
       refreshLinks();
       if (
         storedTitle(draft.current.title) !== saved.current.title ||
@@ -698,8 +763,17 @@ export function DocumentEditor({
       await persistRecovery();
       await recovery.flush();
     } catch {
-      setDraftAtRisk(() => action);
-      return;
+      try {
+        if (initial || !fallbackWorkspace.current)
+          throw new Error("Document recovery requires workspace protection");
+        await keepCaptureTextDraft(
+          fallbackWorkspace.current,
+          recoveryPayload(),
+        );
+      } catch {
+        setDraftAtRisk(() => action);
+        return;
+      }
     }
     closeRequested.current = false;
     afterSave.current = null;
@@ -792,25 +866,15 @@ export function DocumentEditor({
     <Input
       id="document-title"
       aria-label="Title"
-      variant={capture ? "default" : "title"}
-      placeholder={capture ? "e.g. Retry policy for uploads" : "Title"}
-      readOnly={locked}
+      variant={capture ? "capture-title" : "title"}
+      placeholder={capture ? "Document title" : "Title"}
+      readOnly={locked || restoringCapture}
       value={title || (head ? heading : "")}
       onChange={(event) => {
         draft.current = { ...draft.current, title: event.target.value };
         setTitle(event.target.value);
       }}
     />
-  );
-  const titleField = (
-    <FieldGroup>
-      <Field>
-        <FieldLabel htmlFor="document-title">
-          Title <small>Optional</small>
-        </FieldLabel>
-        {titleInput}
-      </Field>
-    </FieldGroup>
   );
   const [fadedStatus, setFadedStatus] = useState<string | null>(null);
   const [previousStatus, setPreviousStatus] = useState(status);
@@ -846,7 +910,7 @@ export function DocumentEditor({
       ) : (
         <>
           {isSaved && <Check aria-hidden="true" />}
-          {capture && isSaved ? "Saved to Documents as you type" : status}
+          {capture && isSaved ? "Saved" : status}
         </>
       )}
     </span>
@@ -856,7 +920,7 @@ export function DocumentEditor({
   const draftNote = failedTrash
     ? ""
     : draftAtRisk
-      ? " This device can't keep the draft either. Retry, or discard it to close."
+      ? " This device cannot safely keep the draft. Attached files need workspace recovery. Retry, copy the text, or discard it to close."
       : recovery.active
         ? " Your draft stays on this device if you close."
         : " Your draft is still here.";
@@ -867,28 +931,51 @@ export function DocumentEditor({
       {...((capture || !writing) && { onRetry: retry })}
       actions={
         draftAtRisk ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              closeRequested.current = false;
-              afterSave.current = null;
-              void recovery.put(recoveryOwner, null, []).catch(() => {});
-              draftAtRisk();
-            }}
-          >
-            Discard and close
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void writeClipboard(draft.current.body).then((failure) =>
+                  setCopyResult(
+                    failure
+                      ? `Couldn’t copy: ${failure}.`
+                      : "Draft text copied.",
+                  ),
+                );
+              }}
+            >
+              Copy text
+            </Button>
+            {copyResult && <span role="status">{copyResult}</span>}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                closeRequested.current = false;
+                afterSave.current = null;
+                void recovery.put(recoveryOwner, null, []).catch(() => {});
+                if (!initial && fallbackWorkspace.current)
+                  void clearCaptureTextDraft(fallbackWorkspace.current).catch(
+                    () => {},
+                  );
+                draftAtRisk();
+              }}
+            >
+              Discard and close
+            </Button>
+          </>
         ) : (
-          leaveBlocked &&
+          (capture || leaveBlocked) &&
           recovery.active && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => {
-                const leave = leaveBlocked;
+                const leave = leaveBlocked ?? (() => close.current());
                 setLeaveBlocked(null);
                 void leaveKeepingDraft(leave);
               }}
@@ -981,8 +1068,27 @@ export function DocumentEditor({
       // when recovery can't keep it, the failure offers Discard and close
       // (plans DR-08, set ER-05).
       onDismiss={requestClose}
-      blockedReason={body.trim() ? null : "Write a thought to finish."}
-      note={body.trim() && !failed ? statusLine : null}
+      footer={
+        suggestion ? (
+          <Badge variant="linked">
+            <Link2 aria-hidden="true" />
+            Linked to <Reference>{suggestion}</Reference>
+            <IconButton
+              type="button"
+              label={`Remove connection to ${suggestion}`}
+              size="icon-card"
+              onClick={() => {
+                draft.current = { ...draft.current, suggestion: null };
+                setSuggestion(null);
+                refocusEditor();
+              }}
+            >
+              <X />
+            </IconButton>
+          </Badge>
+        ) : null
+      }
+      note={statusLine}
       error={capture && saveError}
     >
       {initial && (
@@ -1147,7 +1253,7 @@ export function DocumentEditor({
             onDone={() => setEditing(false)}
           />
         )}
-        {suggestion && (
+        {!capture && suggestion && (
           <p>
             Connected to {suggestion}{" "}
             <Button
@@ -1229,6 +1335,7 @@ export function DocumentEditor({
           </Alert>
         )}
         {initial && saveError}
+        {capture && titleInput}
         <div
           className="document-body"
           {...(initial &&
@@ -1249,7 +1356,7 @@ export function DocumentEditor({
               placeholder={
                 capture ? "Write a thought…" : "Write — type / for blocks"
               }
-              readOnly={locked}
+              readOnly={locked || restoringCapture}
               autoFocus={capture}
               {...(!capture && {
                 chrome: "floating" as const,
@@ -1303,7 +1410,7 @@ export function DocumentEditor({
             </DocumentNavigation.Provider>
           )}
         </div>
-        {capture && titleField}
+
         {initial && (
           <aside className="document-rail" aria-label="Document details">
             <header className="document-linked-header">
