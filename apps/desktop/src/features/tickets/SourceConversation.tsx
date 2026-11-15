@@ -10,12 +10,9 @@ import {
 import { useEffect, useState } from "react";
 import {
   CircleAlert,
-  CircleCheck,
   LockKeyhole,
   MessageSquare,
-  CircleEqual,
   Circle,
-  CircleSlash,
   UserMinus,
   UserPlus,
   type LucideIcon,
@@ -27,6 +24,7 @@ import { client } from "@/lib/api/client";
 import type { ConversationEntry, TicketSource } from "@/lib/api/client";
 import { useNow } from "@/lib/use-now";
 import { relativeDateTime, formatDateTime } from "@/lib/format";
+import { statusIcons } from "./status-icons";
 import "./source-conversation.css";
 
 type EventEntry = Extract<ConversationEntry, { type: "event" }>;
@@ -40,16 +38,19 @@ function describeEvent(entry: EventEntry): {
   const subject = entry.subject;
   switch (entry.event) {
     case "closed_completed":
-      return { text: `${actor} closed this as completed`, icon: CircleCheck };
+      return {
+        text: `${actor} closed this as completed`,
+        icon: statusIcons.Done,
+      };
     case "closed_not_planned":
       return {
         text: `${actor} closed this as not planned`,
-        icon: CircleSlash,
+        icon: statusIcons.Canceled,
       };
     case "closed_duplicate":
       return {
         text: `${actor} closed this as a duplicate${subject ? ` of ${subject}` : ""}`,
-        icon: CircleEqual,
+        icon: statusIcons.Duplicate,
       };
     case "closed":
       return { text: `${actor} closed this`, icon: Circle };

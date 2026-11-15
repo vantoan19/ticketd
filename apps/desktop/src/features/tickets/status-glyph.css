@@ -1,0 +1,100 @@
+.status-glyph {
+  flex: none;
+}
+
+.status-glyph > * {
+  color: var(--muted-foreground);
+}
+
+.status-glyph[data-status="In progress"] > *,
+.status-glyph[data-status="In review"] > * {
+  color: var(--foreground);
+}
+
+.status-glyph[data-status="Canceled"] > *,
+.status-glyph[data-status="Duplicate"] > * {
+  color: var(--disabled-foreground);
+}
+
+@property --status-sweep {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.status-glyph-sweep-disc {
+  opacity: 0;
+  --status-sweep: 180deg;
+  /* Opaque mask paint controls geometry, without adding a visible colour. */
+  mask-image: conic-gradient(black var(--status-sweep), transparent 0deg);
+}
+
+[data-status="In review"] .status-glyph-sweep-disc {
+  --status-sweep: 270deg;
+}
+
+.status-glyph.is-changing .status-glyph-sweep-disc {
+  animation: status-glyph-sweep var(--dur-4) var(--ease-in-out);
+}
+
+.status-glyph.is-changing .status-glyph-disc {
+  transform-origin: center;
+  animation:
+    status-glyph-fill var(--dur-4) var(--ease-in-out),
+    status-glyph-settle var(--dur-settle) var(--ease-out)
+      calc(var(--dur-4) + var(--dur-settle)) backwards;
+}
+
+.status-glyph.is-changing .status-glyph-check {
+  stroke-dasharray: 1;
+  animation: status-glyph-check var(--dur-settle) var(--motion-swift)
+    var(--dur-4) both;
+}
+
+.status-glyph.is-changing .status-glyph-pie {
+  animation: status-glyph-pie-rest var(--dur-4) var(--ease-in-out);
+}
+
+@keyframes status-glyph-sweep {
+  from {
+    --status-sweep: var(--status-from);
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes status-glyph-pie-rest {
+  from,
+  to {
+    visibility: hidden;
+  }
+}
+
+@keyframes status-glyph-check {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes status-glyph-fill {
+  from {
+    transform: scale(0.75);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes status-glyph-settle {
+  from {
+    color: var(--foreground);
+  }
+  to {
+    color: var(--muted-foreground);
+  }
+}
