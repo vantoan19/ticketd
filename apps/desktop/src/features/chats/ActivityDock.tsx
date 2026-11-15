@@ -1,3 +1,4 @@
+import { cn } from "cn";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import {
   describeFailure,
@@ -116,6 +117,7 @@ function Request({
     <section
       role="group"
       className="chat-request"
+      data-request={request.request}
       aria-labelledby={titleId}
       {...(request.reason && { "aria-describedby": reasonId })}
       onKeyDown={(event) => {
@@ -206,7 +208,10 @@ function Request({
           <pre className="chat-out">{request.command}</pre>
         )}
         {request.reason && (
-          <p id={reasonId} className="chat-request-reason">
+          <p
+            id={reasonId}
+            className={cn("chat-request-reason", !question && "text-xs")}
+          >
             <CodeSpans text={request.reason} />
           </p>
         )}

@@ -1215,6 +1215,23 @@ button.chat-file-name:focus-visible {
 .chat-activity > .chat-activity-slot {
   padding-block: 0;
 }
+.chat-activity > .chat-request[data-request="approval"] {
+  padding-inline: 14px;
+}
+.chat-request[data-request="approval"] .chat-request-body {
+  padding-left: 0;
+}
+.chat-request[data-request="approval"] .chat-request-body > .chat-out {
+  margin: 8px 0 0;
+  padding-block: 8px;
+}
+.chat-request[data-request="approval"] .chat-request-reason {
+  margin-top: 8px;
+}
+.chat-activity .chat-request[data-request="approval"] .chat-request-buttons {
+  margin-block: 12px -12px;
+  padding-top: 0;
+}
 .chat-request-head {
   display: flex;
   align-items: flex-start;
