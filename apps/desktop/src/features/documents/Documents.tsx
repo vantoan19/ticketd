@@ -112,6 +112,13 @@ export function Documents({
   const [pinOffset, setPinOffset] = useState(0);
   const [error, setError] = useState("");
   const [keptId, setKeptId] = useState<string | null>(null);
+  // The Document last restored from Trash, said where the Include toggle sits
+  // outside Trash, so nothing moves.
+  const [restored, setRestored] = useState<DocumentSummary | null>(null);
+  // The Trash row whose Restore takes focus once the list reloads.
+  const focusAfterRestore = useRef<number | null>(null);
+  const trashList = useRef<HTMLElement>(null);
+  const restoredOpen = useRef<HTMLButtonElement>(null);
   // Only mention hidden Activity details when including them would actually find something.
   const [hiddenProbe, setHiddenProbe] = useState({ key: "", found: false });
   const searchInput = useRef<HTMLInputElement>(null);
@@ -144,6 +151,20 @@ export function Documents({
     if (!active || !showTrash) return;
     loadTrash();
   }, [active, showTrash, loadTrash, changeVersion]);
+  useEffect(() => {
+    const index = focusAfterRestore.current;
+    if (index === null) return;
+    focusAfterRestore.current = null;
+    // The row that took the restored one's place, else the one above, else Open.
+    const buttons = [
+      ...(trashList.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-restore]",
+      ) ?? []),
+    ];
+    (
+      buttons[Math.min(index, buttons.length - 1)] ?? restoredOpen.current
+    )?.focus();
+  }, [trash]);
   useEffect(() => {
     if (!active || view !== "all") return;
     const load = () =>
@@ -224,9 +245,19 @@ export function Documents({
       })
       .catch((e: unknown) => setError(String(e)));
   };
+  const restore = (doc: DocumentSummary, index: number) =>
+    void documents
+      .setTrashed(doc.id, false, crypto.randomUUID())
+      .then(() => {
+        setRestored(doc);
+        focusAfterRestore.current = index;
+        loadTrash();
+        refresh();
+      })
+      .catch((e: unknown) => setError(String(e)));
   const list = (items: DocumentSummary[], mark = "", inTrash = false) => (
     <ul className="document-list">
-      {items.map((doc) => {
+      {items.map((doc, index) => {
         const pinned = pins.some((p) => p.id === doc.id);
         const date = relativeDate(doc.updated_at);
         return (
@@ -277,16 +308,9 @@ export function Documents({
               <Button
                 variant="outline"
                 size="sm"
+                data-restore
                 aria-label={`Restore ${doc.heading}`}
-                onClick={() =>
-                  void documents
-                    .setTrashed(doc.id, false, crypto.randomUUID())
-                    .then(() => {
-                      loadTrash();
-                      refresh();
-                    })
-                    .catch((e: unknown) => setError(String(e)))
-                }
+                onClick={() => restore(doc, index)}
               >
                 Restore
               </Button>
@@ -344,7 +368,10 @@ export function Documents({
                 key={value}
                 variant={view === value ? "secondary" : "ghost"}
                 aria-pressed={view === value}
-                onClick={() => setView(value)}
+                onClick={() => {
+                  setView(value);
+                  setRestored(null);
+                }}
               >
                 {label}
               </Button>
@@ -363,6 +390,23 @@ export function Documents({
                 />{" "}
                 Include update details
               </label>
+            )}
+            {showTrash && (
+              <p role="status" className="documents-include">
+                {restored && (
+                  <>
+                    Restored {restored.heading}.
+                    <Button
+                      ref={restoredOpen}
+                      variant="link"
+                      size="sm"
+                      onClick={() => open(restored.id)}
+                    >
+                      Open
+                    </Button>
+                  </>
+                )}
+              </p>
             )}
           </div>
           {!showTrash && (
@@ -416,7 +460,7 @@ export function Documents({
           )}
         </div>
         {showTrash ? (
-          <section>
+          <section ref={trashList}>
             {!trashLoaded ? (
               <EmptyState
                 size="inline"
