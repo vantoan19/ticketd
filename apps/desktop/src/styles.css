@@ -382,6 +382,10 @@
   select option {
     background: var(--surface);
   }
+  /* A placeholder is an example, not content (T6). */
+  ::placeholder {
+    color: var(--disabled-foreground);
+  }
 }
 
 .ui-button {
@@ -570,8 +574,10 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+/* A placeholder is an example, not content (T6): it reads quieter than any
+   value. */
 .ui-input::placeholder {
-  color: var(--muted-foreground);
+  color: var(--disabled-foreground);
 }
 .ui-input[aria-invalid="true"],
 .ui-select[aria-invalid="true"] {

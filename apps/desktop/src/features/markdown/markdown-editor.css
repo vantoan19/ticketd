@@ -139,7 +139,7 @@
   position: absolute;
   inset: 0 auto auto 0;
   max-width: 100%;
-  color: var(--muted-foreground);
+  color: var(--disabled-foreground);
   pointer-events: none;
   user-select: none;
 }
