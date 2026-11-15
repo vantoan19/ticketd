@@ -15,6 +15,7 @@ import {
 import { workspaceClient, type BackupRecord } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
+import { Tooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
@@ -173,9 +174,9 @@ function LastBackupRow({
         // The file name whole on its own line; the folder under it gives way
         // in the middle, with the full path on hover.
         <span className="backups-last-path">
-          <code className="backups-file" title={name}>
-            {name}
-          </code>
+          <Tooltip content={name} overflowOnly>
+            <code className="backups-file">{name}</code>
+          </Tooltip>
           {folder && <PathText path={folder} />}
         </span>
       }

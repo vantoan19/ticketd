@@ -250,7 +250,7 @@ function Blockers({
                   id="plan-blocker"
                   aria-invalid={error || search.error ? true : undefined}
                   value={query}
-                  placeholder="Search by title, text or reference"
+                  placeholder="Search tickets by title or reference"
                   autoComplete="off"
                   onChange={(event) => {
                     setQuery(event.target.value);

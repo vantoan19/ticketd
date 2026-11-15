@@ -396,7 +396,7 @@ export function AgentSkillsCard({
         onOpenChange={(open) => !open && setReviewing(null)}
         title={`Replace the ${reviewing?.name ?? ""} skill`}
         description="ticketd will install its own skill in this folder. The current SKILL.md is saved beside it first, so nothing is lost."
-        width={573}
+        size="md"
         primaryLabel="Replace"
         blockedReason={busy ? "Replacing…" : null}
         busy={busy}

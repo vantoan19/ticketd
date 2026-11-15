@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Item } from "@/components/ui/item";
 import {
   Popover,
@@ -55,19 +56,23 @@ export function PlanDocuments({
         <li>
           {!chip && <FileText aria-hidden="true" size={14} />}
           {chip ? (
-            <Badge variant="doc" asChild>
-              <button type="button" title={doc.heading} onClick={open}>
-                <FileText aria-hidden="true" size={14} />
-                <span className="plan-spec-label">
-                  {isSpec ? "Spec:" : "Document:"}
-                </span>{" "}
-                <span className="plan-spec-title">{heading}</span>
-              </button>
-            </Badge>
+            <Tooltip content={doc.heading}>
+              <Badge variant="doc" asChild>
+                <button type="button" onClick={open}>
+                  <FileText aria-hidden="true" size={14} />
+                  <span className="plan-spec-label">
+                    {isSpec ? "Spec:" : "Document:"}
+                  </span>{" "}
+                  <span className="plan-spec-title">{heading}</span>
+                </button>
+              </Badge>
+            </Tooltip>
           ) : (
-            <button type="button" title={doc.heading} onClick={open}>
-              <span>{heading}</span>
-            </button>
+            <Tooltip content={doc.heading}>
+              <button type="button" onClick={open}>
+                <span>{heading}</span>
+              </button>
+            </Tooltip>
           )}
           {!readOnly && (
             <DropdownMenu>

@@ -8,6 +8,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Item } from "@/components/ui/item";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -120,27 +121,29 @@ export function TicketDocuments({
                 <button
                   type="button"
                   className="ticket-documents-item"
-                  title={link.target_label}
                   onClick={() => openDocument?.(link.target_id)}
                 >
                   <FileText aria-hidden="true" />
-                  <span className="ticket-documents-title">
-                    {link.target_label}
-                  </span>
+                  <Tooltip content={link.target_label} overflowOnly>
+                    <span className="ticket-documents-title">
+                      {link.target_label}
+                    </span>
+                  </Tooltip>
                   {link.target_trashed && (
                     <span className="ticket-documents-badge">Trash</span>
                   )}
                 </button>
                 {link.explicit ? (
-                  <button
-                    type="button"
-                    className="ticket-documents-unlink"
-                    aria-label={`Unlink ${link.target_label}`}
-                    title="Unlink"
-                    onClick={() => void change(link.target_id, false)}
-                  >
-                    <X aria-hidden="true" />
-                  </button>
+                  <Tooltip content="Unlink">
+                    <button
+                      type="button"
+                      className="ticket-documents-unlink"
+                      aria-label={`Unlink ${link.target_label}`}
+                      onClick={() => void change(link.target_id, false)}
+                    >
+                      <X aria-hidden="true" />
+                    </button>
+                  </Tooltip>
                 ) : link.activity_id ? null : (
                   <IconButton
                     size="icon-xs"
@@ -152,14 +155,16 @@ export function TicketDocuments({
                   </IconButton>
                 )}
                 {!link.explicit && link.activity_id && (
-                  <button
-                    type="button"
-                    className="ticket-documents-source"
-                    title="Open the update that mentions this Document"
-                    onClick={() => onOpenUpdate?.(link.activity_id!)}
-                  >
-                    From update
-                  </button>
+                  <Tooltip content="Open the update that mentions this Document">
+                    <button
+                      type="button"
+                      className="ticket-documents-source"
+                      aria-description="Opens the update that mentions this Document"
+                      onClick={() => onOpenUpdate?.(link.activity_id!)}
+                    >
+                      From update
+                    </button>
+                  </Tooltip>
                 )}
               </li>
             </Item>

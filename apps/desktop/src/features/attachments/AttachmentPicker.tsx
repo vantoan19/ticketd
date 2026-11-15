@@ -29,6 +29,7 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import "@/features/tickets/ticket-attachments.css";
+import "./attachment-library.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
 import { UploadRecovery, type UploadRecord } from "./upload-recovery";
 import { ExistingAttachments } from "./ExistingAttachments";
@@ -504,13 +505,12 @@ export function AttachmentPicker({
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent
         ref={dropTarget}
-        className={
-          tab === "existing"
-            ? // Existing files stays inside the window and only its list
-              // scrolls, so Insert selected is always in view.
-              "sm:max-w-170 flex max-h-dvh flex-col overflow-hidden"
-            : "sm:max-w-170 max-h-dvh overflow-y-auto"
-        }
+        size="md"
+        // Existing files stays inside the window and only its list scrolls,
+        // so Insert selected is always in view (AT-19).
+        {...(tab === "existing" && {
+          className: "flex flex-col overflow-hidden",
+        })}
       >
         <DialogHeader>
           <DialogTitle>

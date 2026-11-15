@@ -11,6 +11,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { TicketDocuments } from "@/features/tickets/TicketDocuments";
 import type { Ticket } from "@/lib/api/client";
 
+window.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+// The Document picker's list (cmdk) scrolls the highlighted row into view.
+Element.prototype.scrollIntoView ??= () => {};
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 afterEach(() => {
   cleanup();

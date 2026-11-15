@@ -178,7 +178,7 @@ export function MermaidDiagram({ source }: { source: string }) {
             {source}
           </pre>
         )}
-        <DialogContent className="mermaid-expanded">
+        <DialogContent className="mermaid-expanded" size="viewer">
           <DialogHeader>
             <DialogTitle>Expanded Mermaid diagram</DialogTitle>
             <DialogDescription>

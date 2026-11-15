@@ -1,13 +1,6 @@
 import { LatestUpdate } from "./LatestUpdate";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
+import { ChoiceList, type Choice } from "@/components/ui/choice-list";
 import {
   ChevronDown,
   Folder,
@@ -56,15 +49,21 @@ import type { Plan } from "@/lib/api/plans";
 import "./properties.css";
 import { Badge } from "@/components/ui/badge";
 
-type Choice = { value: string; label: string };
-
+/**
+ * A rail property's value and its ChoiceList (P3): rows with the property's
+ * icon, the current value checked and highlighted on open, the clearing
+ * choice ("No project") last. `multiple` (tags) keeps the list open while
+ * values are toggled and offers "Create “x”".
+ */
 export function PropertyPicker({
   label,
   value,
+  selected,
   choices,
+  clear,
   disabled,
   onChoose,
-  allowCreate = false,
+  multiple = false,
   onSearch,
   compact = false,
   readOnly = false,
@@ -72,8 +71,11 @@ export function PropertyPicker({
   align = "start",
   display,
   className,
+  things,
 }: {
   label: string;
+  /** What the search finds, for its placeholder: "Search projects". */
+  things: string;
   /** Shown in the trigger in place of the value text (the label stays the accessible name). */
   display?: ReactNode;
   className?: string;
@@ -82,21 +84,28 @@ export function PropertyPicker({
   compact?: boolean;
   readOnly?: boolean;
   icon?: LucideIcon;
+  /** The current value's words, for the trigger. */
   value: string;
+  /** The current choice's value, or the chosen values when `multiple`. */
+  selected: string | string[];
   choices: Choice[];
+  clear?: Choice;
   disabled: boolean;
   onChoose: (value: string) => void;
-  allowCreate?: boolean;
+  multiple?: boolean;
   onSearch?: (query: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   function choose(next: string) {
-    setOpen(false);
-    setQuery("");
-    onSearch?.("");
+    if (!multiple) {
+      setOpen(false);
+      setQuery("");
+      onSearch?.("");
+    }
     onChoose(next);
   }
+  const icon = Icon && <Icon aria-hidden="true" />;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -114,46 +123,28 @@ export function PropertyPicker({
       </PopoverTrigger>
       <PopoverContent
         align={align}
-        className="property-popover"
+        variant="list"
         aria-label={`${label} choices`}
       >
-        <Command shouldFilter={!onSearch}>
-          <CommandInput
-            aria-label={`Search ${label}`}
-            placeholder={`Search ${label.toLowerCase()}…`}
-            value={query}
-            onValueChange={(next) => {
-              setQuery(next);
-              onSearch?.(next);
-            }}
-          />
-          <CommandList>
-            <CommandEmpty>No matches.</CommandEmpty>
-            <CommandGroup>
-              {choices.map((choice) => (
-                <CommandItem
-                  key={choice.value}
-                  value={choice.label}
-                  onSelect={() => choose(choice.value)}
-                >
-                  {choice.label}
-                </CommandItem>
-              ))}
-              {allowCreate &&
-                query.trim() &&
-                !choices.some(
-                  (choice) => choice.value === query.trim().toLowerCase(),
-                ) && (
-                  <CommandItem
-                    value={`Add ${query}`}
-                    onSelect={() => choose(query.trim())}
-                  >
-                    Add “{query.trim()}”
-                  </CommandItem>
-                )}
-            </CommandGroup>
-          </CommandList>
-        </Command>
+        <ChoiceList
+          label={`${label} choices`}
+          searchPlaceholder={`Search ${things}`}
+          query={query}
+          onQueryChange={(next) => {
+            setQuery(next);
+            onSearch?.(next);
+          }}
+          groups={choices
+            .filter((choice) =>
+              choice.label.toLowerCase().includes(query.trim().toLowerCase()),
+            )
+            .map((choice) => ({ ...choice, ...(icon && { icon }) }))}
+          {...(clear &&
+            !query.trim() && { clear: { ...clear, ...(icon && { icon }) } })}
+          selected={selected}
+          onSelect={choose}
+          {...(multiple && { create: choose })}
+        />
       </PopoverContent>
     </Popover>
   );
@@ -397,7 +388,6 @@ export function TicketProperties({
               variant={chips ? "default" : "ghost"}
               readOnly={ticket.trashed}
               aria-label={`Status: ${ticket.status}`}
-              title="Status"
             >
               <StatusIcon status={ticket.status} decorative />
               <SelectValue>{ticket.status}</SelectValue>
@@ -414,6 +404,7 @@ export function TicketProperties({
                   .filter((status) => owner || status !== "Duplicate")
                   .map((status) => (
                     <SelectItem key={status} value={status}>
+                      <StatusIcon status={status} decorative />
                       {status}
                     </SelectItem>
                   ))}
@@ -436,6 +427,7 @@ export function TicketProperties({
                         .filter((status) => !statusChoices.includes(status))
                         .map((status) => (
                           <SelectItem key={status} value={status} disabled>
+                            <StatusIcon status={status} decorative />
                             {status}
                           </SelectItem>
                         ))}
@@ -528,12 +520,12 @@ export function TicketProperties({
           readOnly={ticket.trashed}
           icon={Folder}
           label="Project"
+          things="projects"
           value={projectName}
+          selected={ticket.project_id ?? ""}
           disabled={disabled}
-          choices={[
-            { value: "", label: "No project" },
-            ...projects.map((p) => ({ value: p.id, label: p.name })),
-          ]}
+          choices={projects.map((p) => ({ value: p.id, label: p.name }))}
+          clear={{ value: "", label: "No project" }}
           onChoose={(value) =>
             void save("Project", () =>
               client.changeTicket(ticket.reference, {
@@ -551,14 +543,14 @@ export function TicketProperties({
           readOnly={ticket.trashed}
           icon={Layers}
           label="Plan"
+          things="Plans"
           value={planName}
+          selected={ticket.plan_id ?? ""}
           disabled={disabled}
-          choices={[
-            { value: "", label: "No Plan" },
-            ...plans
-              .filter((e) => !e.archived)
-              .map((e) => ({ value: e.id, label: e.name })),
-          ]}
+          choices={plans
+            .filter((e) => !e.archived)
+            .map((e) => ({ value: e.id, label: e.name }))}
+          clear={{ value: "", label: "No Plan" }}
           onChoose={(value) =>
             void save("Plan", () =>
               client.setPlan(ticket.reference, value || null),
@@ -607,15 +599,14 @@ export function TicketProperties({
                 </>
               }
               label="Tags"
+              things="tags"
               value={ticket.tags.length ? "Edit tags" : "Add tags"}
               disabled={disabled}
-              allowCreate
+              multiple
+              selected={ticket.tags}
               onSearch={setTagQuery}
               choices={[...new Set([...vocabulary, ...ticket.tags])].map(
-                (tag) => ({
-                  value: tag,
-                  label: ticket.tags.includes(tag) ? `✓ ${tag}` : tag,
-                }),
+                (tag) => ({ value: tag, label: tag }),
               )}
               onChoose={(tag) =>
                 void save("Tags", () =>

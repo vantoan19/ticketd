@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { Input } from "@/components/ui/input";
+import { Tooltip } from "@/components/ui/tooltip";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   attachments,
@@ -289,16 +290,15 @@ export function AttachmentLibrary({
                         </td>
                         <td data-label="Added">
                           {file.added_at ? (
-                            <time
-                              dateTime={file.added_at}
-                              title={formatDateTime(file.added_at)}
-                            >
-                              {relativeDateTime(file.added_at)}
-                            </time>
+                            <Tooltip content={formatDateTime(file.added_at)}>
+                              <time dateTime={file.added_at} tabIndex={0}>
+                                {relativeDateTime(file.added_at)}
+                              </time>
+                            </Tooltip>
                           ) : (
-                            <span title="No registration date was recorded">
-                              Unknown
-                            </span>
+                            <Tooltip content="No registration date was recorded">
+                              <span tabIndex={0}>Unknown</span>
+                            </Tooltip>
                           )}
                         </td>
                         <td>

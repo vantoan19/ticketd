@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureDetails, FailureState } from "@/components/ui/failure-alert";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import type { PlanViewState } from "@/features/plans/usePlanView";
@@ -213,9 +214,11 @@ export function TicketListPane({
         </div>
       ) : (
         <div className="list-header">
-          <h1 id="tickets-heading" tabIndex={-1} title={scopeName}>
-            {scopeName}
-          </h1>
+          <Tooltip content={scopeName} side="bottom" overflowOnly>
+            <h1 id="tickets-heading" tabIndex={-1}>
+              {scopeName}
+            </h1>
+          </Tooltip>
           <p>
             {filtered && scopeTotal !== undefined
               ? `${total} of ${scopeTotal}`

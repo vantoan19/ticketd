@@ -46,7 +46,7 @@ test("keeps the saved project and reports a failed change", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: /Project: No project/ }));
-  const search = await screen.findByLabelText("Search Project");
+  const search = await screen.findByLabelText("Search projects");
   fireEvent.change(search, {
     target: { value: "Project" },
   });

@@ -67,10 +67,19 @@ test("a # mention inserts the record without sending, and the message links it w
   ]);
 });
 
+test("Enter never sends while the # menu is open, even with no row to pick (chat CH-46)", async () => {
+  const { box, onSend } = setup();
+  // Still searching: no row is highlighted yet.
+  type(box, "Look at #zzz");
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
+  expect(box.value).toBe("Look at #zzz");
+});
+
 test("# with nothing typed offers the linked records, then the recently updated ones", async () => {
   const { box } = setup();
   type(box, "#");
-  expect(await screen.findByText("Recently updated")).toBeTruthy();
+  expect(await screen.findByText("Recent")).toBeTruthy();
   expect(await screen.findByRole("option", { name: /T-KQ12/ })).toBeTruthy();
 });
 

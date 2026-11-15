@@ -490,7 +490,7 @@ function Choose({
         description={`ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`}
         primaryLabel="Use another account"
         blockedReason={null}
-        width={480}
+        size="sm"
         onSubmit={() => {
           setSwitching(false);
           void run(syncApi.disconnect, "disconnect from Google Drive");
@@ -511,7 +511,7 @@ function Choose({
           description="The Workspace from Drive replaces the one on this desktop. A safety backup is saved first."
           primaryLabel="Download and replace"
           blockedReason={null}
-          width={573}
+          size="md"
           onSubmit={() => {
             setConfirming(false);
             void run(async () => {
@@ -698,7 +698,7 @@ function Disconnect({ folder }: { folder: string | undefined }) {
         description="Sync stops on this desktop. Nothing is deleted."
         primaryLabel="Disconnect"
         blockedReason={null}
-        width={480}
+        size="sm"
         onSubmit={() => {
           setDisconnecting(false);
           void run(syncApi.disconnect, "disconnect from Google Drive");

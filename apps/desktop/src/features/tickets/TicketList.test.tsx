@@ -312,7 +312,11 @@ test("detailed rows show tags and context", () => {
 
 test("a simple row's readiness dot is never alone: it has a tooltip and a name", () => {
   renderList([ticket({})], { simple: true });
-  expect(screen.getByTitle("Ready").textContent).toBe("Ready");
+  const dot = screen.getByText("Ready").closest(".ticket-row-state")!;
+  expect(dot.textContent).toBe("Ready");
+  // A Tooltip trigger, not a native title the keyboard never reaches.
+  expect(dot.getAttribute("data-state")).toBe("closed");
+  expect(dot.hasAttribute("title")).toBe(false);
 });
 
 test("the Ready view leaves out the per-row Ready dot, simple rows too", () => {

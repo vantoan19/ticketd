@@ -7,6 +7,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { Tooltip } from "@/components/ui/tooltip";
 import { latestUpdate, type LatestUpdate as Update } from "@/lib/api/progress";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -69,22 +70,17 @@ export function LatestUpdate({
           <div className="latest-update-meta">
             <small>
               {update.editing_agent && <>{update.editing_agent} · </>}
-              <time
-                tabIndex={0}
-                dateTime={update.reported_at}
-                title={formatDateTime(update.reported_at)}
-              >
-                {relativeDateTime(update.reported_at, now)}
-              </time>
+              <Tooltip content={formatDateTime(update.reported_at)}>
+                <time tabIndex={0} dateTime={update.reported_at}>
+                  {relativeDateTime(update.reported_at, now)}
+                </time>
+              </Tooltip>
               {update.updated_at !== update.reported_at && (
                 <>
                   {" "}
                   · Edited{" "}
-                  <time
-                    tabIndex={0}
-                    dateTime={update.updated_at}
-                    title={formatDateTime(update.updated_at)}
-                  >
+                  {/* Already the exact time: no tooltip to repeat it. */}
+                  <time dateTime={update.updated_at}>
                     {formatDateTime(update.updated_at)}
                   </time>
                 </>

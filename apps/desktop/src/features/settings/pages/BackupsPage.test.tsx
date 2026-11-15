@@ -79,9 +79,8 @@ test("the last backup shows its file, folder and Checked, and can be revealed", 
   const name = await screen.findByText("ticketd-backup-2026-11-01.sqlite3");
   const row = name.closest(".settings-list-row") as HTMLElement;
   expect(within(row).getByText("Checked")).toBeTruthy();
-  expect(within(row).getByTitle("/Users/me/Backups").textContent).toBe(
-    "~/Backups",
-  );
+  // The folder is a PathText; its full path is in a Tooltip, not a title.
+  expect(row.querySelector(".path-text")?.textContent).toBe("~/Backups");
   fireEvent.click(within(row).getByRole("button", { name: /^Show in / }));
   await waitFor(() =>
     expect(workspaceClient.reveal).toHaveBeenCalledWith(last.path),

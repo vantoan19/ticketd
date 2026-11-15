@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Cloud, LaptopMinimal, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Popover,
   PopoverContent,
@@ -137,13 +138,16 @@ export function SourceRail({
         </div>
       ) : ticket.source ? (
         <div className="rail-source">
-          <span
-            className="rail-value"
-            title="Owned in ticketd; the external issue is kept as provenance"
-          >
-            <LaptopMinimal aria-hidden="true" />
-            Local
-          </span>
+          <Tooltip content="Owned in ticketd; the external issue is kept as provenance">
+            <span
+              className="rail-value"
+              tabIndex={0}
+              aria-description="Owned in ticketd; the external issue is kept as provenance"
+            >
+              <LaptopMinimal aria-hidden="true" />
+              Local
+            </span>
+          </Tooltip>
           <small className="rail-note">
             was <span className="source-number">{ticket.source.display}</span>
           </small>
@@ -156,10 +160,16 @@ export function SourceRail({
         </div>
       ) : (
         <div className="rail-source">
-          <span className="rail-value" title="Created and edited in ticketd">
-            <LaptopMinimal aria-hidden="true" />
-            Local
-          </span>
+          <Tooltip content="Created and edited in ticketd">
+            <span
+              className="rail-value"
+              tabIndex={0}
+              aria-description="Created and edited in ticketd"
+            >
+              <LaptopMinimal aria-hidden="true" />
+              Local
+            </span>
+          </Tooltip>
           <LocalParentNote ticket={ticket} />
           <LocalPublication ticket={ticket} refresh={refresh} />
         </div>

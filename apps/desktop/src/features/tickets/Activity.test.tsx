@@ -12,6 +12,8 @@ import { Activity } from "./Activity";
 import { DocumentNavigation } from "@/features/documents/navigation";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+// The Document picker's list (cmdk) scrolls the highlighted row into view.
+Element.prototype.scrollIntoView ??= () => {};
 vi.mock("@tauri-apps/api/core", () => bridge);
 // Source entry exercises the real controlled editor; jsdom lacks the native
 // selection and layout APIs used by the external CodeMirror widget.
@@ -40,6 +42,7 @@ afterEach(() => {
   bridge.invoke.mockReset();
   localStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 test("preserves a note draft on a failed save and prevents repeated submissions", async () => {
@@ -744,8 +747,17 @@ test("restores a selected supporting Document after navigation", async () => {
   };
   const view = render(<Activity {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
+  // The Document picker opens in a popover after the composer mounted, which measures its trigger.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: "Attach Document" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Investigation" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Investigation/ }));
   view.unmount();
   render(<Activity {...props} />);
   expect(await screen.findByText("Attached: Investigation")).toBeTruthy();

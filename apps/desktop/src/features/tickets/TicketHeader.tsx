@@ -242,11 +242,7 @@ export function TicketHeader({
                 <MoreHorizontal />
               </IconButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className="ticket-actions-menu"
-              align="end"
-              sideOffset={4}
-            >
+            <DropdownMenuContent align="end">
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   onSelect={() => void copy("Reference", ticket.reference)}
@@ -276,12 +272,12 @@ export function TicketHeader({
                         preview.eligibility.reason !== "internal_attachments")
                     }
                     onSelect={() => setPublishing(true)}
-                    className="publication-menu-item"
+                    {...(preview &&
+                      preview.eligibility.kind !== "eligible" && {
+                        reason: publicationReason(preview),
+                      })}
                   >
-                    <span>Publish to GitHub…</span>
-                    {preview && preview.eligibility.kind !== "eligible" && (
-                      <small>{publicationReason(preview)}</small>
-                    )}
+                    Publish to GitHub…
                   </DropdownMenuItem>
                 )}
                 {!ticket.trashed && (

@@ -207,3 +207,18 @@
     max-width: none;
   }
 }
+
+/* Attach file: the existing-files action row ("Insert selected") stays on
+   the dialog's bottom edge while the dialog scrolls (shell AT-19). The
+   dialog has a 24px inset, which the row covers. */
+[data-slot="dialog-content"]
+  .attachment-existing
+  .attachment-existing
+  > .attachment-actions:last-child {
+  position: sticky;
+  bottom: -24px;
+  margin: 0 -24px -24px;
+  padding: 12px 24px;
+  background: var(--recessed);
+  box-shadow: inset 0 1px 0 var(--group-hairline);
+}

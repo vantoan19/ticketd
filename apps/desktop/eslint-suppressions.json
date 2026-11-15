@@ -9,18 +9,7 @@
       "count": 8
     }
   },
-  "src/components/ui/dialog-shell.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 2
-    },
-    "shadcn/no-restyle": {
-      "count": 6
-    }
-  },
   "src/components/ui/dialog.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
-    },
     "shadcn/no-restyle": {
       "count": 1
     }
@@ -61,17 +50,9 @@
       "count": 1
     }
   },
-  "src/components/ui/tooltip.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
-    }
-  },
   "src/features/documents/DocumentEditor.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
-    },
     "shadcn/no-restyle": {
-      "count": 9
+      "count": 3
     }
   },
   "src/features/documents/Documents.tsx": {
@@ -96,17 +77,12 @@
   },
   "src/features/plans/PlanHeader.tsx": {
     "shadcn/no-restyle": {
-      "count": 3
+      "count": 2
     }
   },
   "src/features/projects/Projects.tsx": {
     "shadcn/no-restyle": {
       "count": 3
-    }
-  },
-  "src/features/settings/RestoreDialog.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
     }
   },
   "src/features/tickets/Activity.tsx": {
@@ -117,11 +93,6 @@
   "src/features/tickets/BulkControls.tsx": {
     "shadcn/no-restyle": {
       "count": 3
-    }
-  },
-  "src/features/tickets/BulkTagDialog.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
     }
   },
   "src/features/tickets/Duplicates.tsx": {
@@ -139,14 +110,9 @@
       "count": 5
     }
   },
-  "src/features/tickets/MarkDuplicateDialog.tsx": {
-    "shadcn/no-restyle": {
-      "count": 2
-    }
-  },
   "src/features/tickets/PublishToSource.tsx": {
     "shadcn/no-restyle": {
-      "count": 6
+      "count": 3
     }
   },
   "src/features/tickets/ReadOnlySource.tsx": {
@@ -196,7 +162,7 @@
   },
   "src/features/tickets/TicketHeader.tsx": {
     "shadcn/no-restyle": {
-      "count": 3
+      "count": 1
     }
   },
   "src/features/tickets/TicketList.tsx": {
@@ -211,7 +177,7 @@
   },
   "src/features/tickets/TicketProperties.tsx": {
     "shadcn/no-restyle": {
-      "count": 2
+      "count": 1
     }
   },
   "src/features/tickets/TicketWorkspaceView.tsx": {

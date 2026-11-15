@@ -661,15 +661,48 @@ body:has([data-slot="dialog-overlay"])
   line-height: 32px;
   letter-spacing: -0.6px;
 }
+/* A choice list's search row (P3): 32px, a hairline under it. */
 [data-slot="command-input-wrapper"] {
-  height: 40px;
+  height: 32px;
+  padding-inline: 8px;
   border: 0;
-  box-shadow: 0 1px var(--border);
+  box-shadow: 0 1px var(--group-hairline);
 }
 [data-slot="command-input"] {
-  height: 40px;
+  height: 32px;
   background: transparent;
   box-shadow: none;
+}
+[data-slot="command-item"][data-size="tall"] {
+  min-height: 36px;
+}
+/* A disabled menu row's reason: a readable line under the label, aligned
+   with the label when the row has an icon (P3). */
+[data-slot="dropdown-menu-item"][data-reason] {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+[data-slot="dropdown-menu-item-reason"] {
+  flex-basis: 100%;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+[data-slot="dropdown-menu-item"]:has(> svg:first-child)
+  > [data-slot="dropdown-menu-item-reason"] {
+  padding-left: 24px;
+}
+/* A popover holding a choice list or picker (P3). */
+.ui-popover[data-variant="list"] {
+  width: max(var(--radix-popover-trigger-width), 280px);
+  padding: 4px;
+}
+/* Menus and select lists stop at 320px and scroll inside (P3). */
+[data-slot="select-content"] {
+  max-height: min(320px, var(--radix-select-content-available-height));
+}
+[data-slot="dropdown-menu-content"] {
+  max-height: min(320px, var(--radix-dropdown-menu-content-available-height));
 }
 [data-slot="command-item"],
 [data-slot="select-item"],
@@ -2193,10 +2226,6 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   max-width: 100%;
   height: auto;
 }
-.mermaid-expanded {
-  width: calc(100vw - 48px);
-  max-width: none;
-}
 .mermaid-expanded .mermaid-viewer {
   max-height: 70vh;
 }
@@ -2319,9 +2348,32 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   list-style: none;
 }
 
+/* Dialogs are anchored at the top and grow downward, so a result, a note or
+   a typed search never re-centres them (DESIGN.md section 11). */
 .ui-dialog {
-  max-height: calc(100dvh - 32px);
+  --dialog-top: max(48px, 12vh);
+  top: var(--dialog-top);
+  left: 50%;
+  translate: -50% 0;
+  width: min(512px, calc(100vw - 32px));
+  max-height: calc(100dvh - var(--dialog-top) - 16px);
   overflow-y: auto;
+}
+.ui-dialog[data-size="sm"] {
+  width: min(480px, calc(100vw - 32px));
+}
+.ui-dialog[data-size="md"] {
+  width: min(640px, calc(100vw - 32px));
+}
+.ui-dialog[data-size="lg"] {
+  width: min(920px, calc(100vw - 32px));
+}
+.ui-dialog[data-size="viewer"] {
+  top: 50%;
+  translate: -50% -50%;
+  width: min(1120px, calc(100vw - 64px));
+  height: min(800px, calc(100dvh - 64px));
+  max-height: none;
 }
 
 .list-header:has(.source-refresh:not(:empty)) > p {
@@ -2338,6 +2390,27 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   order: -2;
 }
 
+/* The tooltip chip (DESIGN.md section 4): 12/16 text, 4px 8px, wrapping at
+   240px, no arrow. */
+.ui-tooltip {
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  background: var(--tooltip);
+  color: var(--tooltip-foreground);
+  box-shadow: var(--shadow-tooltip);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  overflow-wrap: anywhere;
+}
+.ui-tooltip[data-state="delayed-open"],
+.ui-tooltip[data-state="instant-open"] {
+  animation: tooltip-enter 0.15s var(--motion-swift);
+}
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+  }
+}
 /* A tooltip only labels; its positioning wrapper must not cover the controls
    beside the trigger (it hid "Clear filters" after the search popover closed). */
 [data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
@@ -2423,45 +2496,37 @@ html[data-input="pointer"] .sidebar-nav button:focus-visible {
   cursor: default;
 }
 
-/* Every dialog shell keeps its footer inside the viewport: a tall body
-   (an alert, a long review) scrolls instead of pushing the footer out. */
+/* Every dialog shell keeps its header and footer in place: a tall body (an
+   alert, a long review, the New ticket editor growing its toolbar) scrolls
+   inside instead of pushing the footer out. */
 .ui-dialog:has(.dialog-shell-form) {
-  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.ui-dialog:has(.dialog-shell-form) .dialog-shell-form {
+.dialog-shell-form {
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1;
 }
-.ui-dialog:has(.dialog-shell-form) .dialog-shell-body {
+.dialog-shell-body {
   min-height: 0;
   overflow-y: auto;
 }
-
-/* The New ticket dialog grows by the docked editor toolbar on focus. Its top
-   edge is anchored at a fixed offset so it never moves (board D: 112px in the frame, 84px in the webview under the 28px title bar), and the body scrolls
-   inside a viewport-bound dialog so the growth never pushes the footer off. */
-.ui-dialog:has(.create-form) {
-  top: 84px;
-  translate: -50% 0;
-  max-height: calc(100dvh - 84px - 16px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+/* The footer band: recessed under a hairline, one note slot beside Cancel
+   and the primary. */
+.dialog-shell-footer {
+  min-height: 60px;
+  background: var(--recessed);
+  box-shadow: inset 0 1px 0 var(--group-hairline);
 }
-.ui-dialog:has(.create-form) .dialog-shell-form {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}
-.ui-dialog:has(.create-form) .dialog-shell-body {
-  min-height: 0;
-  overflow-y: auto;
+.dialog-shell-note {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  text-align: right;
+  text-wrap: pretty;
 }
 /* Filters panel open (board C): the panel covers the left of the detail pane,
    so the empty state centres in the space to its right (centre x 1120) and sits

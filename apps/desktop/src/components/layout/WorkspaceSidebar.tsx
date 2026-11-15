@@ -6,7 +6,7 @@ import {
   MessagesSquare,
   Trash2,
   Settings,
-  Ellipsis,
+  ChevronRight,
   SquarePen,
   Folder,
   Layers,
@@ -34,12 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Project } from "@/lib/api/client";
@@ -61,27 +56,21 @@ function SidebarCount({ value }: { value: number }) {
   );
 }
 
-/** The heading's "..." menu: a place to manage the list below it. */
-function ManageMenu({
+/**
+ * The heading's way to the page that manages the list below it. One action is
+ * a direct button, never a one-item menu (DESIGN.md section 11).
+ */
+function ManageLink({
   label,
-  item,
   onSelect,
 }: {
   label: string;
-  item: string;
   onSelect: () => void;
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <IconButton label={label}>
-          <Ellipsis aria-hidden="true" size={16} />
-        </IconButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={onSelect}>{item}</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <IconButton label={label} onClick={onSelect}>
+      <ChevronRight aria-hidden="true" size={16} />
+    </IconButton>
   );
 }
 
@@ -112,18 +101,13 @@ function GroupMenu({
   return (
     <SidebarMenuItem>
       <DropdownMenu>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton isActive={!!current} aria-label={name}>
-                  <Icon size={16} aria-hidden />
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="right">{name}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <Tooltip content={name} side="right">
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton isActive={!!current} aria-label={name}>
+              <Icon size={16} aria-hidden />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+        </Tooltip>
         <DropdownMenuContent side="right" align="start">
           {entries.map((entry) => (
             <DropdownMenuItem
@@ -429,9 +413,8 @@ export function WorkspaceSidebar({
                   data-active={view === "projects" || undefined}
                 >
                   Projects{" "}
-                  <ManageMenu
-                    label="Manage projects"
-                    item="All projects"
+                  <ManageLink
+                    label="All projects"
                     onSelect={() => setView("projects")}
                   />
                 </div>
@@ -447,7 +430,9 @@ export function WorkspaceSidebar({
                           onClick={() => scope("all", p.id)}
                         >
                           <Folder size={16} />{" "}
-                          <span title={p.name}>{p.name}</span>
+                          <Tooltip content={p.name} overflowOnly>
+                            <span>{p.name}</span>
+                          </Tooltip>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
                     ))}
@@ -489,6 +474,7 @@ export function WorkspaceSidebar({
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={view === "attachments"}
+                    tooltip="Attachments"
                     onClick={() => setView("attachments")}
                   >
                     <Paperclip size={16} /> Attachments
@@ -541,9 +527,8 @@ export function WorkspaceSidebar({
               <>
                 <div className="sidebar-heading">
                   Plans{" "}
-                  <ManageMenu
-                    label="Manage Plans"
-                    item="All Plans"
+                  <ManageLink
+                    label="All Plans"
                     onSelect={() => setView("plans")}
                   />
                 </div>
@@ -561,7 +546,9 @@ export function WorkspaceSidebar({
                             onClick={() => scope("all", "all", e.id)}
                           >
                             <Layers size={16} />{" "}
-                            <span title={e.name}>{e.name}</span>
+                            <Tooltip content={e.name} overflowOnly>
+                              <span>{e.name}</span>
+                            </Tooltip>
                             {navigation.plan === e.id &&
                               view === "tickets" &&
                               activePlanCount !== undefined && (

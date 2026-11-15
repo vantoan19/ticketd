@@ -6,7 +6,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { Project } from "@/lib/api/client";
@@ -621,27 +620,25 @@ test("closing an empty recovered submission preserves its request identity", asy
   ).toBeTruthy();
 });
 
-test("tags are chips that can be added and removed", () => {
+test("a new tag is created from the typed words, lower case, and toggled off again", () => {
   render(<Harness create={vi.fn()} />);
-  const input = screen.getByRole("textbox", { name: "Add tag" });
-  fireEvent.change(input, { target: { value: "Bug" } });
-  fireEvent.keyDown(input, { key: "Enter" });
-  expect(screen.getByText("bug")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove bug" }));
-  expect(screen.queryByText("bug")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Tags: none" }));
+  fireEvent.change(screen.getByLabelText("Search tags"), {
+    target: { value: "Bug" },
+  });
+  fireEvent.click(screen.getByRole("option", { name: "Create “Bug”" }));
+  expect(screen.getByRole("button", { name: "Tags: bug" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("option", { name: "bug" }));
+  expect(screen.getByRole("button", { name: "Tags: none" })).toBeTruthy();
 });
 
-test("suggested tags are options in the field's dropdown, not chips beside it", async () => {
+test("existing tags are offered in the list and stay there with a check", async () => {
   answers.tags = ["alpha", "beta"];
   render(<Harness create={vi.fn()} />);
-  const input = screen.getByRole("textbox", { name: "Add tag" });
-  expect(screen.queryByRole("listbox")).toBeNull();
-  fireEvent.focus(input);
-  const list = await screen.findByRole("listbox", {
-    name: "Add tag suggestions",
-  });
-  fireEvent.click(within(list).getByRole("option", { name: "alpha" }));
-  expect(screen.getByRole("button", { name: "Remove alpha" })).toBeTruthy();
-  expect(screen.queryByRole("option", { name: "alpha" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Tags: none" }));
+  fireEvent.click(await screen.findByRole("option", { name: "alpha" }));
+  expect(screen.getByRole("button", { name: "Tags: alpha" })).toBeTruthy();
+  expect(
+    screen.getByRole("option", { name: "alpha" }).getAttribute("aria-checked"),
+  ).toBe("true");
 });

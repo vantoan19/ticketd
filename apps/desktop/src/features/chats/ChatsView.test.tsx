@@ -625,7 +625,12 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Folder reset-email, missing").textContent).toBe("reset-email");
   // The path reads like the folder popover's: one line, not a code block.
   const notice = screen.getByRole("alert");
-  expect(within(notice).getByTitle("~/ticketd/chats/reset-email")).toBeTruthy();
+  const path = notice.querySelector<HTMLElement>(".path-text")!;
+  fireEvent.pointerMove(path);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    "~/ticketd/chats/reset-email",
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
   expect(notice.querySelector("code")).toBeNull();
   expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
   client.nextFolder = "~/code/emails";
@@ -1433,10 +1438,12 @@ test("records are linked by title and unlinked from their chip", async () => {
   expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull();
   await linkFromMenu();
   fireEvent.change(
-    await screen.findByLabelText("Search tickets, Documents and Projects"),
+    await screen.findByLabelText(
+      "Search tickets, Documents and Projects by title or reference",
+    ),
     { target: { value: "wait" } },
   );
-  fireEvent.click(await screen.findByRole("button", { name: /T-14/ }));
+  fireEvent.click(await screen.findByRole("option", { name: /T-14/ }));
   const links = within(
     await screen.findByRole("group", { name: "Linked records" }),
   );
@@ -1776,10 +1783,12 @@ test("a Project is linked like a ticket or Document and has no page to open", as
   await open(one({ id: "c1", title: "Limiter" }));
   await linkFromMenu();
   fireEvent.change(
-    await screen.findByLabelText("Search tickets, Documents and Projects"),
+    await screen.findByLabelText(
+      "Search tickets, Documents and Projects by title or reference",
+    ),
     { target: { value: "store" } },
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Storefront/ }));
   const links = within(
     await screen.findByRole("group", { name: "Linked records" }),
   );
@@ -1845,11 +1854,13 @@ test("an incompatible harness notice keeps the full stop with the path", async (
 test("the link picker lists recent records before a name is typed", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   await linkFromMenu();
-  const recent = await screen.findByRole("list", { name: "Recent" });
+  const recent = await screen.findByRole("group", { name: "Recent" });
   expect(
-    within(recent).getByRole("button", { name: "Storefront" }),
+    within(recent).getByRole("option", { name: /Storefront/ }),
   ).toBeTruthy();
-  expect(screen.queryByText("Type part of a name to find it.")).toBeNull();
+  expect(
+    screen.queryByText("Type part of a name or a reference to find it."),
+  ).toBeNull();
 });
 
 test("New Chat picks harness, model and effort in one composer picker and starts with them", async () => {
@@ -2065,8 +2076,8 @@ test("linking a Project with a folder in New Chat starts the Chat there", async 
   expect(button("Folder: Scratch folder")).toBeTruthy();
   fireEvent.click(button("Link a ticket, Document or Project"));
   // Recent records show before anything is typed.
-  expect(await screen.findByRole("list", { name: "Recent" })).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  expect(await screen.findByRole("group", { name: "Recent" })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("option", { name: /Storefront/ }));
   expect(
     await screen.findByRole("button", { name: "Folder: /work/storefront" }),
   ).toBeTruthy();
@@ -2225,7 +2236,7 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
   expect(button(picker)).toBeTruthy();
 
   openMenu("Permissions: Accept edits");
-  expect(await screen.findByText("This Chat only")).toBeTruthy();
+  expect(await screen.findByText(/^This Chat only\./)).toBeTruthy();
   expect(
     screen.queryByRole("menuitemradio", { name: /Full access/ }),
   ).toBeNull();
@@ -2340,7 +2351,7 @@ test("CH-12: Expand keeps New Chat's links and harness check, and the list stays
   client.projectFolders.set("p1", "/work/storefront");
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   fireEvent.click(button("Link a ticket, Document or Project"));
-  fireEvent.click(await screen.findByRole("button", { name: "Storefront" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Storefront/ }));
   const linked = () =>
     screen.queryByRole("button", {
       name: "Remove the link to the Project Storefront",

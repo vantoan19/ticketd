@@ -137,26 +137,6 @@
   margin: 0;
 }
 
-/* The form that asks for the canonical ticket, or the endpoint to replace. */
-.duplicate-pick {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.duplicate-pick-results {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.duplicate-pick-result {
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-}
 /* Only the review list scrolls; the stale notice, error, and footer stay in view. */
 .duplicate-scroll {
   display: grid;

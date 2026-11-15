@@ -14,6 +14,13 @@ import { documents } from "./api";
 import { TickingChanges } from "@/test/ticking-changes";
 import { syncReview } from "@/lib/sync-review-api";
 
+window.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+// The Document picker's list (cmdk) scrolls the highlighted row into view.
+Element.prototype.scrollIntoView ??= () => {};
 vi.mock("@/lib/sync-review-api", () => ({
   syncReview: {
     conflicts: vi.fn(async () => []),
@@ -74,7 +81,7 @@ it("disables Done with a stated reason until a thought is written", async () => 
   const done = screen.getByRole("button", { name: "Done" });
   expect((done as HTMLButtonElement).disabled).toBe(true);
   expect(done.getAttribute("aria-describedby")).toBeTruthy();
-  expect(screen.getByText("Write a thought to finish")).toBeTruthy();
+  expect(screen.getByText("Write a thought to finish.")).toBeTruthy();
   fireEvent.click(done);
   expect(close).not.toHaveBeenCalled();
   expect(documents.save).not.toHaveBeenCalled();
@@ -120,7 +127,7 @@ it("keeps a failed capture open and retries the same request before returning", 
     target: { value: "A thought" },
   });
   fireEvent.click(screen.getByText("Done"));
-  await screen.findByText("Couldn't save the Document");
+  await screen.findByText(/Couldn't save the Document/);
   expect(close).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Retry"));
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
@@ -149,8 +156,8 @@ it("after a failed capture save, closing explains the risk and can discard", asy
     ),
   ).toBeTruthy();
   expect(close).not.toHaveBeenCalled();
-  // Without draft recovery the draft would be lost, so × asks instead of hanging.
-  fireEvent.click(screen.getByRole("button", { name: "Close and return" }));
+  // Without draft recovery the draft would be lost, so Cancel asks instead of hanging.
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Discard and close" }),
   );
@@ -266,7 +273,7 @@ it("inserts a link to a Document chosen by title into the draft", async () => {
   );
   fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
   fireEvent.click(screen.getByRole("button", { name: "Link a Document" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Release plan" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Release plan/ }));
   await waitFor(() =>
     expect(
       (screen.getByLabelText("Your thought") as HTMLTextAreaElement).value,

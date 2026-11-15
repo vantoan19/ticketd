@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   attachments,
   type AttachmentCleanupReview,
@@ -146,29 +140,28 @@ export function AttachmentCleanup({
     );
   }
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
-    >
-      <DialogContent
-        className="sm:max-w-170 max-h-dvh overflow-y-auto"
-        showCloseButton={!busy}
-      >
-        <DialogHeader>
-          <DialogTitle>Review unused attachments</DialogTitle>
-          <DialogDescription>
-            Choose files to move out of your active workspace. Eligibility is
-            checked again before cleanup.
-          </DialogDescription>
-        </DialogHeader>
-        <p className="attachment-hint">
-          Local files move to reversible quarantine. They remain in complete
-          backups and continue to occupy disk space until explicitly purged.
-          Remote files are never deleted.
-        </p>
-        {error && (
+      size="lg"
+      title="Review unused attachments"
+      description="Choose files to move out of your active workspace. Eligibility is checked again before cleanup."
+      primaryLabel="Move to quarantine"
+      blockedReason={
+        busy
+          ? "Moving files…"
+          : loading
+            ? "Reviewing files…"
+            : selected.length
+              ? null
+              : "Choose files to move."
+      }
+      footerNote={`${selected.length} selected.`}
+      busy={busy}
+      error={
+        error && (
           <FailureAlert
             size="compact"
             failure={error}
@@ -180,69 +173,65 @@ export function AttachmentCleanup({
               } else void quarantine();
             }}
           />
-        )}
-        {loading ? (
-          <p role="status">Reviewing files…</p>
-        ) : (
-          <>
-            <p className="attachment-hint">
-              {rows.filter((row) => row.eligible).length} eligible on this page
-              · {rows.filter((row) => !row.eligible).length} protected or
-              unavailable
-            </p>
-            <ul
-              className="attachment-cleanup-files"
-              aria-label="Eligible local files"
-            >
-              {rows.filter((row) => row.eligible).map(fileRow)}
-            </ul>
-            {!rows.some((row) => row.eligible) && (
-              <p>No eligible files on this page.</p>
-            )}
-            {rows.some((row) => !row.eligible) && (
-              <details className="attachment-cleanup-protected">
-                <summary>
-                  Protected or unavailable (
-                  {rows.filter((row) => !row.eligible).length})
-                </summary>
-                <ul
-                  className="attachment-cleanup-files"
-                  aria-label="Protected or unavailable files"
-                >
-                  {rows.filter((row) => !row.eligible).map(fileRow)}
-                </ul>
-              </details>
-            )}
-            <div className="attachment-actions">
-              <Button
-                variant="ghost"
-                disabled={busy || offset === 0}
-                onClick={() => page(Math.max(0, offset - 50))}
-              >
-                Previous files
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={busy || rows.length < 50}
-                onClick={() => page(offset + 50)}
-              >
-                Next files
-              </Button>
-            </div>
-          </>
-        )}
-        <div className="attachment-actions attachment-cleanup-footer">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            disabled={busy || loading || !selected.length}
-            onClick={() => void quarantine()}
+        )
+      }
+      onSubmit={() => void quarantine()}
+    >
+      <p className="attachment-hint">
+        Local files move to reversible quarantine. They remain in complete
+        backups and continue to occupy disk space until explicitly purged.
+        Remote files are never deleted.
+      </p>
+      {loading ? (
+        <p role="status">Reviewing files…</p>
+      ) : (
+        <>
+          <p className="attachment-hint">
+            {rows.filter((row) => row.eligible).length} eligible on this page ·{" "}
+            {rows.filter((row) => !row.eligible).length} protected or
+            unavailable
+          </p>
+          <ul
+            className="attachment-cleanup-files"
+            aria-label="Eligible local files"
           >
-            {busy ? "Moving files…" : "Move to quarantine"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+            {rows.filter((row) => row.eligible).map(fileRow)}
+          </ul>
+          {!rows.some((row) => row.eligible) && (
+            <p>No eligible files on this page.</p>
+          )}
+          {rows.some((row) => !row.eligible) && (
+            <details className="attachment-cleanup-protected">
+              <summary>
+                Protected or unavailable (
+                {rows.filter((row) => !row.eligible).length})
+              </summary>
+              <ul
+                className="attachment-cleanup-files"
+                aria-label="Protected or unavailable files"
+              >
+                {rows.filter((row) => !row.eligible).map(fileRow)}
+              </ul>
+            </details>
+          )}
+          <div className="attachment-actions">
+            <Button
+              variant="ghost"
+              disabled={busy || offset === 0}
+              onClick={() => page(Math.max(0, offset - 50))}
+            >
+              Previous files
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy || rows.length < 50}
+              onClick={() => page(offset + 50)}
+            >
+              Next files
+            </Button>
+          </div>
+        </>
+      )}
+    </DialogShell>
   );
 }

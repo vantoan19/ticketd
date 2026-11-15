@@ -224,7 +224,15 @@ test.each([
     const alert = await within(dialog).findByRole("alert");
     expect(alert.textContent).toMatch(expected);
     expect(alert.textContent).toContain("Your workspace hasn't changed.");
-    expect(replaceButton(dialog).disabled).toBe(true);
+    // No dead destructive button: the way forward is another file (set BK-06).
+    expect(
+      within(dialog).queryByRole("button", {
+        name: "Replace workspace with backup",
+      }),
+    ).toBeNull();
+    expect(
+      within(dialog).getByRole("button", { name: "Choose another…" }),
+    ).toBeTruthy();
     expect(client.restoreWorkspace).not.toHaveBeenCalled();
   },
 );
@@ -374,5 +382,9 @@ test("an unreadable file is an error with the unchanged reassurance and no way t
   const alert = await within(dialog).findByRole("alert");
   expect(alert.textContent).toContain("Couldn't read this backup");
   expect(alert.textContent).toContain("Your workspace hasn't changed.");
-  expect(replaceButton(dialog).disabled).toBe(true);
+  expect(
+    within(dialog).queryByRole("button", {
+      name: "Replace workspace with backup",
+    }),
+  ).toBeNull();
 });

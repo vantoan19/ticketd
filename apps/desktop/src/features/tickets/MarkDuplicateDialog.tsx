@@ -1,25 +1,14 @@
-import { EmptyState } from "@/components/ui/empty-state";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { Duplicates } from "@/features/tickets/Duplicates";
-import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Ticket } from "@/lib/api/client";
-import { useTicketSearch } from "./useTicketSearch";
-import { Reference } from "@/components/ui/reference";
+import { TicketPicker } from "./TicketPicker";
 
 /**
  * The Duplicate group's Add action. A ticket becomes a Duplicate only through
  * the review that names its canonical ticket, so this chooses the ticket and
- * then hands over to that same review.
+ * then hands over to that same review, at the same size (md), so the dialog
+ * never jumps between steps.
  */
 export function MarkDuplicateDialog({
   open,
@@ -33,28 +22,19 @@ export function MarkDuplicateDialog({
   onMarked?: (reference: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<Ticket | null>(null);
   const [chosen, setChosen] = useState<Ticket | null>(null);
 
-  const search = useTicketSearch(
-    query,
-    open,
-    (item) => !item.trashed && item.status !== "Duplicate",
-  );
-  const { results, error } = search;
-
   // Escape closes the dialog and keeps the typed search and chosen ticket for
-  // when it reopens; a finished review discards them.
+  // when it reopens; a finished review or Cancel discards them.
   function discard() {
     setQuery("");
-    search.reset();
+    setPicked(null);
     setChosen(null);
-  }
-  function change(next: boolean) {
-    onOpenChange(next);
   }
   const finish = () => {
     discard();
-    change(false);
+    onOpenChange(false);
   };
   if (chosen && open)
     return (
@@ -63,7 +43,7 @@ export function MarkDuplicateDialog({
         refresh={refresh}
         open={open}
         // Escape keeps the typed search and chosen ticket for when it reopens.
-        onOpenChange={change}
+        onOpenChange={onOpenChange}
         title={`Mark ${chosen.reference} as a duplicate`}
         description={`${chosen.reference} keeps its description and history and becomes Duplicate. Review what points at it.`}
         onDone={() => {
@@ -74,65 +54,25 @@ export function MarkDuplicateDialog({
       />
     );
   return (
-    <Dialog open={open} onOpenChange={change}>
-      <DialogContent className="duplicate-dialog">
-        <DialogHeader>
-          <DialogTitle>Mark a ticket as duplicate</DialogTitle>
-          <DialogDescription>
-            Choose the ticket that duplicates another one. You choose the
-            canonical ticket next.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="duplicate-pick">
-          <Field>
-            <FieldLabel htmlFor="duplicate-pick-query">
-              Ticket to mark
-            </FieldLabel>
-            <Input
-              id="duplicate-pick-query"
-              value={query}
-              autoComplete="off"
-              placeholder="Reference or words from the title"
-              aria-invalid={error ? true : undefined}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            {error && <FieldError>{error}</FieldError>}
-          </Field>
-          {query.trim() && results.length === 0 && !error && (
-            <EmptyState
-              size="inline"
-              role="status"
-              description="No tickets to mark match that search."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setQuery("")}
-                >
-                  Clear search
-                </Button>
-              }
-            />
-          )}
-          {results.length > 0 && (
-            <ul className="duplicate-pick-results" aria-label="Matches">
-              {results.map((item) => (
-                <li key={item.reference}>
-                  <Button
-                    variant="ghost"
-                    className="duplicate-pick-result"
-                    onClick={() => setChosen(item)}
-                  >
-                    <StatusIcon status={item.status} size={14} decorative />
-                    <Reference>{item.reference}</Reference>
-                    <span className="truncate">{item.title}</span>
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <DialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Mark a ticket as duplicate"
+      description="Choose the ticket that duplicates another one. You choose the canonical ticket next."
+      primaryLabel="Continue"
+      blockedReason={picked ? null : "Choose the ticket to mark."}
+      footerNote={picked && `${picked.reference} ${picked.title}`}
+      onSubmit={() => setChosen(picked)}
+      onCancel={discard}
+    >
+      <TicketPicker
+        label="Ticket to mark"
+        query={query}
+        onQueryChange={setQuery}
+        accept={(item) => !item.trashed && item.status !== "Duplicate"}
+        selected={picked ? [picked.reference] : []}
+        onPick={setPicked}
+      />
+    </DialogShell>
   );
 }

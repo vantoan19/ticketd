@@ -96,6 +96,7 @@ import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -284,35 +285,36 @@ function Element(props: PlateElementProps) {
       {element.type === "a" &&
         String(element.url).startsWith("ticketd://attachment/") && (
           <span contentEditable={false}>
-            <button
-              type="button"
-              className="attachment-inline-preview"
-              aria-label={`Preview attachment: ${NodeApi.string(element)}`}
-              title="Preview attachment"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                const before = writeMarkdown(editor.children);
-                setPreview({
-                  uri: String(element.url),
-                  replace:
-                    readOnly || !path
-                      ? undefined
-                      : async (file, _requestId, signal) => {
-                          const uri = await attachments.uri(file.id);
-                          signal.throwIfAborted();
-                          await protectAttachment(uri);
-                          signal.throwIfAborted();
-                          if (writeMarkdown(editor.children) !== before)
-                            throw new Error(
-                              "The content changed while choosing a replacement. Close the preview and select the reference again.",
-                            );
-                          editor.tf.setNodes({ url: uri }, { at: path });
-                        },
-                });
-              }}
-            >
-              <Eye aria-hidden="true" />
-            </button>
+            <Tooltip content="Preview attachment">
+              <button
+                type="button"
+                className="attachment-inline-preview"
+                aria-label={`Preview attachment: ${NodeApi.string(element)}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  const before = writeMarkdown(editor.children);
+                  setPreview({
+                    uri: String(element.url),
+                    replace:
+                      readOnly || !path
+                        ? undefined
+                        : async (file, _requestId, signal) => {
+                            const uri = await attachments.uri(file.id);
+                            signal.throwIfAborted();
+                            await protectAttachment(uri);
+                            signal.throwIfAborted();
+                            if (writeMarkdown(editor.children) !== before)
+                              throw new Error(
+                                "The content changed while choosing a replacement. Close the preview and select the reference again.",
+                              );
+                            editor.tf.setNodes({ url: uri }, { at: path });
+                          },
+                  });
+                }}
+              >
+                <Eye aria-hidden="true" />
+              </button>
+            </Tooltip>
             {preview && (
               <AttachmentPreview
                 target={{ uri: preview.uri }}

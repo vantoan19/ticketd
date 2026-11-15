@@ -235,42 +235,6 @@
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
-.plan-add-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-foreground);
-}
-.plan-add-results {
-  display: flex;
-  flex-direction: column;
-  max-height: 320px;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-.plan-add-results li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 4px 0;
-}
-.plan-add-title {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.plan-add-title small {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .plan-documents {
   position: relative;
   display: flex;
@@ -419,12 +383,6 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.plan-add-done {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
-}
 
 /* A Document row reads title (left, truncating) then its actions on one line. */
 :is(.plan-documents, .plan-documents-popover)
@@ -467,29 +425,6 @@
   display: none;
 }
 
-/* The Plan actions menu is 237px wide, rows 30px (board E). */
-.plan-actions-menu {
-  box-sizing: border-box;
-  width: 235.5px;
-  padding: 6px;
-  font-size: var(--text-code);
-}
-/* Frame E: 30px rows with 8px inset, 14px icons, and a hairline that runs edge to edge. */
-.plan-actions-menu [data-slot="dropdown-menu-item"] {
-  height: 30px;
-  min-height: 30px;
-  padding: 0 8px;
-  font-size: var(--text-code);
-  line-height: 20px;
-}
-.plan-actions-menu [data-slot="dropdown-menu-item"] svg:not([class*="size-"]) {
-  width: 14px;
-  height: 14px;
-}
-.plan-actions-menu [data-slot="dropdown-menu-separator"] {
-  height: 1px;
-  margin: 6px -6px;
-}
 .plan-actions [aria-expanded="true"] {
   background: var(--accent);
 }

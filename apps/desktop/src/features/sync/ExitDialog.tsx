@@ -110,9 +110,9 @@ export function ExitDialog() {
       primaryVariant="destructive"
       cancelLabel="Keep open"
       showClose={false}
-      focusPrimary
+      initialFocus="primary"
       blockedReason={null}
-      width={480}
+      size="sm"
       onSubmit={() => void windowClient.quit()}
     >
       {exit.phase === "finishing" && (

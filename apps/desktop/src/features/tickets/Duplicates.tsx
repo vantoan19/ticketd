@@ -332,7 +332,7 @@ export function Duplicates({
             : "Mark duplicate"
       }
       blockedReason={blockedReason}
-      width={713}
+      size="md"
       footerNote="Nothing changes until you apply."
       onSubmit={() => void apply()}
       onCancel={() => {
@@ -554,7 +554,7 @@ export function Duplicates({
                     event.preventDefault();
                     if (target && !pending) void loadPreview();
                   }}
-                  placeholder="Search by title or reference"
+                  placeholder="Search tickets by title or reference"
                   autoComplete="off"
                   aria-label={
                     separate

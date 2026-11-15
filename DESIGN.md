@@ -172,8 +172,8 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 
 | Element                                | Value  | Application                                           |
 | -------------------------------------- | ------ | ----------------------------------------------------- |
-| Small control                          | 32px   | Header actions, property pickers, compact menus       |
-| Default control                        | 40px   | Search, form inputs, primary form actions             |
+| Small control                          | 32px   | Every button, dialog primaries included; pickers      |
+| Default control                        | 40px   | Search and form inputs                                |
 | Large control                          | 48px   | Deliberately prominent actions / coarse-pointer forms |
 | Default radius `--radius`              | 6px    | Inputs, buttons, small controls                       |
 | Segment radius `--radius-segment`      | 4px    | Segments, keys and other small inner shapes           |
@@ -191,6 +191,14 @@ Stylesheets hold no literal radii or raw colors; they map to tokens as follows. 
 Pane widths and row columns are ticketd geometry, defined below. The application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/content-panel shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
 
 Lucide icons remain 16px inside ordinary controls, with consistent stroke weight. Icon-only actions have accessible names and hover/focus tooltips. A 16px icon sits inside a 32px or larger hit area.
+
+### Tooltip
+
+One tooltip in both themes, a small dark chip: `--tooltip` (`#171717` light, `#2E2E2E` dark) with `--tooltip-foreground`, 12/16 text, 4px 8px padding, `--radius`, at most 240px wide and wrapping, no arrow, and `--shadow-tooltip`, whose dark ring is the 14% `--shadow-border-base`. This replaces the reference's elevated white chip.
+
+- **Timing:** one provider for the app, 400ms before the first label and 300ms in which the next opens at once. A tooltip opens on hover and on keyboard focus only, never on focus that a closing menu or dialog returns to its opener, and closes when a menu, select or dialog opens over its trigger. With nothing to say it is not mounted, so it can never catch Escape.
+- **Placement:** 6px from the trigger with 8px collision padding; below header and toolbar triggers, right of sidebar and rail triggers, above inline items. It never covers the row or line the pointer is on.
+- **Content:** the label of an icon-only control, with its shortcut after it as inverted Kbd chips ("New ticket C"); the exact time on a focusable `<time>`; the full text of a truncated name, only while it is cut. A tooltip is never the only place an explanation lives, and a full path is shown in one but never used as a button's label. Native `title` attributes are banned on DOM elements by lint.
 
 ### Boundaries, shadows, and focus
 
@@ -486,8 +494,8 @@ Build from the bottom up. A piece may use anything from a lower level, never fro
 | ------------------------ | -------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0 · Tokens               | Named decisions; the only place raw values live                | `apps/desktop/src/styles.css`    | `surface`, `muted-foreground`, `radius-panel`, `shadow-menu`, `text-ui`                                                                                                          |
 | 1 · Base components      | One job each, no ticketd words, tokens only                    | `apps/desktop/src/components/ui` | Button, IconButton, Input, Select, Switch, SegmentedControl, StatusDot, StatusLabel, ChoiceTiles, CommandBlock, Steps, Badge, Reference, Count, Progress, Kbd, Tooltip, Skeleton |
-| 2 · Composite components | Content-agnostic compositions with slots                       | `apps/desktop/src/components/ui` | Field, Picker, TokenField, Menu, Popover, Dialog, Sheet, Command, ListHeader, EmptyState, Alert, SectionHeader, Card, Item, Timeline, EventRow, Sidebar                          |
-| 3 · Product components   | ticketd recipes that know tickets, statuses, sources and Plans | `apps/desktop/src/features`      | StatusIcon, TicketRow, property rail, Activity, source card, Filters and Display, bulk bar                                                                                       |
+| 2 · Composite components | Content-agnostic compositions with slots                       | `apps/desktop/src/components/ui` | Field, Picker, ChoiceList, TagPicker, Menu, Popover, Dialog, DialogShell, Sheet, Command, ListHeader, EmptyState, Alert, SectionHeader, Card, Item, Timeline, EventRow, Sidebar  |
+| 3 · Product components   | ticketd recipes that know tickets, statuses, sources and Plans | `apps/desktop/src/features`      | StatusIcon, TicketRow, TicketPicker, RecordPicker, property rail, Activity, source card, Filters and Display, bulk bar                                                           |
 | 4 · Layouts              | Page structures that place components                          | `apps/desktop/src`               | App shell, split view, ticket page, management page, Settings                                                                                                                    |
 | 5 · Screens              | Real screens with real content                                 | `apps/desktop/src`               | All tickets, a ticket, Inbox, a Plan                                                                                                                                             |
 
@@ -507,6 +515,10 @@ What the shared pieces do and which variants exist; each has a JSDoc summary in 
 - **Timeline** joins comments, updates and recorded changes with one 2px line, in Activity and the source conversation alike. A **CommentRow** is a comment or update with no card: a 28px badge on the line, a caption header with actions at the end, and the body beneath. An **EventRow** is one recorded change, a 28px badge with the change’s icon, the sentence and caption-size meta. A status change shows its new status icon, so Canceled and Duplicate never look completed.
 - **Alert** is the one inline notice: a short title (`level` makes it a heading where the notice replaced one), one sentence and real buttons. Tones are `neutral`, `attention` (a status dot in the title) and `error`; size `compact` is the single-row form for transient confirmations such as “In Trash”. It defaults to `role="alert"`; pass `status` for a calm update.
 - **EmptyState** comes in `block` (an empty view: icon, title, one sentence and the action that fills it), `inline` (a row inside a card or section, the action at its end) and `hint` (a quiet pane with one line and an optional footnote; it carries no icon, description or action).
+- **Tooltip** labels the control it wraps (section 4): `content`, an optional `shortcut` drawn as inverted **Kbd** chips, a `side` that defaults to the region's (**TooltipSide**: right in the sidebar), and `overflowOnly` for a truncated name. **IconButton** names its button and shows the same label.
+- **DialogShell** is the one dialog (below). **DialogContent** is used directly only for the `viewer` size of the attachment and diagram previews.
+- **ChoiceList** is the one searchable list, for a popover (`PopoverContent variant="list"`) or a dialog body. **Picker** is its closed, single-choice Select form; its options take an icon and a `clear` flag. **TagPicker** is a field of tag badges that opens a multi-choice ChoiceList offering "Create “x”". **TicketPicker** and **RecordPicker** (level 3) are ChoiceLists over a search: tickets, or tickets, Documents and Projects in groups.
+- **OverlayBoundary** marks the region overlays opened inside it stay within: the content panel, or a pane body for a picker inside a pane. Dialogs reset it.
 
 ### Tokens
 
@@ -533,8 +545,8 @@ Primitive values, such as hex colors and pixel sizes, belong only in the token b
 `apps/desktop/eslint-suppressions.json` holds the findings that remain; each group below says why it stays. Fix them by the route given, and prune the entry in the same change.
 
 - **Feature class on a shared component** (the `no-restyle` entries in `src/features` and `WorkspaceSidebar.tsx`, such as `board-card`, `filters-content`, `linked-work-title`, `plan-actions-menu`). The feature stylesheet gives the component its own height, padding, font size, background or width, and many of the components render in a portal, so no parent element exists to carry the class. Each needs a variant or size on the shared component that the design names; moving the class to a wrapper would only hide the restyle. Do them one component at a time, with the screen open in both themes.
-- **Overrides inside `components/ui`** (`dialog-shell`, `command`, `empty-state`, `field`, `picker`, `resizable`, `sidebar`). The composite passes spacing, type or color classes to the primitive it wraps (`DialogContent p-0 gap-0`, `DialogTitle text-2xl`, `Label font-normal`). Each becomes a variant on the primitive (`dialog`, `label`, `separator`, `sheet`, `input`).
-- **Arbitrary values with no scale equivalent** (`dialog.tsx`, `sidebar.tsx`, `switch.tsx`, `tooltip.tsx`, `dialog-shell.tsx`, `empty-state.tsx`, `DocumentEditor.tsx`): `calc()` widths and offsets, `transition-[...]` property lists, `0_0_0_1px` ring shadows, `tracking-[-0.6px]`, `stroke-[1.75]`. They need a new token or utility, which the design has not decided.
+- **Overrides inside `components/ui`** (`command`, `empty-state`, `field`, `picker`, `resizable`, `sidebar`). The composite passes spacing, type or color classes to the primitive it wraps (`Label font-normal`, `CommandItem` padding). Each becomes a variant on the primitive (`dialog`, `label`, `separator`, `sheet`, `input`).
+- **Arbitrary values with no scale equivalent** (`sidebar.tsx`, `switch.tsx`, `empty-state.tsx`): `calc()` widths and offsets, `transition-[...]` property lists, `0_0_0_1px` ring shadows, `tracking-[-0.6px]`, `stroke-[1.75]`. They need a new token or utility, which the design has not decided.
 - **Toggled state color** (`Activity.tsx` `bg-accent` on a ghost Button): needs a pressed treatment for ghost buttons, which would change every ghost trigger that opens a menu.
 
 ### Control and state recipes
@@ -558,6 +570,27 @@ Primary buttons use the inverted neutral pair. Destructive buttons sit on `--err
 Fields have persistent labels; placeholders are examples, not labels. Forms use aligned full-width inputs, shared field spacing, and a trailing action row. Put the destructive action away from ordinary submit controls. Do not place an unstyled native select beside a themed button and consider the form finished.
 
 Menus are for short action choices. Popovers are for small, focused edits. Dialogs are for multi-field forms, consequential confirmation, and dependency review. Every dialog/sheet has a title, a close path, correct focus containment, and focus return. Escape closes only the foremost surface and must not silently discard a draft. One action must not open a stack of overlapping editors.
+
+### Menus, selects and choice lists
+
+- **Placement:** below the trigger, flipping above only on collision, 4px away with 16px clearance, at least as wide as the trigger, inside the nearest OverlayBoundary so nothing escapes over the sidebar or covers its own pane's header. A select list never opens over its own trigger.
+- **Surface:** `--popover`, `--radius-panel`, 4px padding, `--shadow-menu` (`--shadow-large` for a popover holding a form). Menus are 220–280px wide by content, pickers 280–320px; lists stop at 320px and scroll inside.
+- **Rows:** 32px (36px in ticket and record pickers): a 16px icon, the label, muted meta or a Kbd, and a trailing check for the current value. Every row of a list has an icon, or none does. The highlight is `--accent` for pointer and keyboard alike; section labels are 12/16 muted; separators are hairlines.
+- **Values:** a single choice opens with its current value highlighted and checked, so Enter never clears it; the clearing choice ("No project") comes last after a separator. A multi choice (tags) stays open and toggles checks.
+- **Disabled and destructive:** a disabled row keeps a readable `--disabled-foreground` label and says why on a 12/16 line under it, with no opacity. Destructive rows go last after a separator.
+- **Rules:** a menu holds choices or actions; a popover holds a small form or a list and has a title when its trigger is icon-only; no popover is a column of buttons. Never a one-item menu: make that action a direct button. "…" only gathers several unrelated actions.
+- **Search and empty:** an optional 32px search row at the top, a quiet "No matches" row, and "Create “x”" as the last row where creating is allowed. Pickers say "Search {things} by title or reference".
+- **Pickers:** TicketPicker looks an exact reference up first, waits 150ms after typing, and shows a fixed list of six 36px rows (StatusIcon, reference, title, a caption such as "Linked") with "No tickets match “x”"; its multi-pick form checks rows and its dialog puts the count in the note slot. RecordPicker groups tickets, Documents and Projects as "Linked to this …", "Recent" and results for `#` mentions, Link popovers, Plan context and the editor's Link.
+
+### Dialogs
+
+- **One component:** DialogShell, in three sizes: `sm` 480 for a confirm, `md` 640 for a form or picker, `lg` 920 for review and compare. A multi-step flow keeps one size. The attachment and diagram previews use the `viewer` size, min(1120px, 100vw − 64) by min(800px, 100vh − 64), with only a close button.
+- **Position:** anchored at max(48px, 12vh) and growing downward; the body scrolls inside while the header and footer stay put. A dialog never re-centres while someone types, searches or chooses.
+- **Header:** a 24/32 title naming the action and its target, an optional one-sentence description, and the 32px close button on the title line, with 24px padding. A confirm's title is a question ("Change T-FV10 to In progress?").
+- **Body:** a 24px inset; labels above 40px fields; pickers stacked; notices as Alerts.
+- **Footer:** a 60px band on `--recessed` under a hairline. At the left, one persistent control (the Create more switch). At the right, the note slot (12/16 muted: the blocked reason such as "Add a title to create.", a count, or a transient result such as "Created T-FV16 · Open"), a ghost Cancel, and one 32px primary, default or destructive, with its key hint. The primary repeats the verb and keeps a constant label; counts go in the note slot. Never a close button plus "Done".
+- **Failure:** the dialog stays open and a compact error Alert appears above the footer.
+- **Focus and stacking:** focus starts in the first field, or on Cancel for a destructive confirm, and returns to the opener. Never open a dialog from a dialog: replace its content instead.
 
 ## 12. Feedback, motion, and accessibility
 

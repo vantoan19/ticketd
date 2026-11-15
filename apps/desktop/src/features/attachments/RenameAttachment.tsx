@@ -1,15 +1,8 @@
 import { useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { FailureAlert } from "@/components/ui/failure-alert";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { FailureAlert } from "@/components/ui/failure-alert";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import {
   describeFailure,
@@ -49,51 +42,43 @@ export function RenameAttachment({
     }
   }
   return (
-    <Dialog
+    <DialogShell
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rename attachment</DialogTitle>
-          <DialogDescription>
-            The name ticketd shows for this file.
-          </DialogDescription>
-        </DialogHeader>
-        <Label htmlFor="attachment-display-name">Display name</Label>
-        <Input
-          id="attachment-display-name"
-          value={name}
-          disabled={busy}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && name.trim() && !busy) void save();
-          }}
-        />
-        <p className="attachment-hint">
-          Original filename: {file.original_filename}
-        </p>
-        <p className="attachment-hint">
-          Links keep their text; only the name shown in ticketd changes.
-        </p>
-        {error && (
+      size="sm"
+      title="Rename attachment"
+      description="The name ticketd shows for this file."
+      primaryLabel="Save name"
+      blockedReason={
+        busy ? "Saving…" : name.trim() ? null : "Enter a display name."
+      }
+      busy={busy}
+      error={
+        error && (
           <FailureAlert
             size="compact"
             failure={error}
             onRetry={() => void save()}
           />
-        )}
-        <div className="attachment-actions">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button disabled={busy || !name.trim()} onClick={() => void save()}>
-            Save name
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        )
+      }
+      onSubmit={() => void save()}
+    >
+      <Label htmlFor="attachment-display-name">Display name</Label>
+      <Input
+        id="attachment-display-name"
+        value={name}
+        disabled={busy}
+        onChange={(event) => setName(event.target.value)}
+      />
+      <p className="attachment-hint">
+        Original filename: {file.original_filename}
+      </p>
+      <p className="attachment-hint">
+        Links keep their text; only the name shown in ticketd changes.
+      </p>
+    </DialogShell>
   );
 }

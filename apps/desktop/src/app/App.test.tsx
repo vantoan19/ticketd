@@ -375,7 +375,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
-  await openManageMenu("Manage projects", "All projects");
+  fireEvent.click(screen.getByRole("button", { name: "All projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
     target: { value: "Draft" },
@@ -562,6 +562,7 @@ test("choosing New ticket closes the New ticket tooltip", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   const trigger = screen.getByRole("button", { name: "New ticket" });
+  fireEvent.keyDown(document.body, { key: "Tab" });
   trigger.focus();
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1342,9 +1343,10 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "Remove tag" });
   expect(within(dialog).queryByRole("button", { name: "Add tag" })).toBeNull();
-  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+  fireEvent.change(within(dialog).getByLabelText("Search tags"), {
     target: { value: "old" },
   });
+  fireEvent.click(within(dialog).getByRole("option", { name: "old" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
@@ -1367,9 +1369,10 @@ test("Organize has a separate Add tag action", async () => {
   expect(
     within(dialog).queryByRole("button", { name: "Remove tag" }),
   ).toBeNull();
-  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+  fireEvent.change(within(dialog).getByLabelText("Search tags"), {
     target: { value: "new" },
   });
+  fireEvent.click(within(dialog).getByRole("option", { name: "Create “new”" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Add tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ add_tags: ["new"] }]);
@@ -1431,7 +1434,7 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  await openManageMenu("Manage projects", "All projects");
+  fireEvent.click(screen.getByRole("button", { name: "All projects" }));
   unread = 3;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -1504,8 +1507,8 @@ test("the narrow navigation trigger shows its label and gets focus back when the
   trigger.focus();
   fireEvent.click(trigger);
   expect(screen.getByRole("dialog", { name: "Navigation" })).toBeTruthy();
-  // Focus lands on a control with a tooltip; the first Escape closes the tooltip.
-  fireEvent.keyDown(document, { key: "Escape" });
+  // Focus lands on a row whose rail tooltip is not mounted in the sheet, so
+  // the first Escape closes the sheet (shell SH-17).
   fireEvent.keyDown(document, { key: "Escape" });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
@@ -1915,13 +1918,15 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
   });
-  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
-    target: { value: "second" },
-  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "second" } },
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(200);
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
+  fireEvent.click(within(dialog).getByRole("option", { name: /Second/ }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
   await act(async () => {});
   const review = screen.getByRole("dialog", {
     name: "Mark T-KQ2 as a duplicate",
@@ -1963,14 +1968,14 @@ test("an exact reference leads the matches in the mark-duplicate search", async 
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
   });
-  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
-    target: { value: "T-KQ3" },
-  });
+  fireEvent.change(
+    within(dialog).getByLabelText("Search tickets by title or reference"),
+    { target: { value: "T-KQ3" } },
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(200);
   });
-  const matches = within(dialog).getByRole("list", { name: "Matches" });
-  expect(within(matches).getAllByRole("button")[0]?.textContent).toContain(
+  expect(within(dialog).getAllByRole("option")[0]?.textContent).toContain(
     "T-KQ3",
   );
 });
@@ -2227,7 +2232,7 @@ test("opening the workspace graph from Plans does not stack the Plans list", asy
       omitted_groups: [],
     }),
   });
-  await openManageMenu("Manage Plans", "All Plans");
+  fireEvent.click(screen.getByRole("button", { name: "All Plans" }));
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
   await act(async () => {
@@ -2363,9 +2368,30 @@ test("the folded sidebar opens Projects and Plans as one menu each", async () =>
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
   fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   // The rail holds one entry per group, not a row per project or Plan.
-  expect(screen.queryByRole("button", { name: "Manage projects" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "All projects" })).toBeNull();
   await openManageMenu("Projects", "All projects");
   expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
   await openManageMenu("Plans", "All Plans");
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
+});
+
+test("every icon on the folded rail names itself in a tooltip", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  const rail = document.querySelector<HTMLElement>(".sidebar")!;
+  const unnamed = within(rail)
+    .getAllByRole("button")
+    .filter((button) => {
+      // Shell SH-07: Attachments had no tooltip on the folded rail.
+      fireEvent.keyDown(document.body, { key: "Tab" });
+      act(() => button.focus());
+      const shown = screen
+        .queryAllByRole("tooltip")
+        .some((tip) => tip.textContent?.trim());
+      act(() => button.blur());
+      return !shown;
+    })
+    .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+  expect(unnamed).toEqual([]);
 });

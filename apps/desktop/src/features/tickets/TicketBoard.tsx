@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -197,9 +198,11 @@ export function TicketBoard({
                           <Reference>{ticket.reference}</Reference>
                           <SourcePill ticket={ticket} />
                         </span>
-                        <span className="board-card-title" title={ticket.title}>
-                          {ticket.title}
-                        </span>
+                        <Tooltip content={ticket.title} overflowOnly>
+                          <span className="board-card-title">
+                            {ticket.title}
+                          </span>
+                        </Tooltip>
                         {needsReview.has(ticket.id) ? (
                           <span className="board-card-state">
                             <StatusDot tone="attention" size={10} />

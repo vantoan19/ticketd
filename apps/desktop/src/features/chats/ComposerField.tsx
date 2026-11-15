@@ -247,7 +247,7 @@ export function ComposerField({
                           linked.id === record.id,
                       ),
                   ),
-                  "Recently updated",
+                  "Recent",
                 ),
               ]
             : recordOptions(

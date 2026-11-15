@@ -24,12 +24,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import type {
   ChatState,
   HarnessOptions,
@@ -531,23 +526,18 @@ function ReadOnly({
   children: ReactNode;
 }) {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-control="permission"
-            readOnly
-            aria-disabled="true"
-          >
-            {children}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{reason}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip content={reason}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        data-control="permission"
+        readOnly
+        aria-disabled="true"
+      >
+        {children}
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -650,11 +640,9 @@ function PermissionPicker({
             ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <p
-          className="chat-pick-note"
-          title={`Your ${harness} settings are unchanged.`}
-        >
-          This Chat only
+        {/* The whole explanation is visible: a menu note cannot take focus. */}
+        <p className="chat-pick-note">
+          This Chat only. Your {harness} settings are unchanged.
         </p>
       </DropdownMenuContent>
     </DropdownMenu>

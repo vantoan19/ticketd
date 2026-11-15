@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
@@ -447,9 +448,12 @@ export function WorkspaceGraph({
         {labelledConnections(preview.id, graph!).map((row) => (
           <div key={row.label}>
             <dt>{row.label}</dt>
-            <dd title={row.items.map((item) => item.text).join(", ")}>
-              {row.items.map((item) => item.text).join(", ")}
-            </dd>
+            <Tooltip
+              content={row.items.map((item) => item.text).join(", ")}
+              overflowOnly
+            >
+              <dd>{row.items.map((item) => item.text).join(", ")}</dd>
+            </Tooltip>
           </div>
         ))}
       </dl>

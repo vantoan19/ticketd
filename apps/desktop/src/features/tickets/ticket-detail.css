@@ -31,12 +31,6 @@
     display: none;
   }
 }
-.duplicate-dialog {
-  display: flex;
-  flex-direction: column;
-  max-height: 85vh;
-  overflow-y: auto;
-}
 /* The dependency graph replaces the ticket; its drafts stay mounted. */
 .ticket-detail[data-graph] > :not(.dependency-graph-view, .graph-loading) {
   display: none;

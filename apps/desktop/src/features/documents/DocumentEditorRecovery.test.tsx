@@ -121,7 +121,7 @@ it("closes a capture after a failed save and keeps the draft for next time", asy
   });
   fireEvent.click(screen.getByText("Done"));
   await screen.findByText(/Your draft stays on this device if you close/);
-  fireEvent.click(screen.getByRole("button", { name: "Close and return" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(documents.save).toHaveBeenCalledOnce();
   expect(JSON.stringify(kept.at(-1))).toContain("A thought");

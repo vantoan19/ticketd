@@ -154,11 +154,17 @@ test("the Location page shows the path, counts, size, and format version", async
       onOpenInbox={() => {}}
     />,
   );
-  const folder = await screen.findByTitle(
-    "/Users/me/Library/Application Support/ticketd",
+  await waitFor(() =>
+    expect(document.querySelector(".path-text")).not.toBeNull(),
   );
+  const folder = document.querySelector<HTMLElement>(".path-text")!;
   expect(screen.getAllByText("workspace.sqlite3").length).toBeGreaterThan(0);
   expect(folder.textContent).toBe("~/Library/Application Support/ticketd");
+  fireEvent.pointerMove(folder);
+  expect((await screen.findByRole("tooltip")).textContent).toBe(
+    "/Users/me/Library/Application Support/ticketd",
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
   const text = screen.getByRole("region", { name: "Contents" }).textContent;
   expect(text).toContain("Tickets42");
   expect(text).toContain("Projects3");

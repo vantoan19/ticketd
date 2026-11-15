@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
@@ -107,9 +108,11 @@ export function TicketPage({
                 <>
                   {" "}
                   of{" "}
-                  <span className="source-number" title={original.display}>
-                    {originalLabel}
-                  </span>
+                  <Tooltip content={original.display} side="bottom">
+                    <span className="source-number" tabIndex={0}>
+                      {originalLabel}
+                    </span>
+                  </Tooltip>
                   {original.last_known && " (last known)"}
                 </>
               )}
@@ -126,12 +129,14 @@ export function TicketPage({
             <>
               {source.state.state === "open" && <span>{source.number}</span>}
               {source.closed_at && (
-                <time
-                  dateTime={source.closed_at}
-                  title={formatDateTime(source.closed_at)}
+                <Tooltip
+                  content={formatDateTime(source.closed_at)}
+                  side="bottom"
                 >
-                  {relativeDateTime(source.closed_at, now)}
-                </time>
+                  <time dateTime={source.closed_at} tabIndex={0}>
+                    {relativeDateTime(source.closed_at, now)}
+                  </time>
+                </Tooltip>
               )}
             </>
           )}
@@ -140,10 +145,18 @@ export function TicketPage({
         <span>
           Local ticket
           {ticket.updated_at && (
-            <span title={formatDateTime(ticket.updated_at)}>
+            <>
               {" "}
-              · updated {relativeDateTime(ticket.updated_at, now)}
-            </span>
+              · updated{" "}
+              <Tooltip
+                content={formatDateTime(ticket.updated_at)}
+                side="bottom"
+              >
+                <time dateTime={ticket.updated_at} tabIndex={0}>
+                  {relativeDateTime(ticket.updated_at, now)}
+                </time>
+              </Tooltip>
+            </>
           )}
         </span>
       )}

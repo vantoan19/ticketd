@@ -7,6 +7,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { Tooltip } from "@/components/ui/tooltip";
 
 /**
  * A link to the issue at its source, opened in the default browser. A webview
@@ -31,24 +32,25 @@ export function SourceLink({
     <>
       {/* A real link (its address shows on hover and focus); the app opens it
           in the default browser because a webview cannot follow it itself. */}
-      <a
-        href={url}
-        title={title}
-        className={cn("source-link", className)}
-        onClick={(event) => {
-          event.preventDefault();
-          void workspaceClient.openLink(url).then(
-            () => setError(null),
-            (reason: unknown) =>
-              setError(describeFailure(reason, "open the link")),
-          );
-        }}
-      >
-        {children}
-        {icon && (
-          <ExternalLink className="source-link-icon" aria-hidden="true" />
-        )}
-      </a>
+      <Tooltip content={title}>
+        <a
+          href={url}
+          className={cn("source-link", className)}
+          onClick={(event) => {
+            event.preventDefault();
+            void workspaceClient.openLink(url).then(
+              () => setError(null),
+              (reason: unknown) =>
+                setError(describeFailure(reason, "open the link")),
+            );
+          }}
+        >
+          {children}
+          {icon && (
+            <ExternalLink className="source-link-icon" aria-hidden="true" />
+          )}
+        </a>
+      </Tooltip>
       {error && <FailureAlert size="compact" failure={error} />}
     </>
   );

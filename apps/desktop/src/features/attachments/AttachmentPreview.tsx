@@ -13,6 +13,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -245,7 +246,7 @@ export function AttachmentPreview({
         if (!open) close();
       }}
     >
-      <DialogContent variant="flush" className="sm:max-w-280">
+      <DialogContent variant="flush" size="viewer">
         <div className="attachment-preview-frame">
           <div className="attachment-preview-header">
             <div className="attachment-preview-heading">
@@ -409,9 +410,9 @@ export function AttachmentPreview({
                           {formatDateTime(file.added_at)}
                         </time>
                       ) : (
-                        <span title="No registration date was recorded">
-                          Unknown
-                        </span>
+                        <Tooltip content="No registration date was recorded">
+                          <span tabIndex={0}>Unknown</span>
+                        </Tooltip>
                       )}
                     </dd>
                     {external ? (
