@@ -18,10 +18,11 @@ export type TicketGroup = {
 export function groupTickets(
   tickets: Ticket[],
   counts: StatusCounts,
+  groupStatus: (ticket: Ticket) => string = (ticket) => ticket.status,
 ): TicketGroup[] {
   return workflowStatuses
     .map((status) => {
-      const shown = tickets.filter((ticket) => ticket.status === status);
+      const shown = tickets.filter((ticket) => groupStatus(ticket) === status);
       return {
         status,
         count: Math.max(counts[statusCountKey[status]], shown.length),

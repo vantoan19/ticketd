@@ -436,8 +436,6 @@ function TicketListBody({
                 />
               ) : loading && tickets.length === 0 ? (
                 <TicketRowsSkeleton detailed={ticketRows === "detailed"} />
-              ) : tickets.length === 0 ? (
-                emptyView
               ) : (
                 <>
                   {showBulk && bulk.selection.length > 0 && (
@@ -454,7 +452,20 @@ function TicketListBody({
                     </a>
                   )}
                   <TicketList
+                    scopeKey={JSON.stringify([
+                      filter,
+                      plan,
+                      status,
+                      tags,
+                      availability,
+                      family,
+                      source,
+                      query,
+                      trash,
+                    ])}
                     tickets={visibleTickets}
+                    empty={emptyView}
+                    details={workspace.details}
                     scope={{
                       showPlan: !navigation.plan,
                       showProject: navigation.project === "all",
