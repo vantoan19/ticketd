@@ -377,6 +377,12 @@ export function ComposerField({
           pick(option);
           return;
         }
+        // While the menu is open, Enter never sends, even with no row to
+        // insert yet (still searching, or nothing matches) (CH-46).
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          return;
+        }
       }
       if (event.key === "Escape") {
         // Closes the menu and keeps the text; a second Escape is Stop's.
