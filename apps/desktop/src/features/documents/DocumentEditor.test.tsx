@@ -467,8 +467,10 @@ it("reads an untitled Document with its core heading and current save details", 
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "First line" })).toBeTruthy();
   expect(screen.getAllByText(/before/).length).toBeGreaterThan(0);
-  // The save state shows only while editing, in the session row (DR-09).
-  expect(screen.queryAllByText("Saved on this computer")).toHaveLength(0);
+  // Storage status stays in the metadata; local save feedback floats in Edit.
+  expect(
+    screen.getByRole("status", { name: "Document sync status" }).textContent,
+  ).toBe("Saved on this computer");
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.getAllByText("Saved")).toHaveLength(1);
   fireEvent.change(screen.getByLabelText("Your thought"), {

@@ -446,8 +446,8 @@
     padding: 20px 16px;
   }
 }
-/* The row under the title: "Updated 2 h ago" while reading, the session
-   row while editing. 32px either way, so the body never moves (DR-01). */
+/* Updated time and confirmed local/Drive state keep the same 32px metadata
+   row in Read and Edit; editing controls float outside the prose. */
 .document-state-row {
   display: flex;
   align-items: center;
