@@ -396,7 +396,33 @@
   min-height: 44px;
   margin-top: 18px;
 }
-.ticket-agent-slot .latest-update-line {
+.ticket-agent-strip {
   width: 100%;
   min-height: 44px;
+}
+
+.ticket-agent-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px 8px 12px;
+}
+.ticket-agent-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.ticket-agent-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-scroll[data-agent-loading] {
+  overflow-y: hidden;
+}
+.detail-scroll[data-agent-loading] > .detail-content {
+  visibility: hidden;
 }

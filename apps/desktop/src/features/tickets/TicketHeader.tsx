@@ -1,3 +1,4 @@
+import { TicketAgentHeader } from "./TicketAgent";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -203,6 +204,7 @@ export function TicketHeader({
                 </Tooltip>
               </span>
             )}
+            <TicketAgentHeader />
             {owner && (
               <SourceLink url={owner.url} className="header-source-link">
                 <span className="sr-only">Open on {owner.provider_name}: </span>
