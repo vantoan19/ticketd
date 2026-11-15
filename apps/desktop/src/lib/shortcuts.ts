@@ -31,7 +31,7 @@ export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
   Everywhere: "These work wherever you are in ticketd.",
   Lists: "In any list of tickets. The list is one stop for Tab.",
   Ticket: "On the open ticket.",
-  Plans: "On an open Plan.",
+  Plans: "On a Plan or the Plans page, as noted.",
   Chat: "In a Chat's message box and its requests.",
   "Dialogs and menus": "In any dialog, menu or sheet.",
 };
@@ -206,6 +206,13 @@ export const SHORTCUTS = [
     scope: "Ticket",
     label: "Finish editing the description or a Document",
     note: "While editing; nothing is discarded.",
+  },
+  {
+    id: "new-plan",
+    keys: [["N"]],
+    scope: "Plans",
+    label: "New Plan",
+    note: "On the Plans page; not while typing.",
   },
   {
     id: "plan-rename",

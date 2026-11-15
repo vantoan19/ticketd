@@ -154,71 +154,179 @@ button.plan-purpose:focus-visible {
 }
 
 /* Plans index: management rows (P12), 48px, full-row hover. */
+/* Plan cards keep their order and reserved action slots through refreshes. */
 .plan-index-list {
   display: flex;
   flex-direction: column;
-  margin: 0 -8px;
+  gap: 14px;
+  margin: 28px 0 0;
   padding: 0;
   list-style: none;
 }
-.plan-index-list > li {
+.plan-card {
   position: relative;
   display: flex;
-  align-items: center;
-  border-radius: var(--radius);
+  flex-direction: column;
+  gap: 14px;
+  min-height: 184px;
+  padding: 20px 20px 16px;
+  border-radius: var(--radius-panel);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
 }
-.plan-index-list > li:hover {
+.plan-card:has(.plan-card-open:hover) {
   background: var(--hover);
 }
-.plan-index-row {
-  display: grid;
-  flex: 1;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+.plan-card-open {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.plan-card-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.plan-card-heading {
+  display: flex;
   align-items: center;
   gap: 12px;
+  pointer-events: none;
+}
+.plan-card-description {
+  flex: 1;
   min-width: 0;
-  min-height: 48px;
-  padding: 0 8px;
-  border-radius: var(--radius);
-  color: var(--foreground);
-  text-align: left;
 }
-.plan-index-row:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.plan-index-row > svg {
-  width: 16px;
-  height: 16px;
-  color: var(--muted-foreground);
+.plan-card-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .plan-index-name {
   overflow: hidden;
-  font-weight: 500;
+  font-size: var(--text-reading);
+  line-height: var(--text-doc-line);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.plan-index-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.plan-card[data-archived] .plan-index-name {
+  color: var(--muted-foreground);
+}
+.plan-card-description p {
+  color: var(--muted-foreground);
+  margin: 0;
+}
+.plan-card-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.plan-card-summary strong {
+  font-weight: 500;
+}
+.plan-card-summary time {
+  position: relative;
+  pointer-events: auto;
+}
+.plan-card-caption,
+.plan-card-legend {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
-  white-space: nowrap;
 }
-/* Reactivate sits in a reserved trailing slot, shown on hover and focus. */
-.plan-index-action {
+.plan-card-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  pointer-events: none;
+}
+.plan-card-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.plan-card-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-segment);
+  background: var(--track);
+}
+.plan-card-legend [data-segment="done"] {
+  background: var(--seg-done);
+}
+.plan-card-legend [data-segment="review"] {
+  background: var(--seg-review);
+}
+.plan-card-legend [data-segment="progress"] {
+  background: var(--seg-progress);
+}
+.plan-card-next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  border-top: 1px solid var(--group-hairline);
+  padding-top: 14px;
+  pointer-events: none;
+}
+.plan-card-next > .plan-card-caption:first-child {
   flex: none;
-  padding-inline-end: 8px;
+  width: 56px;
+}
+.plan-card-next > svg {
+  flex: none;
+}
+.plan-card-next button {
+  position: relative;
+  pointer-events: auto;
+}
+.plan-card-next .ui-record-link {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.plan-card-ready {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.plan-card-spec {
+  margin-left: auto;
+  max-width: 40%;
+}
+.plan-index-action {
+  position: relative;
+  align-self: flex-end;
   visibility: hidden;
 }
-.plan-index-list > li:is(:hover, :focus-within) .plan-index-action {
+.plan-card:is(:hover, :focus-within) .plan-index-action {
   visibility: visible;
 }
 @media (hover: none) {
   .plan-index-action {
     visibility: visible;
+  }
+}
+@media (max-width: 640px) {
+  .plan-card-heading {
+    flex-wrap: wrap;
+  }
+  .plan-card-summary {
+    flex-basis: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  .plan-card-next {
+    flex-wrap: wrap;
+  }
+  .plan-card-spec {
+    max-width: 100%;
   }
 }
 

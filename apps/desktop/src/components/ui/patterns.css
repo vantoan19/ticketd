@@ -603,3 +603,19 @@
     animation: none;
   }
 }
+
+/* Centered management pages, with cards under a single header row. */
+.ui-management-page-centered {
+  max-width: 860px;
+  margin-inline: auto;
+  padding: 44px 40px;
+}
+.ui-management-page-centered .ui-page-header-actions {
+  align-self: flex-end;
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .ui-management-page-centered {
+    padding: 24px 16px;
+  }
+}
