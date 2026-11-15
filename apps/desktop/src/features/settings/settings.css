@@ -1,6 +1,6 @@
 /* Settings navigation: takes the workspace sidebar's place. */
 .settings-nav {
-  width: 224px;
+  width: 232px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -28,11 +28,11 @@
 .settings-back {
   gap: 8px;
 }
-.settings-back:hover,
 .settings-nav-row[aria-current="page"] {
   background: var(--accent);
   color: var(--foreground);
 }
+.settings-back:hover,
 .settings-nav-row:hover:not([aria-current="page"]) {
   background: var(--recessed);
   color: var(--foreground);

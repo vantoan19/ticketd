@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
+import { SHORTCUTS } from "@/lib/shortcuts";
 import { isMacPlatform } from "@/lib/platform";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
 
@@ -30,15 +31,10 @@ const ALL = [
 test("every real shortcut is listed under its scope", () => {
   render(<KeyboardShortcutsPage />);
   expect(groupNames()).toEqual(ALL);
-  // Keys that work but were missing before the registry (list R-08, P18).
-  for (const label of [
-    "Edit the description",
-    "Add the selected text to a Chat",
-    "Choose the harness, model and effort",
-    "Select the focused ticket for bulk changes",
-    "Rename the Plan",
-  ])
-    expect(screen.getByText(label)).toBeTruthy();
+  for (const shortcut of SHORTCUTS) {
+    const scope = screen.getByRole("region", { name: shortcut.scope });
+    expect(within(scope).getByText(shortcut.label)).toBeTruthy();
+  }
   expect(screen.getByText("Focus the divider first.")).toBeTruthy();
 });
 
