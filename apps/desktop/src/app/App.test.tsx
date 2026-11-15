@@ -104,8 +104,12 @@ test("Storage settings in the Attachments library opens Settings at Attachments"
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "More library actions" }),
+    { key: "Enter" },
+  );
   fireEvent.click(
-    await screen.findByRole("button", { name: "Storage settings" }),
+    await screen.findByRole("menuitem", { name: "Storage settings" }),
   );
   const nav = await screen.findByRole("navigation", {
     name: "Settings sections",

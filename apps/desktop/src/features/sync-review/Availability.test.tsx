@@ -92,26 +92,32 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-test("the library's Storage column says what is on this desktop and offers Download", async () => {
-  render(<AttachmentLibrary onPreview={() => {}} />);
-  expect(
-    await screen.findByRole("cell", { name: "Not downloaded" }),
-  ).toBeTruthy();
+test("the library's rows say what is on this desktop and offer Download", async () => {
+  render(<AttachmentLibrary />);
+  expect(await screen.findByText(/Not downloaded/)).toBeTruthy();
   expect(
     screen
       .getByRole("progressbar", { name: "Downloading design.pdf" })
       .getAttribute("aria-valuenow"),
   ).toBe("40");
-  expect(screen.getByRole("cell", { name: "Local snapshot" })).toBeTruthy();
-  expect(
-    screen.queryByRole("button", { name: "Download design.pdf" }),
-  ).toBeNull();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Download recording.mp4" }),
+  // A file on this computer needs no storage word in its row.
+  expect(screen.queryByText(/On this computer/)).toBeNull();
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "More actions for design.pdf" }),
+    { button: 0, ctrlKey: false },
   );
+  await screen.findByRole("menu");
+  expect(screen.queryByRole("menuitem", { name: "Download" })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "More actions for recording.mp4" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Download" }));
   await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
   await screen.findByRole("progressbar", { name: "Downloading recording.mp4" });
-  expect(screen.queryByRole("cell", { name: "Not downloaded" })).toBeNull();
+  expect(screen.queryByText(/Not downloaded/)).toBeNull();
 });
 
 test("a ticket's attached files say whether they are downloaded", async () => {
@@ -124,27 +130,27 @@ test("a ticket's attached files say whether they are downloaded", async () => {
   );
   expect(await screen.findByText("193 B · Not downloaded")).toBeTruthy();
   expect(screen.getByText("193 B · Downloading…")).toBeTruthy();
-  expect(screen.getByText("193 B · Local snapshot")).toBeTruthy();
+  expect(screen.getByText("193 B · On this computer")).toBeTruthy();
 });
 
 test("the preview of a file that is not downloaded offers Download in place of the file", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  expect((await screen.findAllByText("Not downloaded")).length).toBe(2);
   expect(
-    await screen.findByRole("heading", { name: "Not downloaded" }),
+    screen
+      .getByText("This file is in your Google Drive.")
+      .closest('[role="status"]'),
   ).toBeTruthy();
-  expect(screen.getByText("This file is in your Google Drive.").role).toBe(
-    "status",
-  );
-  expect(screen.getByText("Not downloaded · 193 B")).toBeTruthy();
+  expect(screen.getByText("193 B")).toBeTruthy();
   expect(
     screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
       .disabled,
   ).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Download" }));
   await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
-  expect(
-    await screen.findByRole("heading", { name: "Downloading…" }),
-  ).toBeTruthy();
+  expect((await screen.findAllByText("Downloading…")).length).toBeGreaterThan(
+    0,
+  );
   expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
 });
 
@@ -154,9 +160,9 @@ test("with Attachments downloaded when opened, opening one that is not here down
   vi.mocked(syncReview.download).mockReturnValue(new Promise(() => {}));
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
   await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
-  expect(
-    await screen.findByRole("heading", { name: "Downloading…" }),
-  ).toBeTruthy();
+  expect((await screen.findAllByText("Downloading…")).length).toBeGreaterThan(
+    0,
+  );
   expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
   expect(syncReview.download).toHaveBeenCalledTimes(1);
 });
