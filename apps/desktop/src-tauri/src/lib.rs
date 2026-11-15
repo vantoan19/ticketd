@@ -1579,6 +1579,29 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
+            // The theme-first frontend reveal is the fast path. A broken module
+            // or stalled painting IPC must never leave the process invisible.
+            let startup_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if let Some(window) = tauri::Manager::get_webview_window(&startup_app, "main") {
+                    match window.is_visible() {
+                        Ok(true) => return,
+                        Ok(false) => {}
+                        Err(error) => {
+                            eprintln!("Could not check startup window visibility: {error}");
+                        }
+                    }
+                    if let Err(error) =
+                        window.eval(include_str!("../../public/startup-fallback.js"))
+                    {
+                        eprintln!("Could not display startup guidance: {error}");
+                    }
+                    if let Err(error) = window.show() {
+                        eprintln!("Could not reveal ticketd after startup: {error}");
+                    }
+                }
+            });
             let version = app.package_info().version.to_string();
             let chat = chat_commands::ChatBridge::new(version);
             automation_runner::start(chat.chats(), app.handle().clone());

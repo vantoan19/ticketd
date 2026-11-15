@@ -2672,15 +2672,16 @@ kbd,
 }
 
 /* Compact header controls retain the pane's existing height and position. */
-:is(.detail-header, .ui-section-header[data-bar]) .ui-button {
+:is(.detail-header, .ui-pane-header, .ui-section-header[data-bar]) .ui-button {
   height: var(--header-control-height);
 }
-:is(.detail-header, .ui-section-header[data-bar])
+:is(.detail-header, .ui-pane-header, .ui-section-header[data-bar])
   .ui-button[data-size^="icon"] {
   width: var(--header-control-height);
 }
 @media (pointer: coarse) {
-  :is(.detail-header, .ui-section-header[data-bar]) .ui-button {
+  :is(.detail-header, .ui-pane-header, .ui-section-header[data-bar])
+    .ui-button {
     min-width: 44px;
     min-height: 44px;
   }

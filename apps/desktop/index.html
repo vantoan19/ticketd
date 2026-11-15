@@ -7,7 +7,12 @@
     <script src="/theme.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main id="startup-failure" hidden>
+        <h1>Couldn't start ticketd</h1>
+        <p>Quit and reopen ticketd to try again.</p>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -178,6 +178,51 @@ it("rejects raw times and unrelated tokens in motion declarations", () => {
   ).toEqual([]);
 });
 
+function componentMotionFindings(source: string): string[] {
+  const offenders: string[] = [];
+  for (const match of source.matchAll(
+    /(?<![\w-])(?:duration|delay)-(?:\d+|\[[^\]]+\]|\([^)]*\))/g,
+  ))
+    if (!/^(?:duration|delay)-\(--dur-[\w-]+\)$/.test(match[0]))
+      offenders.push(match[0]);
+  for (const match of source.matchAll(
+    /(?:animation|transition)(?:Duration|Delay)\s*:\s*["'`]?[^,}\n]+/g,
+  ))
+    offenders.push(match[0]);
+  // Arbitrary Tailwind values encode CSS whitespace as underscores.
+  for (const match of source.matchAll(
+    /(?:animate|transition)-\[([^\]]+)\]|\[(?:animation|transition):([^\]]+)\]/g,
+  )) {
+    const value = (match[1] ?? match[2] ?? "").replaceAll("_", " ");
+    offenders.push(...motionFindings(`a { animation: ${value}; }`));
+  }
+  for (const match of source.matchAll(
+    /\b(animation|transition)\s*:\s*(["'`])([^"'`]+)\2/g,
+  )) {
+    const declaration = `${match[1]}: ${match[3]};`;
+    offenders.push(...motionFindings(`a { ${declaration} }`));
+  }
+  return offenders;
+}
+
+it("rejects raw times in arbitrary animation utilities and inline shorthands", () => {
+  for (const source of [
+    'className="animate-[spin_2s_linear_infinite]"',
+    'className="[animation:spin_2s_linear_infinite]"',
+    'style={{ animation: "spin 2s linear infinite" }}',
+    'style={{ transition: "opacity 120ms ease-out" }}',
+  ])
+    expect(componentMotionFindings(source), source).not.toEqual([]);
+  expect(
+    componentMotionFindings('className="animate-spin duration-(--dur-2)"'),
+  ).toEqual([]);
+  expect(
+    componentMotionFindings(
+      'style={{ transition: "opacity var(--dur-2) var(--ease-out)" }}',
+    ),
+  ).toEqual([]);
+});
+
 it("component motion utilities use duration tokens", () => {
   function componentsUnder(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -187,18 +232,9 @@ it("component motion utilities use duration tokens", () => {
     });
   }
   const offenders: string[] = [];
-  for (const file of componentsUnder(srcDir)) {
-    const source = readFileSync(file, "utf8");
-    for (const match of source.matchAll(
-      /(?<![\w-])(?:duration|delay)-(?:\d+|\[[^\]]+\]|\([^)]*\))/g,
-    ))
-      if (!/^(?:duration|delay)-\(--dur-[\w-]+\)$/.test(match[0]))
-        offenders.push(`${relative(srcDir, file)}: ${match[0]}`);
-    for (const match of source.matchAll(
-      /(?:animation|transition)(?:Duration|Delay)\s*:\s*["'`]?[^,}\n]+/g,
-    ))
-      offenders.push(`${relative(srcDir, file)}: ${match[0]}`);
-  }
+  for (const file of componentsUnder(srcDir))
+    for (const finding of componentMotionFindings(readFileSync(file, "utf8")))
+      offenders.push(`${relative(srcDir, file)}: ${finding}`);
   expect(offenders).toEqual([]);
 });
 
