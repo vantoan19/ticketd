@@ -93,36 +93,24 @@ function renderDetails(item: Ticket = ticket) {
   );
 }
 
-test("the property rail holds Status, Latest update, Project, Plan, Tags, Attention, Relationships and Files in order", async () => {
+test("all property chips stay above the description and linked context stays below it", async () => {
   renderDetails({ ...ticket, status: "In progress" });
-  const rail = await screen.findByRole("complementary", {
-    name: "Ticket properties",
-  });
-  await within(rail).findByRole("button", { name: "Add relationship" });
+  const bar = await screen.findByRole("group", { name: "Ticket properties" });
   expect(
-    within(rail)
-      .getAllByRole("heading", { level: 3 })
-      .map((heading) => heading.textContent),
-  ).toEqual([
-    "Status",
-    "Latest update",
-    "Project",
-    "Plan",
-    "Tags",
-    "Attention",
-    "Relationships",
-    "Files",
-  ]);
-  // No source is set up: nothing says "Local", and there is no Source section.
-  expect(within(rail).queryByText("Local")).toBeNull();
-  expect(screen.queryByText(/Owned by GitHub/)).toBeNull();
-  expect(screen.queryByText(/Local ticket/)).toBeNull();
-  expect(
-    within(rail).getByRole("combobox", { name: "Status: In progress" }),
+    within(bar).getByRole("combobox", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(
-    within(rail).getByRole("button", { name: "Project: No project" }),
+    within(bar).getByRole("button", { name: "Project: No project" }),
   ).toBeTruthy();
+  const linked = await screen.findByRole("heading", { name: "Relationships" });
+  expect(bar.contains(linked)).toBe(false);
+  expect(
+    screen.getByText("A description to read.").compareDocumentPosition(linked) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("complementary", { name: "Ticket properties" }),
+  ).toBeNull();
 });
 
 test("the reading column runs title, state, description, then subtickets, and keeps the rail apart", async () => {
@@ -140,7 +128,7 @@ test("the reading column runs title, state, description, then subtickets, and ke
   const title = screen.getByRole("textbox", { name: "Title" });
   const state = document.querySelector(".ticket-state-line")!;
   const description = screen.getByText("Description");
-  const rail = screen.getByRole("complementary", {
+  const rail = screen.getByRole("group", {
     name: "Ticket properties",
   });
   const before = (first: Node, second: Node) =>
@@ -156,7 +144,7 @@ test("the reading column runs title, state, description, then subtickets, and ke
 
 test("Follow, the reminder, and the properties live in the rail, not the header", async () => {
   renderDetails();
-  const rail = await screen.findByRole("complementary", {
+  const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
   const follow = await within(rail).findByRole("button", { name: "Follow" });
@@ -170,7 +158,7 @@ test("Follow, the reminder, and the properties live in the rail, not the header"
     ).toBe("true"),
   );
   // Visible words follow the state; the name stays "Follow".
-  expect(follow.textContent).toBe("Following");
+  expect(follow.getAttribute("aria-pressed")).toBe("true");
   expect(
     within(rail).getByRole("button", { name: "Manage reminder" }),
   ).toBeTruthy();
@@ -203,10 +191,10 @@ test("the header shows the list position with Previous and Next", async () => {
 
 test("Latest update appears only for In progress and In review tickets", async () => {
   renderDetails();
-  const rail = await screen.findByRole("complementary", {
+  const rail = await screen.findByRole("group", {
     name: "Ticket properties",
   });
-  await within(rail).findByRole("button", { name: "Add relationship" });
+  await screen.findByRole("button", { name: "Add relationship" });
   expect(
     within(rail).queryByRole("heading", { name: "Latest update" }),
   ).toBeNull();
@@ -244,16 +232,11 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
       editing_agent: "agent",
     },
   });
-  const heading = screen.getByRole("heading", { name: "Latest update" });
-  fireEvent.click(
-    await within(heading.closest("section")!).findByRole("button", {
-      name: /^Go to update/,
-    }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: /^Go to update/ }));
   expect(
     (await screen.findByLabelText("Selected update")).textContent,
   ).toContain("Reported progress");
-  const rail = screen.getByRole("complementary", { name: "Ticket properties" });
+  const rail = screen.getByRole("group", { name: "Ticket properties" });
   // Each tag is its own chip, not one joined string.
   expect(within(rail).getByText("frontend")).toBeTruthy();
   expect(within(rail).getByText("urgent")).toBeTruthy();
@@ -319,13 +302,12 @@ test("showing another ticket starts its rail and document at the top", async () 
     offsets.set(this, value);
   });
   const view = render(<TicketDetails {...props} selected="T-KQ2" />);
-  await screen.findAllByRole("complementary", { hidden: true });
+  await screen.findAllByRole("group", { hidden: true });
   const scrollers = () => {
     const [shown] = document.querySelectorAll<HTMLElement>(".detail-content");
     return [
       document.querySelector<HTMLElement>(".detail-scroll")!,
       shown!.querySelector<HTMLElement>(".detail-document")!,
-      shown!.querySelector<HTMLElement>(".ticket-properties")!,
     ];
   };
   for (const node of scrollers()) node.scrollTop = 120;

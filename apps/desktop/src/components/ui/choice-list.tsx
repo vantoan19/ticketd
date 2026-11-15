@@ -104,7 +104,7 @@ export function ChoiceList({
   const row = (choice: Choice) => (
     <CommandItem
       key={choice.value}
-      value={choice.value}
+      value={choice.value || choice.label}
       keywords={[choice.label, choice.reference ?? ""]}
       size={size}
       disabled={choice.disabled ?? false}
@@ -145,7 +145,9 @@ export function ChoiceList({
           : 0
       }
       shouldFilter={!onQueryChange}
-      {...(current !== undefined && { defaultValue: current })}
+      {...(current !== undefined && {
+        defaultValue: current || clear?.label || "",
+      })}
     >
       {searchPlaceholder && (
         <CommandInput

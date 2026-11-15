@@ -18,7 +18,7 @@ function Item({
   ...props
 }: React.ComponentProps<"div"> & {
   asChild?: boolean;
-  variant?: "default" | "ledger" | "ledger-group";
+  variant?: "default" | "ledger" | "ledger-group" | "navigator";
 }) {
   const Comp = asChild ? Slot.Root : "div";
 

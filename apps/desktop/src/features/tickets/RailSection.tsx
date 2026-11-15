@@ -1,5 +1,6 @@
 import { use, useId, type ComponentProps, type ReactNode } from "react";
 import { cn } from "cn";
+import { Tooltip } from "@/components/ui/tooltip";
 import { SectionHeader } from "@/components/ui/section-header";
 import { RailPlacement } from "./rail-placement";
 
@@ -62,6 +63,7 @@ export function RailRow({
   trailing,
   children,
   className,
+  title,
   ...props
 }: ComponentProps<"button"> & {
   icon?: ReactNode;
@@ -69,7 +71,7 @@ export function RailRow({
   readOnly?: boolean;
   trailing?: ReactNode;
 }) {
-  return (
+  const button = (
     <button
       type="button"
       className={cn("rail-row", className)}
@@ -82,4 +84,5 @@ export function RailRow({
       {trailing && <span className="rail-row-trailing">{trailing}</span>}
     </button>
   );
+  return title ? <Tooltip content={title}>{button}</Tooltip> : button;
 }

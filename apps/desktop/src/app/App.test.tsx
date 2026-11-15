@@ -2424,7 +2424,7 @@ test("opens Capture from anywhere with the global shortcut", async () => {
   expect(await screen.findByRole("dialog")).toBeTruthy();
 });
 
-test("the ticket detail bounds its height so the document and rail can scroll on their own", async () => {
+test("the ticket detail bounds one document scroller and keeps properties in the document", async () => {
   vi.useFakeTimers();
   const ticket = {
     id: "1",
@@ -2460,14 +2460,16 @@ test("the ticket detail bounds its height so the document and rail can scroll on
   const bounded = detail.querySelectorAll(".detail-scroll");
   expect(bounded).toHaveLength(1);
   expect(bounded[0]!.parentElement).toBe(detail);
-  // The document column and the rail are siblings, each scrolling by its own
-  // overflow (styles.css) once the pane is wide enough for both.
+  // The property bar and connected context share one document scroller.
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
   expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
-  expect(content.querySelector(":scope > .ticket-properties")).toBeTruthy();
+  expect(content.querySelector(":scope > .ticket-properties")).toBeNull();
+  expect(
+    content.querySelector(".detail-document .property-strip"),
+  ).toBeTruthy();
 });
 
 test("the folded sidebar opens Projects and Plans as one menu each", async () => {
@@ -3352,6 +3354,144 @@ test("Inbox shares Needs you counts with the sidebar and keeps E/H on the opened
   });
   expect(screen.getByText("Snooze until")).toBeTruthy();
   expect(screen.queryByRole("dialog", { name: /command/i })).toBeNull();
+});
+
+test.each([
+  [
+    "Status: Todo",
+    "Status",
+    "Done",
+    "change_ticket",
+    { patch: { status: "Done" } },
+  ],
+  [
+    "Project: No project",
+    "Project",
+    "Next project",
+    "change_ticket",
+    { patch: { project_id: "project-next" } },
+  ],
+  ["Plan: No Plan", "Plan", "Next Plan", "set_plan", { plan: "plan-next" }],
+  ["Tags: No tags", "Tags", "polish", "add_tag", { tag: "polish" }],
+  ["Remind me", "Reminder", "Tomorrow", "set_reminder", {}],
+])(
+  "the %s chip opens the shared %s drill-in and mutation",
+  async (chip, scope, label, command, expected) => {
+    const current = bulkTicket(1, {
+      reference: "T-FV1",
+      title: "Document target",
+    });
+    bridge.invoke.mockImplementation((name: string, args?: object) => {
+      if (name === "find_tickets") return [current];
+      if (
+        ["show_ticket", "change_ticket", "set_plan", "add_tag"].includes(name)
+      )
+        return current;
+      if (name === "set_reminder") return null;
+      if (name === "list_projects")
+        return [
+          {
+            id: "project-next",
+            name: "Next project",
+            path: "/next",
+            paths: ["/next"],
+          },
+        ];
+      if (name === "list_plans")
+        return [
+          { id: "plan-next", name: "Next Plan", archived: false, purpose: "" },
+        ];
+      if (name === "search_tags") return ["polish"];
+      return bridgeDefault(name, args);
+    });
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Document target/ }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: chip }));
+    expect(await screen.findByText(`${scope} of T-FV1`)).toBeTruthy();
+    fireEvent.click(
+      await screen.findByRole("option", { name: new RegExp(`^${label}`) }),
+    );
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith(
+        command,
+        expect.objectContaining({ reference: "T-FV1", ...expected }),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Undo" })).toBeTruthy();
+  },
+);
+
+test("a read-only workspace disables description editing from the button and E", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  const edit = await screen.findByRole("button", {
+    name: "Add a description…",
+  });
+  act(() => reportWorkspaceFailure("workspace_read_only", "Read only"));
+  expect(edit.hasAttribute("disabled")).toBe(true);
+  fireEvent.keyDown(document.body, { key: "e" });
+  expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull();
+  expect(
+    screen.getByRole("textbox", { name: "Title" }).hasAttribute("disabled"),
+  ).toBe(true);
+});
+
+test("J and K swap the open document and Escape returns focus to its navigator row", async () => {
+  paletteTickets();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Open Ticket/ }));
+  await screen.findByRole("textbox", { name: "Title" });
+  const reference = document.getElementById("detail-heading")!;
+  reference.focus();
+  fireEvent.keyDown(reference, { key: "j" });
+  await vi.waitFor(() =>
+    expect(document.getElementById("detail-heading")?.textContent).toBe(
+      "T-KQ2",
+    ),
+  );
+  fireEvent.keyDown(document.getElementById("detail-heading")!, {
+    key: "Escape",
+  });
+  await vi.waitFor(() =>
+    expect(document.activeElement?.getAttribute("data-ticket-reference")).toBe(
+      "T-KQ2",
+    ),
+  );
+});
+
+test("a property drill-in highlights its current clearing value instead of the first project", async () => {
+  const current = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Current project",
+  });
+  bridge.invoke.mockImplementation((name: string, args?: object) => {
+    if (name === "find_tickets") return [current];
+    if (name === "show_ticket") return current;
+    if (name === "list_projects")
+      return [
+        {
+          id: "project-next",
+          name: "Next project",
+          path: "/next",
+          paths: ["/next"],
+        },
+      ];
+    return bridgeDefault(name, args);
+  });
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Current project/ }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Project: No project" }),
+  );
+  const clear = await screen.findByRole("option", { name: "No project" });
+  await vi.waitFor(() =>
+    expect(clear.getAttribute("aria-selected")).toBe("true"),
+  );
 });
 
 test("sticky ledger keeps palette mutations in place until J leaves, then targets the newly focused ticket", async () => {

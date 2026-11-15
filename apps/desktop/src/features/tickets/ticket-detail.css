@@ -12,31 +12,38 @@
 .ticket-detail {
   container: ticket-detail / inline-size;
 }
-/* Expanded: a fixed 280px rail beside the document, whose text column is
-   centred at no more than 800px including its 32px gutters. The document
-   stays the scroller, so its scrollbar sits at the rail's rule. */
-@container ticket-detail (min-width: 760px) {
-  .ticket-detail[data-expanded] .detail-content {
-    grid-template-columns: minmax(0, 1fr) 280px;
-  }
-  .ticket-detail[data-expanded] .detail-document {
-    padding-inline: max(32px, calc((100% - 736px) / 2));
-  }
-}
+/* The same document stays in place when it opens full width. */
 .ticket-detail[data-expanded] .detail-document {
-  padding-block: 32px 40px;
+  max-width: 760px;
+  padding-top: 40px;
 }
-.ticket-detail[data-expanded]
-  .description-document
-  :is(h1, h2, h3, h4, h5, h6) {
-  font-size: var(--text-reading);
-  line-height: 24px;
+.ticket-detail .description-document,
+.ticket-detail .description-document :is(p, li),
+.ticket-detail .editor-body [role="textbox"] {
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
 }
-.ticket-detail[data-expanded] .description-document,
-.ticket-detail[data-expanded] .description-document :is(p, li),
-.ticket-detail[data-expanded] .editor-body [role="textbox"] {
-  font-size: var(--text-reading);
-  line-height: 24px;
+.detail-content:not([hidden]) .detail-document {
+  animation: ticket-document-enter var(--dur-2) var(--ease-out);
+}
+@keyframes ticket-document-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ticket-follow-slot {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+.ticket-follow-feedback {
+  position: absolute;
+  top: 100%;
+  inset-inline-end: 0;
+  white-space: nowrap;
 }
 /* One 32px row under the title: "Updated 5 h ago", the source state, or
    save state. Its height is fixed so nothing moves when its words change. */
