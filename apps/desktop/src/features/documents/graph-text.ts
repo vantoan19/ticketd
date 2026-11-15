@@ -1,5 +1,6 @@
 import { MarkerType, type Edge } from "@xyflow/react";
 import type { ContextGraph } from "@/lib/api/client";
+import { plainText } from "@/lib/plain-text";
 
 type GraphNode = ContextGraph["nodes"][number];
 type GraphEdge = ContextGraph["edges"][number];
@@ -87,15 +88,8 @@ export const kindNames: Record<GraphNode["kind"], string> = {
   plan: "Plan",
 };
 
-/** Passages are stored Markdown; show the link text, not the link. */
-export function plainText(markdown: string): string {
-  return markdown
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/ticketd:\/\/\S+/g, "")
-    .replace(/[`*_>#]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// Passages are stored Markdown; show the link text, not the link.
+export { plainText };
 
 /** Equal ignoring case and punctuation. */
 function sameWords(a: string, b: string): boolean {

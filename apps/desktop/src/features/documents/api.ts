@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { loadPreferences } from "@/lib/preferences";
+import { plainLabel, plainSnippet } from "@/lib/plain-text";
 
 const schema = z.object({
   id: z.string(),
@@ -59,11 +60,12 @@ const linkDocuments = {
       }),
     ),
 };
+// A derived heading is the body's first line and can hold Markdown; list rows show plain text.
 const summary = z.object({
   id: z.string(),
-  heading: z.string(),
+  heading: z.string().transform(plainLabel),
   origin_ticket: z.string().nullable().optional(),
-  snippet: z.string().optional(),
+  snippet: z.string().transform(plainSnippet).optional(),
   tags: z.array(z.string()).optional(),
   updated_at: z.string().optional(),
 });
