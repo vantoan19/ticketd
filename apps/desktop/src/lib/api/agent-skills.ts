@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/api/bridge-failure";
 import { z } from "zod";
 
 const agentSkillSchema = z.object({
