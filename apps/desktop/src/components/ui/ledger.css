@@ -155,3 +155,18 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+
+/* Regrouping is instant; only the arrival surface fades. */
+.ui-item-ledger[data-arriving] {
+  animation: ledger-arrival var(--dur-arrival) var(--ease-out);
+}
+@keyframes ledger-arrival {
+  from {
+    background-color: var(--hover);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-item-ledger[data-arriving] {
+    animation: none;
+  }
+}
