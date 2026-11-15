@@ -3105,3 +3105,13 @@ kbd,
   font-size: inherit;
   line-height: inherit;
 }
+
+/* Agent status uses the same well and document motion in both themes. */
+.ui-agent-strip {
+  background: var(--well);
+  border-radius: var(--radius-card);
+  font-size: var(--text-ui);
+}
+.ui-agent-state {
+  animation: palette-scrim var(--dur-2) var(--ease-in-out);
+}
