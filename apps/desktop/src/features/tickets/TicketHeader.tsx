@@ -234,6 +234,8 @@ export function TicketHeader({
                     </span>
                     <IconButton
                       label="Previous ticket"
+                      shortcut="K"
+                      aria-keyshortcuts="K"
                       disabled={!position || position.index <= 1}
                       onClick={() => {
                         adjacentFocus.current = {
@@ -247,6 +249,8 @@ export function TicketHeader({
                     </IconButton>
                     <IconButton
                       label="Next ticket"
+                      shortcut="J"
+                      aria-keyshortcuts="J"
                       disabled={!position || position.index >= position.total}
                       onClick={() => {
                         adjacentFocus.current = {
@@ -378,7 +382,12 @@ export function TicketHeader({
                     </IconButton>
                   </span>
                 )}
-                <IconButton label="Close ticket details" onClick={onClose}>
+                <IconButton
+                  label="Close ticket details"
+                  shortcut="Esc"
+                  aria-keyshortcuts="Escape"
+                  onClick={onClose}
+                >
                   <X />
                 </IconButton>
               </div>
