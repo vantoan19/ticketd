@@ -1842,7 +1842,10 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   list-style: none;
   margin-left: -20px;
 }
-.markdown-document .context-link {
+/* A record link (a ticket, Document or attachment that opens in place) is a
+   button drawn as a link. It is styled everywhere, not only inside Markdown:
+   portalled dialogs such as the attachment preview use it too (shell AT-11). */
+.context-link {
   display: inline;
   padding: 0;
   border: 0;
@@ -1855,7 +1858,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   text-underline-offset: 4px;
   cursor: pointer;
 }
-.markdown-document .context-link:hover {
+.context-link:hover {
   color: var(--interactive);
 }
 .markdown-document li + li {
