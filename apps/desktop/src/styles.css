@@ -620,6 +620,10 @@
 .ui-sheet[data-side="right"] {
   border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
+/* A navigation sheet: at most 280px, or the window less 32px (section 5). */
+.ui-sheet[data-size="nav"] {
+  width: min(280px, calc(100vw - 32px));
+}
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }

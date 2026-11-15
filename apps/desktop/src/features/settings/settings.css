@@ -9,55 +9,42 @@
   background: var(--background);
   color: var(--foreground);
 }
+/* Every entry, Search included, is one 32px row: icon, label, then a key
+   hint or a dot. Hover is --recessed on the canvas, the open page --accent. */
 .settings-back,
-.settings-search-entry,
-.settings-nav li button {
+.settings-nav-row {
   display: flex;
   align-items: center;
+  gap: 10px;
   width: 100%;
   height: 32px;
   min-height: 32px;
   flex: none;
+  padding: 0 8px;
   border-radius: var(--radius);
   text-align: left;
   color: var(--muted-foreground);
 }
 .settings-back {
   gap: 8px;
-  padding: 0 8px;
-}
-.settings-nav li button {
-  gap: 10px;
-  padding: 0 8px;
 }
 .settings-back:hover,
-.settings-nav li button[aria-current="page"] {
+.settings-nav-row[aria-current="page"] {
   background: var(--accent);
   color: var(--foreground);
 }
-/* Nav rows on the canvas hover on --recessed, quieter than the current page. */
-.settings-nav li button:hover:not([aria-current="page"]) {
+.settings-nav-row:hover:not([aria-current="page"]) {
   background: var(--recessed);
   color: var(--foreground);
 }
 .settings-search-entry {
-  gap: 8px;
-  margin: 8px 0 6px;
-  padding: 0 6px 0 10px;
-  background: var(--surface);
-  box-shadow: var(--shadow-border-base);
-  color: var(--disabled-foreground);
+  margin-top: 8px;
 }
-.settings-search-entry:hover {
-  box-shadow: 0 0 0 1px var(--control-boundary);
-}
-.settings-search-entry[aria-current="page"] {
-  box-shadow: 0 0 0 1px var(--input-focus);
-  color: var(--foreground);
+.settings-nav-query {
+  color: var(--muted-foreground);
 }
 .settings-back:focus-visible,
-.settings-search-entry:focus-visible,
-.settings-nav li button:focus-visible {
+.settings-nav-row:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
@@ -93,42 +80,13 @@
   color: var(--muted-foreground);
 }
 
-/* The shell stacks the section list above the content on narrow windows. */
-@media (max-width: 767px) {
-  .workspace.settings-open {
-    flex-direction: column;
-  }
-  /* The sections become one wrapping strip, so the page below is never covered. */
-  .settings-nav {
-    width: 100%;
-    max-height: none;
-    overflow: visible;
-    gap: 4px;
-    padding-bottom: 4px;
-  }
-  .settings-nav nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .settings-nav [role="group"] {
-    display: contents;
-  }
-  .settings-nav-heading {
-    display: none;
-  }
-  .settings-nav ul {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .settings-search-entry {
-    margin: 0;
-  }
-  .settings-nav li button {
-    width: auto;
-    white-space: nowrap;
-  }
+/* Below 768px the same nav is the navigation sheet (DESIGN section 5): at
+   most 280px, or the window less 32px, opened from the panel bar. */
+.settings-nav.settings-nav-sheet {
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  background: var(--surface);
 }
 
 .settings-hint {

@@ -1,5 +1,14 @@
 import type { AgentSkill } from "@/lib/api/agent-skills";
 import type { CliStatus } from "@/lib/api/cli";
+import type { HarnessStatus } from "@/features/chats/client";
+
+/**
+ * True when Chat is on but no harness can start a Chat: neither Claude Code
+ * nor Codex is installed, compatible and usable. Settings › Chat lists why.
+ */
+export function chatNeedsSetup(harnesses: HarnessStatus[]) {
+  return !harnesses.some((harness) => harness.usable);
+}
 
 /**
  * True when the Command line page would show the tool as not found or in need

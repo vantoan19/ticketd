@@ -1,5 +1,10 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Check, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, Menu, type LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { IconTile } from "@/components/ui/icon-tile";
+import { StatusDot } from "@/components/ui/status-dot";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useSettingsState } from "@/features/settings/use-settings-state";
 import "@/features/settings/layout/settings-layout.css";
 
 /**
@@ -48,6 +53,9 @@ export function SettingsPage({
   children: ReactNode;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const { navOpen = false, setNavOpen, needsSetup } = useSettingsState();
+  const setup = Object.values(needsSetup).some(Boolean);
+  const mobile = useIsMobile();
   // Opening a page replaces what held focus; land on its title.
   useEffect(() => {
     if (!hidden && focusTitle) heading.current?.focus({ preventScroll: true });
@@ -55,12 +63,31 @@ export function SettingsPage({
   return (
     <div className="settings-shell" hidden={hidden}>
       <div className="settings-panel-bar">
-        <nav aria-label="Breadcrumb">
-          <ol>
-            <li>{group}</li>
-            <li aria-current="page">{label}</li>
-          </ol>
-        </nav>
+        {mobile ? (
+          // The nav is a sheet here: the breadcrumb becomes its trigger.
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-ml-2 min-w-0"
+            aria-haspopup="dialog"
+            aria-expanded={navOpen}
+            aria-label={`${label}, Settings sections${setup ? ", a section needs setup" : ""}`}
+            onClick={() => setNavOpen?.(true)}
+          >
+            <Menu aria-hidden="true" />
+            {label}
+            <ChevronDown aria-hidden="true" />
+            {setup && <StatusDot tone="attention" />}
+          </Button>
+        ) : (
+          <nav aria-label="Breadcrumb">
+            <ol>
+              <li>{group}</li>
+              <li aria-current="page">{label}</li>
+            </ol>
+          </nav>
+        )}
         {endSlot && <div className="settings-panel-bar-end">{endSlot}</div>}
       </div>
       <div className="settings-page-column">
@@ -70,9 +97,9 @@ export function SettingsPage({
             data-wordmark={wordmark || undefined}
           >
             {!wordmark && (
-              <span className="settings-page-icon" aria-hidden="true">
-                <Icon size={20} />
-              </span>
+              <IconTile>
+                <Icon />
+              </IconTile>
             )}
             <div className="settings-page-heading">
               <div className="settings-page-title-line">

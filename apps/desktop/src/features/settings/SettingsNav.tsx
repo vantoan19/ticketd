@@ -1,7 +1,14 @@
 import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Tooltip } from "@/components/ui/tooltip";
-import { StatusDot } from "@/components/ui/status-dot";
+import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { modifierKeyLabel } from "@/lib/platform";
 import {
   SETTINGS_GROUPS,
@@ -21,7 +28,48 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-/** Takes the workspace sidebar's place while Settings is open. */
+interface NavIndicator {
+  label: string;
+  tone: StatusDotTone;
+}
+
+/**
+ * The nav's items and the dot each carries: "Needs setup" (attention) on
+ * Command line, Agent skills and Chat when the page would ask for a step;
+ * "Connected" (positive) on a source with a saved configuration. The page
+ * says the same words in its StatusLabel.
+ */
+function useSettingsNavItems() {
+  const { entries } = useSources();
+  const { needsSetup } = useSettingsState();
+  const items: NavItem[] = [
+    ...SETTINGS_SECTIONS,
+    ...entries.map(({ connector }) =>
+      sourceSection(connector.provider, connector.name),
+    ),
+  ];
+  const indicator = (id: SettingsPageId): NavIndicator | null => {
+    if (
+      (id === "command-line" || id === "agent-skills" || id === "chat") &&
+      needsSetup[id]
+    )
+      return { label: "Needs setup", tone: "attention" };
+    if (
+      entries.some(
+        (entry) => `source-${entry.connector.provider}` === id && entry.saved,
+      )
+    )
+      return { label: "Connected", tone: "positive" };
+    return null;
+  };
+  return { items, indicator };
+}
+
+/**
+ * Takes the workspace sidebar's place while Settings is open. Below 768px the
+ * same nav opens as the navigation sheet, from the page trigger in the panel
+ * bar, like the workspace's own navigation.
+ */
 export function SettingsNav({
   onBack,
   selected = "appearance",
@@ -31,48 +79,49 @@ export function SettingsNav({
   selected?: SettingsPageId;
   onSelect?: (page: SettingsPageId) => void;
 }) {
-  const { entries } = useSources();
-  const { query, needsSetup } = useSettingsState();
-  const items: NavItem[] = [
-    ...SETTINGS_SECTIONS,
-    ...entries.map(({ connector }) =>
-      sourceSection(connector.provider, connector.name),
-    ),
-  ];
-  const indicator = (item: NavItem) => {
-    if (
-      (item.id === "command-line" || item.id === "agent-skills") &&
-      needsSetup[item.id]
-    )
-      return { label: "Needs setup", tone: "attention" as const };
-    if (
-      entries.some(
-        (entry) =>
-          `source-${entry.connector.provider}` === item.id && entry.saved,
-      )
-    )
-      return { label: "On", tone: "positive" as const };
-    return null;
-  };
+  const { items, indicator } = useSettingsNavItems();
+  const { query, navOpen = false, setNavOpen = () => {} } = useSettingsState();
+  const mobile = useIsMobile();
   const modifier = modifierKeyLabel();
   const findHint = modifier === "Ctrl" ? "Ctrl+F" : `${modifier}F`;
   const shown = query.trim();
-  return (
-    <aside className="settings-nav" aria-label="Settings">
-      <button type="button" className="settings-back" onClick={onBack}>
-        <ArrowLeft size={16} aria-hidden="true" /> Back to tickets
-      </button>
+  const open = (page: SettingsPageId) => {
+    setNavOpen(false);
+    onSelect?.(page);
+  };
+  const content = (
+    <>
       <button
         type="button"
-        className="settings-search-entry"
-        aria-current={selected === "search" ? "page" : undefined}
-        onClick={() => onSelect?.("search")}
+        className="settings-back"
+        onClick={() => {
+          setNavOpen(false);
+          onBack();
+        }}
       >
-        <Search size={16} aria-hidden="true" />
-        <span className="settings-nav-label">{shown || "Search settings"}</span>
-        <Kbd aria-hidden="true">{findHint}</Kbd>
+        <ArrowLeft size={16} aria-hidden="true" /> Back to tickets
       </button>
       <nav aria-label="Settings sections">
+        {/* A nav row like the others: the input is drawn on the Search page only. */}
+        <button
+          type="button"
+          className="settings-nav-row settings-search-entry"
+          aria-current={selected === "search" ? "page" : undefined}
+          onClick={() => open("search")}
+        >
+          <Search size={16} aria-hidden="true" />
+          <span className="settings-nav-label">
+            {shown ? (
+              <>
+                <span className="sr-only">Search settings: </span>
+                <span className="settings-nav-query">“{shown}”</span>
+              </>
+            ) : (
+              "Search settings"
+            )}
+          </span>
+          <Kbd aria-hidden="true">{findHint}</Kbd>
+        </button>
         {SETTINGS_GROUPS.map((group) => {
           const sections = items.filter((item) => item.group === group);
           if (sections.length === 0) return null;
@@ -83,13 +132,14 @@ export function SettingsNav({
               </p>
               <ul>
                 {sections.map((item) => {
-                  const dot = indicator(item);
+                  const dot = indicator(item.id);
                   return (
                     <li key={item.id}>
                       <button
                         type="button"
+                        className="settings-nav-row"
                         aria-current={selected === item.id ? "page" : undefined}
-                        onClick={() => onSelect?.(item.id)}
+                        onClick={() => open(item.id)}
                       >
                         <item.icon size={16} aria-hidden="true" />
                         <span className="settings-nav-label">{item.label}</span>
@@ -113,6 +163,28 @@ export function SettingsNav({
           );
         })}
       </nav>
+    </>
+  );
+  if (mobile)
+    return (
+      <Sheet open={navOpen} onOpenChange={setNavOpen}>
+        <SheetContent
+          side="left"
+          showCloseButton={false}
+          size="nav"
+          aria-label="Settings"
+        >
+          <SheetTitle className="sr-only">Settings</SheetTitle>
+          <SheetDescription className="sr-only">
+            Settings sections.
+          </SheetDescription>
+          <div className="settings-nav settings-nav-sheet">{content}</div>
+        </SheetContent>
+      </Sheet>
+    );
+  return (
+    <aside className="settings-nav" aria-label="Settings">
+      {content}
     </aside>
   );
 }
