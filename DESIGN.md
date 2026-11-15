@@ -253,6 +253,8 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 └──────────────┴───────────────────────────────────────────────────────────────────────┘
 ```
 
+Nothing is inserted above the panes. The way back to a graph a view was opened from is a ReturnCrumb, "← Workspace graph /", in the leading slot of the view's first header, before its title; the shell provides it (and the narrow navigation button) to PaneHeader and PageHeader through one slot, so a view never builds its own.
+
 The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar. The sidebar footer shows each configured source’s sync state and opens its settings.
 
 | Region          | Geometry and behavior                                                                                                                                         |
@@ -275,13 +277,13 @@ List and detail scroll independently, and the window itself never scrolls. In th
 
 Measure the available content panel width after navigation, not just the screen width. Preserve readable minimums rather than squeezing three panes together.
 
-| Available space              | Behavior                                                                                              |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Content width at least 840px | List and detail may share the workspace; enforce both pane minimums                                   |
-| Content width below 840px    | Selecting a ticket replaces the list in the content area; explicit Back returns to its prior position |
-| Window below 768px           | Navigation moves into a sheet; retain a labeled navigation trigger                                    |
-| Window near 390px            | One content column, 16px gutters, wrapping property values, full-width action forms where needed      |
-| Detail pane below 652px      | The property rail folds into a chip bar under the title (see Ticket detail)                           |
+| Available space              | Behavior                                                                                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Content width at least 840px | List and detail may share the workspace; enforce both pane minimums                                                                                                                                         |
+| Content width below 840px    | Selecting a ticket replaces the list in the content area; explicit Back returns to its prior position                                                                                                       |
+| Window below 768px           | Navigation moves into a sheet, opened by a 32px "Open navigation" icon button in the leading slot of the view's own header (never a bar above it), with the Chats-waiting or Inbox-unread dot on its corner |
+| Window near 390px            | One content column, 16px gutters, wrapping property values, full-width action forms where needed                                                                                                            |
+| Detail pane below 652px      | The property rail folds into a chip bar under the title (see Ticket detail)                                                                                                                                 |
 
 A navigation sheet is at most 280px or viewport width minus 32px. Popovers retain 16px viewport clearance and collide away from edges. Forms that cannot fit a popover use a sheet/dialog with a scrollable body. At short heights, keep form actions reachable without clipping the body.
 

@@ -848,38 +848,48 @@ body:has([data-slot="dialog-overlay"])
   color: var(--foreground);
   place-items: start center;
 }
+/* One 520px column, 120px from the top: wordmark, tile, title, sentence, the
+   file, Retry, then Details on a line of its own. */
 .recovery-screen-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: flex-start;
   width: 100%;
-  max-width: 480px;
-  margin-top: 12vh;
+  max-width: 520px;
+  margin-top: 72px;
   text-wrap: pretty;
 }
 .recovery-wordmark {
-  margin-bottom: 16px;
   font-size: var(--text-wordmark);
   font-weight: 600;
+  line-height: 20px;
+  letter-spacing: -0.3px;
+}
+.recovery-screen-body > [data-slot="icon-tile"] {
+  margin-top: 24px;
 }
 .recovery-title {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: var(--text-ui-line);
+  margin-top: 16px;
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: var(--text-title-line);
+  letter-spacing: -0.6px;
 }
 .recovery-sentence {
+  margin-top: 8px;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
 .recovery-path {
   display: flex;
+  align-self: stretch;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 8px 8px 8px 12px;
+  gap: 4px;
+  margin-top: 24px;
+  padding: 10px 8px 10px 12px;
   border-radius: var(--radius);
-  background: var(--recessed);
+  background: var(--surface);
   box-shadow: var(--shadow-border-base);
 }
 .recovery-path [data-slot="path-text"] {
@@ -896,6 +906,14 @@ body:has([data-slot="dialog-overlay"])
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+.recovery-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
   gap: 8px;
   margin-top: 16px;
 }
@@ -1657,12 +1675,30 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .content-panel:focus {
   outline: none;
 }
-.mobile-nav-bar {
+/* The narrow window's navigation button in a header's leading slot, with what
+   waits in the sheet as a dot on its corner, cut out by the panel's fill. */
+.shell-nav {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+}
+.shell-nav > [data-slot="status-dot"] {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+/* For a view whose header has no leading slot yet (ShellRow in App.tsx). */
+.shell-row {
   display: flex;
   align-items: center;
+  gap: 4px;
   height: 48px;
   flex: none;
   padding-inline: 8px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .icon-button {
   display: inline-flex;

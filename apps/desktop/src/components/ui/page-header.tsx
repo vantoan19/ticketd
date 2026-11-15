@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "cn";
+import { ShellLeading } from "@/components/ui/list-header";
 import "./patterns.css";
 
 /**
@@ -58,6 +59,8 @@ export function PageHeader({
       <div className="ui-page-header">
         <div className="ui-page-header-text">
           <div className="ui-page-header-title">
+            {/* The narrow window's navigation button, before the title. */}
+            <ShellLeading navOnly />
             <h1 id={titleId} tabIndex={titleId ? -1 : undefined}>
               {title}
             </h1>

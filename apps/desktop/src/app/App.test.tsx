@@ -1552,7 +1552,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
   expect(container.querySelector(".ticket-workspace.expanded")).toBeNull();
 });
 
-test("the narrow navigation trigger shows its label and gets focus back when the sheet closes", async () => {
+test("the narrow navigation trigger sits in the view's header and gets focus back when the sheet closes", async () => {
   vi.useFakeTimers();
   narrowViewport = true;
   bridge.invoke.mockImplementation(async () => []);
@@ -1561,7 +1561,9 @@ test("the narrow navigation trigger shows its label and gets focus back when the
     await vi.advanceTimersByTimeAsync(0);
   });
   const trigger = screen.getByRole("button", { name: "Open navigation" });
-  expect(trigger.textContent).toContain("Navigation");
+  // Shell SH-16: in the header's leading slot, not a 48px bar above it.
+  expect(trigger.closest('[data-slot="pane-header"]')).not.toBeNull();
+  expect(document.querySelector(".shell-row")).toBeNull();
   trigger.focus();
   fireEvent.click(trigger);
   expect(screen.getByRole("dialog", { name: "Navigation" })).toBeTruthy();
@@ -2199,9 +2201,14 @@ test.each(["ticket", "document", "plan"] as const)(
     fireEvent.click(
       screen.getByRole("button", { name: /^Open (ticket|item)$/ }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Back to workspace graph" }),
-    );
+    const back = screen.getByRole("button", {
+      name: "Back to workspace graph",
+    });
+    // Shell SH-14: a ReturnCrumb in the leading slot, not a strip over both panes.
+    expect(
+      back.closest('[data-slot="pane-header"], .shell-row'),
+    ).not.toBeNull();
+    fireEvent.click(back);
     expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe(
       "First",
     );

@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { ReturnCrumb } from "@/components/ui/list-header";
+import { ReturnCrumb, ShellLeading } from "@/components/ui/list-header";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useCopy } from "@/components/ui/use-copy";
@@ -157,6 +157,8 @@ export function TicketHeader({
   return (
     <div className="detail-header">
       <div className="detail-title-group">
+        {/* The narrow window's navigation, when the detail replaces the list. */}
+        {selected && <ShellLeading navOnly />}
         {selected && expanded && (
           // The list it came from, by name (P14), not a hard-coded "All tickets".
           <ReturnCrumb
