@@ -47,16 +47,6 @@
       "count": 3
     }
   },
-  "src/features/documents/Documents.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
-  "src/features/markdown/MarkdownEditor.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
   "src/features/markdown/MermaidDiagram.tsx": {
     "shadcn/no-restyle": {
       "count": 1
@@ -75,11 +65,6 @@
   "src/features/projects/Projects.tsx": {
     "shadcn/no-restyle": {
       "count": 3
-    }
-  },
-  "src/features/tickets/Activity.tsx": {
-    "shadcn/no-restyle": {
-      "count": 2
     }
   },
   "src/features/tickets/BulkControls.tsx": {
