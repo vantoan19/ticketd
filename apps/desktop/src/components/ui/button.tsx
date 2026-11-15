@@ -24,6 +24,8 @@ const buttonVariants = cva(
         "icon-xs": "size-8",
         "icon-sm": "size-8",
         "icon-lg": "size-12",
+        // An action link inside a sentence or caption: no padding, the text's height.
+        inline: "h-auto p-0 align-baseline",
       },
     },
     defaultVariants: {

@@ -14,7 +14,7 @@
   min-height: 0;
   overflow: hidden;
 }
-.chat-pane > .list-header,
+.chat-pane > .ui-pane-header,
 .chat-pane > .detail-header {
   flex: none;
 }
@@ -1578,12 +1578,6 @@ button.chat-file-name:focus-visible,
   color: var(--foreground);
   font-weight: 500;
 }
-.chat-pop .path-text {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-  font-weight: 400;
-}
 .chat-pop-branch {
   display: flex;
   align-items: center;
@@ -1774,14 +1768,6 @@ button.chat-file-name:focus-visible,
   display: inline-flex;
   max-width: 100%;
   vertical-align: bottom;
-}
-.ui-notice-description .path-text {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 100%;
-  vertical-align: bottom;
-  line-height: inherit;
-  font-weight: inherit;
 }
 .chat-pick-results {
   display: flex;

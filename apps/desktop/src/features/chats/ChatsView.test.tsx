@@ -625,7 +625,9 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Folder reset-email, missing").textContent).toBe("reset-email");
   // The path reads like the folder popover's: one line, not a code block.
   const notice = screen.getByRole("alert");
-  expect(within(notice).getByTitle("~/ticketd/chats/reset-email")).toBeTruthy();
+  expect(notice.querySelector('[data-slot="path-text"]')?.textContent).toBe(
+    "~/ticketd/chats/reset-email",
+  );
   expect(notice.querySelector("code")).toBeNull();
   expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
   client.nextFolder = "~/code/emails";

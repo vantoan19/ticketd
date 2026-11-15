@@ -1,0 +1,531 @@
+/* Shared feedback, page and list primitives (DESIGN.md sections 11 and 12).
+   Tokens only; features add layout, never colour or type. */
+
+/* Status line: the one transient surface, floating at the bottom centre of
+   its pane. Positioned by StatusLineRegion. */
+.ui-status-line {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  height: 40px;
+  padding: 0 4px 0 12px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-panel);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-menu);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  animation: status-line-enter 0.2s var(--motion-swift);
+}
+.ui-status-line-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--muted-foreground);
+}
+.ui-status-line-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.ui-status-line-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline-end: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes status-line-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+/* Skeleton: still, in the final geometry, and only after 300ms so a fast
+   read never flashes placeholders. */
+.ui-skeleton {
+  border-radius: var(--radius);
+  background: var(--accent);
+  animation: skeleton-appear 1ms linear 300ms both;
+}
+@keyframes skeleton-appear {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+
+/* IconTile: one recipe for page headers, settings rows and empty states. */
+.ui-icon-tile {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-panel);
+  background: var(--recessed);
+  color: var(--muted-foreground);
+  box-shadow: var(--shadow-border-base);
+}
+.ui-icon-tile svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.75;
+}
+
+/* EmptyState block: top-anchored 48px below the region's last fixed row,
+   centred in its column; never boxed or filled. */
+.ui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 48px 24px 24px;
+  text-align: center;
+}
+.ui-empty[data-anchor="center"] {
+  flex: 1 1 auto;
+  justify-content: center;
+  padding-top: 24px;
+}
+.ui-empty-title {
+  margin-top: 12px;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  text-wrap: balance;
+}
+.ui-empty-sentence {
+  max-width: 360px;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-wrap: pretty;
+}
+.ui-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.ui-empty-footnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-empty-footnote svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Pane header: 48px, never wraps (PaneHeader). The title truncates first;
+   below a 420px pane labelled controls become icon buttons (in React). */
+.ui-pane-header {
+  container-type: inline-size;
+  display: flex;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  min-width: 0;
+  padding: 0 8px 0 16px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
+}
+.ui-pane-header[data-leading] {
+  padding-inline-start: 8px;
+}
+.ui-pane-header-title {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ui-pane-header-title > h1,
+.ui-pane-header-title > h2 {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-pane-header-title > :not(h1, h2) {
+  flex: none;
+  white-space: nowrap;
+}
+.ui-pane-header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+}
+/* Search expands in place: the title gives way, Filters and Display stay. */
+.ui-pane-header:has([data-slot="pane-search"]) .ui-pane-header-title {
+  display: none;
+}
+.ui-pane-header:has([data-slot="pane-search"]) .ui-pane-header-actions {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ui-pane-header-caption {
+  flex: none;
+  height: 28px;
+  padding: 0 16px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 768px) {
+  .ui-pane-header {
+    padding-inline: 16px 8px;
+  }
+  .ui-pane-header[data-leading] {
+    padding-inline-start: 8px;
+  }
+}
+
+/* Page header (Plans, Projects, Attachments): a management page's title,
+   lede and one primary, on the 32px gutter (16px narrow). */
+.ui-management-page {
+  width: 100%;
+  max-width: 960px;
+  padding: 32px 32px 48px;
+}
+.ui-page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.ui-page-header-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-page-header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.ui-page-header-title > h1 {
+  min-width: 0;
+  color: var(--foreground);
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: var(--text-title-line);
+  letter-spacing: -0.6px;
+  text-wrap: balance;
+}
+.ui-page-header-lede {
+  max-width: 560px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-wrap: pretty;
+}
+.ui-page-header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.ui-page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.ui-page-body {
+  margin-top: 24px;
+}
+@media (max-width: 768px) {
+  .ui-management-page {
+    padding-inline: 16px;
+  }
+}
+
+/* Return crumb: "← Origin /" in a pane header's leading slot. */
+.ui-return-crumb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+.ui-return-crumb-origin {
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Search input: leading icon, trailing clear button, a width that never
+   shrinks. 32px in toolbars and popovers, 40px in dialogs. */
+.ui-search-input {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  width: 240px;
+  max-width: 100%;
+}
+.ui-search-input[data-fill] {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 360px;
+}
+.ui-search-input > svg {
+  position: absolute;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.ui-search-input > input {
+  width: 100%;
+  padding-inline: 32px 36px;
+}
+.ui-search-input > input::-webkit-search-cancel-button {
+  appearance: none;
+}
+.ui-search-input > [data-slot="search-clear"] {
+  position: absolute;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+}
+
+/* Disclosure: a 16px chevron that turns down, then the label and its count. */
+.ui-disclosure-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  text-align: start;
+  cursor: pointer;
+}
+.ui-disclosure-trigger > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  transition: transform 0.15s var(--motion-swift);
+}
+.ui-disclosure-trigger[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+.ui-disclosure-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.ui-disclosure-body {
+  padding-top: 4px;
+  padding-inline-start: 20px;
+}
+
+/* Clamp: about eight lines with a fade, then Show more at the text edge. */
+.ui-clamp-body[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--clamp-lines, 8);
+  mask-image: linear-gradient(to bottom, black 70%, transparent);
+}
+.ui-clamp-toggle {
+  margin-top: 4px;
+}
+
+/* PathText: name on line 1, folder on line 2 (middle-truncated); never wraps
+   mid-word. `inline` is one line inside a sentence, `folder` one muted
+   caption line. */
+.ui-path-text {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  user-select: text;
+}
+.ui-path-name {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: var(--text-code);
+  font-weight: 500;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-path-folder,
+.ui-path-text[data-layout="inline"],
+.ui-path-text[data-layout="folder"] {
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ui-path-folder,
+.ui-path-text[data-layout="folder"] {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: var(--text-caption-line);
+}
+.ui-path-text[data-layout="inline"] {
+  display: inline-flex;
+  vertical-align: bottom;
+  font-size: var(--text-code);
+  font-weight: 500;
+  line-height: inherit;
+}
+.ui-path-lead {
+  flex: none;
+}
+/* The part between the root and the last folders gives way first, keeping room
+   for its ellipsis; only then do the last folders shorten, at their end. Only
+   one part flexes at a time: weighted shrinking would still take a fraction of
+   a pixel from the end, and its ellipsis would then eat two characters. So the
+   middle grows into the room the end leaves, up to its text, and never shrinks;
+   once it is down to 2ch the end alone shrinks. */
+.ui-path-middle {
+  flex: 1 0 0;
+  min-width: 2ch;
+  max-width: max-content;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+}
+.ui-path-tail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pager: one centred "Show 50 more" under the content. */
+.ui-pager {
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px 16px;
+}
+
+/* Kbd keys in a row: "⌘ ⇧ M". */
+.ui-kbd-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Record link: a reference or record in running text. Foreground text with
+   a 1px interactive underline; hover takes the link colour. */
+.ui-record-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--interactive);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ui-record-link:hover {
+  color: var(--link-foreground);
+}
+.ui-record-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-segment);
+}
+.ui-record-link .ui-reference {
+  color: inherit;
+}
+.ui-record-link[data-gone] {
+  color: var(--muted-foreground);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* Badges: the 28px record chip and filter chip (P11). */
+.ui-badge-record,
+.ui-badge-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: 28px;
+}
+.ui-badge-record {
+  max-width: 280px;
+}
+.ui-badge-filter {
+  padding-inline-end: 4px;
+}
+.ui-badge-dimension {
+  color: var(--muted-foreground);
+}
+.ui-badge-filter [data-slot="badge-remove"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-segment);
+  color: var(--muted-foreground);
+}
+.ui-badge-filter [data-slot="badge-remove"]:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.ui-badge-filter [data-slot="badge-remove"] svg {
+  width: 16px;
+  height: 16px;
+}

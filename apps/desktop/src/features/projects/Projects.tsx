@@ -1,13 +1,6 @@
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
 import { useEffect, useState } from "react";
-import {
-  Check,
-  Copy,
-  Folder,
-  FolderOpen,
-  MoreHorizontal,
-  Plus,
-} from "lucide-react";
+import { Folder, FolderOpen, MoreHorizontal, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Item } from "@/components/ui/item";
 import { DialogShell } from "@/components/ui/dialog-shell";
@@ -21,13 +14,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { useCopy } from "@/components/ui/use-copy";
+import { CopyButton } from "@/components/ui/copy-button";
 import { client, type Project } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
-import { nameFromFolder } from "@/features/projects/paths";
+import { nameFromFolder } from "@/lib/paths";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
-import { PathText } from "@/features/projects/PathText";
+import { PathText } from "@/components/ui/path-text";
 import "./projects.css";
 import { SectionHeader } from "@/components/ui/section-header";
 
@@ -60,26 +53,6 @@ function ticketsLabel(count: TicketCount | undefined) {
   if (!count) return "";
   const noun = count.total === 1 ? "ticket" : "tickets";
   return `${count.total} ${noun} · ${count.open} open`;
-}
-
-/** An icon button that copies text and announces it. */
-function CopyIcon({ label, text }: { label: string; text: string }) {
-  const { copied, error, copy } = useCopy();
-  return (
-    <>
-      <IconButton
-        type="button"
-        label={label}
-        onClick={() => void copy("text", text)}
-      >
-        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-      </IconButton>
-      <span className="sr-only" role="status">
-        {copied && "Copied"}
-        {error && "Copy unavailable. Select the text."}
-      </span>
-    </>
-  );
 }
 
 function CheckoutRow({
@@ -143,13 +116,13 @@ function CheckoutRow({
   return (
     <Item>
       <span className="checkout-text">
-        <PathText path={path} />
+        <PathText path={path} layout="inline" />
         <span className="checkout-note">
           {first ? "First checkout" : "Checkout"}
           {revealError && ` · ${revealError}`}
         </span>
       </span>
-      <CopyIcon label={`Copy checkout path ${path}`} text={path} />
+      <CopyButton label="Copy path" subject={path} text={path} />
       <IconButton
         type="button"
         label={`Show ${path} in ${manager}`}
@@ -210,12 +183,8 @@ function FolderPicker({
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
         />
-        <span
-          className="folder-path"
-          data-empty={!path}
-          title={path || undefined}
-        >
-          {path ? <PathText path={path} /> : "No folder chosen"}
+        <span className="folder-path" data-empty={!path}>
+          {path ? <PathText path={path} layout="inline" /> : "No folder chosen"}
         </span>
         <Button type="button" variant="outline" size="sm" onClick={choose}>
           {path ? "Change…" : "Choose folder…"}
@@ -519,10 +488,7 @@ export function Projects({
                     <div className="project-card-footer">
                       <span>Project ID</span>
                       <code title={item.id}>{truncateId(item.id)}</code>
-                      <CopyIcon
-                        label={`Copy project ID of ${item.name}`}
-                        text={item.id}
-                      />
+                      <CopyButton label="Copy project ID" text={item.id} />
                       <span className="projects-spacer" />
                       <span>
                         Used by <code>ticketd list --project</code>

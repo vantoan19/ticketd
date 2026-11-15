@@ -25,7 +25,7 @@ import {
 import { StatusDot } from "@/components/ui/status-dot";
 import { useCopy } from "@/components/ui/use-copy";
 import { fileManagerName } from "@/lib/platform";
-import { PathText } from "@/features/projects/PathText";
+import { PathText } from "@/components/ui/path-text";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import {
   useChatClient,
@@ -86,7 +86,7 @@ function FolderGroup({ chat }: { chat: ChatState }) {
       </div>
       {/* A folder ticketd keeps says so; its scratch path means nothing to
           read, and Copy still gives it (LIVE2-6). */}
-      {!folder.managed && <PathText path={folder.path} />}
+      {!folder.managed && <PathText path={folder.path} layout="folder" />}
       {branch &&
         (branch.name ? (
           <p className="chat-pop-branch">

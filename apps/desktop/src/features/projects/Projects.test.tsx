@@ -36,12 +36,18 @@ function openMenu(name: string) {
   });
 }
 
-test("shows checkouts home-relative on one line with the full path on hover", () => {
+test("shows checkouts home-relative on one line, never as a native title", () => {
   render(<Projects {...props} />);
   const list = screen.getByRole("list", { name: "Checkouts of Original" });
-  const path = within(list).getByTitle("/Users/me/src/old");
-  expect(path.textContent).toBe("~/src/old");
-  expect(within(list).getByTitle("/other/checkout")).toBeTruthy();
+  const paths = Array.from(
+    list.querySelectorAll<HTMLElement>('[data-slot="path-text"]'),
+  );
+  expect(paths.map((path) => path.textContent)).toEqual([
+    "~/src/old",
+    "/other/checkout",
+  ]);
+  // The full path is in a tooltip (P4), not a native title.
+  expect(list.querySelector("[title]")).toBeNull();
 });
 
 test("labels the project's own path as the first checkout, not the alphabetically first", () => {
@@ -73,10 +79,10 @@ test("copies a checkout path and the project ID, and shows the folder in the fil
   const reveal = vi.spyOn(workspaceClient, "reveal").mockResolvedValue();
   render(<Projects {...props} />);
   expect(screen.getByText(/identity survives moves and renames/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /Copy project ID/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Copy project ID" }));
   expect(writeText).toHaveBeenCalledWith("p1");
   fireEvent.click(
-    screen.getByRole("button", { name: "Copy checkout path /other/checkout" }),
+    screen.getByRole("button", { name: "Copy path /other/checkout" }),
   );
   expect(writeText).toHaveBeenCalledWith("/other/checkout");
   fireEvent.click(
@@ -232,5 +238,6 @@ test("a long checkout path keeps all its text for the middle to truncate", () =>
   const long =
     "/private/tmp/claude-501/-Users-me-Projects/8b654d0c-8f7d/repo-api";
   render(<Projects {...props} projects={[{ ...project, paths: [long] }]} />);
-  expect(screen.getByTitle(long).textContent).toBe(long);
+  const path = document.querySelector('[data-slot="path-text"]');
+  expect(path?.textContent).toBe(long);
 });
