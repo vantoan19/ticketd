@@ -101,16 +101,17 @@
   color: var(--foreground);
 }
 
-/* The plan's one dock slot while its turn runs: 32px. */
+/* The plan's recessed 28px pill in the dock. */
 .chat-plan-pill {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   min-width: 0;
-  height: 32px;
+  height: 28px;
   padding: 0 8px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
+  background: var(--recessed);
   color: var(--muted-foreground);
   text-align: left;
 }
