@@ -100,13 +100,31 @@ pub(super) fn unattended_params(
 
 /// The `config` overrides of an unattended thread: none of the person's own MCP
 /// servers, plugins (which bring servers and skills of their own) or ChatGPT apps
-/// start, so the agent has only what Codex itself gives it (#387 L5, D4).
+/// start, and everything else a config override can switch off is off too: hooks (a
+/// `PermissionRequest` hook could allow what the session declines), the `notify`
+/// program, project AGENTS.md, memories, sub-agents, computer and browser use, the
+/// bundled skills and the skills list in the prompt (#387 L5, D4). Every key is in
+/// Codex's config schema from 0.162.1 to 0.169.
+/// Still applying, because no override reaches them: the person's rules, global
+/// AGENTS.md and the skills in `~/.agents/skills`.
 /// `config` is the person's configuration (`config/read`), which names their servers;
 /// Codex merges an override table into theirs, so each is turned off by name.
 // ponytail: a server added to the person's configuration between the read and
 // `thread/start` still starts; the next run reads it again.
 pub(super) fn personal_tools_off(config: Option<&Value>) -> Value {
-    let mut off = json!({"features.plugins": false, "features.apps": false});
+    let mut off = json!({
+        "features.plugins": false,
+        "features.apps": false,
+        "features.hooks": false,
+        "features.memories": false,
+        "features.multi_agent": false,
+        "features.computer_use": false,
+        "features.browser_use": false,
+        "notify": [],
+        "project_doc_max_bytes": 0,
+        "skills.bundled.enabled": false,
+        "skills.include_instructions": false,
+    });
     let servers = config
         .and_then(|config| config["mcp_servers"].as_object())
         .into_iter()

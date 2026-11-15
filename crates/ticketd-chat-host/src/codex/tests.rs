@@ -972,6 +972,45 @@ async fn an_unattended_thread_never_asks_and_a_declined_tool_fails_its_turn() {
     }
 }
 
+async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
+    let (mut peer, io) = pipes();
+    peer.load(fixture);
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::New,
+        unattended: Some(unattended(false, false)),
+        ticketd_cli: None,
+        taken_over: false,
+        settings: StartSettings::default(),
+    };
+    tokio::join!(open_over(io, &request, options()), peer.play()).0
+}
+
+/// On Windows an unattended run asks Codex whether its sandbox can start, and a
+/// Codex that says it cannot fails the run before any thread starts.
+#[tokio::test(start_paused = true)]
+async fn an_unattended_run_fails_at_once_when_the_windows_sandbox_is_not_ready() {
+    let Err(problem) = open_unattended(fixture!("unattended_sandbox_not_ready")).await else {
+        panic!("the run fails");
+    };
+    assert_eq!(
+        problem.message,
+        "Codex could not start its sandbox on this computer. Update Codex (`codex update`) and try again."
+    );
+}
+
+/// A Codex that does not know the readiness method is carried on with as before.
+#[tokio::test(start_paused = true)]
+async fn a_codex_without_the_readiness_method_is_not_blocked() {
+    assert!(
+        open_unattended(fixture!("unattended_readiness_unknown"))
+            .await
+            .is_ok()
+    );
+}
+
 /// Codex reports a command the person declined as `declined`: it never ran, so it is
 /// not a failure.
 #[test]
@@ -1160,24 +1199,31 @@ fn an_unattended_session_declines_every_approval_request_at_once() {
 }
 
 /// L5: an unattended thread starts none of the person's MCP servers (named from
-/// their configuration), plugins or apps.
+/// their configuration), plugins or apps, and runs none of their hooks, notify
+/// program, project instructions, memories, sub-agents, computer or browser use, or
+/// skills that Codex lets a thread switch off.
 #[test]
-fn an_unattended_thread_turns_off_each_of_the_persons_mcp_servers_plugins_and_apps() {
+fn an_unattended_thread_turns_off_what_codex_lets_it_of_the_persons_setup() {
+    let always = json!({
+        "features.plugins": false,
+        "features.apps": false,
+        "features.hooks": false,
+        "features.memories": false,
+        "features.multi_agent": false,
+        "features.computer_use": false,
+        "features.browser_use": false,
+        "notify": [],
+        "project_doc_max_bytes": 0,
+        "skills.bundled.enabled": false,
+        "skills.include_instructions": false,
+    });
     let config =
         json!({"mcp_servers": {"docs": {"command": "docs-mcp"}, "web": {"url": "https://x"}}});
-    assert_eq!(
-        super::personal_tools_off(Some(&config)),
-        json!({
-            "features.plugins": false,
-            "features.apps": false,
-            "mcp_servers.docs.enabled": false,
-            "mcp_servers.web.enabled": false,
-        })
-    );
-    assert_eq!(
-        super::personal_tools_off(None),
-        json!({"features.plugins": false, "features.apps": false})
-    );
+    let mut with_servers = always.clone();
+    with_servers["mcp_servers.docs.enabled"] = json!(false);
+    with_servers["mcp_servers.web.enabled"] = json!(false);
+    assert_eq!(super::personal_tools_off(Some(&config)), with_servers);
+    assert_eq!(super::personal_tools_off(None), always);
 }
 
 /// L2: a Chat taken over from a run resumes with the person's own approval policy

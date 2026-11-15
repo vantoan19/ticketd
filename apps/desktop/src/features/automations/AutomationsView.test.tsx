@@ -484,6 +484,11 @@ test("with Codex chosen, the switches it cannot enforce are fixed on and the tur
       /Codex applies its own sandbox: it can read any file you can read on this computer/,
     ),
   ).toBeTruthy();
+  expect(
+    within(form).getByText(
+      /It cannot switch off your Codex rules, your global AGENTS.md/,
+    ),
+  ).toBeTruthy();
   expect(control("spinbutton", "Turns").disabled).toBe(true);
   expect(within(form).getByText("Not applied with Codex")).toBeTruthy();
   expect(control("spinbutton", "Minutes").disabled).toBe(false);
