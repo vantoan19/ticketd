@@ -12,21 +12,22 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
-/* One line: the file name stays whole and the folder gives way with an ellipsis. */
+/* Two lines: the file name, never broken inside a word, then its folder,
+   which gives way in the middle. The row keeps its height for any path. */
 .backups-last-path {
   display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 .backups-last-path .backups-file {
-  flex: none;
-  max-width: 60%;
-}
-.backups-last-folder {
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* pre, not nowrap: a flex item drops its leading space before the "·". */
-  white-space: pre;
+  white-space: nowrap;
+}
+.backups-last-path .path-text {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
 }
 .backups-icon-error {
   color: var(--error-foreground);

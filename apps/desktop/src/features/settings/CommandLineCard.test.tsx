@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import {
   SettingsStateContext,
@@ -15,6 +16,10 @@ import {
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn(),
+  revealItemInDir: vi.fn(),
+}));
 
 afterEach(() => {
   cleanup();
@@ -83,6 +88,18 @@ test("a missing CLI shows guidance, and Check again finds a later install", asyn
   invoke.mockResolvedValueOnce(base);
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   expect(await screen.findByText("Installed")).toBeTruthy();
+});
+
+test("an installation guide that cannot open says so", async () => {
+  invoke.mockResolvedValue({ ...base, on_path: false });
+  vi.mocked(openUrl).mockRejectedValueOnce(new Error("No browser"));
+  render(<CommandLineCard />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Installation guide" }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not open the installation guide: Error: No browser",
+  );
 });
 
 test("copies a quick-reference command", async () => {

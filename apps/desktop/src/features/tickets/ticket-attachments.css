@@ -121,6 +121,22 @@
   max-height: none;
   overflow: visible;
 }
+/* In the Attach file dialog (a flex column on this tab), the Existing files
+   tab and its file list take whatever height the window leaves; the list
+   gives way first, so the footer with Insert selected never falls below the
+   window edge. */
+[data-slot="dialog-content"] > .attachment-existing,
+.attachment-existing .attachment-existing {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.attachment-existing .attachment-existing-results {
+  flex: 0 1 auto;
+  min-height: 96px;
+}
+.attachment-existing-footer {
+  flex: none;
+}
 .attachment-existing-results .attachment-row {
   padding: 12px 8px;
   border-bottom: 1px solid var(--border);

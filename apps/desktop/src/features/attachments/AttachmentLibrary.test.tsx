@@ -271,7 +271,10 @@ test("library searches core metadata and state and opens the chosen stable file"
   fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
     target: { value: "no match" },
   });
-  await screen.findByText("No matching files");
+  await screen.findByText("No files match “no match”");
+  expect(screen.queryByRole("table")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+  expect(await screen.findByRole("button", { name: "Trace" })).toBeTruthy();
 });
 
 test("adding files to the library offers storage without an insertion into nowhere", async () => {
@@ -345,4 +348,58 @@ test("usage stays compact in the table and opens details without labeling recove
   expect(
     screen.getByRole("button", { name: "Recovery protected" }),
   ).toBeTruthy();
+});
+
+test("an empty library says so, with no table, paging or Clean up over nothing", async () => {
+  vi.mocked(invoke).mockResolvedValue([]);
+  render(<AttachmentLibrary onPreview={() => {}} />);
+  expect(await screen.findByText("No attachments yet")).toBeTruthy();
+  expect(screen.queryByText(/No files match/)).toBeNull();
+  expect(screen.queryByRole("table")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Previous files" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Next files" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Clean up" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Add files" })).toBeTruthy();
+});
+
+test("typing a search keeps the rows in place until the new answer arrives", async () => {
+  const row = (id: string) => ({
+    attachment: {
+      id,
+      display_name: id,
+      original_filename: `${id}.txt`,
+      size_bytes: 1,
+      kind: "local_snapshot",
+      locator: `${id}/bytes/${id}.txt`,
+    },
+    related: false,
+    usage: { eligible: true, legacy_drafts_pending: false, protections: [] },
+  });
+  let answer: (rows: unknown[]) => void = () => {};
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command !== "search_attachments") return [];
+    const { query } = args as { query: { search: string } };
+    if (query.search === "") return [row("Trace"), row("Notes")];
+    return new Promise((done) => {
+      answer = done;
+    });
+  });
+  render(<AttachmentLibrary onPreview={() => {}} />);
+  await screen.findByRole("button", { name: "Trace" });
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
+    target: { value: "no" },
+  });
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("search_attachments", {
+      query: expect.objectContaining({ search: "no" }),
+    }),
+  );
+  // No blank "Loading files…" between keystrokes: the old rows stay.
+  expect(screen.queryByText("Loading files…")).toBeNull();
+  expect(screen.getByRole("button", { name: "Trace" })).toBeTruthy();
+  answer([row("Notes")]);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Trace" })).toBeNull(),
+  );
+  expect(screen.getByRole("button", { name: "Notes" })).toBeTruthy();
 });

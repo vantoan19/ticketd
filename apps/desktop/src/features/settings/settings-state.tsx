@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -26,7 +27,7 @@ export function SettingsStateProvider({
 }: {
   /** Opens a Settings page; the page that is open belongs to the parent. */
   onOpenPage?: (page: SettingsPageId) => void;
-  /** False while Settings is closed: nothing is read until it opens. */
+  /** False while Settings is closed; indicators are read at startup and on each open. */
   active?: boolean;
   children: ReactNode;
 }) {
@@ -53,9 +54,14 @@ export function SettingsStateProvider({
         () => set("agent-skills", undefined),
       );
   }, []);
-  // Read when Settings opens; pages refresh after they change something.
+  // Read once at startup, so the nav shows its dots on Settings' first frame
+  // instead of popping them in, then again each time Settings opens. A reading
+  // keeps the last result until the new one arrives. Pages refresh after they
+  // change something.
+  const read = useRef(false);
   useEffect(() => {
-    if (!active) return;
+    if (!active && read.current) return;
+    read.current = true;
     refreshIndicators();
   }, [active, refreshIndicators]);
   const value = useMemo(

@@ -445,7 +445,13 @@ export function AttachmentPicker({
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent
         ref={dropTarget}
-        className="sm:max-w-170 max-h-dvh overflow-y-auto"
+        className={
+          tab === "existing"
+            ? // Existing files stays inside the window and only its list
+              // scrolls, so Insert selected is always in view.
+              "sm:max-w-170 flex max-h-dvh flex-col overflow-hidden"
+            : "sm:max-w-170 max-h-dvh overflow-y-auto"
+        }
       >
         <DialogHeader>
           <DialogTitle>

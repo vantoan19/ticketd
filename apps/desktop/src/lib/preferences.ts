@@ -182,18 +182,34 @@ export function useThemeSync() {
   const { theme } = usePreferences();
   // main.tsx applies the stored theme before the first paint.
   useEffect(() => applyTheme(dark ? "dark" : "light"), [dark]);
-  // The title bar and native dialogs follow the choice too; System hands
-  // control back to the operating system.
-  useEffect(() => {
-    void windowClient.setTheme(theme === "system" ? null : theme);
-  }, [theme]);
-  // The transparent macOS title bar shows the window color: the canvas.
-  useEffect(() => {
-    void windowClient.setBackgroundColor(dark ? "#0A0A0A" : "#FAFAFA");
-  }, [dark]);
+  useEffect(() => syncWindowTheme(theme), [theme]);
+  useEffect(() => syncWindowColor(dark ? "dark" : "light"), [dark]);
 }
 
-/** Applies the stored theme before the first render. */
+/**
+ * The title bar and native dialogs follow the choice too; System hands
+ * control back to the operating system.
+ */
+function syncWindowTheme(theme: ThemePreference) {
+  void windowClient.setTheme(theme === "system" ? null : theme);
+}
+
+/** The transparent macOS title bar shows the window color: the canvas. */
+function syncWindowColor(resolved: "light" | "dark") {
+  void windowClient.setBackgroundColor(
+    resolved === "dark" ? "#0A0A0A" : "#FAFAFA",
+  );
+}
+
+/**
+ * Applies the stored theme before the first render, to the document and the
+ * native window both. A startup failure renders without the app, so its
+ * `useThemeSync` would never theme the title bar.
+ */
 export function applyStoredTheme() {
-  applyTheme(resolveTheme(loadPreferences().theme, systemPrefersDark()));
+  const { theme } = loadPreferences();
+  const resolved = resolveTheme(theme, systemPrefersDark());
+  applyTheme(resolved);
+  syncWindowTheme(theme);
+  syncWindowColor(resolved);
 }

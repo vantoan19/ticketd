@@ -112,6 +112,26 @@ test("choosing Dark or Full width is stored and exposed as selected", () => {
   });
 });
 
+test("a page opens at its top, not where the previous page was scrolled", () => {
+  const view = render(
+    <SettingsView
+      selected="appearance"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  const scroller = view.container.querySelector(".settings-page")!;
+  scroller.scrollTop = 600;
+  view.rerender(
+    <SettingsView
+      selected="google-drive"
+      onRestore={async () => {}}
+      onOpenInbox={() => {}}
+    />,
+  );
+  expect(scroller.scrollTop).toBe(0);
+});
+
 test("Google Drive opens as its own page in the shell", () => {
   render(
     <SettingsView

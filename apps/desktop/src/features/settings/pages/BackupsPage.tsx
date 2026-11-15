@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive,
   Check,
@@ -16,6 +16,7 @@ import { StatusLabel } from "@/components/ui/status-label";
 import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { revealFile } from "@/lib/reveal";
+import { PathText } from "@/features/projects/PathText";
 import { localDate, splitPath } from "@/features/settings/settings-format";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
@@ -160,13 +161,13 @@ function LastBackupRow({
         </span>
       }
       description={
+        // The file name whole on its own line; the folder under it gives way
+        // in the middle, with the full path on hover.
         <span className="backups-last-path">
-          <code className="backups-file">{name}</code>
-          {folder && (
-            <span className="backups-last-folder" title={folder}>
-              {` · in ${folder}`}
-            </span>
-          )}
+          <code className="backups-file" title={name}>
+            {name}
+          </code>
+          {folder && <PathText path={folder} />}
         </span>
       }
       trailing={
@@ -189,6 +190,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
   const [failure, setFailure] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const choosing = useRef(false);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [restoredCount, setRestoredCount] = useState(0);
   const loadLast = useCallback(async () => {
@@ -215,7 +217,9 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
     };
   }, []);
   async function backUp() {
-    setBusy(true);
+    // Only one save sheet at a time; the row says nothing until a path returns.
+    if (choosing.current) return;
+    choosing.current = true;
     setFailure("");
     setMessage("");
     try {
@@ -226,6 +230,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
         extension: "sqlite3",
       });
       if (path === null) return;
+      setBusy(true);
       let recorded: boolean;
       try {
         recorded = await client.backupWorkspace(path);
@@ -250,6 +255,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
     } catch (reason) {
       setFailure(`Could not open the save dialog: ${String(reason)}`);
     } finally {
+      choosing.current = false;
       setBusy(false);
     }
   }
