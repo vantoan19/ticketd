@@ -1,8 +1,9 @@
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FailureDetails } from "@/components/ui/failure-alert";
+import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
-  clearWorkspaceFailure,
   useWorkspaceState,
   type WorkspaceProblem,
 } from "@/lib/workspace-state";
@@ -24,24 +25,42 @@ const messages: Record<WorkspaceProblem, string> = {
  * until Retry succeeds. Everything else that fails for the same cause stays
  * quiet: editing controls are disabled with the reason as their tooltip.
  */
-export function WorkspaceBand({ onRetry }: { onRetry: () => void }) {
+export function WorkspaceBand({
+  onRetry,
+}: {
+  onRetry: () => void | Promise<void>;
+}) {
+  const busy = useRef(false);
+  const [pending, setPending] = useState(false);
   const state = useWorkspaceState();
   if (!state) return null;
   return (
     <div role="status" data-slot="workspace-band" className="workspace-band">
       <p className="workspace-band-message">
         <StatusDot tone="attention" size={10} />
-        {messages[state.problem]}
+        <Tooltip content={messages[state.problem]} overflowOnly>
+          <span>{messages[state.problem]}</span>
+        </Tooltip>
       </p>
-      <FailureDetails details={state.details} />
+      <FailureDetails details={state.details} variant="popover" />
       <Button
         type="button"
         variant="ghost"
         size="sm"
+        disabled={pending}
         onClick={() => {
-          // Clear first: a write that still fails raises the band again.
-          clearWorkspaceFailure();
-          onRetry();
+          if (busy.current) return;
+          busy.current = true;
+          setPending(true);
+          void Promise.resolve()
+            .then(onRetry)
+            .catch(() => {
+              // The failure remains visible; the bridge reports an updated cause.
+            })
+            .finally(() => {
+              busy.current = false;
+              setPending(false);
+            });
         }}
       >
         Retry

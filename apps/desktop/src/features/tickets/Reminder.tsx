@@ -1,9 +1,10 @@
+import { useReminderTime } from "./use-reminder-time";
 import { RailRow } from "./RailSection";
 import { TicketCommandPicker } from "./TicketCommandPicker";
 import type { Ticket, Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { TicketCommandContext } from "@/lib/ticket-command-actions";
-import { localInstants, localValue } from "./reminder-time";
+import { localValue } from "./reminder-time";
 import { ReminderDateTime } from "./ReminderDateTime";
 import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
 import { Bell, CalendarClock } from "lucide-react";
@@ -58,7 +59,8 @@ export function Reminder({
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState("");
   const [occurrence, setOccurrence] = useState("");
-  const options = localInstants(draft);
+  const time = useReminderTime(draft, occurrence);
+  const options = time.instants;
   // Reading and changing the reminder fail separately: a failed read names
   // the trigger, a failed change shows under the actions until the next try.
   const [loadFailure, setLoadFailure] = useState<FailureDescription | null>(
@@ -265,6 +267,7 @@ export function Reminder({
             draft={draft}
             occurrence={occurrence}
             pending={pending}
+            past={time.past}
             onDraft={(value) => {
               setDraft(value);
               setOccurrence("");
@@ -303,11 +306,13 @@ export function Reminder({
                 size="sm"
                 disabled={
                   pending ||
+                  time.past ||
                   options.length === 0 ||
                   (options.length > 1 && !occurrence)
                 }
                 onClick={() => {
-                  const selected = occurrence || options[0]!.toISOString();
+                  const selected = time.selectForSubmit();
+                  if (!selected) return;
                   void save(`schedule:${selected}`, () => selected);
                 }}
               >

@@ -1,15 +1,25 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { z } from "zod";
 import { draftRetention, type DraftRetention } from "./api/attachments";
 import { isWorkspaceCode, toFailure } from "./api/bridge-failure";
+import { countsClient } from "./api/counts";
 import { RecoveryScreen } from "./recovery-screen";
 import {
   clearWorkspaceFailure,
+  getWorkspaceFailure,
+  type WorkspaceState,
   reportWorkspaceFailure,
 } from "./workspace-state";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureDetails } from "@/components/ui/failure-alert";
+import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { describeFailure } from "@/lib/api/describe-failure";
 import {
@@ -177,16 +187,19 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
   // Why drafts are not protected, or null. The workspace band says so; editors
   // read it only to stop claiming their content is protected.
   const [failure, setFailureState] = useState<unknown>(null);
+  const recoveryFailure = useRef<WorkspaceState>(null);
   const setFailure = useCallback((reason: unknown) => {
     setFailureState(reason);
     if (reason === null) {
-      clearWorkspaceFailure();
+      clearWorkspaceFailure(recoveryFailure.current);
+      recoveryFailure.current = null;
       return;
     }
     // A workspace-level kind already raised the band through the bridge.
-    const kind = toFailure(reason).kind;
-    if (!isWorkspaceCode(kind))
-      reportWorkspaceFailure("drafts_unprotected", toFailure(reason).message);
+    const failed = toFailure(reason);
+    recoveryFailure.current = isWorkspaceCode(failed.kind)
+      ? failed.workspaceFailure
+      : reportWorkspaceFailure("drafts_unprotected", failed.message);
   }, []);
   // A cutover action failed; shown beside its button.
   const [cutoverFailure, setCutoverFailure] = useState<unknown>(null);
@@ -194,6 +207,7 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
   const [cutoverPending, setCutoverPending] = useState(false);
   useEffect(() => {
     let active = true;
+    const startupFailure = getWorkspaceFailure();
     void (async () => {
       const makeStore = (initial: DraftRetention[]): RecoveryStore =>
         recoveryStore(
@@ -325,6 +339,16 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem(key);
       }
       const pending = await draftRetention.cutoverPending();
+      if (startupFailure) {
+        // Opening recovery is a read. Verify write access separately before
+        // retiring its stale band; a read-only workspace can still open.
+        await countsClient.sidebar().then(
+          () => {
+            if (active) clearWorkspaceFailure(startupFailure);
+          },
+          () => {},
+        );
+      }
       if (active) {
         setCutoverPending(pending);
         setRecovery((current) => ({ ...current, store: next }));
@@ -360,15 +384,18 @@ export function DraftRecoveryProvider({ children }: { children: ReactNode }) {
   const failed =
     cutoverFailure !== null &&
     describeFailure(cutoverFailure, "finish the draft review");
+  const noticeMessage = failed
+    ? `${failed.title}. Files stay protected.`
+    : "Files stay protected until every desktop profile has imported its legacy drafts.";
   const notices = cutoverPending && (
     <div role="status" data-slot="workspace-band" className="workspace-band">
       <p className="workspace-band-message">
         <StatusDot tone={failed ? "attention" : "neutral"} size={10} />
-        {failed
-          ? `${failed.title}. Files stay protected.`
-          : "Files stay protected until every desktop profile has imported its legacy drafts."}
+        <Tooltip content={noticeMessage} overflowOnly>
+          <span>{noticeMessage}</span>
+        </Tooltip>
       </p>
-      {failed && <FailureDetails details={failed.details} />}
+      {failed && <FailureDetails details={failed.details} variant="popover" />}
       <Button
         type="button"
         variant="ghost"

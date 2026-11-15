@@ -240,10 +240,12 @@
   text-overflow: ellipsis;
 }
 .inbox-loading {
+  pointer-events: none;
+}
+.inbox-loading-summary {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
+  align-items: center;
+  height: var(--text-preview-line);
 }
 
 .ticket-detail[data-expanded] .inbox-triage-document {

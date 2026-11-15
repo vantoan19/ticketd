@@ -70,3 +70,32 @@ it("a module-load failure has a visible restart step when the native watchdog re
   runInNewContext(fallback, { document: page });
   expect(root?.textContent).toBe("All tickets");
 });
+
+it("prepares the native frame even if application modules never load", async () => {
+  const calls: [string, unknown][] = [];
+  const root = { dataset: {}, classList: { toggle() {} }, style: {} };
+  runInNewContext(bootstrap, {
+    localStorage: { getItem: () => '{"theme":"dark"}' },
+    matchMedia: () => ({ matches: false }),
+    document: { documentElement: root },
+    __TAURI_INTERNALS__: {
+      metadata: { currentWindow: { label: "main" } },
+      invoke: async (command: string, args: unknown) => {
+        calls.push([command, args]);
+      },
+    },
+  });
+  await Promise.resolve();
+  expect(calls).toContainEqual([
+    "plugin:window|set_theme",
+    { label: "main", value: "dark" },
+  ]);
+  expect(calls).toContainEqual([
+    "plugin:window|set_background_color",
+    { label: "main", value: "#0A0A0A" },
+  ]);
+  expect(calls).toContainEqual([
+    "plugin:webview|set_webview_background_color",
+    { label: "main", value: "#0A0A0A" },
+  ]);
+});
