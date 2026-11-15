@@ -326,10 +326,12 @@ const ESC_AFTER_LAYER_MS = 1000;
 function Conversation({
   snapshot,
   focusRequest,
+  onRequestsAnswered,
   notice,
 }: {
   snapshot: ChatSnapshot;
   focusRequest: boolean;
+  onRequestsAnswered?: () => void;
   notice?: ReactNode;
 }) {
   const client = useChatClient();
@@ -438,6 +440,35 @@ function Conversation({
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
   );
+  const [answered, setAnswered] = useState<{
+    id: string;
+    origin: Element | null;
+  } | null>(null);
+  const handledAnswer = useRef<typeof answered>(null);
+  useEffect(() => {
+    if (
+      !answered ||
+      answered === handledAnswer.current ||
+      !items.some(
+        (item) =>
+          item.id === answered.id &&
+          item.kind === "request" &&
+          item.state === "answered",
+      )
+    )
+      return;
+    handledAnswer.current = answered;
+    // Only an answer made here returns to triage. Host updates alone never
+    // take focus, and moving elsewhere while the answer is sent keeps it there.
+    if (
+      document.activeElement !== answered.origin &&
+      document.activeElement !== document.body
+    )
+      return;
+    if (pending.length) {
+      dock.current?.querySelector<HTMLElement>(".chat-request-title")?.focus();
+    } else onRequestsAnswered?.();
+  }, [answered, items, pending.length, onRequestsAnswered]);
   // Opened from a notification: the request waiting then takes focus, once.
   const [notifiedRequest] = useState(() =>
     focusRequest ? pending[0]?.id : undefined,
@@ -508,6 +539,7 @@ function Conversation({
             },
           });
         else throw reason;
+        if (onRequestsAnswered) throw reason;
       },
     );
   const edit = (queued: { id: string; text: string }) =>
@@ -708,6 +740,10 @@ function Conversation({
                   {...(plan && { plan: <PlanPill item={plan} /> })}
                   dockRef={dock}
                   onAnswer={answer}
+                  {...(onRequestsAnswered && {
+                    onAnswered: (requestId: string, origin: Element | null) =>
+                      setAnswered({ id: requestId, origin }),
+                  })}
                   onLeave={() => messageBox.current?.focus()}
                   onSendNow={(queuedId) =>
                     run(
@@ -861,6 +897,7 @@ export function ChatDetail({
   notice,
   crumb,
   focusRequest = false,
+  onRequestsAnswered,
   title,
 }: {
   id: string;
@@ -879,6 +916,8 @@ export function ChatDetail({
   crumb?: ReactNode;
   /** Opened from a notification: a pending request's title takes focus once shown. */
   focusRequest?: boolean;
+  /** Inbox triage resumes after this view answers its final pending request. */
+  onRequestsAnswered?: () => void;
 }) {
   const client = useChatClient();
   const { snapshot, error, retry } = useChat(id);
@@ -997,6 +1036,7 @@ export function ChatDetail({
           key={id}
           snapshot={snapshot}
           focusRequest={focusRequest}
+          {...(onRequestsAnswered && { onRequestsAnswered })}
           notice={notice}
         />
       )}

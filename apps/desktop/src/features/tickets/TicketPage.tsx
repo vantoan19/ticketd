@@ -312,7 +312,7 @@ export function TicketPage({
             trigger={
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <IconButton label="Add ticket property">
+                  <IconButton label="Add ticket property" size="icon-compact">
                     <Plus />
                   </IconButton>
                 </DropdownMenuTrigger>
