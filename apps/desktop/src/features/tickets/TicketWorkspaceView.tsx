@@ -344,7 +344,7 @@ export function TicketWorkspaceView({
                   if (narrow) focusPane.current = "detail";
                   // The Open tickets preference: a ticket opened from the list may
                   // take the full width. Narrow windows already show it that way.
-                  else if (openTickets === "expanded") {
+                  else if (!board && openTickets === "expanded") {
                     setExpanded(true);
                     focusPane.current = "detail";
                   }
