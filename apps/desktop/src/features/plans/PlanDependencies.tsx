@@ -165,6 +165,21 @@ function Dependencies({
   ]
     .filter(Boolean)
     .join(" · ");
+  // The scope caption sits at the canvas foot in every state, so a limited
+  // Plan always says so and offers its full list.
+  const foot = footnote && (
+    <>
+      {footnote}
+      {total > members.length && (
+        <>
+          {" · "}
+          <Button variant="link" size="sm" onClick={onClose}>
+            See all Plan tickets
+          </Button>
+        </>
+      )}
+    </>
+  );
   const canvas =
     members.length === 0 ? (
       <GraphCanvas
@@ -185,6 +200,7 @@ function Dependencies({
     ) : graph.edges.length === 0 ? (
       <GraphCanvas
         label="Plan dependencies"
+        footnote={foot}
         notice={
           <EmptyState
             anchor="center"
@@ -222,21 +238,7 @@ function Dependencies({
         onSelect={setSelected}
         label="Plan dependencies"
         outsideLabel="outside this Plan"
-        footnote={
-          footnote && (
-            <>
-              {footnote}
-              {total > members.length && (
-                <>
-                  {" · "}
-                  <Button variant="link" size="sm" onClick={onClose}>
-                    See all Plan tickets
-                  </Button>
-                </>
-              )}
-            </>
-          )
-        }
+        footnote={foot}
       />
     );
   return (

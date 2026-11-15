@@ -639,6 +639,8 @@ function AppContent() {
                                     setWorkspaceGraphOpen(false);
                                   }}
                                   onFocus={(id) => {
+                                    // From the workspace: all connections.
+                                    setGraphDependencies(false);
                                     setLocalGraphOrigin(id);
                                     setGraphOrigin(id);
                                   }}
@@ -652,7 +654,7 @@ function AppContent() {
                                 hidden={graphOrigin !== localGraphOrigin}
                               >
                                 <ContextGraph
-                                  key={localGraphOrigin}
+                                  key={`${localGraphOrigin}:${graphDependencies}`}
                                   active={graphOrigin === localGraphOrigin}
                                   origin={localGraphOrigin}
                                   dependencies={graphDependencies}
