@@ -269,7 +269,7 @@ test("a resolved canonical issue opens its local ticket, and a loop is not follo
       onOpenTicket={onOpen}
     />,
   );
-  expect(screen.getByText("Duplicate of T-KQ9 (acme/api#7)")).toBeTruthy();
+  expect(screen.getByText(/^Duplicate of T-KQ9 \(acme\/api#7\)/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Open T-KQ9" }));
   expect(onOpen).toHaveBeenCalledWith("T-KQ9");
   const rows = (target: object) =>
@@ -537,8 +537,28 @@ test("source wording: location, state and freshness", () => {
 });
 
 test("a local child explains its independent ownership when its parent belongs to GitHub", async () => {
+  // GitHub is set up, so the rail has a Source section saying "Local".
+  const github = {
+    connector: {
+      provider: "github",
+      name: "GitHub",
+      contract_version: 1,
+      capabilities: [],
+      schema: { fields: [] },
+    },
+    saved: {
+      provider: "github",
+      config: {},
+      account: "octo",
+      saved_at: "2026-01-01T00:00:00Z",
+    },
+  };
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "show_ticket" ? ticket({ reference: "T-KQ2" }) : [],
+    command === "show_ticket"
+      ? ticket({ reference: "T-KQ2" })
+      : command === "list_sources"
+        ? [github]
+        : [],
   );
   properties(
     ticket({
@@ -546,7 +566,7 @@ test("a local child explains its independent ownership when its parent belongs t
       parent: { reference: "T-KQ2", title: "Parent", trashed: false },
     }),
   );
-  expect(screen.getByText(/^Created in ticketd\./)).toBeTruthy();
+  expect(await screen.findByText("Local")).toBeTruthy();
   expect(
     await screen.findByText(
       /belongs to GitHub; this ticket stays local unless you publish it on its own/,

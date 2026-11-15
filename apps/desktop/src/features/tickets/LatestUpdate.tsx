@@ -1,28 +1,35 @@
 import { progressBrief } from "./progress-brief";
 import { useEffect, useState } from "react";
-import { ArrowDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Bot, User } from "lucide-react";
 import { FailureState } from "@/components/ui/failure-alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { Tooltip } from "@/components/ui/tooltip";
 import { latestUpdate, type LatestUpdate as Update } from "@/lib/api/progress";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { RailSection } from "./RailSection";
 
+/**
+ * The latest authored update of an In progress or In review ticket. In the
+ * rail it is one button: "codex · 5 h ago" over a two-line excerpt, opening
+ * the update in Activity. In the property strip (`line`) it is one line,
+ * "codex · 5 h ago  Drafted a fix…".
+ */
 export function LatestUpdate({
   reference,
   active,
   revision,
   onOpen,
+  variant = "rail",
 }: {
   reference: string;
   active: boolean;
   revision: number;
   onOpen?: ((id: string) => void) | undefined;
+  variant?: "rail" | "line";
 }) {
   const now = useNow();
   const [state, setState] = useState<{
@@ -51,10 +58,38 @@ export function LatestUpdate({
     };
   }, [active, reference, revision, retry]);
   const { update, error, loading } = state;
+  const who = update?.editing_agent ?? "You";
+  const Icon = update?.editing_agent ? Bot : User;
+  const when = update && (
+    <span>
+      {who} · {relativeDateTime(update.reported_at, now)}
+      {update.updated_at !== update.reported_at && " · edited"}
+    </span>
+  );
+  const text =
+    update &&
+    `${progressBrief(update.brief.text)}${update.brief.truncated ? "…" : ""}`;
+  const exact = update
+    ? `Reported ${formatDateTime(update.reported_at)}${
+        update.updated_at !== update.reported_at
+          ? `, edited ${formatDateTime(update.updated_at)}`
+          : ""
+      }`
+    : undefined;
+  if (variant === "line") {
+    if (!update) return null;
+    return (
+      <p className="latest-update-line" aria-label="Latest update">
+        <Icon aria-hidden="true" />
+        {when}
+        <span>{text}</span>
+      </p>
+    );
+  }
   return (
     <RailSection label="Latest update">
       {loading ? (
-        <small className="rail-note">Loading update…</small>
+        <Skeleton className="h-8" />
       ) : error ? (
         <FailureState
           size="inline"
@@ -62,40 +97,19 @@ export function LatestUpdate({
           onRetry={() => setRetry((n) => n + 1)}
         />
       ) : update ? (
-        <div className="latest-update">
-          <p className="latest-update-text">
-            {progressBrief(update.brief.text)}
-            {update.brief.truncated && "…"}
-          </p>
-          <div className="latest-update-meta">
-            <small>
-              {update.editing_agent && <>{update.editing_agent} · </>}
-              <Tooltip content={formatDateTime(update.reported_at)}>
-                <time tabIndex={0} dateTime={update.reported_at}>
-                  {relativeDateTime(update.reported_at, now)}
-                </time>
-              </Tooltip>
-              {update.updated_at !== update.reported_at && (
-                <>
-                  {" "}
-                  · Edited{" "}
-                  {/* Already the exact time: no tooltip to repeat it. */}
-                  <time dateTime={update.updated_at}>
-                    {formatDateTime(update.updated_at)}
-                  </time>
-                </>
-              )}
-            </small>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onOpen?.(update.activity_id)}
-            >
-              Go to update
-              <ArrowDown data-icon="inline-end" aria-hidden="true" />
-            </Button>
-          </div>
-        </div>
+        <button
+          type="button"
+          className="latest-update"
+          aria-label={`Go to update: ${text}`}
+          aria-description={exact}
+          onClick={() => onOpen?.(update.activity_id)}
+        >
+          <span className="latest-update-meta">
+            <Icon aria-hidden="true" />
+            {when}
+          </span>
+          <span className="latest-update-text">{text}</span>
+        </button>
       ) : (
         <small className="rail-note">No update reported</small>
       )}

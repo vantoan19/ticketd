@@ -44,7 +44,7 @@ export function LinkedChats({
   const chats = list?.chats ?? [];
   const top = topChat(chats);
   const action = chatAbout && (
-    <Button variant={chip ? "outline" : "ghost"} size="sm" onClick={chatAbout}>
+    <Button variant="ghost" size="sm" onClick={chatAbout}>
       <Plus aria-hidden />
       Chat about this ticket
     </Button>
@@ -53,7 +53,7 @@ export function LinkedChats({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          variant={chip ? "outline" : "ghost"}
+          variant="ghost"
           size="sm"
           aria-label={`Chats: ${chats.length}${top ? `, ${statusLabel(top.status)}` : ""}`}
         >
@@ -131,6 +131,8 @@ export function LinkedChats({
   ) : list.error ? (
     <FailureState size="inline" failure={list.error} onRetry={retry} />
   ) : null;
+  // A ticket in Trash with no Chats has nothing to show: no orphan label.
+  if (!state && !menu && !action) return null;
   if (chip)
     return (
       <>

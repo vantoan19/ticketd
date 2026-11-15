@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
-import { Cloud, LaptopMinimal, RefreshCw } from "lucide-react";
+import { Cloud, LaptopMinimal, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
-import { Tooltip } from "@/components/ui/tooltip";
 import {
   Popover,
   PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { StatusDot } from "@/components/ui/status-dot";
 import { client, type Ticket } from "@/lib/api/client";
 import { LocalPublication } from "./PublishToSource";
-import { RailSection } from "./RailSection";
+import { RailRow, RailSection } from "./RailSection";
 import { SourceLink } from "./SourceLink";
-import { TakeOwnership } from "./TakeOwnership";
 import { useSourceActivity } from "./source-activity";
 import { externalSource, freshness } from "./ticket-source";
 import { useNow } from "@/lib/use-now";
@@ -106,28 +106,43 @@ export function SourceRail({
               )}
             </small>
           )}
-          <div className="rail-source-actions">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={sync.running}
-              onClick={() => void sync.run()}
-            >
-              <RefreshCw data-icon="inline-start" />
-              {owner.unavailable ? "Retry" : "Refresh"}
-            </Button>
-            {owner.unavailable ? (
-              <TakeOwnership
-                ticket={ticket}
-                refresh={refresh}
+          {/* Unavailable, the notice at the top of the document owns Retry and
+              Take ownership; the rail only says where things stand. */}
+          {!owner.unavailable && !chip && (
+            <>
+              <RailRow
+                icon={<RefreshCw aria-hidden="true" />}
+                muted
+                disabled={sync.running}
+                onClick={() => void sync.run()}
+              >
+                Refresh
+              </RailRow>
+              <RailRow
+                icon={<Settings2 aria-hidden="true" />}
+                muted
+                onClick={activity.openSettings}
+              >
+                Discovery settings
+              </RailRow>
+            </>
+          )}
+          {!owner.unavailable && chip && (
+            <div className="rail-source-actions">
+              <Button
                 variant="ghost"
-              />
-            ) : (
-              <Button variant="link" size="sm" onClick={activity.openSettings}>
-                Discovery
+                size="sm"
+                disabled={sync.running}
+                onClick={() => void sync.run()}
+              >
+                <RefreshCw data-icon="inline-start" />
+                Refresh
               </Button>
-            )}
-          </div>
+              <Button variant="ghost" size="sm" onClick={activity.openSettings}>
+                Discovery settings
+              </Button>
+            </div>
+          )}
           {sync.failure && !sync.running && (
             <FailureAlert
               size="compact"
@@ -138,16 +153,10 @@ export function SourceRail({
         </div>
       ) : ticket.source ? (
         <div className="rail-source">
-          <Tooltip content="Owned in ticketd; the external issue is kept as provenance">
-            <span
-              className="rail-value"
-              tabIndex={0}
-              aria-description="Owned in ticketd; the external issue is kept as provenance"
-            >
-              <LaptopMinimal aria-hidden="true" />
-              Local
-            </span>
-          </Tooltip>
+          <span className="rail-value">
+            <LaptopMinimal aria-hidden="true" />
+            Local
+          </span>
           <small className="rail-note">
             was <span className="source-number">{ticket.source.display}</span>
           </small>
@@ -160,16 +169,10 @@ export function SourceRail({
         </div>
       ) : (
         <div className="rail-source">
-          <Tooltip content="Created and edited in ticketd">
-            <span
-              className="rail-value"
-              tabIndex={0}
-              aria-description="Created and edited in ticketd"
-            >
-              <LaptopMinimal aria-hidden="true" />
-              Local
-            </span>
-          </Tooltip>
+          <span className="rail-value">
+            <LaptopMinimal aria-hidden="true" />
+            Local
+          </span>
           <LocalParentNote ticket={ticket} />
           <LocalPublication ticket={ticket} refresh={refresh} />
         </div>
@@ -181,16 +184,23 @@ export function SourceRail({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" aria-label={`Source: ${name}`}>
-          {owner ? (
-            <Cloud data-icon="inline-start" />
-          ) : (
-            <LaptopMinimal data-icon="inline-start" />
-          )}
-          <span className="truncate">{name}</span>
-        </Button>
+        <RailRow
+          aria-label={`Source: ${name}`}
+          icon={
+            owner ? (
+              <Cloud aria-hidden="true" />
+            ) : (
+              <LaptopMinimal aria-hidden="true" />
+            )
+          }
+        >
+          {name}
+        </RailRow>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72" aria-label="Source">
+        <PopoverHeader>
+          <PopoverTitle>Source</PopoverTitle>
+        </PopoverHeader>
         {body}
       </PopoverContent>
     </Popover>

@@ -141,6 +141,52 @@ test("choosing Duplicate from the status menu opens the duplicate review instead
   );
 });
 
+test("a Duplicate ticket's status menu checks Duplicate, never the action", async () => {
+  Object.assign(Element.prototype, {
+    hasPointerCapture: () => false,
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+  });
+  bridge.invoke.mockResolvedValue({});
+  render(
+    <TicketProperties
+      ticket={{
+        id: "1",
+        reference: "T-KQ1",
+        title: "Ticket",
+        body: "",
+        status: "Duplicate",
+        duplicate_of: "T-KQ9",
+        tags: [],
+        project_id: null,
+        plan_id: null,
+        trashed: false,
+        availability: null,
+        parent: null,
+        children: [],
+        prerequisites: [],
+      }}
+      projects={[]}
+      plans={[]}
+      onSaved={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.keyDown(
+    screen.getByRole("combobox", { name: "Status: Duplicate" }),
+    { key: "Enter" },
+  );
+  const current = await screen.findByRole("option", { name: "Duplicate" });
+  expect(current.getAttribute("aria-selected")).toBe("true");
+  const action = screen.getByRole("option", {
+    name: "Change canonical ticket…",
+  });
+  expect(action.getAttribute("aria-selected")).toBe("false");
+  expect(
+    screen.queryByRole("option", { name: "Mark as duplicate…" }),
+  ).toBeNull();
+});
+
 test("changing the status of a duplicate asks before removing its link", async () => {
   Object.assign(Element.prototype, {
     hasPointerCapture: () => false,
@@ -195,7 +241,7 @@ test("changing the status of a duplicate asks before removing its link", async (
   );
 });
 
-test("a trashed ticket's rail says it is locked", () => {
+test("a trashed ticket's rail stays readable and cannot be changed", () => {
   bridge.invoke.mockResolvedValue([]);
   render(
     <TicketProperties
@@ -220,12 +266,12 @@ test("a trashed ticket's rail says it is locked", () => {
       refresh={async () => {}}
     />,
   );
-  expect(screen.getByRole("note").textContent).toMatch(
-    /In Trash\. Restore it to edit/,
-  );
-  expect(
-    screen.getByRole("img", { name: "Locked while in Trash" }),
-  ).toBeTruthy();
+  // One notice in the document says In Trash; the rail keeps its shape and
+  // its values stay readable but cannot be changed.
+  expect(screen.queryByRole("note")).toBeNull();
+  const project = screen.getByRole("button", { name: "Project: No project" });
+  expect(project).toHaveProperty("disabled", true);
+  expect(project.getAttribute("data-readonly")).not.toBeNull();
 });
 
 test("focus returns to the Status trigger after a status change", async () => {

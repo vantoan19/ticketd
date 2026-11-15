@@ -109,32 +109,28 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
   expect(screen.queryByRole("complementary")).toBeNull();
-  // Rail order, each chip named by its property and value.
+  // Rail order, each chip named by its property and value. No source is set
+  // up, so there is no Source chip and nothing says "Local".
+  await within(bar).findByRole("button", { name: "Follow" });
   expect(
-    [...bar.querySelectorAll("button, [role=combobox], [role=switch]")].map(
+    [...bar.querySelectorAll("button, [role=combobox]")].map(
       (chip) => chip.getAttribute("aria-label") ?? chip.textContent,
     ),
   ).toEqual([
     "Status: In progress",
-    "Source: Local",
     "Project: No project",
-    "Plan: Add to a Plan",
-    "Tags: Edit tags",
+    "Plan: No Plan",
+    "Tags: release",
     "Follow",
     "Manage reminder",
   ]);
-  expect(
-    within(bar).getByRole("button", { name: "Source: Local" }),
-  ).toBeTruthy();
-  // Follow is a chip whose name is its visible text (WCAG 2.5.3), so it reads
-  // Following once on.
-  const follow = within(bar).getByRole("switch", { name: "Follow" });
-  expect(follow.textContent).toBe("Follow");
-  expect(follow.hasAttribute("aria-label")).toBe(false);
+  expect(bar.textContent).not.toContain("Local");
+  // Follow is an icon toggle: its name stays "Follow" and aria-pressed says
+  // whether it is on.
+  const follow = within(bar).getByRole("button", { name: "Follow" });
+  expect(follow.getAttribute("aria-pressed")).toBe("false");
   fireEvent.click(follow);
-  await waitFor(() => expect(follow.textContent).toBe("Following"));
-  expect(within(bar).getByRole("switch", { name: "Following" })).toBe(follow);
-  expect(follow.getAttribute("aria-checked")).toBe("true");
+  await waitFor(() => expect(follow.getAttribute("aria-pressed")).toBe("true"));
 
   // The Project chip opens the rail's picker, and choosing saves.
   fireEvent.click(
@@ -183,15 +179,28 @@ test("a hidden pane reports no width and keeps its layout", async () => {
 });
 
 test("narrow, an active ticket still shows its Latest update under the chips", async () => {
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "latest_update")
+      return {
+        activity_id: "a-1",
+        brief: { text: "Drafted a fix", truncated: false },
+        reported_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        editing_agent: "codex",
+        supporting_document_id: null,
+      };
+    if (command === "is_following") return false;
+    if (command === "reminder") return null;
+    return bridgeDefault(command, args as { reference?: string });
+  });
   renderDetails();
   resizePane(500);
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
-  expect(
-    await within(bar).findByRole("heading", { name: "Latest update" }),
-  ).toBeTruthy();
+  // One line: who and when, then the excerpt.
+  const latest = (await within(bar).findByText("Drafted a fix")).parentElement!;
+  expect(latest.textContent).toMatch(/^codex · .*Drafted a fix$/);
   // On its own line after the last chip, not between Status and the others.
   const last = within(bar).getByRole("button", { name: "Manage reminder" });
-  const latest = within(bar).getByRole("heading", { name: "Latest update" });
   expect(
     last.compareDocumentPosition(latest) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();

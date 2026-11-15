@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Upload } from "lucide-react";
+import { RailRow } from "./RailSection";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   Select,
@@ -61,27 +63,22 @@ export function LocalPublication({
         />
       </>
     );
-  // The origin and what to do about it read as one sentence with an inline action.
-  const lead = "Created in ticketd.";
-  if (!preview) return <small className="rail-note">{lead}</small>;
+  // Nothing to publish to: the Source section says only "Local".
+  if (!target || !preview) return null;
   if (
     preview.eligibility.kind === "eligible" ||
     preview.eligibility.reason === "internal_attachments"
   )
     return (
       <>
-        <small className="rail-note">
-          {lead}{" "}
-          <Button
-            variant="link"
-            size="sm"
-            className="rail-publish-link"
-            onClick={() => setPublishing(true)}
-          >
-            Publish to {preview.provider_name}…
-          </Button>
-        </small>
-        {publishing && target && (
+        <RailRow
+          icon={<Upload aria-hidden="true" />}
+          muted
+          onClick={() => setPublishing(true)}
+        >
+          Publish to {preview.provider_name}…
+        </RailRow>
+        {publishing && (
           <PublishDialog
             ticket={ticket}
             provider={target.provider}
@@ -91,27 +88,18 @@ export function LocalPublication({
         )}
       </>
     );
-  // The core states why, and what to do about it; the rail only shows it.
-  return (
-    <small className="rail-note">
-      {lead}{" "}
-      {preview.eligibility.reason === "source_not_connected" ? (
-        <>
-          <Button
-            variant="link"
-            size="sm"
-            className="rail-publish-link"
-            onClick={activity.openSettings}
-          >
-            Connect {preview.provider_name}
-          </Button>{" "}
-          to publish it.
-        </>
-      ) : (
-        publicationReason(preview)
-      )}
-    </small>
-  );
+  // The core states why; the rail shows one short reason, and the way out
+  // when it is a connection.
+  if (preview.eligibility.reason === "source_not_connected")
+    return (
+      <small className="rail-note">
+        <Button variant="link" size="inline" onClick={activity.openSettings}>
+          Connect {preview.provider_name}
+        </Button>{" "}
+        to publish it.
+      </small>
+    );
+  return <small className="rail-note">{publicationReason(preview)}</small>;
 }
 
 /** The warning at the top of a ticket whose publication outcome is not known. */

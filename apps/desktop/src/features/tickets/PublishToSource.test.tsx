@@ -167,6 +167,34 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
+test("Publish stays in place while the preview reads again after an edit", async () => {
+  bridgeAnswers(eligible);
+  const props = {
+    projects: [],
+    plans: [],
+    onSaved: () => {},
+    refresh: async () => {},
+  };
+  const { rerender } = render(
+    <TicketProperties ticket={ticket()} {...props} />,
+  );
+  await screen.findByRole("button", { name: /Publish to GitHub/ });
+  // The next read never answers: the last answer stays, nothing blinks.
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "list_sources"
+      ? [githubEntry]
+      : command === "preview_publication"
+        ? new Promise(() => {})
+        : [],
+  );
+  rerender(
+    <TicketProperties ticket={ticket({ title: "Renamed" })} {...props} />,
+  );
+  expect(
+    screen.getByRole("button", { name: /Publish to GitHub/ }),
+  ).toBeTruthy();
+});
+
 test("workspace links open the core preflight with affected files and no publication action", async () => {
   const message =
     "Workspace-only attachment links cannot be published. Remove or replace links in the description, or export Markdown with files.";
@@ -806,8 +834,11 @@ test("connecting the source in Settings makes a local ticket publishable without
     </SourceActivityContext.Provider>
   );
   const { rerender } = render(view([{ ...githubEntry, saved: null }]));
-  // Not connected: the rail says why, and offers nothing.
-  await screen.findByRole("button", { name: "Connect GitHub" });
+  // Not set up: no Source section, no "Local", no upsell and no Publish.
+  await screen.findByRole("heading", { name: "Tags" });
+  expect(screen.queryByRole("heading", { name: "Source" })).toBeNull();
+  expect(screen.queryByText("Local")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
   // The person connects the source and returns: the same ticket now shows Publish.
   connected = true;
