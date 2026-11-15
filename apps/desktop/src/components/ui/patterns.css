@@ -540,8 +540,11 @@
   max-width: 280px;
 }
 .ui-badge.ui-badge-filter {
+  height: 26px;
   gap: 4px;
-  padding-inline: 8px 2px;
+  padding-inline: 9px 4px;
+  font-size: var(--text-code);
+  line-height: var(--text-ui-line);
 }
 .ui-badge-filter [data-slot="badge-edit"] {
   display: inline-flex;
@@ -616,6 +619,16 @@
   flex-wrap: wrap;
 }
 @media (max-width: 640px) {
+  .ui-management-page-centered .ui-page-header {
+    flex-wrap: wrap;
+  }
+  .ui-management-page-centered .ui-page-header-text {
+    flex-basis: 100%;
+  }
+  .ui-management-page-centered .ui-page-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
   .ui-management-page-centered {
     padding: 24px 16px;
   }

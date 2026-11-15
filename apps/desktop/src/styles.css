@@ -771,7 +771,8 @@ body:has([data-slot="dialog-overlay"])
   padding-left: 24px;
 }
 /* A popover holding a choice list or picker (P3). */
-.ui-popover[data-variant="list"] {
+.ui-popover[data-variant="list"],
+.ui-popover[data-variant="constrained-list"] {
   width: max(var(--radix-popover-trigger-width), 280px);
   padding: 4px;
 }
@@ -1610,7 +1611,6 @@ html[data-window-bar] {
   list-style: none;
   margin: 0;
   padding: 0;
-  gap: 0;
 }
 .sidebar-nav li {
   width: 100%;
@@ -1672,7 +1672,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   margin: 14px 0 0;
   padding-left: 10px;
   font-size: var(--text-caption);
-  font-weight: 500;
+  font-weight: 400;
   line-height: 16px;
 }
 /* Projects and Plans headings open their page: the nav row's hover and
@@ -2805,6 +2805,8 @@ kbd,
 }
 [data-slot="command"][data-variant="palette"] {
   min-height: 0;
+  max-height: calc(100dvh - 112px);
+  height: auto;
 }
 [data-variant="palette"] [data-slot="command-input-wrapper"] {
   height: 56px;
@@ -2818,7 +2820,9 @@ kbd,
   line-height: 24px;
 }
 [data-variant="palette"] [data-slot="command-list"] {
-  max-height: min(440px, calc(100dvh - 220px));
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 440px;
   padding: 6px;
 }
 [data-variant="palette"] [data-slot="command-group"] {
@@ -2843,6 +2847,7 @@ kbd,
   text-underline-offset: 3px;
 }
 .ui-palette-footer {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -3114,4 +3119,94 @@ kbd,
 }
 .ui-agent-state {
   animation: palette-scrim var(--dur-2) var(--ease-in-out);
+}
+
+/* A quiet label for a capability still being tried. */
+.ui-badge-experimental {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding-inline: 6px;
+  border-radius: var(--radius-segment);
+  background: var(--recessed);
+  box-shadow: none;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+}
+[data-theme="dark"] .ui-badge-experimental {
+  background: var(--accent);
+}
+
+/* A record summary shares the Card surface, with content roles rather than a band. */
+.ui-card-summary {
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+.ui-card-summary:has([data-slot="card-open"]:hover) {
+  background: var(--hover);
+}
+[data-slot="card-open"] {
+  border-radius: inherit;
+}
+[data-slot="card-open"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ui-card-title {
+  font-size: var(--text-reading);
+  line-height: var(--text-doc-line);
+  font-weight: 600;
+}
+.ui-card-caption {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-card-description {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-card-summary[data-archived] [data-slot="card-title"] {
+  color: var(--muted-foreground);
+}
+.ui-progress-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.ui-progress-key i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-segment);
+  background: var(--track);
+}
+.ui-progress-key [data-segment="done"] {
+  background: var(--seg-done);
+}
+.ui-progress-key [data-segment="review"] {
+  background: var(--seg-review);
+}
+.ui-progress-key [data-segment="progress"] {
+  background: var(--seg-progress);
+}
+
+.ui-card-footer-summary {
+  border-top: 1px solid var(--group-hairline);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.ui-popover[data-variant="constrained-list"] {
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
 }

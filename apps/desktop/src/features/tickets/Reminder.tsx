@@ -1,3 +1,7 @@
+import { RailRow } from "./RailSection";
+import { TicketCommandPicker } from "./TicketCommandPicker";
+import type { Ticket, Project } from "@/lib/api/client";
+import type { Plan } from "@/lib/api/plans";
 import { TicketCommandContext } from "@/lib/ticket-command-actions";
 import { localInstants, localValue } from "./reminder-time";
 import { ReminderDateTime } from "./ReminderDateTime";
@@ -36,7 +40,15 @@ export function Reminder({
   reference,
   revision,
   variant = "rail",
+  ticket,
+  projects = [],
+  plans = [],
+  refresh,
 }: {
+  ticket?: Ticket;
+  projects?: Project[];
+  plans?: Plan[];
+  refresh?: () => Promise<void>;
   reference: string;
   revision: number;
   variant?: "rail" | "strip";
@@ -152,17 +164,26 @@ export function Reminder({
     setOccurrence("");
   }
   const presets = reminderPresets(now);
-  if (variant === "strip" && openCommand)
-    return (
-      <IconButton
-        label={due ? reminderSummary(due) : "Remind me"}
-        shortcut={shortcutLabel("ticket-reminder")}
-        aria-keyshortcuts={ariaKeyShortcuts("ticket-reminder")}
-        onClick={() => openCommand("Reminder", reference)}
-      >
-        <Bell />
-      </IconButton>
-    );
+  if (variant === "strip" && openCommand && ticket && refresh)
+    return due ? (
+      <TicketCommandPicker
+        ticket={ticket}
+        projects={projects}
+        plans={plans}
+        refresh={refresh}
+        scope="Reminder"
+        trigger={
+          <RailRow
+            icon={<Bell />}
+            aria-label={name}
+            title={`Remind me (${shortcutLabel("ticket-reminder")})`}
+            aria-keyshortcuts={ariaKeyShortcuts("ticket-reminder")}
+          >
+            {summary}
+          </RailRow>
+        }
+      />
+    ) : null;
   return (
     <Popover
       open={open}

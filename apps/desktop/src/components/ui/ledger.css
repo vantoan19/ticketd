@@ -136,9 +136,8 @@
 /* One line of chips under the header: they never wrap; what does not fit
    becomes "+N more". Clear filters ends the line. */
 .filter-chips {
-  border-radius: var(--radius-card);
   background: var(--surface);
-  box-shadow: var(--shadow-menu);
+  box-shadow: inset 0 -1px 0 var(--header-boundary);
 }
 /* Menu rows: the current value after the dimension, a count, a dot slot. */
 .filters-menu-value,

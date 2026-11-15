@@ -10,6 +10,7 @@
 .ticket-rows li {
   display: flex;
   align-items: flex-start;
+  column-gap: 0;
   min-width: 0;
   margin: 0 8px;
   padding: 0 10px 0 4px;

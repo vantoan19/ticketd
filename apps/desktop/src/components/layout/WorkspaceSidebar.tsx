@@ -4,7 +4,6 @@ import {
   CirclePlay,
   ListTodo,
   MessagesSquare,
-  Workflow,
   Trash2,
   Settings,
   SquarePen,
@@ -475,24 +474,6 @@ export function WorkspaceSidebar({
                         />
                       )}
                       {waiting > 0 ? waiting : working > 0 ? working : null}
-                    </span>
-                  )}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )}
-            {chat.enabled && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={view === "automations"}
-                  tooltip={automationsLabel}
-                  aria-label={automationsLabel}
-                  onClick={() => setView("automations")}
-                >
-                  <Workflow size={16} /> Automations
-                  {runsWaiting > 0 && (
-                    <span className="sidebar-count" aria-hidden="true">
-                      <StatusDot tone="attention" size={6} />
-                      {runsWaiting}
                     </span>
                   )}
                 </SidebarMenuButton>

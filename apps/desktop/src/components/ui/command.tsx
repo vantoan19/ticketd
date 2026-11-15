@@ -1,5 +1,7 @@
 "use client";
 
+import { searchMatch } from "@/lib/search-match";
+
 import * as React from "react";
 import { Command as CommandPrimitive, useCommandState } from "cmdk";
 import { cn } from "cn";
@@ -197,19 +199,24 @@ function CommandItem({
   );
 }
 
-/** A literal search match keeps the text's original case and readable context. */
+/** The same ordered-letter match drives filtering and visible emphasis. */
 function CommandMatch({ text, query }: { text: string; query: string }) {
-  const needle = query.trim().toLowerCase();
-  const start = needle ? text.toLowerCase().indexOf(needle) : -1;
-  if (start < 0) return text;
-  return (
-    <>
-      {text.slice(0, start)}
-      <mark className="ui-command-match">
-        {text.slice(start, start + needle.length)}
+  const indices = new Set(searchMatch(text, query) ?? []);
+  const parts: { text: string; match: boolean }[] = [];
+  for (let index = 0; index < text.length; index++) {
+    const match = indices.has(index);
+    const last = parts.at(-1);
+    if (last && last.match === match) last.text += text[index];
+    else parts.push({ text: text[index]!, match });
+  }
+  return parts.map((part, index) =>
+    part.match ? (
+      <mark className="ui-command-match" key={index}>
+        {part.text}
       </mark>
-      {text.slice(start + needle.length)}
-    </>
+    ) : (
+      part.text
+    ),
   );
 }
 

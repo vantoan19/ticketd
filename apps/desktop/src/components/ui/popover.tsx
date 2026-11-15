@@ -33,7 +33,7 @@ function PopoverContent({
   variant = "form",
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
-  variant?: "form" | "list" | "compact-list" | "bar";
+  variant?: "form" | "list" | "compact-list" | "constrained-list" | "bar";
 }) {
   const boundary = useOverlayBoundary();
   return (

@@ -374,6 +374,7 @@ function TicketListBody({
           }
         />
       )}
+      {!trash && <TicketFilters part="chips" {...filterProps} />}
       {
         <>
           {!trash && (configuredSources.length > 0 || source !== "all") && (
@@ -569,7 +570,6 @@ function TicketListBody({
         refresh={refresh}
       />
       <ListOverlays>
-        {!trash && <TicketFilters part="chips" {...filterProps} />}
         {showBulk && workspace.layout === "list" && (
           <BulkControls
             bulk={bulk}
@@ -585,7 +585,7 @@ function TicketListBody({
   );
 }
 
-/** Filters float without inserting a row; outcomes clear the whole overlay stack. */
+/** Bulk actions float at the bottom; outcomes clear their reserved stack. */
 function ListOverlays({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);

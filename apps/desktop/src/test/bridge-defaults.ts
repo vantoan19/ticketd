@@ -39,6 +39,8 @@ export function bridgeDefault(
     case "find_tickets":
     case "search_tickets":
     case "recent_documents":
+    case "search_documents":
+    case "all_documents":
     case "pinned_documents":
     case "activity_feed":
     case "ticket_history":

@@ -1,3 +1,4 @@
+import { FollowToggle } from "./Attention";
 import { TicketAgentHeader } from "./TicketAgent";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
@@ -265,6 +266,13 @@ export function TicketHeader({
                       <ChevronDown />
                     </IconButton>
                   </div>
+                )}
+                {!ticket.trashed && (
+                  <FollowToggle
+                    reference={ticket.reference}
+                    revision={0}
+                    variant="strip"
+                  />
                 )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

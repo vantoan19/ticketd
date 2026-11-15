@@ -1,3 +1,4 @@
+import { TicketCommandPicker } from "./TicketCommandPicker";
 import { useContext } from "react";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -14,10 +15,8 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
-import { FollowToggle } from "@/features/tickets/Attention";
 import { Reminder } from "@/features/tickets/Reminder";
 import { RailPlacement } from "@/features/tickets/rail-placement";
-import { LinkedChats } from "@/features/chats/LinkedChats";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { TicketFiles } from "@/features/tickets/TicketFiles";
@@ -232,17 +231,15 @@ export function TicketPage({
     active &&
     !ticket.trashed && (
       <>
-        <FollowToggle
-          key={`follow-${ticket.reference}`}
-          reference={ticket.reference}
-          revision={revision}
-          variant={variant}
-        />
         <Reminder
           key={`reminder-${ticket.reference}`}
           reference={ticket.reference}
           revision={revision}
           variant={variant}
+          ticket={ticket}
+          projects={projects}
+          plans={plans}
+          refresh={refresh}
         />
       </>
     );
@@ -255,25 +252,15 @@ export function TicketPage({
       onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
     />
   );
-  const chats = active && (
-    <LinkedChats
-      ticket={ticket}
-      folder={
-        projects.find((project) => project.id === ticket.project_id)?.path ??
-        null
-      }
-      chip
-    />
-  );
   const relationships = active && (
     <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
   );
   const runs = active && <TicketRunsSection runs={ticketRuns.runs} />;
   // One property strip for every document width.
+  const [reminderOpen, setReminderOpen] = useState(false);
   const strip = (
     <TicketProperties
       layout="strip"
-      chats={chats}
       attention={attentionFor("strip")}
       ticket={ticket}
       active={active}
@@ -303,31 +290,48 @@ export function TicketPage({
                 .join(", ")}
             </Button>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton label="Add ticket property">
-                <Plus />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {openCommand && (
-                <DropdownMenuItem
-                  onSelect={() => openCommand("Reminder", ticket.reference)}
+          <TicketCommandPicker
+            ticket={ticket}
+            projects={projects}
+            plans={plans}
+            refresh={refresh}
+            scope="Reminder"
+            open={reminderOpen}
+            onOpenChange={setReminderOpen}
+            anchorOnly
+            trigger={
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton label="Add ticket property">
+                    <Plus />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  onCloseAutoFocus={(event) => {
+                    if (reminderOpen) event.preventDefault();
+                  }}
                 >
-                  Reminder
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={() => work.openLink("blocked_by")}>
-                Blocked by
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => work.openLink("parent")}>
-                Parent
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => work.openLink("related")}>
-                Link
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  {openCommand && (
+                    <DropdownMenuItem onSelect={() => setReminderOpen(true)}>
+                      Reminder
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onSelect={() => work.openLink("blocked_by")}
+                  >
+                    Blocked by
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => work.openLink("parent")}>
+                    Parent
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => work.openLink("related")}>
+                    Link
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            }
+          />
         </>
       )}
     </TicketProperties>

@@ -1,0 +1,228 @@
+import "./properties.css";
+import { useRef, useState, type ReactNode } from "react";
+import { ChoiceList } from "@/components/ui/choice-list";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { useTicketCommands } from "@/app/use-ticket-commands";
+import type { TicketCommandScope } from "@/lib/ticket-command-actions";
+import type { Project, Ticket } from "@/lib/api/client";
+import type { Plan } from "@/lib/api/plans";
+import { StatusIcon } from "./StatusIcon";
+import { Duplicates } from "./Duplicates";
+import { ConfirmLeaveDuplicate } from "./ConfirmLeaveDuplicate";
+import { ReminderDateTime } from "./ReminderDateTime";
+import { localInstants, localValue } from "./reminder-time";
+import { reminderPresets } from "./reminder-presets";
+
+/** Chip and palette share the same options, mutation, safeguards and Undo controller. */
+export function TicketCommandPicker({
+  ticket,
+  projects,
+  plans,
+  refresh,
+  scope,
+  trigger,
+  open: controlledOpen,
+  onOpenChange,
+  anchorOnly = false,
+}: {
+  ticket: Ticket;
+  projects: Project[];
+  plans: Plan[];
+  refresh: () => Promise<void>;
+  scope: TicketCommandScope;
+  trigger: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  anchorOnly?: boolean;
+}) {
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = controlledOpen ?? ownOpen;
+  const [query, setQuery] = useState("");
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [occurrence, setOccurrence] = useState("");
+  const returnFocus = useRef<HTMLElement | null>(null);
+  function setOpen(next: boolean) {
+    setOwnOpen(next);
+    onOpenChange?.(next);
+    if (!next) {
+      setQuery("");
+      setCustom(false);
+    }
+  }
+  const actions = useTicketCommands({
+    reference: ticket.reference,
+    initialTicket: ticket,
+    open,
+    scope,
+    query,
+    projects,
+    plans,
+    close: () => setOpen(false),
+    refresh,
+  });
+  const instants = localInstants(draft);
+  function choose(value: string) {
+    if (scope === "Reminder" && value === "custom") {
+      setCustom(true);
+      setDraft(
+        localValue(
+          actions.due
+            ? new Date(actions.due)
+            : reminderPresets(new Date()).find((p) => p.key === "tomorrow")!.at,
+        ),
+      );
+      setOccurrence("");
+    } else void actions.apply(value);
+  }
+  const selected =
+    scope === "Status"
+      ? ticket.status
+      : scope === "Project"
+        ? (ticket.project_id ?? "")
+        : scope === "Plan"
+          ? (ticket.plan_id ?? "")
+          : scope === "Tags"
+            ? ticket.tags
+            : undefined;
+  return (
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <span
+          ref={(element) => {
+            returnFocus.current = element?.querySelector("button") ?? null;
+          }}
+          className="ticket-command-anchor"
+        >
+          {anchorOnly ? (
+            <PopoverAnchor asChild>
+              <span>{trigger}</span>
+            </PopoverAnchor>
+          ) : (
+            <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          )}
+        </span>
+        <PopoverContent
+          variant="constrained-list"
+          align="start"
+          aria-label={`${scope} choices`}
+          onFocusOutside={(event) => {
+            const target = event.detail.originalEvent.target;
+            if (
+              anchorOnly &&
+              target instanceof Element &&
+              target.closest('[role="menu"]')
+            )
+              event.preventDefault();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            returnFocus.current?.focus({ preventScroll: true });
+          }}
+        >
+          <span className="sr-only" role="status">
+            {scope} of {ticket.reference}
+          </span>
+          {custom ? (
+            <div className="ticket-command-custom">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setCustom(false)}
+              >
+                Back to reminders
+              </Button>
+              <ReminderDateTime
+                reference={ticket.reference}
+                draft={draft}
+                occurrence={occurrence}
+                pending={actions.pending || actions.blocked}
+                onDraft={(value) => {
+                  setDraft(value);
+                  setOccurrence("");
+                }}
+                onOccurrence={setOccurrence}
+              />
+              <Button
+                size="sm"
+                disabled={
+                  actions.pending ||
+                  actions.blocked ||
+                  instants.length === 0 ||
+                  (instants.length > 1 && !occurrence)
+                }
+                onClick={() =>
+                  void actions.apply(
+                    "custom",
+                    false,
+                    occurrence || instants[0]!.toISOString(),
+                  )
+                }
+              >
+                Set reminder
+              </Button>
+            </div>
+          ) : (
+            <ChoiceList
+              label={`${scope} choices`}
+              searchPlaceholder={`Search ${scope.toLowerCase()}…`}
+              query={query}
+              onQueryChange={setQuery}
+              {...(selected !== undefined && { selected })}
+              {...((scope === "Project" || scope === "Plan") &&
+                actions.options.some((option) => option.value === "") && {
+                  clear: {
+                    value: "",
+                    label: scope === "Project" ? "No project" : "No Plan",
+                    disabled: actions.pending || actions.blocked,
+                  },
+                })}
+              groups={actions.options
+                .filter(
+                  (option) =>
+                    option.value !== "" ||
+                    (scope !== "Project" && scope !== "Plan"),
+                )
+                .map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                  disabled: actions.pending || actions.blocked,
+                  ...(scope === "Status" && {
+                    icon: <StatusIcon status={option.value} decorative />,
+                  }),
+                }))}
+              onSelect={choose}
+            />
+          )}
+        </PopoverContent>
+      </Popover>
+      {actions.duplicate && (
+        <Duplicates
+          ticket={ticket}
+          refresh={refresh}
+          open
+          onOpenChange={actions.setDuplicate}
+          title={`Mark ${ticket.reference} as a duplicate`}
+          description="Choose the canonical ticket and review what points at this ticket."
+          returnFocus={returnFocus}
+        />
+      )}
+      <ConfirmLeaveDuplicate
+        canonical={ticket.duplicate_of ?? ""}
+        status={actions.leaving}
+        returnFocus={returnFocus}
+        onCancel={() => actions.setLeaving(null)}
+        onConfirm={(status) => {
+          actions.setLeaving(null);
+          void actions.apply(status, true);
+        }}
+      />
+    </>
+  );
+}

@@ -15,7 +15,9 @@ function Card({
   className,
   asChild = false,
   ...props
-}: Props & { variant?: "default" | "well" | "slot" | "lift" | "board" }) {
+}: Props & {
+  variant?: "default" | "well" | "slot" | "lift" | "board" | "summary";
+}) {
   const Comp = asChild ? Slot.Root : "div";
   return (
     <Comp
@@ -48,15 +50,63 @@ function CardBody({ className, asChild = false, ...props }: Props) {
   );
 }
 /** A recessed strip for the card's explanation or actions. */
-function CardFooter({ className, asChild = false, ...props }: Props) {
+function CardFooter({
+  className,
+  asChild = false,
+  variant = "default",
+  ...props
+}: Props & { variant?: "default" | "summary" }) {
   const Comp = asChild ? Slot.Root : "div";
   return (
     <Comp
       data-slot="card-footer"
-      className={cn("ui-card-footer", className)}
+      className={cn(
+        "ui-card-footer",
+        variant === "summary" && "ui-card-footer-summary",
+        className,
+      )}
       {...props}
     />
   );
 }
 
-export { Card, CardHeader, CardBody, CardFooter };
+/** Shared content roles for summaries of records, independent of their feature. */
+function CardTitle({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-title"
+      className={cn("ui-card-title", className)}
+      {...props}
+    />
+  );
+}
+function CardCaption({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-caption"
+      className={cn("ui-card-caption", className)}
+      {...props}
+    />
+  );
+}
+function CardDescription({ className, asChild = false, ...props }: Props) {
+  const Comp = asChild ? Slot.Root : "div";
+  return (
+    <Comp
+      data-slot="card-description"
+      className={cn("ui-card-description", className)}
+      {...props}
+    />
+  );
+}
+export {
+  Card,
+  CardHeader,
+  CardBody,
+  CardFooter,
+  CardTitle,
+  CardCaption,
+  CardDescription,
+};
