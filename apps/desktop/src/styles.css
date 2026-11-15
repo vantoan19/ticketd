@@ -970,6 +970,9 @@ body:has([data-slot="dialog-overlay"])
 }
 .recovery-title {
   margin-top: 16px;
+}
+.recovery-title,
+.ui-input[data-variant="document-title"] {
   font-size: var(--text-title);
   font-weight: 600;
   line-height: var(--text-title-line);
@@ -3591,4 +3594,147 @@ kbd,
 }
 .ui-card-caption time {
   font-variant-numeric: tabular-nums;
+}
+
+/* S06 and S09 share the shell while retaining their own fixed bands. */
+.ui-dialog[data-surface="create"],
+.ui-dialog[data-surface="capture"] {
+  --dialog-top: 96px;
+  box-shadow: var(--shadow-modal);
+}
+.ui-dialog[data-surface="capture"] {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--popover);
+}
+.ui-dialog[data-surface="create"][data-expanded] {
+  width: min(920px, calc(100vw - 32px));
+  height: calc(100dvh - var(--dialog-top) - 16px);
+}
+.dialog-shell-compact-header {
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 96px 0 20px;
+}
+.dialog-shell-compact-header [data-slot="dialog-title"] {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  letter-spacing: normal;
+}
+.dialog-shell-compact-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ui-dialog[data-surface="create"] .dialog-shell-body {
+  padding-top: 4px;
+  padding-bottom: 16px;
+}
+.ui-dialog[data-surface="create"] .dialog-shell-footer {
+  min-height: 56px;
+  padding: 8px 12px 8px 20px;
+}
+.ui-dialog[data-surface="create"][data-expanded] .dialog-shell-body {
+  flex: 1;
+}
+.ui-input[data-variant="document-title"],
+.ui-input[data-variant="capture-title"] {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 600;
+}
+.ui-input[data-variant="document-title"] {
+  height: 32px;
+  font-size: var(--text-title);
+  line-height: var(--text-title-line);
+}
+.ui-input[data-variant="capture-title"] {
+  height: 26px;
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
+}
+.create-description .markdown-editor,
+.ui-dialog[data-surface="capture"] .markdown-editor {
+  --text-editor: var(--text-doc);
+  --text-editor-line: var(--text-doc-line);
+  box-shadow: none;
+  background: transparent;
+}
+.create-description .rich-document,
+.ui-dialog[data-surface="capture"] .rich-document {
+  padding: 0;
+  min-height: 24px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-compact-header {
+  height: 40px;
+  padding-left: 16px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-compact-actions {
+  top: 4px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-body {
+  padding: 2px 20px 18px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-footer {
+  min-height: 48px;
+  padding: 8px 12px 8px 16px;
+}
+.ui-dialog[data-surface="capture"] .document-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  min-width: 0;
+}
+.ui-badge-linked {
+  display: inline-flex;
+  overflow: visible;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  color: var(--foreground);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-border-base);
+  font-size: var(--text-caption);
+}
+.ui-badge-linked > svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ui-dialog[data-surface="capture"]
+  .dialog-shell-compact-header
+  [data-slot="dialog-title"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.ui-dialog[data-surface="capture"] [data-slot="dialog-title"] svg {
+  width: 14px;
+  height: 14px;
+}
+.ui-dialog[data-surface="capture"] .dialog-shell-note {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-button-property {
+  color: var(--foreground);
+  background: transparent;
+  box-shadow: var(--shadow-border-base);
+}
+.ui-button-property:hover {
+  background: var(--accent);
 }
