@@ -94,20 +94,40 @@ Normal text must meet 4.5:1 contrast against its actual surface; large text and 
 
 ### Status and state vocabulary
 
-Use a 16px Lucide status icon plus text. Keep icons neutral; shape and label provide the distinction. Where color adds meaning (Ready, Blocked, unread, checked), use a small status dot (about 10px or less) placed beside a word. A dot never appears alone, and it is the only place status color is used.
+Use the shared `StatusIcon` plus text at 16px (rows and headers), 14px (cards and chips), or 12px (minimum). Its custom SVG family uses a 16-unit grid, neutral tokens and fill to show progress; the status registry also supplies history. Named glyphs announce the status; beside a visible status word they are decorative. Where color adds meaning (Ready, Blocked, unread, checked), use a small status dot (about 10px or less) placed beside a word. A dot never appears alone, and it is the only place status color is used.
 
 | Meaning            | Icon treatment                                          | Visible label       |
 | ------------------ | ------------------------------------------------------- | ------------------- |
 | Todo               | Empty circle                                            | Todo                |
-| In progress        | Circle with center mark                                 | In progress         |
-| In review          | Dashed circle                                           | In review           |
-| Done               | Circle with check                                       | Done                |
+| In progress        | Ring with a right-half pie                              | In progress         |
+| In review          | Ring with a three-quarter pie                           | In review           |
+| Done               | Solid disc with a surface-coloured check                | Done                |
 | Canceled           | Circle with slash                                       | Canceled            |
 | Ready              | Status dot beside the word, on Todo tickets             | Ready               |
 | Blocked            | Status dot beside the word, with the reason             | Blocked by T-KQ18   |
 | Duplicate          | Circle with equals sign, beside a canonical-ticket link | Duplicate of T-KQ10 |
 | Source unavailable | Status dot beside the words                             | Source unavailable  |
 | Unread             | Status dot plus accessible unread state                 | Unread              |
+
+Status rings have radius 6 and stroke 1.5; the inner pies have radius 3.75.
+Done uses a radius-7 disc and a 1.6 check stroke. Todo and Done use
+`--muted-foreground`, moving states `--foreground`, and Canceled and Duplicate
+`--disabled-foreground`. These drawings do not take Lucide's global stroke.
+A changed status sweeps clockwise in `--dur-4` with `--ease-in-out`; Done fills
+and its check draws in `--dur-settle` with `--motion-swift`. Initial glyphs and
+recorded history stay still. Reduced motion makes changes instant.
+
+`PlanRing` and `PlanSplitBar` are Plan-aware shared recipes in `features/plans`.
+They consume `PlanCounts` from `show_plan`, including all non-trashed members,
+independent of list filters. Countable work is Todo + In progress + In review +
+Done; Canceled and Duplicate are excluded. The 16px ring (20px on Plan cards)
+uses radius 6, stroke 2, a `--track` track, a `--seg-review` arc for Done plus
+moving work, and a round-capped `--foreground` Done arc on top, starting at the
+top. The 6px split bar has a 3px radius and 2px gaps, with Done, In review and
+In progress segments in `--seg-done`, `--seg-review` and `--seg-progress`; Todo
+remains track. Zero countable work shows only track, including all-excluded
+Plans. Both announce “Board polish, 0 of 5 done, 2 moving”, where moving counts
+only In progress and In review. Decorative mode suppresses repeated speech.
 
 Ready and Blocked are availability indicators, not extra statuses. Canceled and Duplicate must never look completed. Duplicate is a status of its own: it never looks Canceled or Done, and it always names its canonical ticket, or the source’s reference when that ticket is not in the workspace. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
 
