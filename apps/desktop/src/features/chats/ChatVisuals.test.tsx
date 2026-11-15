@@ -273,7 +273,7 @@ test("New Chat's folder button shows the folder's Project icon", async () => {
   client.folderProjects.set("/work/web-app", { id: "p1", title: "Web App" });
   client.nextFolder = "/work/web-app";
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  fireEvent.keyDown(screen.getByRole("button", { name: /^Folder: / }), {
+  fireEvent.keyDown(screen.getByRole("button", { name: "Scratch folder" }), {
     key: "Enter",
   });
   fireEvent.click(

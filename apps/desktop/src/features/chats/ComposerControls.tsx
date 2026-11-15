@@ -734,6 +734,51 @@ export function ComposerControls({
   );
 }
 
+/** Past this, a harness check that is still running says so in words (P10). */
+const SLOW_CHECK_MS = 600;
+
+/**
+ * The picker's place while the harnesses are checked: a still skeleton, and
+ * after 600ms the words "Checking harnesses…" beside the 12px spinner. It is
+ * disabled, so it shows no chevron, and its tooltip says why (CH-14).
+ */
+function CheckingHarnesses() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), SLOW_CHECK_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div className="chat-controls" role="group" aria-label="Harness settings">
+      <Tooltip content="Checking which harnesses are installed">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-control="model"
+          aria-disabled="true"
+          aria-label="Checking which harnesses are installed…"
+        >
+          {slow ? (
+            <>
+              <LoaderCircle size={12} className="chat-spin" aria-hidden />
+              <span className="chat-control-label">Checking harnesses…</span>
+            </>
+          ) : (
+            <>
+              <span className="chat-skeleton chat-control-mark" aria-hidden />
+              <span
+                className="chat-skeleton chat-control-skeleton"
+                aria-hidden
+              />
+            </>
+          )}
+        </Button>
+      </Tooltip>
+    </div>
+  );
+}
+
 /**
  * New Chat's control row, before any session: the picker over every harness,
  * with the models, efforts and permission modes each one reported to the host.
@@ -763,23 +808,7 @@ export function NewChatControls({
   onOpenChange?: (open: boolean) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
-  if (!harnessId)
-    return (
-      <div className="chat-controls" role="group" aria-label="Harness settings">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-control="model"
-          disabled
-          aria-label="Checking which harnesses are installed…"
-        >
-          <span className="chat-skeleton chat-control-mark" aria-hidden />
-          <span className="chat-skeleton chat-control-skeleton" aria-hidden />
-          <ChevronDown aria-hidden />
-        </Button>
-      </div>
-    );
+  if (!harnessId) return <CheckingHarnesses />;
   const harness = harnesses.find((item) => item.id === harnessId);
   const name = harness?.name ?? harnessId;
   const permission = options?.permission;

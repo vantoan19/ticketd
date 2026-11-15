@@ -731,9 +731,13 @@ test("archive keeps the work running; trash stops it and restore re-runs nothing
   expect(button("Stop")).toBeTruthy();
   expect((await client.openChat("kept")).chat.activity).toBe("working");
 
-  openMenu("Chats shown: Active");
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
-  expect(await screen.findByRole("heading", { name: "Archived" })).toBeTruthy();
+  openMenu("Chats");
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Archived Chats" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Archived Chats" }),
+  ).toBeTruthy();
   fireEvent.click(await screen.findByRole("button", { name: /^Limiter/ }));
   await screen.findByRole("button", { name: "Unarchive" });
 
@@ -871,7 +875,7 @@ test("a clicked notification opens its Chat under its own list", async () => {
   expect(
     await screen.findByRole("heading", { name: "Rate-limit failed logins" }),
   ).toBe(document.activeElement);
-  expect(screen.getByRole("heading", { name: "Archived" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Archived Chats" })).toBeTruthy();
 });
 
 test("a view that missed changes resyncs from a snapshot instead of showing a broken transcript", async () => {
@@ -1871,11 +1875,6 @@ test("New Chat picks harness, model and effort in one composer picker and starts
     },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  expect(
-    screen
-      .getByText("Checking which harnesses are installed…")
-      .getAttribute("role"),
-  ).toBe("status");
   // No radios: the harness is the picker's, beside Send.
   const trigger = await screen.findByRole("button", {
     name: "Claude Code, model Opus 5.5, effort Default",
@@ -2068,7 +2067,7 @@ test("linking a Project with a folder in New Chat starts the Chat there", async 
   const client = await open([]);
   client.projectFolders.set("p1", "/work/storefront");
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  expect(button("Folder: Scratch folder")).toBeTruthy();
+  expect(button("Scratch folder")).toBeTruthy();
   fireEvent.click(button("Link a ticket, Document or Project"));
   // Recent records show before anything is typed.
   expect(await screen.findByRole("group", { name: "Recent" })).toBeTruthy();
@@ -2371,4 +2370,20 @@ test("CH-12: Expand keeps New Chat's links and harness check, and the list stays
   expect(document.querySelector(".chat-new")).toBe(pane);
   expect(document.querySelector(".chat-rows")).toBe(list);
   expect(linked()).not.toBeNull();
+});
+
+test("with no Chat open the detail pane is New Chat, and the pencil keeps its draft", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  fireEvent.click(button("Close Chat"));
+  expect(
+    await screen.findByRole("heading", { name: "What should we work on?" }),
+  ).toBeTruthy();
+  // Resting, it has nothing to close and leaves focus on the closed Chat's row.
+  noButton("Close New Chat");
+  expect(document.activeElement).toBe(button(/^Limiter/));
+  type("Draft the reset email", "Describe a task or ask a question");
+  fireEvent.click(button("New Chat"));
+  const box = composer("Describe a task or ask a question");
+  expect(box).toHaveProperty("value", "Draft the reset email");
+  await waitFor(() => expect(document.activeElement).toBe(box));
 });

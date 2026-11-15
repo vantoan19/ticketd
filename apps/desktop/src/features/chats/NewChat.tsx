@@ -20,6 +20,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
+import { OverlayBoundary } from "@/components/ui/overlay-boundary";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   useChatClient,
   type HarnessOptions,
@@ -100,7 +102,16 @@ export function NewChat({
   onCreated,
   start,
   crumb,
+  resting = false,
+  focusRequest = 0,
 }: {
+  /**
+   * Shown because no Chat is open (U1): nothing to close, and it waits for
+   * the person instead of taking focus.
+   */
+  resting?: boolean;
+  /** Rises when New Chat is asked for: the message box takes focus. */
+  focusRequest?: number;
   expanded: boolean;
   single: boolean;
   onExpand: () => void;
@@ -156,6 +167,20 @@ export function NewChat({
   const [linkedNote, setLinkedNote] = useState("");
   const [refilled, setRefilled] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Asked for again while shown: the person is put in the message box.
+  const [seenFocus, setSeenFocus] = useState(focusRequest);
+  // It also asks the harnesses again, as opening New Chat always did: one may
+  // have been installed or signed in to since the pane was first shown.
+  if (focusRequest !== seenFocus) {
+    setSeenFocus(focusRequest);
+    setProbe((count) => count + 1);
+  }
+  const firstFocus = useRef(focusRequest);
+  useEffect(() => {
+    if (seenFocus !== firstFocus.current) input.current?.focus();
+  }, [seenFocus]);
+  // Pickers and menus opened in the body stay below the pane header.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     const box = input.current;
     if (!refilled || !box) return;
@@ -321,7 +346,7 @@ export function NewChat({
     <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
       <div className="detail-header">
         <div className="detail-title-group">
-          {!crumb && single && (
+          {!crumb && single && !expanded && (
             <IconButton label="Back to Chats" onClick={onReturn}>
               <ArrowLeft aria-hidden />
             </IconButton>
@@ -343,280 +368,303 @@ export function NewChat({
               </IconButton>
             )
           )}
-          <IconButton label="Close Chat" onClick={onClose}>
-            <X aria-hidden />
-          </IconButton>
+          {!resting && (
+            <IconButton label="Close New Chat" onClick={onClose}>
+              <X aria-hidden />
+            </IconButton>
+          )}
         </div>
       </div>
-      <div className="chat-new">
-        <div>
-          <h2>What should we work on?</h2>
-          <div
-            className="chat-new-composer"
-            onKeyDown={(event) => {
-              // Undo right after choosing a suggestion takes back the prompt
-              // and its links together.
-              if (
-                (event.metaKey || event.ctrlKey) &&
-                !event.shiftKey &&
-                event.key.toLowerCase() === "z" &&
-                before &&
-                typed === before.prompt &&
-                undoChoice()
-              )
-                event.preventDefault();
-            }}
-          >
-            <Composer
-              key={composerKey}
-              autoFocus
-              inputRef={input}
-              placeholder="Describe a task or ask a question"
-              initialText={draft}
-              initialTokens={draftTokens}
-              onText={(text, tokens) => {
-                draft = text;
-                draftTokens = tokens;
-                if (text !== prefilled) prefilled = null;
-                setTyped(text);
-                if (before && text !== before.prompt) setBefore(null);
+      <OverlayBoundary element={body}>
+        <div ref={setBody} className="chat-new">
+          <div>
+            <h2>What should we work on?</h2>
+            <div
+              className="chat-new-composer"
+              onKeyDown={(event) => {
+                // Undo right after choosing a suggestion takes back the prompt
+                // and its links together.
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  !event.shiftKey &&
+                  event.key.toLowerCase() === "z" &&
+                  before &&
+                  typed === before.prompt &&
+                  undoChoice()
+                )
+                  event.preventDefault();
               }}
-              mentions={mentions}
-              above={<ComposerQuotes quotes={quotes} onRemove={removeQuote} />}
-              controls={(text) => ({
-                send: "send",
-                enabled: ready && text.trim() !== "",
-              })}
-              leading={
-                <NewChatControls
-                  harnesses={found}
-                  harnessId={harness?.id ?? null}
-                  onHarness={(id) => {
-                    setHarnessId(id);
-                    rememberHarness(id);
-                  }}
-                  options={offered}
-                  pick={pick}
-                  onPick={choosePick}
-                  notice={(id) => {
-                    const other = found.find((item) => item.id === id);
-                    return (
-                      other?.problem && (
-                        <ProblemNotice
-                          problem={other.problem}
-                          harness={other.name}
-                          onAction={() => setProbe((count) => count + 1)}
-                        />
-                      )
-                    );
-                  }}
-                  onOpenChange={setPickerOpen}
-                  inputRef={input}
-                />
-              }
-              onSend={async (typed, mentioned) => {
-                if (!harness) return;
-                const message = quotedMessage(quotes, typed);
-                const chosen = links.map(({ kind, id }) => ({ kind, id }));
-                const input = {
-                  harness_id: harness.id,
-                  folder,
-                  // Mentioned and quoted records link with the first message (21.4).
-                  links: [
-                    ...chosen,
-                    ...mentioned,
-                    ...quoteLinks(quotes),
-                  ].filter(
-                    (link, index, all) =>
-                      all.findIndex(
-                        (other) =>
-                          other.kind === link.kind && other.id === link.id,
-                      ) === index,
-                  ),
-                  message,
-                  // The first turn runs on what the picker shows (LIVE-7).
-                  ...(pick.model && { model: pick.model }),
-                  ...(pick.effort && { effort: pick.effort }),
-                  ...(pick.permission && { permission: pick.permission }),
-                };
-                const request = JSON.stringify(input);
-                if (attempt.current.request !== request)
-                  attempt.current = { id: crypto.randomUUID(), request };
-                // Notifications are asked for with the first Chat message.
-                if (loadPreferences().notifyChats)
-                  void notificationClient.requestPermission().catch(() => {});
-                try {
-                  const created = await client.createChat({
-                    command_id: attempt.current.id,
-                    ...input,
-                  });
-                  // Answered: whatever is asked for next is a new request.
-                  attempt.current = { id: crypto.randomUUID(), request: "" };
-                  if (offered) rememberStart(created.chat_id, offered, pick);
-                  if (folder) rememberFolder(folder);
-                  clearQuotes(NEW_CHAT);
-                  prefilled = null;
-                  // The Chat exists but holds no message. It is opened with the
-                  // unsent words in its composer, so they are sent there and no
-                  // second Chat is made for them.
-                  if (created.send_error)
-                    carryIntoChat(
-                      created.chat_id,
-                      message,
-                      `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
-                    );
-                  setFailure(null);
-                  onCreated(created.chat_id);
-                } catch (reason) {
-                  // Sending again repeats this same request safely.
-                  setFailure(chatFailure(reason, "start the Chat"));
-                  throw reason;
+            >
+              <Composer
+                key={composerKey}
+                autoFocus={!resting}
+                inputRef={input}
+                placeholder="Describe a task or ask a question"
+                initialText={draft}
+                initialTokens={draftTokens}
+                onText={(text, tokens) => {
+                  draft = text;
+                  draftTokens = tokens;
+                  if (text !== prefilled) prefilled = null;
+                  setTyped(text);
+                  if (before && text !== before.prompt) setBefore(null);
+                }}
+                mentions={mentions}
+                above={
+                  <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
                 }
-              }}
-            />
+                controls={(text) => ({
+                  send: "send",
+                  enabled: ready && text.trim() !== "",
+                })}
+                leading={
+                  <NewChatControls
+                    harnesses={found}
+                    harnessId={harness?.id ?? null}
+                    onHarness={(id) => {
+                      setHarnessId(id);
+                      rememberHarness(id);
+                    }}
+                    options={offered}
+                    pick={pick}
+                    onPick={choosePick}
+                    notice={(id) => {
+                      const other = found.find((item) => item.id === id);
+                      return (
+                        other?.problem && (
+                          <ProblemNotice
+                            problem={other.problem}
+                            harness={other.name}
+                            onAction={() => setProbe((count) => count + 1)}
+                          />
+                        )
+                      );
+                    }}
+                    onOpenChange={setPickerOpen}
+                    inputRef={input}
+                  />
+                }
+                onSend={async (typed, mentioned) => {
+                  if (!harness) return;
+                  const message = quotedMessage(quotes, typed);
+                  const chosen = links.map(({ kind, id }) => ({ kind, id }));
+                  const input = {
+                    harness_id: harness.id,
+                    folder,
+                    // Mentioned and quoted records link with the first message (21.4).
+                    links: [
+                      ...chosen,
+                      ...mentioned,
+                      ...quoteLinks(quotes),
+                    ].filter(
+                      (link, index, all) =>
+                        all.findIndex(
+                          (other) =>
+                            other.kind === link.kind && other.id === link.id,
+                        ) === index,
+                    ),
+                    message,
+                    // The first turn runs on what the picker shows (LIVE-7).
+                    ...(pick.model && { model: pick.model }),
+                    ...(pick.effort && { effort: pick.effort }),
+                    ...(pick.permission && { permission: pick.permission }),
+                  };
+                  const request = JSON.stringify(input);
+                  if (attempt.current.request !== request)
+                    attempt.current = { id: crypto.randomUUID(), request };
+                  // Notifications are asked for with the first Chat message.
+                  if (loadPreferences().notifyChats)
+                    void notificationClient.requestPermission().catch(() => {});
+                  try {
+                    const created = await client.createChat({
+                      command_id: attempt.current.id,
+                      ...input,
+                    });
+                    // Answered: whatever is asked for next is a new request.
+                    attempt.current = { id: crypto.randomUUID(), request: "" };
+                    if (offered) rememberStart(created.chat_id, offered, pick);
+                    if (folder) rememberFolder(folder);
+                    clearQuotes(NEW_CHAT);
+                    prefilled = null;
+                    // The Chat exists but holds no message. It is opened with the
+                    // unsent words in its composer, so they are sent there and no
+                    // second Chat is made for them.
+                    if (created.send_error)
+                      carryIntoChat(
+                        created.chat_id,
+                        message,
+                        `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
+                      );
+                    setFailure(null);
+                    onCreated(created.chat_id);
+                  } catch (reason) {
+                    // Sending again repeats this same request safely.
+                    setFailure(chatFailure(reason, "start the Chat"));
+                    throw reason;
+                  }
+                }}
+              />
+            </div>
+            <div className="chat-chips">
+              <DropdownMenu>
+                <Tooltip
+                  content={
+                    folder
+                      ? project
+                        ? `${project.title} · ${folder}`
+                        : folder
+                      : "A new empty folder kept by ticketd"
+                  }
+                >
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-label={folder ? `Folder: ${folder}` : SCRATCH}
+                    >
+                      {project ? (
+                        <ProjectIcon project={project} />
+                      ) : (
+                        <Folder aria-hidden />
+                      )}
+                      <span className="chat-folder-label">
+                        {folderName ? (
+                          <>
+                            <span className="chat-folder-prefix">Folder:</span>{" "}
+                            {folderName}
+                          </>
+                        ) : (
+                          SCRATCH
+                        )}
+                      </span>
+                      <ChevronDown aria-hidden />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </Tooltip>
+                <DropdownMenuContent align="start" className="w-72">
+                  {[...new Set([...(folder ? [folder] : []), ...recent])].map(
+                    (path) => (
+                      <DropdownMenuItem
+                        key={path}
+                        onSelect={() => setFolder(path)}
+                      >
+                        <FolderLine path={path} current={path === folder} />
+                      </DropdownMenuItem>
+                    ),
+                  )}
+                  <DropdownMenuItem onSelect={() => setFolder(null)}>
+                    <span className="chat-folder-option">
+                      <span className="chat-folder-option-line">
+                        <span>{SCRATCH}</span>
+                        {folder === null && <Check aria-hidden />}
+                      </span>
+                      <small>A new empty folder kept by ticketd</small>
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      void client.pickFolder().then(
+                        (path) => path && setFolder(path),
+                        (reason: unknown) =>
+                          setFailure(chatFailure(reason, "choose the folder")),
+                      )
+                    }
+                  >
+                    Choose a folder…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {links.map((record) => (
+                <RecordChip
+                  key={`${record.kind}:${record.id}`}
+                  record={record}
+                  onRemove={() =>
+                    setLinks(links.filter((item) => item !== record))
+                  }
+                />
+              ))}
+              <LinkPicker
+                withLabel
+                linked={links}
+                onPick={(record) => {
+                  setLinks([...links, record]);
+                  // A linked Project's folder is where its work happens: chosen
+                  // for the Chat unless a folder was already picked.
+                  if (record.kind !== "project" || folder !== null) return;
+                  void client.projectFolder(record.id).then(
+                    (path) => {
+                      if (!path) return;
+                      setFolder((chosen) => chosen ?? path);
+                      setLinkedNote(`Using ${record.title}'s folder.`);
+                    },
+                    () => {},
+                  );
+                }}
+              />
+            </div>
           </div>
-          <div className="chat-chips">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+          <div>
+            {prompt?.kept && start && (
+              <p className="chat-fine">
+                Draft kept ·{" "}
                 <Button
                   variant="ghost"
                   size="xs"
-                  title={folder ?? undefined}
-                  aria-label={`Folder: ${folder ?? SCRATCH}`}
+                  onClick={() => {
+                    draft = prompt.text;
+                    draftTokens = prompt.tokens;
+                    prefilled = prompt.text;
+                    setTyped(prompt.text);
+                    setComposerKey((count) => count + 1);
+                  }}
                 >
-                  {project ? (
-                    <ProjectIcon project={project} />
-                  ) : (
-                    <Folder aria-hidden />
-                  )}
-                  <span className="chat-folder-label">
-                    <span className="chat-folder-prefix">Folder:</span>{" "}
-                    {folderName ?? SCRATCH}
-                  </span>
-                  <ChevronDown aria-hidden />
+                  Use {start.ticket.reference} prompt
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-72">
-                {[...new Set([...(folder ? [folder] : []), ...recent])].map(
-                  (path) => (
-                    <DropdownMenuItem
-                      key={path}
-                      title={path}
-                      onSelect={() => setFolder(path)}
-                    >
-                      <FolderLine path={path} current={path === folder} />
-                    </DropdownMenuItem>
-                  ),
+              </p>
+            )}
+            {/* Suggestions or the harness's notice, never both: the notice's
+              actions come next in Tab order. */}
+            {typed.trim() === "" && !harness?.problem && (
+              <Suggestions
+                folder={folder}
+                linked={links.flatMap((record) =>
+                  record.kind === "ticket" ? [record.id] : [],
                 )}
-                <DropdownMenuItem onSelect={() => setFolder(null)}>
-                  <span className="chat-folder-option">
-                    <span className="chat-folder-option-line">
-                      <span>{SCRATCH}</span>
-                      {folder === null && <Check aria-hidden />}
-                    </span>
-                    <small>A new empty folder kept by ticketd</small>
-                  </span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={() =>
-                    void client.pickFolder().then(
-                      (path) => path && setFolder(path),
-                      (reason: unknown) =>
-                        setFailure(chatFailure(reason, "choose the folder")),
-                    )
-                  }
-                >
-                  Choose a folder…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {links.map((record) => (
-              <RecordChip
-                key={`${record.kind}:${record.id}`}
-                record={record}
-                onRemove={() =>
-                  setLinks(links.filter((item) => item !== record))
-                }
+                onChoose={choose}
+                refresh={seenFocus}
               />
-            ))}
-            <LinkPicker
-              withLabel
-              linked={links}
-              onPick={(record) => {
-                setLinks([...links, record]);
-                // A linked Project's folder is where its work happens: chosen
-                // for the Chat unless a folder was already picked.
-                if (record.kind !== "project" || folder !== null) return;
-                void client.projectFolder(record.id).then(
-                  (path) => {
-                    if (!path) return;
-                    setFolder((chosen) => chosen ?? path);
-                    setLinkedNote(`Using ${record.title}'s folder.`);
-                  },
-                  () => {},
-                );
-              }}
-            />
+            )}
+            {/* The check is said, not shown: the picker holds its place
+              meanwhile, so nothing moves when it ends (LIVE-11). */}
+            <p className="sr-only" role="status">
+              {harnesses
+                ? linkedNote
+                : "Checking which harnesses are installed…"}
+            </p>
+            {folderMissing && (
+              <p className="chat-fine">
+                Project folder isn’t on this computer; using a scratch folder.
+              </p>
+            )}
+            {/* While the picker is open it shows this notice itself. */}
+            {harness?.problem && !pickerOpen && (
+              <ProblemNotice
+                problem={harness.problem}
+                harness={harness.name}
+                onAction={() => setProbe((count) => count + 1)}
+              />
+            )}
+            {failure && (
+              <FailureAlert
+                size="compact"
+                failure={failure.failure}
+                {...(failure.retry && { onRetry: failure.retry })}
+              />
+            )}
           </div>
         </div>
-        <div>
-          {prompt?.kept && start && (
-            <p className="chat-fine">
-              Draft kept ·{" "}
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  draft = prompt.text;
-                  draftTokens = prompt.tokens;
-                  prefilled = prompt.text;
-                  setTyped(prompt.text);
-                  setComposerKey((count) => count + 1);
-                }}
-              >
-                Use {start.ticket.reference} prompt
-              </Button>
-            </p>
-          )}
-          {/* Suggestions or the harness's notice, never both: the notice's
-              actions come next in Tab order. */}
-          {typed.trim() === "" && !harness?.problem && (
-            <Suggestions
-              folder={folder}
-              linked={links.flatMap((record) =>
-                record.kind === "ticket" ? [record.id] : [],
-              )}
-              onChoose={choose}
-            />
-          )}
-          {/* The check is said, not shown: the picker holds its place
-              meanwhile, so nothing moves when it ends (LIVE-11). */}
-          <p className="sr-only" role="status">
-            {harnesses ? linkedNote : "Checking which harnesses are installed…"}
-          </p>
-          {folderMissing && (
-            <p className="chat-fine">
-              Project folder isn’t on this computer; using a scratch folder.
-            </p>
-          )}
-          {/* While the picker is open it shows this notice itself. */}
-          {harness?.problem && !pickerOpen && (
-            <ProblemNotice
-              problem={harness.problem}
-              harness={harness.name}
-              onAction={() => setProbe((count) => count + 1)}
-            />
-          )}
-          {failure && (
-            <FailureAlert
-              size="compact"
-              failure={failure.failure}
-              {...(failure.retry && { onRetry: failure.retry })}
-            />
-          )}
-        </div>
-      </div>
+      </OverlayBoundary>
     </section>
   );
 }

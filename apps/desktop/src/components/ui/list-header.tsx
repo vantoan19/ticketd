@@ -28,7 +28,8 @@ const Collapsed = createContext(false);
  * collapse to icons with tooltips below a 420px pane. A search field marked
  * `data-slot="pane-search"` expands in place over the title. `caption` adds
  * one fixed 28px line under the header ("Todo tickets with nothing left to
- * wait on.").
+ * wait on."). `titleControl` makes the title itself a control, such as the
+ * trigger of a scope menu ("Chats ⌄"): it renders the heading's content.
  */
 export function PaneHeader({
   title,
@@ -40,8 +41,11 @@ export function PaneHeader({
   actions,
   caption,
   className,
+  titleControl,
 }: {
   title: string;
+  /** Renders the title as a control inside the heading (a menu trigger). */
+  titleControl?: (title: string) => ReactNode;
   /** The heading's id, for `aria-labelledby` and focus after a change. */
   titleId?: string;
   titleLevel?: 1 | 2;
@@ -76,12 +80,22 @@ export function PaneHeader({
       >
         {leading}
         <span className="ui-pane-header-title">
-          {/* The full title while it is cut, below the header. */}
-          <Tooltip content={title} side="bottom" overflowOnly>
-            <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
-              {title}
+          {titleControl ? (
+            <Heading
+              id={titleId}
+              tabIndex={titleId ? -1 : undefined}
+              data-control=""
+            >
+              {titleControl(title)}
             </Heading>
-          </Tooltip>
+          ) : (
+            // The full title while it is cut, below the header.
+            <Tooltip content={title} side="bottom" overflowOnly>
+              <Heading id={titleId} tabIndex={titleId ? -1 : undefined}>
+                {title}
+              </Heading>
+            </Tooltip>
+          )}
           {count}
           {children}
         </span>

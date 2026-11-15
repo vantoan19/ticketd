@@ -55,13 +55,15 @@
   opacity: 0;
   transition: opacity 100ms ease-out;
 }
+/* Keyboard focus shows it (Right Arrow reaches it); a click that leaves focus
+   on the open row does not, so the open row keeps its time (CH-05). */
 .chat-row-item:hover .chat-row-more,
-.chat-row-item:focus-within .chat-row-more,
+.chat-row-item:has(:focus-visible) .chat-row-more,
 .chat-row-more[data-open] {
   opacity: 1;
 }
 .chat-row-item:hover .chat-row-time,
-.chat-row-item:focus-within .chat-row-time,
+.chat-row-item:has(:focus-visible) .chat-row-time,
 .chat-row-item:has(.chat-row-more[data-open]) .chat-row-time {
   visibility: hidden;
 }
@@ -140,12 +142,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* One context item: the first ticket's status icon, reference and "+N", or
-   the Project's icon and name. */
+/* One context item at the line's end: the first ticket's status icon, its
+   caption-size reference and "+N", or the Project's icon and name. */
 .chat-row-sub > .chat-row-context {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
+}
+.chat-row-context > .ui-reference {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .chat-row-context > svg {
   flex: none;
@@ -183,11 +190,14 @@
   margin-right: 6px;
 }
 /* The status word is never cut ("Question", "Approval needed"); only the
-   detail after it truncates (LIVE2-9). */
+   detail after it truncates (LIVE2-9). It is in the foreground only beside
+   its dot or spinner; an idle Chat's last line stays muted (CH-05). */
 .chat-status-word {
   flex: none;
-  color: var(--foreground);
   white-space: nowrap;
+}
+.chat-status[data-signal] > .chat-status-word {
+  color: var(--foreground);
 }
 .chat-status-detail {
   flex: 0 1 auto;
@@ -207,12 +217,6 @@
 }
 .chat-settings-extra {
   padding: 0 20px 16px;
-}
-.chat-list-empty {
-  padding: 24px 16px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui-line);
 }
 /* Only one of title and trigger flexes at a time; weighted shrinking would cut
    the trigger by a fraction of a pixel, and its ellipsis then eats two letters.
@@ -1382,22 +1386,21 @@ button.chat-file-name:focus-visible,
     outline: 1px solid CanvasText;
   }
 }
-/* The heading, composer and chips sit in the middle row; notices that arrive
-   later fill the row under them, so nothing above moves. */
+/* Top-anchored (CH-13): the heading sits at a fixed distance from the pane's
+   top, so a second line, a quote, a suggestion or wrapping chips grow the
+   composer downward and nothing above the caret moves. Notices that arrive
+   later fill the space under the chips. */
 .chat-new {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 1fr auto 1fr;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  padding: 32px 32px 96px;
+  padding: clamp(32px, 16vh, 160px) 32px 96px;
   overflow-y: auto;
-}
-.chat-new::before {
-  content: "";
 }
 .chat-new > div {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 20px;
   width: 100%;
@@ -1406,7 +1409,6 @@ button.chat-file-name:focus-visible,
   margin: 0 auto;
 }
 .chat-new > div + div {
-  align-self: start;
   padding-top: 20px;
 }
 .chat-new h2 {
