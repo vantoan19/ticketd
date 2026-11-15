@@ -74,7 +74,8 @@ pub(super) struct TicketTool {
     /// The step's folder.
     pub working_directory: PathBuf,
     pub chat_id: String,
-    pub run_id: String,
+    /// `None` for a Chat the person took over from a run.
+    pub run_id: Option<String>,
 }
 
 struct Call {
@@ -166,7 +167,7 @@ impl TicketTool {
         let arguments: Vec<&str> = call.arguments.iter().map(String::as_str).collect();
         let serving = Serving::Chat {
             chat_id: &self.chat_id,
-            run_id: Some(&self.run_id),
+            run_id: self.run_id.as_deref(),
             ticketd_cli: None,
         };
         let mut process = command(&self.cli, &arguments, serving);
@@ -264,7 +265,7 @@ mod tests {
             cli: std::env::current_exe().unwrap(),
             working_directory: std::env::temp_dir(),
             chat_id: "chat-1".into(),
-            run_id: "run-1".into(),
+            run_id: Some("run-1".into()),
         }
     }
 

@@ -258,16 +258,9 @@ impl Connection {
                 params["environments"] = json!([]);
             }
             self.state().session.turn_overrides = Some(turn);
-            if let Some(cli) = &request.ticketd_cli {
+            if request.ticketd_cli.is_some() {
                 // ticketd's own tool is how the agent reaches its tickets: Codex's
                 // shell may be off and its sandbox read-only.
-                let tool = TicketTool {
-                    cli: cli.clone(),
-                    working_directory: request.working_directory.clone(),
-                    chat_id: request.chat_id.clone(),
-                    run_id: unattended.run_id.clone(),
-                };
-                let _ = self.ticket_tool.set(tool);
                 // A resumed thread keeps the tool it was started with.
                 if matches!(request.session, SessionStart::New) {
                     params["dynamicTools"] = json!([ticket_tool::spec()]);
@@ -277,6 +270,19 @@ impl Connection {
         } else if request.taken_over {
             let config = self.effective_config(&cwd).await;
             merge(&mut params, super::own_approvals(config.as_ref()));
+        }
+        // A Chat taken over from a run resumes a thread that was started with the
+        // tool, which Codex may still offer its model: answer it, as the person's
+        // own Chat (no run).
+        if let Some(cli) = &request.ticketd_cli
+            && (request.unattended.is_some() || request.taken_over)
+        {
+            let _ = self.ticket_tool.set(TicketTool {
+                cli: cli.clone(),
+                working_directory: request.working_directory.clone(),
+                chat_id: request.chat_id.clone(),
+                run_id: request.unattended.as_ref().map(|run| run.run_id.clone()),
+            });
         }
         let result = match self.call(method, |_| Ok((params, Call::OpenThread))).await {
             CallOutcome::Reply(result) => result,

@@ -1398,6 +1398,28 @@ async fn a_taken_over_thread_is_resumed_with_its_configuration_read_first() {
     );
 }
 
+/// The thread of a run keeps the ticketd tool Codex was given, so the Chat the person
+/// took over still answers it, without declaring anything on resume.
+#[tokio::test(start_paused = true)]
+async fn a_taken_over_chat_still_answers_the_ticketd_tool() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("resume_taken_over_tool"));
+    let request = OpenRequest {
+        generation: GENERATION,
+        chat_id: "chat-1".into(),
+        working_directory: PathBuf::from("/work/chat-1"),
+        session: SessionStart::Resume(NativeSessionId::new("thr_1")),
+        unattended: None,
+        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        taken_over: true,
+        settings: StartSettings::default(),
+    };
+    let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
+    let _opened = opened.expect("the thread resumes");
+    peer.play().await;
+    peer.assert_nothing_written().await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn reasoning_plan_files_and_context_carry_only_what_codex_reported() {
     let (mut peer, runtime, mut events) = open().await;
