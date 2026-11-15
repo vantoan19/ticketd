@@ -1,18 +1,15 @@
 .status-glyph {
   flex: none;
-}
-
-.status-glyph > * {
   color: var(--muted-foreground);
 }
 
-.status-glyph[data-status="In progress"] > *,
-.status-glyph[data-status="In review"] > * {
+.status-glyph[data-status="In progress"],
+.status-glyph[data-status="In review"] {
   color: var(--foreground);
 }
 
-.status-glyph[data-status="Canceled"] > *,
-.status-glyph[data-status="Duplicate"] > * {
+.status-glyph[data-status="Canceled"],
+.status-glyph[data-status="Duplicate"] {
   color: var(--disabled-foreground);
 }
 
@@ -23,26 +20,35 @@
 }
 
 .status-glyph-sweep-disc {
-  opacity: 0;
-  --status-sweep: 180deg;
+  visibility: hidden;
+  --status-sweep: 0deg;
   /* Opaque mask paint controls geometry, without adding a visible colour. */
   mask-image: conic-gradient(black var(--status-sweep), transparent 0deg);
+}
+
+[data-status="In progress"] .status-glyph-sweep-disc {
+  --status-sweep: 180deg;
 }
 
 [data-status="In review"] .status-glyph-sweep-disc {
   --status-sweep: 270deg;
 }
 
+[data-status="Done"] .status-glyph-sweep-disc {
+  --status-sweep: 360deg;
+}
+
 .status-glyph.is-changing .status-glyph-sweep-disc {
   animation: status-glyph-sweep var(--dur-4) var(--ease-in-out);
 }
 
-.status-glyph.is-changing .status-glyph-disc {
-  transform-origin: center;
-  animation:
-    status-glyph-fill var(--dur-4) var(--ease-in-out),
-    status-glyph-settle var(--dur-settle) var(--ease-out)
-      calc(var(--dur-4) + var(--dur-settle)) backwards;
+.status-glyph.is-changing .status-glyph-static {
+  animation: status-glyph-rest var(--dur-4) var(--ease-in-out);
+}
+
+.status-glyph.is-changing[data-status="Done"] {
+  animation: status-glyph-settle var(--dur-settle) var(--ease-out)
+    calc(var(--dur-4) + var(--dur-settle)) backwards;
 }
 
 .status-glyph.is-changing .status-glyph-check {
@@ -51,21 +57,17 @@
     var(--dur-4) both;
 }
 
-.status-glyph.is-changing .status-glyph-pie {
-  animation: status-glyph-pie-rest var(--dur-4) var(--ease-in-out);
-}
-
 @keyframes status-glyph-sweep {
   from {
     --status-sweep: var(--status-from);
-    opacity: 1;
+    visibility: visible;
   }
   to {
-    opacity: 1;
+    visibility: visible;
   }
 }
 
-@keyframes status-glyph-pie-rest {
+@keyframes status-glyph-rest {
   from,
   to {
     visibility: hidden;
@@ -78,15 +80,6 @@
   }
   to {
     stroke-dashoffset: 0;
-  }
-}
-
-@keyframes status-glyph-fill {
-  from {
-    transform: scale(0.75);
-  }
-  to {
-    transform: scale(1);
   }
 }
 
