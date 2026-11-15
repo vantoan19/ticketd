@@ -1,23 +1,25 @@
 import type { ReactNode } from "react";
 import { cn } from "cn";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { IconTile } from "@/components/ui/icon-tile";
+import "./patterns.css";
 
 /**
- * The one empty-state pattern: icon, short title, one sentence on what will
- * appear, and the one action that fills it (`action`, usually a secondary
- * Button; several sit side by side). Sizes: `block` for an empty view,
- * `inline` for a row inside a card or section (the action sits at the end),
- * `plain` drops the inline surface for a section that already has a heading,
- * such as Evidence on a ticket. `hint` for a quiet pane: one line and an optional footnote, no icon or
- * action. Icon, title and description are optional where a size does not
- * need them.
+ * The one empty-state pattern (DESIGN.md section 12). Take the words from
+ * `lib/empty-copy.ts`.
+ *
+ * - `block` (a view or list region has nothing): IconTile, title, one
+ *   sentence, sm actions. Top-anchored 48px below the region's last fixed
+ *   row, centred in its column, never boxed; `anchor="center"` centres it in a
+ *   canvas (graph, dependencies). A no-match view uses the `SearchX` icon.
+ * - `inline` (inside a section): one muted line, its action at the end;
+ *   `plain` drops the recessed band where the section already has a heading.
+ * - `hint` (nothing selected): one muted line centred on both axes and an
+ *   optional key footnote; no icon or action.
+ *
+ * Action rule: a primary only when it is the only way to fill the view and no
+ * other primary is visible; otherwise outline sm; none when the header holds
+ * the same action. Chrome rule: hide or disable what acts on nothing (Search,
+ * Filters and Display over zero items, paging, count footers).
  */
 export function EmptyState({
   icon,
@@ -26,6 +28,7 @@ export function EmptyState({
   action,
   footnote,
   size = "block",
+  anchor = "top",
   plain = false,
   className,
   role,
@@ -37,6 +40,8 @@ export function EmptyState({
   /** Optional small hint under the action. */
   footnote?: ReactNode;
   size?: "block" | "inline" | "hint";
+  /** Block only: `center` for a canvas, where there is no row to hang from. */
+  anchor?: "top" | "center";
   /** Inline only: no recessed surface, just the line and its action. */
   plain?: boolean;
   className?: string;
@@ -49,7 +54,7 @@ export function EmptyState({
         data-size="hint"
         role={role}
         className={cn(
-          "flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground",
+          "flex flex-col items-center justify-center gap-2 text-center text-sm text-pretty text-muted-foreground",
           className,
         )}
       >
@@ -76,7 +81,7 @@ export function EmptyState({
         )}
       >
         {icon && <span aria-hidden="true">{icon}</span>}
-        <p className="flex-1">
+        <p className="flex-1 text-pretty">
           {title && (
             <span className="font-medium text-foreground">{title} </span>
           )}
@@ -86,44 +91,18 @@ export function EmptyState({
       </div>
     );
   return (
-    <Empty
+    <div
       data-slot="empty-state"
       data-size="block"
+      data-anchor={anchor}
       role={role}
-      className={cn("gap-3 p-6 text-wrap md:p-6", className)}
+      className={cn("ui-empty", className)}
     >
-      <EmptyHeader className="max-w-95 gap-1">
-        {icon && (
-          <EmptyMedia
-            variant="icon"
-            className="rounded-lg text-secondary-foreground [&_svg:not([class*='size-'])]:size-5 [&_svg]:stroke-[1.75]"
-          >
-            <span aria-hidden="true" className="contents">
-              {icon}
-            </span>
-          </EmptyMedia>
-        )}
-        {title && (
-          <EmptyTitle className="text-sm font-medium tracking-normal">
-            {title}
-          </EmptyTitle>
-        )}
-        {description && (
-          <EmptyDescription className="text-wrap">
-            {description}
-          </EmptyDescription>
-        )}
-      </EmptyHeader>
-      {action && (
-        <EmptyContent>
-          <div className="flex flex-wrap justify-center gap-2">{action}</div>
-        </EmptyContent>
-      )}
-      {footnote && (
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground [&_svg]:size-3">
-          {footnote}
-        </p>
-      )}
-    </Empty>
+      {icon && <IconTile>{icon}</IconTile>}
+      {title && <p className="ui-empty-title">{title}</p>}
+      {description && <p className="ui-empty-sentence">{description}</p>}
+      {action && <div className="ui-empty-actions">{action}</div>}
+      {footnote && <p className="ui-empty-footnote">{footnote}</p>}
+    </div>
   );
 }
