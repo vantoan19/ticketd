@@ -273,45 +273,44 @@ test("Display holds Layout and Rows; both persist and the header carries no togg
   expect(layoutRadio("Board").getAttribute("aria-checked")).toBe("true");
 });
 
-test("Board and List resizing retain independent pane widths without replacing the detail draft", async () => {
+test("an open card peeks over the board, which keeps its width, and the list split survives", async () => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
-  const app = render(<App />);
+  render(<App />);
   await settle();
   fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ }));
   await settle();
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Keep this unsaved draft" },
   });
-  let separator = screen.getByRole("separator", { name: "Resize ticket list" });
-  const size = () => Number(separator.getAttribute("aria-valuenow"));
-  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  const separator = () =>
+    screen.queryByRole("separator", { name: "Resize ticket list" });
+  const size = () => Number(separator()?.getAttribute("aria-valuenow"));
+  fireEvent.keyDown(separator()!, { key: "ArrowRight" });
   await settle();
   const listSize = size();
   await showBoard();
-  expect(size()).toBeCloseTo(44);
-  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  // The open card is a peek over the board: no split to resize (S5).
+  expect(
+    document.querySelector(".ticket-workspace")?.hasAttribute("data-peek"),
+  ).toBe(true);
+  // Escape closes the peek (a first one may close an open tooltip).
+  for (let press = 0; press < 2; press++)
+    fireEvent.keyDown(document.getElementById("detail-heading")!, {
+      key: "Escape",
+    });
   await settle();
-  const boardSize = size();
-  expect(boardSize).toBeGreaterThan(44);
+  expect(
+    document.querySelector(".ticket-workspace")?.hasAttribute("data-peek"),
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ }));
+  await settle();
   chooseLayout("List");
   await settle();
   expect(size()).toBeCloseTo(listSize);
-  await showBoard();
-  expect(size()).toBeCloseTo(boardSize);
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Keep this unsaved draft",
   );
-  app.unmount();
-  render(<App />);
-  await settle();
-  fireEvent.click(screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ }));
-  await settle();
-  separator = screen.getByRole("separator", { name: "Resize ticket list" });
-  expect(size()).toBeCloseTo(boardSize);
-  chooseLayout("List");
-  await settle();
-  expect(size()).toBeCloseTo(listSize);
 });
 
 test("saved-status feedback is the pane's status line, can be dismissed and does not return", async () => {
@@ -603,12 +602,10 @@ test("a column empty because of Ready filtering accepts a drag and explains the 
       "Moved T-KQ1 to In progress. It no longer matches the filters",
     ),
   ).toBeTruthy();
-  expect(
-    within(
-      screen.getByRole("region", { name: "Ticket status board" }),
-    ).queryByText("Ticket 1"),
-  ).toBeNull();
-  expect(screen.getAllByText("No matches")).toHaveLength(6);
+  // Nothing left: one empty state for the view, not six empty columns.
+  const list = document.querySelector<HTMLElement>(".ticket-list")!;
+  expect(within(list).queryByText("Ticket 1")).toBeNull();
+  expect(within(list).getByText("No Ready tickets")).toBeTruthy();
 });
 
 test("choosing the saved status does not write, and a pending card cannot submit another move", async () => {
@@ -625,7 +622,7 @@ test("choosing the saved status does not write, and a pending card cannot submit
     bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   await chooseStatus("T-KQ1", "Done");
-  expect(screen.getByText("Saving T-KQ1…")).toBeTruthy();
+  expect(screen.getByText("Saving…")).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   ).toHaveProperty("disabled", true);
@@ -645,7 +642,7 @@ test("choosing the saved status does not write, and a pending card cannot submit
     finish?.([saved[0]]);
   });
   await settle(20);
-  expect(screen.queryByText("Saving T-KQ1…")).toBeNull();
+  expect(screen.queryByText("Saving…")).toBeNull();
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   );
@@ -703,9 +700,7 @@ test("a lost response reconciles applied state and a historical replay never rep
   await settle();
   await showBoard();
   await chooseStatus("T-KQ1", "Done");
-  expect(screen.getByRole("alert").textContent).toContain(
-    "Current saved status: Done",
-  );
+  expect(screen.getByRole("alert").textContent).toContain("It is now Done.");
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
@@ -811,9 +806,7 @@ test("ownership changes during a card save reconcile the saved state and permitt
   await settle();
   await showBoard();
   await chooseStatus("T-KQ1", "In progress");
-  expect(screen.getByRole("alert").textContent).toContain(
-    "Current saved status: Done",
-  );
+  expect(screen.getByRole("alert").textContent).toContain("It is now Done.");
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
@@ -1021,7 +1014,7 @@ test("switching layouts preserves a pending card request and its protection", as
   expect(
     screen.getByRole("button", { name: "Change status of T-KQ1" }),
   ).toHaveProperty("disabled", true);
-  expect(screen.getByText("Saving T-KQ1…")).toBeTruthy();
+  expect(screen.getByText("Saving…")).toBeTruthy();
   await act(async () => {
     saved[0] = ticket(1, "Done");
     finish?.([saved[0]]);
@@ -1074,9 +1067,7 @@ test("a move out of Ready keeps its filters, announces departure and focuses the
   ).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Ready", level: 1 })).toBeTruthy();
   await settle(20);
-  expect(document.activeElement).toBe(
-    screen.getByRole("region", { name: "Ticket status board" }),
-  );
+  expect(document.activeElement?.closest(".ticket-list")).toBeTruthy();
 });
 
 test("a card status action changes only that ticket and leaves the selected detail draft intact", async () => {
@@ -1137,14 +1128,11 @@ test("List is the default and Board keeps all six columns, including empty statu
     within(board)
       .getAllByRole("heading")
       .map((item) => item.textContent),
-  ).toEqual([
-    "Todo",
-    "In progress",
-    "In review",
-    "Done",
-    "Canceled",
-    "Duplicate",
-  ]);
+  ).toEqual(["Todo", "In progress", "In review", "Done"]);
+  // Canceled and Duplicate fold to 40px headers that open them (S5).
+  fireEvent.click(screen.getByRole("button", { name: /^Show Canceled/ }));
+  expect(within(board).getByRole("heading", { name: "Canceled" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Show Duplicate/ })).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).getByRole(
       "button",
@@ -1162,13 +1150,15 @@ test("List is the default and Board keeps all six columns, including empty statu
       "No tickets",
     ),
   ).toBeTruthy();
+  // One muted line; Add lives in the column header (BD-06).
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
-      { name: "Add ticket" },
+      { name: "Add Done ticket" },
     ),
   ).toBeTruthy();
-  expect(screen.getByText("Counts reflect current filters.")).toBeTruthy();
+  // The footer note shows only while filters narrow the columns (BD-04).
+  expect(screen.queryByText("Counts reflect current filters.")).toBeNull();
 });
 
 test("each status loads a bounded page with accurate totals and its own Load more", async () => {
@@ -1279,7 +1269,7 @@ test("workspace changes reconcile cards, counts and selected detail while a fail
   await settle(2000);
   const todo = within(screen.getByRole("region", { name: "Todo column" }));
   expect(todo.getByRole("button", { name: /T-KQ1.*Ticket 1/ })).toBeTruthy();
-  expect(todo.getByText(/information may be stale/)).toBeTruthy();
+  expect(todo.getByText(/Showing the saved tickets/)).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Updated elsewhere",
@@ -1301,7 +1291,7 @@ test("workspace changes reconcile cards, counts and selected detail while a fail
   expect(
     todo.getByRole("button", { name: /T-KQ1.*Updated elsewhere/ }),
   ).toBeTruthy();
-  expect(todo.queryByText(/information may be stale/)).toBeNull();
+  expect(todo.queryByText(/Showing the saved tickets/)).toBeNull();
 });
 
 test("a card outside the List page opens existing detail, preserves its draft across layouts, and restores focus", async () => {
@@ -1479,8 +1469,9 @@ test("cards retain source, project, Plan and core readiness context; project and
   await showBoard();
   const card = screen.getByRole("button", { name: /T-KQ1.*Ticket 1/ });
   expect(within(card).getByText("Blocked by T-KQ4")).toBeTruthy();
-  expect(within(card).getByText("Sample project")).toBeTruthy();
+  // One context item, as on a list row (BD-07): the Plan before the project.
   expect(within(card).getByText("Release plan")).toBeTruthy();
+  expect(within(card).queryByText("Sample project")).toBeNull();
   expect(
     within(screen.getByRole("button", { name: /T-KQ2.*Ticket 2/ })).queryByText(
       "Ready",
@@ -1536,6 +1527,7 @@ test("a board card says Needs review in place of its readiness", async () => {
     document.querySelector(`[data-board-reference="${reference}"]`);
   expect(card("T-KQ1")?.textContent).toContain("Needs review");
   expect(card("T-KQ1")?.textContent).not.toContain("Ready");
-  expect(card("T-KQ3")?.textContent).toContain("Ready");
+  // Ready is the Todo column's norm, so a card flags only Blocked.
+  expect(card("T-KQ3")?.textContent).not.toContain("Ready");
   expect(card("T-KQ3")?.textContent).not.toContain("Needs review");
 });

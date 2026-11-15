@@ -234,6 +234,115 @@ function TicketListBody({
     counts,
     menu: filtersMenu,
   };
+  // What an empty list or board says (P9): one state for the whole view.
+  const emptyView = trash ? (
+    <EmptyState icon={<Trash2 />} {...copyProps(emptyCopy("tickets-trash"))} />
+  ) : filtered ? (
+    <EmptyState
+      icon={<SearchX />}
+      {...copyProps(
+        emptyCopy(
+          query
+            ? filterCount
+              ? "tickets-search-filtered"
+              : "tickets-search"
+            : "tickets-filters",
+          { query, name: scopeName, filters: filterCount },
+        ),
+      )}
+      action={
+        query || filterCount > 0 ? (
+          <>
+            {query && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setQuery("");
+                  resetPaging();
+                }}
+              >
+                Clear search
+              </Button>
+            )}
+            {filterCount > 0 && (
+              <Button variant="outline" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </>
+        ) : undefined
+      }
+    />
+  ) : planScope ? (
+    <EmptyState
+      icon={<Layers />}
+      {...copyProps(
+        emptyCopy(addDisabled ? "plan-archived" : "plan-empty", {
+          name: scopedPlan?.name ?? scopeName,
+        }),
+      )}
+      action={
+        addDisabled ? undefined : (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => planState.setAdding(true)}
+            >
+              Add to Plan…
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(event) => onCreate(event.currentTarget)}
+            >
+              New ticket
+            </Button>
+          </>
+        )
+      }
+    />
+  ) : navigation.kind === "ready" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-ready"))}
+    />
+  ) : navigation.kind === "progress" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-progress"))}
+    />
+  ) : navigation.project === "unlinked" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-no-project"))}
+    />
+  ) : navigation.project !== "all" ? (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-project", { name: scopeName }))}
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={(event) => onCreate(event.currentTarget)}
+        >
+          New ticket
+        </Button>
+      }
+    />
+  ) : (
+    <EmptyState
+      icon={<TicketIcon />}
+      {...copyProps(emptyCopy("tickets-first-run"))}
+      action={
+        <Button size="sm" onClick={(event) => onCreate(event.currentTarget)}>
+          <Plus data-icon="inline-start" /> New ticket
+        </Button>
+      }
+    />
+  );
   return (
     <section
       className="ticket-list"
@@ -334,6 +443,11 @@ function TicketListBody({
           {workspace.layout === "board" ? (
             <TicketBoard
               workspace={workspace}
+              empty={
+                !loading && !queryError && tickets.length === 0
+                  ? emptyView
+                  : null
+              }
               onOpen={onOpen}
               {...(!addDisabled &&
                 !trash && {
@@ -360,126 +474,7 @@ function TicketListBody({
               ) : loading && tickets.length === 0 ? (
                 <TicketRowsSkeleton />
               ) : tickets.length === 0 ? (
-                trash ? (
-                  <EmptyState
-                    icon={<Trash2 />}
-                    {...copyProps(emptyCopy("tickets-trash"))}
-                  />
-                ) : filtered ? (
-                  <EmptyState
-                    icon={<SearchX />}
-                    {...copyProps(
-                      emptyCopy(
-                        query
-                          ? filterCount
-                            ? "tickets-search-filtered"
-                            : "tickets-search"
-                          : "tickets-filters",
-                        { query, name: scopeName, filters: filterCount },
-                      ),
-                    )}
-                    action={
-                      query || filterCount > 0 ? (
-                        <>
-                          {query && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setQuery("");
-                                resetPaging();
-                              }}
-                            >
-                              Clear search
-                            </Button>
-                          )}
-                          {filterCount > 0 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={clearFilters}
-                            >
-                              Clear filters
-                            </Button>
-                          )}
-                        </>
-                      ) : undefined
-                    }
-                  />
-                ) : planScope ? (
-                  <EmptyState
-                    icon={<Layers />}
-                    {...copyProps(
-                      emptyCopy(addDisabled ? "plan-archived" : "plan-empty", {
-                        name: scopedPlan?.name ?? scopeName,
-                      }),
-                    )}
-                    action={
-                      addDisabled ? undefined : (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => planState.setAdding(true)}
-                          >
-                            Add to Plan…
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(event) => onCreate(event.currentTarget)}
-                          >
-                            New ticket
-                          </Button>
-                        </>
-                      )
-                    }
-                  />
-                ) : navigation.kind === "ready" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-ready"))}
-                  />
-                ) : navigation.kind === "progress" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-progress"))}
-                  />
-                ) : navigation.project === "unlinked" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-no-project"))}
-                  />
-                ) : navigation.project !== "all" ? (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(
-                      emptyCopy("tickets-project", { name: scopeName }),
-                    )}
-                    action={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(event) => onCreate(event.currentTarget)}
-                      >
-                        New ticket
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <EmptyState
-                    icon={<TicketIcon />}
-                    {...copyProps(emptyCopy("tickets-first-run"))}
-                    action={
-                      <Button
-                        size="sm"
-                        onClick={(event) => onCreate(event.currentTarget)}
-                      >
-                        <Plus data-icon="inline-start" /> New ticket
-                      </Button>
-                    }
-                  />
-                )
+                emptyView
               ) : (
                 <>
                   {showBulk && bulk.selection.length > 0 && (

@@ -150,6 +150,10 @@ export function TicketWorkspaceView({
     }
     focusPane.current = null;
   });
+  // On the board an open card is a peek over its right side; the columns keep
+  // their width (S5). Narrow windows stack as before; Expand takes the page.
+  const peek =
+    workspace.layout === "board" && selected !== null && !narrow && !expanded;
   const [previousNarrow, setPreviousNarrow] = useState(narrow);
   if (previousNarrow !== narrow) {
     setPreviousNarrow(narrow);
@@ -207,7 +211,7 @@ export function TicketWorkspaceView({
           orientation="horizontal"
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
-          disabled={narrow || expanded || !selected}
+          disabled={narrow || expanded || !selected || peek}
           className={cn(
             "ticket-workspace",
             expanded && "expanded",
@@ -215,6 +219,7 @@ export function TicketWorkspaceView({
             workspace.layout === "board" && "board-layout",
             !selected && "unselected",
           )}
+          data-peek={peek || undefined}
           groupRef={groupRef}
           defaultLayout={
             workspace.layout === "board"
@@ -276,24 +281,45 @@ export function TicketWorkspaceView({
             // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.
             style={DETAIL_PANEL_STYLE}
           >
-            <TicketDetailPane
-              workspace={workspace}
-              expanded={expanded}
-              inboxTarget={inboxTarget}
-              onExpand={() => {
-                setExpanded(true);
-                focusPane.current = "detail";
-              }}
-              onReturn={() => {
-                setExpanded(false);
-                setNarrowDetail(false);
+            {/* Escape closes the peek, unless a field, menu or dialog has it. */}
+            <div
+              className="contents"
+              onKeyDown={(event) => {
+                if (!peek || event.key !== "Escape" || event.defaultPrevented)
+                  return;
+                const target = event.target as HTMLElement;
+                if (
+                  target.isContentEditable ||
+                  target.closest(
+                    "input, textarea, select, [role=combobox], [role=menu], [role=dialog]",
+                  )
+                )
+                  return;
+                event.preventDefault();
                 focusPane.current = { reference: selected };
+                setSelected(null);
               }}
-              onSelect={(value, mention) => {
-                if (value === null) focusPane.current = { reference: selected };
-                setSelected(value, mention);
-              }}
-            />
+            >
+              <TicketDetailPane
+                workspace={workspace}
+                expanded={expanded}
+                inboxTarget={inboxTarget}
+                onExpand={() => {
+                  setExpanded(true);
+                  focusPane.current = "detail";
+                }}
+                onReturn={() => {
+                  setExpanded(false);
+                  setNarrowDetail(false);
+                  focusPane.current = { reference: selected };
+                }}
+                onSelect={(value, mention) => {
+                  if (value === null)
+                    focusPane.current = { reference: selected };
+                  setSelected(value, mention);
+                }}
+              />
+            </div>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
